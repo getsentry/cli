@@ -256,6 +256,20 @@ export function buildLogsUrl(orgSlug: string, logId?: string): string {
   return logId ? `${base}?query=sentry.item_id:${logId}` : base;
 }
 
+/**
+ * Build URL to view a replay in the Replay explorer.
+ *
+ * @param orgSlug - Organization slug
+ * @param replayId - Replay ID (32-character hex string)
+ * @returns Full URL to the replay detail view
+ */
+export function buildReplayUrl(orgSlug: string, replayId: string): string {
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/explore/replays/${replayId}/`;
+  }
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/explore/replays/${replayId}/`;
+}
+
 // Dashboard URLs
 
 /**

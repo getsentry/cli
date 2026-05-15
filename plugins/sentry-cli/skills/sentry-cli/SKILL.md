@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.31.0-dev.0
+version: 0.34.0-dev.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -281,7 +281,7 @@ Authenticate with Sentry
 - `sentry auth refresh` — Refresh your authentication token
 - `sentry auth status` — View authentication status
 - `sentry auth token` — Print the stored authentication token
-- `sentry auth whoami` — Show the currently authenticated user
+- `sentry auth whoami` — Show the currently authenticated identity
 
 → Full flags and examples: `references/auth.md`
 
@@ -316,6 +316,7 @@ Manage Sentry issues
 - `sentry issue view <issue>` — View details of a specific issue
 - `sentry issue resolve <issue>` — Mark an issue as resolved
 - `sentry issue unresolve <issue>` — Reopen a resolved issue
+- `sentry issue archive <issue>` — Archive (ignore) an issue
 - `sentry issue merge <issue...>` — Merge 2+ issues into a single canonical group
 
 → Full flags and examples: `references/issue.md`
@@ -324,7 +325,7 @@ Manage Sentry issues
 
 View and list Sentry events
 
-- `sentry event view <org/project/event-id...>` — View details of a specific event
+- `sentry event view <org/project/event-id...>` — View details of one or more events
 - `sentry event list <issue>` — List events for an issue
 
 → Full flags and examples: `references/event.md`
@@ -359,8 +360,19 @@ Manage Sentry dashboards
 - `sentry dashboard widget add <org/project/dashboard/title...>` — Add a widget to a dashboard
 - `sentry dashboard widget edit <org/project/dashboard...>` — Edit a widget in a dashboard
 - `sentry dashboard widget delete <org/project/dashboard...>` — Delete a widget from a dashboard
+- `sentry dashboard revisions <org/dashboard...>` — List dashboard revisions
+- `sentry dashboard restore <org/dashboard...>` — Restore a dashboard revision
 
 → Full flags and examples: `references/dashboard.md`
+
+### Replay
+
+Search and inspect Session Replays
+
+- `sentry replay list <org/project>` — List recent Session Replays
+- `sentry replay view <replay-id-or-url...>` — View a Session Replay
+
+→ Full flags and examples: `references/replay.md`
 
 ### Release
 

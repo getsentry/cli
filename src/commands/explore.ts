@@ -7,7 +7,12 @@
  */
 
 import type { SentryContext } from "../context.js";
-import { queryEvents } from "../lib/api-client.js";
+import {
+  isReplaySortValue,
+  listReplays,
+  queryEvents,
+  queryMetricsMeta,
+} from "../lib/api-client.js";
 import { buildProjectQuery, validateLimit } from "../lib/arg-parsing.js";
 import {
   advancePaginationState,
@@ -29,7 +34,16 @@ import {
   paginationHint,
 } from "../lib/list-command.js";
 import { logger } from "../lib/logger.js";
+import { resolveMetricField } from "../lib/metrics-transform.js";
 import { withProgress } from "../lib/polling.js";
+import {
+  DEFAULT_REPLAY_EXPLORE_FIELDS,
+  getReplayFieldValue,
+  getReplayRequestFields,
+  isSupportedReplayField,
+  listSupportedReplayFields,
+  parseReplayEnvironmentFilter,
+} from "../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../lib/resolve-target.js";
 import { sanitizeQuery } from "../lib/search-query.js";
 import {
@@ -52,6 +66,7 @@ const DEFAULT_FIELDS = ["title", "count()"];
 
 /** Default dataset */
 const DEFAULT_DATASET = "errors";
+const DEFAULT_REPLAY_SORT = "-started_at";
 
 /** Default time period */
 const DEFAULT_PERIOD = "24h";
@@ -73,6 +88,8 @@ const DATASET_ALIASES: Record<string, string> = {
   metrics: "metricsEnhanced",
   logs: "logs",
   log: "logs",
+  replays: "replays",
+  replay: "replays",
   // Deprecated but still functional — hidden from help
   transactions: "transactions",
   transaction: "transactions",
@@ -86,7 +103,13 @@ const DATASET_ALIASES: Record<string, string> = {
  *
  * Set preserves insertion order for the join-based help/error rendering.
  */
-const VALID_DATASETS = new Set(["errors", "spans", "metrics", "logs"]);
+const VALID_DATASETS = new Set([
+  "errors",
+  "spans",
+  "metrics",
+  "logs",
+  "replays",
+]);
 
 /**
  * Reverse map from API-level dataset name → canonical user-facing name.
@@ -102,7 +125,10 @@ const API_TO_USER_DATASET = new Map(
 
 type ExploreFlags = {
   readonly field?: string[];
+  readonly metric?: string;
+  readonly agg: string;
   readonly dataset: string;
+  readonly environment?: readonly string[];
   readonly query?: string;
   readonly sort?: string;
   readonly period: TimeRange;
@@ -157,6 +183,38 @@ function parseDataset(value: string): string {
  */
 function parseLimit(value: string): number {
   return validateLimit(value, 1, LIST_MAX_LIMIT);
+}
+
+/** Infer a Discover-style column type for a replay field (used for table alignment). */
+function inferReplayFieldType(field: string): string {
+  if (field === "duration") {
+    return "duration";
+  }
+  if (field === "activity" || field.startsWith("count_")) {
+    return "integer";
+  }
+  return "string";
+}
+
+function buildReplayExploreResponse(
+  fields: string[],
+  replays: Awaited<ReturnType<typeof listReplays>>["data"]
+): { data: Record<string, unknown>[]; meta: NonNullable<ExploreData["meta"]> } {
+  return {
+    data: replays.map((replay) =>
+      Object.fromEntries(
+        fields.map((field) => [field, getReplayFieldValue(replay, field)])
+      )
+    ),
+    meta: {
+      fields: Object.fromEntries(
+        fields.map((field) => [field, inferReplayFieldType(field)])
+      ),
+      units: Object.fromEntries(
+        fields.map((field) => [field, field === "duration" ? "s" : null])
+      ),
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -248,33 +306,79 @@ function jsonTransformExplore(data: ExploreData, fields?: string[]): unknown {
 /** Default limit value matching the flag default for hint comparison */
 const DEFAULT_LIMIT = 25;
 
+function defaultFieldsForDataset(dataset: string): readonly string[] {
+  return dataset === "replays" ? DEFAULT_REPLAY_EXPLORE_FIELDS : DEFAULT_FIELDS;
+}
+
+/** Append --metric / --agg flags to hint parts */
+function appendMetricHints(
+  parts: string[],
+  metric: string | undefined,
+  agg: string
+): void {
+  if (metric) {
+    parts.push(`-m "${metric}"`);
+    if (agg !== "sum") {
+      parts.push(`--agg ${agg}`);
+    }
+  }
+}
+
+/** Append non-default --field flags to hint parts */
+function appendFieldHints(
+  parts: string[],
+  rawFields: string[] | undefined,
+  dataset: string,
+  metricActive: boolean
+): void {
+  const fields = rawFields ?? [];
+  const fieldList = metricActive
+    ? fields.filter((f) => !isAggregate(f))
+    : fields;
+  const defaults = defaultFieldsForDataset(dataset).join(",");
+  if (fieldList.join(",") !== defaults && fieldList.length > 0) {
+    for (const f of fieldList) {
+      parts.push(`-F "${f}"`);
+    }
+  }
+}
+
 /** Append active non-default flags to a base command string */
 function appendFlagHints(
   base: string,
   flags: Pick<
     ExploreFlags,
-    "dataset" | "sort" | "query" | "period" | "field" | "limit"
+    | "dataset"
+    | "environment"
+    | "sort"
+    | "query"
+    | "period"
+    | "field"
+    | "limit"
+    | "metric"
+    | "agg"
   >
 ): string {
   const parts: string[] = [];
+  const defaultSort =
+    flags.dataset === "replays" ? DEFAULT_REPLAY_SORT : undefined;
   if (flags.dataset !== DEFAULT_DATASET) {
     // Emit user-facing name, not API-level name (e.g. "metrics" not "metricsEnhanced")
     const displayDataset =
       API_TO_USER_DATASET.get(flags.dataset) ?? flags.dataset;
     parts.push(`--dataset ${displayDataset}`);
   }
-  appendSortHint(parts, flags.sort);
+  appendMetricHints(parts, flags.metric, flags.agg);
+  appendSortHint(parts, flags.sort, defaultSort);
   appendQueryHint(parts, flags.query);
-  // Include --field flags when non-default
-  const fieldList = flags.field ?? [];
-  const currentFieldStr = fieldList.join(",");
-  if (currentFieldStr !== DEFAULT_FIELDS.join(",") && fieldList.length > 0) {
-    for (const f of fieldList) {
-      parts.push(`-F "${f}"`);
-    }
-  }
+  appendFieldHints(parts, flags.field, flags.dataset, !!flags.metric);
   if (flags.limit !== DEFAULT_LIMIT) {
     parts.push(`--limit ${flags.limit}`);
+  }
+  if (flags.environment && flags.environment.length > 0) {
+    for (const environment of flags.environment) {
+      parts.push(`-e "${environment}"`);
+    }
   }
   appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
@@ -288,28 +392,176 @@ function findFirstAggregate(fieldList: string[]): string | undefined {
   return fieldList.find((f) => f.includes("(") && f.includes(")"));
 }
 
-/**
- * Determine the effective sort value, accounting for dataset restrictions.
- * Sort is only supported on the `spans` dataset.
- */
-function resolveSort(
-  fieldList: string[],
-  dataset: string,
-  explicitSort?: string
-): string | undefined {
-  const firstAgg = findFirstAggregate(fieldList);
-  const sort = explicitSort ?? (firstAgg ? `-${firstAgg}` : undefined);
+/** True when the field looks like an aggregate call: `fn(...)`. */
+function isAggregate(field: string): boolean {
+  return field.includes("(") && field.endsWith(")");
+}
 
-  if (dataset === "spans") {
-    return sort;
+/**
+ * True when the aggregate uses the tracemetrics comma-separated format:
+ * `aggregation(value,metric_name,metric_type,unit)`.
+ */
+function isTracemetricsAggregate(aggregate: string): boolean {
+  const parenIdx = aggregate.indexOf("(");
+  if (parenIdx < 0) {
+    return false;
   }
-  // Warn only when user explicitly passed --sort on a non-spans dataset
-  if (sort && explicitSort) {
-    log.warn(
-      `--sort is only supported on the spans dataset. Ignoring sort for ${dataset}.`
+  const inner = aggregate.slice(parenIdx + 1, -1);
+  return inner.startsWith("value,") && inner.split(",").length === 4;
+}
+
+/**
+ * Validate that aggregate fields use the tracemetrics format when querying
+ * the `metricsEnhanced` dataset. Standard aggregates like `count()` or
+ * `avg(measurements.fcp)` are invalid — the API requires the four-part
+ * comma-separated format: `aggregation(value,metric_name,metric_type,unit)`.
+ */
+function validateMetricsFields(fieldList: string[]): void {
+  const badAggs = fieldList.filter(
+    (f) => isAggregate(f) && !isTracemetricsAggregate(f)
+  );
+  if (badAggs.length === 0) {
+    return;
+  }
+
+  throw new ValidationError(
+    `Invalid metrics aggregate${badAggs.length > 1 ? "s" : ""}: ${badAggs.join(", ")}\n\n` +
+      "The metrics dataset requires the format: aggregation(value,metric_name,metric_type,unit)\n\n" +
+      "Examples:\n" +
+      '  sentry explore my-org/ -F "sum(value,llm.token_usage,distribution,none)" --dataset metrics\n' +
+      '  sentry explore my-org/ -F gen_ai.request.model -F "avg(value,cache.hit_rate,distribution,none)" --dataset metrics\n\n' +
+      "Parameters:\n" +
+      '  - value: literal string "value"\n' +
+      "  - metric_name: the metric name emitted by the SDK (e.g., llm.token_usage)\n" +
+      "  - metric_type: distribution, gauge, counter, or set\n" +
+      "  - unit: none, byte, second, millisecond, etc.",
+    "field"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Dataset configuration
+// ---------------------------------------------------------------------------
+
+/**
+ * Dataset-specific configuration resolved before the main query loop.
+ *
+ * Centralizes all replay vs. non-replay branching so the main `func` body
+ * reads linearly without `dataset === "replays"` checks.
+ */
+type DatasetConfig = {
+  /** The effective sort value for pagination context and API calls. */
+  sort: string | undefined;
+  /** The API query string (with or without `project:` prefix). */
+  query: string | undefined;
+  /** Execute the dataset-specific API query. */
+  fetch: (params: {
+    cursor: string | undefined;
+    limit: number;
+    timeRange: TimeRange;
+  }) => Promise<{
+    data: { data: Record<string, unknown>[]; meta?: ExploreData["meta"] };
+    nextCursor?: string;
+  }>;
+};
+
+/**
+ * Resolve dataset-specific configuration: sort, query, validation, and fetch.
+ *
+ * For the `replays` dataset this validates fields, resolves replay-specific
+ * sort, and returns a fetch function that calls `listReplays`. For all other
+ * datasets it validates environment usage, resolves explore sort (spans-only),
+ * prepends `project:<slug>` to the query, and returns a `queryEvents` fetch.
+ */
+function resolveDatasetConfig(params: {
+  dataset: string;
+  fieldList: string[];
+  flags: ExploreFlags;
+  org: string;
+  project: string | undefined;
+  environment: string[] | undefined;
+}): DatasetConfig {
+  const { dataset, fieldList, flags, org, project, environment } = params;
+
+  if (dataset === "replays") {
+    const unsupportedField = fieldList.find(
+      (field) => !isSupportedReplayField(field)
+    );
+    if (unsupportedField) {
+      throw new ValidationError(
+        `Unsupported replay field "${unsupportedField}". Supported fields include: ${listSupportedReplayFields().slice(0, 12).join(", ")}...`,
+        "field"
+      );
+    }
+
+    const sort = flags.sort ?? DEFAULT_REPLAY_SORT;
+    if (!isReplaySortValue(sort)) {
+      throw new ValidationError(
+        `Invalid replay sort "${sort}". Use a replay sort like ${DEFAULT_REPLAY_SORT} or -count_errors.`,
+        "sort"
+      );
+    }
+
+    return {
+      sort,
+      query: flags.query,
+      fetch: async ({ cursor, limit, timeRange }) => {
+        const replayResponse = await listReplays(org, {
+          cursor,
+          environment,
+          fields: getReplayRequestFields(fieldList),
+          limit,
+          projectSlugs: project ? [project] : undefined,
+          query: flags.query,
+          sort,
+          ...timeRangeToApiParams(timeRange),
+        });
+        return {
+          data: buildReplayExploreResponse(fieldList, replayResponse.data),
+          nextCursor: replayResponse.nextCursor,
+        };
+      },
+    };
+  }
+
+  // Non-replay datasets
+  if (environment) {
+    throw new ValidationError(
+      "--environment is only supported with --dataset replays. Use environment:... inside --query for other datasets.",
+      "environment"
     );
   }
-  return;
+
+  const firstAgg = findFirstAggregate(fieldList);
+  const rawSort = flags.sort ?? (firstAgg ? `-${firstAgg}` : undefined);
+  let sort: string | undefined;
+  if (dataset === "spans") {
+    sort = rawSort;
+  } else {
+    // Warn only when user explicitly passed --sort on a non-spans dataset
+    if (rawSort && flags.sort) {
+      log.warn(
+        `--sort is only supported on the spans dataset. Ignoring sort for ${dataset}.`
+      );
+    }
+    sort = undefined;
+  }
+
+  const query = buildProjectQuery(flags.query, project);
+  return {
+    sort,
+    query,
+    fetch: async ({ cursor, limit, timeRange }) =>
+      queryEvents(org, {
+        fields: fieldList,
+        dataset,
+        query,
+        sort,
+        limit,
+        cursor,
+        ...timeRangeToApiParams(timeRange),
+      }),
+  };
 }
 
 /** Build the result hint string from pagination state and row count */
@@ -339,8 +591,9 @@ export const exploreCommand = buildListCommand("explore", {
       "Datasets:\n" +
       "  errors   Error events (default)\n" +
       "  spans    Span data\n" +
-      "  metrics  Custom metrics\n" +
-      "  logs     Log entries\n\n" +
+      "  metrics  Custom metrics (tracemetrics format)\n" +
+      "  logs     Log entries\n" +
+      "  replays  Session replay search\n\n" +
       "Targets:\n" +
       "  <org>/<project>  Filter by project (auto-adds project:<slug> to query)\n" +
       "  <org>/           All projects in org\n" +
@@ -351,8 +604,13 @@ export const exploreCommand = buildListCommand("explore", {
       '  sentry explore my-org/ -F title -F "count()" -F "count_unique(user)" --period 1h\n' +
       '  sentry explore my-org/cli -F span.op -F "p50(span.duration)" ' +
       "--dataset spans\n" +
+      "  sentry explore my-org/cli --dataset replays -F id -F user.email -F count_errors\n" +
       '  sentry explore -F span.op -F "count()" --dataset spans --period 1h\n' +
-      "  sentry explore --json",
+      "  sentry explore --json\n\n" +
+      "Metrics (auto mode — resolves type/unit automatically):\n" +
+      "  sentry explore my-org/ -m llm.token_usage --dataset metrics\n" +
+      "  sentry explore my-org/seer -F gen_ai.request.model -m llm.token_usage --dataset metrics --period 7d\n" +
+      "  sentry explore my-org/ -m cache.hit_rate --agg avg --dataset metrics",
   },
   output: {
     human: formatExploreHuman,
@@ -380,6 +638,19 @@ export const exploreCommand = buildListCommand("explore", {
         variadic: true,
         optional: true,
       },
+      metric: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Metric name for --dataset metrics. Auto-resolves type/unit via API.",
+        optional: true,
+      },
+      agg: {
+        kind: "parsed",
+        parse: String,
+        brief: "Aggregation for --metric (sum, avg, count, p50, p95, etc.)",
+        default: "sum",
+      },
       dataset: {
         kind: "parsed",
         parse: parseDataset,
@@ -398,6 +669,14 @@ export const exploreCommand = buildListCommand("explore", {
         brief: 'Sort field (prefix with - for desc, e.g., "-count()")',
         optional: true,
       },
+      environment: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Replay environment filter for --dataset replays (repeatable, comma-separated)",
+        variadic: true,
+        optional: true,
+      },
       limit: {
         kind: "parsed",
         parse: parseLimit,
@@ -413,7 +692,9 @@ export const exploreCommand = buildListCommand("explore", {
     },
     aliases: {
       ...PERIOD_ALIASES,
+      e: "environment",
       F: "field",
+      m: "metric",
       d: "dataset",
       q: "query",
       s: "sort",
@@ -428,25 +709,75 @@ export const exploreCommand = buildListCommand("explore", {
       "explore"
     );
 
-    const fieldList =
-      flags.field && flags.field.length > 0 ? flags.field : DEFAULT_FIELDS;
-    const dataset = flags.dataset;
+    let dataset = flags.dataset;
+    const userSuppliedFields = flags.field && flags.field.length > 0;
+    let fieldList = [...defaultFieldsForDataset(dataset)];
+    if (userSuppliedFields) {
+      fieldList = flags.field;
+    }
     const timeRange = flags.period;
-    const effectiveSort = resolveSort(fieldList, dataset, flags.sort);
+    const environment = parseReplayEnvironmentFilter(flags.environment);
 
-    // When a project is in the target, prepend `project:<slug>` to the query
-    // so the API filters server-side. Mirrors `trace logs` / `log list` behavior.
-    const apiQuery = buildProjectQuery(flags.query, project);
+    // --metric auto mode: resolve metric name → tracemetrics aggregate
+    if (flags.metric) {
+      if (dataset !== "metricsEnhanced") {
+        log.warn("--metric implies --dataset metrics; switching dataset.");
+        dataset = "metricsEnhanced";
+      }
 
-    // Pagination context includes project so different scopes don't share state
+      // Use the user's --period for metadata discovery so older metrics are found
+      const metaParams = timeRangeToApiParams(timeRange);
+      const metrics = await withProgress(
+        {
+          message: `Discovering metric '${flags.metric}'...`,
+          json: flags.json,
+        },
+        () =>
+          queryMetricsMeta(org, {
+            ...metaParams,
+            project,
+          })
+      );
+
+      const aggField = resolveMetricField(flags.metric, flags.agg, metrics);
+      // Prepend any user-supplied grouping fields, then the resolved aggregate
+      const groupByFields = userSuppliedFields
+        ? fieldList.filter((f) => !isAggregate(f))
+        : [];
+      fieldList = [...groupByFields, aggField];
+    } else if (dataset === "metricsEnhanced") {
+      if (!userSuppliedFields) {
+        throw new ValidationError(
+          "The metrics dataset requires --metric or explicit --field flags.\n\n" +
+            "Auto mode (recommended):\n" +
+            "  sentry explore my-org/ -m llm.token_usage --dataset metrics\n" +
+            "  sentry explore my-org/ -m llm.token_usage --agg avg --dataset metrics\n\n" +
+            "Manual mode (tracemetrics format):\n" +
+            '  sentry explore my-org/ -F "sum(value,llm.token_usage,distribution,none)" --dataset metrics',
+          "field"
+        );
+      }
+      validateMetricsFields(fieldList);
+    }
+
+    const config = resolveDatasetConfig({
+      dataset,
+      fieldList,
+      flags,
+      org,
+      project,
+      environment,
+    });
+
     const contextKey = buildPaginationContextKey(
       "explore",
       project ? `${org}/${project}` : org,
       {
         dataset,
+        env: environment?.join(","),
         fields: fieldList.join(","),
         q: flags.query,
-        sort: effectiveSort,
+        sort: config.sort,
         period: serializeTimeRange(timeRange),
       }
     );
@@ -461,29 +792,26 @@ export const exploreCommand = buildListCommand("explore", {
         message: `Querying ${dataset} in ${project ? `${org}/${project}` : org}...`,
         json: flags.json,
       },
-      () =>
-        queryEvents(org, {
-          fields: fieldList,
-          dataset,
-          query: apiQuery,
-          sort: effectiveSort,
-          limit: flags.limit,
-          cursor,
-          ...timeRangeToApiParams(timeRange),
-        })
+      () => config.fetch({ cursor, limit: flags.limit, timeRange })
     );
 
     advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
     const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
     const hasMore = !!nextCursor;
 
-    // Pagination hints preserve the original target shape (org/ vs org/project)
     const baseTarget = project ? `${org}/${project}` : `${org}/`;
+    const hintFlags = { ...flags, dataset };
     const nav = paginationHint({
       hasPrev,
       hasMore,
-      prevHint: appendFlagHints(`sentry explore ${baseTarget} -c prev`, flags),
-      nextHint: appendFlagHints(`sentry explore ${baseTarget} -c next`, flags),
+      prevHint: appendFlagHints(
+        `sentry explore ${baseTarget} -c prev`,
+        hintFlags
+      ),
+      nextHint: appendFlagHints(
+        `sentry explore ${baseTarget} -c next`,
+        hintFlags
+      ),
     });
 
     const hint = buildResultHint(response.data.length, nav);

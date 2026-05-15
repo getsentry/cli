@@ -9,7 +9,7 @@ import { z } from "zod";
 /**
  * Source where DSN was detected from
  *
- * - env: SENTRY_DSN environment variable
+ * - env: SENTRY_DSN or framework-prefixed environment variable (e.g., NEXT_PUBLIC_SENTRY_DSN)
  * - env_file: .env file
  * - config: Language-specific config file (e.g., sentry.properties)
  * - code: Source code patterns (e.g., Sentry.init)
@@ -40,7 +40,12 @@ export type DetectedDsn = ParsedDsn & {
   raw: string;
   /** Where the DSN was found */
   source: DsnSource;
-  /** File path (relative to cwd) if detected from file */
+  /**
+   * Context-dependent source identifier:
+   * - For `"env"`: the env var name (e.g., `"NEXT_PUBLIC_SENTRY_DSN"`)
+   * - For `"env_file"`, `"config"`, `"code"`: file path relative to cwd
+   * - For `"inferred"`: undefined
+   */
   sourcePath?: string;
   /** Package/app directory path for monorepo grouping (e.g., "packages/frontend", "apps/web") */
   packagePath?: string;
@@ -77,7 +82,7 @@ export type CachedDsnEntry = {
   orgId?: string;
   /** Where the DSN was found */
   source: DsnSource;
-  /** Relative path to the source file */
+  /** Source identifier: env var name for `"env"`, relative file path for file-based sources */
   sourcePath?: string;
   /** Resolved project info (avoids API call on cache hit) */
   resolved?: ResolvedProjectInfo;

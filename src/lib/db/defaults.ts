@@ -16,6 +16,7 @@ const DEFAULTS_PROJECT = "defaults.project";
 const DEFAULTS_TELEMETRY = "defaults.telemetry";
 const DEFAULTS_URL = "defaults.url";
 const DEFAULTS_HEADERS = "defaults.headers";
+const DEFAULTS_CA_CERT = "defaults.ca-cert";
 
 /** All metadata keys used for defaults (for bulk operations) */
 const ALL_DEFAULTS_KEYS = [
@@ -24,6 +25,7 @@ const ALL_DEFAULTS_KEYS = [
   DEFAULTS_TELEMETRY,
   DEFAULTS_URL,
   DEFAULTS_HEADERS,
+  DEFAULTS_CA_CERT,
 ];
 
 /** State of all persistent defaults */
@@ -38,6 +40,8 @@ export type DefaultsState = {
   url: string | null;
   /** Custom HTTP headers for self-hosted proxy auth, or null if unset */
   headers: string | null;
+  /** Path to a PEM file with custom CA certificates, or null if unset */
+  "ca-cert": string | null;
 };
 
 /** Parse a raw telemetry metadata value to a typed "on" | "off" | null. */
@@ -106,6 +110,16 @@ export function getDefaultHeaders(): string | null {
 }
 
 /**
+ * Get the stored CA certificate file path, or null if not set.
+ * Used by `custom-ca.ts` as the highest-priority CA source.
+ */
+export function getDefaultCaCert(): string | null {
+  const db = getDatabase();
+  const m = getMetadata(db, [DEFAULTS_CA_CERT]);
+  return m.get(DEFAULTS_CA_CERT) ?? null;
+}
+
+/**
  * Get all persistent defaults as a structured object.
  * Used by the `sentry cli defaults` show mode and JSON output.
  */
@@ -119,6 +133,7 @@ export function getAllDefaults(): DefaultsState {
     telemetry: parseTelemetryValue(telVal),
     url: m.get(DEFAULTS_URL) ?? null,
     headers: m.get(DEFAULTS_HEADERS) ?? null,
+    "ca-cert": m.get(DEFAULTS_CA_CERT) ?? null,
   };
 }
 
@@ -179,6 +194,19 @@ export function setDefaultHeaders(value: string | null): void {
     clearMetadata(db, [DEFAULTS_HEADERS]);
   } else {
     setMetadata(db, { [DEFAULTS_HEADERS]: value });
+  }
+}
+
+/**
+ * Set or clear the stored CA certificate file path. Pass `null` to clear.
+ * The path should point to a PEM file containing CA certificates.
+ */
+export function setDefaultCaCert(path: string | null): void {
+  const db = getDatabase();
+  if (path === null) {
+    clearMetadata(db, [DEFAULTS_CA_CERT]);
+  } else {
+    setMetadata(db, { [DEFAULTS_CA_CERT]: path });
   }
 }
 

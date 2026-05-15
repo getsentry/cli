@@ -256,7 +256,7 @@ export const addCommand = buildCommand({
 
     // GET current dashboard → append widget with layout → PUT
     const current = await getDashboard(orgSlug, dashboardId).catch(
-      (error: unknown) =>
+      async (error: unknown) =>
         enrichDashboardError(error, { orgSlug, dashboardId, operation: "view" })
     );
     const updateBody = prepareDashboardForUpdate(current);
@@ -298,7 +298,7 @@ export const addCommand = buildCommand({
       orgSlug,
       dashboardId,
       updateBody
-    ).catch((error: unknown) =>
+    ).catch(async (error: unknown) =>
       enrichDashboardError(error, {
         orgSlug,
         dashboardId,

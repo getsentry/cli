@@ -86,6 +86,72 @@ async function fetchEventsPage(
   return { data, nextCursor };
 }
 
+/** Metric metadata returned by {@link queryMetricsMeta}. */
+export type MetricMeta = {
+  name: string;
+  type: string;
+  unit: string;
+};
+
+/**
+ * Discover available metrics for an org via the Events API.
+ *
+ * Queries `dataset=metricsEnhanced` with meta-fields (`metric.name`, etc.)
+ * — the same technique the Sentry Explore Metrics UI uses.
+ *
+ * Auto-paginates to collect all available metrics (bounded by
+ * {@link MAX_PAGINATION_PAGES} to prevent runaway loops).
+ */
+export async function queryMetricsMeta(
+  orgSlug: string,
+  options?: {
+    statsPeriod?: string;
+    start?: string;
+    end?: string;
+    project?: string;
+  }
+): Promise<MetricMeta[]> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const query = options?.project ? `project:${options.project}` : undefined;
+
+  const baseOptions: ExploreQueryOptions = {
+    fields: ["metric.name", "metric.type", "metric.unit"],
+    dataset: "metricsEnhanced",
+    query,
+    statsPeriod:
+      options?.start || options?.end
+        ? undefined
+        : (options?.statsPeriod ?? "7d"),
+    start: options?.start,
+    end: options?.end,
+  };
+
+  const allRows: Record<string, unknown>[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+    const result = await fetchEventsPage(
+      regionUrl,
+      orgSlug,
+      { ...baseOptions, cursor },
+      API_MAX_PER_PAGE
+    );
+
+    allRows.push(...result.data.data);
+
+    if (!result.nextCursor) {
+      break;
+    }
+    cursor = result.nextCursor;
+  }
+
+  return allRows.map((row) => ({
+    name: String(row["metric.name"] ?? ""),
+    type: String(row["metric.type"] ?? "distribution"),
+    unit: String(row["metric.unit"] ?? "none"),
+  }));
+}
+
 /**
  * Query the Explore/Events endpoint for aggregate or tabular event data.
  *

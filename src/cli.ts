@@ -173,6 +173,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const { startCleanupOldBinary } = await import("./lib/upgrade.js");
   const {
     abortPendingVersionCheck,
+    getErrorUpdateNotification,
     getUpdateNotification,
     maybeCheckForUpdateInBackground,
     shouldSuppressNotification,
@@ -439,6 +440,10 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     }
     process.stderr.write(`${error("Error:")} ${formatError(err)}\n`);
     process.exitCode = getExitCode(err);
+    const notification = getErrorUpdateNotification(err, hoistedArgs);
+    if (notification) {
+      process.stderr.write(notification);
+    }
     return;
   } finally {
     // Abort any pending version check to allow clean exit

@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-event
-version: 0.31.0-dev.0
+version: 0.34.0-dev.0
 description: View and list Sentry events
 requires:
   bins: ["sentry"]
@@ -13,7 +13,7 @@ View and list Sentry events
 
 ### `sentry event view <org/project/event-id...>`
 
-View details of a specific event
+View details of one or more events
 
 **Flags:**
 - `-w, --web - Open in browser`
@@ -59,7 +59,7 @@ List events for an issue
 | `platform` | string \| null | Platform (python, javascript, etc.) |
 | `dateCreated` | string | ISO 8601 creation timestamp |
 | `crashFile` | string \| null | Crash file URL |
-| `metadata` | unknown \| null | Event metadata |
+| `metadata` | object \| null | Event metadata |
 
 **Examples:**
 

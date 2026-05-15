@@ -276,6 +276,19 @@ export const myCommand = buildCommand({
 - The wrapper auto-injects `--json` and `--fields` flags. Do NOT add your own `json` flag.
 - Do NOT use `stdout.write()` or `if (flags.json)` branching — the wrapper handles it.
 
+### Command File Structure
+
+Command files in `src/commands/` should focus on three concerns:
+1. **Argument parsing** — positional args, flags, URL detection
+2. **API orchestration** — fetching data, error handling, enrichment
+3. **Output dispatch** — `yield new CommandOutput(data)`
+
+Formatting and rendering logic belongs in `src/lib/formatters/<domain>.ts`. If a command file exceeds ~400 lines, extract formatting helpers into a dedicated formatter module.
+
+Reference: `src/lib/formatters/replay.ts` (extracted from `replay/view.ts`), `src/lib/formatters/trace.ts`, `src/lib/formatters/human.ts`.
+
+Lint enforcement: `stderr.write()` is banned in command files (GritQL rule). Use `logger` for diagnostics and `CommandOutput` for data output.
+
 ### Route Maps (Stricli)
 
 Route groups use Stricli's `buildRouteMap` wrapped by `src/lib/route-map.ts`.
@@ -619,6 +632,30 @@ When a user-provided name/title doesn't match any entity, use `fuzzyMatch()` fro
 
 Reference: `resolveDashboardId()` in `src/commands/dashboard/resolve.ts`.
 
+### Catch Block Logging
+
+Silent `catch` blocks are prohibited in `src/` production code. Biome's `noEmptyBlockStatements` catches syntactically empty `catch {}` blocks, but blocks with only a `return` statement and no logging are equally problematic — errors vanish silently, making debugging impossible.
+
+Every `catch` block must either:
+1. Re-throw the error
+2. Log with `log.debug()` or `log.warn()` for diagnostic visibility
+3. Return a fallback value **with** a `log.debug()` call explaining the suppression
+
+```typescript
+// WRONG — error vanishes silently
+try { data = await fetchOptionalData(); }
+catch { return []; }
+
+// RIGHT — error is visible in debug logs
+try { data = await fetchOptionalData(); }
+catch (error) {
+  log.debug("Failed to fetch optional data", error);
+  return [];
+}
+```
+
+Use `logger.withTag("command-name")` for tagged logging in command files.
+
 ### Auto-Recovery for Wrong Entity Types
 
 When a user provides the wrong type of identifier (e.g., an issue short ID
@@ -656,6 +693,24 @@ const isAuth = await isAuthenticated();
 await setAuthToken(token, expiresIn);
 ```
 
+### Adding New Utility Files
+
+Before creating a new `src/lib/*.ts` utility file, check whether existing shared modules already cover your use case:
+
+| If you need... | Check first... |
+|----------------|---------------|
+| Duration formatting | `src/lib/formatters/time-utils.ts` (`formatDurationCompact`, `formatDurationVerbose`) |
+| Hex ID validation/normalization | `src/lib/hex-id.ts` (`validateHexId`, `tryNormalizeHexId`, `normalizeHexId`) |
+| Relative time display | `src/lib/formatters/time-utils.ts` (`formatRelativeTime`) |
+| Table/markdown output | `src/lib/formatters/` directory |
+| Pagination | `src/lib/db/pagination.ts`, `src/lib/list-command.ts` |
+| Error classes | `src/lib/errors.ts` (never create ad-hoc error types) |
+| Search query building | `src/lib/search-query.ts`, `src/lib/arg-parsing.ts` |
+
+If an existing module covers ≥80% of what you need, extend it with new exported functions rather than creating a new file. New files are appropriate when the domain is genuinely new (e.g., `replay-search.ts` for replay-specific field resolution).
+
+Every new `src/lib/**/*.ts` file must start with a module-level JSDoc comment describing the module's purpose.
+
 ### Imports
 
 - Use `.js` extension for local imports (ESM requirement)
@@ -685,6 +740,18 @@ Key rules when writing overrides:
 - Always set `orgSlugMatchBehavior` on `dispatchOrgScopedList` to declare how bare-slug org matches are handled. Use `"redirect"` for commands where listing all entities in the org makes sense (e.g., `project list`, `team list`, `issue list`). Use `"error"` for commands where org-all redirect is inappropriate. The pre-check uses cached orgs to avoid N API calls — when the cache is cold, the handler's own org-slug check serves as a safety net (throws `ResolutionError` with a hint).
 
 3. **Standalone list commands** (e.g., `span list`, `trace list`) that don't use org-scoped dispatch wire pagination directly in `func()`. See the "List Command Pagination" section above for the pattern.
+
+### Project Filtering in API Calls
+
+Different Sentry API endpoints use different project filtering mechanisms. Never apply both simultaneously:
+
+| API Endpoint | Project filter | Helper |
+|-------------|---------------|--------|
+| Discover/Events (`queryEvents`) | `project:<slug>` in query string | `buildProjectQuery()` |
+| Replay index (`listReplays`) | `projectSlugs` parameter | Direct parameter |
+| Issue index (`listIssuesPaginated`) | `project` parameter or query string | Varies by mode |
+
+When adding a new dataset to `explore`, verify which filtering mechanism the underlying API expects and handle it in `resolveDatasetConfig`. The `explore` command centralizes dataset-specific behavior (sort, query, fetch, field validation) in `resolveDatasetConfig` — add new datasets there rather than scattering `if (dataset === ...)` checks through the `func` body.
 
 ## Commenting & Documentation (JSDoc-first)
 
@@ -1004,8 +1071,46 @@ mock.module("./some-module", () => ({
 <!-- lore:019df992-599e-7bad-bf86-248dfda9c24b -->
 * **sentry local command uses getParsedEnvelope() for envelope item dispatch**: \`src/commands/local.ts\` receives raw Sentry envelopes via a Hono HTTP server, pushes them into a Spotlight \`MessageBuffer\<EventContainer>\`, then in the subscriber calls \`container.getParsedEnvelope()\` to get \`\[header, items\[]]\`. Each item's \`\[itemHeader, itemPayload]\` is dispatched: \`event\`/\`error\` types → \`formatErrorItem\`, \`transaction\` → \`formatTransactionItem\`, \`log\` → \`formatLogItem\` (returns multiple lines), all others fall back to a minimal \`timestamp • type\` line. Formatters are inline in \`local.ts\` and use the CLI's color helpers.
 
+<!-- lore:019da6b7-1d7b-70b0-adf8-769712f5c577 -->
+* **Issue resolve --in grammar: release + @next + @commit sentinels**: \*\*Issue resolve --in grammar + repo\_cache SQLite table\*\*: \`sentry issue resolve --in\` grammar: (a) omitted→immediate, (b) \`\<version>\`→\`inRelease\`, (c) \`@next\`→\`inNextRelease\`, (d) \`@commit\`→auto-detect git HEAD via \`src/lib/git.ts\`, (e) \`@commit:\<repo>@\<sha>\`→explicit. \`parseResolveSpec\` splits on LAST \`@\` for scoped names. API requires \`statusDetails.inCommit: {commit, repository}\` — not bare SHA. Repo matching uses \`listRepositoriesCached(org)\` (7-day SQLite cache in \`repo\_cache\` table, schema v14). Always use \`listAllRepositories\` (paginated via \`API\_MAX\_PER\_PAGE\`) — never \`listRepositories\` (silently caps ~25). \`setCachedRepos\` wrapped in try/catch so read-only DBs (macOS \`sudo brew install\`) don't crash commands.
+
+<!-- lore:019dd1bb-5546-79b2-8034-066acf076779 -->
+* **Response cache hit invisibility — synthetic Response carries no marker**: Response cache hit invisibility — synthetic Response from \`getCachedResponse()\` in \`src/lib/response-cache.ts\` is indistinguishable from network. Solved via module-level \`lastCacheHitAgeMs\`: set on hit, cleared at top of \`authenticatedFetch()\` per-call (single-process CLI = race-free). \`src/lib/cache-hint.ts\` provides \`formatCacheHint()\` (\`"cached · 3m ago · use -f to refresh"\`) and \`appendCacheHint(existingHint)\` (joins with \` | \`). Wired in \`buildCommand\` (\`src/lib/command.ts\`): \`appendCacheHint(returned?.hint)\` runs only when generator returns a \`CommandReturn\` — bare \`return;\` paths (e.g. \`--web\`) skip the hint. Same chokepoint can host future cross-cutting hint decorators. Test-only \`\_setLastCacheHitAgeForTesting(ms)\` exposes state.
+
+<!-- lore:019ce0bb-f35d-7380-b661-8dc56f9938cf -->
+* **Seer trial prompt uses middleware layering in bin.ts error handling chain**: Seer trial prompt via error middleware layering: \`bin.ts\` chain is \`main() → executeWithAutoAuth() → executeWithSeerTrialPrompt() → runCommand()\`. Seer trial prompts (\`no\_budget\`/\`not\_enabled\`) caught by inner wrapper; auth errors bubble to outer. Trial API: \`GET /api/0/customers/{org}/\` → \`productTrials\[]\` (prefer \`seerUsers\`, fallback \`seerAutofix\`). Start: \`PUT /api/0/customers/{org}/product-trial/\`. SaaS-only; self-hosted 404s gracefully. \`ai\_disabled\` excluded. \`startSeerTrial\` accepts \`category\` from trial object — don't hardcode.
+
+### Decision
+
+<!-- lore:019c99d5-69f2-74eb-8c86-411f8512801d -->
+* **Raw markdown output for non-interactive terminals, rendered for TTY**: Markdown-first output pipeline: custom renderer in \`src/lib/formatters/markdown.ts\` walks \`marked\` tokens to produce ANSI-styled output. Commands build CommonMark using helpers (\`mdKvTable()\`, \`mdRow()\`, \`colorTag()\`, \`escapeMarkdownCell()\`, \`safeCodeSpan()\`) and pass through \`renderMarkdown()\`. \`isPlainOutput()\` precedence: \`SENTRY\_PLAIN\_OUTPUT\` > \`NO\_COLOR\` > \`FORCE\_COLOR\` > \`!isTTY\`. \`--json\` always outputs JSON. Colors defined in \`COLORS\` object in \`colors.ts\`. Tests run non-TTY so assertions match raw CommonMark; use \`stripAnsi()\` helper for rendered-mode assertions.
+
 ### Gotcha
 
 <!-- lore:019df992-5999-7f3a-b76e-29e3b08c354b -->
 * **@spotlightjs/spotlight exports only two paths — no formatter/parser access**: The \`@spotlightjs/spotlight\` package's \`exports\` map exposes only \`.\` (main server) and \`./sdk\` (buffer API). Formatter registries (\`humanFormatters\`, \`applyFormatter\`) and parser helpers (\`isErrorEvent\`, type guards) live under \`dist/server/formatters/\` and \`dist/server/parser/\` but are not in \`exports\`. Bun's strict module resolution blocks deep \`dist/\` imports at runtime. Workaround: write inline formatters using the CLI's own color system (\`muted\`, \`bold\`, \`cyan\`, etc.) following the same pattern as Spotlight's human formatters.
+
+<!-- lore:019db57b-ba0d-7a5f-803d-f15b7a819d05 -->
+* **--json schema stability: collapse=organization drops nested org fields**: --json schema + response cache gotchas: (1) \`?collapse=organization\` shrinks \`organization\` to \`{id, slug}\` — silent --json regression. \`jsonTransform\` re-hydrates \`organization.name\` via \`resolveOrgDisplayName\` against \`org\_regions\` cache. (2) \`buildCacheKey()\` normalizes URL with sorted query params, so \`invalidateCachedResponse(baseUrl)\` misses entries with query suffixes. Use \`invalidateCachedResponsesMatching(prefix)\` (raw \`startsWith()\`); \`buildApiUrl()\` always emits trailing slash → safe prefix. (3) When \`jsonTransform\` is set, \`jsonExclude\` and \`filterFields\` are NOT applied — transform must call \`filterFields(result, fields)\` and omit excluded keys itself.
+
+<!-- lore:019dd588-df59-71ab-aad6-7453c4a99ccb -->
+* **API tests must use useTestConfigDir to isolate disk response cache**: \*\*API tests must use useTestConfigDir to isolate disk response cache\*\*: Tests mocking \`globalThis.fetch\` MUST call \`useTestConfigDir()\` + \`setAuthToken()\`. \`authenticatedFetch\` checks a filesystem response cache (\`~/.sentry/cache/responses/\`) BEFORE calling fetch — without per-test dirs, test N's response is served to test N+1. TTL tiers in \`classifyUrl()\`: stable=5min, volatile=60s (issues/logs), immutable=24h (events/traces by ID). Also: \`@sentry/api\` SDK calls \`\_fetch(request)\` with no init — fall back to \`input.headers\` when \`init\` is undefined (prevents HTTP 415). SDK returns \`data={}\` for empty/204 responses — always guard with \`Array.isArray(data)\` before \`.map()\`. Use \`unwrapPaginatedResult\` (not \`unwrapResult\`) for Link header pagination.
+
+<!-- lore:019dc095-9ce4-7fe1-89ab-12efeffddcee -->
+* **Biome noUselessUndefined also rejects () => {} empty arrow callbacks**: Biome lint traps: (1) \`noUselessUndefined\` rejects \`() => undefined\` AND \`noEmptyBlockStatements\` rejects \`() => {}\` — use top-level \`function noop(): void {}\`. (2) \`noExcessiveCognitiveComplexity\` caps at 15. (3) \`expect(() => fn()).toThrow(X)\` must be one line. (4) Plugin forbids raw \`metadata\` table queries — use \`getMetadata\`/\`setMetadata\`/\`clearMetadata\`. (5) Also enforced: \`useBlockStatements\`, \`noNestedTernary\`, \`useAtIndex\`, \`noStaticOnlyClass\`, \`useSimplifiedLogicExpression\`, \`noShadow\`. Namespace imports forbidden. (6) \`useYield\` fires on \`async \*func()\` with statements but not empty bodies — only add \`biome-ignore\` to generators with statements. \`lint:fix\` differs from CI \`lint\`: auto-fix hides \`noPrecisionLoss\` on >2^53 literals, \`noIncrementDecrement\`, import ordering. Always \`bun run lint\` before pushing.
+
+<!-- lore:019dc60a-2c2c-7d07-b583-40c5a9342101 -->
+* **Bun --isolate coverage inflates LF count for files with verbose comments/JSDoc**: Bun --isolate coverage inflates LF count: under \`bun test --isolate --parallel\` (CI's \`test:unit\`), Bun's coverage instrumentation counts comments, blank lines, type annotations, and closing braces as 'executable'. E.g. \`zstd-transport.ts\` LF=165 locally → 210 under --isolate, dropping coverage 99%→78%. Workaround: trim verbose inline comments inside function bodies; move rationale to JSDoc above the function. Statement coverage stays 100% — 'missing' lines are non-executable.
+
+<!-- lore:019e0455-945e-77ac-ac2f-ca206985387a -->
+* **Bun /$bunfs/ virtual FS uses JS parser — embedded .tsx files fail on TS syntax**: \*\*Bun \`/$bunfs/\` virtual FS + Ink TUI sidecar embedding\*\*: Files embedded via \`with { type: "file" }\` run from \`/$bunfs/root/\` using a JS parser (not TypeScript) — raw \`.tsx\` crashes on \`import { type Foo }\`. Fix: pre-bundle \`.tsx\` → \`.js\` via esbuild before embedding (\`script/text-import-plugin.ts\`). \`/$bunfs/\` has no \`node\_modules\` — inline all deps; use \`createRequire\` banner for CJS deps. Only \`node:\*\` builtins external. Query strings in \`/$bunfs/\` paths cause ENOENT. Related: Ink TUI sidecar (\`ink-app.tsx\`) must be fully self-contained — main bundle must NOT import \`ink\`/\`react\` separately; call \`app.mountApp()\` from the sidecar only to avoid dual-React "Invalid hook call" errors.
+
+<!-- lore:019dbabc-1b61-7768-ac90-e62d6464af34 -->
+* **Bun 1.3.11 tty.ReadStream leaks libuv handle — process.stdin.unref is undefined**: Bun 1.3.11 macOS TTY bug: \`process.stdin\` via kqueue \`EVFILT\_READ\` fails to deliver keystrokes when fd 0 is inherited via \`exec bin \</dev/tty\` (curl|bash flow). Linux (epoll) works. Workaround: \`openSync('/dev/tty','r')\` + \`new tty.ReadStream(fd)\` routes through libuv threadpool. Lives in \`src/lib/init/stdin-reopen.ts\`, darwin-gated in \`wizard-runner.ts\` via \`using \_tty\`. Leaks libuv handle → safety net in \`init.ts\`: \`setTimeout(process.exit, 100).unref()\`. Skip under \`NODE\_ENV=test\`.
+
+<!-- lore:019db776-111b-73db-b4ad-b762dfd4808f -->
+* **MastraClient has no dispose API — use AbortController for cleanup**: MastraClient has no \`close()\`/\`dispose()\` API — cleanup via \`ClientOptions.abortSignal\` (constructor) or per-prompt \`signal\`. Without explicit abort, Bun's fetch dispatcher keep-alive sockets hold the event loop alive past natural exit. Pattern in \`src/lib/init/wizard-runner.ts\`: create \`AbortController\` per \`runWizard\`, pass \`abortSignal: controller.signal\` to \`new MastraClient(...)\`, abort via \`using \_ = { \[Symbol.dispose]: () => controller.abort() }\`. Custom \`fetch\` wrapper must preserve \`init.signal\` via spread. Tests capture \`ClientOptions\` via \`spyOn(MastraClient.prototype, 'getWorkflow').mockImplementation(function() { capturedOpts.push(this.options); ... })\`.
+
+<!-- lore:019d0b04-ccec-7bd2-a5ca-732e7064cc1a -->
+* **Multi-region fan-out: distinguish all-403 from empty orgs with hasSuccessfulRegion flag**: In \`listOrganizationsUncached\` (\`src/lib/api/organizations.ts\`), \`Promise.allSettled\` collects multi-region results. Don't use \`flatResults.length === 0\` to detect all-regions-failed — a region returning 200 OK with zero orgs pushes nothing into \`flatResults\`. Track a \`hasSuccessfulRegion\` boolean on any \`"fulfilled"\` settlement. Only re-throw 403 \`ApiError\` when \`!hasSuccessfulRegion && lastScopeError\`.
 <!-- End lore-managed section -->

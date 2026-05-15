@@ -7,12 +7,12 @@ import {
   spyOn,
   test,
 } from "bun:test";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as clack from "@clack/prompts";
 import { MastraClient } from "@mastra/client-js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
-import { WizardError } from "../../../src/lib/errors.js";
+import { ENV_VAR_AGENTS } from "../../../src/lib/detect-agent.js";
+import { setEnv } from "../../../src/lib/env.js";
+import { EXIT, WizardError } from "../../../src/lib/errors.js";
 import { WizardCancelledError } from "../../../src/lib/init/clack-utils.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as fmt from "../../../src/lib/init/formatters.js";
@@ -23,7 +23,7 @@ import * as inter from "../../../src/lib/init/interactive.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as preflight from "../../../src/lib/init/preflight.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as initSpinner from "../../../src/lib/init/spinner.js";
+import * as readiness from "../../../src/lib/init/readiness.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as registry from "../../../src/lib/init/tools/registry.js";
 import type {
@@ -32,19 +32,38 @@ import type {
   WizardOptions,
   WorkflowRunResult,
 } from "../../../src/lib/init/types.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as uiFactory from "../../../src/lib/init/ui/factory.js";
+import {
+  CANCELLED,
+  type SpinnerHandle,
+  type WizardUI,
+} from "../../../src/lib/init/ui/types.js";
 import { runWizard } from "../../../src/lib/init/wizard-runner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as workflowInputs from "../../../src/lib/init/workflow-inputs.js";
+import { createMockUI, type MockCall } from "./ui/mock-ui.js";
 
 const noop = () => {
   /* suppress output */
 };
 
-const spinnerMock = {
+/**
+ * Per-test reference to the spinner mock. The wizard-runner calls
+ * `ui.spinner()` exactly once and reuses the handle for the entire run,
+ * so we expose a singleton with mock fns the test cases can assert on.
+ */
+const spinnerMock: SpinnerHandle & {
+  start: ReturnType<typeof mock>;
+  stop: ReturnType<typeof mock>;
+  message: ReturnType<typeof mock>;
+} = {
   start: mock(),
   stop: mock(),
   message: mock(),
 };
+
+let mockUICalls: MockCall[];
 
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   return {
@@ -73,15 +92,10 @@ let mockStartResult: WorkflowRunResult;
 let mockResumeResults: WorkflowRunResult[];
 let resumeCallCount = 0;
 let startAsyncMock: ReturnType<typeof mock>;
+let mockRunByIdResult: WorkflowRunResult | Error;
+let runByIdMock: ReturnType<typeof mock>;
 
-let introSpy: ReturnType<typeof spyOn>;
-let confirmSpy: ReturnType<typeof spyOn>;
-let cancelSpy: ReturnType<typeof spyOn>;
-let logInfoSpy: ReturnType<typeof spyOn>;
-let logWarnSpy: ReturnType<typeof spyOn>;
-let logErrorSpy: ReturnType<typeof spyOn>;
-let spinnerSpy: ReturnType<typeof spyOn>;
-
+let getUISpy: ReturnType<typeof spyOn>;
 let formatBannerSpy: ReturnType<typeof spyOn>;
 let formatResultSpy: ReturnType<typeof spyOn>;
 let formatErrorSpy: ReturnType<typeof spyOn>;
@@ -104,6 +118,33 @@ let capturedClientOptions: { abortSignal?: AbortSignal }[] = [];
 
 let savedPlainOutput: string | undefined;
 
+function forceStdinTty<T>(action: () => Promise<T>): Promise<T> {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(
+    process.stdin,
+    "isTTY"
+  );
+  Object.defineProperty(process.stdin, "isTTY", {
+    value: true,
+    configurable: true,
+    writable: true,
+  });
+  return action().finally(() => {
+    if (originalDescriptor) {
+      Object.defineProperty(process.stdin, "isTTY", originalDescriptor);
+    } else {
+      delete (process.stdin as { isTTY?: boolean }).isTTY;
+    }
+  });
+}
+
+function useMockUI(ui: WizardUI, calls: MockCall[]): void {
+  mockUICalls = calls;
+  getUISpy.mockResolvedValue({
+    ...ui,
+    spinner: () => spinnerMock,
+  });
+}
+
 beforeEach(() => {
   // Force rich output so clack-plain.ts delegates to real clack (spied below)
   savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
@@ -112,22 +153,30 @@ beforeEach(() => {
   mockStartResult = { status: "success", result: { platform: "React" } };
   mockResumeResults = [];
   resumeCallCount = 0;
+  mockRunByIdResult = new Error("runById not configured");
   process.exitCode = 0;
-
-  introSpy = spyOn(clack, "intro").mockImplementation(noop);
-  confirmSpy = spyOn(clack, "confirm").mockResolvedValue(true);
-  cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
-  logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
-  logWarnSpy = spyOn(clack.log, "warn").mockImplementation(noop);
-  logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
-  spinnerSpy = spyOn(initSpinner, "createWizardSpinner").mockReturnValue(
-    spinnerMock as any
-  );
 
   spinnerMock.start.mockClear();
   spinnerMock.stop.mockClear();
   spinnerMock.message.mockClear();
 
+  // The wizard runner constructs a UI via `getUI()`. Replace it with a
+  // MockUI whose spinner() returns the shared `spinnerMock` so tests can
+  // assert on lifecycle calls.
+  const { ui, calls, respond } = createMockUI();
+  mockUICalls = calls;
+  // Pre-load a confirm response so the experimental confirm prompt
+  // resolves to "true" by default — the legacy default before MockUI.
+  // Tests that exercise `--yes` skip this prompt entirely; the response
+  // sits unused on the queue and is harmless.
+  respond.confirm(true);
+  const wrapped: WizardUI = {
+    ...ui,
+    spinner: () => spinnerMock,
+  };
+  getUISpy = spyOn(uiFactory, "getUIAsync").mockResolvedValue(wrapped);
+
+  spyOn(readiness, "checkReadiness").mockResolvedValue(undefined);
   formatBannerSpy = spyOn(banner, "formatBanner").mockReturnValue("BANNER");
   formatResultSpy = spyOn(fmt, "formatResult").mockImplementation(noop);
   formatErrorSpy = spyOn(fmt, "formatError").mockImplementation(noop);
@@ -166,7 +215,13 @@ beforeEach(() => {
   );
 
   startAsyncMock = mock(() => Promise.resolve(mockStartResult));
+  runByIdMock = mock(() =>
+    mockRunByIdResult instanceof Error
+      ? Promise.reject(mockRunByIdResult)
+      : Promise.resolve(mockRunByIdResult)
+  );
   const run = {
+    runId: "test-run-id",
     startAsync: startAsyncMock,
     resumeAsync: mock(() => {
       const result = mockResumeResults[resumeCallCount] ?? {
@@ -178,6 +233,7 @@ beforeEach(() => {
   };
   const workflow = {
     createRun: mock(() => Promise.resolve(run)),
+    runById: runByIdMock,
   };
   capturedClientOptions = [];
   getWorkflowSpy = spyOn(
@@ -194,14 +250,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  introSpy.mockRestore();
-  confirmSpy.mockRestore();
-  cancelSpy.mockRestore();
-  logInfoSpy.mockRestore();
-  logWarnSpy.mockRestore();
-  logErrorSpy.mockRestore();
-  spinnerSpy.mockRestore();
-
+  getUISpy.mockRestore();
   formatBannerSpy.mockRestore();
   formatResultSpy.mockRestore();
   formatErrorSpy.mockRestore();
@@ -223,7 +272,40 @@ afterEach(() => {
   } else {
     process.env.SENTRY_PLAIN_OUTPUT = savedPlainOutput;
   }
+
+  // Restore the env sandbox in case any test used setEnv without try/finally.
+  setEnv(process.env);
 });
+
+function lastCancelMessage(): string | undefined {
+  for (let i = mockUICalls.length - 1; i >= 0; i--) {
+    const call = mockUICalls[i];
+    if (call?.kind === "cancel") {
+      return call.message;
+    }
+  }
+  return;
+}
+
+function lastFeedbackOutcome(): string | undefined {
+  for (let i = mockUICalls.length - 1; i >= 0; i--) {
+    const call = mockUICalls[i];
+    if (call?.kind === "feedback") {
+      return call.outcome;
+    }
+  }
+  return;
+}
+
+function lastWarn(): string | undefined {
+  for (let i = mockUICalls.length - 1; i >= 0; i--) {
+    const call = mockUICalls[i];
+    if (call?.kind === "log.warn") {
+      return call.message;
+    }
+  }
+  return;
+}
 
 describe("runWizard", () => {
   test("formats successful results", async () => {
@@ -235,29 +317,143 @@ describe("runWizard", () => {
   });
 
   test("throws when stdin is not a TTY without --yes", async () => {
-    const originalIsTTY = process.stdin.isTTY;
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+      process.stdin,
+      "isTTY"
+    );
     Object.defineProperty(process.stdin, "isTTY", {
       value: false,
       configurable: true,
+      writable: true,
     });
 
-    await expect(runWizard(makeOptions({ yes: false }))).rejects.toThrow(
-      WizardError
-    );
-
-    Object.defineProperty(process.stdin, "isTTY", {
-      value: originalIsTTY,
-      configurable: true,
-    });
+    try {
+      await expect(runWizard(makeOptions({ yes: false }))).rejects.toThrow(
+        WizardError
+      );
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(process.stdin, "isTTY", originalDescriptor);
+      } else {
+        delete (process.stdin as { isTTY?: boolean }).isTTY;
+      }
+    }
   });
 
   test("passes dry-run as non-interactive into preflight", async () => {
     await runWizard(makeOptions({ dryRun: true, yes: false }));
 
     expect(resolveInitContextSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ dryRun: true, yes: true })
+      expect.objectContaining({ dryRun: true, yes: true }),
+      expect.anything()
     );
-    expect(logWarnSpy).toHaveBeenCalled();
+    expect(lastWarn()).toContain("Dry-run");
+  });
+
+  test("uses rich welcome screen when available", async () => {
+    const { ui, calls, respond } = createMockUI({ welcome: true });
+    respond.welcome("continue");
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() =>
+      runWizard(
+        makeOptions({
+          yes: false,
+          features: ["errorMonitoring", "performanceMonitoring"],
+          org: "bete-dev",
+          project: "nextjs",
+        })
+      )
+    );
+
+    const welcome = calls.find((call) => call.kind === "welcome");
+    expect(welcome).toBeDefined();
+    if (welcome?.kind !== "welcome") {
+      throw new Error("expected welcome call");
+    }
+    expect(welcome.options.title).toBe("Sentry Init");
+    expect(welcome.options.body).toContain(
+      "We'll use AI to inspect this project and configure Sentry."
+    );
+    expect(welcome.options.punchline).toContain("use AI for setup");
+    expect(getUISpy.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        initialWelcome: expect.objectContaining({
+          title: "Sentry Init",
+        }),
+      })
+    );
+    expect(
+      calls.some((call) => call.kind === "select" || call.kind === "confirm")
+    ).toBe(false);
+    const introOn = calls.findIndex(
+      (call) => call.kind === "setIntroMode" && call.enabled
+    );
+    const introOff = calls.findIndex(
+      (call) => call.kind === "setIntroMode" && !call.enabled
+    );
+    expect(introOn).toBeGreaterThanOrEqual(0);
+    expect(introOff).toBeGreaterThanOrEqual(0);
+    expect(spinnerMock.message.mock.calls).toContainEqual([
+      "Connecting to wizard...",
+    ]);
+    expect(formatResultSpy).toHaveBeenCalled();
+  });
+
+  test("does not log a second AI disclaimer after welcome", async () => {
+    const { ui, calls, respond } = createMockUI({ welcome: true });
+    respond.welcome("continue");
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() =>
+      runWizard(
+        makeOptions({
+          yes: false,
+          features: ["errorMonitoring"],
+          org: "bete-dev",
+          project: "nextjs",
+        })
+      )
+    );
+
+    const infoMessages = calls
+      .filter((call) => call.kind === "log.info")
+      .map((call) => call.message);
+    expect(
+      infoMessages.some((message) => message.includes("This wizard uses AI"))
+    ).toBe(false);
+    expect(
+      infoMessages.some((message) => message.includes("For manual setup"))
+    ).toBe(false);
+  });
+
+  test("cancels cleanly from rich welcome screen", async () => {
+    const { ui, calls, respond } = createMockUI({ welcome: true });
+    respond.welcome(CANCELLED);
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
+
+    expect(process.exitCode).toBe(0);
+    expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
+    expect(getWorkflowSpy).not.toHaveBeenCalled();
+  });
+
+  test("falls back to generic continue prompt without rich welcome", async () => {
+    const { ui, calls, respond } = createMockUI();
+    respond.select("continue");
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
+
+    const select = calls.find((call) => call.kind === "select");
+    expect(select).toBeDefined();
+    if (select?.kind !== "select") {
+      throw new Error("expected select call");
+    }
+    expect(select.message).toContain("experimental");
+    expect(formatResultSpy).toHaveBeenCalled();
   });
 
   test("stops before workflow creation when preflight returns null", async () => {
@@ -274,8 +470,47 @@ describe("runWizard", () => {
 
     await runWizard(makeOptions());
 
-    expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
+    expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
     expect(getWorkflowSpy).not.toHaveBeenCalled();
+  });
+
+  test("suppresses the ASCII art banner when an agent is detected", async () => {
+    setEnv({ ...process.env, CLAUDE_CODE: "1" } as NodeJS.ProcessEnv);
+    try {
+      await runWizard(makeOptions());
+    } finally {
+      setEnv(process.env);
+    }
+
+    expect(formatBannerSpy).not.toHaveBeenCalled();
+    expect(stderrSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("BANNER")
+    );
+  });
+
+  test("prints the ASCII art banner when no agent is detected", async () => {
+    // Strip all agent-detection env vars so detectAgent() returns undefined
+    // even when running inside an agent environment (e.g. OpenCode in CI).
+    const agentKeys = new Set([
+      "AI_AGENT",
+      "AGENT",
+      "CLAUDECODE",
+      "CLAUDE_CODE",
+      ...ENV_VAR_AGENTS.keys(),
+    ]);
+    const cleanEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([k]) => !agentKeys.has(k))
+    );
+    setEnv(cleanEnv as NodeJS.ProcessEnv);
+    try {
+      await runWizard(makeOptions());
+    } finally {
+      setEnv(process.env);
+    }
+
+    expect(formatBannerSpy).toHaveBeenCalled();
+    expect(mockUICalls).toContainEqual({ kind: "banner", art: "BANNER" });
   });
 
   test("dispatches tool payloads through the registry", async () => {
@@ -325,7 +560,8 @@ describe("runWizard", () => {
         kind: "confirm",
         prompt: "Continue?",
       },
-      makeContext()
+      makeContext(),
+      expect.anything()
     );
   });
 
@@ -401,7 +637,8 @@ describe("runWizard", () => {
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
-    expect(cancelSpy).toHaveBeenCalledWith("Setup failed");
+    expect(lastCancelMessage()).toBe("Setup failed");
+    expect(lastFeedbackOutcome()).toBe("failed");
   });
 
   test("tears down forwarding and stops the spinner on cancellation", async () => {
@@ -424,6 +661,8 @@ describe("runWizard", () => {
 
     expect(process.exitCode).toBe(0);
     expect(spinnerMock.stop).toHaveBeenCalledWith("Cancelled", 0);
+    expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
   });
 
   test("tears down forwarding when a WizardError is rethrown from a tool", async () => {
@@ -451,9 +690,11 @@ describe("runWizard", () => {
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
+    expect(lastCancelMessage()).toBe("Setup failed");
+    expect(lastFeedbackOutcome()).toBe("failed");
   });
 
-  test("shows a multiline tree while reading files and then analyzing them", async () => {
+  test("shows count-based messages while reading and analyzing files", async () => {
     mockStartResult = {
       status: "suspended",
       suspended: [["detect-platform"]],
@@ -474,23 +715,11 @@ describe("runWizard", () => {
 
     await runWizard(makeOptions());
 
-    const messages = spinnerMock.message.mock.calls.map((call: string[]) =>
-      call[0]
-        ?.replace(
-          // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
-          /\x1b\[[^m]*m/g,
-          ""
-        )
-        // Normalize whitespace left behind by code span padding
-        .replace(/[ \t]+$/gm, "")
-        .replace(/ {2,}/g, " ")
+    const messages = spinnerMock.message.mock.calls.map(
+      (call: string[]) => call[0]
     );
-    expect(messages).toContain(
-      "Reading files...\n├─ ● settings.py\n└─ ● urls.py"
-    );
-    expect(messages).toContain(
-      "Analyzing files...\n├─ ✓ settings.py\n└─ ✓ urls.py"
-    );
+    expect(messages).toContain("Reading 2 files...");
+    expect(messages).toContain("Analyzing 2 files...");
   });
 
   test("passes precomputed dirListing/fileCache/existingSentry via initialState, not inputData", async () => {
@@ -555,6 +784,29 @@ describe("runWizard", () => {
     await runWizard(makeOptions());
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Using existing project");
+  });
+
+  test("shows --yes hint when LoggingUI prompt fails", async () => {
+    const { LoggingUIPromptError } = await import(
+      "../../../src/lib/init/ui/logging-ui.js"
+    );
+    const { ui } = createMockUI();
+    const failingUI: WizardUI = {
+      ...ui,
+      spinner: () => spinnerMock,
+      select: () =>
+        Promise.reject(
+          new LoggingUIPromptError(
+            "select",
+            "This is experimental and will modify files"
+          )
+        ),
+    };
+    getUISpy.mockResolvedValue(failingUI);
+
+    await expect(
+      forceStdinTty(() => runWizard(makeOptions({ yes: false })))
+    ).rejects.toThrow("Run with --yes for non-interactive mode.");
   });
 });
 
@@ -646,5 +898,271 @@ describe("runWizard — MastraClient lifecycle", () => {
     expect(abortedAtConstruction).toBe(false);
     // And teardown aborted it by the time the wizard returned.
     expect(capturedClientOptions[0]?.abortSignal?.aborted).toBe(true);
+  });
+});
+
+// ─── Additional coverage tests ───────────────────────────────────────────────
+
+describe("runWizard — workflow exit codes", () => {
+  // handleFinalResult calls mapWorkflowExitCode when the workflow result
+  // carries a non-zero exitCode. Each case maps a server-internal code to
+  // the CLI's semantic EXIT constant.
+  test.each([
+    [20, EXIT.CONFIG],
+    [30, EXIT.WIZARD_DEPS],
+    [40, EXIT.WIZARD_CODEMOD],
+    [41, EXIT.WIZARD_CODEMOD],
+    [50, EXIT.WIZARD_VERIFY],
+    // 999 is an unknown code; also exercises the default branch of mapWorkflowExitCode
+    [999, EXIT.WIZARD],
+  ])("maps workflow exit code %s to the expected EXIT constant", async (workflowCode, expectedExitCode) => {
+    mockStartResult = {
+      status: "success",
+      result: { exitCode: workflowCode },
+    };
+
+    const err = await runWizard(makeOptions()).catch((e) => e);
+
+    expect(err).toBeInstanceOf(WizardError);
+    expect((err as WizardError).exitCode).toBe(expectedExitCode);
+  });
+});
+
+describe("runWizard — resumeWithRetry stale-step recovery", () => {
+  const toolPayload: ToolPayload = {
+    type: "tool",
+    operation: "run-commands",
+    cwd: "/tmp/test",
+    params: { commands: ["npm install"] },
+  };
+
+  function makeStaleStepRun(resumeAsyncImpl: () => Promise<WorkflowRunResult>) {
+    let runByIdRef: ReturnType<typeof mock>;
+    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+      capturedClientOptions.push(
+        (this as unknown as { options: { abortSignal?: AbortSignal } }).options
+      );
+      runByIdRef = runByIdMock;
+      return {
+        createRun: mock(() =>
+          Promise.resolve({
+            runId: "test-run-id",
+            startAsync: startAsyncMock,
+            resumeAsync: mock(resumeAsyncImpl),
+          })
+        ),
+        runById: runByIdRef,
+      } as any;
+    });
+  }
+
+  function staleStepError(): Error {
+    return new Error(
+      "HTTP error! status: 500 - " +
+        JSON.stringify({
+          error:
+            "This workflow step 'tool-step' was not suspended. Available suspended steps: [next-step]",
+        })
+    );
+  }
+
+  test("recovers when server has already advanced to the next step", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+    // runById returns a finished workflow — the wizard should complete cleanly.
+    mockRunByIdResult = { status: "success" };
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      if (resumeCount === 1) {
+        return Promise.reject(staleStepError());
+      }
+      return Promise.resolve({ status: "success" });
+    });
+
+    await runWizard(makeOptions());
+
+    expect(formatResultSpy).toHaveBeenCalled();
+    expect(runByIdMock).toHaveBeenCalledWith(
+      "test-run-id",
+      expect.objectContaining({ fields: expect.any(Array) })
+    );
+    // Recovery succeeded on the first attempt — resumeAsync was not called again.
+    expect(resumeCount).toBe(1);
+  });
+
+  test("throws immediately when stale-step error occurs and runById fails", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+    // runById is unreachable — recovery fails, wizard throws without retrying.
+    mockRunByIdResult = new Error("runById network error");
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      return Promise.reject(staleStepError());
+    });
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    // Threw immediately after recovery failed — no futile retries of the stale step.
+    expect(resumeCount).toBe(1);
+    expect(runByIdMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runWizard — additional coverage", () => {
+  test("throws WizardError and stops spinner when workflow start fails", async () => {
+    startAsyncMock.mockRejectedValue(new Error("connection refused"));
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(spinnerMock.stop).toHaveBeenCalledWith("Connection failed", 1);
+    expect(lastCancelMessage()).toBe("Setup failed");
+  });
+
+  test("throws when the workflow response has an unrecognised status", async () => {
+    startAsyncMock.mockResolvedValue({ status: "bailed" });
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(
+      /Unexpected workflow status/
+    );
+  });
+
+  test("throws when a suspend payload is a non-object truthy value", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: {
+        "detect-platform": {
+          // 42 is truthy, so extractSuspendPayload passes it to
+          // assertSuspendPayload, which rejects non-objects.
+          suspendPayload: 42,
+        },
+      },
+    };
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+  });
+
+  test("finds suspend payload via fallback loop when primary step has none", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["echo hi"] },
+    };
+    // `suspended` points to "step-a", but its payload is missing.
+    // extractSuspendPayload falls back to iterating all steps and finds
+    // the payload in "step-b".
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["step-a"]],
+      steps: {
+        "step-a": {},
+        "step-b": { suspendPayload: payload },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions());
+
+    expect(executeToolSpy).toHaveBeenCalledWith(payload, makeContext());
+  });
+
+  test("marks the previous step completed when the workflow advances", async () => {
+    const payloadA: ToolPayload = {
+      type: "tool",
+      operation: "list-dir",
+      cwd: "/tmp/test",
+      params: { path: "." },
+    };
+    const payloadB: ToolPayload = {
+      type: "tool",
+      operation: "read-files",
+      cwd: "/tmp/test",
+      params: { paths: ["package.json"] },
+    };
+
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["discover-context"]],
+      steps: { "discover-context": { suspendPayload: payloadA } },
+    };
+    mockResumeResults = [
+      {
+        status: "suspended",
+        suspended: [["detect-platform"]],
+        steps: { "detect-platform": { suspendPayload: payloadB } },
+      },
+      { status: "success" },
+    ];
+
+    await runWizard(makeOptions());
+
+    const stepCalls = mockUICalls.filter((c) => c.kind === "setStep");
+    expect(stepCalls).toContainEqual({
+      kind: "setStep",
+      stepId: "discover-context",
+      status: "in_progress",
+    });
+    expect(stepCalls).toContainEqual({
+      kind: "setStep",
+      stepId: "discover-context",
+      status: "completed",
+    });
+    expect(stepCalls).toContainEqual({
+      kind: "setStep",
+      stepId: "detect-platform",
+      status: "in_progress",
+    });
+    const inProgressIdx = stepCalls.findIndex(
+      (c) =>
+        c.kind === "setStep" &&
+        c.stepId === "discover-context" &&
+        c.status === "in_progress"
+    );
+    const completedIdx = stepCalls.findIndex(
+      (c) =>
+        c.kind === "setStep" &&
+        c.stepId === "discover-context" &&
+        c.status === "completed"
+    );
+    expect(inProgressIdx).toBeLessThan(completedIdx);
+  });
+
+  test("uses existing platform name in detect-platform spinner label", async () => {
+    resolveInitContextSpy.mockResolvedValue(
+      makeContext({ existingProject: { platform: "javascript-nextjs" } })
+    );
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: {
+        "detect-platform": {
+          suspendPayload: {
+            type: "tool",
+            operation: "list-dir",
+            cwd: "/tmp/test",
+            params: { path: "." },
+          },
+        },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions());
+
+    const messages = spinnerMock.message.mock.calls.map(
+      (c: unknown[]) => c[0] as string
+    );
+    expect(messages.some((m) => m.includes("javascript-nextjs"))).toBe(true);
   });
 });

@@ -126,7 +126,7 @@ export const deleteCommand = buildDeleteCommand(
 
       // GET current dashboard → find widget
       const current = await getDashboard(orgSlug, dashboardId).catch(
-        (error: unknown) =>
+        async (error: unknown) =>
           enrichDashboardError(error, {
             orgSlug,
             dashboardId,
@@ -158,7 +158,7 @@ export const deleteCommand = buildDeleteCommand(
         orgSlug,
         dashboardId,
         updateBody
-      ).catch((error: unknown) =>
+      ).catch(async (error: unknown) =>
         enrichDashboardError(error, {
           orgSlug,
           dashboardId,

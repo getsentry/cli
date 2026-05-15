@@ -15,7 +15,12 @@ import {
   test,
 } from "bun:test";
 import {
+  collectEventIds,
+  expandNewlineArgs,
   fetchEventWithContext,
+  fetchMultipleEvents,
+  formatEventView,
+  jsonTransformEventView,
   parsePositionalArgs,
   resolveAutoDetectTarget,
   resolveEventTarget,
@@ -241,7 +246,7 @@ describe("parsePositionalArgs", () => {
   });
 
   describe("edge cases", () => {
-    test("handles more than two args (ignores extras)", () => {
+    test("collects extra args as additional event IDs", () => {
       const result = parsePositionalArgs([
         "my-org/frontend",
         "abc123",
@@ -249,12 +254,78 @@ describe("parsePositionalArgs", () => {
       ]);
       expect(result.targetArg).toBe("my-org/frontend");
       expect(result.eventId).toBe("abc123");
+      expect(result.extraEventIds).toEqual(["extra-arg"]);
     });
 
     test("handles empty string event ID in two-arg case", () => {
       const result = parsePositionalArgs(["my-org/frontend", ""]);
       expect(result.targetArg).toBe("my-org/frontend");
       expect(result.eventId).toBe("");
+    });
+  });
+
+  describe("newline-separated IDs (CLI-1HT)", () => {
+    test("expands newline-separated IDs from single structured arg", () => {
+      const multiLineArg =
+        "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d\n60c277e6c73f41c58ca46231b46dc0f8\n722e1158dfa147ec90ed831c4d096ae7";
+      const expanded = expandNewlineArgs([multiLineArg]);
+      expect(expanded).toEqual([
+        "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d",
+        "60c277e6c73f41c58ca46231b46dc0f8",
+        "722e1158dfa147ec90ed831c4d096ae7",
+      ]);
+
+      // First arg has 2+ slashes → routed through single-arg path to correctly
+      // extract org/project and first event ID, remaining become extraEventIds.
+      const result = parsePositionalArgs(expanded);
+      expect(result.targetArg).toBe("perzimo/perzimo-server");
+      expect(result.eventId).toBe("189945b37884462cb9134bd5cabeaa3d");
+      expect(result.extraEventIds).toEqual([
+        "60c277e6c73f41c58ca46231b46dc0f8",
+        "722e1158dfa147ec90ed831c4d096ae7",
+      ]);
+    });
+
+    test("single arg with newlines goes through single-arg path after expansion", () => {
+      // When there's only one line (no newlines), single-arg path works normally
+      const result = parsePositionalArgs([
+        "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d",
+      ]);
+      expect(result.eventId).toBe("189945b37884462cb9134bd5cabeaa3d");
+      expect(result.targetArg).toBe("perzimo/perzimo-server");
+      expect(result.extraEventIds).toBeUndefined();
+    });
+
+    test("first arg with 2+ slashes routes through single-arg path and collects extras", () => {
+      // Simulates expanded "org/project/id1\nid2\nid3" → 3 args
+      const result = parsePositionalArgs([
+        "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d",
+        "60c277e6c73f41c58ca46231b46dc0f8",
+        "722e1158dfa147ec90ed831c4d096ae7",
+      ]);
+      expect(result.eventId).toBe("189945b37884462cb9134bd5cabeaa3d");
+      expect(result.targetArg).toBe("perzimo/perzimo-server");
+      expect(result.extraEventIds).toEqual([
+        "60c277e6c73f41c58ca46231b46dc0f8",
+        "722e1158dfa147ec90ed831c4d096ae7",
+      ]);
+    });
+
+    test("collects multiple extra event IDs", () => {
+      const result = parsePositionalArgs([
+        "my-org/frontend",
+        "abc123",
+        "def456",
+        "789abc",
+      ]);
+      expect(result.targetArg).toBe("my-org/frontend");
+      expect(result.eventId).toBe("abc123");
+      expect(result.extraEventIds).toEqual(["def456", "789abc"]);
+    });
+
+    test("no extra IDs when only two args", () => {
+      const result = parsePositionalArgs(["my-org/frontend", "abc123"]);
+      expect(result.extraEventIds).toBeUndefined();
     });
   });
 
@@ -857,6 +928,27 @@ describe("viewCommand.func", () => {
     expect(getEventSpy).toHaveBeenCalled();
   });
 
+  test("returns undefined hint when there is no detection or replay hint", async () => {
+    getEventSpy.mockResolvedValue(sampleEvent);
+    getSpanTreeLinesSpy.mockResolvedValue({
+      lines: [],
+      spans: null,
+      traceId: null,
+      success: false,
+    });
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    const result = await func.call(
+      context,
+      { json: true, web: false, spans: 0 },
+      "test-org/test-proj",
+      VALID_EVENT_ID
+    );
+
+    expect(result?.hint).toBeUndefined();
+  });
+
   test("auto-redirects issue short ID in two-arg form via issueShortId path", async () => {
     // "CAM-82X" as first arg matches looksLikeIssueShortId → sets issueShortId,
     // NOT targetArg. The resolveIssueShortcut path fetches the latest event.
@@ -1173,5 +1265,367 @@ describe("fetchEventWithContext", () => {
       fetchEventWithContext(null, "my-org", "my-project", "abc123")
     ).rejects.toThrow("Server error");
     expect(resolveEventSpy).not.toHaveBeenCalled();
+  });
+});
+
+// Note: splitNewlineArg is tested in test/lib/arg-parsing.test.ts
+
+// ---------------------------------------------------------------------------
+// expandNewlineArgs
+// ---------------------------------------------------------------------------
+
+describe("expandNewlineArgs", () => {
+  test("expands newline-separated args into flat array", () => {
+    expect(expandNewlineArgs(["org/proj/id1\nid2\nid3"])).toEqual([
+      "org/proj/id1",
+      "id2",
+      "id3",
+    ]);
+  });
+
+  test("passes through args without newlines", () => {
+    expect(expandNewlineArgs(["org/proj", "eventid"])).toEqual([
+      "org/proj",
+      "eventid",
+    ]);
+  });
+
+  test("handles mixed args with and without newlines", () => {
+    expect(expandNewlineArgs(["org/proj", "id1\nid2"])).toEqual([
+      "org/proj",
+      "id1",
+      "id2",
+    ]);
+  });
+
+  test("handles empty array", () => {
+    expect(expandNewlineArgs([])).toEqual([]);
+  });
+
+  test("real Codex pattern: org/project/id with many newline-separated IDs", () => {
+    const codexArg = [
+      "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d",
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ].join("\n");
+    expect(expandNewlineArgs([codexArg])).toEqual([
+      "perzimo/perzimo-server/189945b37884462cb9134bd5cabeaa3d",
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// collectEventIds
+// ---------------------------------------------------------------------------
+
+describe("collectEventIds", () => {
+  test("returns only primary ID when no extras", () => {
+    expect(collectEventIds("abc123", undefined)).toEqual(["abc123"]);
+  });
+
+  test("returns only primary ID when extras is empty", () => {
+    expect(collectEventIds("abc123", [])).toEqual(["abc123"]);
+  });
+
+  test("validates and collects valid extra hex IDs", () => {
+    const ids = collectEventIds("abc123", [
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ]);
+    expect(ids).toEqual([
+      "abc123",
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ]);
+  });
+
+  test("skips invalid extra IDs silently", () => {
+    const ids = collectEventIds("abc123", [
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "not-a-hex-id",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ]);
+    expect(ids).toEqual([
+      "abc123",
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ]);
+  });
+
+  test("skips all invalid extras", () => {
+    const ids = collectEventIds("abc123", ["bad1", "bad2"]);
+    expect(ids).toEqual(["abc123"]);
+  });
+
+  test("deduplicates event IDs", () => {
+    const ids = collectEventIds("60c277e6c73f41c58ca46231b46dc0f8", [
+      "60c277e6c73f41c58ca46231b46dc0f8", // same as primary
+      "722e1158dfa147ec90ed831c4d096ae7",
+      "722e1158dfa147ec90ed831c4d096ae7", // duplicate extra
+    ]);
+    expect(ids).toEqual([
+      "60c277e6c73f41c58ca46231b46dc0f8",
+      "722e1158dfa147ec90ed831c4d096ae7",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parsePositionalArgs: extraEventIds collection
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// formatEventView
+// ---------------------------------------------------------------------------
+
+describe("formatEventView", () => {
+  const mockEvent = (id: string) =>
+    ({
+      eventID: id,
+      title: `Error ${id}`,
+      context: {},
+      contexts: {},
+      entries: [],
+      tags: [],
+    }) as unknown as import("../../../src/types/sentry.js").SentryEvent;
+
+  test("renders single event", () => {
+    const result = formatEventView({
+      events: [{ event: mockEvent("abc123"), trace: null }],
+      requestedCount: 1,
+    });
+    expect(result).toContain("abc123");
+  });
+
+  test("renders multiple events separated by horizontal rule", () => {
+    const result = formatEventView({
+      events: [
+        { event: mockEvent("event1"), trace: null },
+        { event: mockEvent("event2"), trace: null },
+      ],
+      requestedCount: 2,
+    });
+    expect(result).toContain("event1");
+    expect(result).toContain("---");
+    expect(result).toContain("event2");
+  });
+
+  test("includes span tree lines when present", () => {
+    const result = formatEventView({
+      events: [
+        {
+          event: mockEvent("abc123"),
+          trace: null,
+          spanTreeLines: ["  span-1 (50ms)", "    span-2 (20ms)"],
+        },
+      ],
+      requestedCount: 1,
+    });
+    expect(result).toContain("span-1 (50ms)");
+    expect(result).toContain("span-2 (20ms)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// jsonTransformEventView
+// ---------------------------------------------------------------------------
+
+describe("jsonTransformEventView", () => {
+  const mockEvent = (id: string) =>
+    ({
+      eventID: id,
+      title: `Error ${id}`,
+    }) as unknown as import("../../../src/types/sentry.js").SentryEvent;
+
+  test("returns flat object for single event", () => {
+    const result = jsonTransformEventView({
+      events: [{ event: mockEvent("abc123"), trace: null }],
+      requestedCount: 1,
+    });
+    expect(result).toEqual(
+      expect.objectContaining({ eventID: "abc123", trace: null })
+    );
+    // Should NOT be an array
+    expect(Array.isArray(result)).toBe(false);
+  });
+
+  test("returns array for multiple events", () => {
+    const result = jsonTransformEventView({
+      events: [
+        { event: mockEvent("event1"), trace: null },
+        { event: mockEvent("event2"), trace: null },
+      ],
+      requestedCount: 2,
+    });
+    expect(Array.isArray(result)).toBe(true);
+    const arr = result as Record<string, unknown>[];
+    expect(arr).toHaveLength(2);
+    expect(arr[0]).toEqual(expect.objectContaining({ eventID: "event1" }));
+    expect(arr[1]).toEqual(expect.objectContaining({ eventID: "event2" }));
+  });
+
+  test("returns array when multiple requested but some failed", () => {
+    // Requested 3, only 1 succeeded — still array (CLI-1HT deterministic shape)
+    const result = jsonTransformEventView({
+      events: [{ event: mockEvent("event1"), trace: null }],
+      requestedCount: 3,
+    });
+    expect(Array.isArray(result)).toBe(true);
+    const arr = result as Record<string, unknown>[];
+    expect(arr).toHaveLength(1);
+  });
+
+  test("applies field filtering for single event", () => {
+    const result = jsonTransformEventView(
+      {
+        events: [{ event: mockEvent("abc123"), trace: null }],
+        requestedCount: 1,
+      },
+      ["eventID"]
+    );
+    expect(result).toEqual({ eventID: "abc123" });
+  });
+
+  test("applies field filtering for multiple events", () => {
+    const result = jsonTransformEventView(
+      {
+        events: [
+          { event: mockEvent("event1"), trace: null },
+          { event: mockEvent("event2"), trace: null },
+        ],
+        requestedCount: 2,
+      },
+      ["eventID"]
+    );
+    expect(result).toEqual([{ eventID: "event1" }, { eventID: "event2" }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchMultipleEvents
+// ---------------------------------------------------------------------------
+
+describe("fetchMultipleEvents", () => {
+  const mockEvent = (id: string) =>
+    ({
+      eventID: id,
+      title: `Error ${id}`,
+    }) as unknown as import("../../../src/types/sentry.js").SentryEvent;
+
+  test("fetches single event successfully", async () => {
+    const event = mockEvent("abc123");
+    spyOn(apiClient, "getEvent").mockResolvedValue(event);
+
+    const result = await fetchMultipleEvents({
+      eventIds: ["abc123"],
+      org: "my-org",
+      project: "my-project",
+      prefetchedEvent: null,
+      primaryId: "abc123",
+    });
+    expect(result).toEqual([event]);
+  });
+
+  test("uses prefetched event for primary ID", async () => {
+    const prefetched = mockEvent("abc123");
+
+    const result = await fetchMultipleEvents({
+      eventIds: ["abc123"],
+      org: "my-org",
+      project: "my-project",
+      prefetchedEvent: prefetched,
+      primaryId: "abc123",
+    });
+    expect(result).toEqual([prefetched]);
+  });
+
+  test("fetches multiple events in parallel", async () => {
+    const event1 = mockEvent("event1");
+    const event2 = mockEvent("event2");
+    spyOn(apiClient, "getEvent").mockImplementation(
+      (_org: string, _proj: string, id: string) =>
+        Promise.resolve(id === "event1" ? event1 : event2)
+    );
+
+    const result = await fetchMultipleEvents({
+      eventIds: ["event1", "event2"],
+      org: "my-org",
+      project: "my-project",
+      prefetchedEvent: null,
+      primaryId: "event1",
+    });
+    expect(result).toHaveLength(2);
+    expect(result[0]?.eventID).toBe("event1");
+    expect(result[1]?.eventID).toBe("event2");
+  });
+
+  test("warns on individual fetch failures and continues", async () => {
+    const event1 = mockEvent("event1");
+    spyOn(apiClient, "getEvent").mockImplementation(
+      (_org: string, _proj: string, id: string) =>
+        id === "event1"
+          ? Promise.resolve(event1)
+          : Promise.reject(new Error("not found"))
+    );
+
+    const result = await fetchMultipleEvents({
+      eventIds: ["event1", "event2"],
+      org: "my-org",
+      project: "my-project",
+      prefetchedEvent: null,
+      primaryId: "event1",
+    });
+    // Only the successful event is returned
+    expect(result).toEqual([event1]);
+  });
+
+  test("re-throws primary event error when all fetches fail", async () => {
+    const error = new ApiError("Server error", 500);
+    spyOn(apiClient, "getEvent").mockRejectedValue(error);
+
+    await expect(
+      fetchMultipleEvents({
+        eventIds: ["event1", "event2"],
+        org: "my-org",
+        project: "my-project",
+        prefetchedEvent: null,
+        primaryId: "event1",
+      })
+    ).rejects.toThrow("Server error");
+  });
+});
+
+describe("parsePositionalArgs: extraEventIds", () => {
+  test("no extras for single arg", () => {
+    const result = parsePositionalArgs(["abc123"]);
+    expect(result.extraEventIds).toBeUndefined();
+  });
+
+  test("no extras for two args", () => {
+    const result = parsePositionalArgs(["my-org/proj", "abc123"]);
+    expect(result.extraEventIds).toBeUndefined();
+  });
+
+  test("collects extras for three+ args", () => {
+    const result = parsePositionalArgs([
+      "my-org/proj",
+      "abc123",
+      "def456",
+      "ghi789",
+    ]);
+    expect(result.extraEventIds).toEqual(["def456", "ghi789"]);
+  });
+
+  test("collects extras when args are swapped", () => {
+    // When swap is detected: first looks like hex ID, second looks like target
+    const result = parsePositionalArgs([
+      "abc123def456abc123def456abc123de",
+      "test-org/test-proj",
+      "extra1",
+    ]);
+    expect(result.warning).toBeDefined();
+    expect(result.extraEventIds).toEqual(["extra1"]);
   });
 });

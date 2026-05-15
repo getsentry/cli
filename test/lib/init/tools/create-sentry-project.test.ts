@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as apiClient from "../../../../src/lib/api-client.js";
 import { ApiError } from "../../../../src/lib/errors.js";
-import { createSentryProject } from "../../../../src/lib/init/tools/create-sentry-project.js";
+import {
+  createSentryProject,
+  createSentryProjectTool,
+} from "../../../../src/lib/init/tools/create-sentry-project.js";
 import type {
   CreateSentryProjectPayload,
   EnsureSentryProjectPayload,
@@ -123,6 +126,19 @@ describe("createSentryProject", () => {
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 
+  test("returns error when project name produces an empty slug", async () => {
+    const result = await createSentryProject(makePayload({ name: "---" }), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("produces an empty slug");
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+  });
+
   test("creates a new project with the pre-resolved org and team", async () => {
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
 
@@ -220,6 +236,42 @@ describe("createSentryProject", () => {
         platform: "javascript-react",
       })
     );
+  });
+
+  test("returns clear error with sentry-init guidance when org disables member creation", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Failed to create project: 403 Forbidden",
+        403,
+        "Your organization has disabled this feature for members.",
+        undefined,
+        true
+      )
+    );
+
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("disabled for members");
+    expect(result.error).toContain("sentry init acme/");
+    expect(result.error).not.toContain("Re-authenticate");
+  });
+
+  test("tool describe uses payload.detail when provided", () => {
+    const payload = { ...makePayload(), detail: "Setting up my-app..." };
+    expect(createSentryProjectTool.describe(payload)).toBe(
+      "Setting up my-app..."
+    );
+  });
+
+  test("tool describe falls back to project name and platform", () => {
+    expect(createSentryProjectTool.describe(makePayload())).toContain("my-app");
   });
 
   test("uses the final project slug for deferred team resolution in dry-run mode", async () => {

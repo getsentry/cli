@@ -12,6 +12,7 @@
  * - repositories: repository listing
  * - issues: issue listing, lookup, status updates
  * - events: event retrieval and resolution
+ * - replays: replay listing and detail lookup
  * - traces: trace details and transactions
  * - logs: log listing, detailed fetch, trace-logs
  * - seer: Seer AI root cause analysis and planning
@@ -22,11 +23,14 @@
 export {
   createDashboard,
   getDashboard,
+  listDashboardRevisionsPaginated,
   listDashboardsPaginated,
   queryAllWidgets,
+  restoreDashboardRevision,
   updateDashboard,
 } from "./api/dashboards.js";
-export { queryEvents } from "./api/discover.js";
+export type { MetricMeta } from "./api/discover.js";
+export { queryEvents, queryMetricsMeta } from "./api/discover.js";
 export {
   findEventAcrossOrgs,
   getEvent,
@@ -40,6 +44,7 @@ export {
   type ApiRequestOptions,
   apiRequest,
   apiRequestToRegion,
+  autoPaginate,
   buildSearchParams,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
@@ -52,6 +57,7 @@ export {
   getIssueByShortId,
   getIssueInOrg,
   getSharedIssue,
+  type IgnoreStatusDetails,
   ISSUE_DETAIL_COLLAPSE,
   type IssueCollapseField,
   type IssueSort,
@@ -71,6 +77,7 @@ export {
   updateIssueStatus,
 } from "./api/issues.js";
 export {
+  getLogItemDetail,
   getLogs,
   type LogSortDirection,
   listLogs,
@@ -118,6 +125,17 @@ export {
   updateRelease,
 } from "./api/releases.js";
 export {
+  getReplay,
+  getReplayRecordingSegments,
+  isReplaySortValue,
+  type ListReplaysOptions,
+  listReplayIdsForIssue,
+  listReplays,
+  REPLAY_SORT_FIELDS,
+  type ReplaySortField,
+  type ReplaySortValue,
+} from "./api/replays.js";
+export {
   listAllRepositories,
   listRepositories,
   listRepositoriesCached,
@@ -145,6 +163,7 @@ export {
   fetchMultiSpanDetails,
   getDetailedTrace,
   getSpanDetails,
+  getTraceMeta,
   listSpans,
   listTransactions,
   normalizeTraceSpan,

@@ -10,6 +10,7 @@ export type ExistingProjectData = {
   projectId: string;
   dsn: string;
   url: string;
+  platform?: string;
 };
 
 export type WizardOptions = {
@@ -20,6 +21,15 @@ export type WizardOptions = {
   team?: string;
   org?: string;
   project?: string;
+  /**
+   * Force the non-Ink fallback (`LoggingUI`). Mapped from
+   * `--no-tui`. Acts as an escape hatch when the Ink TUI
+   * misbehaves; in an interactive run this effectively disables
+   * prompts (any prompt path will throw a `LoggingUIPromptError`),
+   * so users hitting this flag should also pass `--yes` or set
+   * every choice via flags.
+   */
+  forceLegacyUi?: boolean;
 };
 
 export type ResolvedInitContext = {

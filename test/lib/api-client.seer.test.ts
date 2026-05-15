@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 describe("triggerRootCauseAnalysis", () => {
-  test("sends POST request to autofix endpoint", async () => {
+  test("sends POST request to autofix endpoint with explorer mode", async () => {
     let capturedRequest: Request | undefined;
 
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -51,9 +51,10 @@ describe("triggerRootCauseAnalysis", () => {
     expect(capturedRequest?.url).toContain(
       "/organizations/test-org/issues/123456789/autofix/"
     );
+    expect(capturedRequest?.url).toContain("mode=explorer");
   });
 
-  test("includes step in request body", async () => {
+  test("includes step and stopping_point in request body", async () => {
     let capturedBody: unknown;
 
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -68,7 +69,10 @@ describe("triggerRootCauseAnalysis", () => {
 
     await triggerRootCauseAnalysis("test-org", "123456789");
 
-    expect(capturedBody).toEqual({ stopping_point: "root_cause" });
+    expect(capturedBody).toEqual({
+      step: "root_cause",
+      referrer: "api.cli",
+    });
   });
 
   test("throws ApiError on 402 response", async () => {
@@ -97,7 +101,7 @@ describe("triggerRootCauseAnalysis", () => {
 });
 
 describe("getAutofixState", () => {
-  test("sends GET request to autofix endpoint", async () => {
+  test("sends GET request to autofix endpoint with explorer mode", async () => {
     let capturedRequest: Request | undefined;
 
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -107,8 +111,9 @@ describe("getAutofixState", () => {
         JSON.stringify({
           autofix: {
             run_id: 12_345,
-            status: "PROCESSING",
-            steps: [],
+            status: "processing",
+            blocks: [],
+            updated_at: "2025-01-01T00:00:00Z",
           },
         }),
         {
@@ -126,6 +131,28 @@ describe("getAutofixState", () => {
     expect(capturedRequest?.url).toContain(
       "/organizations/test-org/issues/123456789/autofix/"
     );
+    expect(capturedRequest?.url).toContain("mode=explorer");
+  });
+
+  test("normalizes agent status values to uppercase", async () => {
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          autofix: {
+            run_id: 1,
+            status: "awaiting_user_input",
+            blocks: [],
+            updated_at: "2025-01-01T00:00:00Z",
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+
+    const result = await getAutofixState("test-org", "123456789");
+    expect(result?.status).toBe("WAITING_FOR_USER_RESPONSE");
   });
 
   test("returns null when autofix is null", async () => {
@@ -139,23 +166,27 @@ describe("getAutofixState", () => {
     expect(result).toBeNull();
   });
 
-  test("returns completed state with steps", async () => {
+  test("returns completed state with blocks", async () => {
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
           autofix: {
             run_id: 12_345,
-            status: "COMPLETED",
-            steps: [
+            status: "completed",
+            updated_at: "2025-01-01T00:00:00Z",
+            blocks: [
               {
-                id: "step-1",
-                key: "root_cause_analysis",
-                status: "COMPLETED",
-                title: "Root Cause Analysis",
-                causes: [
+                id: "block-1",
+                message: { role: "assistant", content: "Found the root cause" },
+                timestamp: "2025-01-01T00:00:00Z",
+                artifacts: [
                   {
-                    id: 0,
-                    description: "Test cause",
+                    key: "root_cause",
+                    data: {
+                      one_line_description: "Test cause",
+                      five_whys: ["Why 1"],
+                    },
+                    reason: "",
                   },
                 ],
               },
@@ -170,13 +201,11 @@ describe("getAutofixState", () => {
 
     const result = await getAutofixState("test-org", "123456789");
     expect(result?.status).toBe("COMPLETED");
-    expect(result?.steps).toHaveLength(1);
-    expect(result?.steps?.[0]?.causes).toHaveLength(1);
   });
 });
 
 describe("triggerSolutionPlanning", () => {
-  test("sends POST request to autofix endpoint", async () => {
+  test("sends POST request to autofix endpoint with explorer mode", async () => {
     let capturedRequest: Request | undefined;
     let capturedBody: unknown;
 
@@ -184,7 +213,7 @@ describe("triggerSolutionPlanning", () => {
       capturedRequest = new Request(input, init);
       capturedBody = await new Request(input, init).json();
 
-      return new Response(JSON.stringify({}), {
+      return new Response(JSON.stringify({ run_id: 12_345 }), {
         status: 202,
         headers: { "Content-Type": "application/json" },
       });
@@ -196,9 +225,11 @@ describe("triggerSolutionPlanning", () => {
     expect(capturedRequest?.url).toContain(
       "/organizations/test-org/issues/123456789/autofix/"
     );
+    expect(capturedRequest?.url).toContain("mode=explorer");
     expect(capturedBody).toEqual({
-      run_id: 12_345,
       step: "solution",
+      run_id: 12_345,
+      referrer: "api.cli",
     });
   });
 });

@@ -8,6 +8,7 @@ import type { ListAnOrganizationSissuesData } from "@sentry/api";
 import { listAnOrganization_sIssues } from "@sentry/api";
 
 import type { SentryIssue } from "../../types/index.js";
+import type { IssueSubstatus } from "../../types/sentry.js";
 
 import { applyCustomHeaders } from "../custom-headers.js";
 import { ApiError, ValidationError } from "../errors.js";
@@ -535,12 +536,28 @@ export function parseResolveSpec(
 }
 
 /**
+ * Ignore/archive conditions for {@link updateIssueStatus}.
+ *
+ * - `ignoreDuration` — ignore for N minutes
+ * - `ignoreCount` / `ignoreWindow` — ignore until N events in M minutes
+ * - `ignoreUserCount` / `ignoreUserWindow` — ignore until N users in M minutes
+ */
+export type IgnoreStatusDetails = {
+  ignoreDuration?: number;
+  ignoreCount?: number;
+  ignoreWindow?: number;
+  ignoreUserCount?: number;
+  ignoreUserWindow?: number;
+};
+
+/**
  * Update an issue's status.
  *
- * When `status === "resolved"`, optional `statusDetails` can pin the fix
- * to a release or commit (see {@link ResolveStatusDetails}). Without
- * `statusDetails`, the issue is resolved immediately with no regression
- * tracking — equivalent to clicking "Resolve" in the Sentry UI.
+ * - `"resolved"` — optional `statusDetails` can pin the fix to a release
+ *   or commit (see {@link ResolveStatusDetails}).
+ * - `"ignored"` — optional `substatus` controls archive granularity;
+ *   optional `statusDetails` sets conditions (see {@link IgnoreStatusDetails}).
+ * - `"unresolved"` — reopens the issue; no additional options needed.
  *
  * When `options.orgSlug` is provided, the request is routed to that org's
  * region via the org-scoped endpoint. Without it, falls back to the legacy
@@ -550,13 +567,18 @@ export async function updateIssueStatus(
   issueId: string,
   status: "resolved" | "unresolved" | "ignored",
   options?: {
-    statusDetails?: ResolveStatusDetails;
+    statusDetails?: ResolveStatusDetails | IgnoreStatusDetails;
+    /** Substatus for archive granularity. */
+    substatus?: IssueSubstatus;
     orgSlug?: string;
   }
 ): Promise<SentryIssue> {
   const body: Record<string, unknown> = { status };
   if (options?.statusDetails) {
     body.statusDetails = options.statusDetails;
+  }
+  if (options?.substatus) {
+    body.substatus = options.substatus;
   }
 
   if (options?.orgSlug) {

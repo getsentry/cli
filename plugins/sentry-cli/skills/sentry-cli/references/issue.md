@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-issue
-version: 0.31.0-dev.0
+version: 0.34.0-dev.0
 description: Manage Sentry issues
 requires:
   bins: ["sentry"]
@@ -34,16 +34,16 @@ List issues in a project
 | `culprit` | string | Culprit string |
 | `count` | string | Total event count |
 | `userCount` | number | Number of affected users |
-| `firstSeen` | string \| null | First occurrence (ISO 8601) |
-| `lastSeen` | string \| null | Most recent occurrence (ISO 8601) |
+| `firstSeen` | string | First occurrence (ISO 8601) |
+| `lastSeen` | string | Most recent occurrence (ISO 8601) |
 | `level` | string | Severity level |
 | `status` | string | Issue status |
-| `priority` | string | Triage priority |
-| `platform` | string | Platform |
 | `permalink` | string | URL to the issue in Sentry |
 | `project` | object | Project info |
 | `metadata` | object | Issue metadata |
-| `assignedTo` | unknown \| null | Assigned user or team |
+| `assignedTo` | object \| null | Assigned user or team |
+| `priority` | string | Triage priority |
+| `platform` | string | Platform |
 | `substatus` | string \| null | Issue substatus |
 | `isUnhandled` | boolean | Whether the issue is unhandled |
 | `seerFixabilityScore` | number \| null | Seer AI fixability score (0-1) |
@@ -109,7 +109,7 @@ List events for a specific issue
 | `platform` | string \| null | Platform (python, javascript, etc.) |
 | `dateCreated` | string | ISO 8601 creation timestamp |
 | `crashFile` | string \| null | Crash file URL |
-| `metadata` | unknown \| null | Event metadata |
+| `metadata` | object \| null | Event metadata |
 
 ### `sentry issue explain <issue>`
 
@@ -143,7 +143,6 @@ sentry issue plan 123456789 --cause 0
 Generate a solution plan using Seer AI
 
 **Flags:**
-- `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--force - Force new plan even if one exists`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
@@ -204,6 +203,44 @@ sentry issue reopen CLI-G5   # alias
 ### `sentry issue unresolve <issue>`
 
 Reopen a resolved issue
+
+### `sentry issue archive <issue>`
+
+Archive (ignore) an issue
+
+**Flags:**
+- `-u, --until <value> - Condition for unarchival: forever, auto, 30m, 10x, 10u, 10x/5m, etc.`
+
+**Examples:**
+
+```bash
+# Archive forever (fully silenced)
+sentry issue archive CLI-G5
+
+# Smart detection — unarchives when Sentry detects a spike in event frequency
+sentry issue archive CLI-G5 --until auto
+
+# Duration-based
+sentry issue archive CLI-G5 --until 1h    # 1 hour
+sentry issue archive CLI-G5 --until 7d    # 7 days
+sentry issue archive CLI-G5 --until 2026-12-31  # specific date
+
+# Count-based — unarchive after N more events
+sentry issue archive CLI-G5 --until 100x
+
+# User-based — unarchive after N more users affected
+sentry issue archive CLI-G5 --until 10u
+
+# Compound — count within a time window
+sentry issue archive CLI-G5 --until 100x/1h   # 100 events within 1 hour
+sentry issue archive CLI-G5 --until 10u/1d    # 10 users within 1 day
+
+# Verbose forms also work
+sentry issue archive CLI-G5 --until 10events/2hours
+
+# 'ignore' is an alias for 'archive'
+sentry issue ignore CLI-G5 --until auto
+```
 
 ### `sentry issue merge <issue...>`
 

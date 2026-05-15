@@ -12,13 +12,18 @@ import {
   TokenResponseSchema,
 } from "../types/index.js";
 import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "./constants.js";
+import {
+  buildTlsErrorDetail,
+  getCustomTlsOptions,
+  isTlsCertError,
+  warnIfSaasWithEnvCa,
+} from "./custom-ca.js";
 import { applyCustomHeaders } from "./custom-headers.js";
 import { setAuthToken } from "./db/auth.js";
 import { getEnv } from "./env.js";
 import {
   ApiError,
   AuthError,
-  ConfigError,
   DeviceFlowError,
   HostScopeError,
 } from "./errors.js";
@@ -38,10 +43,22 @@ function getSentryUrl(): string {
 }
 
 /**
+ * Public OAuth client ID for sentry.io.
+ *
+ * Device Authorization Grant (RFC 8628) is a public-client flow — no client
+ * secret is involved, so this value is safe to commit. It is equivalent to the
+ * `SENTRY_CLIENT_ID` repo variable used by CI.
+ *
+ * Self-hosted instances must override this via the `SENTRY_CLIENT_ID` env var
+ * or the `SENTRY_CLIENT_ID_BUILD` build-time define.
+ */
+const DEFAULT_OAUTH_CLIENT_ID =
+  "1d673b81d60ef84c951359c36296972ca6fd41bd8f45acd2d3a783a3b3c28e41";
+
+/**
  * OAuth client ID
  *
- * Build-time: Injected via esbuild define: { SENTRY_CLIENT_ID_BUILD: "..." }
- * Runtime: Can be overridden via SENTRY_CLIENT_ID env var (for self-hosted)
+ * Priority: SENTRY_CLIENT_ID env var → SENTRY_CLIENT_ID_BUILD (build-time) → committed default
  *
  * Read at call time (not module load time) so tests can override SENTRY_CLIENT_ID
  * after module initialization.
@@ -54,7 +71,7 @@ function getClientId(): string {
     getEnv().SENTRY_CLIENT_ID ??
     (typeof SENTRY_CLIENT_ID_BUILD !== "undefined"
       ? SENTRY_CLIENT_ID_BUILD
-      : "")
+      : DEFAULT_OAUTH_CLIENT_ID)
   );
 }
 
@@ -101,13 +118,30 @@ async function fetchWithConnectionError(
   const effectiveInit: RequestInit = { ...init, headers: merged };
 
   try {
-    return await fetch(url, effectiveInit);
+    const customTls = getCustomTlsOptions();
+    if (customTls) {
+      warnIfSaasWithEnvCa(url);
+    }
+
+    return await fetch(url, { ...effectiveInit, ...customTls });
   } catch (error) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+
+    // TLS certificate errors — give actionable guidance
+    if (isTlsCertError(error)) {
+      throw new ApiError(
+        `TLS certificate error connecting to ${getSentryUrl()}`,
+        0,
+        buildTlsErrorDetail(error)
+      );
+    }
+
     const isConnectionError =
-      error instanceof Error &&
-      (error.message.includes("ECONNREFUSED") ||
-        error.message.includes("fetch failed") ||
-        error.message.includes("network"));
+      error.message.includes("ECONNREFUSED") ||
+      error.message.includes("fetch failed") ||
+      error.message.includes("network");
 
     if (isConnectionError) {
       throw new ApiError(
@@ -139,13 +173,6 @@ function assertRefreshHostTrusted(): void {
 /** Request a device code from Sentry's device authorization endpoint */
 function requestDeviceCode() {
   const clientId = getClientId();
-  if (!clientId) {
-    throw new ConfigError(
-      "SENTRY_CLIENT_ID is required for authentication",
-      "Set SENTRY_CLIENT_ID environment variable or use a pre-built binary"
-    );
-  }
-
   return withHttpSpan("POST", "/oauth/device/code/", async () => {
     const response = await fetchWithConnectionError(
       `${getSentryUrl()}/oauth/device/code/`,
@@ -278,7 +305,6 @@ async function attemptPoll(deviceCode: string): Promise<PollResult> {
  * @param callbacks - Callbacks for UI updates during the flow
  * @param timeout - Maximum time to wait for authorization in ms (default: 10 minutes)
  * @returns The token response containing access_token and metadata
- * @throws {ConfigError} When SENTRY_CLIENT_ID is not configured
  * @throws {ApiError} When unable to connect to Sentry or API returns an error
  * @throws {DeviceFlowError} When authorization fails, is denied, or times out
  */
@@ -370,13 +396,6 @@ export function refreshAccessToken(
   refreshToken: string
 ): Promise<TokenResponse> {
   const clientId = getClientId();
-  if (!clientId) {
-    throw new ConfigError(
-      "SENTRY_CLIENT_ID is required for token refresh",
-      "Set SENTRY_CLIENT_ID environment variable or use a pre-built binary"
-    );
-  }
-
   assertRefreshHostTrusted();
 
   return withHttpSpan("POST", "/oauth/token/", async () => {

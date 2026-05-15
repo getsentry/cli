@@ -40,7 +40,10 @@ export function getInstanceId(): string {
   // Re-fetch to get the actual stored value (may differ if another process won the race)
   const row = db
     .query("SELECT instance_id FROM instance_info WHERE id = 1")
-    .get() as { instance_id: string };
+    .get() as { instance_id: string } | undefined;
 
-  return row.instance_id;
+  // If re-fetch fails (readonly DB, concurrent corruption), fall back to
+  // the generated ID. It won't be persisted, but the CLI can still
+  // function for this invocation — instance ID is only used for telemetry.
+  return row?.instance_id ?? instanceId;
 }

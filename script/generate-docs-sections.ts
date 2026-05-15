@@ -362,6 +362,10 @@ const SELF_HOSTED_TABLE_ENTRIES: readonly [string, string][] = [
   ["SENTRY_FORCE_ENV_TOKEN", "Force env token over stored OAuth token"],
   ["SENTRY_ORG", "Default organization slug"],
   ["SENTRY_PROJECT", "Default project slug (supports `org/project` format)"],
+  [
+    "NODE_EXTRA_CA_CERTS",
+    "Path to PEM file with additional CA certificates (for corporate proxies)",
+  ],
 ];
 
 /**

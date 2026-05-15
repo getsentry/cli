@@ -20,7 +20,11 @@ import {
   SENTRY_CLI_DSN,
 } from "./constants.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
-import { detectAgent, detectAgentFromProcessTree } from "./detect-agent.js";
+import {
+  type AgentInfo,
+  detectAgent,
+  detectAgentFromProcessTree,
+} from "./detect-agent.js";
 import { getEnv } from "./env.js";
 import {
   classifySilenced,
@@ -201,7 +205,7 @@ export async function withTelemetry<T>(
   }
 
   try {
-    return await Sentry.startSpanManual(
+    return await Sentry.startSpan(
       { name: "cli.command", op: "cli.command", forceTransaction: true },
       async (span) => {
         try {
@@ -215,8 +219,6 @@ export async function withTelemetry<T>(
             recordApiErrorOnSpan(span, e as ApiError);
           }
           throw e;
-        } finally {
-          span.end();
         }
       }
     );
@@ -449,6 +451,20 @@ function setLibcTag(): void {
   Sentry.setTag("cli.libc", isMusl() ? "musl" : "glibc");
 }
 
+/**
+ * Set Sentry tags for a detected AI agent.
+ * Splits structured {@link AgentInfo} into `agent`, `agent.version`, and `agent.role` tags.
+ */
+function setAgentTags(info: AgentInfo): void {
+  Sentry.setTag("agent", info.name);
+  if (info.version) {
+    Sentry.setTag("agent.version", info.version);
+  }
+  if (info.role) {
+    Sentry.setTag("agent.role", info.role);
+  }
+}
+
 export function initSentry(
   enabled: boolean,
   options?: { libraryMode?: boolean }
@@ -641,12 +657,12 @@ export function initSentry(
     // before the transaction finishes without blocking CLI startup.
     const agent = detectAgent();
     if (agent) {
-      Sentry.setTag("agent", agent);
+      setAgentTags(agent);
     } else {
       detectAgentFromProcessTree()
         .then((processAgent) => {
           if (processAgent) {
-            Sentry.setTag("agent", processAgent);
+            setAgentTags(processAgent);
           }
         })
         .catch((error) => {

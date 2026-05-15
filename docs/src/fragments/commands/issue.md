@@ -160,3 +160,50 @@ sentry issue merge cli-k9 cli-15h --into cli-k9    # alias form
 # Cross-org merges are rejected — all issues must share an organization
 # Non-error issue types (performance, info, etc.) cannot be merged
 ```
+
+### Archive and ignore issues
+
+Archive an issue to suppress alerts. Without `--until`, the issue is archived
+forever. Use `--until` to set a condition for automatic unarchival:
+
+```bash
+# Archive forever (fully silenced)
+sentry issue archive CLI-G5
+
+# Smart detection — unarchives when Sentry detects a spike in event frequency
+sentry issue archive CLI-G5 --until auto
+
+# Duration-based
+sentry issue archive CLI-G5 --until 1h    # 1 hour
+sentry issue archive CLI-G5 --until 7d    # 7 days
+sentry issue archive CLI-G5 --until 2026-12-31  # specific date
+
+# Count-based — unarchive after N more events
+sentry issue archive CLI-G5 --until 100x
+
+# User-based — unarchive after N more users affected
+sentry issue archive CLI-G5 --until 10u
+
+# Compound — count within a time window
+sentry issue archive CLI-G5 --until 100x/1h   # 100 events within 1 hour
+sentry issue archive CLI-G5 --until 10u/1d    # 10 users within 1 day
+
+# Verbose forms also work
+sentry issue archive CLI-G5 --until 10events/2hours
+
+# 'ignore' is an alias for 'archive'
+sentry issue ignore CLI-G5 --until auto
+```
+
+:::tip[`--until` syntax reference]
+| Format | Meaning |
+|--------|---------|
+| `auto` | Unarchive on event frequency spike (recommended) |
+| `30m`, `1h`, `7d`, `1w` | Duration (minutes, hours, days, weeks) |
+| `2026-05-15` | Absolute date (computed as time delta) |
+| `10x` or `10events` | After 10 more events |
+| `10u` or `10users` | After 10 more users affected |
+| `10x/5m` | 10 events within 5 minutes |
+| `10users/2hours` | 10 users within 2 hours |
+| *(omitted)* | Archive forever |
+:::

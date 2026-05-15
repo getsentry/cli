@@ -85,6 +85,7 @@ Options:
     -v, --version <version> Install a specific version (e.g., 0.2.0) or "nightly"
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
         --no-completions    Don't install shell completions
+        --no-agent-skills   Don't install agent skills
 
 Environment Variables:
     SENTRY_INSTALL_DIR      Override the installation directory
@@ -104,6 +105,7 @@ EOF
 requested_version="${SENTRY_VERSION:-}"
 no_modify_path=false
 no_completions=false
+no_agent_skills=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
@@ -121,6 +123,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-completions)
       no_completions=true
+      shift
+      ;;
+    --no-agent-skills)
+      no_agent_skills=true
       shift
       ;;
     *) shift ;;
@@ -315,6 +321,9 @@ if [[ "$no_modify_path" == "true" ]]; then
 fi
 if [[ "$no_completions" == "true" ]]; then
   setup_args="$setup_args --no-completions"
+fi
+if [[ "$no_agent_skills" == "true" ]]; then
+  setup_args="$setup_args --no-agent-skills"
 fi
 
 # Remove trap — setup will handle temp cleanup on success

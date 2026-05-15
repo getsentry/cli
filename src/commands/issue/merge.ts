@@ -29,7 +29,7 @@ import {
   ResolutionError,
   ValidationError,
 } from "../../lib/errors.js";
-import { muted, warning } from "../../lib/formatters/index.js";
+import { muted } from "../../lib/formatters/index.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { buildIssueUrl } from "../../lib/sentry-urls.js";
@@ -285,14 +285,25 @@ export const mergeCommand = buildCommand({
   async *func(this: SentryContext, flags: MergeFlags, ...args: string[]) {
     const { cwd } = this;
 
-    if (args.length < 2) {
+    // Accept "sentry issue merge A --into B" as a valid 2-issue merge.
+    // --into already designates which issue is the merge target, so passing
+    // it as a positional too would be redundant. Append it to args so the
+    // rest of the pipeline sees 2+ issues and orderForMerge puts it first.
+    const effectiveArgs =
+      args.length === 1 && flags.into ? [...args, flags.into] : args;
+
+    if (effectiveArgs.length < 2) {
+      const hint =
+        args.length === 1
+          ? "Tip: you can also write: sentry issue merge CLI-K9 --into CLI-15H"
+          : "Example: sentry issue merge CLI-K9 CLI-15H CLI-15N";
       throw new ValidationError(
         `'sentry ${COMMAND_PATH}' needs at least 2 issue IDs (got ${args.length}).\n\n` +
-          "Example: sentry issue merge CLI-K9 CLI-15H CLI-15N"
+          hint
       );
     }
 
-    const { org, issues } = await resolveAllIssues(args, cwd);
+    const { org, issues } = await resolveAllIssues(effectiveArgs, cwd);
     const ordered = await orderForMerge(issues, flags.into, cwd);
     const groupIds = ordered.map((i) => i.id);
     // `--into` is a preference, not a guarantee — track it so we can warn
@@ -313,9 +324,9 @@ export const mergeCommand = buildCommand({
 
     if (requestedParentId && requestedParentId !== raw.parent) {
       const requestedShortId = idToShort.get(requestedParentId) ?? flags.into;
-      this.stderr.write(
-        `${warning("Warning:")} --into '${requestedShortId}' was a preference, not a guarantee. ` +
-          `Sentry selected ${parentShortId} as the canonical parent based on event count.\n`
+      log.warn(
+        `--into '${requestedShortId}' was a preference, not a guarantee. ` +
+          `Sentry selected ${parentShortId} as the canonical parent based on event count.`
       );
     }
 

@@ -1101,11 +1101,17 @@ function enrichIssueListError(
       );
     }
     if (error.status === 403) {
+      // Centralized 403 enrichment (infrastructure.ts) already added
+      // scope/token hints. Only append the project-membership hint.
+      const detail = error.enriched403
+        ? appendProjectMembershipHint(error.detail)
+        : build403Detail(error.detail);
       throw new ApiError(
         error.message,
         error.status,
-        build403Detail(error.detail),
-        error.endpoint
+        detail,
+        error.endpoint,
+        true
       );
     }
   }
@@ -1168,6 +1174,17 @@ function build403Detail(originalDetail: unknown): string {
   lines.push("  • Verify project membership: sentry project list <org>/");
 
   return lines.join("\n  ");
+}
+
+/**
+ * Append a project membership verification hint to an already-enriched
+ * 403 detail string. Used when centralized enrichment (infrastructure.ts)
+ * has already added scope/token hints and we only need the issue-list-specific
+ * suggestion.
+ */
+function appendProjectMembershipHint(detail: string | undefined): string {
+  const base = detail ?? "You do not have permission to perform this action.";
+  return `${base}\n  Verify project membership: sentry project list <org>/`;
 }
 
 /**
@@ -1327,13 +1344,16 @@ async function handleResolvedTargets(
       if (first.status === 400) {
         detail = build400Detail(first.detail, flags);
       } else if (first.status === 403) {
-        detail = build403Detail(first.detail);
+        detail = first.enriched403
+          ? appendProjectMembershipHint(first.detail)
+          : build403Detail(first.detail);
       }
       throw new ApiError(
         `${prefix}: ${first.message}`,
         first.status,
         detail,
-        first.endpoint
+        first.endpoint,
+        first.enriched403 || first.status === 403
       );
     }
 

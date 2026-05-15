@@ -215,8 +215,26 @@ const result = await build({
     // Replace import.meta.url with the injected shim variable for CJS
     "import.meta.url": "import_meta_url",
   },
-  // Only externalize Node.js built-ins - bundle all npm packages
-  external: ["node:*"],
+  // Externalize Node.js built-ins, plus Ink + React + companions.
+  // These packages are NOT bundled into the main CJS output because
+  // they use top-level await (esbuild can't emit that in CJS).
+  // Instead, the Ink UI lives in a separate self-contained ESM
+  // sidecar (`dist/ink-app.js`) that the text-import-plugin
+  // pre-bundles with all deps inlined. The main bundle references
+  // the sidecar via a path string and loads it lazily via dynamic
+  // `import()` at runtime. The external list here prevents esbuild
+  // from trying to resolve these packages in the main bundle graph.
+  external: [
+    "node:*",
+    "ink",
+    "ink-spinner",
+    "react",
+    "react/*",
+    "react-reconciler",
+    "react-reconciler/*",
+    "react-devtools-core",
+    "yoga-layout",
+  ],
   metafile: true,
   plugins,
 });
@@ -277,6 +295,12 @@ await Bun.write("./dist/index.d.cts", TYPE_DECLARATIONS);
 
 console.log("  -> dist/bin.cjs (CLI wrapper)");
 console.log("  -> dist/index.d.cts (type declarations)");
+
+// The `ink-app.js` sidecar (pre-bundled by text-import-plugin) ships
+// with the npm package so `npx sentry@latest init` can load the
+// interactive Ink UI on Node via dynamic import(). The sidecar is
+// self-contained ESM with all deps inlined — no runtime dependencies
+// needed.
 
 // Calculate bundle size (only the main bundle, not source maps)
 const bundleOutput = result.metafile?.outputs["dist/index.cjs"];

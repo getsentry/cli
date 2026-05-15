@@ -6,13 +6,16 @@
 
 import { isatty } from "node:tty";
 
+import pLimit from "p-limit";
+
 import type { SentryContext } from "../../context.js";
-import { getLogs } from "../../lib/api-client.js";
+import { getLogItemDetail, getLogs } from "../../lib/api-client.js";
 import {
   detectSwappedViewArgs,
   looksLikeIssueShortId,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
+  splitNewlineArg,
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
@@ -43,9 +46,12 @@ import { RETENTION_DAYS } from "../../lib/retention.js";
 import { buildLogsUrl } from "../../lib/sentry-urls.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
-import type { DetailedSentryLog } from "../../types/index.js";
+import type { DetailedSentryLog, TraceItemDetail } from "../../types/index.js";
 
 const log = logger.withTag("log-view");
+
+/** Matches SPAN_DETAIL_CONCURRENCY in traces.ts */
+const LOG_DETAIL_CONCURRENCY = 15;
 
 type ViewFlags = {
   readonly json: boolean;
@@ -56,21 +62,6 @@ type ViewFlags = {
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry log view <org>/<project> <log-id> [<log-id>...]";
-
-/**
- * Split a raw argument into individual log IDs.
- * Handles newline-separated IDs within a single argument (common when
- * piping or pasting from other tools).
- *
- * @param arg - Raw positional argument
- * @returns Array of non-empty trimmed strings
- */
-function splitLogIds(arg: string): string[] {
-  return arg
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
 
 /**
  * Parse positional arguments for log view.
@@ -115,7 +106,7 @@ export function parsePositionalArgs(args: string[]): {
       "Log ID",
       USAGE_HINT
     );
-    const rawLogIds = splitLogIds(id);
+    const rawLogIds = splitNewlineArg(id);
     if (rawLogIds.length === 0) {
       throw new ContextError("Log ID", USAGE_HINT, []);
     }
@@ -130,7 +121,7 @@ export function parsePositionalArgs(args: string[]): {
   // (first has no "/", second has "/"), but the user's intent is clearly
   // to view an issue, not to swap log-view arguments.
   if (looksLikeIssueShortId(first)) {
-    const rawLogIds = args.slice(1).flatMap(splitLogIds);
+    const rawLogIds = args.slice(1).flatMap(splitNewlineArg);
     if (rawLogIds.length === 0) {
       throw new ContextError("Log ID", USAGE_HINT, []);
     }
@@ -151,14 +142,14 @@ export function parsePositionalArgs(args: string[]): {
     const swapWarning = detectSwappedViewArgs(first, second);
     if (swapWarning) {
       return {
-        rawLogIds: splitLogIds(first),
+        rawLogIds: splitNewlineArg(first),
         targetArg: second,
         suggestion: swapWarning,
       };
     }
   }
 
-  const rawLogIds = args.slice(1).flatMap(splitLogIds);
+  const rawLogIds = args.slice(1).flatMap(splitNewlineArg);
   if (rawLogIds.length === 0) {
     throw new ContextError("Log ID", USAGE_HINT, []);
   }
@@ -413,6 +404,10 @@ type LogViewData = {
   logs: DetailedSentryLog[];
   /** Org slug — needed by human formatter for trace URLs, also useful context in JSON */
   orgSlug: string;
+  /** Full attribute sets from the trace-items detail endpoint (index matches logs) */
+  details?: (TraceItemDetail | undefined)[];
+  /** --fields filter: limits which custom attributes are shown in human output */
+  extraFields?: string[];
 };
 
 /**
@@ -426,11 +421,19 @@ type LogViewData = {
  */
 function formatLogViewHuman(data: LogViewData): string {
   const parts: string[] = [];
-  for (const entry of data.logs) {
+  for (let i = 0; i < data.logs.length; i++) {
     if (parts.length > 0) {
       parts.push("\n---\n");
     }
-    parts.push(formatLogDetails(entry, data.orgSlug));
+    parts.push(
+      formatLogDetails(
+        // biome-ignore lint/style/noNonNullAssertion: index is bounded by data.logs.length
+        data.logs[i]!,
+        data.orgSlug,
+        data.details?.[i]?.attributes,
+        data.extraFields
+      )
+    );
   }
   return parts.join("\n");
 }
@@ -510,7 +513,12 @@ export const viewCommand = buildCommand({
     }
 
     // Fetch all requested log entries
-    const logs = await getLogs(target.org, target.project, logIds);
+    const logs = await getLogs(
+      target.org,
+      target.project,
+      logIds,
+      flags.fields
+    );
 
     if (logs.length === 0) {
       throwNotFoundError(logIds, target.org, target.project);
@@ -518,11 +526,38 @@ export const viewCommand = buildCommand({
 
     warnMissingIds(logIds, logs);
 
+    // Skip detail fetching in JSON mode — jsonTransform only uses data.logs,
+    // not data.details, so the extra round-trips would be wasted.
+    // Mirrors the shouldFetchDetails pattern in trace/view.ts.
+    const detailLimit = pLimit(LOG_DETAIL_CONCURRENCY);
+    const details = flags.json
+      ? undefined
+      : await detailLimit.map(logs, async (entry) => {
+          if (!entry.trace) {
+            return;
+          }
+          try {
+            return await getLogItemDetail(
+              target.org,
+              target.project,
+              entry["sentry.item_id"],
+              entry.trace
+            );
+          } catch {
+            return;
+          }
+        });
+
     const hint = target.detectedFrom
       ? `Detected from ${target.detectedFrom}`
       : undefined;
 
-    yield new CommandOutput({ logs, orgSlug: target.org });
+    yield new CommandOutput({
+      logs,
+      orgSlug: target.org,
+      details,
+      extraFields: flags.fields,
+    });
     return { hint };
   },
 });

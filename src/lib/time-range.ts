@@ -46,8 +46,8 @@ export type TimeRangeApiParams = {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Seconds per unit for relative period computation */
-const UNIT_SECONDS: Record<string, number> = {
+/** Seconds per unit for relative period computation. @internal Exported for reuse in duration parsers. */
+export const UNIT_SECONDS: Record<string, number> = {
   s: 1,
   m: 60,
   h: 3600,
@@ -82,7 +82,7 @@ export const PERIOD_BRIEF = `Time range: "7d", "${EXAMPLE_START}..${EXAMPLE_END}
  * Try to parse a relative period string (e.g., "7d") into its numeric value and unit.
  * Returns null if the string isn't a valid relative period.
  */
-function parseRelativeParts(
+export function parseRelativeParts(
   value: string
 ): { value: number; unit: string } | null {
   if (value.length < 2) {
@@ -356,6 +356,15 @@ export function timeRangeToApiParams(range: TimeRange): TimeRangeApiParams {
   }
   if (range.end) {
     params.end = range.end;
+  }
+  // Fill missing boundary — the Sentry API requires both start and end
+  // when absolute dates are used, otherwise it returns 400.
+  if (params.start && !params.end) {
+    params.end = new Date().toISOString();
+  } else if (params.end && !params.start) {
+    const endDate = new Date(params.end);
+    endDate.setUTCDate(endDate.getUTCDate() - 90);
+    params.start = endDate.toISOString();
   }
   return params;
 }
