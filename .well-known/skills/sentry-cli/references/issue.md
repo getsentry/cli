@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-issue
-version: 0.33.0
+version: 0.34.0
 description: Manage Sentry issues
 requires:
   bins: ["sentry"]
@@ -143,7 +143,6 @@ sentry issue plan 123456789 --cause 0
 Generate a solution plan using Seer AI
 
 **Flags:**
-- `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--force - Force new plan even if one exists`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
