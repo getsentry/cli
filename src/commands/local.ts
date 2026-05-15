@@ -1,23 +1,12 @@
 /**
  * sentry local
  *
- * Run a local Spotlight-compatible server.
+ * Run a local Spotlight-compatible server, or attach to one already running.
  *
- * Spotlight (https://spotlightjs.com/) is "Sentry for Development" — a small
- * local proxy that ingests Sentry envelopes from SDKs running in your dev
- * stack and surfaces them in real time.
- *
- * This command starts a minimal Hono HTTP server that:
- *
- * 1. Accepts envelopes from Sentry SDKs at the standard endpoints:
- *      - `POST /stream` (Spotlight-compatible)
- *      - `POST /api/{projectId}/envelope/` (Sentry SDK ingest path)
- * 2. Pushes them into the buffer provided by `@spotlightjs/spotlight/sdk`,
- *    which lazily parses each envelope.
- * 3. Streams new envelopes back to subscribers via Server-Sent Events at
- *    `GET /stream` — compatible with the Spotlight overlay/UI.
- * 4. Tails events to the terminal as they arrive so you can see what your
- *    app is sending without leaving the CLI.
+ * On startup the command probes `http://<host>:<port>/health`. If a server
+ * is already listening (e.g. a Spotlight sidecar or another `sentry local`),
+ * the command attaches as an SSE consumer and tails events from it. Otherwise
+ * it starts its own Hono HTTP server.
  *
  * Learn more: https://spotlightjs.com/docs/getting-started/
  *
@@ -56,6 +45,9 @@ const BUFFER_SIZE = 500;
 
 /** Canonical content type for Sentry envelopes. */
 const SENTRY_CONTENT_TYPE = "application/x-sentry-envelope";
+
+/** Trailing carriage return — stripped from SSE lines. */
+const CR_RE = /\r$/;
 
 /** Maximum ingest body size (10 MB). Rejects oversized payloads early. */
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
@@ -619,24 +611,23 @@ function waitForShutdown(server: Server): Promise<void> {
   });
 }
 
-/** Maximum number of consecutive ports to try before giving up. */
-const MAX_PORT_ATTEMPTS = 10;
+/** Maximum retries on EADDRINUSE before giving up. */
+const MAX_PORT_RETRIES = 3;
+
+/** Delay between EADDRINUSE retries in milliseconds. */
+const PORT_RETRY_DELAY_MS = 5000;
 
 /**
- * Try to start the HTTP server, auto-incrementing the port on EADDRINUSE.
+ * Try to start the HTTP server, retrying with backoff on EADDRINUSE.
  *
- * `@hono/node-server`'s `serve()` calls `server.listen()` synchronously and
- * returns immediately — the actual bind happens asynchronously. We wrap it in
- * a Promise that resolves on the `listening` event and rejects on `error`.
- * When the port is busy we bump the port number and retry up to
- * {@link MAX_PORT_ATTEMPTS} times, warning the user on each bump.
+ * Retries up to {@link MAX_PORT_RETRIES} times with a {@link PORT_RETRY_DELAY_MS}
+ * delay between attempts, matching Spotlight's retry strategy.
  */
 function tryListen(
   app: Hono,
-  startPort: number,
+  port: number,
   hostname: string
 ): Promise<{ server: Server; port: number }> {
-  let port = startPort;
   let attempts = 0;
 
   const attempt = (): Promise<{ server: Server; port: number }> =>
@@ -648,20 +639,22 @@ function tryListen(
       }) as unknown as Server;
 
       server.once("listening", () => resolve({ server, port }));
-      server.once("error", (err: NodeJS.ErrnoException) => {
+      server.once("error", async (err: NodeJS.ErrnoException) => {
         if (err.code === "EADDRINUSE") {
           attempts += 1;
-          if (attempts >= MAX_PORT_ATTEMPTS) {
+          if (attempts > MAX_PORT_RETRIES) {
             reject(
               new ValidationError(
-                `Port ${startPort} is in use and no open port found after ${MAX_PORT_ATTEMPTS} attempts`,
+                `Port ${port} is in use after ${MAX_PORT_RETRIES} retries`,
                 "port"
               )
             );
             return;
           }
-          logger.warn(`Port ${port} is in use, trying ${port + 1}...`);
-          port += 1;
+          logger.warn(
+            `Port ${port} is in use, retrying in ${PORT_RETRY_DELAY_MS / 1000}s (attempt ${attempts}/${MAX_PORT_RETRIES})...`
+          );
+          await Bun.sleep(PORT_RETRY_DELAY_MS);
           resolve(attempt());
           return;
         }
@@ -672,22 +665,120 @@ function tryListen(
   return attempt();
 }
 
+/**
+ * Check whether a Spotlight server is already running on the given URL.
+ * Returns `true` if the health endpoint responds successfully.
+ */
+async function isServerRunning(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${url}/health`);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Mutable state for the SSE line parser. */
+type SSEParserState = {
+  eventType: string;
+  dataLines: string[];
+};
+
+/** Process a single SSE line, dispatching complete events via callback. */
+function feedSSELine(
+  line: string,
+  state: SSEParserState,
+  onEvent: (type: string, data: string) => void
+): void {
+  if (line.startsWith("event:")) {
+    state.eventType = line.slice(6).trim();
+  } else if (line.startsWith("data:")) {
+    state.dataLines.push(line.slice(5).trimStart());
+  } else if (line === "" && state.dataLines.length > 0) {
+    onEvent(state.eventType, state.dataLines.join("\n"));
+    state.eventType = "";
+    state.dataLines = [];
+  }
+}
+
+/**
+ * Consume SSE events from an upstream Spotlight server and print them.
+ *
+ * Bun doesn't have a global `EventSource`, so we use `fetch` with a
+ * streaming body and parse the SSE wire format manually.
+ */
+async function consumeSSE(
+  url: string,
+  activeFilters: ReadonlySet<FilterValue>,
+  signal: AbortSignal
+): Promise<void> {
+  const res = await fetch(`${url}/stream`, {
+    headers: { Accept: "text/event-stream" },
+    signal,
+  });
+  if (!res.body) {
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  const state: SSEParserState = { eventType: "", dataLines: [] };
+
+  for await (const chunk of res.body) {
+    const text = decoder.decode(chunk as Uint8Array, { stream: true });
+    for (const rawLine of text.split("\n")) {
+      feedSSELine(rawLine.replace(CR_RE, ""), state, (type, data) => {
+        if (type === SENTRY_CONTENT_TYPE) {
+          processSSEEvent(data, activeFilters);
+        }
+      });
+    }
+  }
+}
+
+/** Parse and format a single SSE data payload from upstream. */
+function processSSEEvent(
+  data: string,
+  activeFilters: ReadonlySet<FilterValue>
+): void {
+  try {
+    const envelope = JSON.parse(data) as [
+      Record<string, unknown>,
+      [{ type?: string }, unknown][],
+    ];
+    const [header, items] = envelope;
+    for (const [itemHeader, itemPayload] of items) {
+      if (!isItemIncluded(itemHeader.type, activeFilters)) {
+        continue;
+      }
+      for (const line of formatItem(
+        itemHeader.type,
+        itemPayload as Record<string, unknown>,
+        header,
+        itemHeader.type ?? "envelope"
+      )) {
+        logger.log(line);
+      }
+    }
+  } catch (err) {
+    logger.debug(
+      `Failed to parse SSE event: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
+
 export const localCommand = buildCommand({
   docs: {
     brief: "Run a local Spotlight server to capture dev SDK events",
     fullDescription:
-      "Start a local Spotlight-compatible server.\n\n" +
+      "Start a local Spotlight-compatible server, or attach to one\n" +
+      "already running on the same port.\n\n" +
       "Spotlight is Sentry for Development — it gives you a live view of\n" +
-      "errors, traces, and logs emitted by Sentry SDKs in your dev stack.\n" +
-      "This command runs a minimal Hono server that ingests envelopes\n" +
-      "from any Sentry SDK and tails them to your terminal.\n\n" +
-      "Endpoints:\n" +
-      "  POST /stream                          — Spotlight ingest\n" +
-      "  POST /api/{projectId}/envelope/       — Sentry SDK ingest\n" +
-      "  GET  /stream                          — SSE feed (for the Spotlight overlay)\n" +
-      "  GET  /health                          — health check\n\n" +
+      "errors, traces, and logs emitted by Sentry SDKs in your dev stack.\n\n" +
+      "If a server is already listening on the port, the command connects\n" +
+      "as an SSE consumer and tails events from it. Otherwise it starts\n" +
+      "its own server.\n\n" +
       "Learn more: https://spotlightjs.com/docs/getting-started/\n\n" +
-      "Press Ctrl-C to stop the server.",
+      "Press Ctrl-C to stop.",
   },
   parameters: {
     flags: {
@@ -726,8 +817,39 @@ export const localCommand = buildCommand({
   },
   auth: false,
   async *func(this: SentryContext, flags: LocalFlags) {
-    const buffer = createSpotlightBuffer(BUFFER_SIZE);
     const activeFilters = new Set(flags.filter);
+    const url = `http://${flags.host}:${flags.port}`;
+
+    if (await isServerRunning(url)) {
+      logger.info(`Connected to existing server at ${bold(url)}`);
+      if (activeFilters.size > 0) {
+        logger.info(`Filtering: ${[...activeFilters].join(", ")}`);
+      }
+      logger.info("Press Ctrl-C to stop.");
+
+      const ac = new AbortController();
+      const stop = () => ac.abort();
+      process.on("SIGINT", stop);
+      process.on("SIGTERM", stop);
+
+      if (flags.quiet) {
+        await new Promise<void>((resolve) => {
+          ac.signal.addEventListener("abort", () => resolve());
+        });
+      } else {
+        await consumeSSE(url, activeFilters, ac.signal).catch(
+          (err: unknown) => {
+            if (!(err instanceof DOMException && err.name === "AbortError")) {
+              throw err;
+            }
+          }
+        );
+      }
+      logger.log("Disconnected.");
+      return;
+    }
+
+    const buffer = createSpotlightBuffer(BUFFER_SIZE);
 
     if (!flags.quiet) {
       buffer.subscribe((container) => {
@@ -745,8 +867,8 @@ export const localCommand = buildCommand({
       flags.host
     );
 
-    const url = `http://${flags.host}:${boundPort}`;
-    logger.info(`Listening on ${bold(url)}`);
+    const listenUrl = `http://${flags.host}:${boundPort}`;
+    logger.info(`Listening on ${bold(listenUrl)}`);
     if (activeFilters.size > 0) {
       logger.info(`Filtering: ${[...activeFilters].join(", ")}`);
     }
