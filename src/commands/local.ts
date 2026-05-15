@@ -380,7 +380,7 @@ function formatTransactionItem(
 
   const op = trace?.op;
   if (op && op !== "default" && op !== "unknown") {
-    msg = `[${op}] ${msg}`;
+    msg = `[${stripAnsi(op)}] ${msg}`;
   }
 
   const start = event.start_timestamp as number | undefined;
@@ -392,7 +392,7 @@ function formatTransactionItem(
 
   const status = trace?.status;
   if (status && status !== "ok") {
-    msg += ` ${muted(`[${status}]`)}`;
+    msg += ` ${muted(`[${stripAnsi(status)}]`)}`;
   }
 
   const spans = event.spans as unknown[] | undefined;
