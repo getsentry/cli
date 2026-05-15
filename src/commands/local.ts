@@ -713,13 +713,23 @@ function feedSSELine(
 async function consumeSSE(
   url: string,
   activeFilters: ReadonlySet<FilterValue>,
-  signal: AbortSignal
+  signal: AbortSignal,
+  quiet = false
 ): Promise<void> {
   const res = await fetch(`${url}/stream`, {
     headers: { Accept: "text/event-stream" },
     signal,
   });
   if (!res.body) {
+    return;
+  }
+
+  // In quiet mode we still consume the stream to detect disconnection,
+  // but skip parsing/formatting entirely.
+  if (quiet) {
+    for await (const _chunk of res.body) {
+      // drain
+    }
     return;
   }
 
@@ -842,23 +852,15 @@ export const localCommand = buildCommand({
       process.once("SIGINT", stop);
       process.once("SIGTERM", stop);
 
-      if (flags.quiet) {
-        await new Promise<void>((resolve) => {
-          if (ac.signal.aborted) {
-            resolve();
-            return;
+      // Connect to the SSE stream even in quiet mode so we detect when
+      // the upstream server disconnects (the for-await loop exits).
+      await consumeSSE(url, activeFilters, ac.signal, flags.quiet).catch(
+        (err: unknown) => {
+          if (!(err instanceof DOMException && err.name === "AbortError")) {
+            throw err;
           }
-          ac.signal.addEventListener("abort", () => resolve());
-        });
-      } else {
-        await consumeSSE(url, activeFilters, ac.signal).catch(
-          (err: unknown) => {
-            if (!(err instanceof DOMException && err.name === "AbortError")) {
-              throw err;
-            }
-          }
-        );
-      }
+        }
+      );
       logger.log("Disconnected.");
       return;
     }
