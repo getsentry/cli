@@ -11,10 +11,10 @@
  * - Migration checks
  */
 
-import type { Database } from "bun:sqlite";
 import { getEnv } from "../env.js";
 import { stringifyUnknown } from "../errors.js";
 import { logger } from "../logger.js";
+import type { Database } from "./sqlite.js";
 
 export const CURRENT_SCHEMA_VERSION = 16;
 
@@ -590,18 +590,22 @@ let isRepairing = false;
 
 /**
  * Check if an error is a schema-related SQLite error that can be auto-repaired.
+ *
+ * Matches by message content rather than error name because `bun:sqlite`
+ * throws `SQLiteError` while `node:sqlite` throws plain `Error` — the
+ * message strings are identical across both runtimes.
  */
 function isSchemaError(error: unknown): boolean {
-  if (error instanceof Error && error.name === "SQLiteError") {
-    const msg = error.message.toLowerCase();
-    return (
-      msg.includes("no such column") ||
-      msg.includes("no such table") ||
-      msg.includes("has no column named") ||
-      msg.includes("on conflict clause does not match")
-    );
+  if (!(error instanceof Error)) {
+    return false;
   }
-  return false;
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes("no such column") ||
+    msg.includes("no such table") ||
+    msg.includes("has no column named") ||
+    msg.includes("on conflict clause does not match")
+  );
 }
 
 /**
@@ -610,14 +614,17 @@ function isSchemaError(error: unknown): boolean {
  * This happens when the CLI's local database file or its containing directory
  * lacks write permissions (e.g., installed globally in a protected path,
  * read-only filesystem, or changed permissions).
+ *
+ * Matches by message content rather than error name because `bun:sqlite`
+ * throws `SQLiteError` while `node:sqlite` throws plain `Error`.
  */
 export function isReadonlyError(error: unknown): boolean {
-  if (error instanceof Error && error.name === "SQLiteError") {
-    return error.message
-      .toLowerCase()
-      .includes("attempt to write a readonly database");
+  if (!(error instanceof Error)) {
+    return false;
   }
-  return false;
+  return error.message
+    .toLowerCase()
+    .includes("attempt to write a readonly database");
 }
 
 /** Result of a repair attempt */
