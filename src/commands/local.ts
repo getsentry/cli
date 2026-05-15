@@ -45,6 +45,7 @@ import {
   red,
   yellow,
 } from "../lib/formatters/colors.js";
+import { stripAnsi } from "../lib/formatters/plain-detect.js";
 import { logger } from "../lib/logger.js";
 
 /** Default port matches Spotlight's `DEFAULT_PORT`. */
@@ -55,6 +56,9 @@ const BUFFER_SIZE = 500;
 
 /** Canonical content type for Sentry envelopes. */
 const SENTRY_CONTENT_TYPE = "application/x-sentry-envelope";
+
+/** Maximum ingest body size (10 MB). Rejects oversized payloads early. */
+const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
 /** Envelope item categories that can be filtered via `--filter`. */
 const FILTER_VALUES = ["error", "transaction", "log"] as const;
@@ -135,7 +139,14 @@ function buildApp(
     };
     body: (data: null, status: number) => Response;
   }) => {
+    const contentLength = Number(c.req.header("content-length") ?? 0);
+    if (contentLength > MAX_BODY_BYTES) {
+      return c.body(null, 413);
+    }
     const arrayBuf = await c.req.arrayBuffer();
+    if (arrayBuf.byteLength > MAX_BODY_BYTES) {
+      return c.body(null, 413);
+    }
     const body = Buffer.from(arrayBuf);
     // Browser SDKs using sendBeacon() set Content-Type to text/plain to
     // avoid CORS preflight. Detect this via the sentry_client query param
@@ -205,12 +216,11 @@ function buildApp(
           });
       }, lastEventId);
 
-      stream.onAbort(() => {
-        spotlightBuffer.unsubscribe(readerId);
-      });
-
       await new Promise<void>((resolve) => {
-        stream.onAbort(() => resolve());
+        stream.onAbort(() => {
+          spotlightBuffer.unsubscribe(readerId);
+          resolve();
+        });
       });
     })
   );
@@ -302,12 +312,12 @@ function formatFrameHint(frames: StackFrame[]): string {
   let hint = "";
   if (frame.filename && frame.lineno) {
     const loc = frame.colno
-      ? `${frame.filename}:${frame.lineno}:${frame.colno}`
-      : `${frame.filename}:${frame.lineno}`;
+      ? `${stripAnsi(frame.filename)}:${frame.lineno}:${frame.colno}`
+      : `${stripAnsi(frame.filename)}:${frame.lineno}`;
     hint += ` ${muted(`[${loc}]`)}`;
   }
   if (frame.function) {
-    hint += ` ${muted(`[${frame.function}]`)}`;
+    hint += ` ${muted(`[${stripAnsi(frame.function)}]`)}`;
   }
   return hint;
 }
@@ -331,9 +341,10 @@ function formatErrorItem(
       }
     | undefined;
   const first = exception?.values?.[0];
-  const errorType = first?.type ?? "Error";
-  const errorValue =
-    first?.value ?? (event.message as string | undefined) ?? "Unknown error";
+  const errorType = stripAnsi(first?.type ?? "Error");
+  const errorValue = stripAnsi(
+    first?.value ?? (event.message as string | undefined) ?? "Unknown error"
+  );
 
   let msg = `${errorType}: ${errorValue}`;
 
@@ -359,8 +370,9 @@ function formatTransactionItem(
     ?.trace as
     | { op?: string; status?: string; description?: string }
     | undefined;
-  let msg =
-    (event.transaction as string) ?? trace?.description ?? "Transaction";
+  let msg = stripAnsi(
+    (event.transaction as string) ?? trace?.description ?? "Transaction"
+  );
 
   const op = trace?.op;
   if (op && op !== "default" && op !== "unknown") {
@@ -399,7 +411,7 @@ type LogEntry = {
 /** Format one log entry into a colored tail line. */
 function formatSingleLog(logEntry: LogEntry, source: string): string {
   const level = logEntry.level ?? "log";
-  let msg = logEntry.body ?? "";
+  let msg = stripAnsi(logEntry.body ?? "");
 
   if (logEntry.attributes) {
     const attrs = Object.entries(logEntry.attributes)
@@ -407,7 +419,7 @@ function formatSingleLog(logEntry: LogEntry, source: string): string {
         ([k, v]) =>
           !k.startsWith("sentry.") && v.value !== null && v.value !== undefined
       )
-      .map(([k, v]) => `${k}=${v.value}`);
+      .map(([k, v]) => `${stripAnsi(k)}=${stripAnsi(String(v.value))}`);
     if (attrs.length > 0) {
       msg += ` ${muted(`[${attrs.join(", ")}]`)}`;
     }
