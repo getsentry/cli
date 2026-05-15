@@ -3,11 +3,11 @@
  * Reduces boilerplate for UPSERT and other repetitive patterns.
  */
 
-import type { SQLQueryBindings } from "bun:sqlite";
+import type { SQLQueryBindings } from "./sqlite.js";
 
 import { getDatabase } from "./index.js";
 
-/** Valid SQLite binding value (matches bun:sqlite's SQLQueryBindings) */
+/** Valid SQLite binding value (re-exported from sqlite.ts adapter) */
 export type SqlValue = SQLQueryBindings;
 
 /**

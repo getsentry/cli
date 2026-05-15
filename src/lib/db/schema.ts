@@ -11,7 +11,7 @@
  * - Migration checks
  */
 
-import type { Database } from "bun:sqlite";
+import type { Database } from "./sqlite.js";
 import { getEnv } from "../env.js";
 import { stringifyUnknown } from "../errors.js";
 import { logger } from "../logger.js";
