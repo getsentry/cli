@@ -37,10 +37,10 @@ import type { SentryContext } from "../context.js";
 import { buildCommand, numberParser } from "../lib/command.js";
 import { ValidationError } from "../lib/errors.js";
 import {
+  blue,
   bold,
   cyan,
   green,
-  magenta,
   muted,
   red,
   yellow,
@@ -244,7 +244,7 @@ function formatTime(timestamp?: number | string): string {
   return date.toLocaleTimeString("en-US", { hour12: false });
 }
 
-/** Level → color map for tail output. */
+/** Level → color map for tail output, matching Spotlight's Sentinel theme. */
 const LEVEL_COLORS: Record<string, (s: string) => string> = {
   error: (s) => red(bold(s)),
   fatal: (s) => red(bold(s)),
@@ -254,10 +254,18 @@ const LEVEL_COLORS: Record<string, (s: string) => string> = {
   debug: muted,
 };
 
-/** Colorize a log/event level label. */
-function colorLevel(level: string): string {
+/** Longest bracketed type label: `[WARNING]` = 9 chars. */
+const TYPE_WIDTH = 9;
+
+/** Longest bracketed source label: `[BROWSER]` = 9 chars. */
+const SOURCE_WIDTH = 9;
+
+/** Format a type/level label as `[TYPE]` padded to fixed width. */
+function formatType(level: string): string {
+  const tag = `[${level.toUpperCase()}]`;
   const colorFn = LEVEL_COLORS[level];
-  return colorFn ? colorFn(level) : level;
+  const colored = colorFn ? colorFn(tag) : tag;
+  return colored + " ".repeat(Math.max(0, TYPE_WIDTH - tag.length));
 }
 
 /** Mobile SDK name substrings. */
@@ -275,23 +283,32 @@ const SERVER_JS_MARKERS = [
   "sveltekit",
 ];
 
+/** Source color map matching Spotlight's Sentinel theme. */
+const SOURCE_COLORS: Record<string, (s: string) => string> = {
+  browser: yellow,
+  mobile: blue,
+  server: cyan,
+};
+
 /**
  * Infer the source platform from the envelope header's `sdk.name` field.
- * Returns a short colored label like "server", "browser", or "mobile".
+ * Returns a colored, bracketed, padded label like `[SERVER] `.
  */
 function inferSource(header: Record<string, unknown>): string {
   const sdk = header.sdk as { name?: string } | undefined;
   const name = sdk?.name ?? "";
+  let source = "server";
   if (MOBILE_MARKERS.some((m) => name.includes(m))) {
-    return magenta("mobile");
-  }
-  if (
+    source = "mobile";
+  } else if (
     name.startsWith("sentry.javascript.") &&
     !SERVER_JS_MARKERS.some((m) => name.includes(m))
   ) {
-    return yellow("browser");
+    source = "browser";
   }
-  return cyan("server");
+  const tag = `[${source.toUpperCase()}]`;
+  const colorFn = SOURCE_COLORS[source] ?? cyan;
+  return colorFn(tag) + " ".repeat(Math.max(0, SOURCE_WIDTH - tag.length));
 }
 
 /** Shape of a single stack frame in the exception value. */
@@ -325,7 +342,7 @@ function formatFrameHint(frames: StackFrame[]): string {
 /**
  * Format an error event item into a colored one-liner.
  *
- * Output: `HH:MM:SS  error  server  TypeError: x is not a function [file.ts:42:5] [handleRequest]`
+ * Output: `HH:MM:SS [ERROR]   [SERVER]  TypeError: x is not a function [file.ts:42:5] [handleRequest]`
  */
 function formatErrorItem(
   event: Record<string, unknown>,
@@ -354,13 +371,13 @@ function formatErrorItem(
   }
 
   const ts = formatTime(event.timestamp as number | undefined);
-  return `${muted(ts)}  ${colorLevel("error")}  ${inferSource(header)}  ${msg}`;
+  return `${muted(ts)} ${formatType("error")} ${inferSource(header)} ${msg}`;
 }
 
 /**
  * Format a transaction event item into a colored one-liner.
  *
- * Output: `HH:MM:SS  trace  browser  [http.client] GET /api/users [245ms] [3 spans]`
+ * Output: `HH:MM:SS [TRACE]   [BROWSER] [http.client] GET /api/users [245ms] [3 spans]`
  */
 function formatTransactionItem(
   event: Record<string, unknown>,
@@ -397,7 +414,7 @@ function formatTransactionItem(
   }
 
   const ts = formatTime(event.timestamp as number | undefined);
-  return `${muted(ts)}  ${colorLevel("trace")}  ${inferSource(header)}  ${msg}`;
+  return `${muted(ts)} ${formatType("trace")} ${inferSource(header)} ${msg}`;
 }
 
 /** Shape of a single log entry inside a log envelope item. */
@@ -419,21 +436,23 @@ function formatSingleLog(logEntry: LogEntry, source: string): string {
         ([k, v]) =>
           !k.startsWith("sentry.") && v.value !== null && v.value !== undefined
       )
-      .map(([k, v]) => `${stripAnsi(k)}=${stripAnsi(String(v.value))}`);
+      .map(([k, v]) =>
+        muted(`[${stripAnsi(k)}=${stripAnsi(String(v.value))}]`)
+      );
     if (attrs.length > 0) {
-      msg += ` ${muted(`[${attrs.join(", ")}]`)}`;
+      msg += ` ${attrs.join(" ")}`;
     }
   }
 
   const ts = formatTime(logEntry.timestamp);
-  return `${muted(ts)}  ${colorLevel(level)}  ${source}  ${msg}`;
+  return `${muted(ts)} ${formatType(level)} ${source} ${msg}`;
 }
 
 /**
  * Format a log event item. A log envelope item contains an `items` array
  * of individual log entries; each gets its own line.
  *
- * Output: `HH:MM:SS  info  server  User logged in [user_id=1234]`
+ * Output: `HH:MM:SS [INFO]    [SERVER]  User logged in [user_id=1234]`
  */
 function formatLogItem(
   event: Record<string, unknown>,

@@ -36,9 +36,9 @@ sentry local -f error -f log
 By default, incoming envelopes are pretty-printed to the terminal:
 
 ```
-14:32:01  error  server   TypeError: x is not a function [app.ts:42:5] [handleRequest]
-14:32:02  trace  browser  [http.client] GET /api/users [245ms] [3 spans]
-14:32:03  info   server   User logged in [user_id=1234]
+14:32:01 [ERROR]   [SERVER]  TypeError: x is not a function [app.ts:42:5] [handleRequest]
+14:32:02 [TRACE]   [BROWSER] [http.client] GET /api/users [245ms] [3 spans]
+14:32:03 [INFO]    [SERVER]  User logged in [user_id=1234] [region=us]
 ```
 
 Errors show the exception type, message, and top stack frame. Transactions show the operation, duration, and span count. Logs show the severity level, message, and custom attributes.
