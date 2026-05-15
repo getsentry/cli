@@ -47,8 +47,6 @@ import {
 } from "../lib/formatters/colors.js";
 import { logger } from "../lib/logger.js";
 
-const log = logger;
-
 /** Default port matches Spotlight's `DEFAULT_PORT`. */
 const DEFAULT_PORT = 8969;
 
@@ -64,7 +62,7 @@ type FilterValue = (typeof FILTER_VALUES)[number];
 
 /**
  * Parse and validate a `--filter` value.
- * Accepts the canonical names: error, transaction, log.
+ * Accepts the canonical names: error, transaction, logger.
  */
 function parseFilter(value: string): FilterValue {
   const lower = value.toLowerCase();
@@ -102,27 +100,17 @@ function parsePort(value: string): number {
 }
 
 /**
- * Build the Hono application that backs the sidecar.
+ * Build the Hono application.
  *
- * We expose three concerns:
- *  - CORS: open to `*` because dev stacks send from arbitrary `localhost:*`
- *    origins (Vite, Next, Astro, etc.). The sidecar binds to localhost by
- *    default, so this isn't a security regression.
- *  - Ingest: `POST /stream` and `POST /api/.../envelope/` accept envelope
- *    bodies. We hand the raw buffer to `pushToSpotlightBuffer`, which
- *    decompresses (gzip/deflate/br) and decodes lazily.
- *  - Subscribe: `GET /stream` opens an SSE stream of every envelope that
- *    enters the buffer, including those buffered before the subscriber
- *    connected (so a freshly-opened Spotlight overlay can still see
- *    recent events).
+ * CORS is open to `*` because dev stacks send from arbitrary `localhost:*`
+ * origins (Vite, Next, Astro, etc.) and we only bind to localhost.
  */
-function buildSidecarApp(
+function buildApp(
   spotlightBuffer: ReturnType<typeof createSpotlightBuffer>,
-  onEnvelope: (contentType: string, data: Buffer) => void
+  onEnvelope?: (contentType: string, data: Buffer) => void
 ): Hono {
   const app = new Hono();
 
-  // Open CORS — sidecar binds to localhost; this is a dev-only tool.
   app.use(
     "*",
     cors({
@@ -132,10 +120,8 @@ function buildSidecarApp(
     })
   );
 
-  /** Health check — useful for `curl` and for SDKs that probe before sending. */
   app.get("/health", (c) => c.text("OK"));
 
-  /** Ingest handler shared by `/stream` and `/api/.../envelope/`. */
   const ingest = async (c: {
     req: {
       arrayBuffer: () => Promise<ArrayBuffer>;
@@ -172,18 +158,13 @@ function buildSidecarApp(
     });
 
     if (container) {
-      // Surface the decoded payload to the tail/subscribe pipeline. We push
-      // the (potentially decompressed) raw body so SSE subscribers don't
-      // have to redo the work and so the tail formatter can rely on a
-      // single representation.
-      onEnvelope(container.getContentType(), container.getData());
+      onEnvelope?.(container.getContentType(), container.getData());
     }
 
     return c.body(null, 204);
   };
 
   app.post("/stream", ingest);
-  // SDK-style envelope ingestion: /api/{projectId}/envelope/?...
   app.post("/api/:projectId/envelope/", ingest);
   app.post("/api/:projectId/envelope", ingest);
 
@@ -211,7 +192,7 @@ function buildSidecarApp(
             data: JSON.stringify(parsed.envelope),
           })
           .catch((err: unknown) => {
-            log.debug(
+            logger.debug(
               `SSE write failed (client likely disconnected): ${
                 err instanceof Error ? err.message : String(err)
               }`
@@ -223,8 +204,6 @@ function buildSidecarApp(
         spotlightBuffer.unsubscribe(readerId);
       });
 
-      // Keep the stream open until the client disconnects.
-      // hono/streaming resolves the promise on abort.
       await new Promise<void>((resolve) => {
         stream.onAbort(() => resolve());
       });
@@ -589,7 +568,7 @@ function waitForShutdown(server: Server): Promise<void> {
         process.exit(0);
       }
       shuttingDown = true;
-      log.info(`Received ${signal}, shutting down...`);
+      logger.info(`Received ${signal}, shutting down...`);
       server.close(() => resolve());
       // Force-close keep-alive connections so we don't wait on long-lived
       // SSE subscribers.
@@ -644,7 +623,7 @@ function tryListen(
             );
             return;
           }
-          log.warn(`Port ${port} is in use, trying ${port + 1}...`);
+          logger.warn(`Port ${port} is in use, trying ${port + 1}...`);
           port += 1;
           resolve(attempt());
           return;
@@ -673,8 +652,6 @@ export const localCommand = buildCommand({
       "Learn more: https://spotlightjs.com/docs/getting-started/\n\n" +
       "Press Ctrl-C to stop the server.",
   },
-  // No `output` config: this is a long-running server, not a data command.
-  // We write progress directly to stderr via the logger.
   parameters: {
     flags: {
       port: {
@@ -710,31 +687,20 @@ export const localCommand = buildCommand({
       f: "filter",
     },
   },
-  // No auth required — this is a local-only dev server.
   auth: false,
   async *func(this: SentryContext, flags: LocalFlags) {
     const buffer = createSpotlightBuffer(BUFFER_SIZE);
+    const activeFilters = new Set(flags.filter);
 
-    // Build the active filter set once — empty set means "show everything".
-    const activeFilters: ReadonlySet<FilterValue> = new Set(flags.filter);
-
-    // Tail subscriber: pretty-prints each envelope item. Routes through
-    // the logger (stderr) so the tail doesn't pollute pipelines that
-    // consume the CLI's stdout, and honors `--log-level` / `SENTRY_LOG_LEVEL`
-    // like the rest of the CLI. Skipped entirely when `--quiet` is set.
     if (!flags.quiet) {
       buffer.subscribe((container) => {
         for (const line of formatEnvelopeLines(container, activeFilters)) {
-          log.info(line);
+          logger.info(line);
         }
       });
     }
 
-    const app = buildSidecarApp(buffer, () => {
-      // Tail output is driven by the buffer subscriber above so we don't
-      // have to repeat the formatting work. This callback is a no-op for
-      // now; future hooks (e.g. metrics, file logging) can plug in here.
-    });
+    const app = buildApp(buffer);
 
     const { server, port: boundPort } = await tryListen(
       app,
@@ -743,18 +709,16 @@ export const localCommand = buildCommand({
     );
 
     const url = `http://${flags.host}:${boundPort}`;
-    log.info(`Listening on ${bold(url)}`);
+    logger.info(`Listening on ${bold(url)}`);
     if (activeFilters.size > 0) {
-      log.info(`Filtering: ${[...activeFilters].join(", ")}`);
+      logger.info(`Filtering: ${[...activeFilters].join(", ")}`);
     }
-    log.info(
+    logger.info(
       `Learn more about Spotlight: ${bold("https://spotlightjs.com/docs/getting-started/")}`
     );
-    log.info("Press Ctrl-C to stop.");
+    logger.info("Press Ctrl-C to stop.");
 
-    // Block until the user interrupts. We don't yield any CommandOutput
-    // because there's no structured payload — this command is a server.
     await waitForShutdown(server);
-    log.info("Server stopped.");
+    logger.info("Server stopped.");
   },
 });
