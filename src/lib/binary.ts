@@ -15,6 +15,11 @@ import {
 import { chmod, mkdir, unlink } from "node:fs/promises";
 import { delimiter, join, resolve } from "node:path";
 import { getUserAgent } from "./constants.js";
+import {
+  buildTlsErrorDetail,
+  customFetch,
+  isTlsCertError,
+} from "./custom-ca.js";
 import { stringifyUnknown, UpgradeError } from "./errors.js";
 
 /** Known directories where the curl installer may place the binary */
@@ -232,11 +237,14 @@ export async function fetchWithUpgradeError(
   serviceName: string
 ): Promise<Response> {
   try {
-    return await fetch(url, init);
+    return await customFetch(url, init);
   } catch (error) {
     // Re-throw AbortError as-is so callers can handle it specifically
     if (error instanceof Error && error.name === "AbortError") {
       throw error;
+    }
+    if (error instanceof Error && isTlsCertError(error)) {
+      throw new UpgradeError("network_error", buildTlsErrorDetail(error));
     }
     const msg = stringifyUnknown(error);
     throw new UpgradeError(

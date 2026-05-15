@@ -10,6 +10,8 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   __resetForTests,
+  customFetch,
+  getCustomCaCerts,
   getCustomCaSource,
   getCustomTlsOptions,
   getTlsCertErrorMessage,
@@ -270,5 +272,136 @@ describe("warnIfSaasWithEnvCa", () => {
     // Self-hosted URL — no warning
     warnIfSaasWithEnvCa("https://sentry.example.com/api/0/");
     expect(getCustomCaSource()).toBe("env");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getCustomCaCerts — raw PEM string for Node http.request()
+// ---------------------------------------------------------------------------
+
+describe("getCustomCaCerts", () => {
+  const getConfigDir = useTestConfigDir("ca-certs-");
+  const CERT_PEM =
+    "-----BEGIN CERTIFICATE-----\nMIIBxyz...\n-----END CERTIFICATE-----\n";
+
+  let savedNodeExtra: string | undefined;
+
+  beforeEach(() => {
+    __resetForTests();
+    savedNodeExtra = process.env.NODE_EXTRA_CA_CERTS;
+    delete process.env.NODE_EXTRA_CA_CERTS;
+  });
+
+  afterEach(() => {
+    if (savedNodeExtra !== undefined) {
+      process.env.NODE_EXTRA_CA_CERTS = savedNodeExtra;
+    } else {
+      delete process.env.NODE_EXTRA_CA_CERTS;
+    }
+  });
+
+  test("returns undefined when no CAs configured", () => {
+    expect(getCustomCaCerts()).toBeUndefined();
+  });
+
+  test("returns PEM string when CA is loaded", () => {
+    const certPath = join(getConfigDir(), "ca.pem");
+    writeFileSync(certPath, CERT_PEM);
+    process.env.NODE_EXTRA_CA_CERTS = certPath;
+
+    const caCerts = getCustomCaCerts();
+    expect(caCerts).toBeDefined();
+    expect(caCerts).toContain(CERT_PEM);
+  });
+
+  test("returns same value as getCustomTlsOptions().tls.ca", () => {
+    const certPath = join(getConfigDir(), "ca.pem");
+    writeFileSync(certPath, CERT_PEM);
+    process.env.NODE_EXTRA_CA_CERTS = certPath;
+
+    const caCerts = getCustomCaCerts();
+    const tlsOpts = getCustomTlsOptions();
+    expect(caCerts).toBe(tlsOpts?.tls.ca);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// customFetch — TLS-aware fetch wrapper
+// ---------------------------------------------------------------------------
+
+describe("customFetch", () => {
+  const getConfigDir = useTestConfigDir("custom-fetch-");
+  const CERT_PEM =
+    "-----BEGIN CERTIFICATE-----\nMIIBxyz...\n-----END CERTIFICATE-----\n";
+
+  let savedNodeExtra: string | undefined;
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    __resetForTests();
+    savedNodeExtra = process.env.NODE_EXTRA_CA_CERTS;
+    delete process.env.NODE_EXTRA_CA_CERTS;
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (savedNodeExtra !== undefined) {
+      process.env.NODE_EXTRA_CA_CERTS = savedNodeExtra;
+    } else {
+      delete process.env.NODE_EXTRA_CA_CERTS;
+    }
+  });
+
+  test("calls fetch without tls option when no custom CA", async () => {
+    let capturedInit: RequestInit | undefined;
+    globalThis.fetch = ((_input: unknown, init?: RequestInit) => {
+      capturedInit = init;
+      return Promise.resolve(new Response("ok"));
+    }) as typeof fetch;
+
+    await customFetch("https://example.com", { headers: { "X-Test": "1" } });
+    expect(capturedInit).toBeDefined();
+    expect(capturedInit?.headers).toEqual({ "X-Test": "1" });
+    expect((capturedInit as Record<string, unknown>).tls).toBeUndefined();
+  });
+
+  test("spreads tls options when custom CA is loaded", async () => {
+    const certPath = join(getConfigDir(), "ca.pem");
+    writeFileSync(certPath, CERT_PEM);
+    process.env.NODE_EXTRA_CA_CERTS = certPath;
+
+    let capturedInit: Record<string, unknown> | undefined;
+    globalThis.fetch = ((_input: unknown, init?: RequestInit) => {
+      capturedInit = init as Record<string, unknown>;
+      return Promise.resolve(new Response("ok"));
+    }) as typeof fetch;
+
+    await customFetch("https://example.com", { headers: { "X-Test": "1" } });
+    expect(capturedInit).toBeDefined();
+    expect(capturedInit?.tls).toBeDefined();
+    expect((capturedInit?.tls as { ca: string }).ca).toContain(CERT_PEM);
+  });
+
+  test("preserves caller init options alongside tls", async () => {
+    const certPath = join(getConfigDir(), "ca.pem");
+    writeFileSync(certPath, CERT_PEM);
+    process.env.NODE_EXTRA_CA_CERTS = certPath;
+
+    let capturedInit: Record<string, unknown> | undefined;
+    globalThis.fetch = ((_input: unknown, init?: RequestInit) => {
+      capturedInit = init as Record<string, unknown>;
+      return Promise.resolve(new Response("ok"));
+    }) as typeof fetch;
+
+    await customFetch("https://example.com", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(capturedInit?.method).toBe("POST");
+    expect(capturedInit?.headers).toEqual({
+      "Content-Type": "application/json",
+    });
+    expect(capturedInit?.tls).toBeDefined();
   });
 });

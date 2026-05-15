@@ -22,6 +22,7 @@ import {
 } from "@sentry/node-core/light";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
+import { customFetch } from "../custom-ca.js";
 import { detectAgent } from "../detect-agent.js";
 import { EXIT, WizardError } from "../errors.js";
 import {
@@ -636,7 +637,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       // Preserve `init.signal` via the spread — MastraClient may pass its
       // own per-request signal, and the client-level `abortSignal` is
       // forwarded through the same channel.
-      return fetch(url, {
+      return customFetch(url, {
         ...init,
         headers: {
           ...(init?.headers as Record<string, string> | undefined),
