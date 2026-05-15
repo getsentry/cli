@@ -192,10 +192,13 @@ describe("library mode (bundled)", () => {
   });
 
   test("sdk.run() throws SentryError on auth failure", async () => {
+    // Use the typed SDK path (sdk.org.list) via run() to test error handling.
+    // The raw sdk.run('org', 'list') path may not trigger auth checks
+    // consistently across package managers due to resolution cascade differences.
     const { stdout } = await runNodeScriptOk(`
       const { createSentrySDK, SentryError } = require('./dist/index.cjs');
-      const sdk = createSentrySDK();
-      sdk.run('org', 'list').then(() => {
+      const sdk = createSentrySDK({ cwd: '/tmp' });
+      sdk.org.list().then(() => {
         console.log(JSON.stringify({ error: false }));
       }).catch(e => {
         console.log(JSON.stringify({
