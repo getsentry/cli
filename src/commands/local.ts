@@ -106,8 +106,7 @@ const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
  * arbitrary remote origins to read the SSE envelope stream.
  */
 function buildApp(
-  spotlightBuffer: ReturnType<typeof createSpotlightBuffer>,
-  onEnvelope?: (contentType: string, data: Buffer) => void
+  spotlightBuffer: ReturnType<typeof createSpotlightBuffer>
 ): Hono {
   const app = new Hono();
 
@@ -157,17 +156,13 @@ function buildApp(
       | undefined;
     const userAgent = c.req.header("user-agent");
 
-    const container = pushToSpotlightBuffer({
+    pushToSpotlightBuffer({
       spotlightBuffer,
       body,
       encoding: contentEncoding,
       contentType,
       userAgent,
     });
-
-    if (container) {
-      onEnvelope?.(container.getContentType(), container.getData());
-    }
 
     return c.body(null, 204);
   };
@@ -640,6 +635,7 @@ function tryListen(
 
       server.once("listening", () => resolve({ server, port }));
       server.once("error", async (err: NodeJS.ErrnoException) => {
+        server.close();
         if (err.code === "EADDRINUSE") {
           attempts += 1;
           if (attempts > MAX_PORT_RETRIES) {
@@ -673,7 +669,11 @@ async function isServerRunning(url: string): Promise<boolean> {
   try {
     const res = await fetch(`${url}/health`);
     return res.ok;
-  } catch {
+  } catch (err) {
+    logger.debug(
+      `No existing server at ${url}`,
+      err instanceof Error ? err.message : String(err)
+    );
     return false;
   }
 }
@@ -691,9 +691,11 @@ function feedSSELine(
   onEvent: (type: string, data: string) => void
 ): void {
   if (line.startsWith("event:")) {
-    state.eventType = line.slice(6).trim();
+    const value = line.slice(6);
+    state.eventType = value.startsWith(" ") ? value.slice(1) : value;
   } else if (line.startsWith("data:")) {
-    state.dataLines.push(line.slice(5).trimStart());
+    const value = line.slice(5);
+    state.dataLines.push(value.startsWith(" ") ? value.slice(1) : value);
   } else if (line === "" && state.dataLines.length > 0) {
     onEvent(state.eventType, state.dataLines.join("\n"));
     state.eventType = "";
@@ -722,16 +724,24 @@ async function consumeSSE(
 
   const decoder = new TextDecoder();
   const state: SSEParserState = { eventType: "", dataLines: [] };
-
-  for await (const chunk of res.body) {
-    const text = decoder.decode(chunk as Uint8Array, { stream: true });
-    for (const rawLine of text.split("\n")) {
-      feedSSELine(rawLine.replace(CR_RE, ""), state, (type, data) => {
-        if (type === SENTRY_CONTENT_TYPE) {
-          processSSEEvent(data, activeFilters);
-        }
-      });
+  const onEvent = (type: string, data: string) => {
+    if (type === SENTRY_CONTENT_TYPE) {
+      processSSEEvent(data, activeFilters);
     }
+  };
+
+  let partial = "";
+  for await (const chunk of res.body) {
+    const text =
+      partial + decoder.decode(chunk as Uint8Array, { stream: true });
+    const lines = text.split("\n");
+    partial = lines.pop() ?? "";
+    for (const rawLine of lines) {
+      feedSSELine(rawLine.replace(CR_RE, ""), state, onEvent);
+    }
+  }
+  if (partial) {
+    feedSSELine(partial.replace(CR_RE, ""), state, onEvent);
   }
 }
 
@@ -777,7 +787,6 @@ export const localCommand = buildCommand({
       "If a server is already listening on the port, the command connects\n" +
       "as an SSE consumer and tails events from it. Otherwise it starts\n" +
       "its own server.\n\n" +
-      "Learn more: https://spotlightjs.com/docs/getting-started/\n\n" +
       "Press Ctrl-C to stop.",
   },
   parameters: {
@@ -829,11 +838,15 @@ export const localCommand = buildCommand({
 
       const ac = new AbortController();
       const stop = () => ac.abort();
-      process.on("SIGINT", stop);
-      process.on("SIGTERM", stop);
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
 
       if (flags.quiet) {
         await new Promise<void>((resolve) => {
+          if (ac.signal.aborted) {
+            resolve();
+            return;
+          }
           ac.signal.addEventListener("abort", () => resolve());
         });
       } else {
@@ -872,9 +885,6 @@ export const localCommand = buildCommand({
     if (activeFilters.size > 0) {
       logger.info(`Filtering: ${[...activeFilters].join(", ")}`);
     }
-    logger.info(
-      `Learn more about Spotlight: ${bold("https://spotlightjs.com/docs/getting-started/")}`
-    );
     logger.info("Press Ctrl-C to stop.");
 
     await waitForShutdown(server);
