@@ -9,7 +9,12 @@ import { listAnOrganization_sIssues } from "@sentry/api";
 
 import type { SentryIssue } from "../../types/index.js";
 import type { IssueSubstatus } from "../../types/sentry.js";
-
+import {
+  buildTlsErrorDetail,
+  customFetch,
+  isTlsCertError,
+  warnIfSaasWithEnvCa,
+} from "../custom-ca.js";
 import { applyCustomHeaders } from "../custom-headers.js";
 import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
@@ -694,7 +699,22 @@ export async function getSharedIssue(
   // URL-scoped: headers only attach when `url`'s origin matches the trusted
   // host, so IAP tokens etc. can't leak to an attacker-controlled share URL.
   applyCustomHeaders(headers, url);
-  const response = await fetch(url, { headers });
+  warnIfSaasWithEnvCa(url);
+
+  let response: Response;
+  try {
+    response = await customFetch(url, { headers });
+  } catch (error) {
+    if (error instanceof Error && isTlsCertError(error)) {
+      throw new ApiError(
+        "TLS certificate error",
+        0,
+        buildTlsErrorDetail(error),
+        `shared/issues/${shareId}`
+      );
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     if (response.status === 404) {

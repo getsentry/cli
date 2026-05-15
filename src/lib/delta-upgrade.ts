@@ -30,6 +30,7 @@ import {
 } from "./binary.js";
 import { applyPatch } from "./bspatch.js";
 import { CLI_VERSION } from "./constants.js";
+import { customFetch } from "./custom-ca.js";
 import { formatBytes } from "./formatters/numbers.js";
 import {
   downloadLayerBlob,
@@ -165,14 +166,15 @@ export async function fetchRecentReleases(
   const perPage = MAX_STABLE_CHAIN_DEPTH + 2;
   let response: Response;
   try {
-    response = await fetch(`${GITHUB_RELEASES_URL}?per_page=${perPage}`, {
+    response = await customFetch(`${GITHUB_RELEASES_URL}?per_page=${perPage}`, {
       headers: {
         Accept: "application/vnd.github.v3+json",
         "User-Agent": "sentry-cli",
       },
       signal,
     });
-  } catch {
+  } catch (error) {
+    log.debug("Failed to fetch recent releases from GitHub", error);
     return [];
   }
   if (!response.ok) {
@@ -210,11 +212,12 @@ export async function downloadStablePatch(
 ): Promise<Uint8Array | null> {
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await customFetch(url, {
       headers: { "User-Agent": "sentry-cli" },
       signal,
     });
-  } catch {
+  } catch (error) {
+    log.debug("Failed to download stable patch", error);
     return null;
   }
   if (!response.ok) {

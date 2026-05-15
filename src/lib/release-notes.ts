@@ -18,6 +18,7 @@ import {
   GITHUB_RELEASES_URL,
   getGitHubHeaders,
 } from "./binary.js";
+import { customFetch } from "./custom-ca.js";
 import type { GitHubRelease } from "./delta-upgrade.js";
 import { logger } from "./logger.js";
 
@@ -559,11 +560,12 @@ const CHANGELOG_MAX_RELEASES = 30;
 async function fetchReleasesForChangelog(): Promise<GitHubRelease[]> {
   let response: Response;
   try {
-    response = await fetch(
+    response = await customFetch(
       `${GITHUB_RELEASES_URL}?per_page=${CHANGELOG_MAX_RELEASES}`,
       { headers: getGitHubHeaders() }
     );
-  } catch {
+  } catch (error) {
+    log.debug("Failed to fetch releases for changelog", error);
     return [];
   }
   if (!response.ok) {
@@ -650,7 +652,7 @@ async function fetchNightlyChangelog(
 
   let response: Response;
   try {
-    response = await fetch(url, { headers: getGitHubHeaders() });
+    response = await customFetch(url, { headers: getGitHubHeaders() });
   } catch {
     log.debug("Failed to fetch nightly commits");
     return null;
