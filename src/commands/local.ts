@@ -99,11 +99,15 @@ function parsePort(value: string): number {
   return port;
 }
 
+/** Match localhost origins on any port (http or https). */
+const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
 /**
  * Build the Hono application.
  *
- * CORS is open to `*` because dev stacks send from arbitrary `localhost:*`
- * origins (Vite, Next, Astro, etc.) and we only bind to localhost.
+ * CORS is restricted to localhost origins — dev stacks send from arbitrary
+ * `localhost:*` ports (Vite, Next, Astro, etc.) but we must not allow
+ * arbitrary remote origins to read the SSE envelope stream.
  */
 function buildApp(
   spotlightBuffer: ReturnType<typeof createSpotlightBuffer>,
@@ -114,7 +118,8 @@ function buildApp(
   app.use(
     "*",
     cors({
-      origin: "*",
+      origin: (origin) =>
+        LOCALHOST_ORIGIN_RE.test(origin) ? origin : "http://localhost",
       allowMethods: ["GET", "POST", "OPTIONS"],
       allowHeaders: ["Content-Type", "Content-Encoding", "User-Agent"],
     })
