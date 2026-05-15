@@ -9,8 +9,10 @@
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@biomejs/biome": "2.3.8",
+    "@clack/prompts": "0.11.0",
     "@mastra/client-js": "^1.4.0",
     "@sentry/api": "^0.141.0",
+    "@sentry/core": "10.50.0",
     "@sentry/node-core": "10.50.0",
     "@sentry/sqlish": "^1.0.0",
     "@stricli/auto-complete": "^1.2.4",
@@ -70,11 +72,16 @@
     "dist/ink-app.js"
   ],
   "license": "FSL-1.1-Apache-2.0",
-  "packageManager": "bun@1.3.13",
-  "patchedDependencies": {
-    "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch",
-    "@sentry/node-core@10.50.0": "patches/@sentry%2Fnode-core@10.50.0.patch",
-    "@sentry/core@10.50.0": "patches/@sentry%2Fcore@10.50.0.patch"
+  "packageManager": "pnpm@10.11.0",
+  "pnpm": {
+    "patchedDependencies": {
+      "@stricli/core": "patches/@stricli%2Fcore@1.2.5.patch",
+      "@sentry/node-core": "patches/@sentry%2Fnode-core@10.50.0.patch",
+      "@sentry/core": "patches/@sentry%2Fcore@10.50.0.patch"
+    },
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "scripts": {
     "cli": "bun run src/bin.ts",
@@ -83,8 +90,8 @@
     "build:all": "bun run generate:schema && bun run generate:docs && bun run generate:sdk && bun run script/build.ts",
     "bundle": "bun run generate:schema && bun run generate:docs && bun run generate:sdk && bun run script/bundle.ts",
     "typecheck": "bun run generate:docs && bun run generate:sdk && tsc --noEmit",
-    "lint": "bunx ultracite check",
-    "lint:fix": "bunx ultracite fix",
+    "lint": "biome check --no-errors-on-unmatched --max-diagnostics=none ./",
+    "lint:fix": "biome check --write --no-errors-on-unmatched --max-diagnostics=none ./",
     "test": "bun run test:unit",
     "test:unit": "bun run generate:docs && bun run generate:sdk && bun test --timeout 15000 --isolate --parallel test/lib test/commands test/types --coverage --coverage-reporter=lcov",
     "test:changed": "bun run generate:docs && bun run generate:sdk && bun test --timeout 15000 --isolate --changed",
