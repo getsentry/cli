@@ -568,7 +568,7 @@ function waitForShutdown(server: Server): Promise<void> {
         process.exit(0);
       }
       shuttingDown = true;
-      logger.info(`Received ${signal}, shutting down...`);
+      logger.log(`Received ${signal}, shutting down...`);
       server.close(() => resolve());
       // Force-close keep-alive connections so we don't wait on long-lived
       // SSE subscribers.
@@ -695,7 +695,7 @@ export const localCommand = buildCommand({
     if (!flags.quiet) {
       buffer.subscribe((container) => {
         for (const line of formatEnvelopeLines(container, activeFilters)) {
-          logger.info(line);
+          logger.log(line);
         }
       });
     }
@@ -719,6 +719,6 @@ export const localCommand = buildCommand({
     logger.info("Press Ctrl-C to stop.");
 
     await waitForShutdown(server);
-    logger.info("Server stopped.");
+    logger.log("Server stopped.");
   },
 });
