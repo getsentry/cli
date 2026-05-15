@@ -10,7 +10,7 @@
  * and code spans have backticks stripped.
  */
 
-import { Database } from "bun:sqlite";
+import { Database } from "../../../src/lib/db/sqlite.js";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { chmodSync, statSync } from "node:fs";
 import { join } from "node:path";

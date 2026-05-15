@@ -4,7 +4,7 @@
  * Tests for withTelemetry wrapper and opt-out behavior.
  */
 
-import { Database } from "bun:sqlite";
+import { Database } from "../../src/lib/db/sqlite.js";
 import {
   afterAll,
   afterEach,
