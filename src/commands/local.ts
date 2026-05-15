@@ -1,15 +1,15 @@
 /**
  * sentry local
  *
- * Run a local Spotlight-compatible sidecar server.
+ * Run a local Spotlight-compatible server.
  *
- * Spotlight (https://github.com/getsentry/spotlight) is "Sentry for
- * Development" — a small local proxy that ingests Sentry envelopes from
- * SDKs running in your dev stack and surfaces them in real time.
+ * Spotlight (https://spotlightjs.com/) is "Sentry for Development" — a small
+ * local proxy that ingests Sentry envelopes from SDKs running in your dev
+ * stack and surfaces them in real time.
  *
  * This command starts a minimal Hono HTTP server that:
  *
- * 1. Accepts envelopes from Sentry SDKs at the standard sidecar endpoints:
+ * 1. Accepts envelopes from Sentry SDKs at the standard endpoints:
  *      - `POST /stream` (Spotlight-compatible)
  *      - `POST /api/{projectId}/envelope/` (Sentry SDK ingest path)
  * 2. Pushes them into the buffer provided by `@spotlightjs/spotlight/sdk`,
@@ -19,12 +19,7 @@
  * 4. Tails events to the terminal as they arrive so you can see what your
  *    app is sending without leaving the CLI.
  *
- * To point your SDK at the local sidecar, use a placeholder DSN that
- * resolves to localhost — for example:
- *
- *   SENTRY_DSN=http://public@localhost:8969/1
- *
- * Or configure your SDK's transport to send to `http://localhost:8969/stream`.
+ * Learn more: https://spotlightjs.com/docs/getting-started/
  *
  * The command runs until interrupted (Ctrl-C / SIGTERM).
  */
@@ -52,7 +47,7 @@ import {
 } from "../lib/formatters/colors.js";
 import { logger } from "../lib/logger.js";
 
-const log = logger.withTag("local");
+const log = logger;
 
 /** Default port matches Spotlight's `DEFAULT_PORT`. */
 const DEFAULT_PORT = 8969;
@@ -608,11 +603,64 @@ function waitForShutdown(server: Server): Promise<void> {
   });
 }
 
+/** Maximum number of consecutive ports to try before giving up. */
+const MAX_PORT_ATTEMPTS = 10;
+
+/**
+ * Try to start the HTTP server, auto-incrementing the port on EADDRINUSE.
+ *
+ * `@hono/node-server`'s `serve()` calls `server.listen()` synchronously and
+ * returns immediately — the actual bind happens asynchronously. We wrap it in
+ * a Promise that resolves on the `listening` event and rejects on `error`.
+ * When the port is busy we bump the port number and retry up to
+ * {@link MAX_PORT_ATTEMPTS} times, warning the user on each bump.
+ */
+function tryListen(
+  app: Hono,
+  startPort: number,
+  hostname: string
+): Promise<{ server: Server; port: number }> {
+  let port = startPort;
+  let attempts = 0;
+
+  const attempt = (): Promise<{ server: Server; port: number }> =>
+    new Promise((resolve, reject) => {
+      const server = serve({
+        fetch: app.fetch,
+        port,
+        hostname,
+      }) as unknown as Server;
+
+      server.once("listening", () => resolve({ server, port }));
+      server.once("error", (err: NodeJS.ErrnoException) => {
+        if (err.code === "EADDRINUSE") {
+          attempts += 1;
+          if (attempts >= MAX_PORT_ATTEMPTS) {
+            reject(
+              new ValidationError(
+                `Port ${startPort} is in use and no open port found after ${MAX_PORT_ATTEMPTS} attempts`,
+                "port"
+              )
+            );
+            return;
+          }
+          log.warn(`Port ${port} is in use, trying ${port + 1}...`);
+          port += 1;
+          resolve(attempt());
+          return;
+        }
+        reject(err);
+      });
+    });
+
+  return attempt();
+}
+
 export const localCommand = buildCommand({
   docs: {
-    brief: "Run a local Spotlight sidecar to capture dev SDK events",
+    brief: "Run a local Spotlight server to capture dev SDK events",
     fullDescription:
-      "Start a local Spotlight-compatible sidecar server.\n\n" +
+      "Start a local Spotlight-compatible server.\n\n" +
       "Spotlight is Sentry for Development — it gives you a live view of\n" +
       "errors, traces, and logs emitted by Sentry SDKs in your dev stack.\n" +
       "This command runs a minimal Hono server that ingests envelopes\n" +
@@ -622,8 +670,7 @@ export const localCommand = buildCommand({
       "  POST /api/{projectId}/envelope/       — Sentry SDK ingest\n" +
       "  GET  /stream                          — SSE feed (for the Spotlight overlay)\n" +
       "  GET  /health                          — health check\n\n" +
-      "Configure your SDK to send to the sidecar with a localhost DSN, e.g.:\n" +
-      "  SENTRY_DSN=http://public@localhost:8969/1\n\n" +
+      "Learn more: https://spotlightjs.com/docs/getting-started/\n\n" +
       "Press Ctrl-C to stop the server.",
   },
   // No `output` config: this is a long-running server, not a data command.
@@ -689,30 +736,25 @@ export const localCommand = buildCommand({
       // now; future hooks (e.g. metrics, file logging) can plug in here.
     });
 
-    // `serve` returns a Node http.Server — we use it for graceful shutdown.
-    const server = serve({
-      fetch: app.fetch,
-      port: flags.port,
-      hostname: flags.host,
-    }) as unknown as Server;
-
-    const url = `http://${flags.host}:${flags.port}`;
-    log.info(`Spotlight sidecar listening on ${bold(url)}`);
-    log.info(`  ${muted("Ingest:")} POST ${url}/stream`);
-    log.info(`  ${muted("Stream:")} GET  ${url}/stream`);
-    log.info(`  ${muted("Health:")} GET  ${url}/health`);
-    log.info(`Point your SDK at ${bold(`${url}/stream`)} or use a DSN like:`);
-    log.info(
-      `  ${muted(`SENTRY_DSN=${url.replace("http://", "http://public@")}/1`)}`
+    const { server, port: boundPort } = await tryListen(
+      app,
+      flags.port,
+      flags.host
     );
+
+    const url = `http://${flags.host}:${boundPort}`;
+    log.info(`Listening on ${bold(url)}`);
     if (activeFilters.size > 0) {
       log.info(`Filtering: ${[...activeFilters].join(", ")}`);
     }
+    log.info(
+      `Learn more about Spotlight: ${bold("https://spotlightjs.com/docs/getting-started/")}`
+    );
     log.info("Press Ctrl-C to stop.");
 
     // Block until the user interrupts. We don't yield any CommandOutput
     // because there's no structured payload — this command is a server.
     await waitForShutdown(server);
-    log.info("Sidecar stopped.");
+    log.info("Server stopped.");
   },
 });
