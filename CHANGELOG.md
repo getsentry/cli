@@ -1,6 +1,47 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.34.0
+
+### New Features ✨
+
+#### Init
+
+- Tag wizard.outcome:context_error for non-interactive failures by @betegon in [#959](https://github.com/getsentry/cli/pull/959)
+- Tag wizard.outcome on cli.command span by @betegon in [#948](https://github.com/getsentry/cli/pull/948)
+
+#### Other
+
+- (docs) Add Plausible analytics by @sergical in [#964](https://github.com/getsentry/cli/pull/964)
+- (explore) Add --metric flag for auto-resolving tracemetrics format by @MathurAditya724 in [#927](https://github.com/getsentry/cli/pull/927)
+- (seer) Send referrer 'api.cli' on autofix API calls by @sentry-junior in [#965](https://github.com/getsentry/cli/pull/965)
+- Migrate autofix to agent-based (explorer) endpoint by @MathurAditya724 in [#962](https://github.com/getsentry/cli/pull/962)
+- Show upgrade nudge when command fails and newer version exists by @MathurAditya724 in [#957](https://github.com/getsentry/cli/pull/957)
+
+### Bug Fixes 🐛
+
+#### Init
+
+- Recover gracefully when org listing returns 403 by @betegon in [#963](https://github.com/getsentry/cli/pull/963)
+- Recover from stale-step resume when workflow already advanced by @betegon in [#949](https://github.com/getsentry/cli/pull/949)
+- Recover from member project-creation restriction by @betegon in [#960](https://github.com/getsentry/cli/pull/960)
+- Thread existing project platform as detect-platform hint by @betegon in [#945](https://github.com/getsentry/cli/pull/945)
+- Correct step display order in progress checklist by @betegon in [#944](https://github.com/getsentry/cli/pull/944)
+
+#### Plan
+
+- Surface context when Seer produces no solution by @MathurAditya724 in [#953](https://github.com/getsentry/cli/pull/953)
+- Only show progress from current step by @MathurAditya724 in [#954](https://github.com/getsentry/cli/pull/954)
+
+#### Other
+
+- (telemetry) Use startSpan instead of startSpanManual for root span by @MathurAditya724 in [#955](https://github.com/getsentry/cli/pull/955)
+- (tls) Apply custom CA certificates to all fetch call sites (CLI-1KW) by @BYK in [#966](https://github.com/getsentry/cli/pull/966)
+
+### Internal Changes 🔧
+
+- Regenerate docs by @github-actions[bot] in [e9f3a7aa](https://github.com/getsentry/cli/commit/e9f3a7aa1ea0ee270eeda044c45360688b70afd7)
+
 ## 0.33.0
 
 ### New Features ✨
