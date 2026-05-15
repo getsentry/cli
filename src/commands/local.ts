@@ -666,7 +666,9 @@ function tryListen(
  */
 async function isServerRunning(url: string): Promise<boolean> {
   try {
-    const res = await fetch(`${url}/health`);
+    const res = await fetch(`${url}/health`, {
+      signal: AbortSignal.timeout(2000),
+    });
     return res.ok;
   } catch (err) {
     logger.debug(
