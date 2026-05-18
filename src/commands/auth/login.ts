@@ -355,7 +355,6 @@ export const loginCommand = buildCommand({
 
     refuseLoginToUntrustedHost(flags, effectiveHost, urlFromRc);
 
-    // Check if already authenticated and handle re-authentication
     if (isAuthenticated()) {
       const shouldProceed = await handleExistingAuth(flags.force);
       if (!shouldProceed) {
@@ -363,25 +362,21 @@ export const loginCommand = buildCommand({
       }
     }
 
-    // Clear stale cached responses from a previous session
     try {
       await clearResponseCache();
     } catch {
       // Non-fatal: cache directory may not exist
     }
 
-    // Token-based authentication
     if (flags.token) {
       // Save token first (with host scope), then validate by fetching user regions
       await setAuthToken(flags.token, undefined, undefined, {
         host: effectiveHost,
       });
 
-      // Validate token by fetching user regions
       try {
         await getUserRegions();
       } catch {
-        // Token is invalid - clear it and throw
         await clearAuth();
         throw new AuthError(
           "invalid",
@@ -389,7 +384,6 @@ export const loginCommand = buildCommand({
         );
       }
 
-      // Login succeeded — persist default URL for subsequent invocations.
       persistLoginUrlAsDefault(flags.url, effectiveHost);
 
       // Fetch and cache user info via /auth/ (works with all token types).
@@ -423,10 +417,7 @@ export const loginCommand = buildCommand({
     });
 
     if (result) {
-      // Login succeeded — persist default URL for subsequent invocations.
       persistLoginUrlAsDefault(flags.url, effectiveHost);
-      // Warm the org + region cache so the first real command is fast.
-      // Fire-and-forget — login already succeeded, caching is best-effort.
       warmOrgCache();
       yield new CommandOutput(result);
       return { hint: rcTokenHint(rcConfig, urlFromRc, effectiveHost) };
