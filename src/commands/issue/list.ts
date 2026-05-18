@@ -1165,7 +1165,7 @@ function build403Detail(originalDetail: unknown): string {
         : `Your ${getActiveEnvVarName()} token may lack the required scopes`;
     lines.push(
       `  • ${leader} (${scopeList})`,
-      "  • Check token scopes at: https://sentry.io/settings/auth-tokens/"
+      "  • Check token scopes at: https://sentry.io/settings/account/api/auth-tokens/"
     );
   } else {
     lines.push("  • Re-authenticate with: sentry auth login");

@@ -317,6 +317,48 @@ describe("resolveInitContext", () => {
     expect(feedbackOutcomes(calls)).toEqual(["cancelled"]);
   });
 
+  test("surfaces 403 guidance when listOrganizations is forbidden", async () => {
+    resolveOrgPrefetchedSpy.mockResolvedValue(null);
+    listOrganizationsSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Failed to list organizations",
+        403,
+        "You do not have permission."
+      )
+    );
+
+    const { ui, calls } = createMockUI();
+    await expect(
+      resolveInitContext(makeOptions({ yes: true }), ui)
+    ).rejects.toThrow("403 Forbidden");
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toContain("403 Forbidden");
+    expect(errorCall?.message).toContain("sentry init <org-slug>/");
+  });
+
+  test("surfaces 401 guidance when listOrganizations is unauthorized", async () => {
+    resolveOrgPrefetchedSpy.mockResolvedValue(null);
+    listOrganizationsSpy.mockRejectedValueOnce(
+      new ApiError("Failed to list organizations", 401, "Token expired")
+    );
+
+    const { ui, calls } = createMockUI();
+    await expect(
+      resolveInitContext(makeOptions({ yes: true }), ui)
+    ).rejects.toThrow("401 Unauthorized");
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toContain("401 Unauthorized");
+    expect(errorCall?.message).toContain("Token expired");
+  });
+
   test("includes the auth token in the resolved context", async () => {
     const { ui } = createMockUI();
     const context = await resolveInitContext(makeOptions(), ui);

@@ -64,7 +64,7 @@ function enrich403Detail(rawDetail: string | undefined): string {
       );
     }
     lines.push(
-      "Check token scopes at: https://sentry.io/settings/auth-tokens/"
+      "Check token scopes at: https://sentry.io/settings/account/api/auth-tokens/"
     );
   } else {
     lines.push(
@@ -73,6 +73,70 @@ function enrich403Detail(rawDetail: string | undefined): string {
     );
   }
   return lines.join("\n  ");
+}
+
+/**
+ * Enrich a 401 Unauthorized error detail with actionable guidance.
+ *
+ * 401 means the token is missing, invalid, or expired — the identity cannot
+ * be determined at all. Distinct from 403 (identity known, lacks permission).
+ * Scope hints do not apply; the fix is always to re-authenticate or regenerate
+ * the token.
+ *
+ * The Sentry API returns distinct `detail` strings we can branch on:
+ * `"Token expired"` when the token is past its expiry date, `"Invalid token"`
+ * when it is not found or malformed. We use this to give a more precise message
+ * for env-var token users.
+ *
+ * For OAuth users the token lifecycle is transparent — `sentry-client.ts`
+ * intercepts 401s and refreshes automatically. A 401 that reaches this function
+ * means refresh failed and the user needs to re-authenticate via the browser.
+ *
+ * @see https://github.com/getsentry/sentry/blob/934f1473f198a62f9268d7140b80cd9ca1e59bb9/src/sentry/api/authentication.py#L536-L539
+ */
+function enrich401Detail(rawDetail: string | undefined): string {
+  const lines: string[] = [];
+  if (rawDetail) {
+    lines.push(rawDetail, "");
+  }
+  if (isEnvTokenActive()) {
+    const expired = rawDetail?.toLowerCase().includes("expired");
+    lines.push(
+      `Your ${getActiveEnvVarName()} token ${expired ? "has expired" : "is not recognized or has been revoked"}.`,
+      "Create a new token at: https://sentry.io/settings/account/api/auth-tokens/"
+    );
+  } else {
+    lines.push(
+      "Not authenticated or your session has expired.",
+      "Re-authenticate with: sentry auth login"
+    );
+  }
+  return lines.join("\n  ");
+}
+
+/**
+ * Select and apply status-specific detail enrichment.
+ *
+ * Extracted from {@link throwApiError} and {@link throwRawApiError} to keep
+ * their cognitive complexity within the linter limit. 403 and 401 get
+ * actionable guidance; all other statuses pass the raw detail through.
+ *
+ * `hasUsableDetail` controls whether the raw detail string is forwarded to
+ * the enrichment functions — passing `undefined` when false lets them render
+ * without a noisy `{"detail":null}` prefix.
+ */
+function enrichDetail(
+  status: number,
+  detail: string | undefined,
+  hasUsableDetail: boolean
+): string | undefined {
+  if (status === 403) {
+    return enrich403Detail(hasUsableDetail ? detail : undefined);
+  }
+  if (status === 401) {
+    return enrich401Detail(hasUsableDetail ? detail : undefined);
+  }
+  return detail;
 }
 
 /**
@@ -127,10 +191,9 @@ export function throwApiError(
       ? (error as { detail: unknown }).detail
       : undefined;
   const hasUsableDetail = rawDetail !== null && rawDetail !== undefined;
-  // When the API returns `{ detail: null }` or `{ detail: undefined }`,
-  // fall back to stringifying the whole error object for non-403 errors
-  // (useful for debugging). For 403s, pass undefined to enrich403Detail
-  // so the enrichment stands alone without a noisy `{}` prefix.
+  // Enrichment functions (enrich403Detail, enrich401Detail) render better
+  // when rawDetail is undefined — they stand alone without a noisy `{}`
+  // prefix. For all other statuses, stringify the full error as a debug aid.
   const detail = hasUsableDetail
     ? stringifyUnknown(rawDetail)
     : stringifyUnknown(error);
@@ -139,7 +202,7 @@ export function throwApiError(
   throw new ApiError(
     `${context}: ${status} ${response.statusText ?? "Unknown"}`,
     status,
-    is403 ? enrich403Detail(hasUsableDetail ? detail : undefined) : detail,
+    enrichDetail(status, detail, hasUsableDetail),
     undefined,
     is403
   );
@@ -443,13 +506,13 @@ async function throwRawApiError(
     const text = await response.text();
     try {
       const parsed = JSON.parse(text) as { detail?: string };
-      // Prefer the explicit `detail` field; fall back to the full JSON
-      // for non-403 errors (useful for debugging). For 403s, pass
-      // undefined so enrich403Detail stands alone without a noisy
-      // `{"detail":null}` prefix.
+      // Enriched statuses (403, 401) pass undefined when there is no
+      // usable string detail so the enrichment renders without a noisy
+      // `{"detail":null}` prefix. Other statuses get the full JSON as
+      // a debug aid.
       if (typeof parsed.detail === "string") {
         detail = parsed.detail;
-      } else if (response.status !== 403) {
+      } else if (response.status !== 403 && response.status !== 401) {
         detail = JSON.stringify(parsed);
       }
     } catch {
@@ -476,7 +539,7 @@ async function throwRawApiError(
   throw new ApiError(
     `API request failed: ${response.status} ${response.statusText}`,
     response.status,
-    is403 ? enrich403Detail(detail) : detail,
+    enrichDetail(response.status, detail, detail !== undefined),
     endpoint,
     is403
   );
