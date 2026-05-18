@@ -181,7 +181,8 @@ async function resolveRcContext(
  * no URL is set in the rc file (global SaaS token) or the rc URL matches
  * effectiveHost. A mismatched URL means the token is for a different instance.
  */
-function rcTokenHint(
+/** @internal exported for testing */
+export function rcTokenHint(
   rcConfig: SentryCliRcConfig,
   effectiveHost: string
 ): string | undefined {

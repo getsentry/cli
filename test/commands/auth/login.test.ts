@@ -79,6 +79,7 @@ mock.module("../../../src/lib/logger.js", () => ({
 // Dynamic import: must run AFTER mock.module() so login.ts picks up fakeLog.
 const { loginCommand } = await import("../../../src/commands/auth/login.js");
 
+import { rcTokenHint } from "../../../src/commands/auth/login.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -88,6 +89,7 @@ import * as dbUser from "../../../src/lib/db/user.js";
 import { AuthError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as interactiveLogin from "../../../src/lib/interactive-login.js";
+import type { SentryCliRcConfig } from "../../../src/lib/sentryclirc.js";
 
 type LoginFlags = {
   readonly token?: string;
@@ -778,5 +780,54 @@ describe("applyLoginUrl (trust anchor registration)", () => {
         "https://evil.com/oauth/device/code/"
       )
     ).toBe(false);
+  });
+});
+
+function makeRcConfig(
+  token: string | undefined,
+  url?: string
+): SentryCliRcConfig {
+  return {
+    token,
+    url,
+    sources: { token: token ? "~/.sentryclirc" : undefined },
+  };
+}
+
+describe("rcTokenHint", () => {
+  test("no token → no hint", () => {
+    expect(
+      rcTokenHint(makeRcConfig(undefined), "https://sentry.io")
+    ).toBeUndefined();
+  });
+
+  test("SaaS host, no rc URL → hint without --url", () => {
+    const hint = rcTokenHint(makeRcConfig("sntrys_abc"), "https://sentry.io");
+    expect(hint).toContain("sentry auth login --token <token>");
+    expect(hint).not.toContain("--url");
+  });
+
+  test("self-hosted, rc URL matches → hint includes --url", () => {
+    const hint = rcTokenHint(
+      makeRcConfig("sntrys_abc", "https://self.example.com"),
+      "https://self.example.com"
+    );
+    expect(hint).toContain("--url https://self.example.com");
+  });
+
+  test("self-hosted, rc URL mismatches → no hint (token is for a different instance)", () => {
+    const hint = rcTokenHint(
+      makeRcConfig("sntrys_abc", "https://other.example.com"),
+      "https://self.example.com"
+    );
+    expect(hint).toBeUndefined();
+  });
+
+  test("self-hosted, no rc URL → no hint (bare SaaS token shouldn't be suggested for self-hosted)", () => {
+    const hint = rcTokenHint(
+      makeRcConfig("sntrys_abc"),
+      "https://self.example.com"
+    );
+    expect(hint).toBeUndefined();
   });
 });
