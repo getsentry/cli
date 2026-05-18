@@ -179,13 +179,16 @@ async function resolveRcContext(
  */
 function rcTokenHint(
   rcConfig: SentryCliRcConfig,
-  urlFromRc: string | undefined,
   effectiveHost: string
 ): string | undefined {
   if (!rcConfig.token) {
     return;
   }
-  const urlHint = urlFromRc ? ` --url ${effectiveHost}` : "";
+  // Always include --url for self-hosted instances regardless of how the host
+  // was supplied — omitting it would point the user at SaaS instead.
+  const urlHint = isSaaSTrustOrigin(effectiveHost)
+    ? ""
+    : ` --url ${effectiveHost}`;
   return (
     `Found a token in .sentryclirc (${rcConfig.sources.token}). ` +
     `To skip OAuth next time: sentry auth login --token <token>${urlHint}`
@@ -420,7 +423,7 @@ export const loginCommand = buildCommand({
       persistLoginUrlAsDefault(flags.url, effectiveHost);
       warmOrgCache();
       yield new CommandOutput(result);
-      return { hint: rcTokenHint(rcConfig, urlFromRc, effectiveHost) };
+      return { hint: rcTokenHint(rcConfig, effectiveHost) };
     }
     // Error already displayed by runInteractiveLogin
     process.exitCode = 1;
