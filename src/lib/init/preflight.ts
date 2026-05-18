@@ -404,7 +404,11 @@ async function resolveOrgSlug(
     const slugs = orgs.map((org) => org.slug).join(", ");
     return {
       ok: false,
-      error: `Multiple organizations found (${slugs}). Set SENTRY_ORG to specify which one.`,
+      error: [
+        `Multiple organizations found (${slugs}).`,
+        "Specify one with: sentry init <org-slug>/ [directory]",
+        "  or set SENTRY_ORG=<org-slug>",
+      ].join("\n"),
     };
   }
 
