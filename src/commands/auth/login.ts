@@ -173,22 +173,22 @@ async function resolveRcContext(
 }
 
 /**
- * When the user is about to start an OAuth flow but `.sentryclirc` already
- * has a token, surface the faster `--token` path as a one-line tip.
+ * Returns a hint string when .sentryclirc contains a token the user could
+ * pass directly via --token instead of going through the OAuth flow.
+ * Returned as a footer hint so it appears after login completes, not before.
  */
-function maybeWarnRcToken(
+function rcTokenHint(
   rcConfig: Awaited<ReturnType<typeof loadSentryCliRc>>,
   urlFromRc: string | undefined,
   effectiveHost: string
-): void {
+): string | undefined {
   if (!rcConfig.token) {
     return;
   }
-  const masked = "<token>";
   const urlHint = urlFromRc ? ` --url ${effectiveHost}` : "";
-  log.info(
-    `Tip: Found a token in .sentryclirc (${rcConfig.sources.token}). ` +
-      `To use it: sentry auth login --token ${masked}${urlHint}`
+  return (
+    `Found a token in .sentryclirc (${rcConfig.sources.token}). ` +
+    `To skip OAuth next time: sentry auth login --token <token>${urlHint}`
   );
 }
 
@@ -363,11 +363,6 @@ export const loginCommand = buildCommand({
       }
     }
 
-    // If going through the OAuth flow but .sentryclirc has a token, tip the user.
-    if (!flags.token) {
-      maybeWarnRcToken(rcConfig, urlFromRc, effectiveHost);
-    }
-
     // Clear stale cached responses from a previous session
     try {
       await clearResponseCache();
@@ -434,10 +429,10 @@ export const loginCommand = buildCommand({
       // Fire-and-forget — login already succeeded, caching is best-effort.
       warmOrgCache();
       yield new CommandOutput(result);
-    } else {
-      // Error already displayed by runInteractiveLogin
-      process.exitCode = 1;
+      return { hint: rcTokenHint(rcConfig, urlFromRc, effectiveHost) };
     }
+    // Error already displayed by runInteractiveLogin
+    process.exitCode = 1;
   },
 });
 
