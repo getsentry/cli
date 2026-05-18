@@ -19,6 +19,19 @@ Create a new project
 - `-t, --team <value> - Team to create the project under`
 - `-n, --dry-run - Show what would happen without making changes`
 
+**Examples:**
+
+```bash
+# Create a new project
+sentry project create my-new-app javascript-nextjs
+
+# Create under a specific org and team
+sentry project create my-org/my-new-app python --team backend-team
+
+# Preview without creating
+sentry project create my-new-app node --dry-run
+```
+
 ### `sentry project delete <org/project>`
 
 Delete a project
@@ -27,6 +40,16 @@ Delete a project
 - `-y, --yes - Skip confirmation prompt`
 - `-f, --force - Force the operation without confirmation`
 - `-n, --dry-run - Show what would happen without making changes`
+
+**Examples:**
+
+```bash
+# Delete a project (will prompt for confirmation)
+sentry project delete my-org/old-project
+
+# Delete without confirmation
+sentry project delete my-org/old-project --yes
+```
 
 ### `sentry project list <org/project>`
 
@@ -45,5 +68,21 @@ View details of a project
 **Flags:**
 - `-w, --web - Open in browser`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+
+**Examples:**
+
+```bash
+# List all projects in an org
+sentry project list my-org/
+
+# Filter by platform
+sentry project list my-org/ --platform javascript
+
+# View project details
+sentry project view my-org/frontend
+
+# Open project in browser
+sentry project view my-org/frontend -w
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
