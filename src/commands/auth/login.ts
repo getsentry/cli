@@ -191,12 +191,13 @@ function rcTokenHint(
   const rcUrl = rcConfig.url
     ? normalizeOrigin(normalizeUrl(rcConfig.url))
     : undefined;
-  if (rcUrl) {
-    // rc has an explicit URL — only hint if it matches the current host
-    if (rcUrl !== normalizeOrigin(effectiveHost)) return;
-  } else {
-    // No URL in rc — assume a bare SaaS token; don't hint on self-hosted
-    if (!isSaaSTrustOrigin(effectiveHost)) return;
+  // Token is for a different host — don't suggest it
+  if (rcUrl && rcUrl !== normalizeOrigin(effectiveHost)) {
+    return;
+  }
+  // No URL in rc means a bare SaaS token — don't suggest it for self-hosted
+  if (!(rcUrl || isSaaSTrustOrigin(effectiveHost))) {
+    return;
   }
   // Always include --url for self-hosted instances regardless of how the host
   // was supplied — omitting it would point the user at SaaS instead.
