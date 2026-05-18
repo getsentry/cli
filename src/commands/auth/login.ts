@@ -42,7 +42,10 @@ import {
   normalizeOrigin,
   normalizeUserInputToOrigin,
 } from "../../lib/sentry-urls.js";
-import { loadSentryCliRc } from "../../lib/sentryclirc.js";
+import {
+  loadSentryCliRc,
+  type SentryCliRcConfig,
+} from "../../lib/sentryclirc.js";
 import {
   isLoginTrustAnchorFor,
   registerLoginTrustAnchor,
@@ -153,7 +156,7 @@ async function resolveRcContext(
   cwd: string,
   effectiveHost: string
 ): Promise<{
-  rcConfig: Awaited<ReturnType<typeof loadSentryCliRc>>;
+  rcConfig: SentryCliRcConfig;
   urlFromRc: string | undefined;
 }> {
   const rcConfig = await loadSentryCliRc(cwd);
@@ -175,7 +178,7 @@ async function resolveRcContext(
  * Returned as a footer hint so it appears after login completes, not before.
  */
 function rcTokenHint(
-  rcConfig: Awaited<ReturnType<typeof loadSentryCliRc>>,
+  rcConfig: SentryCliRcConfig,
   urlFromRc: string | undefined,
   effectiveHost: string
 ): string | undefined {
