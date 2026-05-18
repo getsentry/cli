@@ -42,6 +42,7 @@ import {
   normalizeOrigin,
   normalizeUserInputToOrigin,
 } from "../../lib/sentry-urls.js";
+import { loadSentryCliRc } from "../../lib/sentryclirc.js";
 import {
   isLoginTrustAnchorFor,
   registerLoginTrustAnchor,
@@ -115,10 +116,15 @@ export function parseLoginUrl(raw: string): string {
  * a trusted source (`--url` flag or boot-time env snapshot), so "no
  * matching anchor" is the load-bearing signal that the host arrived via
  * an untrusted channel.
+ *
+ * @param rcSource - Path of the `.sentryclirc` file that provided the URL,
+ *   if that's where the host came from. Used to produce a more actionable
+ *   error message pointing at the specific file.
  */
 function refuseLoginToUntrustedHost(
   flags: LoginFlags,
-  effectiveHost: string
+  effectiveHost: string,
+  rcSource?: string
 ): void {
   if (
     flags.url ||
@@ -127,11 +133,62 @@ function refuseLoginToUntrustedHost(
   ) {
     return;
   }
-  const tokenHint = flags.token ? " --token <token>" : "";
+  const tokenFlag = flags.token ? ` --token ${flags.token.slice(0, 8)}…` : "";
+  const sourceClause = rcSource
+    ? `this URL was read from .sentryclirc (${rcSource}) but hasn't been confirmed as trusted yet`
+    : "--url was not provided";
   throw new HostScopeError(
-    `Refusing to log in against ${effectiveHost} without explicit --url.\n` +
-      "Pass the host explicitly to confirm you trust it:\n" +
-      `  sentry auth login --url ${effectiveHost}${tokenHint}`
+    `Refusing to log in against ${effectiveHost} — ${sourceClause}.\n\n` +
+      "To authenticate against this self-hosted instance, confirm the host explicitly:\n" +
+      `  sentry auth login --url ${effectiveHost}${tokenFlag}`
+  );
+}
+
+/**
+ * Resolve which `.sentryclirc` file (if any) provided the effective host, and
+ * return its path alongside the full rc config for downstream use.
+ *
+ * Separating this into its own function keeps {@link loginCommand}'s `func`
+ * complexity within limits.
+ */
+async function resolveRcContext(
+  flagUrl: string | undefined,
+  cwd: string,
+  effectiveHost: string
+): Promise<{
+  rcConfig: Awaited<ReturnType<typeof loadSentryCliRc>>;
+  urlFromRc: string | undefined;
+}> {
+  const rcConfig = await loadSentryCliRc(cwd);
+  const rcUrlNormalized = rcConfig.url
+    ? normalizeOrigin(normalizeUrl(rcConfig.url))
+    : undefined;
+  const urlFromRc =
+    !flagUrl &&
+    !!rcUrlNormalized &&
+    normalizeOrigin(effectiveHost) === rcUrlNormalized
+      ? rcConfig.sources.url
+      : undefined;
+  return { rcConfig, urlFromRc };
+}
+
+/**
+ * When the user is about to start an OAuth flow but `.sentryclirc` already
+ * has a token, surface the faster `--token` path as a one-line tip.
+ */
+function maybeWarnRcToken(
+  rcConfig: Awaited<ReturnType<typeof loadSentryCliRc>>,
+  urlFromRc: string | undefined,
+  effectiveHost: string
+): void {
+  if (!rcConfig.token) {
+    return;
+  }
+  const masked = `${rcConfig.token.slice(0, 8)}…`;
+  const urlHint = urlFromRc ? ` --url ${effectiveHost}` : "";
+  log.info(
+    `Tip: Found a token in .sentryclirc (${rcConfig.sources.token}). ` +
+      `To use it: sentry auth login --token ${masked}${urlHint}`
   );
 }
 
@@ -287,7 +344,16 @@ export const loginCommand = buildCommand({
     // requested instance. Default URL persistence is deferred until login
     // succeeds — see persistLoginUrlAsDefault calls below.
     const effectiveHost = applyLoginUrl(flags.url);
-    refuseLoginToUntrustedHost(flags, effectiveHost);
+
+    // Check whether the effective URL came from .sentryclirc so we can name
+    // the source file in trust-refusal errors and show a migration tip.
+    const { rcConfig, urlFromRc } = await resolveRcContext(
+      flags.url,
+      process.cwd(),
+      effectiveHost
+    );
+
+    refuseLoginToUntrustedHost(flags, effectiveHost, urlFromRc);
 
     // Check if already authenticated and handle re-authentication
     if (isAuthenticated()) {
@@ -295,6 +361,11 @@ export const loginCommand = buildCommand({
       if (!shouldProceed) {
         return;
       }
+    }
+
+    // If going through the OAuth flow but .sentryclirc has a token, tip the user.
+    if (!flags.token) {
+      maybeWarnRcToken(rcConfig, urlFromRc, effectiveHost);
     }
 
     // Clear stale cached responses from a previous session
