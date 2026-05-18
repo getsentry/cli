@@ -82,6 +82,7 @@ type InitFlags = {
   readonly "dry-run": boolean;
   readonly features?: string[];
   readonly team?: string;
+  readonly app?: string;
   /**
    * Default `true` — Ink is the default UI on both the Bun binary
    * and the npm/Node distribution. Stricli auto-generates a negated
@@ -336,6 +337,13 @@ export const initCommand = buildCommand<
         brief: "Team slug to create the project under",
         optional: true,
       },
+      app: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "App to initialize in a monorepo (required with --yes when multiple apps are detected)",
+        optional: true,
+      },
       tui: {
         kind: "boolean",
         brief:
@@ -406,6 +414,7 @@ export const initCommand = buildCommand<
         dryRun: flags["dry-run"],
         features: featuresList,
         team: flags.team,
+        app: flags.app,
         org: explicitOrg,
         project: explicitProject,
         // `flags.tui` defaults to `true`. `--no-tui` (auto-generated
