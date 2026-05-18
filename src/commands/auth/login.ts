@@ -147,9 +147,6 @@ function refuseLoginToUntrustedHost(
 /**
  * Resolve which `.sentryclirc` file (if any) provided the effective host, and
  * return its path alongside the full rc config for downstream use.
- *
- * Separating this into its own function keeps {@link loginCommand}'s `func`
- * complexity within limits.
  */
 async function resolveRcContext(
   flagUrl: string | undefined,
