@@ -176,12 +176,22 @@ async function resolveRcContext(
  * Returns a hint string when .sentryclirc contains a token the user could
  * pass directly via --token instead of going through the OAuth flow.
  * Returned as a footer hint so it appears after login completes, not before.
+ *
+ * Only shown when the stored token is plausibly for the current host: either
+ * no URL is set in the rc file (global SaaS token) or the rc URL matches
+ * effectiveHost. A mismatched URL means the token is for a different instance.
  */
 function rcTokenHint(
   rcConfig: SentryCliRcConfig,
   effectiveHost: string
 ): string | undefined {
   if (!rcConfig.token) {
+    return;
+  }
+  const rcUrl = rcConfig.url
+    ? normalizeOrigin(normalizeUrl(rcConfig.url))
+    : undefined;
+  if (rcUrl && rcUrl !== normalizeOrigin(effectiveHost)) {
     return;
   }
   // Always include --url for self-hosted instances regardless of how the host
