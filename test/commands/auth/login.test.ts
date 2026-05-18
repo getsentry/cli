@@ -77,9 +77,10 @@ mock.module("../../../src/lib/logger.js", () => ({
 }));
 
 // Dynamic import: must run AFTER mock.module() so login.ts picks up fakeLog.
-const { loginCommand } = await import("../../../src/commands/auth/login.js");
+const { loginCommand, rcTokenHint } = await import(
+  "../../../src/commands/auth/login.js"
+);
 
-import { rcTokenHint } from "../../../src/commands/auth/login.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
