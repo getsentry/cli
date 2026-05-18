@@ -59,13 +59,13 @@ export type IssueCollapseField = NonNullable<
 /**
  * Build the `collapse` parameter for issue list API calls.
  *
- * Always collapses fields the CLI never consumes in issue list:
- * `filtered`, `lifetime`, `unhandled`. Conditionally collapses `stats`
- * when sparklines won't be rendered (narrow terminal, non-TTY, or JSON).
+ * Collapses `filtered` and `unhandled` which the CLI never uses in list views.
+ * Does NOT collapse `lifetime` — that suppresses `count`, `userCount`, and
+ * `firstSeen` on the list endpoint, which the CLI needs for table columns
+ * (EVENTS, USERS, AGE) and JSON output.
  *
- * Matches the Sentry web UI's optimization: the initial page load sends
- * `collapse=stats,unhandled` to skip expensive Snuba queries, fetching
- * stats in a follow-up request only when needed.
+ * Conditionally collapses `stats` when sparklines won't be rendered
+ * (narrow terminal, non-TTY, or JSON mode).
  *
  * @param options - Context for determining what to collapse
  * @param options.shouldCollapseStats - Whether stats data can be skipped
@@ -75,7 +75,7 @@ export type IssueCollapseField = NonNullable<
 export function buildIssueListCollapse(options: {
   shouldCollapseStats: boolean;
 }): IssueCollapseField[] {
-  const collapse: IssueCollapseField[] = ["filtered", "lifetime", "unhandled"];
+  const collapse: IssueCollapseField[] = ["filtered", "unhandled"];
   if (options.shouldCollapseStats) {
     collapse.push("stats");
   }
