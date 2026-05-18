@@ -133,7 +133,7 @@ function refuseLoginToUntrustedHost(
   ) {
     return;
   }
-  const tokenFlag = flags.token ? ` --token ${flags.token.slice(0, 8)}…` : "";
+  const tokenFlag = flags.token ? " --token <your-token>" : "";
   const sourceClause = rcSource
     ? `this URL was read from .sentryclirc (${rcSource}) but hasn't been confirmed as trusted yet`
     : "--url was not provided";
@@ -184,7 +184,7 @@ function maybeWarnRcToken(
   if (!rcConfig.token) {
     return;
   }
-  const masked = `${rcConfig.token.slice(0, 8)}…`;
+  const masked = "<token>";
   const urlHint = urlFromRc ? ` --url ${effectiveHost}` : "";
   log.info(
     `Tip: Found a token in .sentryclirc (${rcConfig.sources.token}). ` +
