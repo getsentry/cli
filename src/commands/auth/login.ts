@@ -191,8 +191,12 @@ function rcTokenHint(
   const rcUrl = rcConfig.url
     ? normalizeOrigin(normalizeUrl(rcConfig.url))
     : undefined;
-  if (rcUrl && rcUrl !== normalizeOrigin(effectiveHost)) {
-    return;
+  if (rcUrl) {
+    // rc has an explicit URL — only hint if it matches the current host
+    if (rcUrl !== normalizeOrigin(effectiveHost)) return;
+  } else {
+    // No URL in rc — assume a bare SaaS token; don't hint on self-hosted
+    if (!isSaaSTrustOrigin(effectiveHost)) return;
   }
   // Always include --url for self-hosted instances regardless of how the host
   // was supplied — omitting it would point the user at SaaS instead.
@@ -362,7 +366,7 @@ export const loginCommand = buildCommand({
     // the source file in trust-refusal errors and show a migration tip.
     const { rcConfig, urlFromRc } = await resolveRcContext(
       flags.url,
-      process.cwd(),
+      this.cwd,
       effectiveHost
     );
 
