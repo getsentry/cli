@@ -190,16 +190,37 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
 import inkAppPath from "./ink-app.tsx" with { type: "file" };
 
 /**
- * Open a fresh `/dev/tty` `ReadStream` for Ink to consume. Returns
- * `null` when `/dev/tty` isn't available (non-TTY environment, or
- * platforms that don't expose it — Windows). The caller falls back
- * to `process.stdin` in that case, which works on Node but is
- * broken in Bun-compiled binaries (see module docstring).
+ * Open a fresh TTY `ReadStream` for Ink to consume. Returns `null`
+ * when no TTY device can be opened (non-TTY environment, sandboxed
+ * container, etc.). The caller falls back to `process.stdin` in that
+ * case, which works on Node but is broken in Bun-compiled binaries
+ * (see module docstring).
+ *
+ * On Windows, `/dev/tty` does not exist in native terminals
+ * (CMD.exe, PowerShell, Windows Terminal). The Windows console device
+ * `\\.\CON` is the equivalent — a freshly-opened handle is not fd 0
+ * and should deliver `readable` events correctly, sidestepping the
+ * same Bun inherited-stdin bug (oven-sh/bun#6862) that the `/dev/tty`
+ * workaround addresses on Unix. Git Bash / MSYS2 / Cygwin users already
+ * have `/dev/tty` mapped via their POSIX emulation layer, so they are
+ * unaffected by this branch.
+ *
+ * After opening, `setRawMode(true)` is probed immediately and the
+ * stream is returned to canonical mode. This verifies the handle
+ * actually supports raw mode before we hand it to Ink — on Windows
+ * a read-only `\\.\CON` fd may open successfully but fail `SetConsoleMode`,
+ * which would otherwise surface as a throw inside `mountApp` rather
+ * than here. A failed probe destroys the stream and returns `null` so
+ * the caller falls back gracefully.
  */
 function openFreshTtyForInk(): ReadStream | null {
+  const ttyPath = process.platform === "win32" ? "\\\\.\\CON" : "/dev/tty";
   try {
-    const fd = openSync("/dev/tty", "r");
-    return new ReadStream(fd);
+    const fd = openSync(ttyPath, "r");
+    const stream = new ReadStream(fd);
+    stream.setRawMode(true);
+    stream.setRawMode(false);
+    return stream;
   } catch {
     return null;
   }

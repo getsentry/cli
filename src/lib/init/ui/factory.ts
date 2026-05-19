@@ -29,6 +29,7 @@
  *     companions add a fraction of that and use no native code.
  */
 
+import { addBreadcrumb } from "@sentry/node-core/light";
 import { LoggingUI } from "./logging-ui.js";
 import type { WelcomeOptions, WizardUI } from "./types.js";
 
@@ -102,10 +103,22 @@ export async function getUIAsync(opts: UIFactoryOptions): Promise<WizardUI> {
   try {
     const { createInkUI } = await import("./ink-ui.js");
     return await createInkUI({ initialWelcome: opts.initialWelcome });
-  } catch {
+  } catch (err) {
     // Fall through to LoggingUI so a missing/broken sidecar
     // doesn't take down the wizard. Unreachable on a correctly
     // built package — safety net for corrupted installs.
+    //
+    // Breadcrumb so the actual throw is visible in Sentry — otherwise
+    // only the downstream LoggingUIPromptError appears with no context.
+    addBreadcrumb({
+      category: "init.ui",
+      message: "InkUI creation failed, falling back to LoggingUI",
+      data: {
+        error: String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      },
+      level: "warning",
+    });
     return new LoggingUI();
   }
 }
