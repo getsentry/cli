@@ -61,9 +61,8 @@ export async function handleInteractive(
 type AppEntry = { name: string; path: string; framework?: string };
 
 function formatAppList(apps: AppEntry[], items: string[]): string[] {
-  // Iterate over `items` (the canonical set shown to the user) and look up
-  // path/framework metadata by name. This stays correct even when `payload.options`
-  // and `payload.apps` arrive with different lengths.
+  // Name-based lookup keeps this correct even when payload.options and
+  // payload.apps arrive with different lengths.
   const nameWidth = Math.max(1, ...items.map((n) => n.length));
   return items.map((name) => {
     const meta = apps.find((a) => a.name === name);
@@ -145,8 +144,8 @@ async function handleSelect(
 
   const selected = await ui.select<string>({
     message: payload.prompt,
-    options: items.map((item, i) => {
-      const app = apps[i];
+    options: items.map((item) => {
+      const app = apps.find((a) => a.name === item);
       return {
         value: item,
         label: item,
