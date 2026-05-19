@@ -21,6 +21,10 @@ export type WizardOptions = {
   team?: string;
   org?: string;
   project?: string;
+  /** Pre-selected app name for monorepo runs. When set, skips the interactive
+   * app-selection prompt and uses this value directly. Required when `--yes`
+   * is passed against a monorepo with more than one detected app. */
+  app?: string;
   /**
    * Force the non-Ink fallback (`LoggingUI`). Mapped from
    * `--no-tui`. Acts as an escape hatch when the Ink TUI
@@ -44,11 +48,16 @@ export type ResolvedInitContext = {
    */
   team?: string;
   project?: string;
+  /** Pre-selected app name for monorepo runs. Passed through from `--app`. */
+  app?: string;
   authToken?: string;
   existingProject?: ExistingProjectData;
 };
 
-export type InteractiveContext = Pick<ResolvedInitContext, "yes" | "dryRun">;
+export type InteractiveContext = Pick<
+  ResolvedInitContext,
+  "yes" | "dryRun" | "app"
+>;
 
 // Tool suspend payloads
 export type ToolPayload =

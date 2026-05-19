@@ -99,6 +99,7 @@ function buildResolvedInitContext(
     org,
     team,
     project: selection.project,
+    app: initial.app,
     authToken: getAuthToken(),
     existingProject: selection.existingProject,
   };

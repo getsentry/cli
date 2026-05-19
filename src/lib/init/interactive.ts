@@ -11,6 +11,7 @@
  */
 
 import chalk from "chalk";
+import { WizardError } from "../errors.js";
 import {
   abortIfCancelled,
   featureHint,
@@ -50,8 +51,57 @@ export async function handleInteractive(
     case "confirm":
       return await handleConfirm(payload, options, ui);
     default:
-      return { cancelled: true };
+      throw new WizardError(
+        `Unsupported interactive prompt kind: "${(payload as { kind: string }).kind}"`,
+        { rendered: false }
+      );
   }
+}
+
+type AppEntry = { name: string; path: string; framework?: string };
+
+function formatAppList(apps: AppEntry[], items: string[]): string[] {
+  // Name-based lookup keeps this correct even when payload.options and
+  // payload.apps arrive with different lengths.
+  const nameWidth = Math.max(1, ...items.map((n) => n.length));
+  return items.map((name) => {
+    const meta = apps.find((a) => a.name === name);
+    const fw = meta?.framework ? ` (${meta.framework})` : "";
+    const path = meta?.path ? `  ${meta.path}` : "";
+    return `  ${name.padEnd(nameWidth)}${fw}${path}`;
+  });
+}
+
+function buildMultiAppMessage(apps: AppEntry[], items: string[]): string {
+  const exampleApp = items[0] ?? "<app>";
+  return [
+    `This monorepo has ${items.length} apps. Use --app to specify which one to initialize:`,
+    "",
+    `  sentry init --yes --features <features> --app ${exampleApp}`,
+    "",
+    "Available apps:",
+    ...formatAppList(apps, items),
+    "",
+    "Or run without --yes to pick interactively:",
+    "  sentry init",
+  ].join("\n");
+}
+
+function buildAppNotFoundMessage(
+  requested: string,
+  apps: AppEntry[],
+  items: string[]
+): string {
+  const exampleApp = items[0] ?? "<app>";
+  return [
+    `App "${requested}" not found in this monorepo.`,
+    "",
+    "Available apps:",
+    ...formatAppList(apps, items),
+    "",
+    "Re-run with --app <name>, for example:",
+    `  sentry init --yes --features <features> --app ${exampleApp}`,
+  ].join("\n");
 }
 
 async function handleSelect(
@@ -63,24 +113,39 @@ async function handleSelect(
   const items = payload.options ?? apps.map((a) => a.name);
 
   if (items.length === 0) {
-    return { cancelled: true };
+    throw new WizardError("No options available for this selection.", {
+      rendered: false,
+    });
   }
 
-  if (options.yes) {
-    if (items.length === 1) {
-      ui.log.info(`Auto-selected: ${items[0]}`);
-      return { selectedApp: items[0] };
-    }
-    ui.log.error(
-      `--yes requires exactly one option for selection, but found ${items.length}. Run interactively to choose.`
+  if (options.app && payload.apps && payload.apps.length > 0) {
+    const match = items.find(
+      (item) => item.toLowerCase() === options.app?.toLowerCase()
     );
-    return { cancelled: true };
+    if (!match) {
+      const message = buildAppNotFoundMessage(options.app, apps, items);
+      ui.log.error(message);
+      throw new WizardError(message, { rendered: true });
+    }
+    ui.log.info(`Using app: ${match}`);
+    return { selectedApp: match };
+  }
+
+  if (options.yes && items.length === 1) {
+    ui.log.info(`Auto-selected: ${items[0]}`);
+    return { selectedApp: items[0] };
+  }
+
+  if (options.yes && payload.apps && payload.apps.length > 0) {
+    const message = buildMultiAppMessage(apps, items);
+    ui.log.error(message);
+    throw new WizardError(message, { rendered: true });
   }
 
   const selected = await ui.select<string>({
     message: payload.prompt,
-    options: items.map((item, i) => {
-      const app = apps[i];
+    options: items.map((item) => {
+      const app = apps.find((a) => a.name === item);
       return {
         value: item,
         label: item,

@@ -227,6 +227,17 @@ async function handleSuspendedStep(
 
     const interactiveResult = await handleInteractive(payload, context, ui);
 
+    // Safety net: { cancelled: true } would send malformed resume data to the
+    // server and produce a cryptic HTTP 500. All interactive handlers should
+    // throw on unresolvable prompts instead of returning this sentinel, but
+    // guard here as well so any future regression fails loudly on the CLI side.
+    if (interactiveResult.cancelled === true) {
+      throw new WizardError(
+        "Setup could not complete: interactive step was not resolved.",
+        { rendered: false }
+      );
+    }
+
     spin.start("Processing...");
     spinState.running = true;
 
