@@ -82,8 +82,12 @@ export function isPlainOutput(): boolean {
 export function stripAnsi(text: string): string {
   return (
     text
+      // Full CSI spec: \x1b[ + parameter bytes (0x30-0x3F) + intermediate
+      // bytes (0x20-0x2F, e.g. space, !, ") + final byte (0x40-0x7E).
+      // The narrower [0-9;?]*[A-Za-z] missed sequences with intermediate
+      // bytes like \x1b[!p (Soft Terminal Reset) or \x1b[1 q (cursor style).
       // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape detection requires matching \x1b
-      .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
+      .replace(/\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g, "")
       // biome-ignore lint/suspicious/noControlCharactersInRegex: OSC 8 hyperlink sequences use \x1b and \x07
       .replace(/\x1b\]8;;[^\x07]*\x07/g, "")
   );

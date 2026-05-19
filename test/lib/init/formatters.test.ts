@@ -320,6 +320,31 @@ describe("formatResult with featureBlurbs", () => {
     expect(summary?.featureBlurbs?.[0]?.blurb).toBe("Captures.");
   });
 
+  test("stripAnsi strips CSI sequences with intermediate bytes (e.g. soft reset, cursor style)", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring"],
+          featureBlurbs: [
+            // \x1b[!p = Soft Terminal Reset (intermediate byte !)
+            // \x1b[1 q = Set Cursor Style (intermediate byte space)
+            {
+              feature: "errorMonitoring",
+              blurb: "\x1b[!pCaptures.\x1b[1 q",
+            },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs?.[0]?.blurb).toBe("Captures.");
+  });
+
   test("stripAnsi strips non-SGR CSI sequences (cursor movement, screen-clear) from blurbs", () => {
     const { ui, calls } = createMockUI();
     formatResult(
