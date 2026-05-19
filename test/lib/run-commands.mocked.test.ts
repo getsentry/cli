@@ -63,10 +63,9 @@ describe("runCommands breadcrumb on failure", () => {
   });
 
   test("does not emit a breadcrumb when the command succeeds", async () => {
-    const result = await runCommands(
-      makePayload(["echo hello"]),
-      { dryRun: false }
-    );
+    const result = await runCommands(makePayload(["echo hello"]), {
+      dryRun: false,
+    });
 
     expect(result.ok).toBe(true);
     expect(breadcrumbs).toHaveLength(0);

@@ -865,7 +865,7 @@ export function handleFinalResult(
     const workflowCode = result.result?.exitCode;
     const exitCode = mapWorkflowExitCode(workflowCode);
     setTag("wizard.outcome", "errored");
-    if (workflowCode != null) {
+    if (workflowCode !== undefined) {
       setTag("wizard.exit_code", workflowCode);
     }
     throw new WizardError(

@@ -7,7 +7,10 @@
  */
 
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import type { WizardOutput, WorkflowRunResult } from "../../src/lib/init/types.js";
+import type {
+  WizardOutput,
+  WorkflowRunResult,
+} from "../../src/lib/init/types.js";
 
 // ============================================================================
 // Mock Setup — must precede all imports of the module under test
@@ -16,24 +19,24 @@ import type { WizardOutput, WorkflowRunResult } from "../../src/lib/init/types.j
 const tags: Record<string, unknown> = {};
 
 mock.module("@sentry/node-core/light", () => ({
-  addBreadcrumb: () => {},
-  captureException: () => {},
+  addBreadcrumb: () => null,
+  captureException: () => null,
   getTraceData: () => ({}),
   setTag: (key: string, value: unknown) => {
     tags[key] = value;
   },
 }));
 
+import { WizardError } from "../../src/lib/errors.js";
 // Import AFTER mock setup so the mocked module is used
 import { handleFinalResult } from "../../src/lib/init/wizard-runner.js";
-import { WizardError } from "../../src/lib/errors.js";
 
 // ============================================================================
 // Test helpers
 // ============================================================================
 
 function makeSpinnerHandle() {
-  return { start: () => {}, stop: () => {} };
+  return { start: () => null, stop: () => null };
 }
 
 function makeSpinState(running = false) {
@@ -42,19 +45,22 @@ function makeSpinState(running = false) {
 
 /** Minimal WizardUI stub — only the methods formatError touches. */
 function makeUI() {
+  const noop = () => null;
   return {
-    log: { error: () => {}, warn: () => {}, info: () => {}, message: () => {} },
-    cancel: () => {},
-    feedback: () => {},
-    summary: () => {},
-    outro: () => {},
-    intro: () => {},
-    setStep: () => {},
-    markFilesAnalyzed: () => {},
+    log: { error: noop, warn: noop, info: noop, message: noop },
+    cancel: noop,
+    feedback: noop,
+    summary: noop,
+    outro: noop,
+    intro: noop,
+    setStep: noop,
+    markFilesAnalyzed: noop,
   } as any;
 }
 
-function makeBailResult(partial: Partial<WizardOutput> = {}): WorkflowRunResult {
+function makeBailResult(
+  partial: Partial<WizardOutput> = {}
+): WorkflowRunResult {
   return {
     status: "success",
     result: { exitCode: 30, ...partial },
@@ -75,11 +81,17 @@ describe("handleFinalResult", () => {
   describe("WizardError message", () => {
     test("uses bail message from result.result.message when present", () => {
       const result = makeBailResult({
-        message: "Dependency installation failed after 5 attempts: pnpm exited with code 1",
+        message:
+          "Dependency installation failed after 5 attempts: pnpm exited with code 1",
       });
 
       expect(() =>
-        handleFinalResult(result, makeSpinnerHandle(), makeSpinState(), makeUI())
+        handleFinalResult(
+          result,
+          makeSpinnerHandle(),
+          makeSpinState(),
+          makeUI()
+        )
       ).toThrow(
         "Dependency installation failed after 5 attempts: pnpm exited with code 1"
       );
@@ -89,7 +101,12 @@ describe("handleFinalResult", () => {
       const result = makeBailResult({ message: undefined });
 
       expect(() =>
-        handleFinalResult(result, makeSpinnerHandle(), makeSpinState(), makeUI())
+        handleFinalResult(
+          result,
+          makeSpinnerHandle(),
+          makeSpinState(),
+          makeUI()
+        )
       ).toThrow("Workflow returned an error");
     });
   });
@@ -99,17 +116,30 @@ describe("handleFinalResult", () => {
       const result = makeBailResult({ exitCode: 11 });
 
       expect(() =>
-        handleFinalResult(result, makeSpinnerHandle(), makeSpinState(), makeUI())
+        handleFinalResult(
+          result,
+          makeSpinnerHandle(),
+          makeSpinState(),
+          makeUI()
+        )
       ).toThrow(WizardError);
 
       expect(tags["wizard.exit_code"]).toBe(11);
     });
 
     test("does not set wizard.exit_code when exitCode is absent", () => {
-      const result: WorkflowRunResult = { status: "failed", error: "network error" };
+      const result: WorkflowRunResult = {
+        status: "failed",
+        error: "network error",
+      };
 
       expect(() =>
-        handleFinalResult(result, makeSpinnerHandle(), makeSpinState(), makeUI())
+        handleFinalResult(
+          result,
+          makeSpinnerHandle(),
+          makeSpinState(),
+          makeUI()
+        )
       ).toThrow(WizardError);
 
       expect(tags["wizard.exit_code"]).toBeUndefined();
@@ -124,7 +154,12 @@ describe("handleFinalResult", () => {
       };
 
       expect(() =>
-        handleFinalResult(result, makeSpinnerHandle(), makeSpinState(), makeUI())
+        handleFinalResult(
+          result,
+          makeSpinnerHandle(),
+          makeSpinState(),
+          makeUI()
+        )
       ).toThrow("upstream network timeout");
     });
   });
