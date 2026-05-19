@@ -869,7 +869,7 @@ export function handleFinalResult(
       setTag("wizard.exit_code", workflowCode);
     }
     throw new WizardError(
-      result.result?.message ?? "Workflow returned an error",
+      result.result?.message ?? result.error ?? "Workflow returned an error",
       { exitCode }
     );
   }

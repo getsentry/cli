@@ -115,4 +115,17 @@ describe("handleFinalResult", () => {
       expect(tags["wizard.exit_code"]).toBeUndefined();
     });
   });
+
+  describe("WizardError message — result.error fallback", () => {
+    test("uses result.error when result.result is absent (plain workflow failure)", () => {
+      const result: WorkflowRunResult = {
+        status: "failed",
+        error: "upstream network timeout",
+      };
+
+      expect(() =>
+        handleFinalResult(result, makeSpinnerHandle(), makeSpinState(), makeUI())
+      ).toThrow("upstream network timeout");
+    });
+  });
 });
