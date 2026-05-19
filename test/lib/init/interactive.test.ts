@@ -9,6 +9,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { handleInteractive } from "../../../src/lib/init/interactive.js";
+import { WizardError } from "../../../src/lib/errors.js";
 import type { InteractiveContext } from "../../../src/lib/init/types.js";
 import { CANCELLED } from "../../../src/lib/init/ui/types.js";
 import { createMockUI } from "./ui/mock-ui.js";
@@ -24,14 +25,15 @@ function makeOptions(
 }
 
 describe("handleInteractive dispatcher", () => {
-  test("returns cancelled for unknown kind", async () => {
+  test("throws WizardError for unknown kind", async () => {
     const { ui } = createMockUI();
-    const result = await handleInteractive(
-      { type: "interactive", prompt: "test", kind: "unknown" as "select" },
-      makeOptions(),
-      ui
-    );
-    expect(result).toEqual({ cancelled: true });
+    await expect(
+      handleInteractive(
+        { type: "interactive", prompt: "test", kind: "unknown" as "select" },
+        makeOptions(),
+        ui
+      )
+    ).rejects.toBeInstanceOf(WizardError);
   });
 });
 
@@ -55,37 +57,37 @@ describe("handleSelect", () => {
     ).toBe(true);
   });
 
-  test("cancels with --yes when multiple options exist", async () => {
+  test("throws WizardError with app list when --yes and multiple options", async () => {
     const { ui, calls } = createMockUI();
-    const result = await handleInteractive(
-      {
-        type: "interactive",
-        prompt: "Choose app",
-        kind: "select",
-        options: ["react", "vue"],
-      },
-      makeOptions({ yes: true }),
-      ui
-    );
-
-    expect(result).toEqual({ cancelled: true });
+    await expect(
+      handleInteractive(
+        {
+          type: "interactive",
+          prompt: "Choose app",
+          kind: "select",
+          options: ["react", "vue"],
+        },
+        makeOptions({ yes: true }),
+        ui
+      )
+    ).rejects.toBeInstanceOf(WizardError);
     expect(calls.some((c) => c.kind === "log.error")).toBe(true);
   });
 
-  test("cancels when options list is empty", async () => {
+  test("throws WizardError when options list is empty", async () => {
     const { ui } = createMockUI();
-    const result = await handleInteractive(
-      {
-        type: "interactive",
-        prompt: "Choose app",
-        kind: "select",
-        options: [],
-      },
-      makeOptions(),
-      ui
-    );
-
-    expect(result).toEqual({ cancelled: true });
+    await expect(
+      handleInteractive(
+        {
+          type: "interactive",
+          prompt: "Choose app",
+          kind: "select",
+          options: [],
+        },
+        makeOptions(),
+        ui
+      )
+    ).rejects.toBeInstanceOf(WizardError);
   });
 
   test("uses apps array names when options not provided", async () => {
