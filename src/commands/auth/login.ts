@@ -43,6 +43,10 @@ import {
   normalizeUserInputToOrigin,
 } from "../../lib/sentry-urls.js";
 import {
+  loadSentryCliRc,
+  type SentryCliRcConfig,
+} from "../../lib/sentryclirc.js";
+import {
   isLoginTrustAnchorFor,
   registerLoginTrustAnchor,
 } from "../../lib/token-host.js";
@@ -115,10 +119,15 @@ export function parseLoginUrl(raw: string): string {
  * a trusted source (`--url` flag or boot-time env snapshot), so "no
  * matching anchor" is the load-bearing signal that the host arrived via
  * an untrusted channel.
+ *
+ * @param rcSource - Path of the `.sentryclirc` file that provided the URL,
+ *   if that's where the host came from. Used to produce a more actionable
+ *   error message pointing at the specific file.
  */
 function refuseLoginToUntrustedHost(
   flags: LoginFlags,
-  effectiveHost: string
+  effectiveHost: string,
+  rcSource?: string
 ): void {
   if (
     flags.url ||
@@ -127,11 +136,78 @@ function refuseLoginToUntrustedHost(
   ) {
     return;
   }
-  const tokenHint = flags.token ? " --token <token>" : "";
+  const tokenFlag = flags.token ? " --token <your-token>" : "";
+  const sourceClause = rcSource
+    ? `this URL was read from .sentryclirc (${rcSource}) but hasn't been confirmed as trusted yet`
+    : "--url was not provided";
   throw new HostScopeError(
-    `Refusing to log in against ${effectiveHost} without explicit --url.\n` +
-      "Pass the host explicitly to confirm you trust it:\n" +
-      `  sentry auth login --url ${effectiveHost}${tokenHint}`
+    `Refusing to log in against ${effectiveHost} — ${sourceClause}.\n\n` +
+      "To authenticate against this self-hosted instance, confirm the host explicitly:\n" +
+      `  sentry auth login --url ${effectiveHost}${tokenFlag}`
+  );
+}
+
+/**
+ * Resolve which `.sentryclirc` file (if any) provided the effective host, and
+ * return its path alongside the full rc config for downstream use.
+ */
+async function resolveRcContext(
+  flagUrl: string | undefined,
+  cwd: string,
+  effectiveHost: string
+): Promise<{
+  rcConfig: SentryCliRcConfig;
+  urlFromRc: string | undefined;
+}> {
+  const rcConfig = await loadSentryCliRc(cwd);
+  const rcUrlNormalized = rcConfig.url
+    ? normalizeOrigin(normalizeUrl(rcConfig.url))
+    : undefined;
+  const urlFromRc =
+    !flagUrl &&
+    !!rcUrlNormalized &&
+    normalizeOrigin(effectiveHost) === rcUrlNormalized
+      ? rcConfig.sources.url
+      : undefined;
+  return { rcConfig, urlFromRc };
+}
+
+/**
+ * Returns a hint string when .sentryclirc contains a token the user could
+ * pass directly via --token instead of going through the OAuth flow.
+ * Returned as a footer hint so it appears after login completes, not before.
+ *
+ * Only shown when the stored token is plausibly for the current host: either
+ * no URL is set in the rc file (global SaaS token) or the rc URL matches
+ * effectiveHost. A mismatched URL means the token is for a different instance.
+ */
+/** @internal exported for testing */
+export function rcTokenHint(
+  rcConfig: SentryCliRcConfig,
+  effectiveHost: string
+): string | undefined {
+  if (!rcConfig.token) {
+    return;
+  }
+  const rcUrl = rcConfig.url
+    ? normalizeOrigin(normalizeUrl(rcConfig.url))
+    : undefined;
+  // Token is for a different host — don't suggest it
+  if (rcUrl && rcUrl !== normalizeOrigin(effectiveHost)) {
+    return;
+  }
+  // No URL in rc means a bare SaaS token — don't suggest it for self-hosted
+  if (!(rcUrl || isSaaSTrustOrigin(effectiveHost))) {
+    return;
+  }
+  // Always include --url for self-hosted instances regardless of how the host
+  // was supplied — omitting it would point the user at SaaS instead.
+  const urlHint = isSaaSTrustOrigin(effectiveHost)
+    ? ""
+    : ` --url ${effectiveHost}`;
+  return (
+    `Found a token in .sentryclirc (${rcConfig.sources.token}). ` +
+    `To skip OAuth next time: sentry auth login --token <token>${urlHint}`
   );
 }
 
@@ -287,9 +363,17 @@ export const loginCommand = buildCommand({
     // requested instance. Default URL persistence is deferred until login
     // succeeds — see persistLoginUrlAsDefault calls below.
     const effectiveHost = applyLoginUrl(flags.url);
-    refuseLoginToUntrustedHost(flags, effectiveHost);
 
-    // Check if already authenticated and handle re-authentication
+    // Check whether the effective URL came from .sentryclirc so we can name
+    // the source file in trust-refusal errors and show a migration tip.
+    const { rcConfig, urlFromRc } = await resolveRcContext(
+      flags.url,
+      this.cwd,
+      effectiveHost
+    );
+
+    refuseLoginToUntrustedHost(flags, effectiveHost, urlFromRc);
+
     if (isAuthenticated()) {
       const shouldProceed = await handleExistingAuth(flags.force);
       if (!shouldProceed) {
@@ -297,25 +381,21 @@ export const loginCommand = buildCommand({
       }
     }
 
-    // Clear stale cached responses from a previous session
     try {
       await clearResponseCache();
     } catch {
       // Non-fatal: cache directory may not exist
     }
 
-    // Token-based authentication
     if (flags.token) {
       // Save token first (with host scope), then validate by fetching user regions
       await setAuthToken(flags.token, undefined, undefined, {
         host: effectiveHost,
       });
 
-      // Validate token by fetching user regions
       try {
         await getUserRegions();
       } catch {
-        // Token is invalid - clear it and throw
         await clearAuth();
         throw new AuthError(
           "invalid",
@@ -323,7 +403,6 @@ export const loginCommand = buildCommand({
         );
       }
 
-      // Login succeeded — persist default URL for subsequent invocations.
       persistLoginUrlAsDefault(flags.url, effectiveHost);
 
       // Fetch and cache user info via /auth/ (works with all token types).
@@ -357,16 +436,13 @@ export const loginCommand = buildCommand({
     });
 
     if (result) {
-      // Login succeeded — persist default URL for subsequent invocations.
       persistLoginUrlAsDefault(flags.url, effectiveHost);
-      // Warm the org + region cache so the first real command is fast.
-      // Fire-and-forget — login already succeeded, caching is best-effort.
       warmOrgCache();
       yield new CommandOutput(result);
-    } else {
-      // Error already displayed by runInteractiveLogin
-      process.exitCode = 1;
+      return { hint: rcTokenHint(rcConfig, effectiveHost) };
     }
+    // Error already displayed by runInteractiveLogin
+    process.exitCode = 1;
   },
 });
 
