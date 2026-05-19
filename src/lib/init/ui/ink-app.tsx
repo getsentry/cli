@@ -1176,7 +1176,8 @@ function SummaryPanel({
       {summary.changedFiles !== undefined && summary.changedFiles.length > 0 ? (
         <ChangedFilesTree files={summary.changedFiles} />
       ) : null}
-      {summary.featureBlurbs !== undefined && summary.featureBlurbs.length > 0 ? (
+      {summary.featureBlurbs !== undefined &&
+      summary.featureBlurbs.length > 0 ? (
         <Box flexDirection="column" flexShrink={0} marginTop={1}>
           <Text bold color={MUTED}>
             Here&apos;s what we set up

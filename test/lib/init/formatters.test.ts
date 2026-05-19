@@ -184,6 +184,120 @@ describe("formatResult", () => {
   });
 });
 
+describe("formatResult with featureBlurbs", () => {
+  test("populates featureBlurbs from output.featureBlurbs paired positionally with output.features", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          projectDir: "/app",
+          features: ["errorMonitoring", "performanceMonitoring"],
+          featureBlurbs: [
+            { feature: "errorMonitoring", blurb: "Captures exceptions." },
+            { feature: "performanceMonitoring", blurb: "Traces requests." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs).toEqual([
+      { label: "Error Monitoring", blurb: "Captures exceptions." },
+      { label: "Tracing", blurb: "Traces requests." },
+    ]);
+  });
+
+  test("suppresses the Features row when featureBlurbs are present", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring"],
+          featureBlurbs: [
+            { feature: "errorMonitoring", blurb: "Captures exceptions." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.fields.some((f) => f.label === "Features")).toBe(false);
+  });
+
+  test("shows the Features row when featureBlurbs are absent", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring", "sessionReplay"],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.fields.some((f) => f.label === "Features")).toBe(true);
+  });
+
+  test("uses output.features for labels regardless of what the agent echoed in feature field", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring", "sessionReplay"],
+          // Agent echoed back wrong IDs
+          featureBlurbs: [
+            { feature: "error_monitoring", blurb: "Blurb A." },
+            { feature: "session-replay", blurb: "Blurb B." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    // Labels come from output.features positionally, not blurb.feature
+    expect(summary?.featureBlurbs?.[0]?.label).toBe("Error Monitoring");
+    expect(summary?.featureBlurbs?.[1]?.label).toBe("Session Replay");
+  });
+
+  test("sorts featureBlurbs by canonical display order", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          // Server returned performanceMonitoring before errorMonitoring
+          features: ["performanceMonitoring", "errorMonitoring"],
+          featureBlurbs: [
+            { feature: "performanceMonitoring", blurb: "Traces." },
+            { feature: "errorMonitoring", blurb: "Captures." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    // errorMonitoring comes before performanceMonitoring in FEATURE_DISPLAY_ORDER
+    expect(summary?.featureBlurbs?.map((b) => b.label)).toEqual([
+      "Error Monitoring",
+      "Tracing",
+    ]);
+  });
+});
+
 describe("formatError", () => {
   test("logs the error message", () => {
     const { ui, calls } = createMockUI();

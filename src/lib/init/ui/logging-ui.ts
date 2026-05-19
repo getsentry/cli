@@ -18,11 +18,11 @@
  * logs deterministic and free of carriage returns.
  */
 
-import { renderTextTable } from "../../formatters/text-table.js";
 import {
   renderInlineMarkdown,
   renderMarkdown,
 } from "../../formatters/markdown.js";
+import { renderTextTable } from "../../formatters/text-table.js";
 import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
 import { buildFileTree, flattenTree } from "./file-tree.js";
 import type {
@@ -95,7 +95,11 @@ export class LoggingUI implements WizardUI {
   }
 
   summary(summary: WizardSummary): void {
-    if (summary.fields.length === 0 && !summary.changedFiles?.length) {
+    if (
+      summary.fields.length === 0 &&
+      !summary.changedFiles?.length &&
+      !summary.featureBlurbs?.length
+    ) {
       return;
     }
     // Compact two-column key/value listing — one line per field. The
