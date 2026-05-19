@@ -786,7 +786,7 @@ describe("runWizard", () => {
     expect(spinnerMock.stop).toHaveBeenCalledWith("Using existing project");
   });
 
-  test("shows --yes hint when LoggingUI prompt fails", async () => {
+  test("shows --no-tui --yes hint when LoggingUI prompt fails on an interactive TTY", async () => {
     const { LoggingUIPromptError } = await import(
       "../../../src/lib/init/ui/logging-ui.js"
     );
@@ -806,8 +806,9 @@ describe("runWizard", () => {
 
     await expect(
       forceStdinTty(() => runWizard(makeOptions({ yes: false })))
-    ).rejects.toThrow("Run with --yes for non-interactive mode.");
+    ).rejects.toThrow("Try running with --no-tui --yes.");
   });
+
 });
 
 describe("runWizard — MastraClient lifecycle", () => {

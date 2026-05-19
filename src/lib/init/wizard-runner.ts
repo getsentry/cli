@@ -401,10 +401,12 @@ async function preamble(
       return false;
     }
     if (err instanceof LoggingUIPromptError) {
-      throw new WizardError(
-        "The interactive UI failed to load. Run with --yes for non-interactive mode.",
-        { rendered: false }
-      );
+      // isTTY=true means the user expected interactive mode but the TUI
+      // failed internally — point them to --no-tui rather than just --yes.
+      const hint = process.stdin.isTTY
+        ? "The interactive UI failed to load. Try running with --no-tui --yes."
+        : "The interactive UI failed to load. Run with --yes for non-interactive mode.";
+      throw new WizardError(hint, { rendered: false });
     }
     throw err;
   }
