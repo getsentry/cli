@@ -278,7 +278,11 @@ describe("formatResult with featureBlurbs", () => {
         status: "success",
         result: {
           platform: "Next.js",
-          features: ["errorMonitoring", "performanceMonitoring", "sessionReplay"],
+          features: [
+            "errorMonitoring",
+            "performanceMonitoring",
+            "sessionReplay",
+          ],
           // Only 2 blurbs for 3 features — third has no blurb
           featureBlurbs: [
             { feature: "errorMonitoring", blurb: "Captures." },

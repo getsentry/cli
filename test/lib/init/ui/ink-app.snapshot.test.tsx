@@ -519,7 +519,10 @@ describe("Ink App snapshot", () => {
     store.setSummary({
       fields: [{ label: "Platform", value: "javascript.nextjs" }],
       featureBlurbs: [
-        { label: "Error Monitoring", blurb: "Captures every unhandled exception." },
+        {
+          label: "Error Monitoring",
+          blurb: "Captures every unhandled exception.",
+        },
         { label: "Tracing", blurb: "Traces requests end-to-end." },
       ],
     });
