@@ -41,8 +41,6 @@ const FEATURE_DELIMITER = /[,+ ]+/;
 const NON_INTERACTIVE_USAGE_HINT =
   "sentry init --yes --features errors,tracing,replay [target] [directory]";
 
-const USAGE_HINT = "sentry init <org>/<project> [directory]";
-
 const FEATURE_ALIASES = {
   errors: "errorMonitoring",
   errorMonitoring: "errorMonitoring",
@@ -123,16 +121,26 @@ function classifyArgs(
 
   // Two paths → error
   if (firstIsPath && secondIsPath) {
-    throw new ContextError("Arguments", USAGE_HINT, [
-      "Two directory paths provided. Only one directory is allowed.",
-    ]);
+    throw new ValidationError(
+      [
+        `"${first}" and "${second}" are both directory paths — only one directory is allowed.`,
+        "",
+        "Provide a single directory:",
+        `  sentry init [<org>/<project>] ${first}`,
+      ].join("\n")
+    );
   }
 
   // Two targets → error
   if (!(firstIsPath || secondIsPath)) {
-    throw new ContextError("Arguments", USAGE_HINT, [
-      "Two targets provided. Use <org>/<project> for the target and a path (e.g., ./dir) for the directory.",
-    ]);
+    throw new ValidationError(
+      [
+        `"${first}" and "${second}" are both treated as targets — only one is allowed.`,
+        "",
+        "Pair a target with a directory path:",
+        `  sentry init ${first} ./my-project`,
+      ].join("\n")
+    );
   }
 
   // (TARGET, PATH) — correct order

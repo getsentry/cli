@@ -452,18 +452,22 @@ describe("init command func", () => {
   // ── Error cases ───────────────────────────────────────────────────────
 
   describe("error cases", () => {
-    test("two paths throws ContextError", async () => {
+    test("two paths throws ValidationError with specific message", async () => {
       const ctx = makeContext();
-      await expect(
-        func.call(ctx, DEFAULT_FLAGS, "./dir1", "./dir2")
-      ).rejects.toThrow(ContextError);
+      const promise = func.call(ctx, DEFAULT_FLAGS, "./dir1", "./dir2");
+      await expect(promise).rejects.toThrow(ValidationError);
+      await expect(promise).rejects.toThrow(
+        '"./dir1" and "./dir2" are both directory paths'
+      );
     });
 
-    test("two targets throws ContextError", async () => {
+    test("two targets throws ValidationError with specific message", async () => {
       const ctx = makeContext();
-      await expect(
-        func.call(ctx, DEFAULT_FLAGS, "acme/", "other/")
-      ).rejects.toThrow(ContextError);
+      const promise = func.call(ctx, DEFAULT_FLAGS, "acme/", "other/");
+      await expect(promise).rejects.toThrow(ValidationError);
+      await expect(promise).rejects.toThrow(
+        '"acme/" and "other/" are both treated as targets'
+      );
     });
 
     test("org slug with whitespace is rejected by validateResourceId", async () => {
