@@ -114,16 +114,6 @@ export class LoggingUI implements WizardUI {
       const padded = field.label.padEnd(labelWidth);
       this.writeLine(this.stdout, `  ${padded}  ${field.value}`);
     }
-    if (summary.changedFiles && summary.changedFiles.length > 0) {
-      this.writeLine(this.stdout, "");
-      this.writeLine(this.stdout, "  Changed files:");
-      // Render as a directory tree so collapsed common prefixes match
-      // what the InkUI panel + post-dispose summary report show.
-      const tree = buildFileTree(summary.changedFiles);
-      for (const row of flattenTree(tree)) {
-        this.writeLine(this.stdout, `    ${formatTreeRowPlain(row)}`);
-      }
-    }
     if (summary.featureBlurbs && summary.featureBlurbs.length > 0) {
       this.writeLine(this.stdout, "");
       this.writeLine(this.stdout, "  Here's what we set up");
@@ -136,6 +126,16 @@ export class LoggingUI implements WizardUI {
       });
       for (const line of table.trimEnd().split("\n")) {
         this.writeLine(this.stdout, `  ${line}`);
+      }
+    }
+    if (summary.changedFiles && summary.changedFiles.length > 0) {
+      this.writeLine(this.stdout, "");
+      this.writeLine(this.stdout, "  Changed files:");
+      // Render as a directory tree so collapsed common prefixes match
+      // what the InkUI panel + post-dispose summary report show.
+      const tree = buildFileTree(summary.changedFiles);
+      for (const row of flattenTree(tree)) {
+        this.writeLine(this.stdout, `    ${formatTreeRowPlain(row)}`);
       }
     }
   }

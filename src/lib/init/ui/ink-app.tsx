@@ -1173,9 +1173,6 @@ function SummaryPanel({
           ))}
         </Box>
       ) : null}
-      {summary.changedFiles !== undefined && summary.changedFiles.length > 0 ? (
-        <ChangedFilesTree files={summary.changedFiles} />
-      ) : null}
       {summary.featureBlurbs !== undefined &&
       summary.featureBlurbs.length > 0 ? (
         <Box flexDirection="column" flexShrink={0} marginTop={1}>
@@ -1197,6 +1194,9 @@ function SummaryPanel({
             </Box>
           ))}
         </Box>
+      ) : null}
+      {summary.changedFiles !== undefined && summary.changedFiles.length > 0 ? (
+        <ChangedFilesTree files={summary.changedFiles} />
       ) : null}
     </Box>
   );

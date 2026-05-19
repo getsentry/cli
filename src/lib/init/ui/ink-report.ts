@@ -61,14 +61,6 @@ export function formatSuccessReport(
       lines.push(`   ${label}  ${field.value}`);
     }
   }
-  if (summary?.changedFiles && summary.changedFiles.length > 0) {
-    lines.push("");
-    lines.push(`   ${chalk.hex(REPORT_MUTED).bold("Changed files")}`);
-    const tree = buildFileTree(summary.changedFiles);
-    for (const row of flattenTree(tree)) {
-      lines.push(formatTreeRowChalk(row));
-    }
-  }
   if (summary?.featureBlurbs && summary.featureBlurbs.length > 0) {
     lines.push("");
     lines.push(`   ${chalk.hex(REPORT_MUTED).bold("Here's what we set up")}`);
@@ -81,6 +73,14 @@ export function formatSuccessReport(
     });
     for (const line of table.trimEnd().split("\n")) {
       lines.push(`   ${line}`);
+    }
+  }
+  if (summary?.changedFiles && summary.changedFiles.length > 0) {
+    lines.push("");
+    lines.push(`   ${chalk.hex(REPORT_MUTED).bold("Changed files")}`);
+    const tree = buildFileTree(summary.changedFiles);
+    for (const row of flattenTree(tree)) {
+      lines.push(formatTreeRowChalk(row));
     }
   }
   appendFeedbackHint(lines, feedbackHint);

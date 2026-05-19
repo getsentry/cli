@@ -34,6 +34,22 @@ import type { WizardSummary, WizardUI } from "./ui/types.js";
  * appear.
  */
 function buildSummary(output: WizardOutput): WizardSummary | null {
+  // Resolve blurbs first so the Features row can check the *resolved* length.
+  // If the agent returns blurbs with wrong IDs they all drop out here, and
+  // the Features row falls back to showing correctly.
+  const blurbMap = new Map(
+    (output.featureBlurbs ?? []).map(({ feature, blurb }) => [
+      feature,
+      stripAnsi(blurb),
+    ])
+  );
+  const featureBlurbs = sortFeatures(output.features ?? [])
+    .map((feature) => {
+      const blurb = blurbMap.get(feature);
+      return blurb ? { label: featureLabel(feature), blurb } : null;
+    })
+    .filter((b): b is { label: string; blurb: string } => b !== null);
+
   const fields: WizardSummary["fields"] = [];
 
   if (output.platform) {
@@ -42,7 +58,7 @@ function buildSummary(output: WizardOutput): WizardSummary | null {
   if (output.projectDir) {
     fields.push({ label: "Directory", value: output.projectDir });
   }
-  if (output.features?.length && !output.featureBlurbs?.length) {
+  if (output.features?.length && !featureBlurbs.length) {
     fields.push({
       label: "Features",
       value: output.features.map(featureLabel).join(", "),
@@ -62,23 +78,6 @@ function buildSummary(output: WizardOutput): WizardSummary | null {
   }
 
   const changedFiles = output.changedFiles ?? [];
-
-  // Build a Map keyed by the feature ID the agent echoed back. Labels always
-  // come from featureLabel(canonicalId) so they are correct regardless of what
-  // the agent put in the feature field. If the agent omits or misspells a
-  // feature ID the blurb is simply absent for that feature — never misassigned.
-  const blurbMap = new Map(
-    (output.featureBlurbs ?? []).map(({ feature, blurb }) => [
-      feature,
-      stripAnsi(blurb),
-    ])
-  );
-  const featureBlurbs = sortFeatures(output.features ?? [])
-    .map((feature) => {
-      const blurb = blurbMap.get(feature);
-      return blurb ? { label: featureLabel(feature), blurb } : null;
-    })
-    .filter((b): b is { label: string; blurb: string } => b !== null);
 
   if (
     fields.length === 0 &&
