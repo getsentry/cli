@@ -137,7 +137,7 @@ async function handleSelect(
     return { selectedApp: items[0] };
   }
 
-  if (options.yes) {
+  if (options.yes && payload.apps && payload.apps.length > 0) {
     const message = buildMultiAppMessage(apps, items);
     ui.log.error(message);
     throw new WizardError(message, { rendered: true });

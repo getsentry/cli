@@ -57,7 +57,7 @@ describe("handleSelect", () => {
     ).toBe(true);
   });
 
-  test("throws WizardError with app list when --yes and multiple options", async () => {
+  test("throws WizardError with app list when --yes and multiple apps", async () => {
     const { ui, calls } = createMockUI();
     await expect(
       handleInteractive(
@@ -65,13 +65,34 @@ describe("handleSelect", () => {
           type: "interactive",
           prompt: "Choose app",
           kind: "select",
-          options: ["react", "vue"],
+          apps: [
+            { name: "react", path: "/repo/apps/react" },
+            { name: "vue", path: "/repo/apps/vue" },
+          ],
         },
         makeOptions({ yes: true }),
         ui
       )
     ).rejects.toBeInstanceOf(WizardError);
     expect(calls.some((c) => c.kind === "log.error")).toBe(true);
+  });
+
+  test("falls through to ui.select when --yes and non-monorepo select", async () => {
+    // --yes must not throw the monorepo error for select prompts that have
+    // no payload.apps — only app-selection prompts provide that array.
+    const { ui, respond } = createMockUI();
+    respond.select("create");
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Found an existing project.",
+        kind: "select",
+        options: ["existing", "create"],
+      },
+      makeOptions({ yes: true }),
+      ui
+    );
+    expect(result).toEqual({ selectedApp: "create" });
   });
 
   test("throws WizardError when options list is empty", async () => {
