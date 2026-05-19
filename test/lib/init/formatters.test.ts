@@ -247,7 +247,7 @@ describe("formatResult with featureBlurbs", () => {
     expect(summary?.fields.some((f) => f.label === "Features")).toBe(true);
   });
 
-  test("uses output.features for labels regardless of what the agent echoed in feature field", () => {
+  test("labels use canonical feature IDs — agent echoing wrong IDs omits the blurb rather than mislabelling", () => {
     const { ui, calls } = createMockUI();
     formatResult(
       {
@@ -255,7 +255,7 @@ describe("formatResult with featureBlurbs", () => {
         result: {
           platform: "Next.js",
           features: ["errorMonitoring", "sessionReplay"],
-          // Agent echoed back wrong IDs
+          // Agent echoed back wrong IDs — neither matches a canonical feature
           featureBlurbs: [
             { feature: "error_monitoring", blurb: "Blurb A." },
             { feature: "session-replay", blurb: "Blurb B." },
@@ -266,12 +266,11 @@ describe("formatResult with featureBlurbs", () => {
     );
 
     const summary = summaryCall(calls);
-    // Labels come from output.features positionally, not blurb.feature
-    expect(summary?.featureBlurbs?.[0]?.label).toBe("Error Monitoring");
-    expect(summary?.featureBlurbs?.[1]?.label).toBe("Session Replay");
+    // Wrong IDs → no match → blurbs omitted entirely; safe fallback
+    expect(summary?.featureBlurbs).toBeUndefined();
   });
 
-  test("drops entries when blurbs array is shorter than features", () => {
+  test("drops blurb for feature the agent omitted — remaining blurbs stay correctly labelled", () => {
     const { ui, calls } = createMockUI();
     formatResult(
       {
@@ -283,10 +282,10 @@ describe("formatResult with featureBlurbs", () => {
             "performanceMonitoring",
             "sessionReplay",
           ],
-          // Only 2 blurbs for 3 features — third has no blurb
+          // Agent returned 2 of 3; skipped performanceMonitoring
           featureBlurbs: [
             { feature: "errorMonitoring", blurb: "Captures." },
-            { feature: "performanceMonitoring", blurb: "Traces." },
+            { feature: "sessionReplay", blurb: "Records." },
           ],
         },
       },
@@ -297,8 +296,28 @@ describe("formatResult with featureBlurbs", () => {
     expect(summary?.featureBlurbs).toHaveLength(2);
     expect(summary?.featureBlurbs?.map((b) => b.label)).toEqual([
       "Error Monitoring",
-      "Tracing",
+      "Session Replay",
     ]);
+  });
+
+  test("stripAnsi sanitizes ANSI sequences in server-supplied blurbs", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring"],
+          featureBlurbs: [
+            { feature: "errorMonitoring", blurb: "\x1b[31mCaptures.\x1b[0m" },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs?.[0]?.blurb).toBe("Captures.");
   });
 
   test("sorts featureBlurbs by canonical display order", () => {

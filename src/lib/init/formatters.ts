@@ -16,6 +16,7 @@
  */
 
 import { terminalLink } from "../formatters/colors.js";
+import { stripAnsi } from "../formatters/plain-detect.js";
 import { featureLabel, sortFeatures } from "./clack-utils.js";
 import {
   EXIT_DEPENDENCY_INSTALL_FAILED,
@@ -62,15 +63,19 @@ function buildSummary(output: WizardOutput): WizardSummary | null {
 
   const changedFiles = output.changedFiles ?? [];
 
-  // output.features is the canonical ordered list of selected feature IDs.
-  // Pair blurbs positionally so labels are always correct regardless of what
-  // the agent echoes back in the feature field.
-  const blurbsInOrder = output.featureBlurbs ?? [];
-  const canonicalFeatures = output.features ?? [];
-  const featureBlurbs = sortFeatures(canonicalFeatures)
+  // Build a Map keyed by the feature ID the agent echoed back. Labels always
+  // come from featureLabel(canonicalId) so they are correct regardless of what
+  // the agent put in the feature field. If the agent omits or misspells a
+  // feature ID the blurb is simply absent for that feature — never misassigned.
+  const blurbMap = new Map(
+    (output.featureBlurbs ?? []).map(({ feature, blurb }) => [
+      feature,
+      stripAnsi(blurb),
+    ])
+  );
+  const featureBlurbs = sortFeatures(output.features ?? [])
     .map((feature) => {
-      const pos = canonicalFeatures.indexOf(feature);
-      const blurb = blurbsInOrder[pos]?.blurb;
+      const blurb = blurbMap.get(feature);
       return blurb ? { label: featureLabel(feature), blurb } : null;
     })
     .filter((b): b is { label: string; blurb: string } => b !== null);
