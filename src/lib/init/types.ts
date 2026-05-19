@@ -229,6 +229,7 @@ export type WizardOutput = {
   docsUrl?: string;
   sentryProjectUrl?: string;
   message?: string;
+  featureBlurbs?: Array<{ feature: string; blurb: string }>;
 };
 
 // Interactive payloads

@@ -18,6 +18,7 @@
  * logs deterministic and free of carriage returns.
  */
 
+import { renderTextTable } from "../../formatters/text-table.js";
 import {
   renderInlineMarkdown,
   renderMarkdown,
@@ -117,6 +118,20 @@ export class LoggingUI implements WizardUI {
       const tree = buildFileTree(summary.changedFiles);
       for (const row of flattenTree(tree)) {
         this.writeLine(this.stdout, `    ${formatTreeRowPlain(row)}`);
+      }
+    }
+    if (summary.featureBlurbs && summary.featureBlurbs.length > 0) {
+      this.writeLine(this.stdout, "");
+      this.writeLine(this.stdout, "  Here's what we set up:");
+      const tableRows = summary.featureBlurbs.map(({ label, blurb }) => [
+        label,
+        blurb,
+      ]);
+      const table = renderTextTable(["", ""], tableRows, {
+        shrinkable: [false, true],
+      });
+      for (const line of table.trimEnd().split("\n")) {
+        this.writeLine(this.stdout, `  ${line}`);
       }
     }
   }

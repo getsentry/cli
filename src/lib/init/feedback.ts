@@ -8,7 +8,6 @@ const FEEDBACK_COMMANDS: Record<InitFeedbackOutcome, string> = {
 
 const FEEDBACK_COPY: Record<InitFeedbackOutcome, string[]> = {
   success: [
-    "Nice, setup made it through.",
     "Tell us what felt great or rough:",
   ],
   cancelled: [

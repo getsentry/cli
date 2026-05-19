@@ -16,7 +16,7 @@
  */
 
 import { terminalLink } from "../formatters/colors.js";
-import { featureLabel } from "./clack-utils.js";
+import { featureLabel, sortFeatures } from "./clack-utils.js";
 import {
   EXIT_DEPENDENCY_INSTALL_FAILED,
   EXIT_PLATFORM_NOT_DETECTED,
@@ -41,7 +41,7 @@ function buildSummary(output: WizardOutput): WizardSummary | null {
   if (output.projectDir) {
     fields.push({ label: "Directory", value: output.projectDir });
   }
-  if (output.features?.length) {
+  if (output.features?.length && !output.featureBlurbs?.length) {
     fields.push({
       label: "Features",
       value: output.features.map(featureLabel).join(", "),
@@ -62,6 +62,15 @@ function buildSummary(output: WizardOutput): WizardSummary | null {
 
   const changedFiles = output.changedFiles ?? [];
 
+  const featureBlurbs = sortFeatures(
+    (output.featureBlurbs ?? []).map((b) => b.feature)
+  )
+    .map((feature) => {
+      const match = output.featureBlurbs?.find((b) => b.feature === feature);
+      return match ? { label: featureLabel(feature), blurb: match.blurb } : null;
+    })
+    .filter((b): b is { label: string; blurb: string } => b !== null);
+
   if (fields.length === 0 && changedFiles.length === 0) {
     return null;
   }
@@ -69,6 +78,7 @@ function buildSummary(output: WizardOutput): WizardSummary | null {
   return {
     fields,
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
+    ...(featureBlurbs.length > 0 ? { featureBlurbs } : {}),
   };
 }
 
