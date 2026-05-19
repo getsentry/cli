@@ -846,7 +846,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   }
 }
 
-function handleFinalResult(
+export function handleFinalResult(
   result: WorkflowRunResult,
   spin: SpinnerHandle,
   spinState: SpinState,
@@ -865,7 +865,13 @@ function handleFinalResult(
     const workflowCode = result.result?.exitCode;
     const exitCode = mapWorkflowExitCode(workflowCode);
     setTag("wizard.outcome", "errored");
-    throw new WizardError("Workflow returned an error", { exitCode });
+    if (workflowCode !== undefined) {
+      setTag("wizard.exit_code", workflowCode);
+    }
+    throw new WizardError(
+      result.result?.message ?? result.error ?? "Workflow returned an error",
+      { exitCode }
+    );
   }
 
   if (spinState.running) {

@@ -1,3 +1,4 @@
+import { addBreadcrumb } from "@sentry/node-core/light";
 import { DEFAULT_COMMAND_TIMEOUT_MS } from "../constants.js";
 import type { RunCommandsPayload, ToolResult } from "../types.js";
 import {
@@ -46,6 +47,15 @@ export async function runCommands(
     const result = await runSingleCommand(command, payload.cwd, timeoutMs);
     results.push(result);
     if (result.exitCode !== 0) {
+      addBreadcrumb({
+        level: "error",
+        message: `Command failed: ${command.original}`,
+        data: {
+          exitCode: result.exitCode,
+          stderr: result.stderr.slice(0, 500),
+          cwd: payload.cwd,
+        },
+      });
       return {
         ok: false,
         error: `Command "${command.original}" failed with exit code ${result.exitCode}: ${result.stderr}`,
