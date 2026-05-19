@@ -119,7 +119,7 @@ async function handleSelect(
     });
   }
 
-  if (options.app) {
+  if (options.app && payload.apps && payload.apps.length > 0) {
     const match = items.find(
       (item) => item.toLowerCase() === options.app?.toLowerCase()
     );
