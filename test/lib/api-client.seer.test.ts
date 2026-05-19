@@ -155,6 +155,48 @@ describe("getAutofixState", () => {
     expect(result?.status).toBe("WAITING_FOR_USER_RESPONSE");
   });
 
+  test("normalizes US spelling 'canceled' to CANCELLED for terminal status match", async () => {
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          autofix: {
+            run_id: 1,
+            status: "canceled",
+            blocks: [],
+            updated_at: "2025-01-01T00:00:00Z",
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+
+    const result = await getAutofixState("test-org", "123456789");
+    expect(result?.status).toBe("CANCELLED");
+  });
+
+  test("normalizes need_more_information to NEED_MORE_INFORMATION", async () => {
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          autofix: {
+            run_id: 1,
+            status: "need_more_information",
+            blocks: [],
+            updated_at: "2025-01-01T00:00:00Z",
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+
+    const result = await getAutofixState("test-org", "123456789");
+    expect(result?.status).toBe("NEED_MORE_INFORMATION");
+  });
+
   test("returns null when autofix is null", async () => {
     globalThis.fetch = async () =>
       new Response(JSON.stringify({ autofix: null }), {

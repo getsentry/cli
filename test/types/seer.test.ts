@@ -345,6 +345,63 @@ describe("extractNoSolutionReason", () => {
     const state: AutofixState = { run_id: 1, status: "COMPLETED" };
     expect(extractNoSolutionReason(state)).toBeUndefined();
   });
+
+  test("extracts reason from step-level description when solution is empty", () => {
+    const state = {
+      run_id: 1,
+      status: "NEED_MORE_INFORMATION",
+      blocks: [
+        {
+          key: "solution",
+          description:
+            "Cannot produce a fix: the issue is in a third-party library",
+          solution: [],
+          artifacts: [],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    expect(extractNoSolutionReason(state)).toBe(
+      "Cannot produce a fix: the issue is in a third-party library"
+    );
+  });
+
+  test("extracts reason from step-level when solution field is missing", () => {
+    const state = {
+      run_id: 1,
+      status: "NEED_MORE_INFORMATION",
+      steps: [
+        {
+          key: "solution",
+          description: "Infrastructure-level issue, no code change applicable",
+          artifacts: [],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    expect(extractNoSolutionReason(state)).toBe(
+      "Infrastructure-level issue, no code change applicable"
+    );
+  });
+
+  test("prefers step-level reason over artifact-level reason", () => {
+    const state = {
+      run_id: 1,
+      status: "COMPLETED",
+      blocks: [
+        {
+          key: "solution",
+          description: "Step-level reason",
+          solution: [],
+          artifacts: [
+            { key: "solution", data: null, reason: "Artifact-level reason" },
+          ],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    expect(extractNoSolutionReason(state)).toBe("Step-level reason");
+  });
 });
 
 describe("extractSolution", () => {

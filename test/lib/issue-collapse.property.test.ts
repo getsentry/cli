@@ -15,15 +15,26 @@ import {
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
 describe("property: buildIssueListCollapse", () => {
-  test("always collapses filtered, lifetime, unhandled regardless of stats flag", () => {
+  test("always collapses filtered and unhandled regardless of stats flag", () => {
     fcAssert(
       property(boolean(), (collapseStats) => {
         const result = buildIssueListCollapse({
           shouldCollapseStats: collapseStats,
         });
         expect(result).toContain("filtered");
-        expect(result).toContain("lifetime");
         expect(result).toContain("unhandled");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("never collapses lifetime (CLI needs count, userCount, firstSeen)", () => {
+    fcAssert(
+      property(boolean(), (collapseStats) => {
+        const result = buildIssueListCollapse({
+          shouldCollapseStats: collapseStats,
+        });
+        expect(result).not.toContain("lifetime");
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -65,13 +76,13 @@ describe("property: buildIssueListCollapse", () => {
     );
   });
 
-  test("length is 3 without stats, 4 with stats", () => {
+  test("length is 2 without stats, 3 with stats", () => {
     fcAssert(
       property(boolean(), (collapseStats) => {
         const result = buildIssueListCollapse({
           shouldCollapseStats: collapseStats,
         });
-        expect(result.length).toBe(collapseStats ? 4 : 3);
+        expect(result.length).toBe(collapseStats ? 3 : 2);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );

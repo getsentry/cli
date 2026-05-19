@@ -1110,7 +1110,7 @@ describe("issue list: collapse parameter optimization", () => {
     advancePaginationStateSpy.mockRestore();
   });
 
-  test("always collapses filtered, lifetime, unhandled in org-all mode", async () => {
+  test("always collapses filtered and unhandled (not lifetime) in org-all mode", async () => {
     listIssuesPaginatedSpy.mockResolvedValue({
       data: [sampleIssue],
       nextCursor: undefined,
@@ -1134,7 +1134,7 @@ describe("issue list: collapse parameter optimization", () => {
     const options = callArgs?.[2] as Record<string, unknown> | undefined;
     const collapse = options?.collapse as string[];
     expect(collapse).toContain("filtered");
-    expect(collapse).toContain("lifetime");
+    expect(collapse).not.toContain("lifetime");
     expect(collapse).toContain("unhandled");
   });
 
