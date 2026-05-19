@@ -300,7 +300,7 @@ describe("formatResult with featureBlurbs", () => {
     ]);
   });
 
-  test("stripAnsi sanitizes ANSI sequences in server-supplied blurbs", () => {
+  test("stripAnsi strips SGR colour codes from server-supplied blurbs", () => {
     const { ui, calls } = createMockUI();
     formatResult(
       {
@@ -310,6 +310,30 @@ describe("formatResult with featureBlurbs", () => {
           features: ["errorMonitoring"],
           featureBlurbs: [
             { feature: "errorMonitoring", blurb: "\x1b[31mCaptures.\x1b[0m" },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs?.[0]?.blurb).toBe("Captures.");
+  });
+
+  test("stripAnsi strips non-SGR CSI sequences (cursor movement, screen-clear) from blurbs", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring"],
+          featureBlurbs: [
+            // \x1b[2J = clear screen, \x1b[1A = cursor up — non-SGR CSI
+            {
+              feature: "errorMonitoring",
+              blurb: "\x1b[2JCaptures.\x1b[1A",
+            },
           ],
         },
       },

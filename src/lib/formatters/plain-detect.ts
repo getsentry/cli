@@ -75,14 +75,15 @@ export function isPlainOutput(): boolean {
 /**
  * Strip ANSI escape sequences from a string.
  *
- * Handles SGR codes (`\x1b[...m`) and OSC 8 terminal hyperlink sequences
- * (`\x1b]8;;url\x07text\x1b]8;;\x07`).
+ * Handles all CSI sequences (`\x1b[...LETTER` — covers SGR colour codes,
+ * cursor movement, screen-clear, and other control sequences) and OSC 8
+ * terminal hyperlink sequences (`\x1b]8;;url\x07text\x1b]8;;\x07`).
  */
 export function stripAnsi(text: string): string {
   return (
     text
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape detection requires matching \x1b and \x07
-      .replace(/\x1b\[[0-9;]*m/g, "")
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape detection requires matching \x1b
+      .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
       // biome-ignore lint/suspicious/noControlCharactersInRegex: OSC 8 hyperlink sequences use \x1b and \x07
       .replace(/\x1b\]8;;[^\x07]*\x07/g, "")
   );
