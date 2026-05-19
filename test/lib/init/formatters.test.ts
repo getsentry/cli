@@ -271,6 +271,32 @@ describe("formatResult with featureBlurbs", () => {
     expect(summary?.featureBlurbs?.[1]?.label).toBe("Session Replay");
   });
 
+  test("drops entries when blurbs array is shorter than features", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring", "performanceMonitoring", "sessionReplay"],
+          // Only 2 blurbs for 3 features — third has no blurb
+          featureBlurbs: [
+            { feature: "errorMonitoring", blurb: "Captures." },
+            { feature: "performanceMonitoring", blurb: "Traces." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs).toHaveLength(2);
+    expect(summary?.featureBlurbs?.map((b) => b.label)).toEqual([
+      "Error Monitoring",
+      "Tracing",
+    ]);
+  });
+
   test("sorts featureBlurbs by canonical display order", () => {
     const { ui, calls } = createMockUI();
     formatResult(

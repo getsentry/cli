@@ -514,6 +514,24 @@ describe("Ink App snapshot", () => {
     expect(frame).not.toMatch(FILES_HEADER_UNPINNED_RE);
   });
 
+  test("SummaryPanel renders featureBlurbs as Here's what we set up section", async () => {
+    const store = new WizardStore({ bannerRows: [] });
+    store.setSummary({
+      fields: [{ label: "Platform", value: "javascript.nextjs" }],
+      featureBlurbs: [
+        { label: "Error Monitoring", blurb: "Captures every unhandled exception." },
+        { label: "Tracing", blurb: "Traces requests end-to-end." },
+      ],
+    });
+
+    const frame = stripAnsi((await renderApp(store, 120)).allOutput());
+    expect(frame).toContain("Here's what we set up");
+    expect(frame).toContain("Error Monitoring");
+    expect(frame).toContain("Captures every unhandled exception.");
+    expect(frame).toContain("Tracing");
+    expect(frame).toContain("Traces requests end-to-end.");
+  });
+
   test("Ctrl+C path uses requestCancel via store, never bare process.exit", () => {
     let cancels = 0;
     const store = new WizardStore();
