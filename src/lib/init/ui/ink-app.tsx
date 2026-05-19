@@ -1182,7 +1182,7 @@ function SummaryPanel({
             Here&apos;s what we set up
           </Text>
           {summary.featureBlurbs.map(({ label, blurb }) => (
-            <Box flexDirection="row" flexShrink={0} key={label} marginTop={0}>
+            <Box flexDirection="row" flexShrink={0} key={label}>
               <Box flexShrink={0} width={22}>
                 <Text bold color={PRIMARY}>
                   {label}

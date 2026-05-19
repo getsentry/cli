@@ -62,12 +62,13 @@ function buildSummary(output: WizardOutput): WizardSummary | null {
 
   const changedFiles = output.changedFiles ?? [];
 
-  const featureBlurbs = sortFeatures(
-    (output.featureBlurbs ?? []).map((b) => b.feature)
-  )
+  const blurbMap = new Map(
+    (output.featureBlurbs ?? []).map(({ feature, blurb }) => [feature, blurb])
+  );
+  const featureBlurbs = sortFeatures([...blurbMap.keys()])
     .map((feature) => {
-      const match = output.featureBlurbs?.find((b) => b.feature === feature);
-      return match ? { label: featureLabel(feature), blurb: match.blurb } : null;
+      const blurb = blurbMap.get(feature);
+      return blurb ? { label: featureLabel(feature), blurb } : null;
     })
     .filter((b): b is { label: string; blurb: string } => b !== null);
 

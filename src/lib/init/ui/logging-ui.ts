@@ -122,7 +122,7 @@ export class LoggingUI implements WizardUI {
     }
     if (summary.featureBlurbs && summary.featureBlurbs.length > 0) {
       this.writeLine(this.stdout, "");
-      this.writeLine(this.stdout, "  Here's what we set up:");
+      this.writeLine(this.stdout, "  Here's what we set up");
       const tableRows = summary.featureBlurbs.map(({ label, blurb }) => [
         label,
         blurb,
