@@ -468,6 +468,14 @@ Initialize Sentry in your project (experimental)
 
 → Full flags and examples: `references/init.md`
 
+### Local
+
+Run a local Spotlight server to capture dev SDK events
+
+- `sentry local` — Run a local Spotlight server to capture dev SDK events
+
+→ Full flags and examples: `references/local.md`
+
 ### Schema
 
 Browse the Sentry API schema
