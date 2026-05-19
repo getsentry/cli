@@ -114,7 +114,7 @@ async function handleSelect(
   const items = payload.options ?? apps.map((a) => a.name);
 
   if (items.length === 0) {
-    throw new WizardError("No apps found in this monorepo.", {
+    throw new WizardError("No options available for this selection.", {
       rendered: false,
     });
   }
