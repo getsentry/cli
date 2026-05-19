@@ -62,12 +62,15 @@ function buildSummary(output: WizardOutput): WizardSummary | null {
 
   const changedFiles = output.changedFiles ?? [];
 
-  const blurbMap = new Map(
-    (output.featureBlurbs ?? []).map(({ feature, blurb }) => [feature, blurb])
-  );
-  const featureBlurbs = sortFeatures([...blurbMap.keys()])
+  // output.features is the canonical ordered list of selected feature IDs.
+  // Pair blurbs positionally so labels are always correct regardless of what
+  // the agent echoes back in the feature field.
+  const blurbsInOrder = output.featureBlurbs ?? [];
+  const canonicalFeatures = output.features ?? [];
+  const featureBlurbs = sortFeatures(canonicalFeatures)
     .map((feature) => {
-      const blurb = blurbMap.get(feature);
+      const pos = canonicalFeatures.indexOf(feature);
+      const blurb = blurbsInOrder[pos]?.blurb;
       return blurb ? { label: featureLabel(feature), blurb } : null;
     })
     .filter((b): b is { label: string; blurb: string } => b !== null);
