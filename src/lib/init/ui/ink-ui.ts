@@ -215,13 +215,15 @@ import inkAppPath from "./ink-app.tsx" with { type: "file" };
  */
 function openFreshTtyForInk(): ReadStream | null {
   const ttyPath = process.platform === "win32" ? "\\\\.\\CON" : "/dev/tty";
+  let stream: ReadStream | undefined;
   try {
     const fd = openSync(ttyPath, "r");
-    const stream = new ReadStream(fd);
+    stream = new ReadStream(fd);
     stream.setRawMode(true);
     stream.setRawMode(false);
     return stream;
   } catch {
+    stream?.destroy();
     return null;
   }
 }
