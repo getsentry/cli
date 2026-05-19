@@ -75,7 +75,11 @@ function buildSummary(output: WizardOutput): WizardSummary | null {
     })
     .filter((b): b is { label: string; blurb: string } => b !== null);
 
-  if (fields.length === 0 && changedFiles.length === 0 && featureBlurbs.length === 0) {
+  if (
+    fields.length === 0 &&
+    changedFiles.length === 0 &&
+    featureBlurbs.length === 0
+  ) {
     return null;
   }
 
