@@ -2,7 +2,7 @@
  * Node.js polyfills for Bun APIs. Injected at bundle time via esbuild.
  */
 import {
-  execSync,
+  execFileSync,
   spawn as nodeSpawn,
   spawnSync as nodeSpawnSync,
 } from "node:child_process";
@@ -12,9 +12,6 @@ import { promisify } from "node:util";
 // biome-ignore lint/performance/noNamespaceImport: runtime access to optional `zstdCompress`/`zstdDecompress` exports
 import * as zlibModule from "node:zlib";
 import { constants as zlibConstants } from "node:zlib";
-// node:sqlite is imported lazily inside NodeDatabasePolyfill to avoid
-// crashing on Node.js versions without node:sqlite support when the
-// bundle is loaded as a library (the consumer may never use SQLite).
 
 import picomatch from "picomatch";
 import { compare as semverCompare } from "semver";
@@ -24,85 +21,6 @@ import { uuidv7 } from "uuidv7";
 declare global {
   var Bun: typeof BunPolyfill;
 }
-
-type SqliteValue = string | number | bigint | null | Uint8Array;
-
-/** Lazy-loaded node:sqlite DatabaseSync constructor. */
-function getNodeSqlite(): typeof import("node:sqlite").DatabaseSync {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require("node:sqlite").DatabaseSync;
-}
-
-/** Wraps node:sqlite StatementSync to match bun:sqlite query() API. */
-class NodeStatementPolyfill {
-  // biome-ignore lint/suspicious/noExplicitAny: node:sqlite types loaded lazily
-  private readonly stmt: any;
-
-  // biome-ignore lint/suspicious/noExplicitAny: node:sqlite types loaded lazily
-  constructor(stmt: any) {
-    this.stmt = stmt;
-  }
-
-  get(...params: SqliteValue[]): Record<string, SqliteValue> | undefined {
-    return this.stmt.get(...params) as Record<string, SqliteValue> | undefined;
-  }
-
-  all(...params: SqliteValue[]): Record<string, SqliteValue>[] {
-    return this.stmt.all(...params) as Record<string, SqliteValue>[];
-  }
-
-  run(...params: SqliteValue[]): void {
-    this.stmt.run(...params);
-  }
-}
-
-/** Wraps node:sqlite DatabaseSync to match bun:sqlite Database API. */
-class NodeDatabasePolyfill {
-  // biome-ignore lint/suspicious/noExplicitAny: node:sqlite types loaded lazily
-  private readonly db: any;
-
-  constructor(path: string) {
-    // SQLite configuration (busy_timeout, foreign_keys, WAL mode) is applied
-    // via PRAGMA statements in src/lib/db/index.ts after construction
-    const DatabaseSync = getNodeSqlite();
-    this.db = new DatabaseSync(path);
-  }
-
-  exec(sql: string): void {
-    this.db.exec(sql);
-  }
-
-  query(sql: string): NodeStatementPolyfill {
-    return new NodeStatementPolyfill(this.db.prepare(sql));
-  }
-
-  close(): void {
-    this.db.close();
-  }
-
-  /**
-   * Wraps a function in a transaction. Returns a callable that executes
-   * the function within BEGIN/COMMIT, with ROLLBACK on error.
-   * Matches Bun's db.transaction() API.
-   */
-  transaction<T>(fn: () => T): () => T {
-    return () => {
-      this.db.exec("BEGIN");
-      try {
-        const result = fn();
-        this.db.exec("COMMIT");
-        return result;
-      } catch (error) {
-        this.db.exec("ROLLBACK");
-        throw error;
-      }
-    };
-  }
-}
-
-const bunSqlitePolyfill = { Database: NodeDatabasePolyfill };
-(globalThis as Record<string, unknown>).__bun_sqlite_polyfill =
-  bunSqlitePolyfill;
 
 const BunPolyfill = {
   file(path: string) {
@@ -162,22 +80,39 @@ const BunPolyfill = {
   which(command: string, opts?: { PATH?: string }): string | null {
     try {
       const isWindows = process.platform === "win32";
-      const cmd = isWindows ? `where ${command}` : `which ${command}`;
       // If a custom PATH is provided, override it in the subprocess env.
       // Use !== undefined (not truthy) so empty-string PATH is respected.
       const env =
         opts?.PATH !== undefined
           ? { ...process.env, PATH: opts.PATH }
           : undefined;
-      return (
-        execSync(cmd, {
+
+      let stdout: string;
+      if (isWindows) {
+        // execFileSync bypasses the shell entirely — no injection risk
+        stdout = execFileSync("where.exe", [command], {
           encoding: "utf-8",
           stdio: ["pipe", "pipe", "ignore"],
           env,
-        })
-          .trim()
-          .split("\n")[0] || null
-      );
+          timeout: 5000,
+        });
+      } else {
+        // Pass command as a positional arg ($1) so it's never interpolated
+        // into the shell string. `command -v` is a POSIX builtin — works
+        // even when PATH is overridden to a restricted set of directories.
+        stdout = execFileSync(
+          "/bin/sh",
+          ["-c", 'command -v "$1"', "--", command],
+          {
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "ignore"],
+            env,
+            timeout: 5000,
+          }
+        );
+      }
+
+      return stdout.trim().split("\n")[0] || null;
     } catch {
       return null;
     }
