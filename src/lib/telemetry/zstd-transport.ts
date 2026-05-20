@@ -32,8 +32,11 @@ import * as http from "node:http";
 import * as https from "node:https";
 import { Readable } from "node:stream";
 import { promisify } from "node:util";
-// biome-ignore lint/performance/noNamespaceImport: needed for feature-detected zstd access
-import * as zlib from "node:zlib";
+import {
+  gzip as gzipCb,
+  constants as zlibConstants,
+  zstdCompress as zstdCompressCb,
+} from "node:zlib";
 import {
   createTransport,
   suppressTracing,
@@ -66,7 +69,7 @@ const ZSTD_LEVEL = 3;
  * Minimum body length above which we attempt compression.
  *
  * For zstd we lower this from the SDK's 32 KiB gzip threshold to 1 KiB
- * — Bun's zstd worker is cheap to dispatch and most error envelopes
+ * — zstd compression via libuv is cheap to dispatch and most error envelopes
  * (5–15 KiB) would miss the 32 KiB cutoff and ship uncompressed
  * otherwise.
  */
@@ -78,22 +81,8 @@ const ZSTD_THRESHOLD = 1024;
  */
 const GZIP_THRESHOLD = 1024 * 32;
 
-const gzipAsync = promisify(zlib.gzip);
-// zstdCompress is available in Node 22.15+. Feature-detect to avoid crashing
-// the npm bundle on older Node versions (e.g., CI runners with Node 20).
-// zstdCompress is available in Node 22.15+. Feature-detect to avoid crashing
-// the npm bundle on older Node versions (e.g., CI runners with Node 20).
-// biome-ignore lint/suspicious/noExplicitAny: zstd types unavailable on older @types/node
-const zstdCompressFn = (zlib as any).zstdCompress as
-  | ((...args: unknown[]) => unknown)
-  | undefined;
-const zstdCompressAsync =
-  typeof zstdCompressFn === "function"
-    ? (promisify(zstdCompressFn) as (
-        buf: Buffer,
-        opts?: unknown
-      ) => Promise<Buffer>)
-    : undefined;
+const gzipAsync = promisify(gzipCb);
+const zstdCompressAsync = promisify(zstdCompressCb);
 
 /**
  * Factory for the SDK's `Sentry.init({ transport })` option.
@@ -288,9 +277,9 @@ export async function maybeCompress(
     return { payload: buf, encodingApplied: "none" };
   }
 
-  if (encoding === "zstd" && zstdCompressAsync) {
+  if (encoding === "zstd") {
     const out = await zstdCompressAsync(buf, {
-      params: { [zlib.constants.ZSTD_c_compressionLevel]: ZSTD_LEVEL },
+      params: { [zlibConstants.ZSTD_c_compressionLevel]: ZSTD_LEVEL },
     });
     return {
       payload: Buffer.from(out.buffer, out.byteOffset, out.byteLength),
@@ -304,7 +293,7 @@ export async function maybeCompress(
 
 /** Feature-detect zstd support on the current runtime. */
 export function hasZstdSupport(): boolean {
-  return zstdCompressAsync !== undefined;
+  return typeof zstdCompressCb === "function";
 }
 
 /**

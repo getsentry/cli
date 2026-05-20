@@ -24,8 +24,11 @@ import { open, readFile, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-// biome-ignore lint/performance/noNamespaceImport: needed for feature-detected zstd access
-import * as zlib from "node:zlib";
+import {
+  gzip as gzipCb,
+  constants as zlibConstants,
+  zstdCompress as zstdCompressCb,
+} from "node:zlib";
 import pLimit from "p-limit";
 import { z } from "zod";
 import { ApiError } from "../errors.js";
@@ -35,22 +38,8 @@ import { getSdkConfig } from "../sentry-client.js";
 import { type ZipCompression, ZipWriter } from "../sourcemap/zip.js";
 import { apiRequestToRegion } from "./infrastructure.js";
 
-const gzipAsync = promisify(zlib.gzip);
-// zstdCompress is available in Node 22.15+. Feature-detect to avoid crashing
-// the npm bundle on older Node versions (e.g., CI runners with Node 20).
-// zstdCompress is available in Node 22.15+. Feature-detect to avoid crashing
-// the npm bundle on older Node versions (e.g., CI runners with Node 20).
-// biome-ignore lint/suspicious/noExplicitAny: zstd types unavailable on older @types/node
-const zstdCompressFn = (zlib as any).zstdCompress as
-  | ((...args: unknown[]) => unknown)
-  | undefined;
-const zstdCompressAsync =
-  typeof zstdCompressFn === "function"
-    ? (promisify(zstdCompressFn) as (
-        buf: Buffer,
-        opts?: unknown
-      ) => Promise<Buffer>)
-    : undefined;
+const gzipAsync = promisify(gzipCb);
+const zstdCompressAsync = promisify(zstdCompressCb);
 const log = logger.withTag("api.sourcemaps");
 
 // ── Schemas ─────────────────────────────────────────────────────────
@@ -219,13 +208,13 @@ export async function encodeChunk(
   buf: Buffer,
   encoding: UploadEncoding | undefined
 ): Promise<Uint8Array> {
-  if (encoding === "zstd" && zstdCompressAsync) {
+  if (encoding === "zstd") {
     // L3 is libzstd's default; passed explicitly for self-documenting
     // code. L9+ trades ~14% size for 4x compress time and forces the
     // server's decoder to allocate 15-30 MiB of window state -- not
     // worth it once decode cost is counted.
     return await zstdCompressAsync(buf, {
-      params: { [zlib.constants.ZSTD_c_compressionLevel]: 3 },
+      params: { [zlibConstants.ZSTD_c_compressionLevel]: 3 },
     });
   }
   if (encoding === "gzip") {
