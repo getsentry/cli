@@ -345,6 +345,51 @@ describe("formatResult with featureBlurbs", () => {
     expect(summary?.featureBlurbs?.[0]?.blurb).toBe("Captures.");
   });
 
+  test("stripAnsi strips arbitrary OSC sequences (e.g. window title change) from blurbs", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring"],
+          featureBlurbs: [
+            // \x1b]0;title\x07 = set window title — OSC command, not OSC 8
+            {
+              feature: "errorMonitoring",
+              blurb: "\x1b]0;injected title\x07Captures.",
+            },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs?.[0]?.blurb).toBe("Captures.");
+  });
+
+  test("stripAnsi strips single-char C1 ESC sequences (e.g. terminal reset) from blurbs", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring"],
+          featureBlurbs: [
+            // \x1bc = RIS (Reset to Initial State) — two-char ESC sequence
+            { feature: "errorMonitoring", blurb: "\x1bcCaptures." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs?.[0]?.blurb).toBe("Captures.");
+  });
+
   test("stripAnsi strips non-SGR CSI sequences (cursor movement, screen-clear) from blurbs", () => {
     const { ui, calls } = createMockUI();
     formatResult(

@@ -73,22 +73,29 @@ export function isPlainOutput(): boolean {
 }
 
 /**
- * Strip ANSI escape sequences from a string.
+ * Strip ANSI/VT escape sequences from a string.
  *
- * Handles all CSI sequences (`\x1b[...LETTER` — covers SGR colour codes,
- * cursor movement, screen-clear, and other control sequences) and OSC 8
- * terminal hyperlink sequences (`\x1b]8;;url\x07text\x1b]8;;\x07`).
+ * Covers the four escape-sequence families that can reach a terminal:
+ *   - CSI (`\x1b[`): SGR colour codes, cursor movement, screen-clear, etc.
+ *   - OSC (`\x1b]`): window-title changes, hyperlinks, etc.
+ *   - DCS (`\x1bP`): device-control strings.
+ *   - Two-character C1 ESC: single-byte sequences like `\x1bc` (terminal reset).
  */
 export function stripAnsi(text: string): string {
   return (
     text
-      // Full CSI spec: \x1b[ + parameter bytes (0x30-0x3F) + intermediate
-      // bytes (0x20-0x2F, e.g. space, !, ") + final byte (0x40-0x7E).
-      // The narrower [0-9;?]*[A-Za-z] missed sequences with intermediate
-      // bytes like \x1b[!p (Soft Terminal Reset) or \x1b[1 q (cursor style).
+      // CSI: \x1b[ + param bytes (0x30-0x3F) + intermediate bytes (0x20-0x2F) + final byte (0x40-0x7E)
       // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape detection requires matching \x1b
       .replace(/\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g, "")
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: OSC 8 hyperlink sequences use \x1b and \x07
-      .replace(/\x1b\]8;;[^\x07]*\x07/g, "")
+      // OSC: \x1b] ... terminated by BEL (\x07) or ST (\x1b\)
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: OSC sequences use \x1b and \x07
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+      // DCS: \x1bP ... terminated by ST (\x1b\)
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: DCS sequences use \x1b
+      .replace(/\x1bP[^\x1b]*\x1b\\/g, "")
+      // Two-character ESC sequences (C1: 0x40-0x5F, Fs: 0x60-0x7E), e.g. \x1bc (terminal reset).
+      // Applied last so CSI/OSC/DCS introducers (\x1b[, \x1b], \x1bP) are already stripped.
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: ESC sequence detection requires matching \x1b
+      .replace(/\x1b[@-~]/g, "")
   );
 }
