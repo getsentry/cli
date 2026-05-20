@@ -247,6 +247,39 @@ describe("formatResult with featureBlurbs", () => {
     expect(summary?.fields.some((f) => f.label === "Features")).toBe(true);
   });
 
+  test("regression: all blurbs render when server returns canonical feature IDs", () => {
+    // Regression for the 'only Tracing' bug: the LLM was echoing human-readable
+    // labels ("Error Monitoring") in the feature field instead of canonical IDs
+    // ("errorMonitoring"). The server-side fix now maps blurbs positionally so
+    // canonical IDs are always in the feature field. This test verifies the CLI
+    // renders all blurbs when canonical IDs are present — not just the one that
+    // happened to match ("performanceMonitoring" → "Tracing").
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring", "performanceMonitoring", "sessionReplay"],
+          featureBlurbs: [
+            { feature: "errorMonitoring", blurb: "Captures exceptions." },
+            { feature: "performanceMonitoring", blurb: "Traces requests." },
+            { feature: "sessionReplay", blurb: "Records sessions." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs).toHaveLength(3);
+    expect(summary?.featureBlurbs?.map((b) => b.label)).toEqual([
+      "Error Monitoring",
+      "Session Replay",
+      "Tracing",
+    ]);
+  });
+
   test("labels use canonical feature IDs — agent echoing wrong IDs omits the blurb rather than mislabelling", () => {
     const { ui, calls } = createMockUI();
     formatResult(
