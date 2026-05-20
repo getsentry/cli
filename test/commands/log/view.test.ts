@@ -5,60 +5,64 @@
  * and viewCommand func() body in src/commands/log/view.ts
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // Mock isatty to simulate an interactive terminal for the --web prompt path.
 // Bun's ESM wrapper for CJS built-ins exposes a `default` re-export plus
 // `ReadStream` / `WriteStream` — all must be present or Bun throws
 // "Missing 'default' export in module 'node:tty'".
-const mockIsatty = mock(() => false);
-class FakeReadStream {}
-class FakeWriteStream {}
-const ttyExports = {
-  isatty: mockIsatty,
-  ReadStream: FakeReadStream,
-  WriteStream: FakeWriteStream,
-};
-mock.module("node:tty", () => ({
+const { mockIsatty, ttyExports, noop, mockPrompt, fakeLog } = vi.hoisted(() => {
+  const _mockIsatty = vi.fn(() => false);
+  class _FakeReadStream {}
+  class _FakeWriteStream {}
+  const _ttyExports = {
+    isatty: _mockIsatty,
+    ReadStream: _FakeReadStream,
+    WriteStream: _FakeWriteStream,
+  };
+
+  /** No-op placeholder for unused logger methods. */
+  function _noop() {
+    // intentional no-op
+  }
+
+  // Mock the logger module to intercept the .prompt() call made by the
+  // module-scoped `log = logger.withTag("log-view")` in view.ts.
+  const _mockPrompt = vi.fn(() => Promise.resolve(true));
+  const _fakeLog: {
+    prompt: typeof _mockPrompt;
+    warn: ReturnType<typeof vi.fn>;
+    info: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+    debug: ReturnType<typeof vi.fn>;
+    withTag: () => typeof _fakeLog;
+  } = {
+    prompt: _mockPrompt,
+    warn: vi.fn(_noop),
+    info: vi.fn(_noop),
+    error: vi.fn(_noop),
+    debug: vi.fn(_noop),
+    withTag: () => _fakeLog,
+  };
+
+  return {
+    mockIsatty: _mockIsatty,
+    ttyExports: _ttyExports,
+    noop: _noop,
+    mockPrompt: _mockPrompt,
+    fakeLog: _fakeLog,
+  };
+});
+
+vi.mock("node:tty", () => ({
   ...ttyExports,
   default: ttyExports,
 }));
 
-/** No-op placeholder for unused logger methods. */
-function noop() {
-  // intentional no-op
-}
-
-// Mock the logger module to intercept the .prompt() call made by the
-// module-scoped `log = logger.withTag("log-view")` in view.ts.
-const mockPrompt = mock(() => Promise.resolve(true));
-const fakeLog: {
-  prompt: typeof mockPrompt;
-  warn: ReturnType<typeof mock>;
-  info: ReturnType<typeof mock>;
-  error: ReturnType<typeof mock>;
-  debug: ReturnType<typeof mock>;
-  withTag: () => typeof fakeLog;
-} = {
-  prompt: mockPrompt,
-  warn: mock(noop),
-  info: mock(noop),
-  error: mock(noop),
-  debug: mock(noop),
-  withTag: () => fakeLog,
-};
-mock.module("../../../src/lib/logger.js", () => ({
+vi.mock("../../../src/lib/logger.js", () => ({
   logger: fakeLog,
-  setLogLevel: mock(noop),
-  attachSentryReporter: mock(noop),
+  setLogLevel: vi.fn(noop),
+  attachSentryReporter: vi.fn(noop),
   LOG_LEVEL_NAMES: ["error", "warn", "log", "info", "debug", "trace"],
   LOG_LEVEL_ENV_VAR: "SENTRY_LOG_LEVEL",
   parseLogLevel: (name: string) => {
@@ -69,15 +73,39 @@ mock.module("../../../src/lib/logger.js", () => ({
   getEnvLogLevel: () => null,
 }));
 
-// Dynamic import: must load AFTER mock.module() registrations above so the
+// Dynamic import: must load AFTER vi.mock() registrations above so the
 // `log = logger.withTag(...)` binding inside view.ts picks up fakeLog.
 const { parsePositionalArgs, viewCommand } = await import(
   "../../../src/commands/log/view.js"
 );
 
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/browser.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/browser.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
@@ -290,7 +318,7 @@ describe("resolveProjectBySlug", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
+    findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
   });
 
   afterEach(() => {
@@ -469,11 +497,11 @@ describe("viewCommand.func", () => {
   } as unknown as DetailedSentryLog;
 
   function createMockContext() {
-    const stdoutWrite = mock(() => true);
+    const stdoutWrite = vi.fn(() => true);
     return {
       context: {
         stdout: { write: stdoutWrite },
-        stderr: { write: mock(() => true) },
+        stderr: { write: vi.fn(() => true) },
         cwd: "/tmp",
       },
       stdoutWrite,
@@ -481,9 +509,9 @@ describe("viewCommand.func", () => {
   }
 
   beforeEach(async () => {
-    getLogsSpy = spyOn(apiClient, "getLogs");
-    findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
-    openInBrowserSpy = spyOn(browser, "openInBrowser");
+    getLogsSpy = vi.spyOn(apiClient, "getLogs");
+    findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
+    openInBrowserSpy = vi.spyOn(browser, "openInBrowser");
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
@@ -593,7 +621,7 @@ describe("viewCommand.func", () => {
 /**
  * Tests for the --web interactive prompt path.
  *
- * Uses the module-level `mock.module()` on `node:tty` and the logger (set at
+ * Uses the module-level `vi.mock()` on `node:tty` and the logger (set at
  * the top of this file) to simulate an interactive terminal and control the
  * prompt response.
  */
@@ -603,11 +631,11 @@ describe("log view --web interactive prompt", () => {
   let openInBrowserSpy: ReturnType<typeof spyOn>;
 
   function createPromptMockContext() {
-    const stdoutWrite = mock(() => true);
+    const stdoutWrite = vi.fn(() => true);
     return {
       context: {
         stdout: { write: stdoutWrite },
-        stderr: { write: mock(() => true) },
+        stderr: { write: vi.fn(() => true) },
         cwd: "/tmp",
       },
       stdoutWrite,
@@ -615,7 +643,7 @@ describe("log view --web interactive prompt", () => {
   }
 
   beforeEach(() => {
-    openInBrowserSpy = spyOn(browser, "openInBrowser");
+    openInBrowserSpy = vi.spyOn(browser, "openInBrowser");
     mockIsatty.mockReturnValue(true);
     mockPrompt.mockClear();
   });

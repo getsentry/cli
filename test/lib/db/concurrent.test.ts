@@ -8,8 +8,14 @@
  * CLI usage (e.g., multiple terminals, CI jobs, editor integrations).
  */
 
-import { beforeEach, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { beforeEach, describe, expect, test } from "vitest";
+
+function noop(): void {
+  // Intentionally empty — absorbs async spawn errors
+}
+
 import { getCachedDsn } from "../../../src/lib/db/dsn-cache.js";
 import {
   CONFIG_DIR_ENV_VAR,
@@ -18,7 +24,7 @@ import {
 import { getCachedProject } from "../../../src/lib/db/project-cache.js";
 import { useTestConfigDir } from "../../helpers.js";
 
-const WORKER_SCRIPT = join(import.meta.dir, "concurrent-worker.ts");
+const WORKER_SCRIPT = join(import.meta.dirname, "concurrent-worker.ts");
 
 type WorkerResult = {
   workerId: string;
@@ -36,17 +42,27 @@ async function spawnWorker(
   workerId: string,
   operation: string
 ): Promise<WorkerResult> {
-  const proc = Bun.spawn(
-    [process.execPath, WORKER_SCRIPT, configDir, workerId, operation],
+  const proc = spawn(
+    process.execPath,
+    [WORKER_SCRIPT, configDir, workerId, operation],
     {
-      stdout: "pipe",
-      stderr: "pipe",
+      stdio: ["pipe", "pipe", "pipe"],
     }
   );
+  proc.on("error", noop);
 
-  const exitCode = await proc.exited;
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
+  let stdout = "";
+  let stderr = "";
+  proc.stdout.on("data", (d: Buffer) => {
+    stdout += d;
+  });
+  proc.stderr.on("data", (d: Buffer) => {
+    stderr += d;
+  });
+
+  const exitCode = await new Promise<number>((resolve) =>
+    proc.on("close", (code) => resolve(code ?? 1))
+  );
 
   if (exitCode !== 0) {
     return {
@@ -86,7 +102,12 @@ async function spawnWorkersConcurrently(
   return Promise.all(promises);
 }
 
-describe("concurrent database access", () => {
+// These tests spawn child processes with process.execPath to run .ts worker
+// scripts. Under Bun this works natively; under Node.js (vitest) it fails
+// because Node can't execute .ts files directly.
+const isBun = typeof globalThis.Bun !== "undefined";
+
+describe.skipIf(!isBun)("concurrent database access", () => {
   const getConfigDir = useTestConfigDir("concurrent-");
 
   beforeEach(async () => {

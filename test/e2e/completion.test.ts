@@ -10,11 +10,16 @@
  * Post-optimization target:  ~60ms  (dev), ~190ms (binary)
  */
 
-import { describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { describe, expect, test } from "vitest";
 import { getCliCommand } from "../fixture.js";
 
-const cliDir = join(import.meta.dir, "../..");
+function noop(): void {
+  // Intentionally empty — absorbs async spawn errors
+}
+
+const cliDir = join(import.meta.dirname, "../..");
 
 /** Spawn a CLI process and measure wall-clock duration. */
 async function measureCommand(
@@ -26,24 +31,31 @@ async function measureCommand(
   stdout: string;
   stderr: string;
 }> {
-  const cmd = getCliCommand();
+  const [cmdBin, ...cmdArgs] = getCliCommand();
   const start = performance.now();
-  const proc = Bun.spawn([...cmd, ...args], {
+  const proc = spawn(cmdBin, [...cmdArgs, ...args], {
     cwd: cliDir,
     env: { ...process.env, ...env },
-    stdout: "pipe",
-    stderr: "pipe",
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  proc.on("error", noop);
+
+  let stdout = "";
+  let stderr = "";
+  proc.stdout.on("data", (d: Buffer) => {
+    stdout += d;
+  });
+  proc.stderr.on("data", (d: Buffer) => {
+    stderr += d;
   });
 
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  await proc.exited;
+  const exitCode = await new Promise<number>((resolve) =>
+    proc.on("close", (code) => resolve(code ?? 1))
+  );
 
   return {
     duration: performance.now() - start,
-    exitCode: proc.exitCode ?? 1,
+    exitCode,
     stdout,
     stderr,
   };

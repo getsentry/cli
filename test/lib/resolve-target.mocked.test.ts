@@ -1,7 +1,7 @@
 /**
  * Unit tests for resolve-target utilities with mocked collaborators.
  *
- * These tests use `mock.module()` to stub out every dependency (DB caches,
+ * These tests use `vi.mock()` to stub out every dependency (DB caches,
  * DSN detection, api-client). This gives tight control over return values
  * at each decision point, at the cost of not exercising the real DB/HTTP
  * paths — those are covered by `resolve-target.test.ts` (real DB + mocked
@@ -13,7 +13,7 @@
  * real-DB integration tests.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // Import the real formatMultipleProjectsFooter from its source file (not the
 // barrel dsn/index.js), then pass it through the mock below so the mocked
@@ -25,60 +25,76 @@ import { formatMultipleProjectsFooter } from "../../src/lib/dsn/errors.js";
 // ============================================================================
 
 // Mock functions we'll control in tests
-const mockGetDefaultOrganization = mock(() => null);
-const mockGetDefaultProject = mock(() => null);
-const mockDetectDsn = mock(() => Promise.resolve(null));
-const mockDetectAllDsns = mock(() =>
-  Promise.resolve({
-    primary: null,
-    all: [],
-    hasMultiple: false,
-    fingerprint: "",
-  })
-);
-const mockFindProjectRoot = mock(() =>
-  Promise.resolve({
-    projectRoot: "/test/project",
-    detectedFrom: "package.json",
-  })
-);
-const mockGetDsnSourceDescription = mock(
-  () => "SENTRY_DSN environment variable"
-);
-const mockGetCachedProject = mock(() => null);
-const mockSetCachedProject = mock(() => {
-  /* no-op */
-});
-const mockGetCachedProjectByDsnKey = mock(() => null);
-const mockSetCachedProjectByDsnKey = mock(() => {
-  /* no-op */
-});
-const mockGetCachedDsn = mock(() => null);
-const mockSetCachedDsn = mock(() => {
-  /* no-op */
-});
-const mockGetProject = mock(() =>
-  Promise.resolve({ slug: "test", name: "Test" })
-);
-const mockFindProjectByDsnKey = mock(() => Promise.resolve(null));
-const mockFindProjectsByPattern = mock(() => Promise.resolve([]));
-const mockListOrganizationsUncached = mock(() => Promise.resolve([]));
-const mockGetOrgByNumericId = mock(
-  () => undefined as { slug: string; regionUrl: string } | undefined
-);
+const {
+  mockGetDefaultOrganization,
+  mockGetDefaultProject,
+  mockDetectDsn,
+  mockDetectAllDsns,
+  mockFindProjectRoot,
+  mockGetDsnSourceDescription,
+  mockGetCachedProject,
+  mockSetCachedProject,
+  mockGetCachedProjectByDsnKey,
+  mockSetCachedProjectByDsnKey,
+  mockGetCachedDsn,
+  mockSetCachedDsn,
+  mockGetProject,
+  mockFindProjectByDsnKey,
+  mockFindProjectsByPattern,
+  mockListOrganizationsUncached,
+  mockGetOrgByNumericId,
+} = vi.hoisted(() => ({
+  mockGetDefaultOrganization: vi.fn(() => null),
+  mockGetDefaultProject: vi.fn(() => null),
+  mockDetectDsn: vi.fn(() => Promise.resolve(null)),
+  mockDetectAllDsns: vi.fn(() =>
+    Promise.resolve({
+      primary: null,
+      all: [],
+      hasMultiple: false,
+      fingerprint: "",
+    })
+  ),
+  mockFindProjectRoot: vi.fn(() =>
+    Promise.resolve({
+      projectRoot: "/test/project",
+      detectedFrom: "package.json",
+    })
+  ),
+  mockGetDsnSourceDescription: vi.fn(() => "SENTRY_DSN environment variable"),
+  mockGetCachedProject: vi.fn(() => null),
+  mockSetCachedProject: vi.fn(() => {
+    /* no-op */
+  }),
+  mockGetCachedProjectByDsnKey: vi.fn(() => null),
+  mockSetCachedProjectByDsnKey: vi.fn(() => {
+    /* no-op */
+  }),
+  mockGetCachedDsn: vi.fn(() => null),
+  mockSetCachedDsn: vi.fn(() => {
+    /* no-op */
+  }),
+  mockGetProject: vi.fn(() => Promise.resolve({ slug: "test", name: "Test" })),
+  mockFindProjectByDsnKey: vi.fn(() => Promise.resolve(null)),
+  mockFindProjectsByPattern: vi.fn(() => Promise.resolve([])),
+  mockListOrganizationsUncached: vi.fn(() => Promise.resolve([])),
+  mockGetOrgByNumericId: vi.fn(
+    () => undefined as { slug: string; regionUrl: string } | undefined
+  ),
+}));
 
 // Mock all dependency modules
-mock.module("../../src/lib/db/defaults.js", () => ({
+vi.mock("../../src/lib/db/defaults.js", () => ({
   getDefaultOrganization: mockGetDefaultOrganization,
   getDefaultProject: mockGetDefaultProject,
 }));
 
-// Bun's mock.module() replaces the ENTIRE barrel module. Since resolve-target.ts
+// Bun's vi.mock() replaces the ENTIRE barrel module. Since resolve-target.ts
 // imports formatMultipleProjectsFooter from dsn/index.js, we must include it here.
 // We pass through the real function (imported above from dsn/errors.js) rather than
-// a stub, because Bun leaks mock.module() state across test files in the same run
+// a stub, because Bun leaks vi.mock() state across test files in the same run
 // and a simplified stub would break tests in dsn/errors.test.ts.
-mock.module("../../src/lib/dsn/index.js", () => ({
+vi.mock("../../src/lib/dsn/index.js", () => ({
   detectDsn: mockDetectDsn,
   detectAllDsns: mockDetectAllDsns,
   findProjectRoot: mockFindProjectRoot,
@@ -86,50 +102,54 @@ mock.module("../../src/lib/dsn/index.js", () => ({
   formatMultipleProjectsFooter,
 }));
 
-mock.module("../../src/lib/db/project-cache.js", () => ({
+vi.mock("../../src/lib/db/project-cache.js", () => ({
   getCachedProject: mockGetCachedProject,
   setCachedProject: mockSetCachedProject,
   getCachedProjectByDsnKey: mockGetCachedProjectByDsnKey,
   setCachedProjectByDsnKey: mockSetCachedProjectByDsnKey,
 }));
 
-mock.module("../../src/lib/db/dsn-cache.js", () => ({
+vi.mock("../../src/lib/db/dsn-cache.js", () => ({
   getCachedDsn: mockGetCachedDsn,
   setCachedDsn: mockSetCachedDsn,
 }));
 
-mock.module("../../src/lib/db/regions.js", () => ({
+vi.mock("../../src/lib/db/regions.js", () => ({
   getOrgByNumericId: mockGetOrgByNumericId,
-  getOrgRegion: mock(() => {
+  getOrgRegion: vi.fn(() => {
     /* returns undefined */
   }),
-  setOrgRegion: mock(() => {
+  setOrgRegion: vi.fn(() => {
     /* no-op */
   }),
-  setOrgRegions: mock(() => {
+  setOrgRegions: vi.fn(() => {
     /* no-op */
   }),
-  clearOrgRegions: mock(() => {
+  clearOrgRegions: vi.fn(() => {
     /* no-op */
   }),
-  getAllOrgRegions: mock(() => new Map()),
-  getCachedOrganizations: mock(() => []),
-  getCachedOrgRole: mock(() => {
+  getAllOrgRegions: vi.fn(() => new Map()),
+  getCachedOrganizations: vi.fn(() => []),
+  getCachedOrgRole: vi.fn(() => {
     /* returns undefined */
   }),
-  disableOrgCache: mock(() => {
+  disableOrgCache: vi.fn(() => {
     /* no-op */
   }),
-  enableOrgCache: mock(() => {
+  enableOrgCache: vi.fn(() => {
     /* no-op */
   }),
 }));
 
-mock.module("../../src/lib/api-client.js", () => ({
+vi.mock("../../src/lib/api-client.js", () => ({
   getProject: mockGetProject,
   findProjectByDsnKey: mockFindProjectByDsnKey,
   findProjectsByPattern: mockFindProjectsByPattern,
+  findProjectsBySlug: vi.fn(() => Promise.resolve({ projects: [], orgs: [] })),
+  listOrganizations: vi.fn(() => Promise.resolve([])),
   listOrganizationsUncached: mockListOrganizationsUncached,
+  listProjects: vi.fn(() => Promise.resolve([])),
+  resolveOrgDisplayName: vi.fn((slug: string, name?: string) => name ?? slug),
 }));
 
 import { ContextError } from "../../src/lib/errors.js";

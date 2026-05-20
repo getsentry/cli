@@ -4,7 +4,7 @@
  * Tests for pure functions in src/types/seer.ts
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   type AutofixState,
   extractExaminedFiles,

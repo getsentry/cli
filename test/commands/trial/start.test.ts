@@ -5,24 +5,64 @@
  * Uses spyOn pattern to mock API client and resolve-target.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { startCommand } from "../../../src/commands/trial/start.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/browser.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/browser.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browserMod from "../../../src/lib/browser.js";
 import { ValidationError } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/qrcode.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/qrcode.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as qrcodeMod from "../../../src/lib/qrcode.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type {
@@ -35,8 +75,8 @@ import type {
 // ---------------------------------------------------------------------------
 
 function createMockContext(cwd = "/tmp") {
-  const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
+  const stderrWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
@@ -71,12 +111,11 @@ describe("trial start command", () => {
   let resolveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    getProductTrialsSpy = spyOn(apiClient, "getProductTrials");
-    startProductTrialSpy = spyOn(
-      apiClient,
-      "startProductTrial"
-    ).mockResolvedValue(undefined);
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    getProductTrialsSpy = vi.spyOn(apiClient, "getProductTrials");
+    startProductTrialSpy = vi
+      .spyOn(apiClient, "startProductTrial")
+      .mockResolvedValue(undefined);
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
   });
 
   afterEach(() => {
@@ -208,15 +247,14 @@ describe("trial start command", () => {
 
   test("detects swapped arguments for plan pseudo-trial", async () => {
     resolveOrgSpy.mockResolvedValue({ org: "my-org" });
-    const getInfoSpy = spyOn(
-      apiClient,
-      "getCustomerTrialInfo"
-    ).mockResolvedValue({
-      productTrials: [],
-      canTrial: true,
-      isTrial: false,
-      planDetails: { name: "Developer" },
-    } as CustomerTrialInfo);
+    const getInfoSpy = vi
+      .spyOn(apiClient, "getCustomerTrialInfo")
+      .mockResolvedValue({
+        productTrials: [],
+        canTrial: true,
+        isTrial: false,
+        planDetails: { name: "Developer" },
+      } as CustomerTrialInfo);
 
     const { context } = createMockContext();
     const func = await startCommand.loader();
@@ -274,12 +312,14 @@ describe("trial start plan", () => {
   let generateQRCodeSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    getCustomerTrialInfoSpy = spyOn(apiClient, "getCustomerTrialInfo");
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
-    openBrowserSpy = spyOn(browserMod, "openBrowser").mockResolvedValue(true);
-    generateQRCodeSpy = spyOn(qrcodeMod, "generateQRCode").mockResolvedValue(
-      "[QR CODE]\n"
-    );
+    getCustomerTrialInfoSpy = vi.spyOn(apiClient, "getCustomerTrialInfo");
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
+    openBrowserSpy = vi
+      .spyOn(browserMod, "openBrowser")
+      .mockResolvedValue(true);
+    generateQRCodeSpy = vi
+      .spyOn(qrcodeMod, "generateQRCode")
+      .mockResolvedValue("[QR CODE]\n");
   });
 
   afterEach(() => {
@@ -378,10 +418,9 @@ describe("trial start plan", () => {
   });
 
   test("does not call startProductTrial for plan trial", async () => {
-    const startProductTrialSpy = spyOn(
-      apiClient,
-      "startProductTrial"
-    ).mockResolvedValue(undefined);
+    const startProductTrialSpy = vi
+      .spyOn(apiClient, "startProductTrial")
+      .mockResolvedValue(undefined);
 
     resolveOrgSpy.mockResolvedValue({ org: "test-org" });
     getCustomerTrialInfoSpy.mockResolvedValue(

@@ -5,7 +5,6 @@
  * that are difficult to exhaustively test with example-based tests.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   asyncProperty,
@@ -13,6 +12,7 @@ import {
   integer,
   nat,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { TimeoutError } from "../../src/lib/errors.js";
 import { poll } from "../../src/lib/polling.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";

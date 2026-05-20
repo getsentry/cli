@@ -5,9 +5,10 @@
  * codebase. It provides a `.query(sql).get()` / `.all()` / `.run()`
  * interface and a manual `transaction()` wrapper.
  *
- * Uses `node:sqlite` (Node 22+) as the backing implementation. Falls back
- * to `bun:sqlite` when `node:sqlite` is unavailable (Bun runtime) — this
- * fallback will be removed once the test runner migrates off Bun.
+ * Uses `node:sqlite` (Node 22.15+) as the backing implementation.
+ * On Node versions where `node:sqlite` is still experimental, the
+ * `--experimental-sqlite` flag must be set (the CLI's bin.cjs shim
+ * handles this automatically).
  */
 
 import { logger } from "../logger.js";
@@ -27,15 +28,13 @@ export type SQLQueryBindings =
 /**
  * Prepared statement wrapper exposing `.get()`, `.all()`, `.run()`.
  *
- * Uses a Proxy to pass through any additional driver-specific methods
- * (e.g. bun:sqlite's `.values()`) while normalising `.get()` to return
- * `null` (not `undefined`) for no-row results.
+ * Uses a Proxy to pass through any additional methods while normalising
+ * `.get()` to return `null` (not `undefined`) for no-row results.
  */
 type StatementWrapper = {
   get(...params: SQLQueryBindings[]): Record<string, SQLQueryBindings> | null;
   all(...params: SQLQueryBindings[]): Record<string, SQLQueryBindings>[];
   run(...params: SQLQueryBindings[]): void;
-  /** Allow driver-specific methods (e.g. bun:sqlite `.values()`) to pass through. */
   [method: string]: unknown;
 };
 
@@ -45,7 +44,7 @@ function wrapStatement(stmt: any): StatementWrapper {
     get(target, prop) {
       if (prop === "get") {
         return (...params: SQLQueryBindings[]) =>
-          // node:sqlite returns undefined for no rows; bun:sqlite returns null.
+          // node:sqlite returns undefined for no rows.
           // Normalise to null so callers can rely on a single sentinel.
           (target.get(...params) as Record<string, SQLQueryBindings>) ?? null;
       }
@@ -58,29 +57,16 @@ function wrapStatement(stmt: any): StatementWrapper {
   }) as StatementWrapper;
 }
 
-/**
- * Resolve the underlying SQLite database constructor.
- *
- * Prefers `node:sqlite` (Node 22+). Falls back to `bun:sqlite` when
- * `node:sqlite` is unavailable (Bun runtime). The fallback will be
- * removed once the test runner migrates off Bun.
- */
-function getSqliteConstructor(): new (
-  path: string
-) => {
-  exec(sql: string): void;
-  close(): void;
-} {
-  try {
-    return require("node:sqlite").DatabaseSync;
-  } catch (error) {
-    log.debug("node:sqlite unavailable, falling back to bun:sqlite", error);
-    return require("bun:sqlite").Database;
-  }
+/** Resolve the SQLite database constructor for the current runtime. */
+// biome-ignore lint/suspicious/noExplicitAny: driver types loaded lazily
+let SqliteImpl: any;
+try {
+  // Primary: node:sqlite (Node 22.15+)
+  SqliteImpl = require("node:sqlite").DatabaseSync;
+} catch {
+  // Fallback: bun:sqlite — needed while build/typecheck scripts still run under Bun
+  SqliteImpl = require("bun:sqlite").Database;
 }
-
-// biome-ignore lint/suspicious/noExplicitAny: resolved dynamically
-const SqliteImpl: any = getSqliteConstructor();
 
 /**
  * SQLite database wrapper.
@@ -106,16 +92,9 @@ export class Database {
   /**
    * Prepare a SQL statement.
    * Returns a wrapper with `.get()`, `.all()`, `.run()`.
-   *
-   * Uses bun:sqlite's `.query()` (cached statements) when available,
-   * falling back to node:sqlite's `.prepare()`.
    */
   query(sql: string): StatementWrapper {
-    // bun:sqlite exposes both .query() (cached) and .prepare() (fresh).
-    // Prefer .query() to preserve the caching semantics all consumers
-    // were written against. node:sqlite only has .prepare().
-    const prepFn = this.db.query ?? this.db.prepare;
-    return wrapStatement(prepFn.call(this.db, sql));
+    return wrapStatement(this.db.prepare(sql));
   }
 
   /** Close the database connection. */
@@ -128,10 +107,6 @@ export class Database {
    * the function within BEGIN/COMMIT, with ROLLBACK on error.
    */
   transaction<T>(fn: () => T): () => T {
-    // bun:sqlite has native transaction(); node:sqlite does not
-    if (typeof this.db.transaction === "function") {
-      return this.db.transaction(fn);
-    }
     return () => {
       this.db.exec("BEGIN");
       try {

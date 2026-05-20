@@ -5,8 +5,8 @@
  * cell wrapping, alignment, border styles, and edge cases.
  */
 
-import { describe, expect, test } from "bun:test";
 import chalk from "chalk";
+import { describe, expect, test } from "vitest";
 import { renderTextTable } from "../../../src/lib/formatters/text-table.js";
 
 // Force chalk colors even in test (non-TTY) environment

@@ -4,7 +4,8 @@
  * Tests for resolving organization regions in multi-region Sentry support.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { setTimeout as sleep } from "node:timers/promises";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
 import {
@@ -275,7 +276,7 @@ describe("resolveOrgRegion", () => {
       if (req.url.includes("/organizations/dedup-org/")) {
         fetchCount += 1;
         // Small delay to ensure concurrency overlap
-        await Bun.sleep(50);
+        await sleep(50);
         return new Response(
           JSON.stringify({
             id: "789",

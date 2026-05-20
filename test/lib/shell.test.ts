@@ -5,9 +5,10 @@
  * GitHub Actions). Pure function tests are in shell.property.test.ts.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   addToFpath,
   addToGitHubPath,
@@ -17,6 +18,7 @@ import {
   getConfigCandidates,
   isBashAvailable,
 } from "../../src/lib/shell.js";
+import { whichSync } from "../../src/lib/which.js";
 
 describe("shell utilities", () => {
   describe("getConfigCandidates", () => {
@@ -122,7 +124,7 @@ describe("shell utilities", () => {
       expect(result.modified).toBe(true);
       expect(result.configFile).toBe(configFile);
 
-      const content = await Bun.file(configFile).text();
+      const content = await readFile(configFile, "utf-8");
       expect(content).toContain('export PATH="/home/user/.sentry/bin:$PATH"');
     });
 
@@ -138,7 +140,7 @@ describe("shell utilities", () => {
 
       expect(result.modified).toBe(true);
 
-      const content = await Bun.file(configFile).text();
+      const content = await readFile(configFile, "utf-8");
       expect(content).toContain("# existing content");
       expect(content).toContain("# sentry");
       expect(content).toContain('export PATH="/home/user/.sentry/bin:$PATH"');
@@ -173,7 +175,7 @@ describe("shell utilities", () => {
 
       expect(result.modified).toBe(true);
 
-      const content = await Bun.file(configFile).text();
+      const content = await readFile(configFile, "utf-8");
       expect(content).toContain(
         "# existing content without newline\n\n# sentry\n"
       );
@@ -219,7 +221,7 @@ describe("shell utilities", () => {
       expect(result.modified).toBe(true);
       expect(result.configFile).toBe(configFile);
 
-      const content = await Bun.file(configFile).text();
+      const content = await readFile(configFile, "utf-8");
       expect(content).toContain(
         'fpath=("/home/user/.local/share/zsh/site-functions" $fpath)'
       );
@@ -236,7 +238,7 @@ describe("shell utilities", () => {
 
       expect(result.modified).toBe(true);
 
-      const content = await Bun.file(configFile).text();
+      const content = await readFile(configFile, "utf-8");
       expect(content).toContain("# existing content");
       expect(content).toContain("# sentry");
       expect(content).toContain(
@@ -271,7 +273,7 @@ describe("shell utilities", () => {
 
       expect(result.modified).toBe(true);
 
-      const content = await Bun.file(configFile).text();
+      const content = await readFile(configFile, "utf-8");
       expect(content).toContain(
         "# existing content without newline\n\n# sentry\n"
       );
@@ -328,7 +330,7 @@ describe("shell utilities", () => {
       });
 
       expect(result).toBe(true);
-      const content = await Bun.file(pathFile).text();
+      const content = await readFile(pathFile, "utf-8");
       expect(content).toContain("/usr/local/bin");
     });
 
@@ -342,7 +344,7 @@ describe("shell utilities", () => {
       });
 
       expect(result).toBe(true);
-      const content = await Bun.file(pathFile).text();
+      const content = await readFile(pathFile, "utf-8");
       expect(content).toBe("/usr/local/bin\n");
     });
 
@@ -360,7 +362,7 @@ describe("shell utilities", () => {
 describe("isBashAvailable", () => {
   test("returns true when bash is in PATH", () => {
     // Point PATH at the directory containing bash
-    const bashPath = Bun.which("bash");
+    const bashPath = whichSync("bash");
     if (!bashPath) {
       // Skip if bash truly isn't on this system
       return;

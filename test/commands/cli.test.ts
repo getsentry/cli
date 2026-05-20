@@ -8,7 +8,7 @@
  * Tests capture both stderr (progress) and stdout (results) to verify behavior.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { feedbackCommand } from "../../src/commands/cli/feedback.js";
 import type { UpgradeResult } from "../../src/commands/cli/upgrade.js";
 import { upgradeCommand } from "../../src/commands/cli/upgrade.js";
@@ -67,8 +67,8 @@ describe("feedbackCommand.func", () => {
     // Access func through loader
     const func = await feedbackCommand.loader();
     const mockContext = {
-      stdout: { write: mock(() => true) },
-      stderr: { write: mock(() => true) },
+      stdout: { write: vi.fn(() => true) },
+      stderr: { write: vi.fn(() => true) },
     };
 
     await expect(func.call(mockContext, {}, "")).rejects.toThrow(
@@ -79,8 +79,8 @@ describe("feedbackCommand.func", () => {
   test("throws ValidationError for whitespace-only message", async () => {
     const func = await feedbackCommand.loader();
     const mockContext = {
-      stdout: { write: mock(() => true) },
-      stderr: { write: mock(() => true) },
+      stdout: { write: vi.fn(() => true) },
+      stderr: { write: vi.fn(() => true) },
     };
 
     await expect(func.call(mockContext, {}, "   ")).rejects.toThrow(
@@ -91,8 +91,8 @@ describe("feedbackCommand.func", () => {
   test("throws ConfigError when Sentry is disabled", async () => {
     const func = await feedbackCommand.loader();
     const mockContext = {
-      stdout: { write: mock(() => true) },
-      stderr: { write: mock(() => true) },
+      stdout: { write: vi.fn(() => true) },
+      stderr: { write: vi.fn(() => true) },
     };
 
     // Sentry is disabled in test environment (no DSN)

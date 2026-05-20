@@ -4,22 +4,25 @@
  * Tests for finding project root by walking up from a starting directory.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // Mock Sentry to avoid telemetry side effects. startSpan must pass a no-op
 // span object to the callback — withTracingSpan calls span.setStatus() on it,
 // and production code may call span.setAttribute()/setAttributes() as well.
-const noopSpan = {
-  setStatus: mock(),
-  setAttribute: mock(),
-  setAttributes: mock(),
-};
-mock.module("@sentry/node-core/light", () => ({
+const { noopSpan } = vi.hoisted(() => ({
+  noopSpan: {
+    setStatus: vi.fn(),
+    setAttribute: vi.fn(),
+    setAttributes: vi.fn(),
+  },
+}));
+
+vi.mock("@sentry/node-core/light", () => ({
   startSpan: (_opts: unknown, fn: (span: unknown) => unknown) => fn(noopSpan),
-  captureException: mock(),
+  captureException: vi.fn(),
 }));
 
 import {
@@ -338,7 +341,7 @@ describe("project-root", () => {
  * Tests for stat() concurrency limiting.
  *
  * Note: pathExists() in project-root.ts uses a statically-bound import of
- * node:fs/promises stat, so mock.module() cannot intercept it post-hoc. These
+ * node:fs/promises stat, so vi.mock() cannot intercept it post-hoc. These
  * tests instead verify the exported STAT_CONCURRENCY constant (which configures
  * the pLimit instance) and confirm marker detection works end-to-end. The
  * concurrency enforcement itself is delegated to pLimit, whose correctness is

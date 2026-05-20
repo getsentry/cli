@@ -11,9 +11,9 @@
  * with other telemetry tests.
  */
 
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as Sentry from "@sentry/node-core/light";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   createBeforeExitHandler,
   markSessionCrashed,
@@ -34,16 +34,15 @@ describe("createBeforeExitHandler", () => {
     const handler = createBeforeExitHandler(createMockClient());
 
     const mockSession = { status: "ok", errors: 0 };
-    const getIsolationScopeSpy = spyOn(
-      Sentry,
-      "getIsolationScope"
-    ).mockReturnValue({
-      getSession: () => mockSession,
-    } as unknown as Sentry.Scope);
+    const getIsolationScopeSpy = vi
+      .spyOn(Sentry, "getIsolationScope")
+      .mockReturnValue({
+        getSession: () => mockSession,
+      } as unknown as Sentry.Scope);
     // Mock endSession to prevent it from calling through to real SDK internals
-    const endSessionSpy = spyOn(Sentry, "endSession").mockImplementation(
-      () => null
-    );
+    const endSessionSpy = vi
+      .spyOn(Sentry, "endSession")
+      .mockImplementation(() => null);
 
     handler();
 
@@ -57,15 +56,14 @@ describe("createBeforeExitHandler", () => {
     const handler = createBeforeExitHandler(createMockClient());
 
     const mockSession = { status: "crashed", errors: 1 };
-    const getIsolationScopeSpy = spyOn(
-      Sentry,
-      "getIsolationScope"
-    ).mockReturnValue({
-      getSession: () => mockSession,
-    } as unknown as Sentry.Scope);
-    const endSessionSpy = spyOn(Sentry, "endSession").mockImplementation(
-      () => null
-    );
+    const getIsolationScopeSpy = vi
+      .spyOn(Sentry, "getIsolationScope")
+      .mockReturnValue({
+        getSession: () => mockSession,
+      } as unknown as Sentry.Scope);
+    const endSessionSpy = vi
+      .spyOn(Sentry, "endSession")
+      .mockImplementation(() => null);
 
     handler();
 
@@ -78,15 +76,14 @@ describe("createBeforeExitHandler", () => {
   test("does not end session when no session exists", () => {
     const handler = createBeforeExitHandler(createMockClient());
 
-    const getIsolationScopeSpy = spyOn(
-      Sentry,
-      "getIsolationScope"
-    ).mockReturnValue({
-      getSession: () => null,
-    } as unknown as Sentry.Scope);
-    const endSessionSpy = spyOn(Sentry, "endSession").mockImplementation(
-      () => null
-    );
+    const getIsolationScopeSpy = vi
+      .spyOn(Sentry, "getIsolationScope")
+      .mockReturnValue({
+        getSession: () => null,
+      } as unknown as Sentry.Scope);
+    const endSessionSpy = vi
+      .spyOn(Sentry, "endSession")
+      .mockImplementation(() => null);
 
     handler();
 
@@ -100,15 +97,14 @@ describe("createBeforeExitHandler", () => {
     const handler = createBeforeExitHandler(createMockClient());
 
     const mockSession = { status: "ok", errors: 0 };
-    const getIsolationScopeSpy = spyOn(
-      Sentry,
-      "getIsolationScope"
-    ).mockReturnValue({
-      getSession: () => mockSession,
-    } as unknown as Sentry.Scope);
-    const endSessionSpy = spyOn(Sentry, "endSession").mockImplementation(
-      () => null
-    );
+    const getIsolationScopeSpy = vi
+      .spyOn(Sentry, "getIsolationScope")
+      .mockReturnValue({
+        getSession: () => mockSession,
+      } as unknown as Sentry.Scope);
+    const endSessionSpy = vi
+      .spyOn(Sentry, "endSession")
+      .mockImplementation(() => null);
 
     // Call twice
     handler();
@@ -123,15 +119,14 @@ describe("createBeforeExitHandler", () => {
 
   test("flushes client on beforeExit", () => {
     const mockClient = createMockClient();
-    const flushSpy = spyOn(mockClient, "flush");
+    const flushSpy = vi.spyOn(mockClient, "flush");
     const handler = createBeforeExitHandler(mockClient);
 
-    const getIsolationScopeSpy = spyOn(
-      Sentry,
-      "getIsolationScope"
-    ).mockReturnValue({
-      getSession: () => null,
-    } as unknown as Sentry.Scope);
+    const getIsolationScopeSpy = vi
+      .spyOn(Sentry, "getIsolationScope")
+      .mockReturnValue({
+        getSession: () => null,
+      } as unknown as Sentry.Scope);
 
     handler();
 
@@ -154,12 +149,14 @@ describe("markSessionCrashed", () => {
   test("marks session as crashed from current scope", () => {
     const mockSession = { status: "ok", errors: 0 };
 
-    getCurrentScopeSpy = spyOn(Sentry, "getCurrentScope").mockReturnValue({
+    getCurrentScopeSpy = vi.spyOn(Sentry, "getCurrentScope").mockReturnValue({
       getSession: () => mockSession,
     } as unknown as Sentry.Scope);
-    getIsolationScopeSpy = spyOn(Sentry, "getIsolationScope").mockReturnValue({
-      getSession: () => null,
-    } as unknown as Sentry.Scope);
+    getIsolationScopeSpy = vi
+      .spyOn(Sentry, "getIsolationScope")
+      .mockReturnValue({
+        getSession: () => null,
+      } as unknown as Sentry.Scope);
 
     markSessionCrashed();
 
@@ -169,12 +166,14 @@ describe("markSessionCrashed", () => {
   test("marks session as crashed from isolation scope when current scope has none", () => {
     const mockSession = { status: "ok", errors: 0 };
 
-    getCurrentScopeSpy = spyOn(Sentry, "getCurrentScope").mockReturnValue({
+    getCurrentScopeSpy = vi.spyOn(Sentry, "getCurrentScope").mockReturnValue({
       getSession: () => null,
     } as unknown as Sentry.Scope);
-    getIsolationScopeSpy = spyOn(Sentry, "getIsolationScope").mockReturnValue({
-      getSession: () => mockSession,
-    } as unknown as Sentry.Scope);
+    getIsolationScopeSpy = vi
+      .spyOn(Sentry, "getIsolationScope")
+      .mockReturnValue({
+        getSession: () => mockSession,
+      } as unknown as Sentry.Scope);
 
     markSessionCrashed();
 
@@ -182,12 +181,14 @@ describe("markSessionCrashed", () => {
   });
 
   test("does nothing when no session exists on either scope", () => {
-    getCurrentScopeSpy = spyOn(Sentry, "getCurrentScope").mockReturnValue({
+    getCurrentScopeSpy = vi.spyOn(Sentry, "getCurrentScope").mockReturnValue({
       getSession: () => null,
     } as unknown as Sentry.Scope);
-    getIsolationScopeSpy = spyOn(Sentry, "getIsolationScope").mockReturnValue({
-      getSession: () => null,
-    } as unknown as Sentry.Scope);
+    getIsolationScopeSpy = vi
+      .spyOn(Sentry, "getIsolationScope")
+      .mockReturnValue({
+        getSession: () => null,
+      } as unknown as Sentry.Scope);
 
     // Should not throw
     expect(() => markSessionCrashed()).not.toThrow();
@@ -197,12 +198,14 @@ describe("markSessionCrashed", () => {
     const currentSession = { status: "ok", errors: 0 };
     const isolationSession = { status: "ok", errors: 0 };
 
-    getCurrentScopeSpy = spyOn(Sentry, "getCurrentScope").mockReturnValue({
+    getCurrentScopeSpy = vi.spyOn(Sentry, "getCurrentScope").mockReturnValue({
       getSession: () => currentSession,
     } as unknown as Sentry.Scope);
-    getIsolationScopeSpy = spyOn(Sentry, "getIsolationScope").mockReturnValue({
-      getSession: () => isolationSession,
-    } as unknown as Sentry.Scope);
+    getIsolationScopeSpy = vi
+      .spyOn(Sentry, "getIsolationScope")
+      .mockReturnValue({
+        getSession: () => isolationSession,
+      } as unknown as Sentry.Scope);
 
     markSessionCrashed();
 

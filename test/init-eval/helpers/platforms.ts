@@ -39,11 +39,11 @@ export type Platform = {
   timeout: number;
 };
 
-const TEMPLATES_DIR = join(import.meta.dir, "../templates");
+const TEMPLATES_DIR = join(import.meta.dirname, "../templates");
 
 /** Load feature docs from the external JSON config. */
 const featureDocsRaw: Record<string, Record<string, string[]>> = JSON.parse(
-  readFileSync(join(import.meta.dir, "../feature-docs.json"), "utf-8")
+  readFileSync(join(import.meta.dirname, "../feature-docs.json"), "utf-8")
 );
 
 function getDocs(platformId: string): FeatureDoc[] {

@@ -4,7 +4,7 @@
  * Tests for the seer-related API functions by mocking fetch.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   getAutofixState,
   triggerRootCauseAnalysis,

@@ -2,7 +2,7 @@
  * Unit tests for pagination context key builders.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   buildOrgContextKey,
   buildPaginationContextKey,

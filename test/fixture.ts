@@ -4,8 +4,13 @@
  * Shared utilities for creating isolated test environments.
  */
 
+import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+
+function noop(): void {
+  // Intentionally empty — absorbs async spawn errors
+}
 
 /**
  * Mock process for capturing CLI output
@@ -65,25 +70,33 @@ export async function runCli(
     env?: Record<string, string>;
   }
 ): Promise<CliResult> {
-  const cliDir = join(import.meta.dir, "..");
-  const cmd = getCliCommand();
+  const cliDir = join(import.meta.dirname, "..");
+  const [cmdBin, ...cmdArgs] = getCliCommand();
 
-  const proc = Bun.spawn([...cmd, ...args], {
+  const proc = spawn(cmdBin, [...cmdArgs, ...args], {
     cwd: options?.cwd ?? cliDir,
     env: { ...process.env, ...options?.env },
-    stdout: "pipe",
-    stderr: "pipe",
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  proc.on("error", noop);
+
+  let stdout = "";
+  let stderr = "";
+  proc.stdout.on("data", (d: Buffer) => {
+    stdout += d;
+  });
+  proc.stderr.on("data", (d: Buffer) => {
+    stderr += d;
   });
 
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
+  const exitCode = await new Promise<number>((resolve) =>
+    proc.on("close", (code) => resolve(code ?? 1))
+  );
 
   return {
     stdout,
     stderr,
-    exitCode: await proc.exited,
+    exitCode,
   };
 }
 

@@ -5,9 +5,9 @@
  * isPlainOutput() is true, and delegate to real @clack/prompts when false.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as clack from "@clack/prompts";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   cancel,
   confirm,
@@ -24,7 +24,7 @@ let stdoutSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
   savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
-  stdoutSpy = spyOn(process.stdout, "write").mockReturnValue(true);
+  stdoutSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -121,10 +121,10 @@ describe("rich mode (SENTRY_PLAIN_OUTPUT=0)", () => {
 
   beforeEach(() => {
     process.env.SENTRY_PLAIN_OUTPUT = "0";
-    introSpy = spyOn(clack, "intro").mockImplementation(noop);
-    outroSpy = spyOn(clack, "outro").mockImplementation(noop);
-    cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
-    logInfoSpy = spyOn(clack.log, "info").mockImplementation(noop);
+    introSpy = vi.spyOn(clack, "intro").mockImplementation(noop);
+    outroSpy = vi.spyOn(clack, "outro").mockImplementation(noop);
+    cancelSpy = vi.spyOn(clack, "cancel").mockImplementation(noop);
+    logInfoSpy = vi.spyOn(clack.log, "info").mockImplementation(noop);
   });
 
   afterEach(() => {
@@ -168,7 +168,7 @@ describe("pass-through functions", () => {
   });
 
   test("select delegates to clack.select", () => {
-    const selectSpy = spyOn(clack, "select").mockResolvedValue("choice");
+    const selectSpy = vi.spyOn(clack, "select").mockResolvedValue("choice");
 
     const result = select({
       message: "Pick one",
@@ -181,7 +181,7 @@ describe("pass-through functions", () => {
   });
 
   test("confirm delegates to clack.confirm", () => {
-    const confirmSpy = spyOn(clack, "confirm").mockResolvedValue(true);
+    const confirmSpy = vi.spyOn(clack, "confirm").mockResolvedValue(true);
 
     const result = confirm({ message: "Continue?" });
 
@@ -191,7 +191,7 @@ describe("pass-through functions", () => {
   });
 
   test("multiselect delegates to clack.multiselect", () => {
-    const multiselectSpy = spyOn(clack, "multiselect").mockResolvedValue([]);
+    const multiselectSpy = vi.spyOn(clack, "multiselect").mockResolvedValue([]);
 
     const result = multiselect({
       message: "Pick some",

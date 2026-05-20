@@ -5,7 +5,7 @@
  * organizations, projects, and issues. They use mock data objects.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   formatEventDetails,
   formatFixability,

@@ -6,21 +6,49 @@
  * the func() body without real HTTP calls or database access.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { viewCommand } from "../../../src/commands/project/view.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/browser.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/browser.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
 import { AuthError, ContextError } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { ProjectKey, SentryProject } from "../../../src/types/sentry.js";
@@ -34,7 +62,7 @@ const sampleProject: SentryProject = {
   status: "active",
 };
 
-const sampleKeys: ProjectKey[] = [
+const _sampleKeys: ProjectKey[] = [
   {
     id: "key-1",
     name: "Default",
@@ -44,11 +72,11 @@ const sampleKeys: ProjectKey[] = [
 ];
 
 function createMockContext() {
-  const stdoutWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
+      stderr: { write: vi.fn(() => true) },
       cwd: "/tmp",
     },
     stdoutWrite,
@@ -56,31 +84,28 @@ function createMockContext() {
 }
 
 describe("viewCommand.func", () => {
-  let getProjectSpy: ReturnType<typeof spyOn>;
-  let getProjectKeysSpy: ReturnType<typeof spyOn>;
-  let resolveAllTargetsSpy: ReturnType<typeof spyOn>;
-  let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
-  let openInBrowserSpy: ReturnType<typeof spyOn>;
-
-  beforeEach(() => {
-    getProjectSpy = spyOn(apiClient, "getProject");
-    getProjectKeysSpy = spyOn(apiClient, "getProjectKeys");
-    resolveAllTargetsSpy = spyOn(resolveTarget, "resolveAllTargets");
-    resolveProjectBySlugSpy = spyOn(resolveTarget, "resolveProjectBySlug");
-    openInBrowserSpy = spyOn(browser, "openInBrowser");
-  });
+  const getProjectSpy = vi.mocked(apiClient.getProject);
+  // The command calls tryGetPrimaryDsn (not getProjectKeys directly).
+  // tryGetPrimaryDsn wraps getProjectKeys internally (same-file call),
+  // so we mock tryGetPrimaryDsn to control DSN resolution.
+  const tryGetPrimaryDsnSpy = vi.mocked(apiClient.tryGetPrimaryDsn);
+  const resolveAllTargetsSpy = vi.mocked(resolveTarget.resolveAllTargets);
+  const resolveProjectBySlugSpy = vi.mocked(resolveTarget.resolveProjectBySlug);
+  const openInBrowserSpy = vi.mocked(browser.openInBrowser);
 
   afterEach(() => {
-    getProjectSpy.mockRestore();
-    getProjectKeysSpy.mockRestore();
-    resolveAllTargetsSpy.mockRestore();
-    resolveProjectBySlugSpy.mockRestore();
-    openInBrowserSpy.mockRestore();
+    getProjectSpy.mockReset();
+    tryGetPrimaryDsnSpy.mockReset();
+    resolveAllTargetsSpy.mockReset();
+    resolveProjectBySlugSpy.mockReset();
+    openInBrowserSpy.mockReset();
   });
 
   test("explicit org/project outputs JSON with DSN", async () => {
     getProjectSpy.mockResolvedValue(sampleProject);
-    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc123@o1.ingest.sentry.io/42"
+    );
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
@@ -96,7 +121,9 @@ describe("viewCommand.func", () => {
 
   test("explicit org/project outputs human-readable details", async () => {
     getProjectSpy.mockResolvedValue(sampleProject);
-    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc123@o1.ingest.sentry.io/42"
+    );
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
@@ -160,7 +187,9 @@ describe("viewCommand.func", () => {
       project: "frontend",
     });
     getProjectSpy.mockResolvedValue({ ...sampleProject, slug: "frontend" });
-    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc123@o1.ingest.sentry.io/42"
+    );
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
@@ -208,7 +237,9 @@ describe("viewCommand.func", () => {
       footer: "Detected 1 project from .env",
     });
     getProjectSpy.mockResolvedValue({ ...sampleProject, slug: "backend" });
-    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc123@o1.ingest.sentry.io/42"
+    );
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
@@ -260,7 +291,9 @@ describe("viewCommand.func", () => {
     // must bubble up so the user sees the real cause (404/403/etc.).
     const apiErr = new Error("404 Not Found");
     getProjectSpy.mockRejectedValue(apiErr);
-    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc123@o1.ingest.sentry.io/42"
+    );
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();
@@ -279,7 +312,9 @@ describe("viewCommand.func", () => {
     });
     const apiErr = new Error("403 Forbidden");
     getProjectSpy.mockRejectedValue(apiErr);
-    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc123@o1.ingest.sentry.io/42"
+    );
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();
@@ -306,7 +341,9 @@ describe("viewCommand.func", () => {
       ],
     });
     getProjectSpy.mockRejectedValue(new Error("403 Forbidden"));
-    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc123@o1.ingest.sentry.io/42"
+    );
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();
@@ -318,7 +355,9 @@ describe("viewCommand.func", () => {
 
   test("auth error from API is rethrown", async () => {
     getProjectSpy.mockRejectedValue(new AuthError("not_authenticated"));
-    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc123@o1.ingest.sentry.io/42"
+    );
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();
@@ -336,7 +375,9 @@ describe("viewCommand.func", () => {
       ...sampleProject,
       organization: { id: "1", slug: "my-org" },
     });
-    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc123@o1.ingest.sentry.io/42"
+    );
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
@@ -356,7 +397,9 @@ describe("viewCommand.func", () => {
       ...sampleProject,
       organization: { id: "1", slug: "my-org", name: "My Organization" },
     });
-    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc123@o1.ingest.sentry.io/42"
+    );
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
@@ -369,7 +412,9 @@ describe("viewCommand.func", () => {
 
   test("JSON output still strips detectedFrom (human-only field)", async () => {
     getProjectSpy.mockResolvedValue(sampleProject);
-    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc123@o1.ingest.sentry.io/42"
+    );
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
@@ -385,7 +430,9 @@ describe("viewCommand.func", () => {
       ...sampleProject,
       organization: { id: "1", slug: "my-org" },
     });
-    getProjectKeysSpy.mockResolvedValue(sampleKeys);
+    tryGetPrimaryDsnSpy.mockResolvedValue(
+      "https://abc123@o1.ingest.sentry.io/42"
+    );
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();

@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { validateCommand } from "../../../../src/lib/init/tools/command-utils.js";
 import { runCommands } from "../../../../src/lib/init/tools/run-commands.js";
 import type { RunCommandsPayload } from "../../../../src/lib/init/types.js";

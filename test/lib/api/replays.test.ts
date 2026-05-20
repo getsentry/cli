@@ -2,7 +2,7 @@
  * Tests for the replay API helpers.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { MAX_PAGINATION_PAGES } from "../../../src/lib/api/infrastructure.js";
 import {
   getReplay,

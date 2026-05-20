@@ -7,7 +7,6 @@
  * - Colorization is deterministic
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import chalk from "chalk";
 import {
   array,
@@ -17,6 +16,7 @@ import {
   property,
   stringMatching,
 } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { stripAnsi } from "../../../src/lib/formatters/plain-detect.js";
 import { colorizeSql, isDbSpanOp } from "../../../src/lib/formatters/sql.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";

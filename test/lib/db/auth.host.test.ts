@@ -3,7 +3,7 @@
  * NULL-host lazy migration, host preservation across refresh-style updates.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   getStoredAuthHost,
   hasUsableStoredToken,

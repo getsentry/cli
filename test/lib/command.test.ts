@@ -6,7 +6,7 @@
  * captures flags/args and calls the original function.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { setTimeout as sleep } from "node:timers/promises";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as Sentry from "@sentry/node-core/light";
 import {
@@ -15,6 +15,7 @@ import {
   run,
   text_en,
 } from "@stricli/core";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   applyLoggingFlags,
   applyOrgProjectFlags,
@@ -114,8 +115,8 @@ describe("buildCommand telemetry integration", () => {
   let setContextSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    setTagSpy = spyOn(Sentry, "setTag");
-    setContextSpy = spyOn(Sentry, "setContext");
+    setTagSpy = vi.spyOn(Sentry, "setTag");
+    setContextSpy = vi.spyOn(Sentry, "setContext");
   });
 
   afterEach(() => {
@@ -320,7 +321,7 @@ describe("buildCommand telemetry integration", () => {
       },
       // biome-ignore lint/correctness/useYield: test command — no output to yield
       async *func(_flags: { delay: number }) {
-        await Bun.sleep(1);
+        await sleep(1);
         executed = true;
       },
     });
@@ -1257,7 +1258,7 @@ describe("buildCommand return-based output", () => {
       },
       parameters: {},
       async *func(this: TestContext) {
-        await Bun.sleep(1);
+        await sleep(1);
         yield new CommandOutput({ name: "Bob" });
       },
     });

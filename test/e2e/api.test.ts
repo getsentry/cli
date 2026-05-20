@@ -4,6 +4,7 @@
  * Tests for sentry api command - raw authenticated API requests.
  */
 
+import { writeFile } from "node:fs/promises";
 import {
   afterAll,
   afterEach,
@@ -12,7 +13,7 @@ import {
   describe,
   expect,
   test,
-} from "bun:test";
+} from "vitest";
 import { EXIT } from "../../src/lib/errors.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
@@ -221,7 +222,7 @@ describe("sentry api", () => {
 
       // Create a temp file with JSON body
       const tempFile = `${testConfigDir}/input.json`;
-      await Bun.write(tempFile, JSON.stringify({ status: "resolved" }));
+      await writeFile(tempFile, JSON.stringify({ status: "resolved" }));
 
       // Try to update a non-existent issue - this will fail but tests the flow
       const result = await ctx.run([

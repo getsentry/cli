@@ -6,26 +6,52 @@
  * plus cursor pagination, --cursor next/prev, and error paths.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { listCommand } from "../../../src/commands/team/list.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
+// biome-ignore lint/performance/noNamespaceImport: needed for vi.mocked access
 import * as apiClient from "../../../src/lib/api-client.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
-import * as defaults from "../../../src/lib/db/defaults.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+
+vi.mock("../../../src/lib/db/pagination.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/pagination.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
+// biome-ignore lint/performance/noNamespaceImport: needed for vi.mocked access
 import * as paginationDb from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ValidationError } from "../../../src/lib/errors.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
+// biome-ignore lint/performance/noNamespaceImport: needed for vi.mocked access
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryTeam } from "../../../src/types/sentry.js";
 
@@ -52,8 +78,8 @@ const sampleTeams: SentryTeam[] = [
 ];
 
 function createMockContext(cwd = "/tmp") {
-  const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
+  const stderrWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
@@ -66,17 +92,12 @@ function createMockContext(cwd = "/tmp") {
 }
 
 describe("listCommand.func — project-search (bare slug)", () => {
-  let listProjectTeamsSpy: ReturnType<typeof spyOn>;
-  let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
-
-  beforeEach(() => {
-    listProjectTeamsSpy = spyOn(apiClient, "listProjectTeams");
-    findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
-  });
+  const listProjectTeamsSpy = vi.mocked(apiClient.listProjectTeams);
+  const findProjectsBySlugSpy = vi.mocked(apiClient.findProjectsBySlug);
 
   afterEach(() => {
-    listProjectTeamsSpy.mockRestore();
-    findProjectsBySlugSpy.mockRestore();
+    listProjectTeamsSpy.mockReset();
+    findProjectsBySlugSpy.mockReset();
   });
 
   test("outputs JSON array when --json flag is set", async () => {
@@ -201,15 +222,14 @@ describe("listCommand.func — project-search (bare slug)", () => {
 });
 
 describe("listCommand.func — explicit org/project", () => {
-  let listProjectTeamsSpy: ReturnType<typeof spyOn>;
+  const listProjectTeamsSpy = vi.mocked(apiClient.listProjectTeams);
 
   beforeEach(async () => {
-    listProjectTeamsSpy = spyOn(apiClient, "listProjectTeams");
     setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
-    listProjectTeamsSpy.mockRestore();
+    listProjectTeamsSpy.mockReset();
   });
 
   test("explicit org/project calls listProjectTeams for that project", async () => {
@@ -237,30 +257,27 @@ describe("listCommand.func — explicit org/project", () => {
 });
 
 describe("listCommand.func — auto-detect mode", () => {
-  let listTeamsSpy: ReturnType<typeof spyOn>;
-  let listOrganizationsSpy: ReturnType<typeof spyOn>;
-  let getDefaultOrganizationSpy: ReturnType<typeof spyOn>;
-  let resolveAllTargetsSpy: ReturnType<typeof spyOn>;
+  const listTeamsSpy = vi.mocked(apiClient.listTeams);
+  const listOrganizationsSpy = vi.mocked(apiClient.listOrganizations);
+  // resolveOrgsForListing is the entry point org-list.ts calls for auto-detect.
+  // Mocking resolveAllTargets doesn't work because resolveOrgsForListing calls
+  // it internally (same-file call bypasses vi.mock). Mock the outer function.
+  const resolveOrgsForListingSpy = vi.mocked(
+    resolveTarget.resolveOrgsForListing
+  );
 
   beforeEach(() => {
-    listTeamsSpy = spyOn(apiClient, "listTeams");
-    listOrganizationsSpy = spyOn(apiClient, "listOrganizations");
-    getDefaultOrganizationSpy = spyOn(defaults, "getDefaultOrganization");
-    resolveAllTargetsSpy = spyOn(resolveTarget, "resolveAllTargets");
-
-    getDefaultOrganizationSpy.mockReturnValue(null);
-    resolveAllTargetsSpy.mockResolvedValue({ targets: [] });
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: [] });
   });
 
   afterEach(() => {
-    listTeamsSpy.mockRestore();
-    listOrganizationsSpy.mockRestore();
-    getDefaultOrganizationSpy.mockRestore();
-    resolveAllTargetsSpy.mockRestore();
+    listTeamsSpy.mockReset();
+    listOrganizationsSpy.mockReset();
+    resolveOrgsForListingSpy.mockReset();
   });
 
   test("uses default organization when no org provided", async () => {
-    getDefaultOrganizationSpy.mockReturnValue("default-org");
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: ["default-org"] });
     listTeamsSpy.mockResolvedValue(sampleTeams);
 
     const { context } = createMockContext();
@@ -271,9 +288,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("uses DSN auto-detection when no org and no default", async () => {
-    resolveAllTargetsSpy.mockResolvedValue({
-      targets: [{ org: "detected-org", project: "some-project" }],
-    });
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: ["detected-org"] });
     listTeamsSpy.mockResolvedValue(sampleTeams);
 
     const { context } = createMockContext();
@@ -284,6 +299,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("falls back to all orgs when no org specified and no detection", async () => {
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: [] });
     listOrganizationsSpy.mockResolvedValue([
       { id: "1", slug: "org-a", name: "Org A" },
       { id: "2", slug: "org-b", name: "Org B" },
@@ -298,7 +314,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("outputs JSON in auto-detect mode", async () => {
-    getDefaultOrganizationSpy.mockReturnValue("auto-org");
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: ["auto-org"] });
     listTeamsSpy.mockResolvedValue(sampleTeams);
 
     const { context, stdoutWrite } = createMockContext();
@@ -312,7 +328,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("shows 'No teams found' in auto-detect when empty and single org", async () => {
-    getDefaultOrganizationSpy.mockReturnValue("empty-org");
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: ["empty-org"] });
     listTeamsSpy.mockResolvedValue([]);
 
     const { context, stdoutWrite } = createMockContext();
@@ -324,6 +340,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("shows 'No teams found.' fallback when no orgs at all", async () => {
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: [] });
     listOrganizationsSpy.mockResolvedValue([]);
     listTeamsSpy.mockResolvedValue([]);
 
@@ -337,27 +354,24 @@ describe("listCommand.func — auto-detect mode", () => {
 });
 
 describe("listCommand.func — org-all mode (cursor pagination)", () => {
-  let listTeamsPaginatedSpy: ReturnType<typeof spyOn>;
-  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
-  let hasPreviousPageSpy: ReturnType<typeof spyOn>;
-  let resolveCursorSpy: ReturnType<typeof spyOn>;
+  const listTeamsPaginatedSpy = vi.mocked(apiClient.listTeamsPaginated);
+  const advancePaginationStateSpy = vi.mocked(
+    paginationDb.advancePaginationState
+  );
+  const hasPreviousPageSpy = vi.mocked(paginationDb.hasPreviousPage);
+  const resolveCursorSpy = vi.mocked(paginationDb.resolveCursor);
 
   beforeEach(async () => {
-    listTeamsPaginatedSpy = spyOn(apiClient, "listTeamsPaginated");
-    advancePaginationStateSpy = spyOn(paginationDb, "advancePaginationState");
-    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage");
-    resolveCursorSpy = spyOn(paginationDb, "resolveCursor");
-
     advancePaginationStateSpy.mockReturnValue(undefined);
     hasPreviousPageSpy.mockReturnValue(false);
     setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
-    listTeamsPaginatedSpy.mockRestore();
-    advancePaginationStateSpy.mockRestore();
-    hasPreviousPageSpy.mockRestore();
-    resolveCursorSpy.mockRestore();
+    listTeamsPaginatedSpy.mockReset();
+    advancePaginationStateSpy.mockReset();
+    hasPreviousPageSpy.mockReset();
+    resolveCursorSpy.mockReset();
   });
 
   test("returns paginated JSON with hasMore=false when no nextCursor", async () => {

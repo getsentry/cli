@@ -5,7 +5,6 @@
  * for parseIni/serializeIni, regardless of input.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -13,6 +12,7 @@ import {
   assert as fcAssert,
   property,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { type IniData, parseIni } from "../../src/lib/ini.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 

@@ -14,7 +14,7 @@ import {
   describe,
   expect,
   test,
-} from "bun:test";
+} from "vitest";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {

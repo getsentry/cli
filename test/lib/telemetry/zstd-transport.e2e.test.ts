@@ -7,10 +7,12 @@
  * and the body decompresses back to a valid envelope.
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { promisify } from "node:util";
+import { zstdDecompress } from "node:zlib";
 import { createEnvelope } from "@sentry/core";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   hasZstdSupport,
   makeCompressedTransport,
@@ -106,7 +108,7 @@ describe("makeCompressedTransport (e2e)", () => {
     expect(captures).toHaveLength(1);
     expect(captures[0]?.headers["content-encoding"]).toBe("zstd");
 
-    const decompressed = await Bun.zstdDecompress(captures[0]!.body);
+    const decompressed = await promisify(zstdDecompress)(captures[0]!.body);
     const text = Buffer.from(
       decompressed.buffer,
       decompressed.byteOffset,

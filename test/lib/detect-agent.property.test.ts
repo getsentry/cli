@@ -5,7 +5,6 @@
  * to normalizeAgent(), regardless of content.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -14,6 +13,7 @@ import {
   property,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { AGENT_ALIASES, normalizeAgent } from "../../src/lib/detect-agent.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 

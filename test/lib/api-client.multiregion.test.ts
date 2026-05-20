@@ -5,7 +5,7 @@
  * Covers region discovery, fan-out, and region-aware routing.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   findProjectByDsnKey,
   getUserRegions,

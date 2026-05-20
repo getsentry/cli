@@ -6,7 +6,7 @@
  * the walker itself so we don't rely on fs side-effects.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   DSN_MAX_DEPTH,
   dsnDescentHook,

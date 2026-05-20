@@ -16,8 +16,8 @@
  *      `encodingApplied === "none"`.
  */
 
-import { describe, expect, test } from "bun:test";
-import { gunzipSync } from "node:zlib";
+import { promisify } from "node:util";
+import { gunzipSync, zstdDecompress } from "node:zlib";
 import {
   asyncProperty,
   assert as fcAssert,
@@ -25,6 +25,7 @@ import {
   string,
   uint8Array,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   maybeCompress,
   normalizeBody,
@@ -43,7 +44,7 @@ describe("property: maybeCompress round-trip (zstd path)", () => {
           const buf = Buffer.from(bytes);
           const result = await maybeCompress(buf, "zstd");
           expect(result.encodingApplied).toBe("zstd");
-          const decompressed = await Bun.zstdDecompress(result.payload);
+          const decompressed = await promisify(zstdDecompress)(result.payload);
           expect(Buffer.from(decompressed).equals(buf)).toBe(true);
         }
       ),

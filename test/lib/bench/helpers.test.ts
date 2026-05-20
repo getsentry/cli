@@ -7,7 +7,7 @@
  * where we actually have deterministic inputs to assert against.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   type BenchReport,
   compareReports,

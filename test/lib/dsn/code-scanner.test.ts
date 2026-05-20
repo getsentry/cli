@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   extractDsnsFromContent,
   extractFirstDsnFromContent,
@@ -9,7 +9,7 @@ import {
 } from "../../../src/lib/dsn/code-scanner.js";
 
 describe("Code Scanner", () => {
-  const testDir = join(import.meta.dir, ".test-code-scanner");
+  const testDir = join(import.meta.dirname, ".test-code-scanner");
 
   beforeEach(() => {
     mkdirSync(testDir, { recursive: true });

@@ -6,21 +6,49 @@
  * the func() body without real HTTP calls or database access.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { viewCommand } from "../../../src/commands/log/view.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/browser.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/browser.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
 import { ContextError, ResolutionError } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { DetailedSentryLog } from "../../../src/types/sentry.js";
@@ -53,11 +81,11 @@ function makeSampleLog(id: string, message = "Test log"): DetailedSentryLog {
 }
 
 function createMockContext() {
-  const stdoutWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
+      stderr: { write: vi.fn(() => true) },
       cwd: "/tmp",
     },
     stdoutWrite,
@@ -72,16 +100,16 @@ describe("viewCommand.func", () => {
   let openInBrowserSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    getLogsSpy = spyOn(apiClient, "getLogs");
-    getLogItemDetailSpy = spyOn(apiClient, "getLogItemDetail");
+    getLogsSpy = vi.spyOn(apiClient, "getLogs");
+    getLogItemDetailSpy = vi.spyOn(apiClient, "getLogItemDetail");
     getLogItemDetailSpy.mockResolvedValue({
       itemId: "",
       timestamp: "",
       attributes: [],
     });
-    resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
-    resolveProjectBySlugSpy = spyOn(resolveTarget, "resolveProjectBySlug");
-    openInBrowserSpy = spyOn(browser, "openInBrowser");
+    resolveOrgAndProjectSpy = vi.spyOn(resolveTarget, "resolveOrgAndProject");
+    resolveProjectBySlugSpy = vi.spyOn(resolveTarget, "resolveProjectBySlug");
+    openInBrowserSpy = vi.spyOn(browser, "openInBrowser");
   });
 
   afterEach(() => {

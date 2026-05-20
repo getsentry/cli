@@ -9,7 +9,8 @@
  * In CI, the key is only passed when skill-related files change.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readFile } from "node:fs/promises";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import cases from "../skill-eval/cases.json";
 import { judgePlan } from "../skill-eval/helpers/judge.js";
 import { createClient } from "../skill-eval/helpers/llm-client.js";
@@ -52,7 +53,7 @@ describe.skipIf(!apiKey)("skill eval", () => {
    */
   async function runEvalForModel(model: string): Promise<void> {
     const client = await createClient(apiKey as string);
-    const skillContent = await Bun.file(SKILL_PATH).text();
+    const skillContent = await readFile(SKILL_PATH, "utf-8");
 
     const results: CaseResult[] = [];
     for (const testCase of testCases) {

@@ -6,7 +6,6 @@
  * - Closest-wins: closest file always takes priority per-field
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -16,6 +15,7 @@ import {
   assert as fcAssert,
   record,
 } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   CONFIG_FILENAME,
   clearSentryCliRcCache,

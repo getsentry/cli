@@ -6,7 +6,7 @@
  * focus on parseAliasSuffix edge cases and integration flow documentation.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   expandToFullShortId,
   isShortId,

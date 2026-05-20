@@ -7,7 +7,7 @@
  * lore on cache-write resilience).
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { listRepositoriesCached } from "../../../src/lib/api/repositories.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -41,8 +41,8 @@ describe("listRepositoriesCached", () => {
   beforeEach(() => {
     setAuthToken("test-token", 3600, "test-refresh");
     originalFetch = globalThis.fetch;
-    getSpy = spyOn(repoCache, "getCachedRepos");
-    setSpy = spyOn(repoCache, "setCachedRepos");
+    getSpy = vi.spyOn(repoCache, "getCachedRepos");
+    setSpy = vi.spyOn(repoCache, "setCachedRepos");
   });
 
   afterEach(() => {

@@ -14,10 +14,10 @@
  *      gracefully.
  */
 
-import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterAll, describe, expect, test } from "vitest";
 import { IgnoreStack } from "../../../src/lib/scan/ignore.js";
 
 const ROOT = mkdtempSync(join(tmpdir(), "scan-ignore-test-"));

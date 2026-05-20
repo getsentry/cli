@@ -8,7 +8,6 @@
  * for the matching functions, regardless of input.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -16,6 +15,7 @@ import {
   property,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { matchesWordBoundary } from "../../src/lib/api-client.js";
 
 // Arbitraries

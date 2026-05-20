@@ -1,3 +1,4 @@
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import unauthorizedFixture from "../fixtures/errors/unauthorized.json";
 
 export type RouteHandler = (
@@ -64,7 +65,7 @@ function matchRoute(
     const match = pathname.match(route.pattern);
     if (match) {
       const params: Record<string, string> = {};
-      for (let i = 0; i < route.paramNames.length; i++) {
+      for (let i = 0; i < route.paramNames.length; i += 1) {
         params[route.paramNames[i]] = match[i + 1];
       }
       return { route, params };
@@ -91,11 +92,36 @@ function isAuthorized(req: Request, validTokens: string[]): boolean {
   return validTokens.includes(match[1]);
 }
 
+/** Convert a Node.js IncomingMessage to a Web API Request. */
+async function toWebRequest(
+  req: IncomingMessage,
+  baseUrl: string
+): Promise<Request> {
+  const url = `${baseUrl}${req.url ?? "/"}`;
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value) {
+      headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+    }
+  }
+  const method = req.method ?? "GET";
+  const hasBody = method !== "GET" && method !== "HEAD";
+  let body: string | undefined;
+  if (hasBody) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk as Buffer);
+    }
+    body = Buffer.concat(chunks).toString("utf-8");
+  }
+  return new Request(url, { method, headers, body });
+}
+
 export function createMockServer(
   routes: MockRoute[],
   options: MockServerOptions = {}
 ): MockServer {
-  let server: ReturnType<typeof Bun.serve> | null = null;
+  let server: Server | null = null;
   let port = 0;
   const { validTokens } = options;
   const compiledRoutes: CompiledRoute[] = routes.map((route) => {
@@ -115,61 +141,63 @@ export function createMockServer(
     },
 
     async start() {
-      server = Bun.serve({
-        port: 0,
-        async fetch(req) {
-          const url = new URL(req.url);
-          const pathname = url.pathname;
-          const method = req.method;
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: test mock server requires branching for route matching
+      server = createServer(async (nodeReq, nodeRes) => {
+        const serverUrl = `http://localhost:${port}`;
+        const req = await toWebRequest(nodeReq, serverUrl);
+        const method = req.method;
+        const pathname = new URL(req.url).pathname;
 
-          if (validTokens && !isAuthorized(req, validTokens)) {
-            return new Response(JSON.stringify(unauthorizedFixture), {
-              status: 401,
-              headers: { "Content-Type": "application/json" },
-            });
-          }
+        let status: number;
+        let body: string | undefined;
+        let headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
 
+        if (validTokens && !isAuthorized(req, validTokens)) {
+          status = 401;
+          body = JSON.stringify(unauthorizedFixture);
+        } else {
           const match = matchRoute(method, pathname, compiledRoutes);
-          if (!match) {
-            return new Response(JSON.stringify({ detail: "Not found" }), {
-              status: 404,
-              headers: { "Content-Type": "application/json" },
-            });
-          }
+          if (match) {
+            const { route, params } = match;
+            let responseData: MockResponse;
+            if (typeof route.response === "function") {
+              responseData = await (route.response as RouteHandler)(
+                req,
+                params,
+                serverUrl
+              );
+            } else {
+              responseData = { body: route.response, status: route.status };
+            }
 
-          const { route, params } = match;
-          const serverUrl = `http://localhost:${port}`;
-          let responseData: MockResponse;
-          if (typeof route.response === "function") {
-            const result = await (route.response as RouteHandler)(
-              req,
-              params,
-              serverUrl
-            );
-            responseData = result;
+            status = responseData.status ?? route.status;
+            if (responseData.body !== undefined) {
+              body = JSON.stringify(responseData.body);
+            }
+            headers = { ...headers, ...responseData.headers };
           } else {
-            responseData = { body: route.response, status: route.status };
+            status = 404;
+            body = JSON.stringify({ detail: "Not found" });
           }
+        }
 
-          const status = responseData.status ?? route.status;
-          const body = responseData.body;
-          const headers = {
-            "Content-Type": "application/json",
-            ...responseData.headers,
-          };
-
-          return new Response(
-            body !== undefined ? JSON.stringify(body) : undefined,
-            { status, headers }
-          );
-        },
+        nodeRes.writeHead(status, headers);
+        nodeRes.end(body);
       });
 
-      port = server.port;
+      await new Promise<void>((resolve) => {
+        server!.listen(0, () => {
+          const addr = server!.address();
+          port = typeof addr === "object" && addr ? addr.port : 0;
+          resolve();
+        });
+      });
     },
 
     stop() {
-      server?.stop();
+      server?.close();
       server = null;
     },
   };

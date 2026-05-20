@@ -5,11 +5,13 @@
  * errors (silently ignored) from unexpected ones (reported to Sentry).
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-const captureException = mock();
+const { captureException } = vi.hoisted(() => ({
+  captureException: vi.fn(),
+}));
 
-mock.module("@sentry/node-core/light", () => ({
+vi.mock("@sentry/node-core/light", () => ({
   captureException,
   startSpan: (_opts: unknown, fn: () => unknown) => fn(),
 }));

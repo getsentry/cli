@@ -6,7 +6,7 @@
  * specific expected outputs and integration scenarios.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   buildOrgAwareAliases,
   findCommonWordPrefix,

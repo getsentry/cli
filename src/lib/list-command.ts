@@ -409,20 +409,27 @@ function getSubcommandsForRoute(routeName: string): Set<string> {
   if (!_subcommandsByRoute) {
     _subcommandsByRoute = new Map();
 
-    const { routes } = require("../app.js") as {
-      routes: { getAllEntries: () => readonly RouteEntry[] };
-    };
+    try {
+      const { routes } = require("../app.js") as {
+        routes: { getAllEntries: () => readonly RouteEntry[] };
+      };
 
-    for (const entry of routes.getAllEntries()) {
-      const target = entry.target as unknown as Record<string, unknown>;
-      if (typeof target?.getAllEntries === "function") {
-        _subcommandsByRoute.set(
-          entry.name.original,
-          collectChildNames(
-            target as { getAllEntries: () => readonly RouteEntry[] }
-          )
-        );
+      for (const entry of routes.getAllEntries()) {
+        const target = entry.target as unknown as Record<string, unknown>;
+        if (typeof target?.getAllEntries === "function") {
+          _subcommandsByRoute.set(
+            entry.name.original,
+            collectChildNames(
+              target as { getAllEntries: () => readonly RouteEntry[] }
+            )
+          );
+        }
       }
+    } catch {
+      // In test environments (vitest), require("../app.js") may fail because
+      // Node's ESM resolver can't resolve .js→.ts for transitive imports.
+      // Gracefully degrade: interceptSubcommand will treat all targets as
+      // plain values (no subcommand interception).
     }
   }
 

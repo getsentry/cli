@@ -7,7 +7,7 @@
  * re-scan files and hit the API.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createProjectWithDsn } from "../../../src/lib/api/projects.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import {

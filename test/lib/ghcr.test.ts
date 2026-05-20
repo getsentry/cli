@@ -5,7 +5,7 @@
  * All HTTP calls are mocked via globalThis.fetch to avoid network access.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
   downloadLayerBlob,

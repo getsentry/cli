@@ -6,7 +6,6 @@
  * and parseSort.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constant,
@@ -21,6 +20,7 @@ import {
   tuple,
   uniqueArray,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   __testing,
   type IssueListResult,

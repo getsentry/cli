@@ -7,8 +7,13 @@
  * An unknown route returns exit code 251 (Bun) or -5 (Node).
  */
 
+import { spawn } from "node:child_process";
 import { getCliCommand } from "../../fixture.js";
 import type { PlannedCommand } from "./types.js";
+
+function noop(): void {
+  // Intentionally empty — absorbs async spawn errors
+}
 
 /** Result of verifying a single planned command against the real CLI binary */
 export type CommandVerification = {
@@ -69,17 +74,25 @@ export async function verifyPlannedCommands(
       continue;
     }
 
-    const proc = Bun.spawn([...cliCmd, ...route, "-h"], {
-      stdout: "pipe",
-      stderr: "pipe",
+    const [cliBin, ...cliArgs] = cliCmd;
+    const proc = spawn(cliBin, [...cliArgs, ...route, "-h"], {
+      stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, SENTRY_CLI_NO_TELEMETRY: "1" },
     });
+    proc.on("error", noop);
 
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    const exitCode = await proc.exited;
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (d: Buffer) => {
+      stdout += d;
+    });
+    proc.stderr.on("data", (d: Buffer) => {
+      stderr += d;
+    });
+
+    const exitCode = await new Promise<number>((resolve) =>
+      proc.on("close", (code) => resolve(code ?? 1))
+    );
 
     const valid = exitCode === 0;
     const output = (stdout || stderr).trim();
