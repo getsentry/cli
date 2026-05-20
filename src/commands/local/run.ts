@@ -161,11 +161,7 @@ export const runCommand = buildCommand({
     }
 
     if (exitCode !== 0) {
-      // Forward the child's exit code directly so callers (CI, scripts)
-      // can distinguish error types. We set process.exitCode instead of
-      // throwing CliError to avoid mapping to the CLI's semantic exit
-      // code schema.
-      process.exitCode = exitCode;
+      throw new CliError(`Process exited with code ${exitCode}`, exitCode);
     }
   },
 });

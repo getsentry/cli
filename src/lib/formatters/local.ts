@@ -55,7 +55,7 @@ const SOURCE_WIDTH = 9;
 /** Format a type/level label as `[TYPE]` padded to fixed width. */
 export function formatType(level: string): string {
   const tag = `[${sanitize(level).toUpperCase()}]`;
-  const colorFn = LEVEL_COLORS[level];
+  const colorFn = LEVEL_COLORS[level.toLowerCase()];
   const colored = colorFn ? colorFn(tag) : tag;
   return colored + " ".repeat(Math.max(0, TYPE_WIDTH - tag.length));
 }
