@@ -5,7 +5,6 @@
  * regardless of the user-supplied slug/id embedded in the resource string.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -14,6 +13,7 @@ import {
   property,
   stringMatching,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { extractResourceKind } from "../../src/lib/error-reporting.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 

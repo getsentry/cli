@@ -5,7 +5,7 @@
  * `field` params), schema validation, and pagination cursor extraction.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { queryEvents } from "../../../src/lib/api/discover.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
 

@@ -5,8 +5,8 @@
  * catching edge cases that hand-picked unit tests would miss.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   asyncProperty,
@@ -15,6 +15,7 @@ import {
   property,
   uniqueArray,
 } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   addToPath,
   detectShellType,
@@ -255,7 +256,7 @@ describe("property: addToPath", () => {
         const configFile = join(testDir, `.rc-rt-${fileCounter}`);
         await addToPath(configFile, dir, shellType);
 
-        const content = await Bun.file(configFile).text();
+        const content = await readFile(configFile, "utf-8");
         const expectedCmd = getPathCommand(shellType, dir);
         expect(content).toContain(expectedCmd);
       }),

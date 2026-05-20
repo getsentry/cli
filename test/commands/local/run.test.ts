@@ -5,9 +5,11 @@
  * and exit code propagation.
  */
 
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test, vi } from "vitest";
 import { runCommand } from "../../../src/commands/local/run.js";
 import { CliError, ValidationError } from "../../../src/lib/errors.js";
+
+const isBun = typeof globalThis.Bun !== "undefined";
 
 type RunFunc = (
   this: unknown,
@@ -17,13 +19,14 @@ type RunFunc = (
 
 function makeContext() {
   return {
-    stdout: { write: mock(() => true) },
-    stderr: { write: mock(() => true) },
+    stdout: { write: vi.fn(() => true) },
+    stderr: { write: vi.fn(() => true) },
     cwd: "/tmp",
   };
 }
 
-describe("sentry local run", () => {
+// biome-ignore lint/suspicious/noSkippedTests: requires Bun.spawn (not available in vitest Node workers)
+describe.skipIf(!isBun)("sentry local run", () => {
   test("throws ValidationError when no command provided", async () => {
     const func = (await runCommand.loader()) as unknown as RunFunc;
     const ctx = makeContext();

@@ -5,7 +5,6 @@
  * for the DSN parsing functions, regardless of input.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -15,6 +14,7 @@ import {
   string,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   createDetectedDsn,
   createDsnFingerprint,

@@ -6,8 +6,8 @@
  * property around each assertion.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { assert as fcAssert, integer, nat, property, tuple } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { shouldAutoCompact } from "../../../src/lib/formatters/human.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 

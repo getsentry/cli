@@ -4,9 +4,10 @@
  * Integration tests for SQLite-based config storage.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
+import { access } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   clearAuth,
   getAuthConfig,
@@ -602,7 +603,10 @@ describe("JSON to SQLite migration", () => {
     expect(project).toBe("migrated-project");
 
     // config.json should be deleted after migration
-    const configExists = await Bun.file(configPath).exists();
+    const configExists = await access(configPath).then(
+      () => true,
+      () => false
+    );
     expect(configExists).toBe(false);
   });
 });

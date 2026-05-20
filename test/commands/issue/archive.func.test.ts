@@ -5,21 +5,39 @@
  * construction, validation errors, and human output.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   archiveCommand,
   parseUntilSpec,
 } from "../../../src/commands/issue/archive.js";
+
+vi.mock("../../../src/commands/issue/utils.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../src/commands/issue/utils.js")
+    >();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as issueUtils from "../../../src/commands/issue/utils.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ValidationError } from "../../../src/lib/errors.js";
@@ -44,11 +62,11 @@ function makeMockIssue(overrides?: Partial<SentryIssue>): SentryIssue {
 }
 
 function createMockContext() {
-  const stdoutWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
+      stderr: { write: vi.fn(() => true) },
       cwd: "/tmp",
     },
     stdoutWrite,
@@ -211,8 +229,8 @@ describe("archiveCommand.func()", () => {
   let func: Awaited<ReturnType<typeof archiveCommand.loader>>;
 
   beforeEach(async () => {
-    resolveIssueSpy = spyOn(issueUtils, "resolveIssue");
-    updateSpy = spyOn(apiClient, "updateIssueStatus");
+    resolveIssueSpy = vi.spyOn(issueUtils, "resolveIssue");
+    updateSpy = vi.spyOn(apiClient, "updateIssueStatus");
     func = await archiveCommand.loader();
   });
 

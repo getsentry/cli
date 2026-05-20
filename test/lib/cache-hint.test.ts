@@ -6,7 +6,7 @@
  * module is small and the formatting has specific boundary values.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   appendCacheHint,
   formatAge,

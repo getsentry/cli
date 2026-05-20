@@ -4,7 +4,7 @@
  * Tests for formatting functions in src/lib/formatters/seer.ts
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { SeerError } from "../../../src/lib/errors.js";
 import {
   createSeerError,

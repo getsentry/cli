@@ -5,7 +5,6 @@
  * download URLs, locking, and binary installation.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
   mkdirSync,
@@ -13,7 +12,9 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   acquireLock,
   compareVersions,
@@ -266,18 +267,23 @@ describe("replaceBinarySync", () => {
     const tempPath = join(testDir, "sentry.download");
 
     // Write existing binary
-    await Bun.write(installPath, "old binary");
+    await writeFile(installPath, "old binary");
     // Write new binary to temp location
-    await Bun.write(tempPath, "new binary");
+    await writeFile(tempPath, "new binary");
 
     replaceBinarySync(tempPath, installPath);
 
     // New content should be at install path
-    const content = await Bun.file(installPath).text();
+    const content = await readFile(installPath, "utf-8");
     expect(content).toBe("new binary");
 
     // Temp file should no longer exist (it was renamed)
-    expect(await Bun.file(tempPath).exists()).toBe(false);
+    expect(
+      await access(tempPath).then(
+        () => true,
+        () => false
+      )
+    ).toBe(false);
   });
 
   test("works when no existing binary (fresh install)", async () => {
@@ -287,11 +293,11 @@ describe("replaceBinarySync", () => {
     const tempPath = join(testDir, "sentry.download");
 
     // Only write temp, no existing binary
-    await Bun.write(tempPath, "fresh binary");
+    await writeFile(tempPath, "fresh binary");
 
     replaceBinarySync(tempPath, installPath);
 
-    const content = await Bun.file(installPath).text();
+    const content = await readFile(installPath, "utf-8");
     expect(content).toBe("fresh binary");
   });
 });
@@ -318,66 +324,86 @@ describe("installBinary", () => {
   test("copies binary to install directory", async () => {
     const sourcePath = join(sourceDir, "sentry-temp");
     const content = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF magic
-    await Bun.write(sourcePath, content);
+    await writeFile(sourcePath, content);
     chmodSync(sourcePath, 0o755);
 
     const result = await installBinary(sourcePath, installDir);
 
     expect(result).toBe(join(installDir, getBinaryFilename()));
-    expect(await Bun.file(result).exists()).toBe(true);
+    expect(
+      await access(result).then(
+        () => true,
+        () => false
+      )
+    ).toBe(true);
 
-    const installed = await Bun.file(result).arrayBuffer();
+    const installed = await readFile(result);
     expect(new Uint8Array(installed)).toEqual(content);
   });
 
   test("creates install directory if it does not exist", async () => {
     const sourcePath = join(sourceDir, "sentry-temp");
-    await Bun.write(sourcePath, "binary content");
+    await writeFile(sourcePath, "binary content");
     chmodSync(sourcePath, 0o755);
 
     const nestedDir = join(installDir, "deep", "nested");
     const result = await installBinary(sourcePath, nestedDir);
 
     expect(result).toBe(join(nestedDir, getBinaryFilename()));
-    expect(await Bun.file(result).exists()).toBe(true);
+    expect(
+      await access(result).then(
+        () => true,
+        () => false
+      )
+    ).toBe(true);
   });
 
   test("cleans up lock file after installation", async () => {
     const sourcePath = join(sourceDir, "sentry-temp");
-    await Bun.write(sourcePath, "binary content");
+    await writeFile(sourcePath, "binary content");
     chmodSync(sourcePath, 0o755);
 
     const installPath = await installBinary(sourcePath, installDir);
     const lockPath = `${installPath}.lock`;
 
-    expect(await Bun.file(lockPath).exists()).toBe(false);
+    expect(
+      await access(lockPath).then(
+        () => true,
+        () => false
+      )
+    ).toBe(false);
   });
 
   test("cleans up temp .download file after installation", async () => {
     const sourcePath = join(sourceDir, "sentry-temp");
-    await Bun.write(sourcePath, "binary content");
+    await writeFile(sourcePath, "binary content");
     chmodSync(sourcePath, 0o755);
 
     const installPath = await installBinary(sourcePath, installDir);
     const tempPath = `${installPath}.download`;
 
-    expect(await Bun.file(tempPath).exists()).toBe(false);
+    expect(
+      await access(tempPath).then(
+        () => true,
+        () => false
+      )
+    ).toBe(false);
   });
 
   test("overwrites existing binary", async () => {
     // Install initial binary
     mkdirSync(installDir, { recursive: true });
     const existingPath = join(installDir, getBinaryFilename());
-    await Bun.write(existingPath, "old content");
+    await writeFile(existingPath, "old content");
 
     // Install new binary over it
     const sourcePath = join(sourceDir, "sentry-temp");
-    await Bun.write(sourcePath, "new content");
+    await writeFile(sourcePath, "new content");
     chmodSync(sourcePath, 0o755);
 
     await installBinary(sourcePath, installDir);
 
-    const content = await Bun.file(existingPath).text();
+    const content = await readFile(existingPath, "utf-8");
     expect(content).toBe("new content");
   });
 
@@ -389,13 +415,13 @@ describe("installBinary", () => {
     // setup --install where execPath is that .download file)
     mkdirSync(installDir, { recursive: true });
     const tempPath = join(installDir, `${getBinaryFilename()}.download`);
-    await Bun.write(tempPath, "upgraded binary");
+    await writeFile(tempPath, "upgraded binary");
     chmodSync(tempPath, 0o755);
 
     const result = await installBinary(tempPath, installDir);
 
     expect(result).toBe(join(installDir, getBinaryFilename()));
-    const content = await Bun.file(result).text();
+    const content = await readFile(result, "utf-8");
     expect(content).toBe("upgraded binary");
   });
 });

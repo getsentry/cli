@@ -6,7 +6,7 @@
  * focus on specific scenarios and edge cases.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { hoistGlobalFlags } from "../../src/lib/argv-hoist.js";
 
 describe("hoistGlobalFlags", () => {

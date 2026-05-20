@@ -2,6 +2,7 @@
  * Format and output eval results to console and JSON file.
  */
 
+import { writeFile } from "node:fs/promises";
 import type { CaseResult, EvalReport, ModelResult } from "./types.js";
 
 /** Format a single case result as console lines */
@@ -62,7 +63,7 @@ export async function writeJsonReport(
   report: EvalReport,
   path: string
 ): Promise<void> {
-  await Bun.write(path, JSON.stringify(report, null, 2));
+  await writeFile(path, JSON.stringify(report, null, 2));
   console.log(`Results written to ${path}`);
 }
 

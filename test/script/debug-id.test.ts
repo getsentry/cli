@@ -6,11 +6,11 @@
  * idempotency, hashbang preservation, and sourcemap mutation.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert as fcAssert, property, string, uint8Array } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   contentToDebugId,
   getDebugIdSnippet,

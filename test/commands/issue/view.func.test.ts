@@ -2,18 +2,36 @@
  * Tests for the issue view command's replay integration.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+vi.mock("../../../src/commands/issue/utils.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../src/commands/issue/utils.js")
+    >();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as issueUtils from "../../../src/commands/issue/utils.js";
 import { viewCommand } from "../../../src/commands/issue/view.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import type { SentryEvent, SentryIssue } from "../../../src/types/index.js";
@@ -47,11 +65,11 @@ describe("issue view replay integration", () => {
   let listReplayIdsForIssueSpy: ReturnType<typeof spyOn>;
 
   function createMockContext() {
-    const stdoutWrite = mock(() => true);
+    const stdoutWrite = vi.fn(() => true);
     return {
       context: {
         stdout: { write: stdoutWrite },
-        stderr: { write: mock(() => true) },
+        stderr: { write: vi.fn(() => true) },
         cwd: "/tmp",
       },
       stdoutWrite,
@@ -59,9 +77,9 @@ describe("issue view replay integration", () => {
   }
 
   beforeEach(() => {
-    resolveIssueSpy = spyOn(issueUtils, "resolveIssue");
-    getLatestEventSpy = spyOn(apiClient, "getLatestEvent");
-    listReplayIdsForIssueSpy = spyOn(apiClient, "listReplayIdsForIssue");
+    resolveIssueSpy = vi.spyOn(issueUtils, "resolveIssue");
+    getLatestEventSpy = vi.spyOn(apiClient, "getLatestEvent");
+    listReplayIdsForIssueSpy = vi.spyOn(apiClient, "listReplayIdsForIssue");
   });
 
   afterEach(() => {

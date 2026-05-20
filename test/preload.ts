@@ -2,8 +2,14 @@
  * Test Environment Setup
  *
  * Isolates tests from user's real configuration and environment.
- * Runs before all tests via bunfig.toml preload.
+ * Runs before all tests via vitest setupFiles.
  */
+
+// Polyfill `self` for Node.js — web worker code (e.g., grep-worker.js) references
+// `self.onmessage` which exists in Bun and browsers but not in Node.
+if (typeof globalThis.self === "undefined") {
+  (globalThis as Record<string, unknown>).self = globalThis;
+}
 
 import {
   existsSync,
@@ -17,7 +23,7 @@ import { join } from "node:path";
 
 // Load .env.local for test credentials (SENTRY_TEST_*)
 // This mimics what would happen in CI where secrets are injected as env vars
-const envLocalPath = join(import.meta.dir, "../.env.local");
+const envLocalPath = join(import.meta.dirname, "../.env.local");
 if (existsSync(envLocalPath)) {
   const content = readFileSync(envLocalPath, "utf-8");
   for (const line of content.split("\n")) {
@@ -146,3 +152,43 @@ process.on("exit", () => {
 // Also cleanup on SIGINT/SIGTERM
 process.on("SIGINT", () => process.exit(0));
 process.on("SIGTERM", () => process.exit(0));
+
+// ---------------------------------------------------------------------------
+// Custom matchers (polyfill Bun-specific expect extensions for vitest)
+// ---------------------------------------------------------------------------
+import { expect } from "vitest";
+
+expect.extend({
+  toStartWith(received: string, expected: string) {
+    const pass = typeof received === "string" && received.startsWith(expected);
+    return {
+      pass,
+      message: () =>
+        `expected ${JSON.stringify(received)} to ${pass ? "not " : ""}start with ${JSON.stringify(expected)}`,
+    };
+  },
+  toEndWith(received: string, expected: string) {
+    const pass = typeof received === "string" && received.endsWith(expected);
+    return {
+      pass,
+      message: () =>
+        `expected ${JSON.stringify(received)} to ${pass ? "not " : ""}end with ${JSON.stringify(expected)}`,
+    };
+  },
+  toBeString(received: unknown) {
+    const pass = typeof received === "string";
+    return {
+      pass,
+      message: () =>
+        `expected ${JSON.stringify(received)} to ${pass ? "not " : ""}be a string`,
+    };
+  },
+  toBeArray(received: unknown) {
+    const pass = Array.isArray(received);
+    return {
+      pass,
+      message: () =>
+        `expected ${JSON.stringify(received)} to ${pass ? "not " : ""}be an array`,
+    };
+  },
+});

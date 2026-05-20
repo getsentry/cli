@@ -9,7 +9,6 @@
  * - maskToken: output always contains last 4 chars
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -17,6 +16,7 @@ import {
   property,
   string,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import type {
   DiscoveredRcFile,
   ImportPlan,

@@ -4,9 +4,9 @@
  * Tests for cwd -> projectRoot caching with mtime-based invalidation.
  */
 
-import { beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { beforeEach, describe, expect, test } from "vitest";
 import {
   clearProjectRootCache,
   clearProjectRootCacheFor,

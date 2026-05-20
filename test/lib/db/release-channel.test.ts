@@ -2,7 +2,7 @@
  * Release Channel Storage Tests
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   getReleaseChannel,
   parseReleaseChannel,

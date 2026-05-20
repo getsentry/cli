@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 import { getEnv, setEnv } from "../../src/lib/env.js";
 
 describe("env registry", () => {

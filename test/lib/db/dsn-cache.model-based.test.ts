@@ -7,7 +7,6 @@
 
 // biome-ignore-all lint/suspicious/noMisplacedAssertion: Model-based testing uses expect() inside command classes
 
-import { describe, expect, test } from "bun:test";
 import {
   type AsyncCommand,
   asyncModelRun,
@@ -19,6 +18,7 @@ import {
   option,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   clearDsnCache,
   getCachedDsn,

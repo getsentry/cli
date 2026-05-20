@@ -9,7 +9,6 @@
  * guarantee without flaky wall-clock dependencies.
  */
 
-import { afterAll, describe, expect, test } from "bun:test";
 import {
   mkdirSync,
   mkdtempSync,
@@ -19,6 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterAll, describe, expect, test } from "vitest";
 import type { WalkEntry } from "../../../src/lib/scan/types.js";
 import { walkFiles } from "../../../src/lib/scan/walker.js";
 

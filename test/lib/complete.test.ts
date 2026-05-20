@@ -6,7 +6,7 @@
  * cache interaction tests.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   completeAliases,
   completeOrgSlashProject,

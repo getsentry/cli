@@ -14,8 +14,8 @@
  * isn't available.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { existsSync, openSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   closeFreshTtyForwarding,
   forwardFreshTtyToStdin,
@@ -134,7 +134,7 @@ describe("forwardFreshTtyToStdin no-install paths", () => {
 
   test("does not patch stdin methods when the openTty factory throws", () => {
     const originalSetRawMode = process.stdin.setRawMode;
-    const openTty = mock(() => {
+    const openTty = vi.fn(() => {
       throw new Error("fake /dev/tty unavailable");
     });
     const handle = forwardFreshTtyToStdin({ isTty: () => true, openTty });
@@ -154,7 +154,7 @@ describe("forwardFreshTtyToStdin → closeFreshTtyForwarding round trip", () => 
 
   test("install captures and teardown restores stdin methods", () => {
     const { fd } = makePtmxFd();
-    const openTty = mock(() => fd);
+    const openTty = vi.fn(() => fd);
 
     const originalSetRawMode = process.stdin.setRawMode;
     const originalPause = process.stdin.pause;
@@ -259,7 +259,7 @@ describe("forwardFreshTtyToStdin → closeFreshTtyForwarding round trip", () => 
       expect(h1).toBeDefined();
 
       // Second call — already installed. Factory NOT called again.
-      const secondaryFactory = mock(() => {
+      const secondaryFactory = vi.fn(() => {
         throw new Error("should not be invoked");
       });
       const h2 = forwardFreshTtyToStdin({

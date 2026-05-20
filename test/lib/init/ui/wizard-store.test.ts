@@ -13,7 +13,7 @@
  * dev/binary builds. This test file focuses on the pure data layer.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   CANONICAL_STEP_ORDER,
   CHECKLIST_VISIBLE_STEPS,

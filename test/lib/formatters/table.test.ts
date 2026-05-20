@@ -5,7 +5,7 @@
  * tables. Tests verify content is present rather than exact text alignment.
  */
 
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test, vi } from "vitest";
 import { escapeMarkdownCell } from "../../../src/lib/formatters/markdown.js";
 import { type Column, writeTable } from "../../../src/lib/formatters/table.js";
 
@@ -24,7 +24,7 @@ function stripAnsi(str: string): string {
 }
 
 function capture(items: Row[], cols = columns): string {
-  const write = mock(() => true);
+  const write = vi.fn(() => true);
   writeTable({ write }, items, cols);
   return stripAnsi(write.mock.calls.map((c) => c[0]).join(""));
 }
@@ -85,7 +85,7 @@ describe("writeTable", () => {
     const cols: Column<{ v: string }>[] = [
       { header: "VERY_LONG_HEADER", value: (r) => r.v },
     ];
-    const write = mock(() => true);
+    const write = vi.fn(() => true);
     writeTable({ write }, [{ v: "x" }], cols);
     const output = stripAnsi(write.mock.calls.map((c) => c[0]).join(""));
     expect(output).toContain("VERY_LONG_HEADER");
@@ -120,7 +120,7 @@ describe("writeTable (TTY mode)", () => {
 
   test("renders Unicode box-drawing borders", () => {
     withTty(() => {
-      const write = mock(() => true);
+      const write = vi.fn(() => true);
       writeTable({ write }, [{ name: "a", count: 1, status: "ok" }], columns);
       const output = write.mock.calls.map((c) => c[0]).join("");
       expect(stripAnsi(output)).toContain("│");
@@ -130,7 +130,7 @@ describe("writeTable (TTY mode)", () => {
 
   test("renders content in ANSI mode", () => {
     withTty(() => {
-      const write = mock(() => true);
+      const write = vi.fn(() => true);
       writeTable(
         { write },
         [{ name: "alice", count: 42, status: "active" }],
@@ -146,7 +146,7 @@ describe("writeTable (TTY mode)", () => {
 
   test("passes rowSeparator option to renderer", () => {
     withTty(() => {
-      const write = mock(() => true);
+      const write = vi.fn(() => true);
       writeTable(
         { write },
         [
@@ -168,7 +168,7 @@ describe("writeTable (TTY mode)", () => {
 
   test("passes rowSeparator color string to renderer", () => {
     withTty(() => {
-      const write = mock(() => true);
+      const write = vi.fn(() => true);
       const color = "\x1b[38;2;137;130;148m";
       writeTable(
         { write },
@@ -190,7 +190,7 @@ describe("writeTable (TTY mode)", () => {
       const cols: Column<{ v: string }>[] = [
         { header: "VAL", value: (r) => r.v, minWidth: 10 },
       ];
-      const write = mock(() => true);
+      const write = vi.fn(() => true);
       const longText = "a".repeat(200);
       writeTable({ write }, [{ v: longText }], cols, { truncate: true });
       const output = stripAnsi(write.mock.calls.map((c) => c[0]).join(""));
@@ -201,7 +201,7 @@ describe("writeTable (TTY mode)", () => {
 
   test("respects column alignment", () => {
     withTty(() => {
-      const write = mock(() => true);
+      const write = vi.fn(() => true);
       writeTable({ write }, [{ name: "x", count: 42, status: "ok" }], columns);
       const output = stripAnsi(write.mock.calls.map((c) => c[0]).join(""));
       // Right-aligned COUNT should have leading space before 42
@@ -244,7 +244,7 @@ describe("writeTable (plain mode)", () => {
 
   test("emits box-drawing table with stripped markdown", () => {
     withPlain(() => {
-      const write = mock(() => true);
+      const write = vi.fn(() => true);
       writeTable(
         { write },
         [{ name: "alice", count: 1, status: "ok" }],
@@ -263,7 +263,7 @@ describe("writeTable (plain mode)", () => {
       const cols: Column<{ v: string }>[] = [
         { header: "VAL", value: (r) => escapeMarkdownCell(r.v) },
       ];
-      const write = mock(() => true);
+      const write = vi.fn(() => true);
       writeTable({ write }, [{ v: "a|b" }], cols);
       const output = write.mock.calls.map((c) => c[0]).join("");
       // Content is visible in box-drawing table

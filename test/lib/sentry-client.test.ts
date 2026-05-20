@@ -3,7 +3,7 @@
  * regression coverage.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import { TimeoutError } from "../../src/lib/errors.js";
 import {

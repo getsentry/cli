@@ -10,7 +10,6 @@
  * checking file type with stat() before attempting to read.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execSync } from "node:child_process";
 import {
   mkdirSync,
@@ -21,6 +20,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { isRegularFile } from "../../../src/lib/dsn/fs-utils.js";
 import { useTestConfigDir } from "../../helpers.js";
 

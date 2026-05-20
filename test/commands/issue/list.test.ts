@@ -5,31 +5,56 @@
  * in src/commands/issue/list.ts
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
-import {
-  listCommand,
-  PAGINATION_KEY,
-} from "../../../src/commands/issue/list.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
-import * as apiClient from "../../../src/lib/api-client.js";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { listCommand } from "../../../src/commands/issue/list.js";
+
+vi.mock("../../../src/lib/api/issues.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api/issues.js")>();
+  return {
+    ...actual,
+    listIssuesPaginated: vi.fn(actual.listIssuesPaginated),
+    listIssuesAllPages: vi.fn(actual.listIssuesAllPages),
+  };
+});
+vi.mock("../../../src/lib/api/projects.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api/projects.js")>();
+  return {
+    ...actual,
+    getProject: vi.fn(actual.getProject),
+    findProjectsBySlug: vi.fn(actual.findProjectsBySlug),
+    listProjects: vi.fn(actual.listProjects),
+  };
+});
+vi.mock("../../../src/lib/db/pagination.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/pagination.js")>();
+  return {
+    ...actual,
+    resolveCursor: vi.fn(actual.resolveCursor),
+    advancePaginationState: vi.fn(actual.advancePaginationState),
+  };
+});
+
+// biome-ignore lint/performance/noNamespaceImport: namespace needed for vi.spyOn on mocked module
+import * as issuesApi from "../../../src/lib/api/issues.js";
+// biome-ignore lint/performance/noNamespaceImport: namespace needed for vi.spyOn on mocked module
+import * as projectsApi from "../../../src/lib/api/projects.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import {
   setDefaultOrganization,
   setDefaultProject,
 } from "../../../src/lib/db/defaults.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+// biome-ignore lint/performance/noNamespaceImport: namespace needed for vi.spyOn on mocked module
 import * as paginationDb from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
-import { ApiError, ResolutionError } from "../../../src/lib/errors.js";
+import {
+  ApiError,
+  ResolutionError,
+  ValidationError,
+} from "../../../src/lib/errors.js";
 import type { TimeRange } from "../../../src/lib/time-range.js";
 import { parsePeriod } from "../../../src/lib/time-range.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
@@ -461,7 +486,7 @@ describe("issue list: partial failure handling", () => {
       });
     });
 
-    const stderrSpy = spyOn(process.stderr, "write");
+    const stderrSpy = vi.spyOn(process.stderr, "write");
     try {
       const { context } = createContext();
 
@@ -515,14 +540,18 @@ describe("issue list: partial failure handling", () => {
   });
 });
 
-describe("issue list: org-all mode (cursor pagination)", () => {
-  let listIssuesPaginatedSpy: ReturnType<typeof spyOn>;
-  let getPaginationCursorSpy: ReturnType<typeof spyOn>;
-  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
+/** Shared mock references — vi.mocked() returns the same mock object each time */
+const listIssuesPaginatedMock = vi.mocked(issuesApi.listIssuesPaginated);
+const listIssuesAllPagesMock = vi.mocked(issuesApi.listIssuesAllPages);
+const resolveCursorMock = vi.mocked(paginationDb.resolveCursor);
+const advancePaginationStateMock = vi.mocked(
+  paginationDb.advancePaginationState
+);
 
+describe("issue list: org-all mode (cursor pagination)", () => {
   function createOrgAllContext() {
-    const stdoutWrite = mock(() => true);
-    const stderrWrite = mock(() => true);
+    const stdoutWrite = vi.fn(() => true);
+    const stderrWrite = vi.fn(() => true);
     return {
       context: {
         stdout: { write: stdoutWrite },
@@ -550,20 +579,16 @@ describe("issue list: org-all mode (cursor pagination)", () => {
   };
 
   beforeEach(async () => {
-    listIssuesPaginatedSpy = spyOn(apiClient, "listIssuesPaginated");
-    getPaginationCursorSpy = spyOn(paginationDb, "getPaginationState");
-    advancePaginationStateSpy = spyOn(paginationDb, "advancePaginationState");
-
-    advancePaginationStateSpy.mockReturnValue(undefined);
+    // mockReset clears call data AND removes override implementations set by
+    // mockResolvedValue/mockReturnValue from previous tests, falling back to
+    // the vi.fn(realImpl) default set during vi.mock().
+    listIssuesPaginatedMock.mockReset();
+    listIssuesAllPagesMock.mockReset();
+    resolveCursorMock.mockReset();
+    advancePaginationStateMock.mockReset();
 
     // Pre-populate org cache so resolveEffectiveOrg hits the fast path
     setOrgRegion("my-org", DEFAULT_SENTRY_URL);
-  });
-
-  afterEach(() => {
-    listIssuesPaginatedSpy.mockRestore();
-    getPaginationCursorSpy.mockRestore();
-    advancePaginationStateSpy.mockRestore();
   });
 
   test("--cursor is accepted in multi-target (explicit) mode", async () => {
@@ -576,45 +601,47 @@ describe("issue list: org-all mode (cursor pagination)", () => {
       target?: string
     ) => Promise<void>;
 
-    listIssuesPaginatedSpy.mockResolvedValue({
-      data: [],
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [],
       nextCursor: undefined,
     });
 
+    // Raw cursor passthrough: resolveCursor returns the cursor string as-is
+    resolveCursorMock.mockReturnValue({
+      cursor: "1735689600:0:0",
+      direction: "next",
+    });
+
     // The explicit target path calls fetchProjectId → getProject before listing.
-    // Spy on getProject so we don't hit the network.
-    const getProjectSpy = spyOn(apiClient, "getProject").mockResolvedValue({
+    // Mock getProject so we don't hit the network.
+    vi.mocked(projectsApi.getProject).mockResolvedValue({
       id: "1",
       slug: "test-project",
       name: "Test Project",
-    } as Awaited<ReturnType<typeof apiClient.getProject>>);
+    } as Awaited<ReturnType<typeof projectsApi.getProject>>);
 
     const { context } = createOrgAllContext();
 
-    try {
-      // Using a real-looking cursor value (not "last") bypasses DB lookup.
-      // The command should resolve, fetch, and complete without throwing.
-      await expect(
-        orgAllFunc.call(
-          context,
-          {
-            limit: 10,
-            sort: "date",
-            period: parsePeriod("90d"),
-            json: false,
-            cursor: "1735689600:0:0",
-          },
-          "test-org/test-project"
-        )
-      ).resolves.toBeUndefined();
-    } finally {
-      getProjectSpy.mockRestore();
-    }
+    // Using a real-looking cursor value (not "last") bypasses DB lookup.
+    // The command should resolve, fetch, and complete without throwing.
+    await expect(
+      orgAllFunc.call(
+        context,
+        {
+          limit: 10,
+          sort: "date",
+          period: parsePeriod("90d"),
+          json: false,
+          cursor: "1735689600:0:0",
+        },
+        "test-org/test-project"
+      )
+    ).resolves.toBeUndefined();
   });
 
   test("returns paginated JSON with hasMore=false when no nextCursor", async () => {
-    listIssuesPaginatedSpy.mockResolvedValue({
-      data: [sampleIssue],
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
       nextCursor: undefined,
     });
 
@@ -635,12 +662,12 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     const parsed = JSON.parse(output);
     expect(parsed).toHaveProperty("data");
     expect(parsed).toHaveProperty("hasMore", false);
-    expect(advancePaginationStateSpy).toHaveBeenCalled();
+    expect(advancePaginationStateMock).toHaveBeenCalled();
   });
 
   test("returns paginated JSON with hasMore=true when nextCursor present", async () => {
-    listIssuesPaginatedSpy.mockResolvedValue({
-      data: [sampleIssue],
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
       nextCursor: "cursor:xyz:1",
     });
 
@@ -661,12 +688,12 @@ describe("issue list: org-all mode (cursor pagination)", () => {
     const parsed = JSON.parse(output);
     expect(parsed).toHaveProperty("hasMore", true);
     expect(parsed).toHaveProperty("nextCursor", "cursor:xyz:1");
-    expect(advancePaginationStateSpy).toHaveBeenCalled();
+    expect(advancePaginationStateMock).toHaveBeenCalled();
   });
 
   test("human output shows next page hint when hasMore", async () => {
-    listIssuesPaginatedSpy.mockResolvedValue({
-      data: [sampleIssue],
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
       nextCursor: "cursor:xyz:1",
     });
 
@@ -690,8 +717,8 @@ describe("issue list: org-all mode (cursor pagination)", () => {
   });
 
   test("human output 'No issues found' when empty org-all", async () => {
-    listIssuesPaginatedSpy.mockResolvedValue({
-      data: [],
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [],
       nextCursor: undefined,
     });
 
@@ -713,13 +740,12 @@ describe("issue list: org-all mode (cursor pagination)", () => {
   });
 
   test("resolves 'last' cursor from cache in org-all mode", async () => {
-    // The new stack-based pagination stores a PaginationState with stack + index.
-    // "last" (alias for "next") reads stack[index+1] as the cursor.
-    getPaginationCursorSpy.mockReturnValue({
-      stack: ["", "cached:cursor:789"],
-      index: 0,
+    // "last" (alias for "next") resolves to the cached cursor via resolveCursor.
+    resolveCursorMock.mockReturnValue({
+      cursor: "cached:cursor:789",
+      direction: "next",
     });
-    listIssuesPaginatedSpy.mockResolvedValue({
+    listIssuesPaginatedMock.mockResolvedValue({
       data: [sampleIssue],
       nextCursor: undefined,
     });
@@ -743,7 +769,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
       "my-org/"
     );
 
-    expect(listIssuesPaginatedSpy).toHaveBeenCalledWith(
+    expect(listIssuesPaginatedMock).toHaveBeenCalledWith(
       "my-org",
       "",
       expect.objectContaining({ cursor: "cached:cursor:789" })
@@ -751,7 +777,12 @@ describe("issue list: org-all mode (cursor pagination)", () => {
   });
 
   test("throws ValidationError when 'last' cursor not in cache", async () => {
-    getPaginationCursorSpy.mockReturnValue(undefined);
+    resolveCursorMock.mockImplementation(() => {
+      throw new ValidationError(
+        "No next page saved for this query. Run without --cursor first.",
+        "cursor"
+      );
+    });
 
     const orgAllFunc = (await listCommand.loader()) as unknown as (
       this: unknown,
@@ -777,7 +808,12 @@ describe("issue list: org-all mode (cursor pagination)", () => {
   });
 
   test("uses explicit cursor string in org-all mode", async () => {
-    listIssuesPaginatedSpy.mockResolvedValue({
+    // Raw cursor passthrough: resolveCursor returns the cursor string as-is
+    resolveCursorMock.mockReturnValue({
+      cursor: "explicit:cursor:val",
+      direction: "next",
+    });
+    listIssuesPaginatedMock.mockResolvedValue({
       data: [sampleIssue],
       nextCursor: undefined,
     });
@@ -801,7 +837,7 @@ describe("issue list: org-all mode (cursor pagination)", () => {
       "my-org/"
     );
 
-    expect(listIssuesPaginatedSpy).toHaveBeenCalledWith(
+    expect(listIssuesPaginatedMock).toHaveBeenCalledWith(
       "my-org",
       "",
       expect.objectContaining({ cursor: "explicit:cursor:val" })
@@ -968,28 +1004,13 @@ describe("issue list: compound cursor resume", () => {
   test("resumes from compound cursor, skipping exhausted targets", async () => {
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
 
-    // Pre-store a compound cursor in the DB using the stack-based pagination API.
-    // advancePaginationState("first", nextCursor) creates { stack: ["", nextCursor], index: 0 },
-    // so resolveCursor("last"/next) reads stack[1] = "resume-cursor:0:0".
-    const { advancePaginationState } = await import(
-      "../../../src/lib/db/pagination.js"
-    );
-    const { getApiBaseUrl } = await import("../../../src/lib/sentry-client.js");
-    const { escapeContextKeyValue } = await import(
-      "../../../src/lib/db/pagination.js"
-    );
-    const host = getApiBaseUrl();
-
-    // Build the context key matching buildMultiTargetContextKey for a single target
-    const fingerprint = "test-org/proj-a";
-    const contextKey = `host:${host}|type:multi:${fingerprint}|sort:date|period:${escapeContextKeyValue("rel:90d")}`;
-    // Set up pagination state so "last"/"next" resolves to "resume-cursor:0:0"
-    advancePaginationState(
-      PAGINATION_KEY,
-      contextKey,
-      "first",
-      "resume-cursor:0:0"
-    );
+    // Mock resolveCursor to return the compound cursor that would have been
+    // stored by a previous pagination run. The multi-target path uses this
+    // cursor to resume fetching from the correct position.
+    resolveCursorMock.mockReturnValue({
+      cursor: "resume-cursor:0:0",
+      direction: "next",
+    });
 
     const issue = (id: string, proj: string) => ({
       id,
@@ -1067,9 +1088,6 @@ describe("issue list: compound cursor resume", () => {
 // ---------------------------------------------------------------------------
 
 describe("issue list: collapse parameter optimization", () => {
-  let listIssuesPaginatedSpy: ReturnType<typeof spyOn>;
-  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
-
   const sampleIssue = {
     id: "1",
     shortId: "PROJ-1",
@@ -1086,8 +1104,8 @@ describe("issue list: collapse parameter optimization", () => {
   };
 
   function createOrgAllContext() {
-    const stdoutWrite = mock(() => true);
-    const stderrWrite = mock(() => true);
+    const stdoutWrite = vi.fn(() => true);
+    const stderrWrite = vi.fn(() => true);
     return {
       context: {
         stdout: { write: stdoutWrite },
@@ -1099,23 +1117,16 @@ describe("issue list: collapse parameter optimization", () => {
   }
 
   beforeEach(async () => {
-    listIssuesPaginatedSpy = spyOn(apiClient, "listIssuesPaginated");
-    advancePaginationStateSpy = spyOn(
-      paginationDb,
-      "advancePaginationState"
-    ).mockReturnValue(undefined);
+    listIssuesAllPagesMock.mockReset();
+    resolveCursorMock.mockReset();
+    advancePaginationStateMock.mockReset();
 
     await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
-  afterEach(() => {
-    listIssuesPaginatedSpy.mockRestore();
-    advancePaginationStateSpy.mockRestore();
-  });
-
   test("always collapses filtered and unhandled in org-all mode", async () => {
-    listIssuesPaginatedSpy.mockResolvedValue({
-      data: [sampleIssue],
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
       nextCursor: undefined,
     });
 
@@ -1132,8 +1143,8 @@ describe("issue list: collapse parameter optimization", () => {
       "my-org/"
     );
 
-    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
-    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    expect(listIssuesAllPagesMock).toHaveBeenCalled();
+    const callArgs = listIssuesAllPagesMock.mock.calls[0];
     const options = callArgs?.[2] as Record<string, unknown> | undefined;
     const collapse = options?.collapse as string[];
     expect(collapse).toContain("filtered");
@@ -1141,8 +1152,8 @@ describe("issue list: collapse parameter optimization", () => {
   });
 
   test("does not collapse lifetime in human mode (needed for EVENTS/USERS/SEEN/AGE)", async () => {
-    listIssuesPaginatedSpy.mockResolvedValue({
-      data: [sampleIssue],
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
       nextCursor: undefined,
     });
 
@@ -1159,16 +1170,16 @@ describe("issue list: collapse parameter optimization", () => {
       "my-org/"
     );
 
-    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
-    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    expect(listIssuesAllPagesMock).toHaveBeenCalled();
+    const callArgs = listIssuesAllPagesMock.mock.calls[0];
     const options = callArgs?.[2] as Record<string, unknown> | undefined;
     const collapse = options?.collapse as string[];
     expect(collapse).not.toContain("lifetime");
   });
 
   test("does not collapse lifetime in JSON mode without --fields", async () => {
-    listIssuesPaginatedSpy.mockResolvedValue({
-      data: [sampleIssue],
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
       nextCursor: undefined,
     });
 
@@ -1185,16 +1196,16 @@ describe("issue list: collapse parameter optimization", () => {
       "my-org/"
     );
 
-    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
-    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    expect(listIssuesAllPagesMock).toHaveBeenCalled();
+    const callArgs = listIssuesAllPagesMock.mock.calls[0];
     const options = callArgs?.[2] as Record<string, unknown> | undefined;
     const collapse = options?.collapse as string[];
     expect(collapse).not.toContain("lifetime");
   });
 
   test("does not collapse lifetime in JSON mode when --fields includes lifetime-dependent field", async () => {
-    listIssuesPaginatedSpy.mockResolvedValue({
-      data: [sampleIssue],
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
       nextCursor: undefined,
     });
 
@@ -1217,16 +1228,16 @@ describe("issue list: collapse parameter optimization", () => {
       "my-org/"
     );
 
-    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
-    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    expect(listIssuesAllPagesMock).toHaveBeenCalled();
+    const callArgs = listIssuesAllPagesMock.mock.calls[0];
     const options = callArgs?.[2] as Record<string, unknown> | undefined;
     const collapse = options?.collapse as string[];
     expect(collapse).not.toContain("lifetime");
   });
 
   test("collapses lifetime in JSON mode when --fields omits all lifetime-dependent fields", async () => {
-    listIssuesPaginatedSpy.mockResolvedValue({
-      data: [sampleIssue],
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
       nextCursor: undefined,
     });
 
@@ -1249,16 +1260,16 @@ describe("issue list: collapse parameter optimization", () => {
       "my-org/"
     );
 
-    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
-    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    expect(listIssuesAllPagesMock).toHaveBeenCalled();
+    const callArgs = listIssuesAllPagesMock.mock.calls[0];
     const options = callArgs?.[2] as Record<string, unknown> | undefined;
     const collapse = options?.collapse as string[];
     expect(collapse).toContain("lifetime");
   });
 
   test("collapses stats in JSON mode", async () => {
-    listIssuesPaginatedSpy.mockResolvedValue({
-      data: [sampleIssue],
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
       nextCursor: undefined,
     });
 
@@ -1275,16 +1286,16 @@ describe("issue list: collapse parameter optimization", () => {
       "my-org/"
     );
 
-    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
-    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    expect(listIssuesAllPagesMock).toHaveBeenCalled();
+    const callArgs = listIssuesAllPagesMock.mock.calls[0];
     const options = callArgs?.[2] as Record<string, unknown> | undefined;
     const collapse = options?.collapse as string[];
     expect(collapse).toContain("stats");
   });
 
   test("omits groupStatsPeriod when stats are collapsed (JSON mode)", async () => {
-    listIssuesPaginatedSpy.mockResolvedValue({
-      data: [sampleIssue],
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
       nextCursor: undefined,
     });
 
@@ -1301,8 +1312,8 @@ describe("issue list: collapse parameter optimization", () => {
       "my-org/"
     );
 
-    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
-    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    expect(listIssuesAllPagesMock).toHaveBeenCalled();
+    const callArgs = listIssuesAllPagesMock.mock.calls[0];
     const options = callArgs?.[2] as Record<string, unknown> | undefined;
     expect(options?.groupStatsPeriod).toBeUndefined();
   });

@@ -5,8 +5,8 @@
  * assignDefaultLayout(), regardless of widget types, counts, or layout mode.
  */
 
-import { describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   assignDefaultLayout,
   type DashboardWidget,

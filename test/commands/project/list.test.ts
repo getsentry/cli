@@ -7,7 +7,6 @@
 
 // biome-ignore-all lint/suspicious/noMisplacedAssertion: Property tests use expect() inside fast-check callbacks.
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -15,6 +14,7 @@ import {
   property,
   tuple,
 } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   buildContextKey,
   displayProjectTable,

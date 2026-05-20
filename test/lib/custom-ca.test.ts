@@ -5,9 +5,9 @@
  * CA loading tests use temp files and env sandboxing.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   __resetForTests,
   customFetch,

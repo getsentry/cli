@@ -2,21 +2,37 @@
  * Replay View Command Tests
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   parsePositionalArgs,
   viewCommand,
 } from "../../../src/commands/replay/view.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/browser.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/browser.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
 import {
@@ -25,6 +41,18 @@ import {
   ResolutionError,
   ValidationError,
 } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { ReplayDetails } from "../../../src/types/index.js";
@@ -121,11 +149,11 @@ describe("viewCommand.func", () => {
   let openInBrowserSpy: ReturnType<typeof spyOn>;
 
   function createMockContext() {
-    const stdoutWrite = mock(() => true);
+    const stdoutWrite = vi.fn(() => true);
     return {
       context: {
         stdout: { write: stdoutWrite },
-        stderr: { write: mock(() => true) },
+        stderr: { write: vi.fn(() => true) },
         cwd: "/tmp",
       },
       stdoutWrite,
@@ -133,24 +161,23 @@ describe("viewCommand.func", () => {
   }
 
   beforeEach(() => {
-    getProjectSpy = spyOn(apiClient, "getProject").mockResolvedValue({
+    getProjectSpy = vi.spyOn(apiClient, "getProject").mockResolvedValue({
       id: "42",
       slug: "cli",
       name: "CLI",
     });
-    getReplaySpy = spyOn(apiClient, "getReplay");
-    getReplayRecordingSegmentsSpy = spyOn(
-      apiClient,
-      "getReplayRecordingSegments"
-    ).mockResolvedValue([
-      [
-        {
-          timestamp: 1_735_500_000_000,
-          data: { href: "/checkout" },
-        },
-      ],
-    ]);
-    getTraceMetaSpy = spyOn(apiClient, "getTraceMeta").mockResolvedValue({
+    getReplaySpy = vi.spyOn(apiClient, "getReplay");
+    getReplayRecordingSegmentsSpy = vi
+      .spyOn(apiClient, "getReplayRecordingSegments")
+      .mockResolvedValue([
+        [
+          {
+            timestamp: 1_735_500_000_000,
+            data: { href: "/checkout" },
+          },
+        ],
+      ]);
+    getTraceMetaSpy = vi.spyOn(apiClient, "getTraceMeta").mockResolvedValue({
       errors: 2,
       logs: 4,
       performance_issues: 1,
@@ -158,20 +185,22 @@ describe("viewCommand.func", () => {
       span_count_map: {},
       transaction_child_count_map: [],
     });
-    listIssuesPaginatedSpy = spyOn(
-      apiClient,
-      "listIssuesPaginated"
-    ).mockResolvedValue({
-      data: [
-        {
-          id: "100",
-          shortId: "CLI-123",
-          title: "Checkout error",
-        },
-      ],
-    });
-    resolveTargetSpy = spyOn(resolveTarget, "resolveOrgOptionalProjectFromArg");
-    openInBrowserSpy = spyOn(browser, "openInBrowser").mockResolvedValue();
+    listIssuesPaginatedSpy = vi
+      .spyOn(apiClient, "listIssuesPaginated")
+      .mockResolvedValue({
+        data: [
+          {
+            id: "100",
+            shortId: "CLI-123",
+            title: "Checkout error",
+          },
+        ],
+      });
+    resolveTargetSpy = vi.spyOn(
+      resolveTarget,
+      "resolveOrgOptionalProjectFromArg"
+    );
+    openInBrowserSpy = vi.spyOn(browser, "openInBrowser").mockResolvedValue();
   });
 
   afterEach(() => {

@@ -12,11 +12,11 @@
  *      `createTransport` layer.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ClientRequest, IncomingHttpHeaders } from "node:http";
 import { gunzipSync, zstdDecompressSync } from "node:zlib";
 import { createEnvelope } from "@sentry/core";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   hasZstdSupport,
   isNoProxyExempt,

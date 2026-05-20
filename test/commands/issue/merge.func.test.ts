@@ -5,18 +5,36 @@
  * rejection, --into parent selection, and API call shape.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { mergeCommand } from "../../../src/commands/issue/merge.js";
+
+vi.mock("../../../src/commands/issue/utils.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../src/commands/issue/utils.js")
+    >();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as issueUtils from "../../../src/commands/issue/utils.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import {
@@ -45,11 +63,11 @@ function makeMockIssue(overrides?: Partial<SentryIssue>): SentryIssue {
 }
 
 function createMockContext() {
-  const stdoutWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
+      stderr: { write: vi.fn(() => true) },
       cwd: "/tmp",
     },
     stdoutWrite,
@@ -61,8 +79,8 @@ describe("mergeCommand.func()", () => {
   let mergeSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    resolveIssueSpy = spyOn(issueUtils, "resolveIssue");
-    mergeSpy = spyOn(apiClient, "mergeIssues");
+    resolveIssueSpy = vi.spyOn(issueUtils, "resolveIssue");
+    mergeSpy = vi.spyOn(apiClient, "mergeIssues");
   });
 
   afterEach(() => {
@@ -383,7 +401,7 @@ describe("mergeCommand.func()", () => {
 
     // Warning now goes through log.warn() (consola → process.stderr), not
     // this.stderr.write(). Spy on process.stderr.write to capture it.
-    const stderrSpy = spyOn(process.stderr, "write");
+    const stderrSpy = vi.spyOn(process.stderr, "write");
     try {
       const { context } = createMockContext();
       const func = await mergeCommand.loader();
@@ -415,7 +433,7 @@ describe("mergeCommand.func()", () => {
     // User asked for CLI-B, Sentry agreed.
     mergeSpy.mockResolvedValue({ parent: "10B", children: ["10A"] });
 
-    const stderrSpy = spyOn(process.stderr, "write");
+    const stderrSpy = vi.spyOn(process.stderr, "write");
     try {
       const { context } = createMockContext();
       const func = await mergeCommand.loader();

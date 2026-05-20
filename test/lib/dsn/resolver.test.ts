@@ -1,15 +1,26 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createIsolatedDbContext } from "../../model-based/helpers.js";
 
 // Mock api-client module to avoid real API calls
-const mockListOrganizations = mock(() => Promise.resolve([]));
-const mockListProjects = mock(() => Promise.resolve([]));
-const mockFindProjectByDsnKey = mock(() => Promise.resolve(null));
+const {
+  mockListOrganizations,
+  mockListProjects,
+  mockFindProjectByDsnKey,
+  mockResolveOrgDisplayName,
+} = vi.hoisted(() => ({
+  mockListOrganizations: vi.fn(() => Promise.resolve([])),
+  mockListProjects: vi.fn(() => Promise.resolve([])),
+  mockFindProjectByDsnKey: vi.fn(() => Promise.resolve(null)),
+  mockResolveOrgDisplayName: vi.fn(
+    (slug: string, name?: string) => name ?? slug
+  ),
+}));
 
-mock.module("../../../src/lib/api-client.js", () => ({
+vi.mock("../../../src/lib/api-client.js", () => ({
   listOrganizations: mockListOrganizations,
   listProjects: mockListProjects,
   findProjectByDsnKey: mockFindProjectByDsnKey,
+  resolveOrgDisplayName: mockResolveOrgDisplayName,
 }));
 
 // Now import the resolver after mocking

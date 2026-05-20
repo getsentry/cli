@@ -22,7 +22,6 @@
  * narrow it back, the fast path's correctness is no longer tested.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -30,6 +29,7 @@ import {
   property,
   string,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { extractDsnsFromContent } from "../../../src/lib/dsn/code-scanner.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 

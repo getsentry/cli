@@ -5,7 +5,6 @@
  * of the characters present.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -13,6 +12,7 @@ import {
   property,
   string,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { slugify } from "../../src/lib/utils.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 

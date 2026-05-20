@@ -5,7 +5,7 @@
  * and helper functions.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   findAvailableTrial,
   getDaysRemaining,

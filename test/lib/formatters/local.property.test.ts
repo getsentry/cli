@@ -4,7 +4,6 @@
  * Uses fast-check to verify invariants that should hold for any valid input.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   constantFrom,
   double,
@@ -16,6 +15,7 @@ import {
   string,
   stringMatching,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import type { FilterValue } from "../../../src/lib/formatters/local.js";
 import {
   FILTER_VALUES,

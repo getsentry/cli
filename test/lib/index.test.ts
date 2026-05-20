@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import createSentrySDK, { SentryError } from "../../src/index.js";
 import { mockFetch } from "../helpers.js";
 
@@ -123,19 +123,15 @@ describe("createSentrySDK() library API", () => {
     expect(typeof sdk.dashboard.widget.add).toBe("function");
   });
 
-  test(
-    "token option is plumbed through",
-    async () => {
-      const sdk = createSentrySDK({ token: "invalid-token" });
-      try {
-        await sdk.org.list();
-        expect.unreachable("Should have thrown");
-      } catch (err) {
-        expect(err).toBeInstanceOf(SentryError);
-      }
-    },
-    { timeout: 15_000 }
-  );
+  test("token option is plumbed through", { timeout: 15_000 }, async () => {
+    const sdk = createSentrySDK({ token: "invalid-token" });
+    try {
+      await sdk.org.list();
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SentryError);
+    }
+  });
 
   test("sdk.run returns AsyncIterable for streaming flag --follow", () => {
     const sdk = createSentrySDK();

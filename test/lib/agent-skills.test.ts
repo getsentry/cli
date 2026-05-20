@@ -5,9 +5,10 @@
  * embedded skill installation across detected agent roots.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   detectClaudeCode,
   getSkillInstallPath,
@@ -97,7 +98,7 @@ describe("agent-skills", () => {
       );
       expect(existsSync(result!.path)).toBe(true);
 
-      const content = await Bun.file(result!.path).text();
+      const content = await readFile(result!.path, "utf-8");
       expect(content).toContain("sentry-cli");
 
       expect(result!.referenceCount).toBeGreaterThan(0);

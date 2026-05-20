@@ -2,7 +2,7 @@
  * Tests for log formatters
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   buildLogRowCells,
   createLogStreamingTable,

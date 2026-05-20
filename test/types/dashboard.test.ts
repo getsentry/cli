@@ -5,7 +5,7 @@
  * in src/types/dashboard.ts.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { ValidationError } from "../../src/lib/errors.js";
 import {
   assignDefaultLayout,

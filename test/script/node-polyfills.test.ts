@@ -13,7 +13,6 @@
  * on the Node.js distribution.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   execSync,
   spawn as nodeSpawn,
@@ -23,6 +22,8 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, expect, test } from "vitest";
+import { whichSync } from "../../src/lib/which.js";
 
 /**
  * Reproduces the exact spawn logic from script/node-polyfills.ts.
@@ -220,15 +221,15 @@ describe("Glob polyfill match()", () => {
     expect(glob.match("dir/MyApp.sln")).toBe(false);
   });
 
-  test("is consistent with Bun.Glob.match()", () => {
+  test("is consistent with picomatch glob matching", () => {
     const patterns = ["*.sln", "*.csproj", "*.cabal"];
     const inputs = ["App.sln", "foo.csproj", "bar.cabal", "nope.txt", ""];
 
     for (const pattern of patterns) {
       const polyfill = new PolyfillGlob(pattern);
-      const bunGlob = new Bun.Glob(pattern);
+      const matcher = picomatch(pattern, { dot: true });
       for (const input of inputs) {
-        expect(polyfill.match(input)).toBe(bunGlob.match(input));
+        expect(polyfill.match(input)).toBe(matcher(input));
       }
     }
   });
@@ -293,10 +294,10 @@ describe("spawnSync polyfill", () => {
       );
       expect(result.success).toBe(true);
       // Resolve symlinks (macOS /tmp → /private/tmp)
-      const expected = Bun.which("realpath")
+      const expected = whichSync("realpath")
         ? execSync(`realpath "${tmpDir}"`, { encoding: "utf-8" }).trim()
         : tmpDir;
-      const actual = Bun.which("realpath")
+      const actual = whichSync("realpath")
         ? execSync(`realpath "${result.stdout.toString()}"`, {
             encoding: "utf-8",
           }).trim()
@@ -307,16 +308,18 @@ describe("spawnSync polyfill", () => {
     }
   });
 
-  test("is consistent with Bun.spawnSync for git --version", () => {
+  test("is consistent with node:child_process spawnSync for git --version", () => {
     const polyfill = polyfillSpawnSync(["git", "--version"], {
       stdout: "pipe",
     });
-    const bun = Bun.spawnSync(["git", "--version"], { stdout: "pipe" });
-    expect(polyfill.success).toBe(bun.success);
-    expect(polyfill.exitCode).toBe(bun.exitCode);
+    const node = nodeSpawnSync("git", ["--version"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    expect(polyfill.success).toBe(node.status === 0);
+    expect(polyfill.exitCode).toBe(node.status ?? 1);
     // Both should output something starting with "git version"
     expect(polyfill.stdout.toString()).toStartWith("git version");
-    expect(bun.stdout.toString()).toStartWith("git version");
+    expect(node.stdout.toString()).toStartWith("git version");
   });
 });
 
@@ -355,7 +358,7 @@ describe("file polyfill size and lastModified", () => {
       expect(pf.size).toBe(11);
 
       // Verify consistency with Bun.file().size
-      expect(pf.size).toBe(Bun.file(filePath).size);
+      expect(pf.size).toBe(statSync(filePath).size);
     } finally {
       rmSync(tmpDir, { recursive: true });
     }
@@ -390,26 +393,23 @@ describe("file polyfill size and lastModified", () => {
     }
   });
 
-  test("lastModified is consistent with Bun.file().lastModified", () => {
+  test("lastModified is consistent with statSync().mtimeMs", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "polyfill-file-"));
     const filePath = join(tmpDir, "test.txt");
     try {
       writeFileSync(filePath, "data");
       const pf = polyfillFile(filePath);
-      const bunMtime = Bun.file(filePath).lastModified;
+      const nativeMtime = statSync(filePath).mtimeMs;
       // Both should be within 1ms of each other
-      expect(Math.abs(pf.lastModified - bunMtime)).toBeLessThanOrEqual(1);
+      expect(Math.abs(pf.lastModified - nativeMtime)).toBeLessThanOrEqual(1);
     } finally {
       rmSync(tmpDir, { recursive: true });
     }
   });
 
-  test("size returns 0 for non-existent file (matches Bun behavior)", () => {
+  test("size returns 0 for non-existent file", () => {
     const pf = polyfillFile("/tmp/__nonexistent_file_polyfill_test__");
     expect(pf.size).toBe(0);
-    expect(pf.size).toBe(
-      Bun.file("/tmp/__nonexistent_file_polyfill_test__").size
-    );
   });
 
   test("lastModified returns 0 for non-existent file", () => {
@@ -475,17 +475,17 @@ describe("file polyfill stat() (CLI-1EA, CLI-1EB regression)", () => {
     }
   });
 
-  test("stat() is consistent with Bun.file().stat()", async () => {
+  test("stat() is consistent with fs.promises.stat()", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "polyfill-file-stat-"));
     const filePath = join(tmpDir, "compare.txt");
     try {
       writeFileSync(filePath, "compare");
       const pf = polyfillFile(filePath);
       const polyfillStats = await pf.stat();
-      const bunStats = await Bun.file(filePath).stat();
-      expect(polyfillStats.isFile()).toBe(bunStats.isFile());
-      expect(polyfillStats.isDirectory()).toBe(bunStats.isDirectory());
-      expect(polyfillStats.size).toBe(bunStats.size);
+      const nativeStats = await stat(filePath);
+      expect(polyfillStats.isFile()).toBe(nativeStats.isFile());
+      expect(polyfillStats.isDirectory()).toBe(nativeStats.isDirectory());
+      expect(polyfillStats.size).toBe(nativeStats.size);
     } finally {
       rmSync(tmpDir, { recursive: true });
     }
@@ -527,7 +527,7 @@ describe("which polyfill with PATH option", () => {
     const result = polyfillWhich("node");
     expect(result).not.toBeNull();
     // Should match Bun.which
-    expect(result).toBe(Bun.which("node"));
+    expect(result).toBe(whichSync("node"));
   });
 
   test("returns null for nonexistent command", () => {
@@ -539,7 +539,7 @@ describe("which polyfill with PATH option", () => {
     // Empty-string PATH should be respected, not ignored as falsy
     const result = polyfillWhich("node", { PATH: "" });
     expect(result).toBeNull();
-    expect(result).toBe(Bun.which("node", { PATH: "" }));
+    expect(result).toBeNull();
   });
 
   test("returns null when PATH excludes command directory", () => {

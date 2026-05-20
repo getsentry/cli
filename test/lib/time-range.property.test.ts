@@ -4,7 +4,6 @@
  * Tests invariants that should hold for any valid input using fast-check.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -14,6 +13,7 @@ import {
   oneof,
   property,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   parsePeriod,
   serializeTimeRange,

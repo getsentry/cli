@@ -5,19 +5,22 @@
  * This ensures the functions correctly call the SDK, pass parameters,
  * and transform responses.
  *
- * The `setCommitsAuto` tests additionally use `mock.module()` to stub the
+ * The `setCommitsAuto` tests additionally use `vi.mock()` to stub the
  * git helpers (`getRepositoryName`, etc.) because `setCommitsAuto` reads
- * them at runtime. `getRepositoryName` is a controllable `mock()` so
+ * them at runtime. `getRepositoryName` is a controllable `vi.fn()` so
  * individual tests can change its return value (e.g. null for the
  * "no git remote" path).
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // Controllable git-helper mocks. `setCommitsAuto` calls these at runtime to
 // build the `refs` array sent to Sentry.
-const mockGetRepositoryName = mock((): string | null => "getsentry/cli");
-mock.module("../../../src/lib/git.js", () => ({
+const { mockGetRepositoryName } = vi.hoisted(() => ({
+  mockGetRepositoryName: vi.fn((): string | null => "getsentry/cli"),
+}));
+
+vi.mock("../../../src/lib/git.js", () => ({
   getRepositoryName: mockGetRepositoryName,
   getHeadCommit: () => "abc123def456789012345678901234567890abcd",
   isInsideGitWorkTree: () => true,
@@ -27,7 +30,7 @@ mock.module("../../../src/lib/git.js", () => ({
   parseRemoteUrl: (url: string) => url,
 }));
 
-// Dynamic import: must run AFTER mock.module() so setCommitsAuto picks up
+// Dynamic import: must run AFTER vi.mock() so setCommitsAuto picks up
 // the mocked git helpers.
 const {
   createRelease,

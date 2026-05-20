@@ -5,22 +5,50 @@
  * API call parameters, output formatting, pagination, and dataset handling.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { exploreCommand } from "../../src/commands/explore.js";
+
+vi.mock("../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../src/lib/api-client.js";
+
+vi.mock("../../src/lib/db/pagination.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/lib/db/pagination.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../src/lib/db/pagination.js";
 import { ContextError, ValidationError } from "../../src/lib/errors.js";
 import { DEFAULT_REPLAY_EXPLORE_FIELDS } from "../../src/lib/replay-search.js";
+
+vi.mock("../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../src/lib/resolve-target.js";
 import { parsePeriod } from "../../src/lib/time-range.js";
@@ -46,12 +74,12 @@ function createContext() {
   return {
     context: {
       stdout: {
-        write: mock((s: string) => {
+        write: vi.fn((s: string) => {
           stdoutChunks.push(s);
         }),
       },
       stderr: {
-        write: mock((_s: string) => {
+        write: vi.fn((_s: string) => {
           /* no-op */
         }),
       },
@@ -106,34 +134,36 @@ const MOCK_METRICS_META = [
 beforeEach(async () => {
   func = (await exploreCommand.loader()) as unknown as ExploreFunc;
 
-  queryEventsSpy = spyOn(apiClient, "queryEvents");
+  queryEventsSpy = vi.spyOn(apiClient, "queryEvents");
   queryEventsSpy.mockResolvedValue({
     data: MOCK_EVENTS_RESPONSE,
     nextCursor: undefined,
   });
-  queryMetricsMetaSpy = spyOn(apiClient, "queryMetricsMeta");
+  queryMetricsMetaSpy = vi.spyOn(apiClient, "queryMetricsMeta");
   queryMetricsMetaSpy.mockResolvedValue(MOCK_METRICS_META);
-  listReplaysSpy = spyOn(apiClient, "listReplays");
+  listReplaysSpy = vi.spyOn(apiClient, "listReplays");
   listReplaysSpy.mockResolvedValue({
     data: MOCK_REPLAYS_RESPONSE,
     nextCursor: undefined,
   });
 
   // Default: resolveOrgOptionalProjectFromArg returns org-only (auto-detect)
-  resolveTargetSpy = spyOn(resolveTarget, "resolveOrgOptionalProjectFromArg");
+  resolveTargetSpy = vi.spyOn(
+    resolveTarget,
+    "resolveOrgOptionalProjectFromArg"
+  );
   resolveTargetSpy.mockResolvedValue({ org: "test-org" });
 
-  resolveCursorSpy = spyOn(paginationDb, "resolveCursor").mockReturnValue({
+  resolveCursorSpy = vi.spyOn(paginationDb, "resolveCursor").mockReturnValue({
     cursor: undefined,
     direction: "next" as const,
   });
-  advancePaginationStateSpy = spyOn(
-    paginationDb,
-    "advancePaginationState"
-  ).mockReturnValue(undefined);
-  hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
-    false
-  );
+  advancePaginationStateSpy = vi
+    .spyOn(paginationDb, "advancePaginationState")
+    .mockReturnValue(undefined);
+  hasPreviousPageSpy = vi
+    .spyOn(paginationDb, "hasPreviousPage")
+    .mockReturnValue(false);
 });
 
 afterEach(() => {

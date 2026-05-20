@@ -6,7 +6,7 @@
  * error messages and edge cases.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   detectSwappedTrialArgs,
   detectSwappedViewArgs,

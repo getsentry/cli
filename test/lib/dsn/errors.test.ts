@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   formatConflictError,
   formatMultipleProjectsFooter,
@@ -11,13 +11,15 @@ import type {
 } from "../../../src/lib/dsn/types.js";
 
 // Mock api-client to prevent real API calls from getAccessibleProjects
-const mockListOrganizations = mock(() => Promise.resolve([]));
-const mockListProjects = mock(() => Promise.resolve([]));
+const { mockListOrganizations, mockListProjects } = vi.hoisted(() => ({
+  mockListOrganizations: vi.fn(() => Promise.resolve([])),
+  mockListProjects: vi.fn(() => Promise.resolve([])),
+}));
 
-mock.module("../../../src/lib/api-client.js", () => ({
+vi.mock("../../../src/lib/api-client.js", () => ({
   listOrganizations: mockListOrganizations,
   listProjects: mockListProjects,
-  findProjectByDsnKey: mock(() => Promise.resolve(null)),
+  findProjectByDsnKey: vi.fn(() => Promise.resolve(null)),
 }));
 
 describe("formatConflictError", () => {

@@ -11,7 +11,7 @@
  * instead of rendered markup.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { formatError, formatResult } from "../../../src/lib/init/formatters.js";
 import type { WizardSummary } from "../../../src/lib/init/ui/types.js";
 import { createMockUI, type MockCall } from "./ui/mock-ui.js";

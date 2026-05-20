@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as dsnIndex from "../../../../src/lib/dsn/index.js";
 import { executeTool } from "../../../../src/lib/init/tools/registry.js";
@@ -26,7 +26,7 @@ let detectDsnSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
   testDir = fs.mkdtempSync(path.join("/tmp", "init-tools-"));
-  detectDsnSpy = spyOn(dsnIndex, "detectDsn").mockResolvedValue(null);
+  detectDsnSpy = vi.spyOn(dsnIndex, "detectDsn").mockResolvedValue(null);
 });
 
 afterEach(() => {
