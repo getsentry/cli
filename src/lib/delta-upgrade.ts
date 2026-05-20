@@ -21,7 +21,7 @@ import { unlinkSync } from "node:fs";
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
-import { compare as semverCompare } from "semver";
+import { compare as semverCompare, valid as semverValid } from "semver";
 
 import {
   GITHUB_RELEASES_URL,
@@ -460,10 +460,17 @@ export function filterAndSortChainTags(
   currentVersion: string,
   targetVersion: string
 ): string[] {
+  if (!(semverValid(currentVersion) && semverValid(targetVersion))) {
+    return [];
+  }
+
   const chainTags: { tag: string; version: string }[] = [];
 
   for (const tag of allTags) {
     const version = tag.slice(PATCH_TAG_PREFIX.length);
+    if (!semverValid(version)) {
+      continue;
+    }
     // Include tags where: currentVersion < version <= targetVersion
     if (
       semverCompare(version, currentVersion) === 1 &&

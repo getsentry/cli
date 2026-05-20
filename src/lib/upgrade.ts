@@ -572,7 +572,24 @@ async function streamDecompressToFile(
       if (writeError) {
         break;
       }
-      writer.write(chunk);
+      const ok = writer.write(chunk);
+      if (!(ok || writeError)) {
+        // Race drain against error — an I/O failure (ENOSPC) while the
+        // buffer is full would never emit 'drain', causing a hang.
+        // Clean up the unused listener to avoid MaxListenersExceededWarning.
+        await new Promise<void>((resolve) => {
+          const onDrain = (): void => {
+            writer.removeListener("error", onError);
+            resolve();
+          };
+          const onError = (): void => {
+            writer.removeListener("drain", onDrain);
+            resolve();
+          };
+          writer.once("drain", onDrain);
+          writer.once("error", onError);
+        });
+      }
     }
   } finally {
     await new Promise<void>((resolve, reject) => {

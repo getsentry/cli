@@ -63,7 +63,7 @@
   },
   "description": "Sentry CLI - A command-line interface for using Sentry built by robots and humans for robots and humans",
   "engines": {
-    "node": ">=22.12"
+    "node": ">=22.15"
   },
   "files": [
     "dist/bin.cjs",

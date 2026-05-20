@@ -139,7 +139,11 @@ export class Database {
         this.db.exec("COMMIT");
         return result;
       } catch (error) {
-        this.db.exec("ROLLBACK");
+        try {
+          this.db.exec("ROLLBACK");
+        } catch (rollbackError) {
+          log.debug("ROLLBACK failed after transaction error", rollbackError);
+        }
         throw error;
       }
     };
