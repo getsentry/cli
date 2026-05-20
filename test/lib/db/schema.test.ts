@@ -2,7 +2,6 @@
  * Tests for database schema repair functions.
  */
 
-import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import {
@@ -18,6 +17,7 @@ import {
   runMigrations,
   tableExists,
 } from "../../../src/lib/db/schema.js";
+import { Database } from "../../../src/lib/db/sqlite.js";
 import { getMetadata } from "../../../src/lib/db/utils.js";
 import { useTestConfigDir } from "../../helpers.js";
 
@@ -281,9 +281,11 @@ describe("isReadonlyError", () => {
     expect(isReadonlyError(error)).toBe(false);
   });
 
-  test("returns false for non-SQLiteError", () => {
+  test("returns true for plain Error with readonly message", () => {
+    // node:sqlite throws plain Error (not SQLiteError) — the check
+    // must match by message content to work across runtimes.
     const error = new Error("attempt to write a readonly database");
-    expect(isReadonlyError(error)).toBe(false);
+    expect(isReadonlyError(error)).toBe(true);
   });
 
   test("returns false for non-Error values", () => {

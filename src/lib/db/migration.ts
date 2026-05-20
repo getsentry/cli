@@ -2,11 +2,11 @@
  * One-time migration from config.json to SQLite.
  */
 
-import type { Database } from "bun:sqlite";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { logger } from "../logger.js";
 import { getConfigDir } from "./index.js";
+import type { Database } from "./sqlite.js";
 
 const log = logger.withTag("migration");
 
