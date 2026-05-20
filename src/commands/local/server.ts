@@ -37,6 +37,11 @@ import {
 import { stripAnsi } from "../../lib/formatters/plain-detect.js";
 import { logger } from "../../lib/logger.js";
 
+/** Strip ANSI escapes and collapse newlines so envelope fields can't inject fake log lines. */
+function sanitize(text: string): string {
+  return stripAnsi(text).replace(/[\r\n]+/g, " ");
+}
+
 /** Default port matches Spotlight's `DEFAULT_PORT`. */
 export const DEFAULT_PORT = 8969;
 
@@ -315,12 +320,12 @@ function formatFrameHint(frames: StackFrame[]): string {
   let hint = "";
   if (frame.filename && frame.lineno) {
     const loc = frame.colno
-      ? `${stripAnsi(frame.filename)}:${frame.lineno}:${frame.colno}`
-      : `${stripAnsi(frame.filename)}:${frame.lineno}`;
+      ? `${sanitize(frame.filename)}:${frame.lineno}:${frame.colno}`
+      : `${sanitize(frame.filename)}:${frame.lineno}`;
     hint += ` ${muted(`[${loc}]`)}`;
   }
   if (frame.function) {
-    hint += ` ${muted(`[${stripAnsi(frame.function)}]`)}`;
+    hint += ` ${muted(`[${sanitize(frame.function)}]`)}`;
   }
   return hint;
 }
@@ -345,8 +350,8 @@ function formatErrorItem(
     | undefined;
   // values is ordered oldest→newest; show the outermost (last) exception
   const first = exception?.values?.at(-1);
-  const errorType = stripAnsi(String(first?.type ?? "Error"));
-  const errorValue = stripAnsi(
+  const errorType = sanitize(String(first?.type ?? "Error"));
+  const errorValue = sanitize(
     String(first?.value ?? event.message ?? "Unknown error")
   );
 
@@ -378,11 +383,11 @@ function formatTransactionItem(
     typeof event.transaction === "string"
       ? event.transaction
       : (trace?.description ?? "Transaction");
-  let msg = stripAnsi(txnName);
+  let msg = sanitize(txnName);
 
   const op = trace?.op;
   if (op && op !== "default" && op !== "unknown") {
-    msg = `[${stripAnsi(op)}] ${msg}`;
+    msg = `[${sanitize(op)}] ${msg}`;
   }
 
   const start = event.start_timestamp as number | undefined;
@@ -394,7 +399,7 @@ function formatTransactionItem(
 
   const status = trace?.status;
   if (status && status !== "ok") {
-    msg += ` ${muted(`[${stripAnsi(status)}]`)}`;
+    msg += ` ${muted(`[${sanitize(status)}]`)}`;
   }
 
   const spans = event.spans as unknown[] | undefined;
@@ -417,7 +422,7 @@ type LogEntry = {
 /** Format one log entry into a colored tail line. */
 function formatSingleLog(logEntry: LogEntry, source: string): string {
   const level = logEntry.level ?? "log";
-  let msg = stripAnsi(logEntry.body ?? "");
+  let msg = sanitize(logEntry.body ?? "");
 
   if (logEntry.attributes) {
     const attrs = Object.entries(logEntry.attributes)
@@ -425,9 +430,7 @@ function formatSingleLog(logEntry: LogEntry, source: string): string {
         ([k, v]) =>
           !k.startsWith("sentry.") && v.value !== null && v.value !== undefined
       )
-      .map(([k, v]) =>
-        muted(`[${stripAnsi(k)}=${stripAnsi(String(v.value))}]`)
-      );
+      .map(([k, v]) => muted(`[${sanitize(k)}=${sanitize(String(v.value))}]`));
     if (attrs.length > 0) {
       msg += ` ${attrs.join(" ")}`;
     }

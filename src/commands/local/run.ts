@@ -8,7 +8,7 @@
 
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
-import { CliError, ValidationError } from "../../lib/errors.js";
+import { CliError, EXIT, ValidationError } from "../../lib/errors.js";
 import { bold } from "../../lib/formatters/colors.js";
 import { logger } from "../../lib/logger.js";
 import { DEFAULT_PORT } from "./server.js";
@@ -100,7 +100,7 @@ export const runCommand = buildCommand({
     const exitCode = await child.exited;
 
     if (exitCode !== 0) {
-      throw new CliError(`Process exited with code ${exitCode}`, exitCode);
+      throw new CliError(`Process exited with code ${exitCode}`, EXIT.GENERAL);
     }
   },
 });
