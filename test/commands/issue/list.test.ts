@@ -41,6 +41,9 @@ type ListFlags = {
   readonly period: TimeRange;
   readonly json: boolean;
   readonly cursor?: string;
+  readonly fields?: string[];
+  readonly fresh?: boolean;
+  readonly compact?: boolean;
 };
 
 /** Command function type extracted from loader result */
@@ -1110,7 +1113,7 @@ describe("issue list: collapse parameter optimization", () => {
     advancePaginationStateSpy.mockRestore();
   });
 
-  test("always collapses filtered, lifetime, unhandled in org-all mode", async () => {
+  test("always collapses filtered and unhandled in org-all mode", async () => {
     listIssuesPaginatedSpy.mockResolvedValue({
       data: [sampleIssue],
       nextCursor: undefined,
@@ -1134,8 +1137,123 @@ describe("issue list: collapse parameter optimization", () => {
     const options = callArgs?.[2] as Record<string, unknown> | undefined;
     const collapse = options?.collapse as string[];
     expect(collapse).toContain("filtered");
-    expect(collapse).toContain("lifetime");
     expect(collapse).toContain("unhandled");
+  });
+
+  test("does not collapse lifetime in human mode (needed for EVENTS/USERS/SEEN/AGE)", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", period: parsePeriod("90d"), json: false },
+      "my-org/"
+    );
+
+    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
+    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    const options = callArgs?.[2] as Record<string, unknown> | undefined;
+    const collapse = options?.collapse as string[];
+    expect(collapse).not.toContain("lifetime");
+  });
+
+  test("does not collapse lifetime in JSON mode without --fields", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      { limit: 10, sort: "date", period: parsePeriod("90d"), json: true },
+      "my-org/"
+    );
+
+    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
+    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    const options = callArgs?.[2] as Record<string, unknown> | undefined;
+    const collapse = options?.collapse as string[];
+    expect(collapse).not.toContain("lifetime");
+  });
+
+  test("does not collapse lifetime in JSON mode when --fields includes lifetime-dependent field", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: true,
+        fields: ["shortId", "title", "count"],
+      },
+      "my-org/"
+    );
+
+    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
+    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    const options = callArgs?.[2] as Record<string, unknown> | undefined;
+    const collapse = options?.collapse as string[];
+    expect(collapse).not.toContain("lifetime");
+  });
+
+  test("collapses lifetime in JSON mode when --fields omits all lifetime-dependent fields", async () => {
+    listIssuesPaginatedSpy.mockResolvedValue({
+      data: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: true,
+        fields: ["shortId", "title"],
+      },
+      "my-org/"
+    );
+
+    expect(listIssuesPaginatedSpy).toHaveBeenCalled();
+    const callArgs = listIssuesPaginatedSpy.mock.calls[0];
+    const options = callArgs?.[2] as Record<string, unknown> | undefined;
+    const collapse = options?.collapse as string[];
+    expect(collapse).toContain("lifetime");
   });
 
   test("collapses stats in JSON mode", async () => {
