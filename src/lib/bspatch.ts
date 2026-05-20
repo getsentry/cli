@@ -183,6 +183,20 @@ class BufferedStreamReader {
 
     return output;
   }
+
+  /** Release the underlying stream reader, cancelling any pending reads. */
+  async cancel(): Promise<void> {
+    try {
+      await this.reader.cancel();
+    } catch {
+      // Stream may already be closed or errored — safe to ignore
+    }
+    try {
+      this.reader.releaseLock();
+    } catch {
+      // Lock may already be released
+    }
+  }
 }
 
 /**
@@ -212,6 +226,11 @@ function createZstdStreamReader(compressed: Uint8Array): BufferedStreamReader {
       nodeStream.on("error", (err) => {
         controller.error(err);
       });
+    },
+    cancel() {
+      // Destroy the underlying Node.js stream so buffered data events
+      // don't fire controller.enqueue() on the now-closed controller.
+      nodeStream.destroy();
     },
   });
 
@@ -267,6 +286,38 @@ async function loadOldBinary(oldPath: string): Promise<OldFileHandle> {
         // Data is in JS heap — no temp file to clean up
       },
     };
+  }
+}
+
+/** Resources to clean up after patch application. */
+type PatchResources = {
+  writer: import("node:fs").WriteStream;
+  /** Returns the latest write error (live reference, not a snapshot). */
+  getWriteError: () => Error | undefined;
+  diffReader: BufferedStreamReader;
+  extraReader: BufferedStreamReader;
+  cleanupOldFile: () => void | Promise<void>;
+};
+
+/**
+ * Clean up all patch resources: flush the output stream, cancel decompression
+ * readers, and remove temp files. Each step runs regardless of prior failures.
+ */
+async function cleanupPatchResources(r: PatchResources): Promise<void> {
+  try {
+    await new Promise<void>((resolve, reject) => {
+      r.writer.end((err?: Error | null) => {
+        const finalErr = err ?? r.getWriteError();
+        if (finalErr) {
+          reject(finalErr);
+        } else {
+          resolve();
+        }
+      });
+    });
+  } finally {
+    await Promise.all([r.diffReader.cancel(), r.extraReader.cancel()]);
+    await r.cleanupOldFile();
   }
 }
 
@@ -367,20 +418,13 @@ export async function applyPatch(
       oldpos += seekBy;
     }
   } finally {
-    try {
-      await new Promise<void>((resolve, reject) => {
-        writer.end((err?: Error | null) => {
-          const finalErr = err ?? writeError;
-          if (finalErr) {
-            reject(finalErr);
-          } else {
-            resolve();
-          }
-        });
-      });
-    } finally {
-      await cleanupOldFile();
-    }
+    await cleanupPatchResources({
+      writer,
+      getWriteError: () => writeError,
+      diffReader,
+      extraReader,
+      cleanupOldFile,
+    });
   }
 
   // Validate output size matches header

@@ -193,6 +193,7 @@ jobs:
       - run: bun run typecheck
       - run: bun run check:deps
       - run: bun run check:errors
+      - run: bun run check:patches
 
   test-unit:
     name: Unit Tests
