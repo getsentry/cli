@@ -253,7 +253,7 @@ const SOURCE_WIDTH = 9;
 
 /** Format a type/level label as `[TYPE]` padded to fixed width. */
 function formatType(level: string): string {
-  const tag = `[${level.toUpperCase()}]`;
+  const tag = `[${sanitize(level).toUpperCase()}]`;
   const colorFn = LEVEL_COLORS[level];
   const colored = colorFn ? colorFn(tag) : tag;
   return colored + " ".repeat(Math.max(0, TYPE_WIDTH - tag.length));
@@ -319,9 +319,11 @@ function formatFrameHint(frames: StackFrame[]): string {
   }
   let hint = "";
   if (frame.filename && frame.lineno) {
-    const loc = frame.colno
-      ? `${sanitize(frame.filename)}:${frame.lineno}:${frame.colno}`
-      : `${sanitize(frame.filename)}:${frame.lineno}`;
+    const loc = sanitize(
+      frame.colno
+        ? `${frame.filename}:${frame.lineno}:${frame.colno}`
+        : `${frame.filename}:${frame.lineno}`
+    );
     hint += ` ${muted(`[${loc}]`)}`;
   }
   if (frame.function) {
