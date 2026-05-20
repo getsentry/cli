@@ -1,10 +1,9 @@
 /**
  * sentry local run
  *
- * Run a command with Sentry Spotlight enabled. Starts the local Spotlight
- * server (or connects to an existing one), injects `SENTRY_SPOTLIGHT` into
- * the child process environment so the Sentry SDK auto-sends envelopes to
- * the local server, then tails events to the terminal.
+ * Run a command with the local dev server enabled. Injects
+ * `SENTRY_SPOTLIGHT` into the child process environment so the Sentry SDK
+ * auto-sends envelopes to the local server.
  */
 
 import type { SentryContext } from "../../context.js";
@@ -33,14 +32,13 @@ function parsePort(value: string): number {
 
 export const runCommand = buildCommand({
   docs: {
-    brief: "Run a command with Spotlight enabled",
+    brief: "Run a command with the local dev server enabled",
     fullDescription:
       "Run a command with the SENTRY_SPOTLIGHT environment variable\n" +
       "injected so the Sentry SDK automatically sends envelopes to the\n" +
-      "local Spotlight server.\n\n" +
-      "If no server is running on the port, one is started automatically\n" +
-      "in the background. The child process inherits all current env vars\n" +
-      "plus SENTRY_SPOTLIGHT and SENTRY_TRACES_SAMPLE_RATE=1.\n\n" +
+      "local server.\n\n" +
+      "The child process inherits all current env vars plus\n" +
+      "SENTRY_SPOTLIGHT and SENTRY_TRACES_SAMPLE_RATE=1.\n\n" +
       "Example:\n" +
       "  sentry local run -- npm run dev\n" +
       "  sentry local run -- python manage.py runserver",
@@ -58,13 +56,13 @@ export const runCommand = buildCommand({
       port: {
         kind: "parsed",
         parse: parsePort,
-        brief: `Port for the Spotlight server (default ${DEFAULT_PORT})`,
+        brief: `Port for the local server (default ${DEFAULT_PORT})`,
         default: String(DEFAULT_PORT),
       },
       host: {
         kind: "parsed",
         parse: String,
-        brief: "Hostname for the Spotlight server (default localhost)",
+        brief: "Hostname for the local server (default localhost)",
         default: "localhost",
       },
     },

@@ -1,7 +1,7 @@
 ---
 name: sentry-cli-local
 version: 0.35.0-dev.0
-description: Run a local Spotlight server for development
+description: Sentry for local development
 requires:
   bins: ["sentry"]
   auth: true
@@ -9,7 +9,7 @@ requires:
 
 # Local Commands
 
-Run a local Spotlight server for development
+Sentry for local development
 
 ### `sentry local serve`
 
@@ -23,11 +23,11 @@ Run a local Spotlight server to capture dev SDK events
 
 ### `sentry local run <command...>`
 
-Run a command with Spotlight enabled
+Run a command with the local dev server enabled
 
 **Flags:**
-- `-p, --port <value> - Port for the Spotlight server (default 8969) - (default: "8969")`
-- `--host <value> - Hostname for the Spotlight server (default localhost) - (default: "localhost")`
+- `-p, --port <value> - Port for the local server (default 8969) - (default: "8969")`
+- `--host <value> - Hostname for the local server (default localhost) - (default: "localhost")`
 
 **Examples:**
 
@@ -35,7 +35,7 @@ Run a command with Spotlight enabled
 # Start the server and tail events (default)
 sentry local
 
-# Run your app with Spotlight auto-enabled
+# Run your app with the local server auto-enabled
 sentry local run -- npm run dev
 sentry local run -- python manage.py runserver
 

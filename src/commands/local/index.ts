@@ -9,10 +9,10 @@ export const localRoute = buildRouteMap({
   },
   defaultCommand: "serve",
   docs: {
-    brief: "Run a local Spotlight server for development",
+    brief: "Sentry for local development",
     fullDescription:
-      "Run a local Spotlight-compatible server to capture Sentry SDK\n" +
-      "events from your dev stack.\n\n" +
+      "Run a local development server to capture Sentry SDK events\n" +
+      "from your dev stack.\n\n" +
       "Commands:\n" +
       "  serve      Start the server and tail events (default)\n" +
       "  run        Run a command with SENTRY_SPOTLIGHT auto-injected",

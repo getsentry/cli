@@ -1,8 +1,8 @@
 
 
-[Spotlight](https://spotlightjs.com) is "Sentry for Development" — a lightweight local proxy that ingests Sentry envelopes from SDKs running in your dev stack and surfaces them in real time. `sentry local` runs a minimal [Hono](https://hono.dev/) HTTP server that's wire-compatible with Spotlight's protocol, so your existing SDKs and the [Spotlight overlay](https://spotlightjs.com/about/) work without any changes.
+`sentry local` runs a local development server that captures Sentry SDK envelopes from your dev stack and surfaces errors, traces, and logs in real time — right in your terminal. No authentication required.
 
-No authentication is required — the server binds to `localhost` by default and is purely a development tool.
+If a server is already running on the port, the command attaches as an SSE consumer instead of starting a duplicate.
 
 ## Examples
 
@@ -10,7 +10,7 @@ No authentication is required — the server binds to `localhost` by default and
 # Start the server and tail events (default)
 sentry local
 
-# Run your app with Spotlight auto-enabled
+# Run your app with the local server auto-enabled
 sentry local run -- npm run dev
 sentry local run -- python manage.py runserver
 
@@ -40,7 +40,7 @@ Env vars injected into the child process:
 
 | Method | Path                            | Description                                        |
 |--------|---------------------------------|----------------------------------------------------|
-| `POST` | `/stream`                       | Spotlight-compatible envelope ingest               |
+| `POST` | `/stream`                       | Envelope ingest                                    |
 | `POST` | `/api/{projectId}/envelope/`    | Sentry SDK ingest path                             |
 | `GET`  | `/stream`                       | Server-Sent Events feed of incoming envelopes      |
 | `GET`  | `/health`                       | Liveness check (returns `OK`)                      |
@@ -63,4 +63,4 @@ Use `--filter` / `-f` to narrow the output to specific event types (repeatable):
 sentry local -f error -f log    # only errors and logs
 ```
 
-Use `--quiet` to suppress tail output entirely if you only need the SSE stream for the Spotlight overlay.
+Use `--quiet` to suppress tail output entirely if you only need the SSE stream.

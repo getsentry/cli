@@ -705,7 +705,7 @@ function feedSSELine(
 }
 
 /**
- * Consume SSE events from an upstream Spotlight server and print them.
+ * Consume SSE events from an upstream server and print them.
  *
  * Bun doesn't have a global `EventSource`, so we use `fetch` with a
  * streaming body and parse the SSE wire format manually.
