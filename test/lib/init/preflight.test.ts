@@ -3,21 +3,95 @@
  * with `spyOn` and uses `MockUI` to drive prompts deterministically.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/db/auth.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/auth.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as auth from "../../../src/lib/db/auth.js";
+
+vi.mock("../../../src/lib/dsn/index.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/dsn/index.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as dsnIndex from "../../../src/lib/dsn/index.js";
 import { ApiError } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/init/org-prefetch.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../src/lib/init/org-prefetch.js")
+    >();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as prefetch from "../../../src/lib/init/org-prefetch.js";
 import { resolveInitContext } from "../../../src/lib/init/preflight.js";
 import type { WizardOptions } from "../../../src/lib/init/types.js";
 import { CANCELLED } from "../../../src/lib/init/ui/types.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+
+vi.mock("../../../src/lib/resolve-team.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-team.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as resolveTeam from "../../../src/lib/resolve-team.js";
 import { createMockUI, type MockCall } from "./ui/mock-ui.js";
@@ -49,37 +123,35 @@ let detectDsnSpy: ReturnType<typeof spyOn>;
 let resolveDsnByPublicKeySpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
-  resolveOrgPrefetchedSpy = spyOn(
-    prefetch,
-    "resolveOrgPrefetched"
-  ).mockResolvedValue({ org: "acme" });
-  listOrganizationsSpy = spyOn(
-    apiClient,
-    "listOrganizations"
-  ).mockResolvedValue([{ id: "1", slug: "acme", name: "Acme" }]);
-  getProjectSpy = spyOn(apiClient, "getProject").mockResolvedValue({
+  resolveOrgPrefetchedSpy = vi
+    .spyOn(prefetch, "resolveOrgPrefetched")
+    .mockResolvedValue({ org: "acme" });
+  listOrganizationsSpy = vi
+    .spyOn(apiClient, "listOrganizations")
+    .mockResolvedValue([{ id: "1", slug: "acme", name: "Acme" }]);
+  getProjectSpy = vi.spyOn(apiClient, "getProject").mockResolvedValue({
     id: "42",
     slug: "my-app",
     name: "my-app",
     platform: "javascript-react",
     dateCreated: "2026-04-16T00:00:00Z",
   } as any);
-  tryGetPrimaryDsnSpy = spyOn(apiClient, "tryGetPrimaryDsn").mockResolvedValue(
-    "https://abc@o1.ingest.sentry.io/42"
-  );
-  getAuthTokenSpy = spyOn(auth, "getAuthToken").mockReturnValue("sntrys_test");
-  resolveOrCreateTeamSpy = spyOn(
-    resolveTeam,
-    "resolveOrCreateTeam"
-  ).mockResolvedValue({
-    slug: "platform",
-    source: "auto-selected",
-  });
-  detectDsnSpy = spyOn(dsnIndex, "detectDsn").mockResolvedValue(null);
-  resolveDsnByPublicKeySpy = spyOn(
-    resolveTarget,
-    "resolveDsnByPublicKey"
-  ).mockResolvedValue(null);
+  tryGetPrimaryDsnSpy = vi
+    .spyOn(apiClient, "tryGetPrimaryDsn")
+    .mockResolvedValue("https://abc@o1.ingest.sentry.io/42");
+  getAuthTokenSpy = vi
+    .spyOn(auth, "getAuthToken")
+    .mockReturnValue("sntrys_test");
+  resolveOrCreateTeamSpy = vi
+    .spyOn(resolveTeam, "resolveOrCreateTeam")
+    .mockResolvedValue({
+      slug: "platform",
+      source: "auto-selected",
+    });
+  detectDsnSpy = vi.spyOn(dsnIndex, "detectDsn").mockResolvedValue(null);
+  resolveDsnByPublicKeySpy = vi
+    .spyOn(resolveTarget, "resolveDsnByPublicKey")
+    .mockResolvedValue(null);
 });
 
 afterEach(() => {

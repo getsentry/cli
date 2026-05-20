@@ -6,9 +6,10 @@
  * bash simulation are in completions.property.test.ts.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   extractCommandTree,
   getCompletionPath,
@@ -132,7 +133,7 @@ describe("completions", () => {
       expect(result!.path).toContain("bash-completion");
       expect(existsSync(result!.path)).toBe(true);
 
-      const content = await Bun.file(result!.path).text();
+      const content = await readFile(result!.path, "utf-8");
       expect(content).toContain("_sentry_completions");
     });
 

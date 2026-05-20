@@ -21,8 +21,8 @@
  * row ranges.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import chalk from "chalk";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   createDashboardViewRenderer,
   type DashboardViewData,

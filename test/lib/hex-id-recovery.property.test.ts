@@ -7,7 +7,6 @@
  * - Valid full-length hex IDs never trigger recovery (`validateHexId` accepts them)
  */
 
-import { describe, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -17,6 +16,7 @@ import {
   string,
   tuple,
 } from "fast-check";
+import { describe, test } from "vitest";
 
 import {
   ageInDaysFromUuidV7,

@@ -5,7 +5,7 @@
  * to exhaustively test with example-based tests.
  */
 
-import { describe, expect, test } from "bun:test";
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   array,
   asyncProperty,
@@ -14,6 +14,7 @@ import {
   integer,
   nat,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { anyTrue } from "../../src/lib/promises.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
@@ -107,7 +108,7 @@ describe("anyTrue properties", () => {
 
           // Run with different delays
           const result = await anyTrue(items, async (i) => {
-            await Bun.sleep(delays[i] ?? 0);
+            await sleep(delays[i] ?? 0);
             return i === actualTrueIndex;
           });
 
@@ -126,7 +127,7 @@ describe("anyTrue properties", () => {
           const items = delays.map((_, i) => i);
 
           const result = await anyTrue(items, async (i) => {
-            await Bun.sleep(delays[i] ?? 0);
+            await sleep(delays[i] ?? 0);
             return false; // All false
           });
 

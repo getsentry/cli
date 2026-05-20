@@ -5,7 +5,7 @@
  * framework-prefixed variants (NEXT_PUBLIC_SENTRY_DSN, etc.).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { detectFromEnv, SENTRY_DSN_ENV } from "../../../src/lib/dsn/env.js";
 
 const VALID_DSN = "https://abc123@o1.ingest.us.sentry.io/456";

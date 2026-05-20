@@ -1,13 +1,13 @@
+import { MastraClient } from "@mastra/client-js";
 import {
   afterEach,
   beforeEach,
   describe,
   expect,
-  mock,
-  spyOn,
+  type mock,
   test,
-} from "bun:test";
-import { MastraClient } from "@mastra/client-js";
+  vi,
+} from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
 import { ENV_VAR_AGENTS } from "../../../src/lib/detect-agent.js";
@@ -58,9 +58,9 @@ const spinnerMock: SpinnerHandle & {
   stop: ReturnType<typeof mock>;
   message: ReturnType<typeof mock>;
 } = {
-  start: mock(),
-  stop: mock(),
-  message: mock(),
+  start: vi.fn(),
+  stop: vi.fn(),
+  message: vi.fn(),
 };
 
 let mockUICalls: MockCall[];
@@ -174,48 +174,46 @@ beforeEach(() => {
     ...ui,
     spinner: () => spinnerMock,
   };
-  getUISpy = spyOn(uiFactory, "getUIAsync").mockResolvedValue(wrapped);
+  getUISpy = vi.spyOn(uiFactory, "getUIAsync").mockResolvedValue(wrapped);
 
-  spyOn(readiness, "checkReadiness").mockResolvedValue(undefined);
-  formatBannerSpy = spyOn(banner, "formatBanner").mockReturnValue("BANNER");
-  formatResultSpy = spyOn(fmt, "formatResult").mockImplementation(noop);
-  formatErrorSpy = spyOn(fmt, "formatError").mockImplementation(noop);
-  checkGitStatusSpy = spyOn(git, "checkGitStatus").mockResolvedValue(true);
-  handleInteractiveSpy = spyOn(inter, "handleInteractive").mockResolvedValue({
-    action: "continue",
-  });
-  resolveInitContextSpy = spyOn(
-    preflight,
-    "resolveInitContext"
-  ).mockResolvedValue(makeContext());
-  describeToolSpy = spyOn(registry, "describeTool").mockReturnValue(
-    "Running tool..."
-  );
-  executeToolSpy = spyOn(registry, "executeTool").mockResolvedValue({
+  vi.spyOn(readiness, "checkReadiness").mockResolvedValue(undefined);
+  formatBannerSpy = vi.spyOn(banner, "formatBanner").mockReturnValue("BANNER");
+  formatResultSpy = vi.spyOn(fmt, "formatResult").mockImplementation(noop);
+  formatErrorSpy = vi.spyOn(fmt, "formatError").mockImplementation(noop);
+  checkGitStatusSpy = vi.spyOn(git, "checkGitStatus").mockResolvedValue(true);
+  handleInteractiveSpy = vi
+    .spyOn(inter, "handleInteractive")
+    .mockResolvedValue({
+      action: "continue",
+    });
+  resolveInitContextSpy = vi
+    .spyOn(preflight, "resolveInitContext")
+    .mockResolvedValue(makeContext());
+  describeToolSpy = vi
+    .spyOn(registry, "describeTool")
+    .mockReturnValue("Running tool...");
+  executeToolSpy = vi.spyOn(registry, "executeTool").mockResolvedValue({
     ok: true,
     data: { results: [] },
   });
-  precomputeDirListingSpy = spyOn(
-    workflowInputs,
-    "precomputeDirListing"
-  ).mockResolvedValue([]);
-  preReadCommonFilesSpy = spyOn(
-    workflowInputs,
-    "preReadCommonFiles"
-  ).mockResolvedValue({});
-  precomputeSentryDetectionSpy = spyOn(
-    workflowInputs,
-    "precomputeSentryDetection"
-  ).mockResolvedValue({
-    ok: true,
-    data: { status: "none", signals: [] },
-  });
-  stderrSpy = spyOn(process.stderr, "write").mockImplementation(
-    () => true as any
-  );
+  precomputeDirListingSpy = vi
+    .spyOn(workflowInputs, "precomputeDirListing")
+    .mockResolvedValue([]);
+  preReadCommonFilesSpy = vi
+    .spyOn(workflowInputs, "preReadCommonFiles")
+    .mockResolvedValue({});
+  precomputeSentryDetectionSpy = vi
+    .spyOn(workflowInputs, "precomputeSentryDetection")
+    .mockResolvedValue({
+      ok: true,
+      data: { status: "none", signals: [] },
+    });
+  stderrSpy = vi
+    .spyOn(process.stderr, "write")
+    .mockImplementation(() => true as any);
 
-  startAsyncMock = mock(() => Promise.resolve(mockStartResult));
-  runByIdMock = mock(() =>
+  startAsyncMock = vi.fn(() => Promise.resolve(mockStartResult));
+  runByIdMock = vi.fn(() =>
     mockRunByIdResult instanceof Error
       ? Promise.reject(mockRunByIdResult)
       : Promise.resolve(mockRunByIdResult)
@@ -223,7 +221,7 @@ beforeEach(() => {
   const run = {
     runId: "test-run-id",
     startAsync: startAsyncMock,
-    resumeAsync: mock(() => {
+    resumeAsync: vi.fn(() => {
       const result = mockResumeResults[resumeCallCount] ?? {
         status: "success",
       };
@@ -232,21 +230,20 @@ beforeEach(() => {
     }),
   };
   const workflow = {
-    createRun: mock(() => Promise.resolve(run)),
+    createRun: vi.fn(() => Promise.resolve(run)),
     runById: runByIdMock,
   };
   capturedClientOptions = [];
-  getWorkflowSpy = spyOn(
-    MastraClient.prototype,
-    "getWorkflow"
-  ).mockImplementation(function (this: MastraClient) {
-    // `this` is the MastraClient instance. `BaseResource.options` holds the
-    // full ClientOptions passed to the constructor — including abortSignal.
-    capturedClientOptions.push(
-      (this as unknown as { options: { abortSignal?: AbortSignal } }).options
-    );
-    return workflow as any;
-  });
+  getWorkflowSpy = vi
+    .spyOn(MastraClient.prototype, "getWorkflow")
+    .mockImplementation(function (this: MastraClient) {
+      // `this` is the MastraClient instance. `BaseResource.options` holds the
+      // full ClientOptions passed to the constructor — including abortSignal.
+      capturedClientOptions.push(
+        (this as unknown as { options: { abortSignal?: AbortSignal } }).options
+      );
+      return workflow as any;
+    });
 });
 
 afterEach(() => {
@@ -884,10 +881,10 @@ describe("runWizard — MastraClient lifecycle", () => {
       capturedClientOptions.push(opts);
       abortedAtConstruction = opts.abortSignal?.aborted;
       return {
-        createRun: mock(() =>
+        createRun: vi.fn(() =>
           Promise.resolve({
             startAsync: startAsyncMock,
-            resumeAsync: mock(() => Promise.resolve({ status: "success" })),
+            resumeAsync: vi.fn(() => Promise.resolve({ status: "success" })),
           })
         ),
       } as any;
@@ -944,11 +941,11 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
       );
       runByIdRef = runByIdMock;
       return {
-        createRun: mock(() =>
+        createRun: vi.fn(() =>
           Promise.resolve({
             runId: "test-run-id",
             startAsync: startAsyncMock,
-            resumeAsync: mock(resumeAsyncImpl),
+            resumeAsync: vi.fn(resumeAsyncImpl),
           })
         ),
         runById: runByIdRef,

@@ -5,15 +5,7 @@
  * Uses spyOn pattern to mock API client, pagination DB, resolve, and polling modules.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolve from "../../../src/commands/dashboard/resolve.js";
 import { revisionsCommand } from "../../../src/commands/dashboard/revisions.js";
@@ -30,8 +22,8 @@ import type { DashboardRevision } from "../../../src/types/dashboard.js";
 // ---------------------------------------------------------------------------
 
 function createMockContext(cwd = "/tmp") {
-  const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
+  const stderrWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
@@ -97,27 +89,27 @@ describe("dashboard revisions command", () => {
   let resolveCursorSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    listDashboardRevisionsPaginatedSpy = spyOn(
+    listDashboardRevisionsPaginatedSpy = vi.spyOn(
       apiClient,
       "listDashboardRevisionsPaginated"
     );
-    resolveOrgFromTargetSpy = spyOn(resolve, "resolveOrgFromTarget");
-    resolveDashboardIdSpy = spyOn(resolve, "resolveDashboardId");
+    resolveOrgFromTargetSpy = vi.spyOn(resolve, "resolveOrgFromTarget");
+    resolveDashboardIdSpy = vi.spyOn(resolve, "resolveDashboardId");
     // Bypass spinner — just run the callback directly
-    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
-      (_opts, fn) =>
+    withProgressSpy = vi
+      .spyOn(polling, "withProgress")
+      .mockImplementation((_opts, fn) =>
         fn(() => {
           /* no-op setMessage */
         })
-    );
-    advancePaginationStateSpy = spyOn(
-      paginationDb,
-      "advancePaginationState"
-    ).mockReturnValue(undefined);
-    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
-      false
-    );
-    resolveCursorSpy = spyOn(paginationDb, "resolveCursor").mockReturnValue({
+      );
+    advancePaginationStateSpy = vi
+      .spyOn(paginationDb, "advancePaginationState")
+      .mockReturnValue(undefined);
+    hasPreviousPageSpy = vi
+      .spyOn(paginationDb, "hasPreviousPage")
+      .mockReturnValue(false);
+    resolveCursorSpy = vi.spyOn(paginationDb, "resolveCursor").mockReturnValue({
       cursor: undefined,
       direction: "next",
     });

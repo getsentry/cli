@@ -5,7 +5,7 @@
  * pagination cursor extraction, and auto-pagination across multiple pages.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   getSpanDetails,
   listSpans,

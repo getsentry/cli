@@ -2,18 +2,34 @@
  * Release Finalize Command Tests
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { finalizeCommand } from "../../../src/commands/release/finalize.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryRelease } from "../../../src/types/index.js";
@@ -38,8 +54,8 @@ const finalizedRelease: SentryRelease = {
 };
 
 function createMockContext(cwd = "/tmp") {
-  const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
+  const stderrWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
@@ -56,8 +72,8 @@ describe("release finalize", () => {
   let resolveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    updateReleaseSpy = spyOn(apiClient, "updateRelease");
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    updateReleaseSpy = vi.spyOn(apiClient, "updateRelease");
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
   });
 
   afterEach(() => {

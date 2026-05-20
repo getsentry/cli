@@ -1,12 +1,12 @@
 /**
  * Unit tests for handleFinalResult in wizard-runner.ts.
  *
- * Kept as a mocked sibling file because mock.module() on @sentry/node-core/light
+ * Kept as a mocked sibling file because vi.mock() on @sentry/node-core/light
  * would pollute the module graph for other wizard-runner tests that may not
  * want Sentry calls mocked.
  */
 
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import type {
   WizardOutput,
   WorkflowRunResult,
@@ -16,9 +16,11 @@ import type {
 // Mock Setup — must precede all imports of the module under test
 // ============================================================================
 
-const tags: Record<string, unknown> = {};
+const { tags } = vi.hoisted(() => ({
+  tags: {} as Record<string, unknown>,
+}));
 
-mock.module("@sentry/node-core/light", () => ({
+vi.mock("@sentry/node-core/light", () => ({
   addBreadcrumb: () => null,
   captureException: () => null,
   getTraceData: () => ({}),

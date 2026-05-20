@@ -5,7 +5,7 @@
  * and org resolution in src/commands/dashboard/resolve.ts.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   applyGroupLimitAutoDefault,
   autoDefaultGroupLimit,
@@ -18,6 +18,18 @@ import {
   resolveOrgFromTarget,
   validateWidgetEnums,
 } from "../../../src/commands/dashboard/resolve.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { parseOrgProjectArg } from "../../../src/lib/arg-parsing.js";
@@ -27,8 +39,32 @@ import {
   ResolutionError,
   ValidationError,
 } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/region.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/region.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as region from "../../../src/lib/region.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 
@@ -262,7 +298,7 @@ describe("resolveDashboardId", () => {
   let listDashboardsPaginatedSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    listDashboardsPaginatedSpy = spyOn(apiClient, "listDashboardsPaginated");
+    listDashboardsPaginatedSpy = vi.spyOn(apiClient, "listDashboardsPaginated");
   });
 
   afterEach(() => {
@@ -411,12 +447,11 @@ describe("resolveOrgFromTarget", () => {
   let resolveEffectiveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
     // Default: resolveEffectiveOrg returns the input unchanged
-    resolveEffectiveOrgSpy = spyOn(
-      region,
-      "resolveEffectiveOrg"
-    ).mockImplementation((slug: string) => Promise.resolve(slug));
+    resolveEffectiveOrgSpy = vi
+      .spyOn(region, "resolveEffectiveOrg")
+      .mockImplementation((slug: string) => Promise.resolve(slug));
   });
 
   afterEach(() => {
@@ -520,30 +555,29 @@ describe("enrichDashboardError", () => {
   test("404 on view with dashboardId throws ResolutionError for dashboard", async () => {
     const apiErr = new ApiError("Not Found", 404);
     // Mock listDashboardsPaginated to return suggestions
-    const listSpy = spyOn(
-      apiClient,
-      "listDashboardsPaginated"
-    ).mockResolvedValue({
-      data: [
-        {
-          id: "100",
-          title: "Error Overview",
-          dateCreated: "",
-          createdBy: { id: 0, name: "", email: "" },
-          widgets: [],
-          projects: [],
-        },
-        {
-          id: "200",
-          title: "Performance",
-          dateCreated: "",
-          createdBy: { id: 0, name: "", email: "" },
-          widgets: [],
-          projects: [],
-        },
-      ],
-      nextCursor: undefined,
-    });
+    const listSpy = vi
+      .spyOn(apiClient, "listDashboardsPaginated")
+      .mockResolvedValue({
+        data: [
+          {
+            id: "100",
+            title: "Error Overview",
+            dateCreated: "",
+            createdBy: { id: 0, name: "", email: "" },
+            widgets: [],
+            projects: [],
+          },
+          {
+            id: "200",
+            title: "Performance",
+            dateCreated: "",
+            createdBy: { id: 0, name: "", email: "" },
+            widgets: [],
+            projects: [],
+          },
+        ],
+        nextCursor: undefined,
+      });
     try {
       await enrichDashboardError(apiErr, {
         orgSlug: "my-org",
@@ -569,10 +603,9 @@ describe("enrichDashboardError", () => {
 
   test("404 on view still works when suggestion fetch fails", async () => {
     const apiErr = new ApiError("Not Found", 404);
-    const listSpy = spyOn(
-      apiClient,
-      "listDashboardsPaginated"
-    ).mockRejectedValue(new Error("network error"));
+    const listSpy = vi
+      .spyOn(apiClient, "listDashboardsPaginated")
+      .mockRejectedValue(new Error("network error"));
     try {
       await enrichDashboardError(apiErr, {
         orgSlug: "my-org",

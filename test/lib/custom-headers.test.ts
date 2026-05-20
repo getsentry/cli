@@ -9,7 +9,7 @@
  * error messages, and integration behavior not covered by property generators.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   _resetCustomHeadersCache,
   applyCustomHeaders,

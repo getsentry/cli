@@ -4,9 +4,9 @@
  * Tests for both single-DSN caching and full detection caching with mtime validation.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   clearDsnCache,
   disableDsnCache,
@@ -210,7 +210,9 @@ describe("disableDsnCache / enableDsnCache", () => {
   test("getCachedDetection returns undefined when cache is disabled", async () => {
     const testDsn = createTestDsn();
     const sourceMtimes = {
-      "src/app.ts": Bun.file(join(testProjectDir, "src/app.ts")).lastModified,
+      "src/app.ts": Math.floor(
+        statSync(join(testProjectDir, "src/app.ts")).mtimeMs
+      ),
     };
     const { stat } = await import("node:fs/promises");
     const rootStats = await stat(testProjectDir);
@@ -267,7 +269,9 @@ describe("getCachedDetection", () => {
   test("returns cached detection when valid", async () => {
     const testDsn = createTestDsn();
     const sourceMtimes = {
-      "src/app.ts": Bun.file(join(testProjectDir, "src/app.ts")).lastModified,
+      "src/app.ts": Math.floor(
+        statSync(join(testProjectDir, "src/app.ts")).mtimeMs
+      ),
     };
 
     // Get current root dir mtime
@@ -293,7 +297,9 @@ describe("getCachedDetection", () => {
   test("invalidates cache when source file mtime changes", async () => {
     const testDsn = createTestDsn();
     const sourceMtimes = {
-      "src/app.ts": Bun.file(join(testProjectDir, "src/app.ts")).lastModified,
+      "src/app.ts": Math.floor(
+        statSync(join(testProjectDir, "src/app.ts")).mtimeMs
+      ),
     };
 
     const { stat } = await import("node:fs/promises");
@@ -330,7 +336,9 @@ describe("getCachedDetection", () => {
   test("invalidates cache when source file is deleted", async () => {
     const testDsn = createTestDsn();
     const sourceMtimes = {
-      "src/app.ts": Bun.file(join(testProjectDir, "src/app.ts")).lastModified,
+      "src/app.ts": Math.floor(
+        statSync(join(testProjectDir, "src/app.ts")).mtimeMs
+      ),
     };
 
     const { stat } = await import("node:fs/promises");
@@ -357,7 +365,9 @@ describe("getCachedDetection", () => {
   test("invalidates cache when root directory mtime changes", async () => {
     const testDsn = createTestDsn();
     const sourceMtimes = {
-      "src/app.ts": Bun.file(join(testProjectDir, "src/app.ts")).lastModified,
+      "src/app.ts": Math.floor(
+        statSync(join(testProjectDir, "src/app.ts")).mtimeMs
+      ),
     };
 
     const { stat } = await import("node:fs/promises");
@@ -389,7 +399,9 @@ describe("getCachedDetection", () => {
   test("invalidates cache when tracked subdirectory mtime changes", async () => {
     const testDsn = createTestDsn();
     const sourceMtimes = {
-      "src/app.ts": Bun.file(join(testProjectDir, "src/app.ts")).lastModified,
+      "src/app.ts": Math.floor(
+        statSync(join(testProjectDir, "src/app.ts")).mtimeMs
+      ),
     };
 
     const { stat } = await import("node:fs/promises");
@@ -427,7 +439,9 @@ describe("setCachedDetection", () => {
   test("stores full detection result", async () => {
     const testDsn = createTestDsn();
     const sourceMtimes = {
-      "src/app.ts": Bun.file(join(testProjectDir, "src/app.ts")).lastModified,
+      "src/app.ts": Math.floor(
+        statSync(join(testProjectDir, "src/app.ts")).mtimeMs
+      ),
     };
 
     const { stat } = await import("node:fs/promises");
@@ -452,7 +466,9 @@ describe("setCachedDetection", () => {
     const dsn1 = createTestDsn({ raw: "https://a@o1.ingest.sentry.io/1" });
     const dsn2 = createTestDsn({ raw: "https://b@o2.ingest.sentry.io/2" });
     const sourceMtimes = {
-      "src/app.ts": Bun.file(join(testProjectDir, "src/app.ts")).lastModified,
+      "src/app.ts": Math.floor(
+        statSync(join(testProjectDir, "src/app.ts")).mtimeMs
+      ),
     };
 
     const { stat } = await import("node:fs/promises");
@@ -493,7 +509,9 @@ describe("setCachedDetection", () => {
     const dsn1 = createTestDsn({ raw: "https://first@o1.ingest.sentry.io/1" });
     const dsn2 = createTestDsn({ raw: "https://second@o2.ingest.sentry.io/2" });
     const sourceMtimes = {
-      "src/app.ts": Bun.file(join(testProjectDir, "src/app.ts")).lastModified,
+      "src/app.ts": Math.floor(
+        statSync(join(testProjectDir, "src/app.ts")).mtimeMs
+      ),
     };
 
     const { stat } = await import("node:fs/promises");

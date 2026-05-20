@@ -6,8 +6,8 @@
  * mock.module (which leaks across test files).
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { initCommand } from "../../src/commands/init.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as projectsApi from "../../src/lib/api/projects.js";
@@ -60,22 +60,22 @@ const DEFAULT_FLAGS = { yes: true, "dry-run": false } as const;
 beforeEach(() => {
   capturedArgs = undefined;
   resetPrefetch();
-  runWizardSpy = spyOn(wizardRunner, "runWizard").mockImplementation(
-    (args: Record<string, unknown>) => {
+  runWizardSpy = vi
+    .spyOn(wizardRunner, "runWizard")
+    .mockImplementation((args: Record<string, unknown>) => {
       capturedArgs = args;
       return Promise.resolve();
-    }
-  );
+    });
   // Default: mock findProjectsBySlug to return a single project match
-  findProjectsSpy = spyOn(projectsApi, "findProjectsBySlug").mockImplementation(
-    async (slug: string) => ({
+  findProjectsSpy = vi
+    .spyOn(projectsApi, "findProjectsBySlug")
+    .mockImplementation(async (slug: string) => ({
       projects: [mockProject(slug)],
       orgs: [MOCK_ORG],
-    })
-  );
+    }));
   // Spy on warmOrgDetection to verify it's called/skipped appropriately.
   // The mock prevents real DSN scans and API calls from the background.
-  warmSpy = spyOn(prefetchNs, "warmOrgDetection").mockImplementation(
+  warmSpy = vi.spyOn(prefetchNs, "warmOrgDetection").mockImplementation(
     // biome-ignore lint/suspicious/noEmptyBlockStatements: intentional no-op mock
     () => {}
   );

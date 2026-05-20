@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as authModule from "../../../src/lib/db/auth.js";
 import { WizardError } from "../../../src/lib/errors.js";
@@ -66,8 +66,8 @@ let getAuthTokenSpy: ReturnType<typeof spyOn>;
 let fetchSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
-  getAuthTokenSpy = spyOn(authModule, "getAuthToken");
-  fetchSpy = spyOn(globalThis, "fetch");
+  getAuthTokenSpy = vi.spyOn(authModule, "getAuthToken");
+  fetchSpy = vi.spyOn(globalThis, "fetch");
 });
 
 afterEach(() => {

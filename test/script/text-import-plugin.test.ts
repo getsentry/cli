@@ -10,15 +10,16 @@
  * - The createRequire banner is injected for CJS compatibility
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { build } from "esbuild";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { textImportPlugin } from "../../script/text-import-plugin.js";
 
 const TEST_DIR = join(
-  process.env.BUN_TEST_WORKER_ID
-    ? `/tmp/opencode/tip-test-${process.env.BUN_TEST_WORKER_ID}`
+  process.env.VITEST_POOL_ID
+    ? `/tmp/opencode/tip-test-${process.env.VITEST_POOL_ID}`
     : "/tmp/opencode/tip-test"
 );
 
@@ -75,7 +76,7 @@ describe("text-import-plugin file handler", () => {
     expect(existsSync(join(outDir, "mod.js"))).toBe(true);
     expect(existsSync(join(outDir, "mod.ts"))).toBe(false);
 
-    const content = await Bun.file(join(outDir, "mod.js")).text();
+    const content = await readFile(join(outDir, "mod.js"), "utf-8");
     // TypeScript type import should be stripped
     expect(content).not.toContain("type Foo");
     // Value export should remain
@@ -118,7 +119,7 @@ describe("text-import-plugin file handler", () => {
     await buildWithPlugin(srcDir, outDir, "entry.ts");
 
     expect(existsSync(join(outDir, "plain.js"))).toBe(true);
-    const content = await Bun.file(join(outDir, "plain.js")).text();
+    const content = await readFile(join(outDir, "plain.js"), "utf-8");
     expect(content).toContain("export const x = 42");
   });
 
@@ -135,7 +136,7 @@ describe("text-import-plugin file handler", () => {
     const outDir = join(TEST_DIR, "out");
     await buildWithPlugin(srcDir, outDir, "entry.ts");
 
-    const content = await Bun.file(join(outDir, "mod.js")).text();
+    const content = await readFile(join(outDir, "mod.js"), "utf-8");
     expect(content).toContain("createRequire");
     expect(content).toContain("import.meta.url");
   });
@@ -157,7 +158,7 @@ describe("text-import-plugin file handler", () => {
     const outDir = join(TEST_DIR, "out");
     await buildWithPlugin(srcDir, outDir, "entry.ts");
 
-    const content = await Bun.file(join(outDir, "mod.js")).text();
+    const content = await readFile(join(outDir, "mod.js"), "utf-8");
     // The helper module should be inlined, not left as an import
     expect(content).toContain("999");
     expect(content).not.toContain('"./helper.js"');

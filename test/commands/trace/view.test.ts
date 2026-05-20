@@ -7,9 +7,21 @@
  * Note: Core trace target parsing tests are in test/lib/trace-target.test.ts.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { preProcessArgs } from "../../../src/commands/trace/view.js";
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ResolutionError, ValidationError } from "../../../src/lib/errors.js";
@@ -76,7 +88,7 @@ describe("resolveProjectBySlug", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
+    findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
   });
 
   afterEach(() => {

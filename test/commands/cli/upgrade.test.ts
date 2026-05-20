@@ -9,21 +9,21 @@
  * via a spy on process.stderr.write and assert on the collected output.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as child_process from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { run } from "@stricli/core";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+// Make child_process namespace mutable so vi.spyOn works on ESM exports
+vi.mock("node:child_process", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("node:child_process")>();
+  return { ...orig };
+});
+
 import { app } from "../../../src/app.js";
 import { isEbusyError } from "../../../src/commands/cli/upgrade.js";
 import type { SentryContext } from "../../../src/context.js";
@@ -118,7 +118,7 @@ function createMockContext(
       env,
       cwd: () => "/tmp",
       execPath: overrides.execPath ?? "/usr/local/bin/sentry",
-      exit: mock(() => {
+      exit: vi.fn(() => {
         // no-op for tests
       }),
       exitCode: 0,
@@ -705,12 +705,12 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     spawnedArgs = [];
 
     // Spy on child_process.spawn — captures args and resolves with exit 0
-    spawnSpy = spyOn(child_process, "spawn").mockImplementation(
-      (cmd: string, args?: readonly string[]) => {
+    spawnSpy = vi
+      .spyOn(child_process, "spawn")
+      .mockImplementation((cmd: string, args?: readonly string[]) => {
         spawnedArgs.push({ cmd, args: [...(args ?? [])] });
         return fakeChildProcess(0);
-      }
-    );
+      });
   });
 
   afterEach(async () => {
@@ -737,7 +737,7 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
    */
   function mockBinaryDownloadWithVersion(version: string): void {
     const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF magic
-    const gzipped = Bun.gzipSync(fakeContent);
+    const gzipped = gzipSync(fakeContent);
     mockFetch(async (url) => {
       const urlStr = String(url);
       if (urlStr.includes("releases/latest")) {
@@ -783,7 +783,7 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
   test("reports setup failure when spawn exits non-zero", async () => {
     // Use a unified mock that handles both the version endpoint and binary download
     const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
-    const gzipped = Bun.gzipSync(fakeContent);
+    const gzipped = gzipSync(fakeContent);
     mockFetch(async (url) => {
       const urlStr = String(url);
       if (urlStr.includes("releases/latest")) {
@@ -811,7 +811,7 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
   test("downloads nightly binary from GHCR for nightly channel", async () => {
     const capturedUrls: string[] = [];
     const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
-    const gzipped = Bun.gzipSync(fakeContent);
+    const gzipped = gzipSync(fakeContent);
 
     // GHCR flow: token exchange → manifest → blob redirect → blob download
     mockFetch(async (url) => {
@@ -922,9 +922,9 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
 
     originalFetch = globalThis.fetch;
 
-    migrateSpawnSpy = spyOn(child_process, "spawn").mockImplementation(() =>
-      fakeChildProcess(0)
-    );
+    migrateSpawnSpy = vi
+      .spyOn(child_process, "spawn")
+      .mockImplementation(() => fakeChildProcess(0));
   });
 
   afterEach(async () => {
@@ -946,7 +946,7 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
 
   test("migrates npm install to standalone binary for nightly channel", async () => {
     const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
-    const gzipped = Bun.gzipSync(fakeContent);
+    const gzipped = gzipSync(fakeContent);
 
     // Nightly is now distributed via GHCR (token → manifest → blob)
     mockFetch(async (url) => {

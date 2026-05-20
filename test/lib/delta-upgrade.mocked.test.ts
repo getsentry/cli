@@ -1,20 +1,21 @@
 /**
  * Integration tests for delta upgrade orchestration with a non-dev CLI_VERSION.
  *
- * These tests use `mock.module()` to override `CLI_VERSION` from constants.js
+ * These tests use `vi.mock()` to override `CLI_VERSION` from constants.js
  * so that `canAttemptDelta()` passes its dev-build guard (the real `CLI_VERSION`
  * is "0.0.0-dev" in test mode, which short-circuits the orchestrator).
  *
  * Kept as a sibling file to `delta-upgrade.test.ts` because its
- * `mock.module()` would invert the assumptions of the dev-mode null-return
+ * `vi.mock()` would invert the assumptions of the dev-mode null-return
  * tests in that file. Under `bun test --isolate` each file gets a fresh
  * module graph, so the mocks here don't leak.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { copyFileSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // ============================================================================
 // Mock Setup
@@ -24,10 +25,14 @@ import { join } from "node:path";
  * Mock constants.js to pretend we're running a real stable version.
  * This satisfies canAttemptDelta()'s CLI_VERSION !== "0.0.0-dev" check.
  */
-mock.module("../../src/lib/constants.js", () => ({
-  CLI_VERSION: "0.13.0",
-  USER_AGENT: "sentry-cli/0.13.0",
-}));
+vi.mock("../../src/lib/constants.js", async (importOriginal) => {
+  const orig =
+    await importOriginal<typeof import("../../src/lib/constants.js")>();
+  return {
+    ...orig,
+    CLI_VERSION: "0.13.0",
+  };
+});
 
 // Import AFTER mock setup so the mocked constants are used
 import { getPlatformBinaryName } from "../../src/lib/binary.js";
@@ -408,7 +413,7 @@ describe("attemptDeltaUpgrade", () => {
 
   test("returns DeltaResult with telemetry on successful stable patch", async () => {
     // Use real TRDIFF10 fixture for end-to-end success
-    const fixturesDir = join(import.meta.dir, "../fixtures/patches");
+    const fixturesDir = join(import.meta.dirname, "../fixtures/patches");
     const oldBinaryPath = tempFile("old-success.bin");
     const destPath = tempFile("dest-success.bin");
 
@@ -420,9 +425,7 @@ describe("attemptDeltaUpgrade", () => {
       "54d0dcd74478bc154b5b24393fdc6129518271baa36f446384d60e84021bb724";
 
     // Read the real TRDIFF10 patch
-    const patchData = await Bun.file(
-      join(fixturesDir, "small.trdiff10")
-    ).arrayBuffer();
+    const patchData = await readFile(join(fixturesDir, "small.trdiff10"));
 
     const patchUrl = "https://example.com/small.patch";
     const releases = [
@@ -482,10 +485,8 @@ describe("attemptDeltaUpgrade", () => {
       expect(result!.chainLength).toBe(1);
 
       // Verify patched output matches expected file
-      const actual = await Bun.file(destPath).arrayBuffer();
-      const expected = await Bun.file(
-        join(fixturesDir, "small-new.bin")
-      ).arrayBuffer();
+      const actual = await readFile(destPath);
+      const expected = await readFile(join(fixturesDir, "small-new.bin"));
       expect(new Uint8Array(actual)).toEqual(new Uint8Array(expected));
     } finally {
       if (existsSync(oldBinaryPath)) unlinkSync(oldBinaryPath);

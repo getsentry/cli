@@ -5,8 +5,8 @@
  * specific commands, and not-found cases.
  */
 
-import { describe, expect, test } from "bun:test";
 import { run } from "@stricli/core";
+import { describe, expect, test } from "vitest";
 import { app } from "../../src/app.js";
 import type { SentryContext } from "../../src/context.js";
 

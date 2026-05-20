@@ -5,7 +5,7 @@
  * test/lib/api-client.coverage.test.ts.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   mergeIssues,
   parseResolveSpec,

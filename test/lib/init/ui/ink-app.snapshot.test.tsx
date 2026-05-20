@@ -8,10 +8,12 @@
  * alive in non-TTY). Tests that call renderApp() rely on a 500ms
  * timeout race to prevent blocking.
  */
-import { describe, expect, test } from "bun:test";
+
 import { Readable, Writable } from "node:stream";
+import { setTimeout as sleep } from "node:timers/promises";
 import { render } from "ink";
 import { createElement } from "react";
+import { describe, expect, test } from "vitest";
 import {
   App,
   formatFeedbackBanner,
@@ -104,9 +106,9 @@ async function renderApp(
   });
   for (const input of options.input ?? []) {
     stdin.push(input);
-    await Bun.sleep(20);
+    await sleep(20);
   }
-  await Bun.sleep(FRAME_SETTLE_MS);
+  await sleep(FRAME_SETTLE_MS);
   instance.unmount();
   // waitUntilExit() hangs in CI — race with a short unref'd timeout.
   await Promise.race([

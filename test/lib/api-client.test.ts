@@ -5,7 +5,7 @@
  * Uses manual fetch mocking to avoid polluting the module cache.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   API_MAX_PER_PAGE,
   buildSearchParams,
@@ -398,9 +398,11 @@ describe("rawApiRequest", () => {
     expect(requests[0].method).toBe("PUT");
     // String body should be sent as-is
     expect(capturedBody).toBe('{"status":"resolved"}');
-    // No Content-Type header set by default for string bodies
-    // (user can provide via custom headers if needed)
-    expect(requests[0].headers.get("Content-Type")).toBeNull();
+    // No explicit Content-Type header set by rawApiRequest for string bodies.
+    // Node.js Request constructor auto-sets "text/plain;charset=UTF-8" for
+    // string bodies; Bun leaves it null. Accept either.
+    const ct = requests[0].headers.get("Content-Type");
+    expect(ct === null || ct === "text/plain;charset=UTF-8").toBe(true);
   });
 
   test("string body with explicit Content-Type header", async () => {
@@ -535,9 +537,12 @@ describe("rawApiRequest", () => {
       headers: { "X-Custom": "value" },
     });
 
-    // Custom headers should be present, but no Content-Type for string bodies
+    // Custom headers should be present, but no explicit Content-Type for string bodies.
+    // Node.js Request constructor auto-sets "text/plain;charset=UTF-8" for
+    // string bodies; Bun leaves it null. Accept either.
     expect(requests[0].headers.get("X-Custom")).toBe("value");
-    expect(requests[0].headers.get("Content-Type")).toBeNull();
+    const ct = requests[0].headers.get("Content-Type");
+    expect(ct === null || ct === "text/plain;charset=UTF-8").toBe(true);
   });
 
   test("returns non-JSON response body as string", async () => {

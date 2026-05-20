@@ -9,7 +9,7 @@
  * building the request body, which throws `CliError` on mismatch.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   captureEnvTokenHost,
   resetEnvTokenHostForTesting,

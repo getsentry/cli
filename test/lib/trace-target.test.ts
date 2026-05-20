@@ -5,7 +5,7 @@
  * and targetArgToTraceTarget from src/lib/trace-target.ts.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { ContextError, ValidationError } from "../../src/lib/errors.js";
 import {
   parseSlashSeparatedTraceTarget,

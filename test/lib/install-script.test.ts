@@ -5,7 +5,7 @@
  * setup delegation can be validated without network access.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -16,8 +16,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
-const repoRoot = join(import.meta.dir, "..", "..");
+function noop(): void {
+  // Intentionally empty — absorbs async spawn errors
+}
+
+const repoRoot = join(import.meta.dirname, "..", "..");
 const installScript = join(repoRoot, "install");
 
 describe("install script", () => {
@@ -52,9 +57,9 @@ cat
   });
 
   test("passes --no-agent-skills through to sentry cli setup", async () => {
-    const proc = Bun.spawn(
+    const proc = spawn(
+      "bash",
       [
-        "bash",
         installScript,
         "--version",
         "0.31.0",
@@ -69,16 +74,23 @@ cat
           SENTRY_TEST_ARGS_FILE: argsFile,
           TMPDIR: testDir,
         },
-        stderr: "pipe",
-        stdout: "pipe",
+        stdio: ["pipe", "pipe", "pipe"],
       }
     );
+    proc.on("error", noop);
 
-    const [exitCode, stdout, stderr] = await Promise.all([
-      proc.exited,
-      Bun.readableStreamToText(proc.stdout),
-      Bun.readableStreamToText(proc.stderr),
-    ]);
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (d: Buffer) => {
+      stdout += d;
+    });
+    proc.stderr.on("data", (d: Buffer) => {
+      stderr += d;
+    });
+
+    const exitCode = await new Promise<number>((resolve) =>
+      proc.on("close", (code) => resolve(code ?? 1))
+    );
 
     expect({ exitCode, stdout, stderr }).toMatchObject({ exitCode: 0 });
     expect(readFileSync(argsFile, "utf8").trim().split("\n")).toEqual([

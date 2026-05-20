@@ -10,7 +10,7 @@
  * - User label preference order (username > email > name > fallback).
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   maybeWarnEnvTokenIgnored,
   resetAuthHintState,
@@ -63,9 +63,9 @@ afterEach(() => {
  * rendered output regardless of which instance emitted it.
  */
 function captureStderr() {
-  const stderrSpy = spyOn(process.stderr, "write").mockImplementation(
-    () => true
-  );
+  const stderrSpy = vi
+    .spyOn(process.stderr, "write")
+    .mockImplementation(() => true);
   return {
     /** Number of calls whose first argument contained the env-hint body. */
     hintCalls: () =>

@@ -6,7 +6,7 @@
  * flag/alias injection.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   DESTRUCTIVE_ALIASES,
   DESTRUCTIVE_FLAGS,

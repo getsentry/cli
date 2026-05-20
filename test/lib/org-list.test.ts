@@ -6,21 +6,52 @@
  * dispatchOrgScopedList (with and without overrides, metadata-only config).
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+vi.mock("../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../src/lib/api-client.js";
+
+vi.mock("../../src/lib/db/defaults.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/lib/db/defaults.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as defaults from "../../src/lib/db/defaults.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+
+vi.mock("../../src/lib/db/pagination.js");
+
+// biome-ignore lint/performance/noNamespaceImport: needed for vi.mocked access
 import * as paginationDb from "../../src/lib/db/pagination.js";
+
+vi.mock("../../src/lib/db/regions.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/lib/db/regions.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as regions from "../../src/lib/db/regions.js";
 import {
@@ -41,10 +72,46 @@ import {
   type ListResult,
   type OrgListConfig,
 } from "../../src/lib/org-list.js";
+
+vi.mock("../../src/lib/polling.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/lib/polling.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as polling from "../../src/lib/polling.js";
+
+vi.mock("../../src/lib/region.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/lib/region.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as region from "../../src/lib/region.js";
+
+vi.mock("../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../src/lib/resolve-target.js";
 
@@ -54,12 +121,13 @@ import * as resolveTarget from "../../src/lib/resolve-target.js";
  */
 let withProgressSpy: ReturnType<typeof spyOn>;
 beforeEach(() => {
-  withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
-    (_opts, fn) =>
+  withProgressSpy = vi
+    .spyOn(polling, "withProgress")
+    .mockImplementation((_opts, fn) =>
       fn(() => {
         /* no-op setMessage */
       })
-  );
+    );
 });
 afterEach(() => {
   withProgressSpy.mockRestore();
@@ -76,12 +144,12 @@ function makeConfig(
     entityName: "widget",
     entityPlural: "widgets",
     commandPrefix: "sentry widget list",
-    listForOrg: mock(() => Promise.resolve([])),
-    listPaginated: mock(() =>
+    listForOrg: vi.fn(() => Promise.resolve([])),
+    listPaginated: vi.fn(() =>
       Promise.resolve({ data: [] as FakeEntity[], nextCursor: undefined })
     ),
     withOrg: (entity, orgSlug) => ({ ...entity, orgSlug }),
-    displayTable: mock(() => ""),
+    displayTable: vi.fn(() => ""),
     ...overrides,
   };
 }
@@ -94,7 +162,7 @@ const META_ONLY: ListCommandMeta = {
 };
 
 function createStdout() {
-  const write = mock((_chunk: string) => true);
+  const write = vi.fn((_chunk: string) => true);
   return { writer: { write }, write };
 }
 
@@ -123,7 +191,7 @@ describe("fetchOrgSafe", () => {
       { id: "2", name: "B" },
     ];
     const config = makeConfig({
-      listForOrg: mock(() => Promise.resolve(items)),
+      listForOrg: vi.fn(() => Promise.resolve(items)),
     });
     const result = await fetchOrgSafe(config, "my-org");
 
@@ -134,7 +202,7 @@ describe("fetchOrgSafe", () => {
 
   test("returns empty array on non-auth error", async () => {
     const config = makeConfig({
-      listForOrg: mock(() => Promise.reject(new Error("network"))),
+      listForOrg: vi.fn(() => Promise.reject(new Error("network"))),
     });
     const result = await fetchOrgSafe(config, "my-org");
     expect(result).toEqual([]);
@@ -142,7 +210,7 @@ describe("fetchOrgSafe", () => {
 
   test("rethrows AuthError", async () => {
     const config = makeConfig({
-      listForOrg: mock(() =>
+      listForOrg: vi.fn(() =>
         Promise.reject(new AuthError("not_authenticated"))
       ),
     });
@@ -158,7 +226,7 @@ describe("fetchAllOrgs", () => {
   let listOrganizationsSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    listOrganizationsSpy = spyOn(apiClient, "listOrganizations");
+    listOrganizationsSpy = vi.spyOn(apiClient, "listOrganizations");
   });
 
   afterEach(() => {
@@ -173,7 +241,7 @@ describe("fetchAllOrgs", () => {
 
     const items: FakeEntity[] = [{ id: "1", name: "Widget" }];
     const config = makeConfig({
-      listForOrg: mock(() => Promise.resolve(items)),
+      listForOrg: vi.fn(() => Promise.resolve(items)),
     });
 
     const result = await fetchAllOrgs(config);
@@ -190,7 +258,7 @@ describe("fetchAllOrgs", () => {
 
     let callCount = 0;
     const config = makeConfig({
-      listForOrg: mock(() => {
+      listForOrg: vi.fn(() => {
         callCount += 1;
         if (callCount === 1) return Promise.reject(new Error("forbidden"));
         return Promise.resolve([{ id: "1", name: "Widget" }]);
@@ -208,7 +276,7 @@ describe("fetchAllOrgs", () => {
     ]);
 
     const config = makeConfig({
-      listForOrg: mock(() =>
+      listForOrg: vi.fn(() =>
         Promise.reject(new AuthError("not_authenticated"))
       ),
     });
@@ -222,28 +290,25 @@ describe("fetchAllOrgs", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleOrgAll", () => {
-  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
-  let hasPreviousPageSpy: ReturnType<typeof spyOn>;
+  const advancePaginationStateSpy = vi.mocked(
+    paginationDb.advancePaginationState
+  );
+  const hasPreviousPageSpy = vi.mocked(paginationDb.hasPreviousPage);
 
   beforeEach(() => {
-    advancePaginationStateSpy = spyOn(
-      paginationDb,
-      "advancePaginationState"
-    ).mockReturnValue(undefined);
-    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
-      false
-    );
+    advancePaginationStateSpy.mockReturnValue(undefined);
+    hasPreviousPageSpy.mockReturnValue(false);
   });
 
   afterEach(() => {
-    advancePaginationStateSpy.mockRestore();
-    hasPreviousPageSpy.mockRestore();
+    advancePaginationStateSpy.mockReset();
+    hasPreviousPageSpy.mockReset();
   });
 
   test("returns ListResult with hasMore=true and nextCursor", async () => {
     const items: FakeEntity[] = [{ id: "1", name: "A" }];
     const config = makeConfig({
-      listPaginated: mock(() =>
+      listPaginated: vi.fn(() =>
         Promise.resolve({ data: items, nextCursor: "next:123" })
       ),
     });
@@ -265,7 +330,7 @@ describe("handleOrgAll", () => {
 
   test("returns ListResult with hasMore=false when no nextCursor", async () => {
     const config = makeConfig({
-      listPaginated: mock(() =>
+      listPaginated: vi.fn(() =>
         Promise.resolve({
           data: [{ id: "1", name: "A" }],
           nextCursor: undefined,
@@ -289,7 +354,7 @@ describe("handleOrgAll", () => {
 
   test("returns hint with 'no entities found' when empty", async () => {
     const config = makeConfig({
-      listPaginated: mock(() =>
+      listPaginated: vi.fn(() =>
         Promise.resolve({ data: [] as FakeEntity[], nextCursor: undefined })
       ),
     });
@@ -309,7 +374,7 @@ describe("handleOrgAll", () => {
 
   test("returns hint with next page info when more available", async () => {
     const config = makeConfig({
-      listPaginated: mock(() =>
+      listPaginated: vi.fn(() =>
         Promise.resolve({ data: [{ id: "1", name: "A" }], nextCursor: "x" })
       ),
     });
@@ -329,7 +394,7 @@ describe("handleOrgAll", () => {
 
   test("calls advancePaginationState when nextCursor present", async () => {
     const config = makeConfig({
-      listPaginated: mock(() =>
+      listPaginated: vi.fn(() =>
         Promise.resolve({
           data: [{ id: "1", name: "A" }],
           nextCursor: "cursor:abc",
@@ -356,7 +421,7 @@ describe("handleOrgAll", () => {
 
   test("calls advancePaginationState with undefined when no nextCursor", async () => {
     const config = makeConfig({
-      listPaginated: mock(() =>
+      listPaginated: vi.fn(() =>
         Promise.resolve({
           data: [{ id: "1", name: "A" }],
           nextCursor: undefined,
@@ -389,7 +454,7 @@ describe("handleOrgAll", () => {
 describe("handleExplicitOrg", () => {
   test("returns items with org context", async () => {
     const config = makeConfig({
-      listForOrg: mock(() => Promise.resolve([{ id: "1", name: "A" }])),
+      listForOrg: vi.fn(() => Promise.resolve([{ id: "1", name: "A" }])),
     });
 
     const result = await handleExplicitOrg({
@@ -404,7 +469,7 @@ describe("handleExplicitOrg", () => {
 
   test("includes org-scoped note in header when noteOrgScoped=true", async () => {
     const config = makeConfig({
-      listForOrg: mock(() => Promise.resolve([{ id: "1", name: "A" }])),
+      listForOrg: vi.fn(() => Promise.resolve([{ id: "1", name: "A" }])),
     });
 
     const result = await handleExplicitOrg({
@@ -420,7 +485,7 @@ describe("handleExplicitOrg", () => {
 
   test("does not include org-scoped note when noteOrgScoped=false (default)", async () => {
     const config = makeConfig({
-      listForOrg: mock(() => Promise.resolve([{ id: "1", name: "A" }])),
+      listForOrg: vi.fn(() => Promise.resolve([{ id: "1", name: "A" }])),
     });
 
     const result = await handleExplicitOrg({
@@ -434,7 +499,7 @@ describe("handleExplicitOrg", () => {
 
   test("header includes org-scoped note even in JSON mode (rendering decision is caller's)", async () => {
     const config = makeConfig({
-      listForOrg: mock(() => Promise.resolve([{ id: "1", name: "A" }])),
+      listForOrg: vi.fn(() => Promise.resolve([{ id: "1", name: "A" }])),
     });
 
     const result = await handleExplicitOrg({
@@ -456,7 +521,7 @@ describe("handleExplicitOrg", () => {
 
 describe("handleExplicitProject", () => {
   test("fetches and returns project-scoped entities", async () => {
-    const listForProject = mock(() =>
+    const listForProject = vi.fn(() =>
       Promise.resolve([{ id: "1", name: "Team A" }])
     );
     const config = makeConfig({ listForProject });
@@ -488,7 +553,7 @@ describe("handleExplicitProject", () => {
 
   test("returns hint with 'no entities found' when project has none", async () => {
     const config = makeConfig({
-      listForProject: mock(() => Promise.resolve([])),
+      listForProject: vi.fn(() => Promise.resolve([])),
     });
 
     const result = await handleExplicitProject({
@@ -512,7 +577,7 @@ describe("handleProjectSearch", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
+    findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
   });
 
   afterEach(() => {
@@ -548,7 +613,7 @@ describe("handleProjectSearch", () => {
       ],
       orgs: [],
     });
-    const listForProject = mock(() =>
+    const listForProject = vi.fn(() =>
       Promise.resolve([{ id: "1", name: "Team A" }])
     );
     const config = makeConfig({ listForProject });
@@ -568,7 +633,7 @@ describe("handleProjectSearch", () => {
       ],
       orgs: [],
     });
-    const listForOrg = mock(() =>
+    const listForOrg = vi.fn(() =>
       Promise.resolve([{ id: "1", name: "Repo A" }])
     );
     const config = makeConfig({ listForOrg });
@@ -589,7 +654,7 @@ describe("handleProjectSearch", () => {
       ],
       orgs: [],
     });
-    const listForOrg = mock(() =>
+    const listForOrg = vi.fn(() =>
       Promise.resolve([{ id: "1", name: "Repo A" }])
     );
     const config = makeConfig({ listForOrg });
@@ -608,7 +673,7 @@ describe("handleProjectSearch", () => {
       orgs: [{ slug: "acme-corp", name: "Acme Corp" }],
     });
     const config = makeConfig();
-    const fallback = mock(() =>
+    const fallback = vi.fn(() =>
       Promise.resolve({ items: [] } as ListResult<FakeWithOrg>)
     );
 
@@ -643,7 +708,7 @@ describe("handleProjectSearch", () => {
       orgs: [],
     });
     const config = makeConfig({
-      listForOrg: mock(() => Promise.resolve([{ id: "1", name: "Widget" }])),
+      listForOrg: vi.fn(() => Promise.resolve([{ id: "1", name: "Widget" }])),
     });
 
     const result = await handleProjectSearch(config, "my-proj", {
@@ -667,25 +732,23 @@ describe("dispatchOrgScopedList", () => {
   let resolveEffectiveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    getDefaultOrganizationSpy = spyOn(defaults, "getDefaultOrganization");
-    resolveAllTargetsSpy = spyOn(resolveTarget, "resolveAllTargets");
-    advancePaginationStateSpy = spyOn(
-      paginationDb,
-      "advancePaginationState"
-    ).mockReturnValue(undefined);
-    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
-      false
-    );
-    resolveCursorSpy = spyOn(paginationDb, "resolveCursor").mockReturnValue({
+    getDefaultOrganizationSpy = vi.spyOn(defaults, "getDefaultOrganization");
+    resolveAllTargetsSpy = vi.spyOn(resolveTarget, "resolveAllTargets");
+    advancePaginationStateSpy = vi
+      .spyOn(paginationDb, "advancePaginationState")
+      .mockReturnValue(undefined);
+    hasPreviousPageSpy = vi
+      .spyOn(paginationDb, "hasPreviousPage")
+      .mockReturnValue(false);
+    resolveCursorSpy = vi.spyOn(paginationDb, "resolveCursor").mockReturnValue({
       cursor: undefined,
       direction: "next" as const,
     });
     // Prevent resolveEffectiveOrg from making real HTTP calls during
     // full-suite runs where earlier tests may leave auth state behind.
-    resolveEffectiveOrgSpy = spyOn(
-      region,
-      "resolveEffectiveOrg"
-    ).mockImplementation((org: string) => Promise.resolve(org));
+    resolveEffectiveOrgSpy = vi
+      .spyOn(region, "resolveEffectiveOrg")
+      .mockImplementation((org: string) => Promise.resolve(org));
 
     getDefaultOrganizationSpy.mockReturnValue(null);
     resolveAllTargetsSpy.mockResolvedValue({ targets: [] });
@@ -737,7 +800,7 @@ describe("dispatchOrgScopedList", () => {
   test("delegates to handleOrgAll for org-all mode and returns ListResult", async () => {
     const items: FakeEntity[] = [{ id: "1", name: "A" }];
     const config = makeConfig({
-      listPaginated: mock(() =>
+      listPaginated: vi.fn(() =>
         Promise.resolve({ data: items, nextCursor: undefined })
       ),
     });
@@ -756,7 +819,7 @@ describe("dispatchOrgScopedList", () => {
   });
 
   test("explicit mode uses listForProject when available", async () => {
-    const listForProject = mock(() =>
+    const listForProject = vi.fn(() =>
       Promise.resolve([{ id: "1", name: "T" }])
     );
     const config = makeConfig({ listForProject });
@@ -776,7 +839,7 @@ describe("dispatchOrgScopedList", () => {
   });
 
   test("explicit mode falls back to org-scoped with note when no listForProject", async () => {
-    const listForOrg = mock(() => Promise.resolve([{ id: "1", name: "R" }]));
+    const listForOrg = vi.fn(() => Promise.resolve([{ id: "1", name: "R" }]));
     const config = makeConfig({ listForOrg }); // no listForProject
     const { writer } = createStdout();
 
@@ -795,7 +858,7 @@ describe("dispatchOrgScopedList", () => {
   test("override replaces default handler for that mode", async () => {
     const config = makeConfig();
     const { writer } = createStdout();
-    const overrideCalled = mock(() =>
+    const overrideCalled = vi.fn(() =>
       Promise.resolve({ items: [] } as ListResult<FakeWithOrg>)
     );
 
@@ -816,12 +879,12 @@ describe("dispatchOrgScopedList", () => {
   test("override does not affect other modes", async () => {
     const items: FakeEntity[] = [{ id: "1", name: "A" }];
     const config = makeConfig({
-      listPaginated: mock(() =>
+      listPaginated: vi.fn(() =>
         Promise.resolve({ data: items, nextCursor: undefined })
       ),
     });
     const { writer } = createStdout();
-    const autoDetectOverride = mock(() =>
+    const autoDetectOverride = vi.fn(() =>
       Promise.resolve({ items: [] } as ListResult<FakeWithOrg>)
     );
 
@@ -843,7 +906,7 @@ describe("dispatchOrgScopedList", () => {
 
   test("metadata-only config with full overrides dispatches correctly", async () => {
     const { writer } = createStdout();
-    const handler = mock(() =>
+    const handler = vi.fn(() =>
       Promise.resolve({ items: [] } as ListResult<unknown>)
     );
 
@@ -876,7 +939,7 @@ describe("dispatchOrgScopedList", () => {
         parsed: { type: "auto-detect" },
         overrides: {
           // missing auto-detect override — should throw
-          explicit: mock(() =>
+          explicit: vi.fn(() =>
             Promise.resolve({ items: [] } as ListResult<unknown>)
           ),
         },
@@ -888,15 +951,13 @@ describe("dispatchOrgScopedList", () => {
     // When dispatchOrgScopedList uses the default project-search handler with a
     // full OrgListConfig, and the slug matches an org (no projects found), the
     // handler calls runOrgAll as the orgAllFallback.
-    const findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
-    const localAdvanceSpy = spyOn(
-      paginationDb,
-      "advancePaginationState"
-    ).mockReturnValue(undefined);
-    const localHasPrevSpy = spyOn(
-      paginationDb,
-      "hasPreviousPage"
-    ).mockReturnValue(false);
+    const findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
+    const localAdvanceSpy = vi
+      .spyOn(paginationDb, "advancePaginationState")
+      .mockReturnValue(undefined);
+    const localHasPrevSpy = vi
+      .spyOn(paginationDb, "hasPreviousPage")
+      .mockReturnValue(false);
 
     findProjectsBySlugSpy.mockResolvedValue({
       projects: [],
@@ -905,7 +966,7 @@ describe("dispatchOrgScopedList", () => {
 
     const items: FakeEntity[] = [{ id: "1", name: "Widget A" }];
     const config = makeConfig({
-      listPaginated: mock(() =>
+      listPaginated: vi.fn(() =>
         Promise.resolve({ data: items, nextCursor: undefined })
       ),
     });
@@ -937,10 +998,9 @@ describe("dispatchOrgScopedList", () => {
     let getCachedOrgsSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
-      getCachedOrgsSpy = spyOn(
-        regions,
-        "getCachedOrganizations"
-      ).mockReturnValue([]);
+      getCachedOrgsSpy = vi
+        .spyOn(regions, "getCachedOrganizations")
+        .mockReturnValue([]);
     });
 
     afterEach(() => {
@@ -954,7 +1014,7 @@ describe("dispatchOrgScopedList", () => {
 
       const items: FakeEntity[] = [{ id: "1", name: "Widget A" }];
       const config = makeConfig({
-        listPaginated: mock(() =>
+        listPaginated: vi.fn(() =>
           Promise.resolve({ data: items, nextCursor: undefined })
         ),
       });
@@ -1020,7 +1080,7 @@ describe("dispatchOrgScopedList", () => {
         { slug: "acme-corp", id: "1", name: "Acme Corp" },
       ]);
 
-      const handler = mock(() =>
+      const handler = vi.fn(() =>
         Promise.resolve({ items: [] } as ListResult<FakeWithOrg>)
       );
 
@@ -1048,7 +1108,7 @@ describe("dispatchOrgScopedList", () => {
         { slug: "other-org", id: "2", name: "Other Org" },
       ]);
 
-      const handler = mock(() =>
+      const handler = vi.fn(() =>
         Promise.resolve({ items: [] } as ListResult<FakeWithOrg>)
       );
 
@@ -1073,7 +1133,7 @@ describe("dispatchOrgScopedList", () => {
     test("redirect with empty cache falls through to project-search handler", async () => {
       getCachedOrgsSpy.mockReturnValue([]);
 
-      const handler = mock(() =>
+      const handler = vi.fn(() =>
         Promise.resolve({ items: [] } as ListResult<FakeWithOrg>)
       );
 

@@ -5,13 +5,13 @@
  * can be correctly parsed back by parseSentryUrl().
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   assert as fcAssert,
   property,
   stringMatching,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { parseSentryUrl } from "../../src/lib/sentry-url-parser.js";
 import {
   buildOrgUrl,

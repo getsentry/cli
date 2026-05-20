@@ -2,7 +2,7 @@
  * Unit Tests for API Schema Query Functions
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   getAllEndpoints,
   getAllResources,

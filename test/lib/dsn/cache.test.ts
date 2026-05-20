@@ -4,7 +4,7 @@
  * Tests for DSN detection caching functionality.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   clearDsnCache,
   getCachedDsn,

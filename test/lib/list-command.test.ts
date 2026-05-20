@@ -5,7 +5,7 @@
  * to `dispatchOrgScopedList`.
  */
 
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   buildOrgListCommand,
   type OrgListCommandDocs,
@@ -52,22 +52,22 @@ function makeFakeConfig(
     entityName: "widget",
     entityPlural: "widgets",
     commandPrefix: "sentry widget list",
-    listForOrg: mock(() => Promise.resolve([])),
-    listPaginated: mock(() =>
+    listForOrg: vi.fn(() => Promise.resolve([])),
+    listPaginated: vi.fn(() =>
       Promise.resolve({ data: [] as FakeEntity[], nextCursor: undefined })
     ),
     withOrg: (entity, orgSlug) => ({ ...entity, orgSlug }),
-    displayTable: mock(() => ""),
+    displayTable: vi.fn(() => ""),
     ...overrides,
   };
 }
 
 function createContext() {
-  const write = mock((_chunk: string) => true);
+  const write = vi.fn((_chunk: string) => true);
   return {
     context: {
       stdout: { write },
-      stderr: { write: mock((_chunk: string) => true) },
+      stderr: { write: vi.fn((_chunk: string) => true) },
       cwd: "/tmp",
     },
     write,
@@ -89,10 +89,9 @@ describe("buildOrgListCommand", () => {
   });
 
   test("calls dispatchOrgScopedList with correct config and flags", async () => {
-    dispatchSpy = spyOn(
-      orgListModule,
-      "dispatchOrgScopedList"
-    ).mockResolvedValue({ items: [] });
+    dispatchSpy = vi
+      .spyOn(orgListModule, "dispatchOrgScopedList")
+      .mockResolvedValue({ items: [] });
 
     const config = makeFakeConfig();
     const docs: OrgListCommandDocs = { brief: "List widgets" };
@@ -119,10 +118,9 @@ describe("buildOrgListCommand", () => {
   });
 
   test("passes parsed target to dispatchOrgScopedList", async () => {
-    dispatchSpy = spyOn(
-      orgListModule,
-      "dispatchOrgScopedList"
-    ).mockResolvedValue({ items: [] });
+    dispatchSpy = vi
+      .spyOn(orgListModule, "dispatchOrgScopedList")
+      .mockResolvedValue({ items: [] });
 
     const config = makeFakeConfig();
     const cmd = buildOrgListCommand(
@@ -140,10 +138,9 @@ describe("buildOrgListCommand", () => {
   });
 
   test("passes undefined parsed target when no positional arg given", async () => {
-    dispatchSpy = spyOn(
-      orgListModule,
-      "dispatchOrgScopedList"
-    ).mockResolvedValue({ items: [] });
+    dispatchSpy = vi
+      .spyOn(orgListModule, "dispatchOrgScopedList")
+      .mockResolvedValue({ items: [] });
 
     const config = makeFakeConfig();
     const cmd = buildOrgListCommand(

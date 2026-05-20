@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { formatFeedbackHint } from "../../../src/lib/init/feedback.js";
 
 describe("formatFeedbackHint", () => {

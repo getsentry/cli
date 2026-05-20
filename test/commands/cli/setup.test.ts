@@ -7,10 +7,11 @@
  * via a spy on process.stderr.write and assert on the collected output.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { run } from "@stricli/core";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { app } from "../../../src/app.js";
 import type { SentryContext } from "../../../src/context.js";
 import { getReleaseChannel } from "../../../src/lib/db/release-channel.js";
@@ -62,19 +63,19 @@ function createMockContext(
   const context = {
     process: {
       stdout: {
-        write: mock((s: string) => {
+        write: vi.fn((s: string) => {
           stdoutChunks.push(String(s));
           return true;
         }),
       },
       stderr: {
-        write: mock((_s: string) => true),
+        write: vi.fn((_s: string) => true),
       },
       stdin: process.stdin,
       env,
       cwd: () => "/tmp",
       execPath: overrides.execPath ?? "/usr/local/bin/sentry",
-      exit: mock(() => {
+      exit: vi.fn(() => {
         // no-op for tests
       }),
       exitCode: 0,
@@ -84,13 +85,13 @@ function createMockContext(
     configDir: "/tmp/test-config",
     env,
     stdout: {
-      write: mock((s: string) => {
+      write: vi.fn((s: string) => {
         stdoutChunks.push(String(s));
         return true;
       }),
     },
     stderr: {
-      write: mock((_s: string) => true),
+      write: vi.fn((_s: string) => true),
     },
     stdin: process.stdin,
     setFlags: () => {
@@ -312,7 +313,7 @@ describe("sentry cli setup", () => {
     expect(getOutput()).toContain("Completions:");
 
     // Verify .zshrc was actually modified
-    const content = await Bun.file(zshrc).text();
+    const content = await readFile(zshrc, "utf-8");
     expect(content).toContain("fpath=");
     expect(content).toContain("site-functions");
   });

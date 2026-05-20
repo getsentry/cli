@@ -6,7 +6,7 @@
  * edge cases and self-hosted DSN behavior that property generators don't cover.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { DetectedDsn } from "../../src/lib/dsn/index.js";
 import {
   createDetectedDsn,

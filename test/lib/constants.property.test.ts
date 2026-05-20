@@ -6,7 +6,6 @@
  * This prevents the "Invalid URL" TypeError when constructing API requests.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -15,6 +14,7 @@ import {
   property,
   string,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { normalizeUrl } from "../../src/lib/constants.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 

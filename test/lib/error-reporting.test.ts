@@ -8,9 +8,9 @@
  * - End-to-end behavior of reportCliError (metric emission + capture)
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as Sentry from "@sentry/node-core/light";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   classifySilenced,
   enrichEventWithGroupingTags,
@@ -239,9 +239,9 @@ describe("reportCliError integration", () => {
   let withScopeSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    captureSpy = spyOn(Sentry, "captureException");
-    metricSpy = spyOn(Sentry.metrics, "distribution");
-    withScopeSpy = spyOn(Sentry, "withScope");
+    captureSpy = vi.spyOn(Sentry, "captureException");
+    metricSpy = vi.spyOn(Sentry.metrics, "distribution");
+    withScopeSpy = vi.spyOn(Sentry, "withScope");
   });
 
   afterEach(() => {

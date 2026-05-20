@@ -5,9 +5,9 @@
  * Uses real temp directories with actual .sentryclirc files.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { closeDatabase } from "../../src/lib/db/index.js";
 import {
   captureEnvTokenHost,

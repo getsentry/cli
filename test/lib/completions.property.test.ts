@@ -10,11 +10,13 @@
  * and a real bash simulation of the generated completion script.
  */
 
-import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { proposeCompletions } from "@stricli/core";
 import { constantFrom, assert as fcAssert, property } from "fast-check";
-import { app } from "../../src/app.js";
+import { describe, expect, test } from "vitest";
+import { app, routes } from "../../src/app.js";
 import {
   ORG_ONLY_COMMANDS,
   ORG_PROJECT_COMMANDS,
@@ -320,11 +322,11 @@ describe("bash completion: real shell simulation", () => {
     const script = generateBashCompletion("sentry");
 
     const tmpScript = join("/tmp", `completion-test-${Date.now()}.bash`);
-    await Bun.write(tmpScript, script);
+    writeFileSync(tmpScript, script);
 
-    const result = Bun.spawnSync({
-      cmd: [
-        "bash",
+    const result = spawnSync(
+      "bash",
+      [
         "-c",
         `
 # Stub _init_completion (not available outside bash-completion package)
@@ -341,7 +343,8 @@ _sentry_completions
 echo "\${COMPREPLY[*]}"
 `,
       ],
-    });
+      { stdio: ["pipe", "pipe", "pipe"] }
+    );
     const output = result.stdout.toString().trim();
     const completions = output.split(/\s+/);
 
@@ -359,13 +362,13 @@ echo "\${COMPREPLY[*]}"
     const script = generateBashCompletion("sentry");
 
     const tmpScript = join("/tmp", `completion-test-${Date.now()}.bash`);
-    await Bun.write(tmpScript, script);
+    writeFileSync(tmpScript, script);
 
     // Test a few representative groups
     for (const group of tree.groups) {
-      const result = Bun.spawnSync({
-        cmd: [
-          "bash",
+      const result = spawnSync(
+        "bash",
+        [
           "-c",
           `
 _init_completion() {
@@ -381,7 +384,8 @@ _sentry_completions
 echo "\${COMPREPLY[*]}"
 `,
         ],
-      });
+        { stdio: ["pipe", "pipe", "pipe"] }
+      );
       const output = result.stdout.toString().trim();
       const completions = output.split(/\s+/);
 
@@ -427,7 +431,9 @@ describe("complete.ts: command set drift detection", () => {
     return orgCommands;
   }
 
-  const { routes } = require("../../src/app.js") as { routes: RouteMap };
+  // Use the ESM import (routes) instead of require() which fails under
+  // vitest because Node's CJS require can't resolve .js→.ts for transitive imports.
+  const appRoutes = routes as unknown as RouteMap;
 
   test("every command in ORG_PROJECT_COMMANDS exists in the route tree", () => {
     const tree = extractCommandTree();
@@ -456,7 +462,7 @@ describe("complete.ts: command set drift detection", () => {
   });
 
   test("org-positional commands are in at least one set", () => {
-    const orgCommands = collectOrgCommands(routes);
+    const orgCommands = collectOrgCommands(appRoutes);
     const combined = new Set([...ORG_PROJECT_COMMANDS, ...ORG_ONLY_COMMANDS]);
     for (const cmd of orgCommands) {
       expect(combined.has(cmd)).toBe(true);

@@ -4,6 +4,7 @@
  * Tests for sentry api command - raw authenticated API requests.
  */
 
+import { writeFile } from "node:fs/promises";
 import {
   afterAll,
   afterEach,
@@ -12,7 +13,7 @@ import {
   describe,
   expect,
   test,
-} from "bun:test";
+} from "vitest";
 import { EXIT } from "../../src/lib/errors.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
@@ -52,48 +53,41 @@ describe("sentry api", () => {
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
-  test(
-    "GET request works with valid auth",
-    async () => {
-      await ctx.setAuthToken(TEST_TOKEN);
+  test("GET request works with valid auth", { timeout: 15_000 }, async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
 
-      const result = await ctx.run(["api", "organizations/"]);
+    const result = await ctx.run(["api", "organizations/"]);
 
-      expect(result.exitCode).toBe(0);
-      // Should return JSON array of organizations
-      const data = JSON.parse(result.stdout);
-      expect(Array.isArray(data)).toBe(true);
-    },
-    { timeout: 15_000 }
-  );
+    expect(result.exitCode).toBe(0);
+    // Should return JSON array of organizations
+    const data = JSON.parse(result.stdout);
+    expect(Array.isArray(data)).toBe(true);
+  });
 
   test(
     "invalid endpoint returns non-zero exit code",
+    { timeout: 15_000 },
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
       const result = await ctx.run(["api", "nonexistent-endpoint-12345/"]);
 
       expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
-    },
-    { timeout: 15_000 }
+    }
   );
 
-  test(
-    "--silent flag suppresses output",
-    async () => {
-      await ctx.setAuthToken(TEST_TOKEN);
+  test("--silent flag suppresses output", { timeout: 15_000 }, async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
 
-      const result = await ctx.run(["api", "organizations/", "--silent"]);
+    const result = await ctx.run(["api", "organizations/", "--silent"]);
 
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout).toBe("");
-    },
-    { timeout: 15_000 }
-  );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+  });
 
   test(
     "--silent with error sets exit code but no output",
+    { timeout: 15_000 },
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
@@ -105,86 +99,69 @@ describe("sentry api", () => {
 
       expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
       expect(result.stdout).toBe("");
-    },
-    { timeout: 15_000 }
+    }
   );
 
-  test(
-    "supports custom HTTP method",
-    async () => {
-      await ctx.setAuthToken(TEST_TOKEN);
+  test("supports custom HTTP method", { timeout: 15_000 }, async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
 
-      // DELETE on organizations list should return 405 Method Not Allowed
-      const result = await ctx.run([
-        "api",
-        "organizations/",
-        "--method",
-        "DELETE",
-      ]);
+    // DELETE on organizations list should return 405 Method Not Allowed
+    const result = await ctx.run([
+      "api",
+      "organizations/",
+      "--method",
+      "DELETE",
+    ]);
 
-      // Method not allowed or similar error - just checking it processes the flag
-      expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
-    },
-    { timeout: 15_000 }
-  );
+    // Method not allowed or similar error - just checking it processes the flag
+    expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
+  });
 
-  test(
-    "rejects invalid HTTP method",
-    async () => {
-      await ctx.setAuthToken(TEST_TOKEN);
+  test("rejects invalid HTTP method", { timeout: 15_000 }, async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
 
-      const result = await ctx.run([
-        "api",
-        "organizations/",
-        "--method",
-        "INVALID",
-      ]);
+    const result = await ctx.run([
+      "api",
+      "organizations/",
+      "--method",
+      "INVALID",
+    ]);
 
-      // Exit code 252 is stricli's parse error code, 1 is a general error
-      expect(result.exitCode).toBeGreaterThan(0);
-      expect(result.stderr + result.stdout).toMatch(/invalid method/i);
-    },
-    { timeout: 15_000 }
-  );
+    // Exit code 252 is stricli's parse error code, 1 is a general error
+    expect(result.exitCode).toBeGreaterThan(0);
+    expect(result.stderr + result.stdout).toMatch(/invalid method/i);
+  });
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Alias Tests (curl/gh api compatibility)
   // ─────────────────────────────────────────────────────────────────────────────
 
-  test(
-    "-X alias for --method works",
-    async () => {
-      await ctx.setAuthToken(TEST_TOKEN);
+  test("-X alias for --method works", { timeout: 15_000 }, async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
 
-      // Use -X POST on organizations list (should fail with 405)
-      const result = await ctx.run(["api", "organizations/", "-X", "POST"]);
+    // Use -X POST on organizations list (should fail with 405)
+    const result = await ctx.run(["api", "organizations/", "-X", "POST"]);
 
-      // POST on list endpoint typically returns 405 or similar error
-      expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
-    },
-    { timeout: 15_000 }
-  );
+    // POST on list endpoint typically returns 405 or similar error
+    expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
+  });
 
-  test(
-    "-H alias for --header works",
-    async () => {
-      await ctx.setAuthToken(TEST_TOKEN);
+  test("-H alias for --header works", { timeout: 15_000 }, async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
 
-      // Add a custom header - the request should still succeed
-      const result = await ctx.run([
-        "api",
-        "organizations/",
-        "-H",
-        "X-Custom-Header: test-value",
-      ]);
+    // Add a custom header - the request should still succeed
+    const result = await ctx.run([
+      "api",
+      "organizations/",
+      "-H",
+      "X-Custom-Header: test-value",
+    ]);
 
-      expect(result.exitCode).toBe(0);
-      // Should return valid JSON
-      const data = JSON.parse(result.stdout);
-      expect(Array.isArray(data)).toBe(true);
-    },
-    { timeout: 15_000 }
-  );
+    expect(result.exitCode).toBe(0);
+    // Should return valid JSON
+    const data = JSON.parse(result.stdout);
+    expect(Array.isArray(data)).toBe(true);
+  });
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Verbose Mode Tests
@@ -192,6 +169,7 @@ describe("sentry api", () => {
 
   test(
     "--verbose flag shows request and response details",
+    { timeout: 15_000 },
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
@@ -206,41 +184,37 @@ describe("sentry api", () => {
       // stdout should still contain the response body
       const data = JSON.parse(result.stdout);
       expect(Array.isArray(data)).toBe(true);
-    },
-    { timeout: 15_000 }
+    }
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Input From File Tests
   // ─────────────────────────────────────────────────────────────────────────────
 
-  test(
-    "--input reads body from file",
-    async () => {
-      await ctx.setAuthToken(TEST_TOKEN);
+  test("--input reads body from file", { timeout: 15_000 }, async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
 
-      // Create a temp file with JSON body
-      const tempFile = `${testConfigDir}/input.json`;
-      await Bun.write(tempFile, JSON.stringify({ status: "resolved" }));
+    // Create a temp file with JSON body
+    const tempFile = `${testConfigDir}/input.json`;
+    await writeFile(tempFile, JSON.stringify({ status: "resolved" }));
 
-      // Try to update a non-existent issue - this will fail but tests the flow
-      const result = await ctx.run([
-        "api",
-        "issues/999999999/",
-        "-X",
-        "PUT",
-        "--input",
-        tempFile,
-      ]);
+    // Try to update a non-existent issue - this will fail but tests the flow
+    const result = await ctx.run([
+      "api",
+      "issues/999999999/",
+      "-X",
+      "PUT",
+      "--input",
+      tempFile,
+    ]);
 
-      // Will fail with 404 or similar, but the flag should be processed
-      expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
-    },
-    { timeout: 15_000 }
-  );
+    // Will fail with 404 or similar, but the flag should be processed
+    expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
+  });
 
   test(
     "--input with non-existent file throws error",
+    { timeout: 15_000 },
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
@@ -253,8 +227,7 @@ describe("sentry api", () => {
 
       expect(result.exitCode).toBe(EXIT.VALIDATION);
       expect(result.stderr + result.stdout).toMatch(/file not found/i);
-    },
-    { timeout: 15_000 }
+    }
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -263,6 +236,7 @@ describe("sentry api", () => {
 
   test(
     "GET request with --field uses query parameters (not body)",
+    { timeout: 15_000 },
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
@@ -280,12 +254,12 @@ describe("sentry api", () => {
       expect(result.exitCode).toBe(0);
       const data = JSON.parse(result.stdout);
       expect(Array.isArray(data)).toBe(true);
-    },
-    { timeout: 15_000 }
+    }
   );
 
   test(
     "POST request with --field uses request body",
+    { timeout: 15_000 },
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
@@ -305,12 +279,12 @@ describe("sentry api", () => {
       expect(result.exitCode).toBe(EXIT.OUTPUT_ERROR);
       // The error should be from the API, not a TypeError about body
       expect(result.stdout + result.stderr).not.toMatch(/cannot have body/i);
-    },
-    { timeout: 15_000 }
+    }
   );
 
   test(
     "--data and --input are mutually exclusive",
+    { timeout: 15_000 },
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
@@ -329,12 +303,12 @@ describe("sentry api", () => {
       expect(result.stderr + result.stdout).toMatch(
         /--data.*--input|--input.*--data/i
       );
-    },
-    { timeout: 15_000 }
+    }
   );
 
   test(
     "--data and --field are mutually exclusive",
+    { timeout: 15_000 },
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
@@ -353,12 +327,12 @@ describe("sentry api", () => {
       expect(result.stderr + result.stdout).toMatch(
         /--data.*--field|--field.*--data/i
       );
-    },
-    { timeout: 15_000 }
+    }
   );
 
   test(
     "--data and --raw-field are mutually exclusive",
+    { timeout: 15_000 },
     async () => {
       await ctx.setAuthToken(TEST_TOKEN);
 
@@ -377,7 +351,6 @@ describe("sentry api", () => {
       expect(result.stderr + result.stdout).toMatch(
         /--data.*--field|--field.*--data/i
       );
-    },
-    { timeout: 15_000 }
+    }
   );
 });

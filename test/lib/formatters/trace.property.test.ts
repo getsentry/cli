@@ -5,7 +5,6 @@
  * that should hold for any valid input.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -16,6 +15,7 @@ import {
   record,
   stringMatching,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   computeTraceSummary,
   formatTraceDuration,

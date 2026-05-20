@@ -8,7 +8,6 @@
  * specific implementation detail.
  */
 
-import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +17,7 @@ import {
   constantFrom,
   assert as fcAssert,
 } from "fast-check";
+import { afterAll, describe, expect, test } from "vitest";
 import { collectGrep } from "../../../src/lib/scan/grep.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 

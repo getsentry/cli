@@ -9,11 +9,13 @@
  * Skipped in CI unless ZIG_BSDIFF_PATH is set.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, unlinkSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { getPlatformBinaryName } from "../../src/lib/binary.js";
 import { applyPatch } from "../../src/lib/bspatch.js";
 
@@ -46,6 +48,7 @@ describe.skipIf(!canRun)("e2e: delta upgrade", () => {
 
   test(
     "patches previous release binary to produce next release binary",
+    { timeout: 120_000 }, // Downloads can be slow
     async () => {
       const workDir = mkdtempSync(join(tmpdir(), "delta-e2e-"));
       const binaryName = getPlatformBinaryName();
@@ -75,25 +78,19 @@ describe.skipIf(!canRun)("e2e: delta upgrade", () => {
         );
 
         // Apply patch with our implementation
-        const patchData = new Uint8Array(
-          await Bun.file(patchPath).arrayBuffer()
-        );
+        const patchData = new Uint8Array(await readFile(patchPath));
         const sha256 = await applyPatch(oldPath, patchData, outputPath);
 
         // Verify output matches expected new binary
-        const expectedHash = new Bun.CryptoHasher("sha256")
-          .update(new Uint8Array(await Bun.file(newPath).arrayBuffer()))
-          .digest("hex") as string;
+        const expectedHash = createHash("sha256")
+          .update(await readFile(newPath))
+          .digest("hex");
 
         expect(sha256).toBe(expectedHash);
 
         // Also verify byte-for-byte equality
-        const outputBytes = new Uint8Array(
-          await Bun.file(outputPath).arrayBuffer()
-        );
-        const expectedBytes = new Uint8Array(
-          await Bun.file(newPath).arrayBuffer()
-        );
+        const outputBytes = new Uint8Array(await readFile(outputPath));
+        const expectedBytes = new Uint8Array(await readFile(newPath));
         expect(outputBytes.byteLength).toBe(expectedBytes.byteLength);
         expect(outputBytes).toEqual(expectedBytes);
       } finally {
@@ -106,8 +103,7 @@ describe.skipIf(!canRun)("e2e: delta upgrade", () => {
           }
         }
       }
-    },
-    { timeout: 120_000 } // Downloads can be slow
+    }
   );
 });
 
@@ -128,5 +124,5 @@ async function downloadBinary(url: string, destPath: string): Promise<void> {
   }
 
   const body = await response.arrayBuffer();
-  await Bun.write(destPath, body);
+  await writeFile(destPath, Buffer.from(body));
 }

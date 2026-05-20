@@ -11,7 +11,7 @@
  * can establish trust for a new host.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { parsePositionalArgs } from "../../../src/commands/event/view.js";
 import {
   parseIssueArg,

@@ -16,16 +16,52 @@ import {
   beforeEach,
   describe,
   expect,
-  mock,
-  spyOn,
+  type mock,
   test,
-} from "bun:test";
+  vi,
+} from "vitest";
 import { logsCommand } from "../../../src/commands/trace/logs.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ContextError } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/polling.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/polling.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as polling from "../../../src/lib/polling.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import { parsePeriod } from "../../../src/lib/time-range.js";
@@ -70,7 +106,7 @@ const sampleLogs: TraceLog[] = [
 ];
 
 function createMockContext() {
-  const stdoutWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
@@ -106,15 +142,16 @@ describe("logsCommand.func", () => {
   let withProgressSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    listTraceLogsSpy = spyOn(apiClient, "listTraceLogs");
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    listTraceLogsSpy = vi.spyOn(apiClient, "listTraceLogs");
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
     // Bypass the withProgress spinner to prevent real stderr timers
-    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
-      (_opts, fn) =>
+    withProgressSpy = vi
+      .spyOn(polling, "withProgress")
+      .mockImplementation((_opts, fn) =>
         fn(() => {
           /* no-op setMessage */
         })
-    );
+      );
   });
 
   afterEach(() => {

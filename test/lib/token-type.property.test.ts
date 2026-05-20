@@ -5,8 +5,8 @@
  * correct across arbitrary suffixes and prefix variations.
  */
 
-import { describe, expect, test } from "bun:test";
 import { assert as fcAssert, property, string } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { classifySentryToken } from "../../src/lib/token-type.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
