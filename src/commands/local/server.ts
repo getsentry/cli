@@ -181,11 +181,14 @@ export function buildApp(
     ) {
       contentType = SENTRY_CONTENT_TYPE;
     }
-    const contentEncoding = c.req.header("content-encoding") as
-      | "gzip"
-      | "deflate"
-      | "br"
-      | undefined;
+    const rawEncoding = c.req.header("content-encoding");
+    const contentEncoding = (
+      rawEncoding === "gzip" ||
+      rawEncoding === "deflate" ||
+      rawEncoding === "br"
+        ? rawEncoding
+        : undefined
+    ) as "gzip" | "deflate" | "br" | undefined;
     const userAgent = c.req.header("user-agent");
 
     pushToSpotlightBuffer({
