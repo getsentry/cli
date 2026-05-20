@@ -727,6 +727,10 @@ async function consumeSSE(
     headers: { Accept: "text/event-stream" },
     signal,
   });
+  if (!res.ok) {
+    logger.warn(`SSE stream returned HTTP ${res.status}`);
+    return;
+  }
   if (!res.body) {
     return;
   }
@@ -876,8 +880,14 @@ export const serverCommand = buildCommand({
 
     if (!flags.quiet) {
       buffer.subscribe((container) => {
-        for (const line of formatEnvelopeLines(container, activeFilters)) {
-          logger.log(line);
+        try {
+          for (const line of formatEnvelopeLines(container, activeFilters)) {
+            logger.log(line);
+          }
+        } catch (err) {
+          logger.debug(
+            `Failed to format envelope: ${err instanceof Error ? err.message : String(err)}`
+          );
         }
       });
     }
