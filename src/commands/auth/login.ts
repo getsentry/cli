@@ -207,7 +207,8 @@ export function rcTokenHint(
     : ` --url ${effectiveHost}`;
   return (
     `Found a token in .sentryclirc (${rcConfig.sources.token}). ` +
-    `To skip OAuth next time: sentry auth login --token <token>${urlHint}`
+    "To import it: sentry cli import | " +
+    `To pass it directly: sentry auth login --token <token>${urlHint}`
   );
 }
 
@@ -374,6 +375,7 @@ export const loginCommand = buildCommand({
 
     refuseLoginToUntrustedHost(flags, effectiveHost, urlFromRc);
 
+    // Check if already authenticated and handle re-authentication
     if (isAuthenticated()) {
       const shouldProceed = await handleExistingAuth(flags.force);
       if (!shouldProceed) {
