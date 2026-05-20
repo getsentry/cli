@@ -5,6 +5,7 @@
  * Used by env-file detection for scanning .env file variants.
  */
 
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { handleFileError, isRegularFile } from "./fs-utils.js";
 import type { DetectedDsn } from "./types.js";
@@ -76,8 +77,7 @@ export async function scanSpecificFiles(
       if (!(await isRegularFile(filepath, "scanSpecificFiles.stat"))) {
         continue;
       }
-      const file = Bun.file(filepath);
-      const content = await file.text();
+      const content = await readFile(filepath, "utf-8");
       const result = processFile(filename, content);
 
       if (result?.dsn) {
@@ -85,7 +85,8 @@ export async function scanSpecificFiles(
         if (detected) {
           dsns.push(detected);
           // Record mtime for cache invalidation
-          sourceMtimes[filename] = file.lastModified;
+          const stats = await stat(filepath);
+          sourceMtimes[filename] = Math.floor(stats.mtimeMs);
 
           if (stopOnFirst) {
             return { dsns, sourceMtimes };

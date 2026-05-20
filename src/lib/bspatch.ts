@@ -31,7 +31,7 @@
  */
 
 import { constants, copyFileSync } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -269,7 +269,7 @@ async function loadOldBinary(oldPath: string): Promise<OldFileHandle> {
       /* May not exist if copyFileSync failed */
     });
     return {
-      data: new Uint8Array(await Bun.file(oldPath).arrayBuffer()),
+      data: new Uint8Array(await readFile(oldPath)),
       cleanup: () => {
         // Data is in JS heap — no temp file to clean up
       },
