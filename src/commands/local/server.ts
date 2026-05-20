@@ -240,24 +240,25 @@ export function buildApp(
 function waitForShutdown(server: Server): Promise<void> {
   return new Promise<void>((resolve) => {
     let shuttingDown = false;
-    const shutdown = (signal: NodeJS.Signals) => {
+    const onSigint = () => shutdown("SIGINT");
+    const onSigterm = () => shutdown("SIGTERM");
+
+    function shutdown(signal: NodeJS.Signals) {
       if (shuttingDown) {
-        // Second signal — force exit. Bypasses the `process.exit` hook so
-        // we don't dangle on stuck connections.
         process.exit(0);
       }
       shuttingDown = true;
       logger.log(`Received ${signal}, shutting down...`);
+      process.removeListener("SIGINT", onSigint);
+      process.removeListener("SIGTERM", onSigterm);
       server.close(() => resolve());
-      // Force-close keep-alive connections so we don't wait on long-lived
-      // SSE subscribers.
       if (typeof server.closeAllConnections === "function") {
         server.closeAllConnections();
       }
-    };
+    }
 
-    process.on("SIGINT", () => shutdown("SIGINT"));
-    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", onSigint);
+    process.on("SIGTERM", onSigterm);
   });
 }
 
@@ -510,15 +511,16 @@ export const serverCommand = buildCommand({
       process.once("SIGINT", stop);
       process.once("SIGTERM", stop);
 
-      // Connect to the SSE stream even in quiet mode so we detect when
-      // the upstream server disconnects (the for-await loop exits).
-      await consumeSSE(url, activeFilters, ac.signal, flags.quiet).catch(
-        (err: unknown) => {
-          if (!(err instanceof DOMException && err.name === "AbortError")) {
-            throw err;
-          }
+      try {
+        await consumeSSE(url, activeFilters, ac.signal, flags.quiet);
+      } catch (err: unknown) {
+        if (!(err instanceof DOMException && err.name === "AbortError")) {
+          throw err;
         }
-      );
+      } finally {
+        process.removeListener("SIGINT", stop);
+        process.removeListener("SIGTERM", stop);
+      }
       logger.log("Disconnected.");
       return;
     }
