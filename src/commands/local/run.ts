@@ -108,9 +108,7 @@ export const runCommand = buildCommand({
       );
     }
 
-    const url = `http://${flags.host}:${flags.port}`;
-    const spotlightUrl = `${url}/stream`;
-
+    let url = `http://${flags.host}:${flags.port}`;
     let bgServer: Server | undefined;
 
     const alreadyRunning = await isServerRunning(url);
@@ -118,11 +116,17 @@ export const runCommand = buildCommand({
       logger.info("No server detected, starting one in the background...");
       const buffer = createSpotlightBuffer(BUFFER_SIZE);
       const app = buildApp(buffer);
-      const { server } = await tryListen(app, flags.port, flags.host);
+      const { server, port: boundPort } = await tryListen(
+        app,
+        flags.port,
+        flags.host
+      );
       bgServer = server;
+      url = `http://${flags.host}:${boundPort}`;
       logger.info(`Background server listening on ${bold(url)}`);
     }
 
+    const spotlightUrl = `${url}/stream`;
     logger.info(`Starting: ${bold(args.join(" "))}`);
     logger.info(`SENTRY_SPOTLIGHT=${spotlightUrl}`);
 

@@ -289,7 +289,11 @@ export function tryListen(
         hostname,
       }) as unknown as Server;
 
-      server.once("listening", () => resolve({ server, port }));
+      server.once("listening", () => {
+        const addr = server.address();
+        const boundPort = typeof addr === "object" && addr ? addr.port : port;
+        resolve({ server, port: boundPort });
+      });
       server.once("error", async (err: NodeJS.ErrnoException) => {
         server.close();
         if (err.code === "EADDRINUSE") {
