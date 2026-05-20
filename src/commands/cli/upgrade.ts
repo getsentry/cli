@@ -431,9 +431,9 @@ async function spawnWithRetry(
         stdio: ["ignore", "inherit", "inherit"],
         env,
       });
-      return await new Promise<number>((resolve) => {
+      return await new Promise<number>((resolve, reject) => {
         proc.on("close", (code) => resolve(code ?? 1));
-        proc.on("error", () => resolve(1));
+        proc.on("error", (err) => reject(err));
       });
     } catch (error) {
       // Translate the opaque Bun "Executable not found" error into an

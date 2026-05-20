@@ -8,7 +8,10 @@
 import { existsSync } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
 import { basename, delimiter, join } from "node:path";
+import { logger } from "./logger.js";
 import { whichSync } from "./which.js";
+
+const log = logger.withTag("shell");
 
 /** Supported shell types */
 export type ShellType = "bash" | "zsh" | "fish" | "sh" | "ash" | "unknown";
@@ -299,7 +302,12 @@ export async function addToGitHubPath(
     let content = "";
     try {
       content = await readFile(env.GITHUB_PATH, "utf-8");
-    } catch {
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        log.debug(`Failed to read GITHUB_PATH (${code}):`, error);
+        return false;
+      }
       // File doesn't exist yet — start with empty content
     }
 
@@ -310,7 +318,8 @@ export async function addToGitHubPath(
       await writeFile(env.GITHUB_PATH, newContent, "utf-8");
     }
     return true;
-  } catch {
+  } catch (error) {
+    log.debug("Failed to update GITHUB_PATH:", error);
     return false;
   }
 }

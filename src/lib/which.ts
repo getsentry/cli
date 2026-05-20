@@ -8,6 +8,9 @@
 
 import { execFileSync } from "node:child_process";
 
+/** Matches CRLF or LF line endings. Used to split `where.exe` output on Windows. */
+const NEWLINE_RE = /\r?\n/;
+
 /**
  * Synchronously find the full path to a command in the system PATH.
  *
@@ -58,7 +61,7 @@ export function whichSync(
       );
     }
 
-    return stdout.trim().split("\n")[0] || null;
+    return stdout.trim().split(NEWLINE_RE)[0] || null;
   } catch {
     return null;
   }
