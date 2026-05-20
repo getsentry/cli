@@ -7,7 +7,13 @@
  */
 
 import { spawn } from "node:child_process";
-import { chmodSync, realpathSync, statSync, unlinkSync } from "node:fs";
+import {
+  chmodSync,
+  createWriteStream,
+  realpathSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
@@ -554,13 +560,31 @@ async function streamDecompressToFile(
   destPath: string
 ): Promise<void> {
   const stream = body.pipeThrough(new DecompressionStream("gzip"));
-  const writer = Bun.file(destPath).writer();
+  const writer = createWriteStream(destPath);
+  // Capture write errors early — without a listener, Node crashes with
+  // ERR_UNHANDLED_ERROR if a write fails (ENOSPC, EIO, etc.) during the loop.
+  let writeError: Error | undefined;
+  writer.on("error", (err) => {
+    writeError ??= err;
+  });
   try {
     for await (const chunk of stream) {
+      if (writeError) {
+        break;
+      }
       writer.write(chunk);
     }
   } finally {
-    await writer.end();
+    await new Promise<void>((resolve, reject) => {
+      writer.end((err?: Error | null) => {
+        const finalErr = err ?? writeError;
+        if (finalErr) {
+          reject(finalErr);
+        } else {
+          resolve();
+        }
+      });
+    });
   }
 }
 

@@ -5,20 +5,10 @@
  * TRDIFF10 format (produced by zig-bsdiff with `--use-zstd`). Designed for
  * minimal memory usage during CLI self-upgrades:
  *
- * - Old binary: copy-then-mmap for 0 JS heap (CoW on btrfs/xfs/APFS),
- *   falling back to `arrayBuffer()` if copy/mmap fails
- * - Diff/extra blocks: streamed via `DecompressionStream('zstd')`
- * - Output: written incrementally to disk via `Bun.file().writer()`
- * - Integrity: SHA-256 computed inline via `Bun.CryptoHasher`
- *
- * `Bun.mmap()` cannot target the running binary directly because it opens
- * with PROT_WRITE/O_RDWR:
- * - macOS: AMFI sends uncatchable SIGKILL (writable mapping on signed Mach-O)
- * - Linux: ETXTBSY from `open()` (kernel blocks write-open on running ELF)
- *
- * The copy-then-mmap strategy sidesteps both: the copy is a regular file
- * with no running process, so mmap succeeds. On CoW-capable filesystems
- * (btrfs, xfs, APFS) the copy is near-instant with zero extra disk I/O.
+ * - Old binary: copy to temp file, then read via `readFile()` (~100 MB heap)
+ * - Diff/extra blocks: streamed via zstd `Transform` from `node:zlib`
+ * - Output: written incrementally to disk via `createWriteStream()`
+ * - Integrity: SHA-256 computed inline via `node:crypto`
  *
  * TRDIFF10 format (from zig-bsdiff):
  * ```
@@ -30,10 +20,13 @@
  * ```
  */
 
-import { constants, copyFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { constants, copyFileSync, createWriteStream } from "node:fs";
 import { readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
+import { createZstdDecompress, zstdDecompressSync } from "node:zlib";
 
 /** TRDIFF10 header magic bytes */
 const TRDIFF10_MAGIC = "TRDIFF10";
@@ -123,7 +116,7 @@ export function parsePatchHeader(patch: Uint8Array): PatchHeader {
 /**
  * Buffered reader over a `ReadableStream` that serves exact byte counts.
  *
- * Wraps a `DecompressionStream` output reader to provide `read(n)` semantics:
+ * Wraps a decompression stream output reader to provide `read(n)` semantics:
  * pulls chunks from the underlying stream as needed, buffers leftover bytes,
  * and returns exactly `n` bytes per call.
  */
@@ -195,34 +188,41 @@ class BufferedStreamReader {
 /**
  * Create a streaming zstd decompressor from a compressed buffer.
  *
- * Wraps the compressed data in a ReadableStream, pipes through
- * DecompressionStream('zstd'), and returns a BufferedStreamReader
- * for on-demand byte consumption.
+ * Pipes the compressed data through `node:zlib`'s zstd decompressor and
+ * returns a BufferedStreamReader for on-demand byte consumption.
  *
  * @param compressed - Zstd-compressed data
  * @returns BufferedStreamReader for incremental decompression
  */
 function createZstdStreamReader(compressed: Uint8Array): BufferedStreamReader {
-  const input = new ReadableStream<Uint8Array>({
+  // Convert the node:zlib Transform stream into a Web ReadableStream
+  // so BufferedStreamReader can consume it with the same interface.
+  const nodeStream = Readable.from(Buffer.from(compressed)).pipe(
+    createZstdDecompress()
+  );
+
+  const webStream = new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(compressed);
-      controller.close();
+      nodeStream.on("data", (chunk: Buffer) => {
+        controller.enqueue(new Uint8Array(chunk));
+      });
+      nodeStream.on("end", () => {
+        controller.close();
+      });
+      nodeStream.on("error", (err) => {
+        controller.error(err);
+      });
     },
   });
 
-  // Bun supports 'zstd' but the standard CompressionFormat type doesn't include it
-  const decompressed = input.pipeThrough(
-    new DecompressionStream("zstd" as "deflate")
-  );
-
   return new BufferedStreamReader(
-    decompressed.getReader() as ReadableStreamDefaultReader<Uint8Array>
+    webStream.getReader() as ReadableStreamDefaultReader<Uint8Array>
   );
 }
 
 /** Result of loading the old binary for patching */
 type OldFileHandle = {
-  /** Memory-mapped or in-memory view of the old binary */
+  /** In-memory view of the old binary */
   data: Uint8Array;
   /** Cleanup function to call after patching (removes temp copy, if any) */
   cleanup: () => void | Promise<void>;
@@ -231,14 +231,10 @@ type OldFileHandle = {
 /**
  * Load the old binary for read access during patching.
  *
- * Strategy: copy to temp file, then try mmap on the copy. The copy is a
- * regular file (no running process), so `Bun.mmap()` succeeds on both
- * Linux and macOS — ETXTBSY (Linux) and AMFI SIGKILL (macOS) only affect
- * the running binary's inode, not a copy. On CoW filesystems (btrfs, xfs,
- * APFS) the copy is a metadata-only reflink (near-instant).
- *
- * Falls back to `Bun.file().arrayBuffer()` (~100 MB heap) if copy or
- * mmap fails for any reason.
+ * Strategy: copy to temp file, then read into memory. The copy avoids
+ * ETXTBSY (Linux) / AMFI SIGKILL (macOS) issues with reading the running
+ * binary directly. On CoW filesystems (btrfs, xfs, APFS) the copy is a
+ * metadata-only reflink (near-instant).
  */
 let loadCounter = 0;
 
@@ -253,18 +249,15 @@ async function loadOldBinary(oldPath: string): Promise<OldFileHandle> {
     // silently falls back to regular copy on filesystems that don't support it.
     copyFileSync(oldPath, tempCopy, constants.COPYFILE_FICLONE);
 
-    // mmap the copy — safe because it's a separate inode, not the running
-    // binary. MAP_PRIVATE avoids write-back to disk.
-    const data = Bun.mmap(tempCopy, { shared: false });
     return {
-      data,
+      data: new Uint8Array(await readFile(tempCopy)),
       cleanup: () =>
         unlink(tempCopy).catch(() => {
           /* Best-effort cleanup — OS will reclaim on reboot */
         }),
     };
   } catch {
-    // Copy or mmap failed — fall back to reading into JS heap
+    // Copy failed — read directly into JS heap
     await unlink(tempCopy).catch(() => {
       /* May not exist if copyFileSync failed */
     });
@@ -280,10 +273,9 @@ async function loadOldBinary(oldPath: string): Promise<OldFileHandle> {
 /**
  * Apply a TRDIFF10 binary patch with streaming I/O for minimal memory usage.
  *
- * Copies the old file to a temp path and mmaps the copy (0 JS heap), falling
- * back to `arrayBuffer()` if mmap fails. Streams diff/extra blocks via
- * `DecompressionStream('zstd')`, writes output via `Bun.file().writer()`,
- * and computes SHA-256 inline.
+ * Copies the old file to a temp path and reads it into memory. Streams
+ * diff/extra blocks via `node:zlib` zstd decompressor, writes output via
+ * `createWriteStream()`, and computes SHA-256 inline.
  *
  * @param oldPath - Path to the existing (old) binary file
  * @param patchData - Complete TRDIFF10 patch file contents
@@ -304,7 +296,7 @@ export async function applyPatch(
   const extraStart = diffStart + diffLen;
 
   // Control block is tiny — decompress fully for random access to tuples
-  const controlBlock = Bun.zstdDecompressSync(
+  const controlBlock = zstdDecompressSync(
     patchData.subarray(controlStart, diffStart)
   );
 
@@ -314,14 +306,20 @@ export async function applyPatch(
   );
   const extraReader = createZstdStreamReader(patchData.subarray(extraStart));
 
-  // Load old binary via copy-then-mmap (0 JS heap) or arrayBuffer fallback.
-  // See loadOldBinary() for why direct mmap of the running binary is impossible.
+  // Load old binary via copy-then-read (or direct read as fallback).
   const { data: oldFile, cleanup: cleanupOldFile } =
     await loadOldBinary(oldPath);
 
-  // Streaming output: write directly to disk, no output buffer in memory
-  const writer = Bun.file(destPath).writer();
-  const hasher = new Bun.CryptoHasher("sha256");
+  // Streaming output: write directly to disk, compute SHA-256 inline
+  const writer = createWriteStream(destPath);
+  const hasher = createHash("sha256");
+
+  // Capture write errors early — without a listener, Node crashes with
+  // ERR_UNHANDLED_ERROR if a write fails (ENOSPC, EIO, etc.) during the loop.
+  let writeError: Error | undefined;
+  writer.on("error", (err) => {
+    writeError ??= err;
+  });
 
   let oldpos = 0;
   let newpos = 0;
@@ -333,6 +331,9 @@ export async function applyPatch(
       controlPos < controlBlock.byteLength;
       controlPos += 24
     ) {
+      if (writeError) {
+        break;
+      }
       const readDiffBy = offtin(controlBlock, controlPos);
       const readExtraBy = offtin(controlBlock, controlPos + 8);
       const seekBy = offtin(controlBlock, controlPos + 16);
@@ -367,7 +368,16 @@ export async function applyPatch(
     }
   } finally {
     try {
-      await writer.end();
+      await new Promise<void>((resolve, reject) => {
+        writer.end((err?: Error | null) => {
+          const finalErr = err ?? writeError;
+          if (finalErr) {
+            reject(finalErr);
+          } else {
+            resolve();
+          }
+        });
+      });
     } finally {
       await cleanupOldFile();
     }
@@ -380,5 +390,5 @@ export async function applyPatch(
     );
   }
 
-  return hasher.digest("hex") as string;
+  return hasher.digest("hex");
 }
