@@ -85,17 +85,25 @@ export const runCommand = buildCommand({
     logger.info(`Starting: ${bold(args.join(" "))}`);
     logger.info(`SENTRY_SPOTLIGHT=${spotlightUrl}`);
 
-    const child = Bun.spawn(args, {
-      env: {
-        ...process.env,
-        SENTRY_SPOTLIGHT: spotlightUrl,
-        NEXT_PUBLIC_SENTRY_SPOTLIGHT: spotlightUrl,
-        SENTRY_TRACES_SAMPLE_RATE: "1",
-      },
-      stdout: "inherit",
-      stderr: "inherit",
-      stdin: "inherit",
-    });
+    let child: ReturnType<typeof Bun.spawn>;
+    try {
+      child = Bun.spawn(args, {
+        env: {
+          ...process.env,
+          SENTRY_SPOTLIGHT: spotlightUrl,
+          NEXT_PUBLIC_SENTRY_SPOTLIGHT: spotlightUrl,
+          SENTRY_TRACES_SAMPLE_RATE: "1",
+        },
+        stdout: "inherit",
+        stderr: "inherit",
+        stdin: "inherit",
+      });
+    } catch (err) {
+      throw new CliError(
+        `Failed to start "${args[0]}": ${err instanceof Error ? err.message : String(err)}`,
+        EXIT.GENERAL
+      );
+    }
 
     const exitCode = await child.exited;
 
