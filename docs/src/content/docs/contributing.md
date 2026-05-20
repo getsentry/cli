@@ -56,6 +56,7 @@ cli/
 │   │   ├── dashboard/   # list, view, create, add, edit, delete, revisions, restore
 │   │   ├── event/       # view, list
 │   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, archive, merge
+│   │   ├── local/       # server, run
 │   │   ├── log/         # list, view
 │   │   ├── org/         # list, view
 │   │   ├── project/     # create, delete, list, view
@@ -71,7 +72,6 @@ cli/
 │   │   ├── explore.ts   # Query aggregate event data (Explore)
 │   │   ├── help.ts      # Help command
 │   │   ├── init.ts      # Initialize Sentry in your project (experimental)
-│   │   ├── local.ts     # Run a local Spotlight server to capture dev SDK events
 │   │   └── schema.ts    # Browse the Sentry API schema
 │   ├── lib/            # Shared utilities
 │   └── types/          # TypeScript types and Zod schemas

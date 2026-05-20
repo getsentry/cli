@@ -4,23 +4,37 @@
 
 No authentication is required — the server binds to `localhost` by default and is purely a development tool.
 
-Learn more about Spotlight at [spotlightjs.com/docs/getting-started](https://spotlightjs.com/docs/getting-started/).
-
 ## Examples
 
 ```bash
-# Start the server on the default port (8969)
+# Start the server and tail events (default)
 sentry local
 
-# Use a custom port and bind to all interfaces
-sentry local --port 9000 --host 0.0.0.0
+# Run your app with Spotlight auto-enabled
+sentry local run -- npm run dev
+sentry local run -- python manage.py runserver
 
-# Run quietly (suppress per-envelope tail output)
-sentry local --quiet
+# Use a custom port
+sentry local --port 9000
 
 # Only show errors and logs (filter out transactions)
 sentry local -f error -f log
+
+# Run quietly (suppress per-envelope tail output)
+sentry local --quiet
 ```
+
+## `sentry local run`
+
+Runs a command with `SENTRY_SPOTLIGHT` injected into the environment. The Sentry SDK automatically detects this variable and sends envelopes to the local server. No code changes needed.
+
+Env vars injected into the child process:
+
+| Variable | Value |
+|----------|-------|
+| `SENTRY_SPOTLIGHT` | `http://localhost:<port>/stream` |
+| `NEXT_PUBLIC_SENTRY_SPOTLIGHT` | `http://localhost:<port>/stream` |
+| `SENTRY_TRACES_SAMPLE_RATE` | `1` |
 
 ## Endpoints
 

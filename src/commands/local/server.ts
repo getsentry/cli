@@ -22,9 +22,9 @@ import {
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
-import type { SentryContext } from "../context.js";
-import { buildCommand, numberParser } from "../lib/command.js";
-import { ValidationError } from "../lib/errors.js";
+import type { SentryContext } from "../../context.js";
+import { buildCommand, numberParser } from "../../lib/command.js";
+import { ValidationError } from "../../lib/errors.js";
 import {
   blue,
   bold,
@@ -33,12 +33,12 @@ import {
   muted,
   red,
   yellow,
-} from "../lib/formatters/colors.js";
-import { stripAnsi } from "../lib/formatters/plain-detect.js";
-import { logger } from "../lib/logger.js";
+} from "../../lib/formatters/colors.js";
+import { stripAnsi } from "../../lib/formatters/plain-detect.js";
+import { logger } from "../../lib/logger.js";
 
 /** Default port matches Spotlight's `DEFAULT_PORT`. */
-const DEFAULT_PORT = 8969;
+export const DEFAULT_PORT = 8969;
 
 /** Buffer size: how many recent envelopes to retain for late subscribers. */
 const BUFFER_SIZE = 500;
@@ -787,7 +787,7 @@ function processSSEEvent(
   }
 }
 
-export const localCommand = buildCommand({
+export const serverCommand = buildCommand({
   docs: {
     brief: "Run a local Spotlight server to capture dev SDK events",
     fullDescription:

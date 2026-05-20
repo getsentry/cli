@@ -18,7 +18,7 @@ import { helpCommand } from "./commands/help.js";
 import { initCommand } from "./commands/init.js";
 import { issueRoute } from "./commands/issue/index.js";
 import { listCommand as issueListCommand } from "./commands/issue/list.js";
-import { localCommand } from "./commands/local.js";
+import { localRoute } from "./commands/local/index.js";
 import { logRoute } from "./commands/log/index.js";
 import { listCommand as logListCommand } from "./commands/log/list.js";
 import { orgRoute } from "./commands/org/index.js";
@@ -104,7 +104,7 @@ export const routes = buildRouteMap({
     trace: traceRoute,
     trial: trialRoute,
     init: initCommand,
-    local: localCommand,
+    local: localRoute,
     api: apiCommand,
     schema: schemaCommand,
     dashboards: dashboardListCommand,

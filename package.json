@@ -118,5 +118,10 @@
     "check:docs-sections": "bun run script/generate-docs-sections.ts --check"
   },
   "type": "module",
-  "types": "./dist/index.d.cts"
+  "types": "./dist/index.d.cts",
+  "patchedDependencies": {
+    "@stricli/core@1.2.5": "patches/@stricli%2Fcore@1.2.5.patch",
+    "@sentry/node-core@10.50.0": "patches/@sentry%2Fnode-core@10.50.0.patch",
+    "@sentry/core@10.50.0": "patches/@sentry%2Fcore@10.50.0.patch"
+  }
 }

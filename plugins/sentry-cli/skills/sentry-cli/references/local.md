@@ -1,7 +1,7 @@
 ---
 name: sentry-cli-local
 version: 0.35.0-dev.0
-description: Run a local Spotlight server to capture dev SDK events
+description: Run a local Spotlight server for development
 requires:
   bins: ["sentry"]
   auth: true
@@ -9,9 +9,9 @@ requires:
 
 # Local Commands
 
-Run a local Spotlight server to capture dev SDK events
+Run a local Spotlight server for development
 
-### `sentry local`
+### `sentry local server`
 
 Run a local Spotlight server to capture dev SDK events
 
@@ -21,20 +21,32 @@ Run a local Spotlight server to capture dev SDK events
 - `-q, --quiet - Suppress per-envelope tail output`
 - `-f, --filter <value>... - Only show items of this type (repeatable: error, transaction, log)`
 
+### `sentry local run <command...>`
+
+Run a command with Spotlight enabled
+
+**Flags:**
+- `-p, --port <value> - Port for the Spotlight server (default 8969) - (default: "8969")`
+- `--host <value> - Hostname for the Spotlight server (default localhost) - (default: "localhost")`
+
 **Examples:**
 
 ```bash
-# Start the server on the default port (8969)
+# Start the server and tail events (default)
 sentry local
 
-# Use a custom port and bind to all interfaces
-sentry local --port 9000 --host 0.0.0.0
+# Run your app with Spotlight auto-enabled
+sentry local run -- npm run dev
+sentry local run -- python manage.py runserver
 
-# Run quietly (suppress per-envelope tail output)
-sentry local --quiet
+# Use a custom port
+sentry local --port 9000
 
 # Only show errors and logs (filter out transactions)
 sentry local -f error -f log
+
+# Run quietly (suppress per-envelope tail output)
+sentry local --quiet
 
 sentry local -f error -f log    # only errors and logs
 ```
