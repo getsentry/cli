@@ -16,7 +16,8 @@
  */
 
 import { terminalLink } from "../formatters/colors.js";
-import { featureLabel } from "./clack-utils.js";
+import { stripAnsi } from "../formatters/plain-detect.js";
+import { featureLabel, sortFeatures } from "./clack-utils.js";
 import {
   EXIT_DEPENDENCY_INSTALL_FAILED,
   EXIT_PLATFORM_NOT_DETECTED,
@@ -33,6 +34,22 @@ import type { WizardSummary, WizardUI } from "./ui/types.js";
  * appear.
  */
 function buildSummary(output: WizardOutput): WizardSummary | null {
+  // Resolve blurbs first so the Features row can check the *resolved* length.
+  // If the agent returns blurbs with wrong IDs they all drop out here, and
+  // the Features row falls back to showing correctly.
+  const blurbMap = new Map(
+    (output.featureBlurbs ?? []).map(({ feature, blurb }) => [
+      feature,
+      stripAnsi(blurb),
+    ])
+  );
+  const featureBlurbs = sortFeatures(output.features ?? [])
+    .map((feature) => {
+      const blurb = blurbMap.get(feature);
+      return blurb ? { label: featureLabel(feature), blurb } : null;
+    })
+    .filter((b): b is { label: string; blurb: string } => b !== null);
+
   const fields: WizardSummary["fields"] = [];
 
   if (output.platform) {
@@ -41,7 +58,7 @@ function buildSummary(output: WizardOutput): WizardSummary | null {
   if (output.projectDir) {
     fields.push({ label: "Directory", value: output.projectDir });
   }
-  if (output.features?.length) {
+  if (output.features?.length && !featureBlurbs.length) {
     fields.push({
       label: "Features",
       value: output.features.map(featureLabel).join(", "),
@@ -62,13 +79,18 @@ function buildSummary(output: WizardOutput): WizardSummary | null {
 
   const changedFiles = output.changedFiles ?? [];
 
-  if (fields.length === 0 && changedFiles.length === 0) {
+  if (
+    fields.length === 0 &&
+    changedFiles.length === 0 &&
+    featureBlurbs.length === 0
+  ) {
     return null;
   }
 
   return {
     fields,
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
+    ...(featureBlurbs.length > 0 ? { featureBlurbs } : {}),
   };
 }
 

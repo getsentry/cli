@@ -184,6 +184,263 @@ describe("formatResult", () => {
   });
 });
 
+describe("formatResult with featureBlurbs", () => {
+  test("populates featureBlurbs from output.featureBlurbs paired positionally with output.features", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          projectDir: "/app",
+          features: ["errorMonitoring", "performanceMonitoring"],
+          featureBlurbs: [
+            { feature: "errorMonitoring", blurb: "Captures exceptions." },
+            { feature: "performanceMonitoring", blurb: "Traces requests." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs).toEqual([
+      { label: "Error Monitoring", blurb: "Captures exceptions." },
+      { label: "Tracing", blurb: "Traces requests." },
+    ]);
+  });
+
+  test("suppresses the Features row when featureBlurbs are present", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring"],
+          featureBlurbs: [
+            { feature: "errorMonitoring", blurb: "Captures exceptions." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.fields.some((f) => f.label === "Features")).toBe(false);
+  });
+
+  test("shows the Features row when featureBlurbs are absent", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring", "sessionReplay"],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.fields.some((f) => f.label === "Features")).toBe(true);
+  });
+
+  test("labels use canonical feature IDs — agent echoing wrong IDs omits the blurb rather than mislabelling", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring", "sessionReplay"],
+          // Agent echoed back wrong IDs — neither matches a canonical feature
+          featureBlurbs: [
+            { feature: "error_monitoring", blurb: "Blurb A." },
+            { feature: "session-replay", blurb: "Blurb B." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    // Wrong IDs → no match → blurbs omitted entirely; safe fallback
+    expect(summary?.featureBlurbs).toBeUndefined();
+  });
+
+  test("drops blurb for feature the agent omitted — remaining blurbs stay correctly labelled", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: [
+            "errorMonitoring",
+            "performanceMonitoring",
+            "sessionReplay",
+          ],
+          // Agent returned 2 of 3; skipped performanceMonitoring
+          featureBlurbs: [
+            { feature: "errorMonitoring", blurb: "Captures." },
+            { feature: "sessionReplay", blurb: "Records." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs).toHaveLength(2);
+    expect(summary?.featureBlurbs?.map((b) => b.label)).toEqual([
+      "Error Monitoring",
+      "Session Replay",
+    ]);
+  });
+
+  test("stripAnsi strips SGR colour codes from server-supplied blurbs", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring"],
+          featureBlurbs: [
+            { feature: "errorMonitoring", blurb: "\x1b[31mCaptures.\x1b[0m" },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs?.[0]?.blurb).toBe("Captures.");
+  });
+
+  test("stripAnsi strips CSI sequences with intermediate bytes (e.g. soft reset, cursor style)", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring"],
+          featureBlurbs: [
+            // \x1b[!p = Soft Terminal Reset (intermediate byte !)
+            // \x1b[1 q = Set Cursor Style (intermediate byte space)
+            {
+              feature: "errorMonitoring",
+              blurb: "\x1b[!pCaptures.\x1b[1 q",
+            },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs?.[0]?.blurb).toBe("Captures.");
+  });
+
+  test("stripAnsi strips arbitrary OSC sequences (e.g. window title change) from blurbs", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring"],
+          featureBlurbs: [
+            // \x1b]0;title\x07 = set window title — OSC command, not OSC 8
+            {
+              feature: "errorMonitoring",
+              blurb: "\x1b]0;injected title\x07Captures.",
+            },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs?.[0]?.blurb).toBe("Captures.");
+  });
+
+  test("stripAnsi strips single-char C1 ESC sequences (e.g. terminal reset) from blurbs", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring"],
+          featureBlurbs: [
+            // \x1bc = RIS (Reset to Initial State) — two-char ESC sequence
+            { feature: "errorMonitoring", blurb: "\x1bcCaptures." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs?.[0]?.blurb).toBe("Captures.");
+  });
+
+  test("stripAnsi strips non-SGR CSI sequences (cursor movement, screen-clear) from blurbs", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          features: ["errorMonitoring"],
+          featureBlurbs: [
+            // \x1b[2J = clear screen, \x1b[1A = cursor up — non-SGR CSI
+            {
+              feature: "errorMonitoring",
+              blurb: "\x1b[2JCaptures.\x1b[1A",
+            },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    expect(summary?.featureBlurbs?.[0]?.blurb).toBe("Captures.");
+  });
+
+  test("sorts featureBlurbs by canonical display order", () => {
+    const { ui, calls } = createMockUI();
+    formatResult(
+      {
+        status: "success",
+        result: {
+          platform: "Next.js",
+          // Server returned performanceMonitoring before errorMonitoring
+          features: ["performanceMonitoring", "errorMonitoring"],
+          featureBlurbs: [
+            { feature: "performanceMonitoring", blurb: "Traces." },
+            { feature: "errorMonitoring", blurb: "Captures." },
+          ],
+        },
+      },
+      ui
+    );
+
+    const summary = summaryCall(calls);
+    // errorMonitoring comes before performanceMonitoring in FEATURE_DISPLAY_ORDER
+    expect(summary?.featureBlurbs?.map((b) => b.label)).toEqual([
+      "Error Monitoring",
+      "Tracing",
+    ]);
+  });
+});
+
 describe("formatError", () => {
   test("logs the error message", () => {
     const { ui, calls } = createMockUI();

@@ -5,7 +5,6 @@ describe("formatFeedbackHint", () => {
   test("maps init outcomes to copy-paste feedback commands", () => {
     expect(formatFeedbackHint("success")).toBe(
       [
-        "Nice, setup made it through.",
         "Tell us what felt great or rough:",
         '$ sentry cli feedback "sentry init worked well"',
       ].join("\n")

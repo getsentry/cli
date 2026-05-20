@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { renderTextTable } from "../../formatters/text-table.js";
 import { buildFileTree, flattenTree } from "./file-tree.js";
 import type { WizardSummary } from "./types.js";
 
@@ -58,6 +59,20 @@ export function formatSuccessReport(
     for (const field of summary.fields) {
       const label = chalk.hex(REPORT_MUTED)(field.label.padEnd(labelWidth));
       lines.push(`   ${label}  ${field.value}`);
+    }
+  }
+  if (summary?.featureBlurbs && summary.featureBlurbs.length > 0) {
+    lines.push("");
+    lines.push(`   ${chalk.hex(REPORT_MUTED).bold("Here's what we set up")}`);
+    const tableRows = summary.featureBlurbs.map(({ label, blurb }) => [
+      chalk.bold(label),
+      chalk.hex(REPORT_MUTED)(blurb),
+    ]);
+    const table = renderTextTable(["", ""], tableRows, {
+      shrinkable: [false, true],
+    });
+    for (const line of table.trimEnd().split("\n")) {
+      lines.push(`   ${line}`);
     }
   }
   if (summary?.changedFiles && summary.changedFiles.length > 0) {

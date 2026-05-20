@@ -49,6 +49,37 @@ describe("formatSuccessReport with summary fields", () => {
   });
 });
 
+describe("formatSuccessReport with featureBlurbs", () => {
+  test("renders Here's what we set up heading and blurb content", () => {
+    const output = stripAnsi(
+      formatSuccessReport("Done!", {
+        fields: [],
+        featureBlurbs: [
+          { label: "Error Monitoring", blurb: "Captures exceptions." },
+          { label: "Tracing", blurb: "Traces requests end-to-end." },
+        ],
+      })
+    );
+    expect(output).toContain("Here's what we set up");
+    expect(output).toContain("Error Monitoring");
+    expect(output).toContain("Captures exceptions.");
+    expect(output).toContain("Tracing");
+    expect(output).toContain("Traces requests end-to-end.");
+  });
+
+  test("no blurbs section when featureBlurbs is absent", () => {
+    const output = stripAnsi(formatSuccessReport("Done!", { fields: [] }));
+    expect(output).not.toContain("Here's what we set up");
+  });
+
+  test("no blurbs section when featureBlurbs is empty", () => {
+    const output = stripAnsi(
+      formatSuccessReport("Done!", { fields: [], featureBlurbs: [] })
+    );
+    expect(output).not.toContain("Here's what we set up");
+  });
+});
+
 describe("formatSuccessReport with changedFiles", () => {
   test("shows Changed files heading and file paths", () => {
     const output = stripAnsi(
