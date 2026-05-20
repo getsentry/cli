@@ -8,8 +8,10 @@
 
 import { spawn } from "node:child_process";
 import { chmodSync, realpathSync, statSync, unlinkSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
+import { setTimeout } from "node:timers/promises";
 import {
   acquireLock,
   cleanupOldBinary,
@@ -658,7 +660,7 @@ async function downloadStableToPath(
   // process before the download completes (Bun event-loop bug).
   // See: https://github.com/oven-sh/bun/issues/13237
   const body = await response.arrayBuffer();
-  await Bun.write(destPath, body);
+  await writeFile(destPath, new Uint8Array(body));
 }
 
 /**
@@ -725,7 +727,7 @@ async function waitForBinaryVisible(path: string): Promise<number> {
     log.debug(
       `Downloaded binary not yet visible at ${path}, retrying in ${delay}ms (attempt ${attempt}/${VERIFY_MAX_ATTEMPTS})`
     );
-    await Bun.sleep(delay);
+    await setTimeout(delay);
   }
   throw new UpgradeError(
     "execution_failed",

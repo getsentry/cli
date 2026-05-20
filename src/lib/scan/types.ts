@@ -21,10 +21,10 @@ export type WalkEntry = {
    * Does not start with `./`. Does not end with `/`.
    */
   relativePath: string;
-  /** Size in bytes, from `Bun.file(path).size`. */
+  /** Size in bytes. */
   size: number;
   /**
-   * mtime in milliseconds since epoch, from `Bun.file(path).lastModified`.
+   * mtime in milliseconds since epoch.
    * Zero when `recordMtimes: false` (the default) — stat'ing every file
    * adds measurable overhead on large scans.
    */

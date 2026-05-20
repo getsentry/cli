@@ -9,6 +9,7 @@
 
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
+import { compare as semverCompare } from "semver";
 import { CLI_VERSION } from "./constants.js";
 import { getReleaseChannel } from "./db/release-channel.js";
 import {
@@ -125,7 +126,7 @@ async function maybePrefetchPatches(
   latestVersion: string,
   signal: AbortSignal
 ): Promise<void> {
-  if (Bun.semver.order(latestVersion, CLI_VERSION) !== 1) {
+  if (semverCompare(latestVersion, CLI_VERSION) !== 1) {
     return;
   }
   try {
@@ -272,7 +273,7 @@ function getUpdateNotificationWithCopy(
 
     // Use Bun's native semver comparison (polyfilled for Node.js)
     // order() returns 1 if first arg is greater than second
-    if (Bun.semver.order(latestVersion, CLI_VERSION) !== 1) {
+    if (semverCompare(latestVersion, CLI_VERSION) !== 1) {
       return null;
     }
 

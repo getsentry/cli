@@ -26,6 +26,7 @@
  * the cache schema.
  */
 
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_SENTRY_HOST, getConfiguredSentryUrl } from "../constants.js";
 import { ConfigError } from "../errors.js";
@@ -166,7 +167,7 @@ export function scanCodeForFirstDsn(cwd: string): Promise<DetectedDsn | null> {
           filesScanned += 1;
           let content: string;
           try {
-            content = await Bun.file(entry.absolutePath).text();
+            content = await readFile(entry.absolutePath, "utf-8");
           } catch {
             continue;
           }

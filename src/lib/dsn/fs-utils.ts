@@ -4,6 +4,7 @@
  * Shared utilities for handling file system errors during scanning.
  */
 
+import { stat } from "node:fs/promises";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 
@@ -63,9 +64,9 @@ export function handleFileError(
  * Check if a path points to a regular file (not a FIFO, socket, device, etc.).
  *
  * Named pipes (FIFOs) — commonly used by 1Password to stream secrets via
- * symlinked `.env` files — cause `Bun.file().text()` to block indefinitely
- * waiting for a writer. This guard uses `Bun.file(path).stat()`, which follows
- * symlinks and inspects file type without performing the blocking read, so a
+ * symlinked `.env` files — cause `readFile()` to block indefinitely
+ * waiting for a writer. This guard uses `stat()`, which follows symlinks
+ * and inspects file type without performing the blocking read, so a
  * symlink → FIFO is correctly detected.
  *
  * @param filePath - Absolute path to check
@@ -77,7 +78,7 @@ export async function isRegularFile(
   operation = "isRegularFile"
 ): Promise<boolean> {
   try {
-    const stats = await Bun.file(filePath).stat();
+    const stats = await stat(filePath);
     return stats.isFile();
   } catch (error) {
     handleFileError(error, { operation, path: filePath });

@@ -5,6 +5,7 @@
  * Similar to 'gh api' for GitHub.
  */
 
+import { access, readFile } from "node:fs/promises";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 import type { SentryContext } from "../context.js";
@@ -828,11 +829,14 @@ export async function buildBodyFromInput(
   if (inputPath === "-") {
     content = await readStdin(stdin);
   } else {
-    const file = Bun.file(inputPath);
-    if (!(await file.exists())) {
+    const exists = await access(inputPath).then(
+      () => true,
+      () => false
+    );
+    if (!exists) {
       throw new ValidationError(`File not found: ${inputPath}`, "input");
     }
-    content = await file.text();
+    content = await readFile(inputPath, "utf-8");
   }
 
   // Try to parse as JSON for the API client

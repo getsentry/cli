@@ -16,7 +16,7 @@
  * `resolve-target.ts`.
  */
 
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { normalizeUrl } from "./constants.js";
@@ -163,7 +163,7 @@ async function tryReadSentryCliRc(filePath: string): Promise<string | null> {
     return null;
   }
   try {
-    return await Bun.file(filePath).text();
+    return await readFile(filePath, "utf-8");
   } catch (error) {
     if (isNarrowAbsenceError(error)) {
       return null;

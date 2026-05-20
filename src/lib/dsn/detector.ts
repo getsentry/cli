@@ -12,7 +12,7 @@
  * Priority: .env with SENTRY_DSN > code > .env files > SENTRY_DSN env var
  */
 
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   getCachedDetection,
@@ -291,7 +291,7 @@ async function verifyFileDsnCache(
     if (!(await isRegularFile(filePath, "verifyFileDsnCache.stat"))) {
       return null;
     }
-    const content = await Bun.file(filePath).text();
+    const content = await readFile(filePath, "utf-8");
     const foundDsn = extractDsnFromContent(content, cached.source);
 
     if (foundDsn === cached.dsn) {

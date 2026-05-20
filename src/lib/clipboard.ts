@@ -5,7 +5,9 @@
  * Includes both low-level copy function and interactive keyboard-triggered copy.
  */
 
+import { spawn } from "node:child_process";
 import { logger } from "./logger.js";
+import { whichSync } from "./which.js";
 
 const log = logger.withTag("clipboard");
 
@@ -29,18 +31,18 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   let args: string[] = [];
 
   if (platform === "darwin") {
-    command = Bun.which("pbcopy");
+    command = whichSync("pbcopy");
     args = [];
   } else if (platform === "win32") {
-    command = Bun.which("clip");
+    command = whichSync("clip");
     args = [];
   } else {
     // Linux - try xclip first, then xsel
-    command = Bun.which("xclip");
+    command = whichSync("xclip");
     if (command) {
       args = ["-selection", "clipboard"];
     } else {
-      command = Bun.which("xsel");
+      command = whichSync("xsel");
       if (command) {
         args = ["--clipboard", "--input"];
       }
@@ -52,16 +54,20 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   }
 
   try {
-    const proc = Bun.spawn([command, ...args], {
-      stdin: "pipe",
-      stdout: "ignore",
-      stderr: "ignore",
+    const proc = spawn(command, args, {
+      stdio: ["pipe", "ignore", "ignore"],
     });
 
-    proc.stdin.write(text);
-    proc.stdin.end();
+    const { stdin } = proc;
+    if (stdin) {
+      stdin.write(text);
+      stdin.end();
+    }
 
-    const exitCode = await proc.exited;
+    const exitCode = await new Promise<number>((resolve) => {
+      proc.on("close", (code) => resolve(code ?? 1));
+      proc.on("error", () => resolve(1));
+    });
     return exitCode === 0;
   } catch {
     return false;

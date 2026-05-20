@@ -8,6 +8,7 @@
  * through the SDK function options (baseUrl, fetch, headers).
  */
 
+import { setTimeout as sleepMs } from "node:timers/promises";
 import { getTraceData } from "@sentry/node-core/light";
 import { maybeWarnEnvTokenIgnored } from "./auth-hint.js";
 import { computeInvalidationPrefixes } from "./cache-keys.js";
@@ -544,7 +545,7 @@ async function fetchWithRetry(
     log.debug(
       `${method} ${new URL(fullUrl).pathname} → retry ${attempt + 1}/${MAX_RETRIES} after ${delay}ms`
     );
-    await Bun.sleep(delay);
+    await sleepMs(delay);
   }
 
   // Unreachable: the last attempt always returns 'done' or 'throw'
