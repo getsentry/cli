@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ClientRequest, IncomingHttpHeaders } from "node:http";
-import { gunzipSync } from "node:zlib";
+import { gunzipSync, zstdDecompressSync } from "node:zlib";
 import { createEnvelope } from "@sentry/core";
 import {
   hasZstdSupport,
@@ -112,16 +112,6 @@ const BASE_OPTIONS = {
 };
 
 describe("makeCompressedTransport", () => {
-  let savedZstd: typeof globalThis.Bun.zstdCompress | undefined;
-
-  afterEach(() => {
-    // Restore Bun.zstdCompress after tests that stash it.
-    if (savedZstd !== undefined) {
-      globalThis.Bun.zstdCompress = savedZstd;
-      savedZstd = undefined;
-    }
-  });
-
   test("zstd branch: sets Content-Encoding: zstd and round-trips", async () => {
     if (!hasZstdSupport()) {
       // On a runtime without zstd this test is meaningless.
@@ -151,50 +141,14 @@ describe("makeCompressedTransport", () => {
     expect(wire.length).toBeGreaterThan(0);
 
     // Decompress and verify the payload body is present
-    const decompressed = await Bun.zstdDecompress(wire);
-    const text = Buffer.from(
-      decompressed.buffer,
-      decompressed.byteOffset,
-      decompressed.byteLength
-    ).toString("utf-8");
+    const decompressed = zstdDecompressSync(wire);
+    const text = decompressed.toString("utf-8");
     expect(text).toContain(payload);
   });
 
-  test("gzip fallback: Bun.zstdCompress absent → Content-Encoding: gzip", async () => {
-    savedZstd = globalThis.Bun.zstdCompress;
-    // Stash + remove zstd to force the gzip branch
-    (globalThis as { Bun: { zstdCompress?: unknown } }).Bun.zstdCompress =
-      undefined as never;
-
-    try {
-      const { httpModule, captured } = buildMockHttpModule({
-        statusCode: 200,
-        headers: {},
-      });
-
-      const transport = makeCompressedTransport({
-        ...BASE_OPTIONS,
-        httpModule,
-      });
-
-      // Build a payload > GZIP_THRESHOLD (32 KiB).
-      const payload = "y".repeat(64 * 1024);
-      const envelope: any = createEnvelope({} as any, [
-        [{ type: "event" } as any, { data: payload } as any],
-      ]);
-      await transport.send(envelope);
-
-      const headers = captured.options.headers as Record<string, string>;
-      expect(headers["content-encoding"]).toBe("gzip");
-
-      const wire = Buffer.concat(captured.chunks);
-      const decompressed = gunzipSync(wire);
-      const text = decompressed.toString("utf-8");
-      expect(text).toContain(payload);
-    } finally {
-      // afterEach restores savedZstd
-    }
-  });
+  // Note: the "gzip fallback when zstd is absent" test was removed because
+  // zstd is now provided by node:zlib (always available in Node 22.15+),
+  // not by a removable globalThis.Bun.zstdCompress polyfill.
 
   test("below threshold: no content-encoding header", async () => {
     const { httpModule, captured } = buildMockHttpModule({
@@ -439,7 +393,7 @@ describe("maybeCompress", () => {
     const result = await maybeCompress(buf, "zstd");
     expect(result.encodingApplied).toBe("zstd");
     expect(result.payload.length).toBeLessThan(buf.length);
-    const decompressed = await Bun.zstdDecompress(result.payload);
+    const decompressed = zstdDecompressSync(result.payload);
     expect(decompressed.toString("utf-8")).toBe("x".repeat(4096));
   });
 
@@ -466,47 +420,9 @@ describe("maybeCompress", () => {
     expect(result.payload).toBe(buf);
   });
 
-  test("zstd path + Bun.zstdCompress missing mid-flight + >32 KiB → gzip safety net", async () => {
-    const saved = globalThis.Bun?.zstdCompress;
-    (globalThis as { Bun: { zstdCompress?: unknown } }).Bun.zstdCompress =
-      undefined as never;
-    try {
-      const buf = Buffer.from("x".repeat(64 * 1024));
-      // Encoding pre-selected as "zstd" (caller didn't reprobe), but
-      // the runtime now lacks zstd — the belt-and-braces branch gzips.
-      const result = await maybeCompress(buf, "zstd");
-      expect(result.encodingApplied).toBe("gzip");
-      expect(gunzipSync(result.payload).toString("utf-8")).toBe(
-        "x".repeat(64 * 1024)
-      );
-    } finally {
-      if (saved !== undefined) {
-        globalThis.Bun.zstdCompress = saved;
-      }
-    }
-  });
-
-  test("zstd path + Bun.zstdCompress missing mid-flight + 1-32 KiB → passthrough (matches SDK default)", async () => {
-    // Edge case: caller selected "zstd" because Bun.zstdCompress was
-    // present at construction, but the global got swapped out before
-    // the first send. For bodies between ZSTD_THRESHOLD (1 KiB) and
-    // GZIP_THRESHOLD (32 KiB) we MUST pass them through uncompressed,
-    // matching the SDK's default-transport behavior. Otherwise we'd
-    // gzip bodies the SDK would have shipped raw.
-    const saved = globalThis.Bun?.zstdCompress;
-    (globalThis as { Bun: { zstdCompress?: unknown } }).Bun.zstdCompress =
-      undefined as never;
-    try {
-      const buf = Buffer.from("x".repeat(8 * 1024));
-      const result = await maybeCompress(buf, "zstd");
-      expect(result.encodingApplied).toBe("none");
-      expect(result.payload).toBe(buf);
-    } finally {
-      if (saved !== undefined) {
-        globalThis.Bun.zstdCompress = saved;
-      }
-    }
-  });
+  // Note: the "zstd mid-flight missing" tests were removed because zstd
+  // is now provided by node:zlib (always available), not a runtime polyfill
+  // that could disappear between construction and first send.
 });
 
 describe("isNoProxyExempt", () => {
@@ -596,22 +512,9 @@ describe("isNoProxyExempt", () => {
 });
 
 describe("hasZstdSupport", () => {
-  test("true when Bun.zstdCompress is present (Bun runtime)", () => {
-    // Running under bun test, so this should always be true.
+  test("true on Node 22.15+ (node:zlib provides zstdCompress)", () => {
+    // node:zlib.zstdCompress is always available in our minimum Node version.
     expect(hasZstdSupport()).toBe(true);
-  });
-
-  test("false when Bun.zstdCompress is absent (simulated)", () => {
-    const saved = globalThis.Bun?.zstdCompress;
-    (globalThis as { Bun: { zstdCompress?: unknown } }).Bun.zstdCompress =
-      undefined as never;
-    try {
-      expect(hasZstdSupport()).toBe(false);
-    } finally {
-      if (saved !== undefined) {
-        globalThis.Bun.zstdCompress = saved;
-      }
-    }
   });
 });
 

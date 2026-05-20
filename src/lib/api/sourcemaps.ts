@@ -24,7 +24,8 @@ import { open, readFile, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { gzip as gzipCb } from "node:zlib";
+// biome-ignore lint/performance/noNamespaceImport: needed for feature-detected zstd access
+import * as zlib from "node:zlib";
 import pLimit from "p-limit";
 import { z } from "zod";
 import { ApiError } from "../errors.js";
@@ -34,7 +35,22 @@ import { getSdkConfig } from "../sentry-client.js";
 import { type ZipCompression, ZipWriter } from "../sourcemap/zip.js";
 import { apiRequestToRegion } from "./infrastructure.js";
 
-const gzipAsync = promisify(gzipCb);
+const gzipAsync = promisify(zlib.gzip);
+// zstdCompress is available in Node 22.15+. Feature-detect to avoid crashing
+// the npm bundle on older Node versions (e.g., CI runners with Node 20).
+// zstdCompress is available in Node 22.15+. Feature-detect to avoid crashing
+// the npm bundle on older Node versions (e.g., CI runners with Node 20).
+// biome-ignore lint/suspicious/noExplicitAny: zstd types unavailable on older @types/node
+const zstdCompressFn = (zlib as any).zstdCompress as
+  | ((...args: unknown[]) => unknown)
+  | undefined;
+const zstdCompressAsync =
+  typeof zstdCompressFn === "function"
+    ? (promisify(zstdCompressFn) as (
+        buf: Buffer,
+        opts?: unknown
+      ) => Promise<Buffer>)
+    : undefined;
 const log = logger.withTag("api.sourcemaps");
 
 // ── Schemas ─────────────────────────────────────────────────────────
@@ -195,20 +211,22 @@ export function pickUploadEncoding(
 /**
  * Compress a chunk buffer with the chosen codec. Exported for testing.
  *
- * Both codecs run off-thread (Bun's zstd worker and libuv's zlib thread
- * pool), so a chunk being compressed doesn't block the event loop --
+ * Both codecs run off-thread via libuv's thread pool, so a chunk
+ * being compressed doesn't block the event loop --
  * with `concurrency=8`, eight uploads truly compress in parallel.
  */
 export async function encodeChunk(
   buf: Buffer,
   encoding: UploadEncoding | undefined
 ): Promise<Uint8Array> {
-  if (encoding === "zstd") {
+  if (encoding === "zstd" && zstdCompressAsync) {
     // L3 is libzstd's default; passed explicitly for self-documenting
     // code. L9+ trades ~14% size for 4x compress time and forces the
     // server's decoder to allocate 15-30 MiB of window state -- not
     // worth it once decode cost is counted.
-    return await Bun.zstdCompress(buf, { level: 3 });
+    return await zstdCompressAsync(buf, {
+      params: { [zlib.constants.ZSTD_c_compressionLevel]: 3 },
+    });
   }
   if (encoding === "gzip") {
     // zlib default (L6). Counter-intuitively, lower levels (L1/L5)

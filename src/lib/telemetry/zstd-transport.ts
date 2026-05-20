@@ -8,9 +8,9 @@
  * SDK's default behavior byte-for-byte so there's no regression.
  *
  * Codec selection is one-shot, performed at factory-construction time.
- * No per-request branching: if `Bun.zstdCompress` is available when the
- * transport is created, every envelope uses zstd; otherwise every
- * envelope uses gzip.
+ * No per-request branching: if `node:zlib` zstd support is available
+ * when the transport is created, every envelope uses zstd; otherwise
+ * every envelope uses gzip.
  *
  * This mirrors `@sentry/node-core/transports/http.js` `makeNodeTransport`
  * — URL parsing, `no_proxy` handling, proxy agent, CA certs, keepAlive,
@@ -32,7 +32,8 @@ import * as http from "node:http";
 import * as https from "node:https";
 import { Readable } from "node:stream";
 import { promisify } from "node:util";
-import { gzip as gzipCb } from "node:zlib";
+// biome-ignore lint/performance/noNamespaceImport: needed for feature-detected zstd access
+import * as zlib from "node:zlib";
 import {
   createTransport,
   suppressTracing,
@@ -77,20 +78,22 @@ const ZSTD_THRESHOLD = 1024;
  */
 const GZIP_THRESHOLD = 1024 * 32;
 
-/**
- * Shape of the globalThis.Bun subset we rely on. Bun's real types
- * declare this, but the transport also runs under Node (via the
- * feature-detected polyfill in `script/node-polyfills.ts`) where only
- * a subset of Bun APIs are installed.
- */
-type BunZstdHost = {
-  zstdCompress?: (
-    data: Uint8Array | Buffer | string | ArrayBuffer,
-    options?: { level?: number }
-  ) => Promise<Buffer>;
-};
-
-const gzipAsync = promisify(gzipCb);
+const gzipAsync = promisify(zlib.gzip);
+// zstdCompress is available in Node 22.15+. Feature-detect to avoid crashing
+// the npm bundle on older Node versions (e.g., CI runners with Node 20).
+// zstdCompress is available in Node 22.15+. Feature-detect to avoid crashing
+// the npm bundle on older Node versions (e.g., CI runners with Node 20).
+// biome-ignore lint/suspicious/noExplicitAny: zstd types unavailable on older @types/node
+const zstdCompressFn = (zlib as any).zstdCompress as
+  | ((...args: unknown[]) => unknown)
+  | undefined;
+const zstdCompressAsync =
+  typeof zstdCompressFn === "function"
+    ? (promisify(zstdCompressFn) as (
+        buf: Buffer,
+        opts?: unknown
+      ) => Promise<Buffer>)
+    : undefined;
 
 /**
  * Factory for the SDK's `Sentry.init({ transport })` option.
@@ -285,20 +288,10 @@ export async function maybeCompress(
     return { payload: buf, encodingApplied: "none" };
   }
 
-  if (encoding === "zstd") {
-    // Belt-and-braces — `Bun` may have been swapped out between
-    // construction and first send. Fall through to gzip if so, but
-    // re-apply the gzip threshold so mid-sized bodies (1-32 KiB) don't
-    // get compressed when the SDK default would have shipped them raw.
-    const bun = (globalThis as { Bun?: BunZstdHost }).Bun;
-    if (!bun?.zstdCompress) {
-      if (buf.length <= GZIP_THRESHOLD) {
-        return { payload: buf, encodingApplied: "none" };
-      }
-      const gz = await gzipAsync(buf);
-      return { payload: gz, encodingApplied: "gzip" };
-    }
-    const out = await bun.zstdCompress(buf, { level: ZSTD_LEVEL });
+  if (encoding === "zstd" && zstdCompressAsync) {
+    const out = await zstdCompressAsync(buf, {
+      params: { [zlib.constants.ZSTD_c_compressionLevel]: ZSTD_LEVEL },
+    });
     return {
       payload: Buffer.from(out.buffer, out.byteOffset, out.byteLength),
       encodingApplied: "zstd",
@@ -311,8 +304,7 @@ export async function maybeCompress(
 
 /** Feature-detect zstd support on the current runtime. */
 export function hasZstdSupport(): boolean {
-  const bun = (globalThis as { Bun?: BunZstdHost }).Bun;
-  return typeof bun?.zstdCompress === "function";
+  return zstdCompressAsync !== undefined;
 }
 
 /**
