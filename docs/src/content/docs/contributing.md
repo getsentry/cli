@@ -56,7 +56,7 @@ cli/
 │   │   ├── dashboard/   # list, view, create, add, edit, delete, revisions, restore
 │   │   ├── event/       # view, list
 │   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, archive, merge
-│   │   ├── local/       # server, run
+│   │   ├── local/       # serve, run
 │   │   ├── log/         # list, view
 │   │   ├── org/         # list, view
 │   │   ├── project/     # create, delete, list, view

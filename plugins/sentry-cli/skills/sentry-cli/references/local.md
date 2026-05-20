@@ -11,7 +11,7 @@ requires:
 
 Run a local Spotlight server for development
 
-### `sentry local server`
+### `sentry local serve`
 
 Run a local Spotlight server to capture dev SDK events
 
