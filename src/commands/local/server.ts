@@ -345,9 +345,9 @@ function formatErrorItem(
     | undefined;
   // values is ordered oldest→newest; show the outermost (last) exception
   const first = exception?.values?.at(-1);
-  const errorType = stripAnsi(first?.type ?? "Error");
+  const errorType = stripAnsi(String(first?.type ?? "Error"));
   const errorValue = stripAnsi(
-    first?.value ?? (event.message as string | undefined) ?? "Unknown error"
+    String(first?.value ?? event.message ?? "Unknown error")
   );
 
   let msg = `${errorType}: ${errorValue}`;
@@ -374,9 +374,11 @@ function formatTransactionItem(
     ?.trace as
     | { op?: string; status?: string; description?: string }
     | undefined;
-  let msg = stripAnsi(
-    (event.transaction as string) ?? trace?.description ?? "Transaction"
-  );
+  const txnName =
+    typeof event.transaction === "string"
+      ? event.transaction
+      : (trace?.description ?? "Transaction");
+  let msg = stripAnsi(txnName);
 
   const op = trace?.op;
   if (op && op !== "default" && op !== "unknown") {
