@@ -47,6 +47,16 @@ Diagnose and repair CLI database issues
 sentry cli fix
 ```
 
+### `sentry cli import`
+
+Import settings from legacy .sentryclirc files
+
+**Flags:**
+- `-y, --yes - Skip confirmation prompt`
+- `-n, --dry-run - Show what would happen without making changes`
+- `--url <value> - Explicitly trust this URL (bypasses same-file trust check)`
+- `--skip-validation - Skip token validation against the Sentry API`
+
 ### `sentry cli setup`
 
 Configure shell integration
