@@ -1,14 +1,12 @@
 /**
- * sentry local
+ * sentry local serve
  *
- * Run a local Spotlight-compatible server, or attach to one already running.
+ * Start a local development server that captures Sentry SDK envelopes,
+ * or attach to one already running on the same port.
  *
  * On startup the command probes `http://<host>:<port>/health`. If a server
- * is already listening (e.g. a Spotlight sidecar or another `sentry local`),
- * the command attaches as an SSE consumer and tails events from it. Otherwise
- * it starts its own Hono HTTP server.
- *
- * Learn more: https://spotlightjs.com/docs/getting-started/
+ * is already listening, the command attaches as an SSE consumer and tails
+ * events from it. Otherwise it starts its own Hono HTTP server.
  *
  * The command runs until interrupted (Ctrl-C / SIGTERM).
  */
@@ -42,7 +40,7 @@ function sanitize(text: string): string {
   return stripAnsi(text).replace(/[\r\n]+/g, " ");
 }
 
-/** Default port matches Spotlight's `DEFAULT_PORT`. */
+/** Default port for the local dev server. */
 export const DEFAULT_PORT = 8969;
 
 /** Buffer size: how many recent envelopes to retain for late subscribers. */
@@ -219,10 +217,10 @@ function buildApp(
   app.post("/api/:projectId/envelope", ingest);
 
   /**
-   * SSE stream — Spotlight overlay / UI clients connect here to receive a
-   * live feed of envelopes. The event format matches Spotlight's protocol:
+   * SSE stream — overlay / UI clients connect here to receive a
+   * live feed of envelopes. The SSE event format:
    *   - `event` is the content type (e.g., "application/x-sentry-envelope")
-   *   - `id` is the Spotlight-assigned envelope UUID (enables reconnection)
+   *   - `id` is the envelope UUID (enables reconnection)
    *   - `data` is the parsed envelope JSON ([header, items])
    */
   app.get("/stream", (c) =>
@@ -259,7 +257,7 @@ function formatTime(timestamp?: number | string): string {
   return date.toLocaleTimeString("en-US", { hour12: false });
 }
 
-/** Level → color map for tail output, matching Spotlight's Sentinel theme. */
+/** Level → color map for tail output. */
 const LEVEL_COLORS: Record<string, (s: string) => string> = {
   error: (s) => red(bold(s)),
   fatal: (s) => red(bold(s)),
@@ -298,7 +296,7 @@ const SERVER_JS_MARKERS = [
   "sveltekit",
 ];
 
-/** Source color map matching Spotlight's Sentinel theme. */
+/** Source → color map for tail output. */
 const SOURCE_COLORS: Record<string, (s: string) => string> = {
   browser: yellow,
   mobile: blue,
@@ -646,7 +644,7 @@ const PORT_RETRY_DELAY_MS = 5000;
  * Try to start the HTTP server, retrying with backoff on EADDRINUSE.
  *
  * Retries up to {@link MAX_PORT_RETRIES} times with a {@link PORT_RETRY_DELAY_MS}
- * delay between attempts, matching Spotlight's retry strategy.
+ * delay between attempts.
  */
 function tryListen(
   app: Hono,
@@ -692,7 +690,7 @@ function tryListen(
 }
 
 /**
- * Check whether a Spotlight server is already running on the given URL.
+ * Check whether a server is already running on the given URL.
  * Returns `true` if the health endpoint responds successfully.
  */
 async function isServerRunning(url: string): Promise<boolean> {
@@ -824,12 +822,10 @@ function processSSEEvent(
 
 export const serverCommand = buildCommand({
   docs: {
-    brief: "Run a local Spotlight server to capture dev SDK events",
+    brief: "Start the local dev server and tail events",
     fullDescription:
-      "Start a local Spotlight-compatible server, or attach to one\n" +
-      "already running on the same port.\n\n" +
-      "Spotlight is Sentry for Development — it gives you a live view of\n" +
-      "errors, traces, and logs emitted by Sentry SDKs in your dev stack.\n\n" +
+      "Start a local development server that captures envelopes from\n" +
+      "Sentry SDKs in your dev stack and tails them to the terminal.\n\n" +
       "If a server is already listening on the port, the command connects\n" +
       "as an SSE consumer and tails events from it. Otherwise it starts\n" +
       "its own server.\n\n" +

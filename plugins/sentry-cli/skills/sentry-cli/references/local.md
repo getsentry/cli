@@ -13,7 +13,7 @@ Sentry for local development
 
 ### `sentry local serve`
 
-Run a local Spotlight server to capture dev SDK events
+Start the local dev server and tail events
 
 **Flags:**
 - `-p, --port <value> - Port to listen on (default 8969) - (default: "8969")`
