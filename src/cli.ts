@@ -219,6 +219,143 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   };
 
   /**
+   * Attempt to import `.sentryclirc` settings when the user is unauthenticated.
+   *
+   * Returns `"imported"` if a trusted token was found, imported, and validated.
+   * Returns `"declined"` if the user said no (marked as declined).
+   * Returns `"skip"` if no eligible files, trust gate fails, or any error.
+   */
+  /**
+   * Build a trusted import plan from non-project-local .sentryclirc files,
+   * or return null if no eligible import is available.
+   */
+  async function buildEligibleImportPlan() {
+    const { discoverRcFiles, buildImportPlan, isImportNeededAsync } =
+      await import("./lib/sentryclirc-import.js");
+
+    if (!(await isImportNeededAsync())) {
+      return null;
+    }
+    const files = await discoverRcFiles(process.cwd());
+    const eligible = files.filter((f) => f.location !== "project-local");
+    if (eligible.length === 0 || !eligible.some((f) => f.token)) {
+      return null;
+    }
+    const plan = buildImportPlan(eligible);
+    if (
+      !(
+        plan.trusted &&
+        plan.effective.token &&
+        plan.newFields.includes("token")
+      )
+    ) {
+      return null;
+    }
+    return plan;
+  }
+
+  async function tryRcImport(): Promise<"imported" | "declined" | "skip"> {
+    const plan = await buildEligibleImportPlan();
+    if (!plan) {
+      return "skip";
+    }
+
+    const source = plan.sources.find((s) => s.token)?.path ?? "~/.sentryclirc";
+    process.stderr.write(
+      `\nFound auth token in ${source}\n` +
+        "Import settings to the new CLI? This stores your token with proper host scoping.\n\n"
+    );
+
+    const consent = await promptImportConsent();
+    if (consent === "declined") {
+      const { markImportDeclined } = await import(
+        "./lib/sentryclirc-import.js"
+      );
+      markImportDeclined(plan.sources);
+      return "declined";
+    }
+    if (consent !== "accepted") {
+      return "skip";
+    }
+
+    const { executeImport } = await import("./lib/sentryclirc-import.js");
+    const result = await executeImport(plan, { validateToken: true });
+    return result.imported && result.tokenValid !== false ? "imported" : "skip";
+  }
+
+  /**
+   * Prompt the user to accept/decline the import.
+   * Returns "accepted", "declined" (explicit no), or "cancelled" (Ctrl+C).
+   * Only "declined" permanently suppresses future prompts.
+   */
+  async function promptImportConsent(): Promise<
+    "accepted" | "declined" | "cancelled"
+  > {
+    const { logger: logModule } = await import("./lib/logger.js");
+    const confirmed = await logModule
+      .withTag("import")
+      .prompt("Import from .sentryclirc?", { type: "confirm", initial: true });
+    if (confirmed === true) {
+      return "accepted";
+    }
+    // false = explicit "no"; Symbol(clack:cancel) = Ctrl+C
+    return confirmed === false ? "declined" : "cancelled";
+  }
+
+  /** Log import middleware errors at an appropriate level */
+  async function logImportError(importErr: unknown): Promise<void> {
+    const { logger: logModule } = await import("./lib/logger.js");
+    const { HostScopeError: HSE } = await import("./lib/errors.js");
+    const importLog = logModule.withTag("import");
+    if (importErr instanceof HSE) {
+      importLog.warn("Import middleware error", importErr);
+    } else {
+      importLog.debug("Import middleware error", importErr);
+    }
+  }
+
+  /**
+   * `.sentryclirc` import middleware.
+   *
+   * When a command fails with `not_authenticated` and a non-project-local
+   * `.sentryclirc` file has a token that passes the same-file trust gate,
+   * offers to import it into the new CLI's SQLite store. On success, retries
+   * the command. On decline, marks as declined (never asks again) and
+   * re-throws so the auto-auth middleware can offer OAuth login instead.
+   *
+   * Only fires in interactive TTYs (disabled in CI). Project-local files
+   * are excluded to avoid prompting in every cloned repo.
+   */
+  const rcImportMiddleware: ErrorMiddleware = async (next, argv) => {
+    try {
+      await next(argv);
+    } catch (err) {
+      let imported = false;
+      if (
+        err instanceof AuthError &&
+        err.reason === "not_authenticated" &&
+        !err.skipAutoAuth &&
+        isatty(0)
+      ) {
+        try {
+          imported = (await tryRcImport()) === "imported";
+        } catch (importErr) {
+          await logImportError(importErr);
+        }
+      }
+      if (imported) {
+        // Retry outside the import try/catch so retry errors propagate
+        // naturally instead of being swallowed and re-throwing the
+        // original AuthError.
+        process.stderr.write("Import successful! Retrying command...\n\n");
+        await next(argv);
+        return;
+      }
+      throw err;
+    }
+  };
+
+  /**
    * Auto-authentication middleware.
    *
    * Catches auth errors (not_authenticated, expired) in interactive TTYs
@@ -269,6 +406,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
    */
   const errorMiddlewares: ErrorMiddleware[] = [
     seerTrialMiddleware,
+    rcImportMiddleware,
     autoAuthMiddleware,
   ];
 

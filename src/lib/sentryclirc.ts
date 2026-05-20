@@ -147,7 +147,9 @@ function isNarrowAbsenceError(error: unknown): boolean {
  * That broader policy is correct for opportunistic DSN scans; not
  * for this committed config load.
  */
-async function tryReadSentryCliRc(filePath: string): Promise<string | null> {
+export async function tryReadSentryCliRc(
+  filePath: string
+): Promise<string | null> {
   let statResult: Awaited<ReturnType<typeof stat>>;
   try {
     statResult = await stat(filePath);
@@ -193,8 +195,13 @@ async function tryApplyFile(
 /** Lazy-cached set of global `.sentryclirc` paths (stable for the process lifetime) */
 let globalPaths: Set<string> | null = null;
 
-/** Global paths checked as fallback after the walk-up */
-function getGlobalPaths(): Set<string> {
+/**
+ * Global paths checked as fallback after the walk-up.
+ *
+ * Returns `$SENTRY_CONFIG_DIR/.sentryclirc` and `~/.sentryclirc`.
+ * Used by the import engine to classify files by location.
+ */
+export function getGlobalPaths(): Set<string> {
   if (!globalPaths) {
     globalPaths = new Set([
       join(getConfigDir(), CONFIG_FILENAME),
