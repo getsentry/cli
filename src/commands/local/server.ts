@@ -110,6 +110,49 @@ const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
  * `localhost:*` ports (Vite, Next, Astro, etc.) but we must not allow
  * arbitrary remote origins to read the SSE envelope stream.
  */
+
+/** Build a subscriber callback that serializes envelopes to an SSE stream. */
+function buildSSEHandler(stream: {
+  writeSSE: (event: {
+    id?: string;
+    event?: string;
+    data: string;
+  }) => Promise<void>;
+}) {
+  return (container: {
+    getParsedEnvelope: () => {
+      envelope: [Record<string, unknown>, unknown[]];
+    } | null;
+    getContentType: () => string;
+  }) => {
+    try {
+      const parsed = container.getParsedEnvelope();
+      if (!parsed) {
+        return;
+      }
+      const header = parsed.envelope[0];
+      const envelopeId = header.__spotlight_envelope_id;
+      stream
+        .writeSSE({
+          id: envelopeId ? String(envelopeId) : undefined,
+          event: container.getContentType(),
+          data: JSON.stringify(parsed.envelope),
+        })
+        .catch((err: unknown) => {
+          logger.debug(
+            `SSE write failed (client likely disconnected): ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          );
+        });
+    } catch (err) {
+      logger.debug(
+        `SSE serialize failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  };
+}
+
 function buildApp(
   spotlightBuffer: ReturnType<typeof createSpotlightBuffer>
 ): Hono {
@@ -185,27 +228,8 @@ function buildApp(
   app.get("/stream", (c) =>
     streamSSE(c, async (stream) => {
       const lastEventId = c.req.header("Last-Event-ID");
-      const readerId = spotlightBuffer.subscribe((container) => {
-        const parsed = container.getParsedEnvelope();
-        if (!parsed) {
-          return;
-        }
-        const header = parsed.envelope[0] as Record<string, unknown>;
-        const envelopeId = header.__spotlight_envelope_id;
-        stream
-          .writeSSE({
-            id: envelopeId ? String(envelopeId) : undefined,
-            event: container.getContentType(),
-            data: JSON.stringify(parsed.envelope),
-          })
-          .catch((err: unknown) => {
-            logger.debug(
-              `SSE write failed (client likely disconnected): ${
-                err instanceof Error ? err.message : String(err)
-              }`
-            );
-          });
-      }, lastEventId);
+      const onEnvelope = buildSSEHandler(stream);
+      const readerId = spotlightBuffer.subscribe(onEnvelope, lastEventId);
 
       await new Promise<void>((resolve) => {
         stream.onAbort(() => {
