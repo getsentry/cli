@@ -4,14 +4,24 @@
  * Run a command with the local dev server enabled. Injects
  * `SENTRY_SPOTLIGHT` into the child process environment so the Sentry SDK
  * auto-sends envelopes to the local server.
+ *
+ * If no server is already running on the target port, one is started
+ * automatically in the background and shut down when the child exits.
  */
 
+import type { Server } from "node:http";
+import { createSpotlightBuffer } from "@spotlightjs/spotlight/sdk";
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { CliError, EXIT, ValidationError } from "../../lib/errors.js";
 import { bold } from "../../lib/formatters/colors.js";
 import { logger } from "../../lib/logger.js";
-import { DEFAULT_PORT } from "./server.js";
+import {
+  buildApp,
+  DEFAULT_PORT,
+  isServerRunning,
+  tryListen,
+} from "./server.js";
 
 type RunFlags = {
   readonly port: number;
@@ -30,6 +40,22 @@ function parsePort(value: string): number {
   return port;
 }
 
+/** Buffer size for the auto-started background server. */
+const BUFFER_SIZE = 500;
+
+/**
+ * Shut down a background server, closing all connections so keep-alive
+ * sockets (e.g. SSE subscribers) don't block exit.
+ */
+function shutdownServer(server: Server): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (typeof server.closeAllConnections === "function") {
+      server.closeAllConnections();
+    }
+    server.close(() => resolve());
+  });
+}
+
 export const runCommand = buildCommand({
   docs: {
     brief: "Run a command with the local dev server enabled",
@@ -37,6 +63,8 @@ export const runCommand = buildCommand({
       "Run a command with the SENTRY_SPOTLIGHT environment variable\n" +
       "injected so the Sentry SDK automatically sends envelopes to the\n" +
       "local server.\n\n" +
+      "If no server is already listening on the port, one is started\n" +
+      "automatically and shut down when the child process exits.\n\n" +
       "The child process inherits all current env vars plus\n" +
       "SENTRY_SPOTLIGHT and SENTRY_TRACES_SAMPLE_RATE=1.\n\n" +
       "Example:\n" +
@@ -80,7 +108,20 @@ export const runCommand = buildCommand({
       );
     }
 
-    const spotlightUrl = `http://${flags.host}:${flags.port}/stream`;
+    const url = `http://${flags.host}:${flags.port}`;
+    const spotlightUrl = `${url}/stream`;
+
+    let bgServer: Server | undefined;
+
+    const alreadyRunning = await isServerRunning(url);
+    if (!alreadyRunning) {
+      logger.info("No server detected, starting one in the background...");
+      const buffer = createSpotlightBuffer(BUFFER_SIZE);
+      const app = buildApp(buffer);
+      const { server } = await tryListen(app, flags.port, flags.host);
+      bgServer = server;
+      logger.info(`Background server listening on ${bold(url)}`);
+    }
 
     logger.info(`Starting: ${bold(args.join(" "))}`);
     logger.info(`SENTRY_SPOTLIGHT=${spotlightUrl}`);
@@ -99,6 +140,9 @@ export const runCommand = buildCommand({
         stdin: "inherit",
       });
     } catch (err) {
+      if (bgServer) {
+        await shutdownServer(bgServer);
+      }
       throw new CliError(
         `Failed to start "${args[0]}": ${err instanceof Error ? err.message : String(err)}`,
         EXIT.GENERAL
@@ -106,6 +150,11 @@ export const runCommand = buildCommand({
     }
 
     const exitCode = await child.exited;
+
+    if (bgServer) {
+      logger.info("Stopping background server...");
+      await shutdownServer(bgServer);
+    }
 
     if (exitCode !== 0) {
       throw new CliError(`Process exited with code ${exitCode}`, EXIT.GENERAL);
