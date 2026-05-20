@@ -485,7 +485,7 @@ function itemTypeToFilterCategory(
 /** Produce a fallback one-liner for unparseable or unsupported items. */
 function formatFallbackLine(label: string): string {
   const ts = new Date().toISOString().slice(11, 23);
-  return `${muted(ts)} ${cyan("•")} ${bold(label)}`;
+  return `${muted(ts)} ${cyan("•")} ${bold(sanitize(label))}`;
 }
 
 /** Resolve a human label for a completely unparseable envelope. */
