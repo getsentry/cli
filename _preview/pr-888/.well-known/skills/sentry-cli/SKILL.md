@@ -472,7 +472,7 @@ Initialize Sentry in your project (experimental)
 
 Sentry for local development
 
-- `sentry local serve` — Run a local Spotlight server to capture dev SDK events
+- `sentry local serve` — Start the local dev server and tail events
 - `sentry local run <command...>` — Run a command with the local dev server enabled
 
 → Full flags and examples: `references/local.md`
