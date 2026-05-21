@@ -89,7 +89,7 @@ function augmentPathForNode(
   const sep = process.platform === "win32" ? ";" : ":";
   return {
     ...env,
-    PATH: `${binDir}${sep}${env.PATH ?? ""}`,
+    PATH: env.PATH ? `${binDir}${sep}${env.PATH}` : binDir,
   };
 }
 

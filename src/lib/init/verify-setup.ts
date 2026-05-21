@@ -77,7 +77,7 @@ export async function verifySetup(
     const sep = process.platform === "win32" ? ";" : ":";
     childEnv = {
       ...childEnv,
-      PATH: `${binDir}${sep}${childEnv.PATH ?? ""}`,
+      PATH: childEnv.PATH ? `${binDir}${sep}${childEnv.PATH}` : binDir,
     };
   }
 
