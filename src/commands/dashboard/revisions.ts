@@ -72,11 +72,7 @@ function formatRevisionsHuman(result: RevisionsResult): string {
   const rows: RevisionRow[] = result.revisions.map((r) => ({
     id: r.id,
     title: escapeMarkdownCell(r.title),
-    author:
-      r.createdBy?.name ??
-      r.createdBy?.email ??
-      r.createdBy?.id ??
-      "—",
+    author: r.createdBy?.name ?? r.createdBy?.email ?? r.createdBy?.id ?? "—",
     created: `${escapeMarkdownCell(formatRelativeTime(r.dateCreated))}\n${colorTag("muted", r.dateCreated)}`,
   }));
 

@@ -110,7 +110,11 @@ describe("dashboard restore command", () => {
   test("restores dashboard and outputs JSON", async () => {
     const { context, stdoutWrite } = createMockContext();
     const func = await restoreCommand.loader();
-    await func.call(context, defaultFlags({ json: true, revision: "42" }), "123");
+    await func.call(
+      context,
+      defaultFlags({ json: true, revision: "42" }),
+      "123"
+    );
 
     expect(restoreDashboardRevisionSpy).toHaveBeenCalledWith(
       "test-org",
@@ -157,7 +161,11 @@ describe("dashboard restore command", () => {
   test("uses dashboard ID from positional argument", async () => {
     const { context } = createMockContext();
     const func = await restoreCommand.loader();
-    await func.call(context, defaultFlags({ json: true, revision: "5" }), "456");
+    await func.call(
+      context,
+      defaultFlags({ json: true, revision: "5" }),
+      "456"
+    );
 
     expect(resolveDashboardIdSpy).toHaveBeenCalledWith("test-org", "456");
     expect(restoreDashboardRevisionSpy).toHaveBeenCalledWith(
