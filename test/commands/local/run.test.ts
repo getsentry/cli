@@ -10,6 +10,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { runCommand } from "../../../src/commands/local/run.js";
 import { CliError, ValidationError } from "../../../src/lib/errors.js";
+import { TEST_TMP_DIR } from "../../constants.js";
 
 type RunFunc = (
   this: unknown,
@@ -20,7 +21,7 @@ type RunFunc = (
 let tmpDir: string;
 
 beforeEach(async () => {
-  tmpDir = await mkdtemp(join("/tmp/opencode", "run-test-"));
+  tmpDir = await mkdtemp(join(TEST_TMP_DIR, "run-test-"));
 });
 
 afterEach(async () => {

@@ -15,6 +15,7 @@ import {
   string,
 } from "fast-check";
 import { detectDevCommand } from "../../src/lib/dev-script.js";
+import { TEST_TMP_DIR } from "../constants.js";
 
 const SCRIPT_NAMES = ["dev", "develop", "serve", "start"] as const;
 
@@ -37,7 +38,7 @@ describe("property: detectDevCommand", () => {
         scriptValueArb,
         async (name, value) => {
           // Each iteration gets its own directory to avoid cross-contamination
-          const dir = await mkdtemp(join("/tmp/opencode", "dev-prop-"));
+          const dir = await mkdtemp(join(TEST_TMP_DIR, "dev-prop-"));
           try {
             await Bun.write(
               join(dir, "package.json"),

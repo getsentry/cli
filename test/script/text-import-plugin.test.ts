@@ -15,12 +15,9 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { build } from "esbuild";
 import { textImportPlugin } from "../../script/text-import-plugin.js";
+import { TEST_TMP_DIR } from "../constants.js";
 
-const TEST_DIR = join(
-  process.env.BUN_TEST_WORKER_ID
-    ? `/tmp/opencode/tip-test-${process.env.BUN_TEST_WORKER_ID}`
-    : "/tmp/opencode/tip-test"
-);
+const TEST_DIR = join(TEST_TMP_DIR, "tip-test");
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });

@@ -10,11 +10,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { detectDevCommand } from "../../src/lib/dev-script.js";
+import { TEST_TMP_DIR } from "../constants.js";
 
 let tmpDir: string;
 
 beforeEach(async () => {
-  tmpDir = await mkdtemp(join("/tmp/opencode", "dev-script-test-"));
+  tmpDir = await mkdtemp(join(TEST_TMP_DIR, "dev-script-test-"));
 });
 
 afterEach(async () => {
