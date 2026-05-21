@@ -14,6 +14,42 @@
   --sl-font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
+/* Subtle background gradient glow */
+.main-frame::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100vh;
+  background:
+    radial-gradient(
+      ellipse 80% 50% at 50% -20%,
+      rgb(var(--sl-color-accent-rgb) / 0.12) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 100% 0%,
+      rgba(59, 130, 246, 0.08) 0%,
+      transparent 40%
+    );
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* GitHub icon - white in header */
+.social-icons a,
+.social-icons a svg {
+  color: #fff !important;
+  fill: #fff !important;
+}
+
+.social-icons a:hover,
+.social-icons a:hover svg {
+  color: rgba(255, 255, 255, 0.8) !important;
+  fill: rgba(255, 255, 255, 0.8) !important;
+}
+
 /* Logo sizing */
 .site-title img {
   height: 2.3rem;

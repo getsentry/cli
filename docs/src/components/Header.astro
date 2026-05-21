@@ -1,0 +1,72 @@
+---
+/**
+ * CLI-specific Header — extends the shared theme's Header pattern
+ * with homepage detection, "Docs" nav link, and social icons.
+ */
+import config from "virtual:starlight/user-config";
+
+import Search from "virtual:starlight/components/Search";
+import SiteTitle from "virtual:starlight/components/SiteTitle";
+import SocialIcons from "virtual:starlight/components/SocialIcons";
+
+const shouldRenderSearch =
+  config.pagefind ||
+  config.components.Search !== "@astrojs/starlight/components/Search.astro";
+
+// Detect homepage (splash page). In Starlight >=0.33, route data lives on
+// Astro.locals.starlightRoute; the old `slug` field is now `id`.
+const isHomepage = Astro.locals.starlightRoute.id === "";
+
+// Get base path for links
+const baseUrl = import.meta.env.BASE_URL;
+const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
+---
+
+<div class:list={["header sentry-header", { "header-homepage": isHomepage }]}>
+  <div class="title-wrapper sl-flex">
+    <SiteTitle />
+  </div>
+  <div class="sentry-header-actions sl-flex print:hidden">
+    {!isHomepage && shouldRenderSearch && <Search />}
+    {isHomepage && (
+      <a href={`${base}getting-started/`} class="header-nav-link">Docs</a>
+    )}
+    {!isHomepage && <span class="header-nav-link header-nav-active">Docs</span>}
+    <div class="sl-hidden md:sl-flex sentry-header-secondary">
+      <SocialIcons />
+    </div>
+  </div>
+</div>
+
+<style>
+  .header-homepage {
+    max-width: var(--sl-content-width);
+    margin: 0 auto;
+  }
+
+  .header-nav-link {
+    color: #fff !important;
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    opacity: 0.9;
+  }
+
+  .header-nav-link:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .header-nav-active {
+    opacity: 1;
+    cursor: default;
+  }
+
+  .header-nav-active:hover {
+    background: none;
+  }
+</style>

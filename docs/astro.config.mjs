@@ -60,6 +60,7 @@ export default defineConfig({
       ],
       plugins: [sentryStarlightTheme()],
       components: {
+        Header: "./src/components/Header.astro",
         PageTitle: "./src/components/PageTitle.astro",
       },
       head: [
