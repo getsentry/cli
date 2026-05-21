@@ -184,7 +184,7 @@ export const runCommand = buildCommand({
       timeout: {
         kind: "parsed",
         parse: parseTimeout,
-        brief: "Kill the child after N seconds (0 = no timeout)",
+        brief: "Kill the child after N seconds (0 = no timeout; defaults to 30 s in --verify mode)",
         default: "0",
       },
     },
