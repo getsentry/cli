@@ -27,8 +27,7 @@ const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
   <div class="header sentry-header header-homepage">
     <div class="title-wrapper sl-flex">
       <a href={base} class="site-title sl-flex">
-        <img src={`${base}glyph.svg`} alt="" class="homepage-logo" />
-        <span class="homepage-title">Sentry CLI</span>
+        <img src={`${base}wordmark-light.svg`} alt="Sentry CLI" class="homepage-logo" />
       </a>
     </div>
     <div class="sentry-header-actions sl-flex print:hidden">
@@ -63,13 +62,6 @@ const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
   .homepage-logo {
     height: 2.3rem;
     width: auto;
-  }
-
-  .homepage-title {
-    font-family: var(--sl-font);
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: var(--ve-text, #fafafa);
   }
 
   .header-nav-link {
