@@ -2,7 +2,7 @@
 /**
  * CLI-specific Header — conditionally renders:
  * - Homepage: branded header with logo, "Docs" link, social icons, no search
- * - Docs pages: theme's standard header with search (no logo)
+ * - Docs pages: theme's standard header with text title + search
  */
 import config from "virtual:starlight/user-config";
 
@@ -23,10 +23,13 @@ const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
 ---
 
 {isHomepage ? (
-  <!-- Homepage: branded header -->
+  <!-- Homepage: branded header with logo -->
   <div class="header sentry-header header-homepage">
     <div class="title-wrapper sl-flex">
-      <SiteTitle />
+      <a href={base} class="site-title sl-flex">
+        <img src={`${base}glyph.svg`} alt="" class="homepage-logo" />
+        <span class="homepage-title">Sentry CLI</span>
+      </a>
     </div>
     <div class="sentry-header-actions sl-flex print:hidden">
       <a href={`${base}getting-started/`} class="header-nav-link">Docs</a>
@@ -36,7 +39,7 @@ const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
     </div>
   </div>
 ) : (
-  <!-- Docs pages: theme's standard header with search -->
+  <!-- Docs pages: theme's standard header with text title + search -->
   <div class="header sentry-header">
     <div class="title-wrapper sl-flex">
       <SiteTitle />
@@ -55,6 +58,18 @@ const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
   .header-homepage {
     max-width: var(--sl-content-width);
     margin: 0 auto;
+  }
+
+  .homepage-logo {
+    height: 2.3rem;
+    width: auto;
+  }
+
+  .homepage-title {
+    font-family: var(--sl-font);
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--ve-text, #fafafa);
   }
 
   .header-nav-link {

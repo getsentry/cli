@@ -50,11 +50,6 @@
   fill: rgba(255, 255, 255, 0.8) !important;
 }
 
-/* Logo sizing */
-.site-title img {
-  height: 2.3rem;
-  width: auto;
-}
 
 /* ==========================================================================
    Splash / Landing Page Styles
