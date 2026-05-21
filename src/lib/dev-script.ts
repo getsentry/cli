@@ -55,6 +55,16 @@ export async function detectDevCommand(
   return result;
 }
 
+/** Split a script value into spawn args, wrapping in a shell if needed. */
+function parseScriptArgs(value: string): string[] {
+  if (SHELL_FEATURES_RE.test(value)) {
+    return process.platform === "win32"
+      ? ["cmd", "/c", value]
+      : ["sh", "-c", value];
+  }
+  return value.trim().split(WHITESPACE_RE);
+}
+
 /** Try to detect a dev command from package.json scripts. */
 async function tryPackageJson(cwd: string): Promise<DetectedCommand | null> {
   try {
@@ -71,12 +81,7 @@ async function tryPackageJson(cwd: string): Promise<DetectedCommand | null> {
     for (const name of SCRIPT_PRIORITY) {
       const value = scripts[name];
       if (typeof value === "string" && value.trim().length > 0) {
-        // Scripts with shell features need a shell interpreter
-        const args = SHELL_FEATURES_RE.test(value)
-          ? process.platform === "win32"
-            ? ["cmd", "/c", value]
-            : ["sh", "-c", value]
-          : value.trim().split(WHITESPACE_RE);
+        const args = parseScriptArgs(value);
         return {
           args,
           source: `package.json scripts.${name}`,
