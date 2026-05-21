@@ -98,10 +98,18 @@ export async function verifySetup(
   }
 
   const onSigint = () => {
-    try { child.kill("SIGINT"); } catch {}
+    try {
+      child.kill("SIGINT");
+    } catch {
+      logger.debug("Child already exited");
+    }
   };
   const onSigterm = () => {
-    try { child.kill("SIGTERM"); } catch {}
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      logger.debug("Child already exited");
+    }
   };
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);

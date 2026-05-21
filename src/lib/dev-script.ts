@@ -19,10 +19,10 @@ const WHITESPACE_RE = /\s+/;
 
 /**
  * Matches script values that use shell features (env-var assignments,
- * variable expansion, operators, redirects) which cannot be tokenized
- * by simple whitespace splitting and must be run via `sh -c`.
+ * variable expansion, operators, redirects, quotes) which cannot be
+ * tokenized by simple whitespace splitting and must be run via a shell.
  */
-const SHELL_FEATURES_RE = /^[A-Za-z_]+=\S|&&|\|\||[|><;$]/;
+const SHELL_FEATURES_RE = /^[A-Za-z_]+=\S|&&|\|\||[|><;$"'`]/;
 
 /**
  * Detect the project's dev command by inspecting filesystem markers in priority order.
@@ -71,9 +71,11 @@ async function tryPackageJson(cwd: string): Promise<DetectedCommand | null> {
     for (const name of SCRIPT_PRIORITY) {
       const value = scripts[name];
       if (typeof value === "string" && value.trim().length > 0) {
-        // Scripts with env-var prefixes, pipes, or operators need a shell
+        // Scripts with shell features need a shell interpreter
         const args = SHELL_FEATURES_RE.test(value)
-          ? ["sh", "-c", value]
+          ? process.platform === "win32"
+            ? ["cmd", "/c", value]
+            : ["sh", "-c", value]
           : value.trim().split(WHITESPACE_RE);
         return {
           args,

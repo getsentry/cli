@@ -291,7 +291,8 @@ async function gracefulKill(
 ): Promise<void> {
   try {
     child.kill("SIGTERM");
-  } catch {
+  } catch (error) {
+    logger.debug("Child already exited during graceful kill", error);
     return;
   }
   let graceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -305,7 +306,8 @@ async function gracefulKill(
   if (!exited) {
     try {
       child.kill("SIGKILL");
-    } catch {
+    } catch (error) {
+      logger.debug("Child already exited during graceful kill", error);
       return;
     }
     await child.exited;
@@ -361,10 +363,18 @@ async function* runWithVerify(
   }
 
   const onSigint = () => {
-    try { child.kill("SIGINT"); } catch {}
+    try {
+      child.kill("SIGINT");
+    } catch {
+      logger.debug("Child already exited");
+    }
   };
   const onSigterm = () => {
-    try { child.kill("SIGTERM"); } catch {}
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      logger.debug("Child already exited");
+    }
   };
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);

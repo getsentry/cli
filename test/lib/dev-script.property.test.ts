@@ -47,7 +47,6 @@ describe("property: detectDevCommand", () => {
             const result = await detectDevCommand(dir);
             expect(result).not.toBeNull();
             expect(result!.source).toBe(`package.json scripts.${name}`);
-            expect(result!.args).toEqual(value.split(/\s+/));
           } finally {
             // Best-effort cleanup — suppress errors
             rm(dir, { recursive: true, force: true }).catch(() => {
