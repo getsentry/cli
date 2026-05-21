@@ -5,7 +5,6 @@
  * for any valid header input.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -14,6 +13,7 @@ import {
   property,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { parseCustomHeaders } from "../../src/lib/custom-headers.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 

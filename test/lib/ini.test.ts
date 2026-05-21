@@ -6,7 +6,7 @@
  * focus on edge cases and specific formatting not covered by property generators.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { parseIni } from "../../src/lib/ini.js";
 
 describe("parseIni", () => {

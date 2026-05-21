@@ -4,7 +4,7 @@
  * of the hardcoded "(org:read, project:read)" fallback.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { extractRequiredScopes } from "../../src/lib/api-scope.js";
 
 describe("extractRequiredScopes", () => {

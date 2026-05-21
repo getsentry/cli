@@ -14,7 +14,7 @@ import {
   describe,
   expect,
   test,
-} from "bun:test";
+} from "vitest";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {
@@ -60,6 +60,7 @@ describe("multi-region", () => {
   describe("sentry org list", () => {
     test(
       "shows REGION column when user has orgs in multiple regions",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -71,12 +72,12 @@ describe("multi-region", () => {
         // In test environment, region URLs are localhost, so display shows LOCALHOST
         // The important thing is that REGION column appears when orgs span multiple regions
         // (In production, would show US/EU based on actual hostname like us.sentry.io)
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
 
     test(
       "lists organizations from all regions",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -91,12 +92,12 @@ describe("multi-region", () => {
         for (const orgSlug of EU_ORGS) {
           expect(result.stdout).toContain(orgSlug);
         }
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
 
     test(
       "--json returns orgs from all regions",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -111,14 +112,14 @@ describe("multi-region", () => {
         for (const orgSlug of [...US_ORGS, ...EU_ORGS]) {
           expect(slugs).toContain(orgSlug);
         }
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
   });
 
   describe("sentry org view", () => {
     test(
       "routes to correct region for US org",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -131,12 +132,12 @@ describe("multi-region", () => {
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("acme-corp");
         expect(result.stdout).toContain("Acme Corporation");
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
 
     test(
       "routes to correct region for EU org",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -149,14 +150,14 @@ describe("multi-region", () => {
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("euro-gmbh");
         expect(result.stdout).toContain("Euro GmbH");
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
   });
 
   describe("sentry project list", () => {
     test(
       "lists projects from US region org",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -170,12 +171,12 @@ describe("multi-region", () => {
         for (const projectSlug of US_PROJECTS["acme-corp"]) {
           expect(result.stdout).toContain(projectSlug);
         }
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
 
     test(
       "lists projects from EU region org",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -189,12 +190,12 @@ describe("multi-region", () => {
         for (const projectSlug of EU_PROJECTS["euro-gmbh"]) {
           expect(result.stdout).toContain(projectSlug);
         }
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
 
     test(
       "--json returns projects from specified region",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -218,14 +219,14 @@ describe("multi-region", () => {
         for (const projectSlug of EU_PROJECTS["berlin-startup"]) {
           expect(slugs).toContain(projectSlug);
         }
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
   });
 
   describe("sentry issue list", () => {
     test(
       "lists issues from US region project",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -243,12 +244,12 @@ describe("multi-region", () => {
         expect(result.stdout.replace(/\*\*/g, "")).toContain(
           "ACME-FRONTEND-1A"
         );
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
 
     test(
       "lists issues from EU region project",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -264,12 +265,12 @@ describe("multi-region", () => {
         expect(result.exitCode).toBe(0);
         // Should contain the EU issue (strip markdown bold markers from short ID)
         expect(result.stdout.replace(/\*\*/g, "")).toContain("EURO-PORTAL-1A");
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
 
     test(
       "--json returns issues from correct region",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -292,8 +293,7 @@ describe("multi-region", () => {
         // Should contain Berlin issue
         const shortIds = parsed.data.map((i: { shortId: string }) => i.shortId);
         expect(shortIds).toContain("BERLIN-APP-1A");
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
   });
 });
@@ -328,6 +328,7 @@ describe("single-region", () => {
   describe("sentry org list", () => {
     test(
       "does NOT show REGION column when user has orgs in single region",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -339,8 +340,7 @@ describe("single-region", () => {
         // Should still contain US orgs
         expect(result.stdout).toContain("acme-corp");
         expect(result.stdout).toContain("widgets-inc");
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
   });
 });
@@ -375,6 +375,7 @@ describe("self-hosted fallback", () => {
   describe("sentry org list", () => {
     test(
       "falls back to default API when regions endpoint returns 404",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -385,12 +386,12 @@ describe("self-hosted fallback", () => {
         expect(result.stdout).toContain("SLUG");
         // Should have orgs from the fallback (US fixtures served by control silo)
         expect(result.stdout).toContain("acme-corp");
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
 
     test(
       "--json works with self-hosted fallback",
+      { timeout: TEST_TIMEOUT },
       async () => {
         await ctx.setAuthToken(TEST_TOKEN);
 
@@ -400,8 +401,7 @@ describe("self-hosted fallback", () => {
         const data = JSON.parse(result.stdout);
         expect(Array.isArray(data)).toBe(true);
         expect(data.length).toBeGreaterThan(0);
-      },
-      { timeout: TEST_TIMEOUT }
+      }
     );
   });
 });

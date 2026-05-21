@@ -13,12 +13,12 @@
  * reproduction too.
  */
 
-import { describe, expect, test } from "bun:test";
 import { execSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, expect, test } from "vitest";
 
 /**
  * Mirrors the `.stat` member of the object returned by
@@ -85,16 +85,16 @@ describe("node polyfill Bun.file().stat() (CLI-1EA, CLI-1EB)", () => {
     }
   });
 
-  test("parity with native Bun.file().stat()", async () => {
+  test("parity with native stat()", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "polyfill-stat-"));
     const filePath = join(tmpDir, "compare.txt");
     try {
       writeFileSync(filePath, "compare");
       const polyfillStats = await polyfillFileStat(filePath)();
-      const bunStats = await Bun.file(filePath).stat();
-      expect(polyfillStats.isFile()).toBe(bunStats.isFile());
-      expect(polyfillStats.isDirectory()).toBe(bunStats.isDirectory());
-      expect(polyfillStats.size).toBe(bunStats.size);
+      const nativeStats = await stat(filePath);
+      expect(polyfillStats.isFile()).toBe(nativeStats.isFile());
+      expect(polyfillStats.isDirectory()).toBe(nativeStats.isDirectory());
+      expect(polyfillStats.size).toBe(nativeStats.size);
     } finally {
       rmSync(tmpDir, { recursive: true });
     }

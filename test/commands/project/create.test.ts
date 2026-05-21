@@ -6,18 +6,23 @@
  * the func() body without real HTTP calls or database access.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createCommand } from "../../../src/commands/project/create.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
-import * as apiClient from "../../../src/lib/api-client.js";
+
+// Auto-mock at the definition site so internal calls (e.g. createProjectWithDsn
+// calling createProject within projects.js) are intercepted. All exports become
+// vi.fn() stubs that tests configure via mockResolvedValue in beforeEach.
+vi.mock("../../../src/lib/api/projects.js");
+vi.mock("../../../src/lib/api/teams.js");
+vi.mock("../../../src/lib/api/organizations.js");
+vi.mock("../../../src/lib/resolve-target.js");
+
+// biome-ignore lint/performance/noNamespaceImport: needed for vi.spyOn mocking
+import * as orgsApi from "../../../src/lib/api/organizations.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for vi.spyOn mocking
+import * as projectsApi from "../../../src/lib/api/projects.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for vi.spyOn mocking
+import * as teamsApi from "../../../src/lib/api/teams.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import {
@@ -26,7 +31,7 @@ import {
   ContextError,
   ResolutionError,
 } from "../../../src/lib/errors.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+// biome-ignore lint/performance/noNamespaceImport: needed for vi.spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryProject, SentryTeam } from "../../../src/types/index.js";
 import { useTestConfigDir } from "../../helpers.js";
@@ -60,11 +65,11 @@ const sampleProject: SentryProject = {
 useTestConfigDir("test-project-create-");
 
 function createMockContext() {
-  const stdoutWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
+      stderr: { write: vi.fn(() => true) },
       cwd: "/tmp",
     },
     stdoutWrite,
@@ -72,30 +77,31 @@ function createMockContext() {
 }
 
 describe("project create", () => {
-  let listTeamsSpy: ReturnType<typeof spyOn>;
-  let createProjectSpy: ReturnType<typeof spyOn>;
-  let createTeamSpy: ReturnType<typeof spyOn>;
-  let tryGetPrimaryDsnSpy: ReturnType<typeof spyOn>;
-  let listOrgsSpy: ReturnType<typeof spyOn>;
-  let resolveOrgSpy: ReturnType<typeof spyOn>;
+  const listTeamsSpy = vi.mocked(teamsApi.listTeams);
+  // The command calls createProjectWithDsn (not createProject directly).
+  // With vitest auto-mock, createProjectWithDsn is a vi.fn() stub that
+  // doesn't internally call createProject, so we assert on this spy.
+  const createProjectWithDsnSpy = vi.mocked(projectsApi.createProjectWithDsn);
+  const createTeamSpy = vi.mocked(teamsApi.createTeam);
+  const tryGetPrimaryDsnSpy = vi.mocked(projectsApi.tryGetPrimaryDsn);
+  const listOrgsSpy = vi.mocked(orgsApi.listOrganizations);
+  const resolveOrgSpy = vi.mocked(resolveTarget.resolveOrg);
 
   beforeEach(() => {
+    vi.clearAllMocks();
     // Pre-populate region cache for orgs used in tests to avoid
     // "unexpected fetch" warnings from resolveOrgRegion
     setOrgRegion("acme-corp", DEFAULT_SENTRY_URL);
     setOrgRegion("123", DEFAULT_SENTRY_URL);
 
-    listTeamsSpy = spyOn(apiClient, "listTeams");
-    createProjectSpy = spyOn(apiClient, "createProject");
-    createTeamSpy = spyOn(apiClient, "createTeam");
-    tryGetPrimaryDsnSpy = spyOn(apiClient, "tryGetPrimaryDsn");
-    listOrgsSpy = spyOn(apiClient, "listOrganizations");
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
-
     // Default mocks
     resolveOrgSpy.mockResolvedValue({ org: "acme-corp" });
     listTeamsSpy.mockResolvedValue([sampleTeam]);
-    createProjectSpy.mockResolvedValue(sampleProject);
+    createProjectWithDsnSpy.mockResolvedValue({
+      project: sampleProject,
+      dsn: "https://abc@o123.ingest.us.sentry.io/999",
+      url: "https://sentry.io/organizations/acme-corp/projects/my-app/",
+    });
     createTeamSpy.mockResolvedValue(sampleTeam);
     tryGetPrimaryDsnSpy.mockResolvedValue(
       "https://abc@o123.ingest.us.sentry.io/999"
@@ -107,12 +113,12 @@ describe("project create", () => {
   });
 
   afterEach(() => {
-    listTeamsSpy.mockRestore();
-    createProjectSpy.mockRestore();
-    createTeamSpy.mockRestore();
-    tryGetPrimaryDsnSpy.mockRestore();
-    listOrgsSpy.mockRestore();
-    resolveOrgSpy.mockRestore();
+    listTeamsSpy.mockReset();
+    createProjectWithDsnSpy.mockReset();
+    createTeamSpy.mockReset();
+    tryGetPrimaryDsnSpy.mockReset();
+    listOrgsSpy.mockReset();
+    resolveOrgSpy.mockReset();
   });
 
   test("creates project with auto-detected org and single team", async () => {
@@ -120,10 +126,14 @@ describe("project create", () => {
     const func = await createCommand.loader();
     await func.call(context, { json: false }, "my-app", "node");
 
-    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "engineering", {
-      name: "my-app",
-      platform: "node",
-    });
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme-corp",
+      "engineering",
+      {
+        name: "my-app",
+        platform: "node",
+      }
+    );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Created project 'my-app'");
@@ -149,10 +159,14 @@ describe("project create", () => {
     const func = await createCommand.loader();
     await func.call(context, { json: false }, "my-app", "python-flask");
 
-    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "engineering", {
-      name: "my-app",
-      platform: "python-flask",
-    });
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme-corp",
+      "engineering",
+      {
+        name: "my-app",
+        platform: "python-flask",
+      }
+    );
   });
 
   test("passes --team to skip team auto-detection", async () => {
@@ -164,10 +178,14 @@ describe("project create", () => {
 
     // listTeams should NOT be called when --team is explicit
     expect(listTeamsSpy).not.toHaveBeenCalled();
-    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "mobile", {
-      name: "my-app",
-      platform: "go",
-    });
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme-corp",
+      "mobile",
+      {
+        name: "my-app",
+        platform: "go",
+      }
+    );
   });
 
   test("auto-selects team when user is member of exactly one among many", async () => {
@@ -179,10 +197,14 @@ describe("project create", () => {
     await func.call(context, { json: false }, "my-app", "node");
 
     // Should auto-select the one team the user is a member of
-    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "engineering", {
-      name: "my-app",
-      platform: "node",
-    });
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme-corp",
+      "engineering",
+      {
+        name: "my-app",
+        platform: "node",
+      }
+    );
   });
 
   test("errors when user is member of multiple teams without --team", async () => {
@@ -199,7 +221,7 @@ describe("project create", () => {
     expect(err.message).toContain("engineering");
     expect(err.message).toContain("mobile");
 
-    expect(createProjectSpy).not.toHaveBeenCalled();
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 
   test("shows only member teams in error, not all org teams", async () => {
@@ -254,10 +276,14 @@ describe("project create", () => {
     await func.call(context, { json: false }, "my-app", "node");
 
     expect(createTeamSpy).toHaveBeenCalledWith("acme-corp", "my-app");
-    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "my-app", {
-      name: "my-app",
-      platform: "node",
-    });
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme-corp",
+      "my-app",
+      {
+        name: "my-app",
+        platform: "node",
+      }
+    );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Created team 'my-app'");
@@ -276,7 +302,7 @@ describe("project create", () => {
   });
 
   test("handles 409 conflict with friendly error", async () => {
-    createProjectSpy.mockRejectedValue(
+    createProjectWithDsnSpy.mockRejectedValue(
       new ApiError(
         "API request failed: 409 Conflict",
         409,
@@ -296,7 +322,7 @@ describe("project create", () => {
   });
 
   test("handles 404 from createProject as team-not-found with available teams", async () => {
-    createProjectSpy.mockRejectedValue(
+    createProjectWithDsnSpy.mockRejectedValue(
       new ApiError("API request failed: 404 Not Found", 404)
     );
 
@@ -318,7 +344,7 @@ describe("project create", () => {
     // createProject returns 404 but the auto-selected team IS in the org.
     // This used to produce a contradictory "Team 'engineering' not found"
     // while listing "engineering" as an available team.
-    createProjectSpy.mockRejectedValue(
+    createProjectWithDsnSpy.mockRejectedValue(
       new ApiError("API request failed: 404 Not Found", 404)
     );
     // Default listTeams returns [sampleTeam] (slug: "engineering")
@@ -339,7 +365,7 @@ describe("project create", () => {
   });
 
   test("handles 404 from createProject with bad org — shows user's orgs", async () => {
-    createProjectSpy.mockRejectedValue(
+    createProjectWithDsnSpy.mockRejectedValue(
       new ApiError("API request failed: 404 Not Found", 404)
     );
     // listTeams also fails → org is bad
@@ -360,7 +386,7 @@ describe("project create", () => {
   });
 
   test("handles 404 with non-404 listTeams failure — shows generic error", async () => {
-    createProjectSpy.mockRejectedValue(
+    createProjectWithDsnSpy.mockRejectedValue(
       new ApiError("API request failed: 404 Not Found", 404)
     );
     // listTeams returns 403 (not 404) — can't tell if org or team is wrong
@@ -393,11 +419,11 @@ describe("project create", () => {
     expect(err.message).toContain("Common platforms:");
 
     // Should NOT have called the API
-    expect(createProjectSpy).not.toHaveBeenCalled();
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 
   test("handles 400 invalid platform from API as safety net", async () => {
-    createProjectSpy.mockRejectedValue(
+    createProjectWithDsnSpy.mockRejectedValue(
       new ApiError(
         "API request failed: 400 Bad Request",
         400,
@@ -418,7 +444,7 @@ describe("project create", () => {
   });
 
   test("wraps other API errors with context, preserving ApiError type", async () => {
-    createProjectSpy.mockRejectedValue(
+    createProjectWithDsnSpy.mockRejectedValue(
       new ApiError("API request failed: 403 Forbidden", 403, "No permission")
     );
 
@@ -454,7 +480,12 @@ describe("project create", () => {
   });
 
   test("handles DSN fetch failure gracefully", async () => {
-    tryGetPrimaryDsnSpy.mockResolvedValue(null);
+    // Override to simulate DSN fetch failure inside createProjectWithDsn
+    createProjectWithDsnSpy.mockResolvedValue({
+      project: sampleProject,
+      dsn: null,
+      url: "https://sentry.io/organizations/acme-corp/projects/my-app/",
+    });
 
     const { context, stdoutWrite } = createMockContext();
     const func = await createCommand.loader();
@@ -491,15 +522,17 @@ describe("project create", () => {
     await func.call(context, { json: false }, "my-app", "node");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("acme-corp.sentry.io/settings/projects/my-app/");
+    expect(output).toContain(
+      "sentry.io/organizations/acme-corp/projects/my-app/"
+    );
   });
 
   test("shows slug divergence note when Sentry adjusts the slug", async () => {
     // Sentry may append a random suffix when the desired slug is taken
-    createProjectSpy.mockResolvedValue({
-      ...sampleProject,
-      slug: "my-app-0g",
-      name: "my-app",
+    createProjectWithDsnSpy.mockResolvedValue({
+      project: { ...sampleProject, slug: "my-app-0g", name: "my-app" },
+      dsn: "https://abc@o123.ingest.us.sentry.io/999",
+      url: "https://sentry.io/organizations/acme-corp/projects/my-app-0g/",
     });
 
     const { context, stdoutWrite } = createMockContext();
@@ -613,10 +646,14 @@ describe("project create", () => {
     await func.call(context, { json: false }, "my-app", "javascript.nextjs");
 
     // Should send corrected platform to API
-    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "engineering", {
-      name: "my-app",
-      platform: "javascript-nextjs",
-    });
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme-corp",
+      "engineering",
+      {
+        name: "my-app",
+        platform: "javascript-nextjs",
+      }
+    );
   });
 
   test("does not correct platform without dots", async () => {
@@ -625,10 +662,14 @@ describe("project create", () => {
     await func.call(context, { json: false }, "my-app", "javascript-nextjs");
 
     // Should send platform as-is to API (no correction needed)
-    expect(createProjectSpy).toHaveBeenCalledWith("acme-corp", "engineering", {
-      name: "my-app",
-      platform: "javascript-nextjs",
-    });
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme-corp",
+      "engineering",
+      {
+        name: "my-app",
+        platform: "javascript-nextjs",
+      }
+    );
   });
 
   test("auto-corrects multiple dots in platform then validates", async () => {
@@ -656,7 +697,7 @@ describe("project create", () => {
     );
 
     // Should NOT call createProject
-    expect(createProjectSpy).not.toHaveBeenCalled();
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
     // Should NOT fetch DSN
     expect(tryGetPrimaryDsnSpy).not.toHaveBeenCalled();
 
@@ -717,7 +758,7 @@ describe("project create", () => {
     expect(parsed.dryRun).toBe(true);
 
     // Should NOT call createProject
-    expect(createProjectSpy).not.toHaveBeenCalled();
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 
   test("dry-run shows team source for auto-selected teams", async () => {
@@ -750,7 +791,7 @@ describe("project create", () => {
     // Should NOT call createTeam
     expect(createTeamSpy).not.toHaveBeenCalled();
     // Should NOT call createProject
-    expect(createProjectSpy).not.toHaveBeenCalled();
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Dry run");

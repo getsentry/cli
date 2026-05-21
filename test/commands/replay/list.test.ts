@@ -2,21 +2,49 @@
  * Replay List Command Tests
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { listCommand, parseSort } from "../../../src/commands/replay/list.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/db/pagination.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/pagination.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../../src/lib/db/pagination.js";
 import { LIST_PERIOD_FLAG } from "../../../src/lib/list-command.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import { parsePeriod } from "../../../src/lib/time-range.js";
@@ -64,11 +92,11 @@ describe("listCommand.func", () => {
   ];
 
   function createMockContext() {
-    const stdoutWrite = mock(() => true);
+    const stdoutWrite = vi.fn(() => true);
     return {
       context: {
         stdout: { write: stdoutWrite },
-        stderr: { write: mock(() => true) },
+        stderr: { write: vi.fn(() => true) },
         cwd: "/tmp",
       },
       stdoutWrite,
@@ -76,19 +104,21 @@ describe("listCommand.func", () => {
   }
 
   beforeEach(() => {
-    listReplaysSpy = spyOn(apiClient, "listReplays");
-    resolveTargetSpy = spyOn(resolveTarget, "resolveOrgOptionalProjectFromArg");
-    resolveCursorSpy = spyOn(paginationDb, "resolveCursor").mockReturnValue({
+    listReplaysSpy = vi.spyOn(apiClient, "listReplays");
+    resolveTargetSpy = vi.spyOn(
+      resolveTarget,
+      "resolveOrgOptionalProjectFromArg"
+    );
+    resolveCursorSpy = vi.spyOn(paginationDb, "resolveCursor").mockReturnValue({
       cursor: undefined,
       direction: "next" as const,
     });
-    advancePaginationStateSpy = spyOn(
-      paginationDb,
-      "advancePaginationState"
-    ).mockReturnValue(undefined);
-    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
-      false
-    );
+    advancePaginationStateSpy = vi
+      .spyOn(paginationDb, "advancePaginationState")
+      .mockReturnValue(undefined);
+    hasPreviousPageSpy = vi
+      .spyOn(paginationDb, "hasPreviousPage")
+      .mockReturnValue(false);
   });
 
   afterEach(() => {

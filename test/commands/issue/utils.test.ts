@@ -4,7 +4,7 @@
  * Tests for shared utilities in src/commands/issue/utils.ts
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   buildCommandHint,
   ensureRootCauseAnalysis,

@@ -6,7 +6,7 @@
  * These tests focus on specific output formatting and edge cases.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { FilterValue } from "../../../src/lib/formatters/local.js";
 import {
   formatErrorItem,

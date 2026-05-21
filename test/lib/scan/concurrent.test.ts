@@ -9,7 +9,7 @@
  *   5. Consumer-initiated `break` halts the producer cleanly.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   mapFilesConcurrent,
   mapFilesConcurrentStream,

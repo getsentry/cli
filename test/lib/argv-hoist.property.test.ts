@@ -7,8 +7,8 @@
  * 3. Idempotency — hoisting twice gives the same result as hoisting once
  */
 
-import { describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { hoistGlobalFlags } from "../../src/lib/argv-hoist.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 

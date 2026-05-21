@@ -10,7 +10,6 @@
  * Unit tests for specific edge cases live in test/lib/token-host.test.ts.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   constantFrom,
   assert as fcAssert,
@@ -18,6 +17,7 @@ import {
   stringMatching,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { normalizeOrigin } from "../../src/lib/sentry-urls.js";
 import { isHostTrusted } from "../../src/lib/token-host.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";

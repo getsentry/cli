@@ -5,7 +5,7 @@
  * Unit tests verify the ZIP structure is valid and extractable.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import {
   string,
   uint8Array,
 } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { ZipWriter } from "../../../src/lib/sourcemap/zip.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 
@@ -37,8 +38,10 @@ describe("ZipWriter", () => {
     await zip.finalize();
 
     // Verify with system unzip (available on Linux/macOS)
-    const proc = Bun.spawnSync(["unzip", "-t", zipPath]);
-    expect(proc.exitCode).toBe(0);
+    const proc = spawnSync("unzip", ["-t", zipPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    expect(proc.status).toBe(0);
   });
 
   test("preserves file content through compression", async () => {
@@ -50,8 +53,10 @@ describe("ZipWriter", () => {
     await zip.finalize();
 
     // Extract via unzip and verify content matches
-    const proc = Bun.spawnSync(["unzip", "-p", zipPath, "test.txt"]);
-    const extracted = new TextDecoder().decode(proc.stdout);
+    const proc = spawnSync("unzip", ["-p", zipPath, "test.txt"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const extracted = proc.stdout.toString();
     expect(extracted).toBe(content);
   });
 
@@ -61,8 +66,10 @@ describe("ZipWriter", () => {
     await zip.addEntry("empty.txt", Buffer.alloc(0));
     await zip.finalize();
 
-    const proc = Bun.spawnSync(["unzip", "-t", zipPath]);
-    expect(proc.exitCode).toBe(0);
+    const proc = spawnSync("unzip", ["-t", zipPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    expect(proc.status).toBe(0);
   });
 
   test("handles files with subdirectory paths", async () => {
@@ -73,8 +80,10 @@ describe("ZipWriter", () => {
     await zip.addEntry("manifest.json", Buffer.from("{}"));
     await zip.finalize();
 
-    const proc = Bun.spawnSync(["unzip", "-l", zipPath]);
-    const output = new TextDecoder().decode(proc.stdout);
+    const proc = spawnSync("unzip", ["-l", zipPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const output = proc.stdout.toString();
     expect(output).toContain("_/_/bundle.js");
     expect(output).toContain("_/_/bundle.js.map");
     expect(output).toContain("manifest.json");
@@ -93,7 +102,10 @@ describe("ZipWriter", () => {
     await zip.finalize();
 
     // Extract and verify content matches byte-for-byte
-    const proc = Bun.spawnSync(["unzip", "-p", zipPath, "large.bin"]);
+    const proc = spawnSync("unzip", ["-p", zipPath, "large.bin"], {
+      stdio: ["pipe", "pipe", "pipe"],
+      maxBuffer: 2 * 1024 * 1024,
+    });
     expect(Buffer.from(proc.stdout)).toEqual(content);
   });
 });
@@ -115,9 +127,12 @@ describe.each([
           await zip.addEntry("data.txt", Buffer.from(input, "utf-8"));
           await zip.finalize();
 
-          const proc = Bun.spawnSync(["unzip", "-p", zipPath, "data.txt"]);
-          expect(proc.exitCode).toBe(0);
-          expect(new TextDecoder().decode(proc.stdout)).toBe(input);
+          const proc = spawnSync("unzip", ["-p", zipPath, "data.txt"], {
+            stdio: ["pipe", "pipe", "pipe"],
+            maxBuffer: 50_000,
+          });
+          expect(proc.status).toBe(0);
+          expect(proc.stdout.toString()).toBe(input);
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
@@ -139,8 +154,11 @@ describe.each([
           await zip.addEntry("data.bin", Buffer.from(input));
           await zip.finalize();
 
-          const proc = Bun.spawnSync(["unzip", "-p", zipPath, "data.bin"]);
-          expect(proc.exitCode).toBe(0);
+          const proc = spawnSync("unzip", ["-p", zipPath, "data.bin"], {
+            stdio: ["pipe", "pipe", "pipe"],
+            maxBuffer: 50_000,
+          });
+          expect(proc.status).toBe(0);
           expect(Buffer.from(proc.stdout)).toEqual(Buffer.from(input));
         }
       ),
@@ -191,9 +209,11 @@ describe("ZipWriter compression mode", () => {
     await zip.addEntry("text.txt", Buffer.from(content));
     await zip.finalize();
 
-    const proc = Bun.spawnSync(["unzip", "-p", zipPath, "text.txt"]);
-    expect(proc.exitCode).toBe(0);
-    expect(new TextDecoder().decode(proc.stdout)).toBe(content);
+    const proc = spawnSync("unzip", ["-p", zipPath, "text.txt"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    expect(proc.status).toBe(0);
+    expect(proc.stdout.toString()).toBe(content);
   });
 });
 

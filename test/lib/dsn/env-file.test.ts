@@ -6,7 +6,6 @@
  * and integration tests for file-system based detection.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -16,6 +15,7 @@ import {
   property,
   string,
 } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   detectFromAllEnvFiles,
   detectFromEnvFiles,

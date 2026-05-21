@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { MetricMeta } from "../../src/lib/api/discover.js";
 import { ResolutionError } from "../../src/lib/errors.js";
 import {

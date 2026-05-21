@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { throwApiError } from "../../../src/lib/api/infrastructure.js";
 import { ApiError } from "../../../src/lib/errors.js";
 

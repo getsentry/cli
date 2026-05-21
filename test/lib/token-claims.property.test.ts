@@ -14,7 +14,6 @@
  *    of a partially-trusted result.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   constantFrom,
   assert as fcAssert,
@@ -23,6 +22,7 @@ import {
   stringMatching,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { parseSntrysClaim } from "../../src/lib/token-claims.js";
 import { mintSntrysToken } from "../helpers.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";

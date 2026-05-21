@@ -5,15 +5,7 @@
  * Uses spyOn pattern to mock API client, resolve, and polling modules.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolve from "../../../src/commands/dashboard/resolve.js";
 import { restoreCommand } from "../../../src/commands/dashboard/restore.js";
@@ -28,8 +20,8 @@ import type { DashboardDetail } from "../../../src/types/dashboard.js";
 // ---------------------------------------------------------------------------
 
 function createMockContext(cwd = "/tmp") {
-  const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
+  const stderrWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
@@ -83,16 +75,20 @@ describe("dashboard restore command", () => {
   let withProgressSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    restoreDashboardRevisionSpy = spyOn(apiClient, "restoreDashboardRevision");
-    resolveOrgFromTargetSpy = spyOn(resolve, "resolveOrgFromTarget");
-    resolveDashboardIdSpy = spyOn(resolve, "resolveDashboardId");
+    restoreDashboardRevisionSpy = vi.spyOn(
+      apiClient,
+      "restoreDashboardRevision"
+    );
+    resolveOrgFromTargetSpy = vi.spyOn(resolve, "resolveOrgFromTarget");
+    resolveDashboardIdSpy = vi.spyOn(resolve, "resolveDashboardId");
     // Bypass spinner — just run the callback directly
-    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
-      (_opts, fn) =>
+    withProgressSpy = vi
+      .spyOn(polling, "withProgress")
+      .mockImplementation((_opts, fn) =>
         fn(() => {
           /* no-op setMessage */
         })
-    );
+      );
 
     // Default mocks
     resolveOrgFromTargetSpy.mockResolvedValue("test-org");

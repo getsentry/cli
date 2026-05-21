@@ -5,7 +5,6 @@
  * functions that are difficult to exhaustively test with example-based tests.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   constantFrom,
   assert as fcAssert,
@@ -14,6 +13,7 @@ import {
   stringMatching,
   tuple,
 } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   buildBillingUrl,
   buildDashboardsListUrl,

@@ -8,24 +8,52 @@
  * - listCommand.func (project mode): new project-scoped behavior
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   listCommand,
   parseSort,
   parseSpanListArgs,
 } from "../../../src/commands/span/list.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/db/pagination.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/pagination.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../../src/lib/db/pagination.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import { parsePeriod } from "../../../src/lib/time-range.js";
@@ -147,12 +175,12 @@ describe("listCommand.func (trace mode)", () => {
     return {
       context: {
         stdout: {
-          write: mock((s: string) => {
+          write: vi.fn((s: string) => {
             stdoutChunks.push(s);
           }),
         },
         stderr: {
-          write: mock((_s: string) => {
+          write: vi.fn((_s: string) => {
             /* no-op */
           }),
         },
@@ -164,23 +192,22 @@ describe("listCommand.func (trace mode)", () => {
 
   beforeEach(async () => {
     func = (await listCommand.loader()) as unknown as ListFunc;
-    listSpansSpy = spyOn(apiClient, "listSpans");
-    resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
+    listSpansSpy = vi.spyOn(apiClient, "listSpans");
+    resolveOrgAndProjectSpy = vi.spyOn(resolveTarget, "resolveOrgAndProject");
     resolveOrgAndProjectSpy.mockResolvedValue({
       org: "test-org",
       project: "test-project",
     });
-    resolveCursorSpy = spyOn(paginationDb, "resolveCursor").mockReturnValue({
+    resolveCursorSpy = vi.spyOn(paginationDb, "resolveCursor").mockReturnValue({
       cursor: undefined,
       direction: "next" as const,
     });
-    advancePaginationStateSpy = spyOn(
-      paginationDb,
-      "advancePaginationState"
-    ).mockReturnValue(undefined);
-    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
-      false
-    );
+    advancePaginationStateSpy = vi
+      .spyOn(paginationDb, "advancePaginationState")
+      .mockReturnValue(undefined);
+    hasPreviousPageSpy = vi
+      .spyOn(paginationDb, "hasPreviousPage")
+      .mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -444,23 +471,28 @@ describe("listCommand.func (trace mode)", () => {
 
 describe("listCommand.func (project mode)", () => {
   let func: ListFunc;
-  let listSpansSpy: ReturnType<typeof spyOn>;
-  let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
-  let resolveCursorSpy: ReturnType<typeof spyOn>;
-  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
-  let hasPreviousPageSpy: ReturnType<typeof spyOn>;
+  // span/list.ts calls resolveOrgProjectFromArg (not resolveOrgAndProject)
+  const resolveOrgAndProjectSpy = vi.mocked(
+    resolveTarget.resolveOrgProjectFromArg
+  );
+  const listSpansSpy = vi.mocked(apiClient.listSpans);
+  const resolveCursorSpy = vi.mocked(paginationDb.resolveCursor);
+  const advancePaginationStateSpy = vi.mocked(
+    paginationDb.advancePaginationState
+  );
+  const hasPreviousPageSpy = vi.mocked(paginationDb.hasPreviousPage);
 
   function createContext() {
     const stdoutChunks: string[] = [];
     return {
       context: {
         stdout: {
-          write: mock((s: string) => {
+          write: vi.fn((s: string) => {
             stdoutChunks.push(s);
           }),
         },
         stderr: {
-          write: mock((_s: string) => {
+          write: vi.fn((_s: string) => {
             /* no-op */
           }),
         },
@@ -472,31 +504,31 @@ describe("listCommand.func (project mode)", () => {
 
   beforeEach(async () => {
     func = (await listCommand.loader()) as unknown as ListFunc;
-    listSpansSpy = spyOn(apiClient, "listSpans");
-    resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
-    resolveOrgAndProjectSpy.mockResolvedValue({
-      org: "test-org",
-      project: "test-project",
-    });
-    resolveCursorSpy = spyOn(paginationDb, "resolveCursor").mockReturnValue({
+    // Mock resolveOrgProjectFromArg to parse explicit "org/project" targets
+    // and fall back to a default for auto-detect (no target).
+    resolveOrgAndProjectSpy.mockImplementation(
+      async (target: string | undefined) => {
+        if (target?.includes("/")) {
+          const [org, project] = target.split("/");
+          return { org: org!, project: project! };
+        }
+        return { org: "test-org", project: "test-project" };
+      }
+    );
+    resolveCursorSpy.mockReturnValue({
       cursor: undefined,
       direction: "next" as const,
     });
-    advancePaginationStateSpy = spyOn(
-      paginationDb,
-      "advancePaginationState"
-    ).mockReturnValue(undefined);
-    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
-      false
-    );
+    advancePaginationStateSpy.mockReturnValue(undefined);
+    hasPreviousPageSpy.mockReturnValue(false);
   });
 
   afterEach(() => {
-    listSpansSpy.mockRestore();
-    resolveOrgAndProjectSpy.mockRestore();
-    resolveCursorSpy.mockRestore();
-    advancePaginationStateSpy.mockRestore();
-    hasPreviousPageSpy.mockRestore();
+    listSpansSpy.mockReset();
+    resolveOrgAndProjectSpy.mockReset();
+    resolveCursorSpy.mockReset();
+    advancePaginationStateSpy.mockReset();
+    hasPreviousPageSpy.mockReset();
   });
 
   test("calls listSpans without trace filter when no trace ID given", async () => {
@@ -555,8 +587,12 @@ describe("listCommand.func (project mode)", () => {
       "my-project",
       expect.anything()
     );
-    // Should NOT have called resolveOrgAndProject since target is explicit
-    expect(resolveOrgAndProjectSpy).not.toHaveBeenCalled();
+    // resolveOrgProjectFromArg is called with the explicit target
+    expect(resolveOrgAndProjectSpy).toHaveBeenCalledWith(
+      "my-org/my-project",
+      expect.any(String),
+      expect.any(String)
+    );
   });
 
   test("translates query in project mode", async () => {

@@ -5,7 +5,7 @@
  * miss (no row), staleness (older than TTL), and corruption resilience.
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 import { getDatabase } from "../../../src/lib/db/index.js";
 import {
   clearCachedRepos,

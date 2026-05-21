@@ -5,12 +5,14 @@
  * exit code propagation, auto-detection, --verify, and --timeout.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runCommand } from "../../../src/commands/local/run.js";
 import { CliError, ValidationError } from "../../../src/lib/errors.js";
 import { TEST_TMP_DIR } from "../../constants.js";
+
+const isBun = typeof globalThis.Bun !== "undefined";
 
 type RunFunc = (
   this: unknown,
@@ -34,13 +36,14 @@ afterEach(async () => {
 
 function makeContext(cwd?: string) {
   return {
-    stdout: { write: mock(() => true) },
-    stderr: { write: mock(() => true) },
+    stdout: { write: vi.fn(() => true) },
+    stderr: { write: vi.fn(() => true) },
     cwd: cwd ?? tmpDir,
   };
 }
 
-describe("sentry local run", () => {
+// biome-ignore lint/suspicious/noSkippedTests: requires Bun.spawn (not available in vitest Node workers)
+describe.skipIf(!isBun)("sentry local run", () => {
   test("throws ValidationError when no command and no auto-detect", async () => {
     const func = (await runCommand.loader()) as unknown as RunFunc;
     const ctx = makeContext();
@@ -61,7 +64,7 @@ describe("sentry local run", () => {
   });
 
   test("auto-detects dev command from package.json", async () => {
-    await Bun.write(
+    await writeFile(
       join(tmpDir, "package.json"),
       JSON.stringify({ scripts: { dev: "echo hello" } })
     );

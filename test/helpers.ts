@@ -4,10 +4,10 @@
  * Shared utilities for test setup and teardown.
  */
 
-import { afterEach, beforeEach } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach } from "vitest";
 import {
   resetAuthRowCache,
   resetAuthTokenCache,
@@ -223,4 +223,120 @@ export function extractFetchUrl(input: RequestInfo | URL): string {
     return input.href;
   }
   return input.url;
+}
+
+// ---------------------------------------------------------------------------
+// Route-based fetch mock
+// ---------------------------------------------------------------------------
+
+/** A single route handler for the fetch mock. */
+export type FetchRoute = {
+  /** URL pattern — string for `includes()` match, or RegExp */
+  match: string | RegExp;
+  /** HTTP method filter (default: any) */
+  method?: string;
+  /** Response body (JSON-serialized) or a handler function */
+  response:
+    | unknown
+    | ((url: string, init?: RequestInit) => unknown | Promise<unknown>);
+  /** HTTP status code (default: 200) */
+  status?: number;
+  /** Response headers */
+  headers?: Record<string, string>;
+};
+
+/** Recorded fetch call for assertions. */
+export type FetchCall = {
+  url: string;
+  method: string;
+  body?: string;
+};
+
+/**
+ * Create a route-based fetch mock that replaces `globalThis.fetch`.
+ *
+ * Matches requests against a list of routes and returns configured responses.
+ * Unmatched requests return 404 by default. All requests are recorded for
+ * assertion.
+ *
+ * Usage:
+ * ```typescript
+ * const { calls, restore } = installFetchMock([
+ *   { match: "/organizations/", response: [{ slug: "acme" }] },
+ *   { match: "/projects/", response: sampleProject, status: 201 },
+ * ]);
+ * afterEach(restore);
+ * ```
+ *
+ * @param routes - Route handlers (matched in order, first match wins)
+ * @param fallback - Response for unmatched requests (default: 404)
+ * @returns Object with `calls` array and `restore` function
+ */
+export function installFetchMock(
+  routes: FetchRoute[],
+  fallback?: { status?: number; body?: unknown }
+): { calls: FetchCall[]; restore: () => void } {
+  const calls: FetchCall[] = [];
+  const originalFetch = globalThis.fetch;
+  const fallbackStatus = fallback?.status ?? 404;
+  const fallbackBody = fallback?.body ?? { detail: "Not found" };
+
+  globalThis.fetch = (async (
+    input: RequestInfo | URL,
+    init?: RequestInit
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: test mock router requires branching for method/URL/body matching
+  ): Promise<Response> => {
+    const url = extractFetchUrl(input);
+    const method = init?.method ?? "GET";
+    const body =
+      init?.body && typeof init.body === "string" ? init.body : undefined;
+
+    calls.push({ url, method, body });
+
+    for (const route of routes) {
+      // Method filter
+      if (route.method && route.method.toUpperCase() !== method.toUpperCase()) {
+        continue;
+      }
+
+      // URL match
+      const matched =
+        typeof route.match === "string"
+          ? url.includes(route.match)
+          : route.match.test(url);
+
+      if (!matched) {
+        continue;
+      }
+
+      const status = route.status ?? 200;
+      const responseBody =
+        typeof route.response === "function"
+          ? await route.response(url, init)
+          : route.response;
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...(route.headers ?? {}),
+      };
+
+      return new Response(
+        responseBody !== undefined ? JSON.stringify(responseBody) : undefined,
+        { status, headers }
+      );
+    }
+
+    // Fallback for unmatched routes
+    return new Response(JSON.stringify(fallbackBody), {
+      status: fallbackStatus,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  return {
+    calls,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+    },
+  };
 }

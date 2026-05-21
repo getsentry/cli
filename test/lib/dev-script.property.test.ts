@@ -5,7 +5,7 @@
  * package.json scripts object, is detected by detectDevCommand.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {

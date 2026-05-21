@@ -26,6 +26,10 @@ env:
   # binary is only smoke-tested (--help) and never shipped, so any non-empty
   # value works; tests tolerate the dummy via test/preload.ts.
   SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID || 'ci-fork-pr-dummy' }}
+  # Disable io_uring in libuv — GitHub Actions runners may use kernels that
+  # don't fully support it, causing SIGABRT in Node.js processes.
+  # See: https://github.com/actions/runner-images/issues/13602
+  UV_USE_IO_URING: "0"
 
 jobs:
   changes:
@@ -211,6 +215,9 @@ jobs:
         with:
           bun-version: "1.3.13"
       - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
       - uses: actions/cache@v5
         id: cache
         with:
@@ -636,7 +643,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
       - uses: actions/cache@v5
         id: cache
         with:

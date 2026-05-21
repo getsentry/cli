@@ -6,7 +6,7 @@
  * sufficient here. These verify each telemetry-driven pattern category.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { routes } from "../../src/app.js";
 import { getCommandSuggestion } from "../../src/lib/command-suggestions.js";
 import { isRouteMap, type RouteMap } from "../../src/lib/introspect.js";

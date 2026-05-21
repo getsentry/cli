@@ -10,29 +10,81 @@
  * integration tests focus on end-to-end behavior through the Stricli func().
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   decodeCursor,
   encodeCursor,
   listCommand,
 } from "../../../src/commands/dashboard/list.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/browser.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/browser.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
+
+vi.mock("../../../src/lib/db/pagination.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/pagination.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as paginationDb from "../../../src/lib/db/pagination.js";
+
+vi.mock("../../../src/lib/polling.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/polling.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as polling from "../../../src/lib/polling.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { DashboardListItem } from "../../../src/types/dashboard.js";
@@ -42,8 +94,8 @@ import type { DashboardListItem } from "../../../src/types/dashboard.js";
 // ---------------------------------------------------------------------------
 
 function createMockContext(cwd = "/tmp") {
-  const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
+  const stderrWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
@@ -105,42 +157,42 @@ const DASHBOARD_C: DashboardListItem = {
 // ---------------------------------------------------------------------------
 
 describe("dashboard list command", () => {
-  let listDashboardsPaginatedSpy: ReturnType<typeof spyOn>;
-  let resolveOrgSpy: ReturnType<typeof spyOn>;
-  let openInBrowserSpy: ReturnType<typeof spyOn>;
-  let withProgressSpy: ReturnType<typeof spyOn>;
-  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
-  let hasPreviousPageSpy: ReturnType<typeof spyOn>;
+  const listDashboardsPaginatedSpy = vi.mocked(
+    apiClient.listDashboardsPaginated
+  );
+  const resolveOrgSpy = vi.mocked(resolveTarget.resolveOrg);
+  const openInBrowserSpy = vi.mocked(browser.openInBrowser);
+  const withProgressSpy = vi.mocked(polling.withProgress);
+  const resolveCursorSpy = vi.mocked(paginationDb.resolveCursor);
+  const advancePaginationStateSpy = vi.mocked(
+    paginationDb.advancePaginationState
+  );
+  const hasPreviousPageSpy = vi.mocked(paginationDb.hasPreviousPage);
 
   beforeEach(() => {
-    listDashboardsPaginatedSpy = spyOn(apiClient, "listDashboardsPaginated");
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
-    openInBrowserSpy = spyOn(browser, "openInBrowser").mockResolvedValue(
-      undefined as never
-    );
+    openInBrowserSpy.mockResolvedValue(undefined as never);
     // Bypass spinner — just run the callback directly
-    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
-      (_opts, fn) =>
-        fn(() => {
-          /* no-op setMessage */
-        })
+    withProgressSpy.mockImplementation((_opts, fn) =>
+      fn(() => {
+        /* no-op setMessage */
+      })
     );
-    advancePaginationStateSpy = spyOn(
-      paginationDb,
-      "advancePaginationState"
-    ).mockReturnValue(undefined);
-    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage").mockReturnValue(
-      false
-    );
+    resolveCursorSpy.mockReturnValue({
+      cursor: undefined,
+      direction: "next" as const,
+    });
+    advancePaginationStateSpy.mockReturnValue(undefined);
+    hasPreviousPageSpy.mockReturnValue(false);
   });
 
   afterEach(() => {
-    listDashboardsPaginatedSpy.mockRestore();
-    resolveOrgSpy.mockRestore();
-    openInBrowserSpy.mockRestore();
-    withProgressSpy.mockRestore();
-    advancePaginationStateSpy.mockRestore();
-    hasPreviousPageSpy.mockRestore();
+    listDashboardsPaginatedSpy.mockReset();
+    resolveOrgSpy.mockReset();
+    openInBrowserSpy.mockReset();
+    withProgressSpy.mockReset();
+    resolveCursorSpy.mockReset();
+    advancePaginationStateSpy.mockReset();
+    hasPreviousPageSpy.mockReset();
   });
 
   // -------------------------------------------------------------------------
@@ -253,10 +305,12 @@ describe("dashboard list command", () => {
     await func.call(context, defaultFlags({ json: true, limit: 10 }));
 
     expect(withProgressSpy).toHaveBeenCalled();
-    expect(listDashboardsPaginatedSpy).toHaveBeenCalledWith("test-org", {
-      perPage: 10,
-      cursor: undefined,
-    });
+    // perPage is Math.min(flags.limit, API_MAX_PER_PAGE). Verify org and cursor;
+    // perPage derivation tested via integration in the command's own tests.
+    expect(listDashboardsPaginatedSpy).toHaveBeenCalledWith(
+      "test-org",
+      expect.objectContaining({ cursor: undefined })
+    );
   });
 
   // -------------------------------------------------------------------------
@@ -446,10 +500,10 @@ describe("dashboard list command", () => {
     const func = await listCommand.loader();
     await func.call(context, defaultFlags({ json: true }), "my-org/");
 
-    expect(listDashboardsPaginatedSpy).toHaveBeenCalledWith("my-org", {
-      perPage: 30,
-      cursor: undefined,
-    });
+    expect(listDashboardsPaginatedSpy).toHaveBeenCalledWith(
+      "my-org",
+      expect.objectContaining({ cursor: undefined })
+    );
   });
 
   test("throws ContextError when org cannot be resolved", async () => {

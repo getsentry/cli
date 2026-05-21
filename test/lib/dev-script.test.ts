@@ -6,8 +6,8 @@
  * tests focus on filesystem integration, fallback chains, and priority ordering.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { detectDevCommand } from "../../src/lib/dev-script.js";
 import { TEST_TMP_DIR } from "../constants.js";
@@ -28,7 +28,7 @@ afterEach(async () => {
 
 describe("detectDevCommand", () => {
   test("detects package.json scripts.dev", async () => {
-    await Bun.write(
+    await writeFile(
       join(tmpDir, "package.json"),
       JSON.stringify({ scripts: { dev: "next dev" } })
     );
@@ -39,7 +39,7 @@ describe("detectDevCommand", () => {
   });
 
   test("detects package.json scripts.start when dev is absent", async () => {
-    await Bun.write(
+    await writeFile(
       join(tmpDir, "package.json"),
       JSON.stringify({ scripts: { start: "node server.js" } })
     );
@@ -50,7 +50,7 @@ describe("detectDevCommand", () => {
   });
 
   test("falls through package.json with no scripts", async () => {
-    await Bun.write(
+    await writeFile(
       join(tmpDir, "package.json"),
       JSON.stringify({ name: "test", version: "1.0.0" })
     );
@@ -59,7 +59,7 @@ describe("detectDevCommand", () => {
   });
 
   test("detects manage.py (Django)", async () => {
-    await Bun.write(join(tmpDir, "manage.py"), "#!/usr/bin/env python");
+    await writeFile(join(tmpDir, "manage.py"), "#!/usr/bin/env python");
     const result = await detectDevCommand(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.args).toEqual(["python", "manage.py", "runserver"]);
@@ -67,7 +67,7 @@ describe("detectDevCommand", () => {
   });
 
   test("detects app.py", async () => {
-    await Bun.write(join(tmpDir, "app.py"), "from flask import Flask");
+    await writeFile(join(tmpDir, "app.py"), "from flask import Flask");
     const result = await detectDevCommand(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.args).toEqual(["python", "app.py"]);
@@ -75,7 +75,7 @@ describe("detectDevCommand", () => {
   });
 
   test("detects main.py", async () => {
-    await Bun.write(join(tmpDir, "main.py"), "print('hello')");
+    await writeFile(join(tmpDir, "main.py"), "print('hello')");
     const result = await detectDevCommand(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.args).toEqual(["python", "main.py"]);
@@ -83,7 +83,7 @@ describe("detectDevCommand", () => {
   });
 
   test("detects go.mod", async () => {
-    await Bun.write(join(tmpDir, "go.mod"), "module example.com/myapp");
+    await writeFile(join(tmpDir, "go.mod"), "module example.com/myapp");
     const result = await detectDevCommand(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.args).toEqual(["go", "run", "."]);
@@ -91,7 +91,7 @@ describe("detectDevCommand", () => {
   });
 
   test("detects docker-compose.yml", async () => {
-    await Bun.write(join(tmpDir, "docker-compose.yml"), "version: '3'");
+    await writeFile(join(tmpDir, "docker-compose.yml"), "version: '3'");
     const result = await detectDevCommand(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.args).toEqual(["docker", "compose", "up"]);
@@ -99,7 +99,7 @@ describe("detectDevCommand", () => {
   });
 
   test("detects compose.yml", async () => {
-    await Bun.write(join(tmpDir, "compose.yml"), "version: '3'");
+    await writeFile(join(tmpDir, "compose.yml"), "version: '3'");
     const result = await detectDevCommand(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.args).toEqual(["docker", "compose", "up"]);
@@ -112,18 +112,18 @@ describe("detectDevCommand", () => {
   });
 
   test("package.json takes priority over manage.py", async () => {
-    await Bun.write(
+    await writeFile(
       join(tmpDir, "package.json"),
       JSON.stringify({ scripts: { dev: "vite" } })
     );
-    await Bun.write(join(tmpDir, "manage.py"), "#!/usr/bin/env python");
+    await writeFile(join(tmpDir, "manage.py"), "#!/usr/bin/env python");
     const result = await detectDevCommand(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.source).toBe("package.json scripts.dev");
   });
 
   test("prefers dev over start in package.json", async () => {
-    await Bun.write(
+    await writeFile(
       join(tmpDir, "package.json"),
       JSON.stringify({ scripts: { start: "node index.js", dev: "vite" } })
     );
@@ -134,7 +134,7 @@ describe("detectDevCommand", () => {
   });
 
   test("prefers develop over serve", async () => {
-    await Bun.write(
+    await writeFile(
       join(tmpDir, "package.json"),
       JSON.stringify({
         scripts: { serve: "serve dist", develop: "gatsby develop" },

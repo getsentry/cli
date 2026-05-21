@@ -5,8 +5,8 @@
  * output length, character set, normalization behavior, and edge cases.
  */
 
-import { describe, expect, test } from "bun:test";
 import { array, assert as fcAssert, integer, nat, property } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { sparkline } from "../../../src/lib/formatters/sparkline.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 

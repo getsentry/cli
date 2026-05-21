@@ -2,8 +2,8 @@
  * Tests for database schema repair functions.
  */
 
-import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { describe, expect, test } from "vitest";
 import {
   CURRENT_SCHEMA_VERSION,
   EXPECTED_COLUMNS,

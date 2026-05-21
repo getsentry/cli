@@ -12,7 +12,6 @@
 
 // biome-ignore-all lint/suspicious/noMisplacedAssertion: Model-based testing uses expect() inside command classes, not directly in test() functions. This is the standard fast-check pattern for stateful testing.
 
-import { describe, expect, test } from "bun:test";
 import {
   type AsyncCommand,
   array,
@@ -30,6 +29,7 @@ import {
   string,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   clearAuth,
   getAuthConfig,

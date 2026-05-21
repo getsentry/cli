@@ -5,7 +5,7 @@
  * command generation from routes, and contextual examples.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { formatBanner } from "../../src/lib/banner.js";
 import { introspectAllCommands, printCustomHelp } from "../../src/lib/help.js";
 import { useTestConfigDir } from "../helpers.js";

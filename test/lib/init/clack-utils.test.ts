@@ -4,7 +4,7 @@
  * These are pure utility functions that don't require module mocking.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   abortIfCancelled,
   featureHint,

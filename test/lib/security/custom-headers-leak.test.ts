@@ -11,7 +11,7 @@
  * See also `fetch-layer-guard.test.ts` for the Bearer-token path.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { getSharedIssue } from "../../../src/lib/api/issues.js";
 import {
   _resetCustomHeadersCache,

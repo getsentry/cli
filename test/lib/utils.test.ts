@@ -7,7 +7,7 @@
  * cases for the npm-scope / monorepo path bug (CLI-1XX).
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { isAllDigits, slugify } from "../../src/lib/utils.js";
 
 describe("slugify", () => {

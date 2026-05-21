@@ -6,8 +6,8 @@
  * `binary.ts` is derived from that predicate.
  */
 
-import { describe, expect, test } from "bun:test";
 import { assert as fcAssert, integer, property, uint8Array } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { isLikelyBinary } from "../../../src/lib/scan/binary.js";
 import { BINARY_SNIFF_BYTES } from "../../../src/lib/scan/constants.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";

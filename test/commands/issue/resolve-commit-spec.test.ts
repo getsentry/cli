@@ -5,7 +5,7 @@
  * fall back to a different resolution mode).
  */
 
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test, vi } from "vitest";
 import { resolveCommitSpec } from "../../../src/commands/issue/resolve-commit-spec.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
@@ -29,10 +29,9 @@ function makeRepo(overrides: Partial<SentryRepository>): SentryRepository {
 describe("resolveCommitSpec — explicit mode", () => {
   test("returns {commit, repository} when repo is registered in Sentry", async () => {
     const repos = [makeRepo({ name: "getsentry/cli" })];
-    const listSpy = spyOn(
-      apiClient,
-      "listRepositoriesCached"
-    ).mockResolvedValue(repos);
+    const listSpy = vi
+      .spyOn(apiClient, "listRepositoriesCached")
+      .mockResolvedValue(repos);
     try {
       const result = await resolveCommitSpec(
         { kind: "explicit", repository: "getsentry/cli", commit: "abc123" },
@@ -55,10 +54,9 @@ describe("resolveCommitSpec — explicit mode", () => {
         externalSlug: "getsentry/sentry",
       }),
     ];
-    const listSpy = spyOn(
-      apiClient,
-      "listRepositoriesCached"
-    ).mockResolvedValue(repos);
+    const listSpy = vi
+      .spyOn(apiClient, "listRepositoriesCached")
+      .mockResolvedValue(repos);
     try {
       const result = await resolveCommitSpec(
         { kind: "explicit", repository: "getsentry/sentry", commit: "abc" },
@@ -73,10 +71,9 @@ describe("resolveCommitSpec — explicit mode", () => {
   });
 
   test("throws ValidationError when repo is not registered in Sentry", async () => {
-    const listSpy = spyOn(
-      apiClient,
-      "listRepositoriesCached"
-    ).mockResolvedValue([makeRepo({ name: "getsentry/sentry" })]);
+    const listSpy = vi
+      .spyOn(apiClient, "listRepositoriesCached")
+      .mockResolvedValue([makeRepo({ name: "getsentry/sentry" })]);
     try {
       await expect(
         resolveCommitSpec(
@@ -93,7 +90,9 @@ describe("resolveCommitSpec — explicit mode", () => {
 
 describe("resolveCommitSpec — auto-detect mode", () => {
   test("throws when not inside a git work tree", async () => {
-    const gitSpy = spyOn(gitLib, "isInsideGitWorkTree").mockReturnValue(false);
+    const gitSpy = vi
+      .spyOn(gitLib, "isInsideGitWorkTree")
+      .mockReturnValue(false);
     try {
       await expect(
         resolveCommitSpec({ kind: "auto" }, "sentry", "/tmp")
@@ -104,8 +103,10 @@ describe("resolveCommitSpec — auto-detect mode", () => {
   });
 
   test("throws when HEAD cannot be read", async () => {
-    const gitSpy = spyOn(gitLib, "isInsideGitWorkTree").mockReturnValue(true);
-    const headSpy = spyOn(gitLib, "getHeadCommit").mockImplementation(() => {
+    const gitSpy = vi
+      .spyOn(gitLib, "isInsideGitWorkTree")
+      .mockReturnValue(true);
+    const headSpy = vi.spyOn(gitLib, "getHeadCommit").mockImplementation(() => {
       throw new Error("fresh repo, no commits");
     });
     try {
@@ -122,23 +123,24 @@ describe("resolveCommitSpec — auto-detect mode", () => {
     // Exercises the full success path: work-tree check → HEAD read →
     // parseRemoteUrl parses the origin → listRepositoriesCached returns
     // a repo whose externalSlug matches → resolved payload returned.
-    const gitSpy = spyOn(gitLib, "isInsideGitWorkTree").mockReturnValue(true);
-    const headSpy = spyOn(gitLib, "getHeadCommit").mockReturnValue(
-      "abc123def456"
-    );
+    const gitSpy = vi
+      .spyOn(gitLib, "isInsideGitWorkTree")
+      .mockReturnValue(true);
+    const headSpy = vi
+      .spyOn(gitLib, "getHeadCommit")
+      .mockReturnValue("abc123def456");
     // parseRemoteUrl runs on the output of `git remote get-url origin`,
     // which resolveCommitSpec fetches internally via execFileSync. We can
     // stub parseRemoteUrl to skip the real git call and return a known
     // owner/repo.
-    const parseSpy = spyOn(gitLib, "parseRemoteUrl").mockReturnValue(
-      "getsentry/cli"
-    );
-    const listSpy = spyOn(
-      apiClient,
-      "listRepositoriesCached"
-    ).mockResolvedValue([
-      makeRepo({ name: "getsentry/cli", externalSlug: "getsentry/cli" }),
-    ]);
+    const parseSpy = vi
+      .spyOn(gitLib, "parseRemoteUrl")
+      .mockReturnValue("getsentry/cli");
+    const listSpy = vi
+      .spyOn(apiClient, "listRepositoriesCached")
+      .mockResolvedValue([
+        makeRepo({ name: "getsentry/cli", externalSlug: "getsentry/cli" }),
+      ]);
 
     try {
       // Use a cwd that actually has a git origin (the repo root) so the
@@ -164,13 +166,12 @@ describe("resolveCommitSpec — auto-detect mode", () => {
 
 describe("resolveCommitSpec — error messages are actionable", () => {
   test("explicit-mode miss lists available repos to help the user correct", async () => {
-    const listSpy = spyOn(
-      apiClient,
-      "listRepositoriesCached"
-    ).mockResolvedValue([
-      makeRepo({ name: "getsentry/cli" }),
-      makeRepo({ name: "getsentry/sentry" }),
-    ]);
+    const listSpy = vi
+      .spyOn(apiClient, "listRepositoriesCached")
+      .mockResolvedValue([
+        makeRepo({ name: "getsentry/cli" }),
+        makeRepo({ name: "getsentry/sentry" }),
+      ]);
     try {
       const err = await resolveCommitSpec(
         { kind: "explicit", repository: "typo/repo", commit: "abc" },

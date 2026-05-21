@@ -7,7 +7,6 @@
  * which collapses `a/b/../c` to `a/c` — that would not be idempotent).
  */
 
-import { describe, expect, test } from "bun:test";
 import path from "node:path";
 import {
   constantFrom,
@@ -16,6 +15,7 @@ import {
   string,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   isMonorepoPackageDir,
   MONOREPO_ROOTS,

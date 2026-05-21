@@ -10,7 +10,7 @@
  * rendered vs plain mode behavior, header newline termination, and edge cases.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { computeSpanDurationMs } from "../../../src/lib/formatters/time-utils.js";
 import {
   computeTraceSummary,

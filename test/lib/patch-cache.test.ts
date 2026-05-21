@@ -5,9 +5,10 @@
  * save, load, stitching from multiple runs, and cleanup.
  */
 
-import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { describe, expect, test } from "vitest";
 import {
   type ChainMeta,
   chainFileName,
@@ -110,18 +111,24 @@ describe("savePatchesToCache", () => {
     expect(existsSync(cacheDir)).toBe(true);
 
     // Verify patch file
-    const patchFile = Bun.file(
-      join(cacheDir, patchFileName("0.13.0", "0.14.0"))
-    );
-    expect(await patchFile.exists()).toBe(true);
-    expect(new Uint8Array(await patchFile.arrayBuffer())).toEqual(patchData);
+    const patchFilePath = join(cacheDir, patchFileName("0.13.0", "0.14.0"));
+    expect(
+      await access(patchFilePath).then(
+        () => true,
+        () => false
+      )
+    ).toBe(true);
+    expect(new Uint8Array(await readFile(patchFilePath))).toEqual(patchData);
 
     // Verify chain metadata
-    const metaFile = Bun.file(
-      join(cacheDir, chainFileName("0.13.0", "0.14.0"))
-    );
-    expect(await metaFile.exists()).toBe(true);
-    const meta = (await metaFile.json()) as ChainMeta;
+    const metaFilePath = join(cacheDir, chainFileName("0.13.0", "0.14.0"));
+    expect(
+      await access(metaFilePath).then(
+        () => true,
+        () => false
+      )
+    ).toBe(true);
+    const meta = JSON.parse(await readFile(metaFilePath, "utf-8")) as ChainMeta;
     expect(meta.fromVersion).toBe("0.13.0");
     expect(meta.toVersion).toBe("0.14.0");
     expect(meta.expectedSha256).toBe("abc123");
@@ -143,20 +150,29 @@ describe("savePatchesToCache", () => {
     const cacheDir = getCacheDir();
     // All 3 patch files
     expect(
-      await Bun.file(join(cacheDir, patchFileName("0.12.0", "0.13.0"))).exists()
+      await access(join(cacheDir, patchFileName("0.12.0", "0.13.0"))).then(
+        () => true,
+        () => false
+      )
     ).toBe(true);
     expect(
-      await Bun.file(join(cacheDir, patchFileName("0.13.0", "0.14.0"))).exists()
+      await access(join(cacheDir, patchFileName("0.13.0", "0.14.0"))).then(
+        () => true,
+        () => false
+      )
     ).toBe(true);
     expect(
-      await Bun.file(join(cacheDir, patchFileName("0.14.0", "0.15.0"))).exists()
+      await access(join(cacheDir, patchFileName("0.14.0", "0.15.0"))).then(
+        () => true,
+        () => false
+      )
     ).toBe(true);
 
     // Chain metadata spans 0.12.0 → 0.15.0
-    const metaFile = Bun.file(
-      join(cacheDir, chainFileName("0.12.0", "0.15.0"))
-    );
-    const meta = (await metaFile.json()) as ChainMeta;
+    const metaFilePath2 = join(cacheDir, chainFileName("0.12.0", "0.15.0"));
+    const meta = JSON.parse(
+      await readFile(metaFilePath2, "utf-8")
+    ) as ChainMeta;
     expect(meta.patches).toHaveLength(3);
     expect(meta.expectedSha256).toBe("target-hash");
   });
@@ -236,7 +252,7 @@ describe("loadCachedChain", () => {
     // Create cache dir with just a patch file (no metadata)
     const cacheDir = getCacheDir();
     mkdirSync(cacheDir, { recursive: true });
-    await Bun.write(
+    await writeFile(
       join(cacheDir, patchFileName("0.13.0", "0.14.0")),
       new Uint8Array([1, 2, 3])
     );
@@ -256,7 +272,7 @@ describe("loadCachedChain", () => {
       cachedAt: Date.now(),
       patches: [{ fromVersion: "0.13.0", toVersion: "0.14.0", size: 100 }],
     };
-    await Bun.write(
+    await writeFile(
       join(cacheDir, chainFileName("0.13.0", "0.14.0")),
       JSON.stringify(meta)
     );
@@ -291,11 +307,11 @@ describe("loadCachedChain", () => {
       cachedAt: Date.now(),
       patches: [{ fromVersion: "0.13.0", toVersion: "0.14.0", size: 3 }],
     };
-    await Bun.write(
+    await writeFile(
       join(cacheDir, chainFileName("0.13.0", "0.14.0")),
       JSON.stringify(meta)
     );
-    await Bun.write(
+    await writeFile(
       join(cacheDir, patchFileName("0.13.0", "0.14.0")),
       new Uint8Array([1, 2, 3])
     );
@@ -355,11 +371,11 @@ describe("cleanupPatchCache", () => {
       cachedAt: eightDaysAgo,
       patches: [{ fromVersion: "0.13.0", toVersion: "0.14.0", size: 10 }],
     };
-    await Bun.write(
+    await writeFile(
       join(cacheDir, chainFileName("0.13.0", "0.14.0")),
       JSON.stringify(meta)
     );
-    await Bun.write(
+    await writeFile(
       join(cacheDir, patchFileName("0.13.0", "0.14.0")),
       new Uint8Array([1, 2, 3])
     );
@@ -388,11 +404,11 @@ describe("cleanupPatchCache", () => {
       cachedAt: oneHourAgo,
       patches: [{ fromVersion: "0.13.0", toVersion: "0.14.0", size: 10 }],
     };
-    await Bun.write(
+    await writeFile(
       join(cacheDir, chainFileName("0.13.0", "0.14.0")),
       JSON.stringify(meta)
     );
-    await Bun.write(
+    await writeFile(
       join(cacheDir, patchFileName("0.13.0", "0.14.0")),
       new Uint8Array([1, 2, 3])
     );
@@ -432,11 +448,11 @@ describe("cleanupPatchCache", () => {
       cachedAt: eightDaysAgo,
       patches: [{ fromVersion: "0.12.0", toVersion: "0.13.0", size: 10 }],
     };
-    await Bun.write(
+    await writeFile(
       join(cacheDir, chainFileName("0.12.0", "0.13.0")),
       JSON.stringify(oldMeta)
     );
-    await Bun.write(
+    await writeFile(
       join(cacheDir, patchFileName("0.12.0", "0.13.0")),
       new Uint8Array([1])
     );
@@ -449,11 +465,11 @@ describe("cleanupPatchCache", () => {
       cachedAt: Date.now(),
       patches: [{ fromVersion: "0.13.0", toVersion: "0.14.0", size: 10 }],
     };
-    await Bun.write(
+    await writeFile(
       join(cacheDir, chainFileName("0.13.0", "0.14.0")),
       JSON.stringify(freshMeta)
     );
-    await Bun.write(
+    await writeFile(
       join(cacheDir, patchFileName("0.13.0", "0.14.0")),
       new Uint8Array([2])
     );
@@ -492,11 +508,11 @@ describe("cleanupPatchCache", () => {
       cachedAt: eightDaysAgo,
       patches: [{ fromVersion: "0.12.0", toVersion: "0.13.0", size: 10 }],
     };
-    await Bun.write(
+    await writeFile(
       join(cacheDir, chainFileName("0.12.0", "0.13.0")),
       JSON.stringify(oldMeta)
     );
-    await Bun.write(
+    await writeFile(
       join(cacheDir, patchFileName("0.12.0", "0.13.0")),
       new Uint8Array([1])
     );
@@ -512,11 +528,11 @@ describe("cleanupPatchCache", () => {
         { fromVersion: "0.13.0", toVersion: "0.14.0", size: 10 },
       ],
     };
-    await Bun.write(
+    await writeFile(
       join(cacheDir, chainFileName("0.12.0", "0.14.0")),
       JSON.stringify(freshMeta)
     );
-    await Bun.write(
+    await writeFile(
       join(cacheDir, patchFileName("0.13.0", "0.14.0")),
       new Uint8Array([2])
     );

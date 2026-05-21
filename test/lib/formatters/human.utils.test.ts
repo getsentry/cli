@@ -6,7 +6,6 @@
  * formatRelativeTime, maskToken, formatDuration, formatExpiration
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   assert as fcAssert,
   integer,
@@ -14,6 +13,7 @@ import {
   property,
   stringMatching,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   formatDuration,
   formatExpiration,

@@ -6,20 +6,48 @@
  * branches without real HTTP calls or database access.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { whoamiCommand } from "../../../src/commands/auth/whoami.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/db/auth.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/auth.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbAuth from "../../../src/lib/db/auth.js";
+
+vi.mock("../../../src/lib/db/user.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/user.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbUser from "../../../src/lib/db/user.js";
 import {
@@ -81,12 +109,12 @@ function createContext() {
   const output: string[] = [];
   const context = {
     stdout: {
-      write: mock((s: string) => {
+      write: vi.fn((s: string) => {
         output.push(s);
       }),
     },
     stderr: {
-      write: mock((_s: string) => {
+      write: vi.fn((_s: string) => {
         /* no-op */
       }),
     },
@@ -104,10 +132,10 @@ describe("whoamiCommand.func", () => {
   let func: WhoamiFunc;
 
   beforeEach(async () => {
-    isAuthenticatedSpy = spyOn(dbAuth, "isAuthenticated");
-    getAuthTokenSpy = spyOn(dbAuth, "getAuthToken");
-    getCurrentUserSpy = spyOn(apiClient, "getCurrentUser");
-    setUserInfoSpy = spyOn(dbUser, "setUserInfo");
+    isAuthenticatedSpy = vi.spyOn(dbAuth, "isAuthenticated");
+    getAuthTokenSpy = vi.spyOn(dbAuth, "getAuthToken");
+    getCurrentUserSpy = vi.spyOn(apiClient, "getCurrentUser");
+    setUserInfoSpy = vi.spyOn(dbUser, "setUserInfo");
     // Default token type: OAuth (not org, not PAT). Tests that need a
     // different type override this mock within their own block.
     getAuthTokenSpy.mockReturnValue(OAUTH_TOKEN);
@@ -128,9 +156,9 @@ describe("whoamiCommand.func", () => {
     beforeEach(() => {
       savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
       delete process.env.SENTRY_AUTH_TOKEN;
-      getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig").mockReturnValue(
-        undefined
-      );
+      getAuthConfigSpy = vi
+        .spyOn(dbAuth, "getAuthConfig")
+        .mockReturnValue(undefined);
       // With no stored auth, getAuthToken returns undefined, and the
       // natural AuthError bubbles up from getCurrentUser().
       getAuthTokenSpy.mockReturnValue(undefined);

@@ -12,7 +12,7 @@
  * base64 → valid UTF-8 → valid JSON object → truthy `iat`).
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { parseSntrysClaim } from "../../src/lib/token-claims.js";
 import { mintSntrysToken } from "../helpers.js";
 

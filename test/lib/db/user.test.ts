@@ -2,7 +2,7 @@
  * User Info Storage Tests
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { getUserInfo, setUserInfo } from "../../../src/lib/db/user.js";
 import { useTestConfigDir } from "../../helpers.js";
 

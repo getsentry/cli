@@ -11,7 +11,7 @@
  * CLI-16G / CLI-M0 / CLI-197, and the over-nested path from CLI-16G.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { ResolutionError, ValidationError } from "../../src/lib/errors.js";
 import {
   ADAPTERS,

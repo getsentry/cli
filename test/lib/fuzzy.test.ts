@@ -6,8 +6,8 @@
  * output formatting are tested via unit tests.
  */
 
-import { describe, expect, test } from "bun:test";
 import { array, assert as fcAssert, property, string } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { fuzzyMatch, levenshtein } from "../../src/lib/fuzzy.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 

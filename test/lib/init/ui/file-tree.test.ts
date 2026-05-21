@@ -13,7 +13,7 @@
  * coverage via the existing `formatters.test.ts` snapshot tests.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   buildFileTree,
   buildReadTree,

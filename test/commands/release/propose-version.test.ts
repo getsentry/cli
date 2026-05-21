@@ -2,15 +2,7 @@
  * Release Propose-Version Command Tests
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { proposeVersionCommand } from "../../../src/commands/release/propose-version.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as git from "../../../src/lib/git.js";
@@ -19,8 +11,8 @@ import { useTestConfigDir } from "../../helpers.js";
 useTestConfigDir("release-propose-version-");
 
 function createMockContext(cwd = "/tmp", env: Record<string, string> = {}) {
-  const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
+  const stderrWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
@@ -37,7 +29,7 @@ describe("release propose-version", () => {
   let getHeadCommitSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    getHeadCommitSpy = spyOn(git, "getHeadCommit");
+    getHeadCommitSpy = vi.spyOn(git, "getHeadCommit");
   });
 
   afterEach(() => {

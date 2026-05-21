@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { arrangeShortcutHints } from "../../../../src/lib/init/ui/ink-shortcuts.js";
 
 describe("arrangeShortcutHints", () => {

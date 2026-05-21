@@ -8,22 +8,38 @@
  * the func() body without real HTTP calls or database access.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   flattenSpanTree,
   formatTraceView,
   viewCommand,
 } from "../../../src/commands/trace/view.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/browser.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/browser.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
@@ -33,6 +49,18 @@ import {
   ResolutionError,
   ValidationError,
 } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { TraceSpan } from "../../../src/types/sentry.js";
@@ -125,11 +153,11 @@ describe("viewCommand.func", () => {
   ];
 
   function createMockContext() {
-    const stdoutWrite = mock(() => true);
+    const stdoutWrite = vi.fn(() => true);
     return {
       context: {
         stdout: { write: stdoutWrite },
-        stderr: { write: mock(() => true) },
+        stderr: { write: vi.fn(() => true) },
         cwd: "/tmp",
       },
       stdoutWrite,
@@ -137,18 +165,17 @@ describe("viewCommand.func", () => {
   }
 
   beforeEach(async () => {
-    getDetailedTraceSpy = spyOn(apiClient, "getDetailedTrace");
-    fetchMultiSpanDetailsSpy = spyOn(
-      apiClient,
-      "fetchMultiSpanDetails"
-    ).mockResolvedValue(new Map());
-    getIssueByShortIdSpy = spyOn(apiClient, "getIssueByShortId");
-    getLatestEventSpy = spyOn(apiClient, "getLatestEvent");
-    getProjectSpy = spyOn(apiClient, "getProject");
-    findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
-    resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
-    openInBrowserSpy = spyOn(browser, "openInBrowser");
+    getDetailedTraceSpy = vi.spyOn(apiClient, "getDetailedTrace");
+    fetchMultiSpanDetailsSpy = vi
+      .spyOn(apiClient, "fetchMultiSpanDetails")
+      .mockResolvedValue(new Map());
+    getIssueByShortIdSpy = vi.spyOn(apiClient, "getIssueByShortId");
+    getLatestEventSpy = vi.spyOn(apiClient, "getLatestEvent");
+    getProjectSpy = vi.spyOn(apiClient, "getProject");
+    findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
+    resolveOrgAndProjectSpy = vi.spyOn(resolveTarget, "resolveOrgAndProject");
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
+    openInBrowserSpy = vi.spyOn(browser, "openInBrowser");
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
     setOrgRegion("my-org", DEFAULT_SENTRY_URL);
 
