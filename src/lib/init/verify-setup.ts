@@ -129,7 +129,14 @@ export async function verifySetup(
   // Clean up — kill and wait for the child to release its port
   try {
     child.kill("SIGTERM");
-    await child.exited;
+    const exited = await Promise.race([
+      child.exited.then(() => true),
+      new Promise<false>((r) => setTimeout(() => r(false), 5_000)),
+    ]);
+    if (!exited) {
+      child.kill("SIGKILL");
+      await child.exited;
+    }
   } catch (error) {
     logger.debug("Failed to kill verification child", error);
   }

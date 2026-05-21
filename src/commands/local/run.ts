@@ -281,6 +281,24 @@ export const runCommand = buildCommand({
 /** Default timeout for --verify when no explicit --timeout is given. */
 const DEFAULT_VERIFY_TIMEOUT_S = 30;
 
+/** Grace period before escalating SIGTERM to SIGKILL. */
+const KILL_GRACE_MS = 5_000;
+
+/** Send SIGTERM, wait up to {@link KILL_GRACE_MS}, then SIGKILL if still alive. */
+async function gracefulKill(
+  child: ReturnType<typeof Bun.spawn>
+): Promise<void> {
+  child.kill("SIGTERM");
+  const exited = await Promise.race([
+    child.exited.then(() => true),
+    new Promise<false>((r) => setTimeout(() => r(false), KILL_GRACE_MS)),
+  ]);
+  if (!exited) {
+    child.kill("SIGKILL");
+    await child.exited;
+  }
+}
+
 /**
  * Run in --verify mode: start a background server, subscribe to the buffer
  * for the first envelope, and race between envelope arrival, timeout,
@@ -364,8 +382,7 @@ async function* runWithVerify(
   switch (outcome.kind) {
     case "envelope": {
       logger.info("Setup verified — your app is sending events to Sentry");
-      child.kill("SIGTERM");
-      await child.exited;
+      await gracefulKill(child);
       await shutdownServer(server);
       return;
     }
@@ -373,8 +390,7 @@ async function* runWithVerify(
       logger.warn(
         `Verification timed out after ${verifyTimeout}s — no events received from the SDK`
       );
-      child.kill("SIGTERM");
-      await child.exited;
+      await gracefulKill(child);
       await shutdownServer(server);
       throw new CliError(
         `Verification timed out after ${verifyTimeout}s`,
