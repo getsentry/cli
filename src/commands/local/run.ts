@@ -303,7 +303,11 @@ async function gracefulKill(
   ]);
   clearTimeout(graceTimer);
   if (!exited) {
-    child.kill("SIGKILL");
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      return;
+    }
     await child.exited;
   }
 }
