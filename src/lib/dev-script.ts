@@ -74,7 +74,7 @@ async function tryPackageJson(cwd: string): Promise<DetectedCommand | null> {
         // Scripts with env-var prefixes, pipes, or operators need a shell
         const args = SHELL_FEATURES_RE.test(value)
           ? ["sh", "-c", value]
-          : value.split(WHITESPACE_RE);
+          : value.trim().split(WHITESPACE_RE);
         return {
           args,
           source: `package.json scripts.${name}`,
