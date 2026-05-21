@@ -469,6 +469,15 @@ Initialize Sentry in your project (experimental)
 
 → Full flags and examples: `references/init.md`
 
+### Local
+
+Sentry for local development
+
+- `sentry local serve` — Start the local dev server and tail events
+- `sentry local run <command...>` — Run a command with the local dev server enabled
+
+→ Full flags and examples: `references/local.md`
+
 ### Schema
 
 Browse the Sentry API schema

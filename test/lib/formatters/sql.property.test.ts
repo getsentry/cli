@@ -126,13 +126,14 @@ describe("property: isDbSpanOp", () => {
 });
 
 describe("property: colorizeSql", () => {
-  test("stripping ANSI preserves original text content", () => {
+  test("stripping ANSI preserves original text content (case-insensitive)", () => {
     process.env.SENTRY_PLAIN_OUTPUT = "0";
     fcAssert(
       property(sqlStringArb, (sql) => {
         const colorized = colorizeSql(sql);
         const stripped = stripAnsi(colorized);
-        expect(stripped).toBe(sql);
+        // Case-insensitive: @sentry/sqlish uppercases SQL keywords (e.g. "by" → "BY")
+        expect(stripped.toLowerCase()).toBe(sql.toLowerCase());
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
