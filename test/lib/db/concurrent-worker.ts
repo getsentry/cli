@@ -1,9 +1,9 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Worker script for concurrent database access tests.
  * Spawned by concurrent.test.ts to simulate multiple CLI instances.
  *
- * Usage: bun test/lib/db/concurrent-worker.ts <config-dir> <worker-id> <operation>
+ * Usage: tsx test/lib/db/concurrent-worker.ts <config-dir> <worker-id> <operation>
  *
  * Operations:
  *   write-dsn     - Write a unique DSN cache entry
@@ -20,7 +20,7 @@ const operation = process.argv[4];
 
 if (!(configDir && workerId && operation)) {
   console.error(
-    "Usage: bun concurrent-worker.ts <config-dir> <worker-id> <operation>"
+    "Usage: tsx concurrent-worker.ts <config-dir> <worker-id> <operation>"
   );
   process.exit(1);
 }

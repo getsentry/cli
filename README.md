@@ -126,30 +126,30 @@ Errors are thrown as `SentryError` with `.exitCode` and `.stderr`.
 ```bash
 git clone https://github.com/getsentry/cli.git
 cd cli
-bun install
+pnpm install
 ```
 
 ### Running Locally
 
 ```bash
 # Run CLI in development mode
-bun run cli --help
+pnpm run cli -- --help
 
-# With environment variables
-bun run --env-file=.env.local cli --help
+# With environment variables (create .env.local first, see DEVELOPMENT.md)
+pnpm run cli -- --help
 ```
 
 ### Scripts
 
 <!-- GENERATED:START dev-scripts -->
 ```bash
-bun run build         # Build for current platform
-bun run typecheck     # Type checking
-bun run lint          # Check for issues
-bun run lint:fix      # Auto-fix issues
-bun run test:unit     # Run unit tests
-bun run test:e2e      # Run end-to-end tests
-bun run generate:docs # Regenerate command docs and skills
+pnpm run build         # Build for current platform
+pnpm run typecheck     # Type checking
+pnpm run lint          # Check for issues
+pnpm run lint:fix      # Auto-fix issues
+pnpm run test:unit     # Run unit tests
+pnpm run test:e2e      # Run end-to-end tests
+pnpm run generate:docs # Regenerate command docs and skills
 ```
 <!-- GENERATED:END dev-scripts -->
 

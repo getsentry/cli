@@ -11,14 +11,11 @@
  */
 
 import { availableParallelism } from "node:os";
-// Raw-text import of the worker body. Bun handles the
-// `with { type: "text" }` attribute natively; the esbuild build
-// uses `script/text-import-plugin.ts` to polyfill it. TypeScript
-// doesn't model the attribute, hence the cast.
-import grepWorkerSource from "./grep-worker.js" with { type: "text" };
+// Worker source loaded as a string. At dev/test time, the module reads
+// the file from disk via readFileSync. At build time, esbuild's
+// text-import-plugin replaces the module with an inlined string constant.
+import GREP_WORKER_SOURCE from "./grep-worker-source.js";
 import type { GrepMatch } from "./types.js";
-
-const GREP_WORKER_SOURCE = grepWorkerSource as unknown as string;
 
 /** Batch dispatched to a worker. */
 export type WorkerGrepRequest = {

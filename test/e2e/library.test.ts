@@ -93,7 +93,7 @@ describe("library mode (bundled)", () => {
 
       await new Promise<number>((resolve) => {
         let buildStderr = "";
-        const proc = spawn("bun", ["run", "script/bundle.ts"], {
+        const proc = spawn("pnpm", ["run", "bundle"], {
           cwd: ROOT_DIR,
           env: {
             ...process.env,

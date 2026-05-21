@@ -10,7 +10,7 @@
 1. Install dependencies:
 
 ```bash
-bun install
+pnpm install
 ```
 
 2. Create a `.env.local` file in the project root:
@@ -25,8 +25,10 @@ Get the client ID from your Sentry OAuth application settings.
 
 ## Running Locally
 
+Load environment variables from `.env.local` (e.g. via `dotenv` or `export $(cat .env.local | xargs)`), then:
+
 ```bash
-bun run --env-file=.env.local cli auth login
+pnpm run cli -- auth login
 ```
 
 ## Testing the Device Flow
@@ -34,7 +36,7 @@ bun run --env-file=.env.local cli auth login
 1. Run the CLI login command:
 
 ```bash
-bun run --env-file=.env.local cli auth login
+pnpm run cli -- auth login
 ```
 
 2. You'll see output like:
@@ -86,8 +88,10 @@ The table below lists the most common development variables. For the complete re
 
 ## Building
 
+Building the native binary still requires Bun:
+
 ```bash
-bun run build
+pnpm run build
 ```
 
 ## Architecture

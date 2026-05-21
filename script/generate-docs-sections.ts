@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Generate Documentation Sections (Marker-Based)
  *
@@ -16,19 +16,24 @@
  * this script edits committed files in-place between marker pairs.
  *
  * Usage:
- *   bun run script/generate-docs-sections.ts          # Generate (write)
- *   bun run script/generate-docs-sections.ts --check   # Dry-run, exit 1 if stale
+ *   tsx script/generate-docs-sections.ts          # Generate (write)
+ *   tsx script/generate-docs-sections.ts --check   # Dry-run, exit 1 if stale
  */
 
 import { mkdirSync } from "node:fs";
+import { access, readFile, writeFile } from "node:fs/promises";
 
 // Bootstrap: skill-content stub (same pattern as generate-command-docs.ts)
 const SKILL_CONTENT_PATH = "src/generated/skill-content.ts";
 const SKILL_CONTENT_STUB =
   "export const SKILL_FILES: [string, string][] = [];\n";
-if (!(await Bun.file(SKILL_CONTENT_PATH).exists())) {
+const skillContentExists = await access(SKILL_CONTENT_PATH).then(
+  () => true,
+  () => false
+);
+if (!skillContentExists) {
   mkdirSync("src/generated", { recursive: true });
-  await Bun.write(SKILL_CONTENT_PATH, SKILL_CONTENT_STUB);
+  await writeFile(SKILL_CONTENT_PATH, SKILL_CONTENT_STUB);
 }
 
 import type { EnvVarEntry } from "../src/lib/env-registry.js";
@@ -38,7 +43,7 @@ const { routes } = await import("../src/app.js");
 const { extractAllRoutes } = await import("../src/lib/introspect.js");
 const { OAUTH_SCOPES } = await import("../src/lib/oauth.js");
 const { ENV_VAR_REGISTRY } = await import("../src/lib/env-registry.js");
-const pkg = await Bun.file("package.json").json();
+const pkg = JSON.parse(await readFile("package.json", "utf-8"));
 
 const isCheck = process.argv.includes("--check");
 
@@ -304,13 +309,13 @@ function generateLibraryPrereq(): string {
  */
 function generateDevScripts(): string {
   const scripts: [string, string][] = [
-    ["bun run build", "Build for current platform"],
-    ["bun run typecheck", "Type checking"],
-    ["bun run lint", "Check for issues"],
-    ["bun run lint:fix", "Auto-fix issues"],
-    ["bun run test:unit", "Run unit tests"],
-    ["bun run test:e2e", "Run end-to-end tests"],
-    ["bun run generate:docs", "Regenerate command docs and skills"],
+    ["pnpm run build", "Build for current platform"],
+    ["pnpm run typecheck", "Type checking"],
+    ["pnpm run lint", "Check for issues"],
+    ["pnpm run lint:fix", "Auto-fix issues"],
+    ["pnpm run test:unit", "Run unit tests"],
+    ["pnpm run test:e2e", "Run end-to-end tests"],
+    ["pnpm run generate:docs", "Regenerate command docs and skills"],
   ];
   const maxCmd = Math.max(...scripts.map(([cmd]) => cmd.length));
   const lines = scripts.map(([cmd, desc]) => `${cmd.padEnd(maxCmd)} # ${desc}`);
@@ -516,7 +521,7 @@ const sections: SectionDef[] = [
 let staleCount = 0;
 
 for (const section of sections) {
-  const original = await Bun.file(section.filePath).text();
+  const original = await readFile(section.filePath, "utf-8");
   const generated = section.generate();
   const updated = replaceMarkerSection(
     original,
@@ -530,7 +535,7 @@ for (const section of sections) {
       console.error(`STALE: ${section.filePath} [${section.sectionName}]`);
       staleCount += 1;
     } else {
-      await Bun.write(section.filePath, updated);
+      await writeFile(section.filePath, updated);
       console.log(`Updated: ${section.filePath} [${section.sectionName}]`);
     }
   } else {
@@ -540,7 +545,7 @@ for (const section of sections) {
 
 if (isCheck && staleCount > 0) {
   console.error(
-    `\n${staleCount} section(s) are stale. Run: bun run generate:docs`
+    `\n${staleCount} section(s) are stale. Run: pnpm run generate:docs`
   );
   process.exit(1);
 }

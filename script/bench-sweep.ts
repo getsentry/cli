@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Concurrency sweep for `src/lib/scan/` hot paths.
  *
@@ -12,11 +12,11 @@
  * into CI.
  *
  * Usage:
- *   bun run bench:sweep                         # full sweep on medium+large
- *   bun run bench:sweep --size small            # one preset
- *   bun run bench:sweep --values 1,2,4,8,16,32  # custom concurrency grid
- *   bun run bench:sweep --runs 10 --warmup 3    # override run counts
- *   bun run bench:sweep --json > sweep.json     # machine-readable
+ *   pnpm run bench:sweep                          # full sweep on medium+large
+ *   pnpm run bench:sweep -- --size small           # one preset
+ *   pnpm run bench:sweep -- --values 1,2,4,8,16,32 # custom concurrency grid
+ *   pnpm run bench:sweep -- --runs 10 --warmup 3   # override run counts
+ *   pnpm run bench:sweep -- --json > sweep.json    # machine-readable
  *
  * Output: a per-(fixture, op) table of p50 times across the
  * concurrency grid, plus a "knee" annotation flagging the value
@@ -144,10 +144,10 @@ function parseArgs(argv: readonly string[]): SweepArgs {
 }
 
 function printHelp(): void {
-  console.log("Usage: bun run bench:sweep [--size small|medium|large|all]");
-  console.log("                            [--values 1,2,4,8,...]");
-  console.log("                            [--runs N] [--warmup N]");
-  console.log("                            [--json]");
+  console.log("Usage: pnpm run bench:sweep [-- --size small|medium|large|all]");
+  console.log("                             [--values 1,2,4,8,...]");
+  console.log("                             [--runs N] [--warmup N]");
+  console.log("                             [--json]");
 }
 
 /** Resolve (or create) a synthetic fixture, same as bench.ts. */

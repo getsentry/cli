@@ -16,6 +16,7 @@
  * threat model discussion.
  */
 
+import { readFileSync } from "node:fs";
 import { rootCertificates } from "node:tls";
 import { getDefaultCaCert } from "./db/defaults.js";
 import { getEnv } from "./env.js";
@@ -28,13 +29,11 @@ import { isSentrySaasUrl } from "./sentry-urls.js";
  * function doesn't exist, and on Bun we use the per-request `tls.ca`
  * option instead.
  */
-const setDefaultCACertificates: ((certs: string[]) => void) | undefined =
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  (
-    require("node:tls") as {
-      setDefaultCACertificates?: (certs: string[]) => void;
-    }
-  ).setDefaultCACertificates;
+const setDefaultCACertificates: ((certs: string[]) => void) | undefined = (
+  require("node:tls") as {
+    setDefaultCACertificates?: (certs: string[]) => void;
+  }
+).setDefaultCACertificates;
 
 const log = logger.withTag("tls");
 
@@ -58,7 +57,6 @@ let warnedSaas = false;
 export function readCaCertFile(
   path: string
 ): { ok: true; content: string } | { ok: false; reason: string } {
-  const { readFileSync } = require("node:fs") as typeof import("node:fs");
   let content: string;
   try {
     content = readFileSync(path, "utf-8");

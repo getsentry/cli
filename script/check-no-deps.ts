@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Check for Runtime Dependencies
  *
@@ -8,18 +8,20 @@
  * package at zero install-time dependencies.
  *
  * Usage:
- *   bun run script/check-no-deps.ts
+ *   tsx script/check-no-deps.ts
  *
  * Exit codes:
  *   0 - No runtime dependencies found
  *   1 - Runtime dependencies detected
  */
 
-const pkg: { dependencies?: Record<string, string> } =
-  await Bun.file("package.json").json();
+import { readFile } from "node:fs/promises";
+
+const pkg: { dependencies?: Record<string, string> } = JSON.parse(
+  await readFile("package.json", "utf-8")
+);
 
 const deps = Object.keys(pkg.dependencies ?? {});
-export {};
 
 if (deps.length === 0) {
   console.log("✓ No runtime dependencies in package.json");
