@@ -510,7 +510,7 @@ describe("sentry explore", () => {
         context,
         {
           ...DEFAULT_FLAGS,
-          dataset: "metricsEnhanced",
+          dataset: "tracemetrics",
           field: ["title", "count()"],
         },
         "test-org/"
@@ -528,7 +528,7 @@ describe("sentry explore", () => {
         context,
         {
           ...DEFAULT_FLAGS,
-          dataset: "metricsEnhanced",
+          dataset: "tracemetrics",
           field: [
             "gen_ai.request.model",
             "sum(value,llm.token_usage,distribution,none)",
@@ -539,7 +539,7 @@ describe("sentry explore", () => {
 
       expect(queryEventsSpy).toHaveBeenCalledWith(
         "test-org",
-        expect.objectContaining({ dataset: "metricsEnhanced" })
+        expect.objectContaining({ dataset: "tracemetrics" })
       );
     });
 
@@ -549,7 +549,7 @@ describe("sentry explore", () => {
 
       const promise = func.call(
         context,
-        { ...DEFAULT_FLAGS, dataset: "metricsEnhanced" },
+        { ...DEFAULT_FLAGS, dataset: "tracemetrics" },
         "test-org/"
       );
 
@@ -567,7 +567,7 @@ describe("sentry explore", () => {
         context,
         {
           ...DEFAULT_FLAGS,
-          dataset: "metricsEnhanced",
+          dataset: "tracemetrics",
           field: ["gen_ai.request.model"],
         },
         "test-org/"
@@ -584,7 +584,7 @@ describe("sentry explore", () => {
         context,
         {
           ...DEFAULT_FLAGS,
-          dataset: "metricsEnhanced",
+          dataset: "tracemetrics",
           metric: "llm.token_usage",
         },
         "test-org/"
@@ -598,7 +598,7 @@ describe("sentry explore", () => {
         "test-org",
         expect.objectContaining({
           fields: ["sum(value,llm.token_usage,distribution,none)"],
-          dataset: "metricsEnhanced",
+          dataset: "tracemetrics",
         })
       );
     });
@@ -611,7 +611,7 @@ describe("sentry explore", () => {
         context,
         {
           ...DEFAULT_FLAGS,
-          dataset: "metricsEnhanced",
+          dataset: "tracemetrics",
           metric: "llm.token_usage",
           field: ["gen_ai.request.model"],
         },
@@ -637,7 +637,7 @@ describe("sentry explore", () => {
         context,
         {
           ...DEFAULT_FLAGS,
-          dataset: "metricsEnhanced",
+          dataset: "tracemetrics",
           metric: "cache.hit_rate",
           agg: "avg",
         },
@@ -652,7 +652,7 @@ describe("sentry explore", () => {
       );
     });
 
-    test("--metric without --dataset metrics auto-switches to metricsEnhanced", async () => {
+    test("--metric without --dataset metrics auto-switches to tracemetrics", async () => {
       resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context } = createContext();
 
@@ -669,7 +669,7 @@ describe("sentry explore", () => {
       expect(queryEventsSpy).toHaveBeenCalledWith(
         "test-org",
         expect.objectContaining({
-          dataset: "metricsEnhanced",
+          dataset: "tracemetrics",
           fields: ["sum(value,llm.token_usage,distribution,none)"],
         })
       );

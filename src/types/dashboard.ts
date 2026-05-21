@@ -1002,7 +1002,7 @@ const WIDGET_TYPE_TO_DATASET: Record<string, string> = {
   "error-events": "errors",
   "transaction-like": "transactions",
   logs: "logs",
-  tracemetrics: "metricsEnhanced",
+  tracemetrics: "tracemetrics",
 };
 
 /**

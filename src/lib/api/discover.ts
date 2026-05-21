@@ -96,7 +96,7 @@ export type MetricMeta = {
 /**
  * Discover available metrics for an org via the Events API.
  *
- * Queries `dataset=metricsEnhanced` with meta-fields (`metric.name`, etc.)
+ * Queries `dataset=tracemetrics` with meta-fields (`metric.name`, etc.)
  * — the same technique the Sentry Explore Metrics UI uses.
  *
  * Auto-paginates to collect all available metrics (bounded by
@@ -116,7 +116,7 @@ export async function queryMetricsMeta(
 
   const baseOptions: ExploreQueryOptions = {
     fields: ["metric.name", "metric.type", "metric.unit"],
-    dataset: "metricsEnhanced",
+    dataset: "tracemetrics",
     query,
     statsPeriod:
       options?.start || options?.end

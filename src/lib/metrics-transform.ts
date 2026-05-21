@@ -3,7 +3,7 @@
  *
  * Transforms user-friendly metric names (e.g., `llm.token_usage`) into the
  * four-part tracemetrics format required by the Sentry Events API when
- * querying `dataset=metricsEnhanced`: `aggregation(value,name,type,unit)`.
+ * querying `dataset=tracemetrics`: `aggregation(value,name,type,unit)`.
  */
 
 import type { MetricMeta } from "./api/discover.js";

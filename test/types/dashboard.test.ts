@@ -950,7 +950,7 @@ describe("mapWidgetTypeToDataset", () => {
     expect(mapWidgetTypeToDataset("error-events")).toBe("errors");
     expect(mapWidgetTypeToDataset("transaction-like")).toBe("transactions");
     expect(mapWidgetTypeToDataset("logs")).toBe("logs");
-    expect(mapWidgetTypeToDataset("tracemetrics")).toBe("metricsEnhanced");
+    expect(mapWidgetTypeToDataset("tracemetrics")).toBe("tracemetrics");
   });
 
   test("returns null for unsupported widget types", () => {
