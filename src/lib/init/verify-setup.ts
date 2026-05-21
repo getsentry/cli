@@ -131,7 +131,7 @@ export async function verifySetup(
     child.kill("SIGTERM");
     const exited = await Promise.race([
       child.exited.then(() => true),
-      new Promise<false>((r) => setTimeout(() => r(false), 5_000)),
+      new Promise<false>((r) => setTimeout(() => r(false), 5000)),
     ]);
     if (!exited) {
       child.kill("SIGKILL");

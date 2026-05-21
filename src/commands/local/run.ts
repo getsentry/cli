@@ -282,7 +282,7 @@ export const runCommand = buildCommand({
 const DEFAULT_VERIFY_TIMEOUT_S = 30;
 
 /** Grace period before escalating SIGTERM to SIGKILL. */
-const KILL_GRACE_MS = 5_000;
+const KILL_GRACE_MS = 5000;
 
 /** Send SIGTERM, wait up to {@link KILL_GRACE_MS}, then SIGKILL if still alive. */
 async function gracefulKill(
