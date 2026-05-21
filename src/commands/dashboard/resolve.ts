@@ -818,8 +818,7 @@ const DATASET_ALIASES: Record<string, string> = {
   transactions: "transaction-like",
   log: "logs",
   // `metrics` and `metricsEnhanced` both alias to the canonical `tracemetrics`.
-  // `metricsEnhanced` is the value surfaced by the events API dataset param
-  // (see WIDGET_TYPE_TO_DATASET in types/dashboard.ts) and may appear in docs.
+  // `metricsEnhanced` is a legacy API synonym and may appear in older docs.
   metrics: "tracemetrics",
   metricsenhanced: "tracemetrics",
 };
