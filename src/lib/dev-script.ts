@@ -17,6 +17,13 @@ const SCRIPT_PRIORITY = ["dev", "develop", "serve", "start"] as const;
 const WHITESPACE_RE = /\s+/;
 
 /**
+ * Matches script values that use shell features (env-var assignments,
+ * operators, redirects) which cannot be tokenized by simple whitespace
+ * splitting and must be run via `sh -c`.
+ */
+const SHELL_FEATURES_RE = /^[A-Z_]+=\S|&&|\|\||[|><;]/;
+
+/**
  * Detect the project's dev command by inspecting filesystem markers in priority order.
  *
  * Detection priority:
@@ -64,8 +71,12 @@ async function tryPackageJson(cwd: string): Promise<DetectedCommand | null> {
     for (const name of SCRIPT_PRIORITY) {
       const value = scripts[name];
       if (typeof value === "string" && value.trim().length > 0) {
+        // Scripts with env-var prefixes, pipes, or operators need a shell
+        const args = SHELL_FEATURES_RE.test(value)
+          ? ["sh", "-c", value]
+          : value.split(WHITESPACE_RE);
         return {
-          args: value.split(WHITESPACE_RE),
+          args,
           source: `package.json scripts.${name}`,
         };
       }

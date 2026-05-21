@@ -326,10 +326,18 @@ async function* runWithVerify(
     );
   }
 
+  const forwardSignal = (signal: NodeJS.Signals) => {
+    child.kill(signal);
+  };
+  process.once("SIGINT", () => forwardSignal("SIGINT"));
+  process.once("SIGTERM", () => forwardSignal("SIGTERM"));
+
   const childExited = child.exited.then((code) => ({
     kind: "exited" as const,
     code,
   }));
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
   const racers: Promise<
     | { kind: "envelope" }
@@ -342,13 +350,20 @@ async function* runWithVerify(
 
   if (flags.timeout > 0) {
     racers.push(
-      new Promise((r) =>
-        setTimeout(() => r({ kind: "timeout" as const }), flags.timeout * 1000)
-      )
+      new Promise((r) => {
+        timeoutHandle = setTimeout(
+          () => r({ kind: "timeout" as const }),
+          flags.timeout * 1000
+        );
+      })
     );
   }
 
   const outcome = await Promise.race(racers);
+
+  if (timeoutHandle !== undefined) {
+    clearTimeout(timeoutHandle);
+  }
 
   switch (outcome.kind) {
     case "envelope": {

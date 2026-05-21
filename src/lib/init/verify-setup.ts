@@ -102,13 +102,22 @@ export async function verifySetup(
     code,
   }));
 
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
   const outcome = await Promise.race([
     envelopeReceived.then(() => ({ kind: "envelope" as const })),
     childExited,
-    new Promise<{ kind: "timeout" }>((r) =>
-      setTimeout(() => r({ kind: "timeout" as const }), VERIFY_TIMEOUT_S * 1000)
-    ),
+    new Promise<{ kind: "timeout" }>((r) => {
+      timeoutHandle = setTimeout(
+        () => r({ kind: "timeout" as const }),
+        VERIFY_TIMEOUT_S * 1000
+      );
+    }),
   ]);
+
+  if (timeoutHandle !== undefined) {
+    clearTimeout(timeoutHandle);
+  }
 
   // Clean up
   try {
