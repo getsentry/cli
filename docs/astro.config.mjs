@@ -1,5 +1,8 @@
 import starlight from "@astrojs/starlight";
 import sentry from "@sentry/astro";
+import sentryStarlightTheme, {
+  monochromeCodeTheme,
+} from "@sentry/starlight-theme";
 import { defineConfig } from "astro/config";
 
 // Allow base path override via environment variable for PR previews
@@ -10,6 +13,9 @@ export default defineConfig({
   base,
   markdown: {
     smartypants: false,
+    shikiConfig: {
+      theme: monochromeCodeTheme,
+    },
   },
   // Generate sourcemaps for Sentry. "hidden" produces .map files without
   // adding //# sourceMappingURL comments to the output (the debug IDs
@@ -52,28 +58,8 @@ export default defineConfig({
           href: "https://github.com/getsentry/cli",
         },
       ],
-      expressiveCode: {
-        themes: ["github-dark"],
-        styleOverrides: {
-          frames: {
-            frameBoxShadowCssValue: "none",
-            editorActiveTabIndicatorTopColor: "transparent",
-            editorActiveTabIndicatorBottomColor: "transparent",
-            editorTabBarBorderBottomColor: "transparent",
-            editorTabBarBackground: "transparent",
-            terminalTitlebarBorderBottomColor: "transparent",
-            terminalTitlebarBackground: "rgba(255, 255, 255, 0.03)",
-            terminalBackground: "#0a0a0f",
-          },
-          borderRadius: "12px",
-          borderColor: "rgba(255, 255, 255, 0.1)",
-          codeBackground: "#0a0a0f",
-        },
-      },
+      plugins: [sentryStarlightTheme()],
       components: {
-        ThemeProvider: "./src/components/ThemeProvider.astro",
-        Header: "./src/components/Header.astro",
-        ThemeSelect: "./src/components/ThemeSelect.astro",
         PageTitle: "./src/components/PageTitle.astro",
       },
       head: [
@@ -91,7 +77,7 @@ export default defineConfig({
                 const path = window.location.pathname;
                 // Works with both / (prod) and /pr-preview/pr-XX (preview)
                 return path === '/' || 
-                       /^\\/_preview\\/pr-(\\d+|main)\\/?$/.test(path);
+                       /^\\/\\_preview\\/pr-(\\d+|main)\\/?$/.test(path);
               }
               
               function checkAtBottom() {
@@ -245,7 +231,7 @@ export default defineConfig({
           ],
         },
       ],
-      customCss: ["./src/styles/custom.css"],
+      customCss: ["./src/styles/cli.css"],
     }),
   ],
 });

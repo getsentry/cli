@@ -1,0 +1,385 @@
+/* ==========================================================================
+   Sentry CLI Docs — Project-specific overrides
+   Base theme provided by @sentry/starlight-theme
+   ========================================================================== */
+
+:root,
+:root[data-theme="dark"],
+:root[data-theme="light"] {
+  /* Compat: existing components reference this var */
+  --sl-color-accent-rgb: 139 92 246;
+
+  /* CLI uses Inter + JetBrains Mono */
+  --sl-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --sl-font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* Logo sizing */
+.site-title img {
+  height: 2.3rem;
+  width: auto;
+}
+
+/* ==========================================================================
+   Splash / Landing Page Styles
+   ========================================================================== */
+
+/* Hero section */
+.hero {
+  padding: 10rem 0 0.5rem !important;
+  text-align: left !important;
+  max-width: none !important;
+}
+
+.hero > img,
+.hero > .hero-image {
+  display: none !important;
+}
+
+/* Hero title - make it bold and impactful */
+.hero h1 {
+  font-size: clamp(2.5rem, 8vw, 4rem) !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+  letter-spacing: -0.03em !important;
+  margin-bottom: 1.5rem !important;
+}
+
+/* Hero tagline */
+.hero .tagline {
+  font-size: 1.125rem !important;
+  line-height: 1.7 !important;
+  color: rgba(255, 255, 255, 0.6) !important;
+  max-width: 540px !important;
+  margin: 0 !important;
+}
+
+/* Hide default hero actions */
+.hero .action,
+.hero .sl-flex.actions {
+  display: none !important;
+}
+
+/* Command box in hero - tight to tagline, space below */
+.hero-command {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  margin-bottom: 4rem;
+}
+
+.hero-docs-link {
+  color: rgba(255, 255, 255, 0.7) !important;
+  text-decoration: none !important;
+  font-weight: 400;
+  font-size: 0.9rem;
+  transition: color 0.2s ease;
+  margin-top: 0.75rem;
+  position: relative;
+  display: inline-block;
+}
+
+.hero-docs-link::after {
+  content: "";
+  position: absolute;
+  bottom: -3px;
+  right: 0;
+  width: 7.5em; /* Width of "documentation." */
+  height: 1px;
+  background: currentColor;
+  transition: width 0.3s ease;
+}
+
+.hero-docs-link:hover {
+  color: #fff !important;
+}
+
+.hero-docs-link:hover::after {
+  width: 100%;
+}
+
+/* Remove the static underline from the span since pseudo-element handles it */
+.hero-docs-link .underline {
+  text-decoration: none;
+}
+
+/* Stack container - page layout for splash */
+[data-page-type="splash"] .sl-container {
+  max-width: var(--sl-content-width);
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+[data-page-type="splash"] main {
+  padding-top: 0;
+}
+
+/* ==========================================================================
+   Features Section - Horizontal Rows with Terminals
+   ========================================================================== */
+
+.feature-section {
+  margin: 2rem 0;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.feature-section-inner {
+  display: flex;
+  align-items: stretch;
+}
+
+.feature-section-inner.reverse {
+  flex-direction: row-reverse;
+}
+
+.feature-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 2.5rem;
+}
+
+.feature-text h3 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: #fff;
+  margin: 0 0 0.75rem 0;
+  line-height: 1.2;
+}
+
+.feature-text p {
+  font-size: 1.05rem;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0 0 1rem 0;
+}
+
+.feature-text p:last-child {
+  margin-bottom: 0;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.feature-text code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.feature-visual {
+  flex: 0 0 55%;
+  min-height: 420px;
+  margin: 0.5rem 0.75rem 0.75rem 0;
+  padding: 10%;
+  background-size: cover;
+  background-position: center;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.feature-section-inner.reverse .feature-visual {
+  margin: 0.75rem 0 0.75rem 0.75rem;
+}
+
+/* Responsive for feature sections */
+@media (max-width: 1000px) {
+  .feature-section-inner,
+  .feature-section-inner.reverse {
+    flex-direction: column;
+  }
+
+  .feature-text {
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .feature-visual,
+  .feature-section-inner.reverse .feature-visual {
+    flex: none;
+    width: calc(100% - 1.5rem);
+    min-height: 380px;
+    margin: 0 0.75rem 0.75rem 0.75rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .feature-section {
+    margin: 1.5rem 0;
+  }
+
+  .feature-text {
+    padding: 1.5rem;
+  }
+
+  .feature-visual {
+    min-height: 340px;
+    margin: 0 0.5rem 0.5rem 0.5rem;
+    padding: 8%;
+  }
+
+  .feature-text h3 {
+    font-size: 1.4rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .feature-visual {
+    margin: 0 0.5rem 0.5rem 0.5rem;
+    min-height: 300px;
+    padding: 6%;
+  }
+
+  .feature-text {
+    padding: 1.25rem;
+  }
+
+  .feature-text h3 {
+    font-size: 1.25rem;
+  }
+}
+
+/* ==========================================================================
+   PackageManagerCode - pm-pre no-border treatment
+   ========================================================================== */
+
+pre.pm-pre,
+.pm-pre {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* ASCII art tables inside terminals - no chrome, consistent monospace */
+pre.table-box {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+pre.table-box,
+pre.table-box * {
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas,
+    "DejaVu Sans Mono", monospace !important;
+  font-size: inherit !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  font-variant: normal !important;
+  font-variant-ligatures: none !important;
+  font-feature-settings: normal !important;
+  font-stretch: normal !important;
+  letter-spacing: 0 !important;
+  word-spacing: 0 !important;
+  text-decoration: none !important;
+  text-transform: none !important;
+  -webkit-text-size-adjust: none !important;
+}
+
+/* ==========================================================================
+   Mobile Responsive (splash-specific)
+   ========================================================================== */
+
+@media (max-width: 768px) {
+  .hero {
+    text-align: center !important;
+  }
+
+  .hero h1 {
+    font-size: 2rem !important;
+  }
+
+  .hero .tagline {
+    font-size: 1rem !important;
+    margin: 0 auto !important;
+  }
+
+  .hero-command {
+    align-items: center;
+  }
+
+  .hero-command .command-box-wrapper {
+    justify-content: center;
+  }
+
+  .hero-command .install-selector {
+    max-width: 100%;
+  }
+
+  .hero-command .install-box {
+    flex-shrink: 0;
+  }
+
+  .hero-command .command-area {
+    font-size: 0.7rem;
+    padding: 0.5rem 0.75rem;
+  }
+}
+
+/* ==========================================================================
+   Overscroll Easter Egg
+   ========================================================================== */
+
+.overscroll-message {
+  position: fixed;
+  bottom: -60px;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease-out,
+    transform 0.15s ease-out;
+}
+
+.overscroll-message span {
+  display: inline-block;
+  padding: 0.6rem 1.5rem;
+  background: rgb(var(--sl-color-accent-rgb) / 0.12);
+  border: 1px solid rgb(var(--sl-color-accent-rgb) / 0.25);
+  border-radius: 24px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.9rem;
+  font-weight: 500;
+  font-family: var(--sl-font);
+  backdrop-filter: blur(12px);
+  white-space: nowrap;
+}
+
+.overscroll-message code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.2em 0.5em;
+  border-radius: 6px;
+  font-family: var(--sl-font-mono);
+  font-size: 0.85em;
+  color: #a78bfa;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.overscroll-message code:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+@media (max-width: 640px) {
+  .overscroll-message span {
+    white-space: normal;
+    text-align: center;
+    max-width: calc(100vw - 2rem);
+    font-size: 0.8rem;
+    padding: 0.5rem 1rem;
+  }
+}

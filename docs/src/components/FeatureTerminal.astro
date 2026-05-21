@@ -65,7 +65,7 @@ const { title = "Terminal" } = Astro.props;
 
   .feature-terminal-body {
     padding: 0 1.5rem 1.25rem;
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-family: var(--sl-font-mono);
     line-height: 1.6;
     color: rgba(255, 255, 255, 0.85);
   }
@@ -108,7 +108,7 @@ const { title = "Terminal" } = Astro.props;
 
   /* Table box styles */
   .feature-terminal-body :global(.table-box) {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-family: var(--sl-font-mono);
     font-size: 0.7rem;
     line-height: 1.5;
     margin: 0;
