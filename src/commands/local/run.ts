@@ -155,6 +155,13 @@ export const runCommand = buildCommand({
       );
     }
 
+    // Forward signals to the child so the whole process tree shuts down.
+    const forwardSignal = (signal: NodeJS.Signals) => {
+      child.kill(signal);
+    };
+    process.once("SIGINT", () => forwardSignal("SIGINT"));
+    process.once("SIGTERM", () => forwardSignal("SIGTERM"));
+
     const exitCode = await child.exited;
 
     if (bgServer) {
