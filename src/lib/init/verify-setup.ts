@@ -133,7 +133,7 @@ export async function verifySetup(
     const exited = await Promise.race([
       child.exited.then(() => true),
       new Promise<false>((r) => {
-        graceTimer = setTimeout(() => r(false), 5_000);
+        graceTimer = setTimeout(() => r(false), 5000);
       }),
     ]);
     clearTimeout(graceTimer);
