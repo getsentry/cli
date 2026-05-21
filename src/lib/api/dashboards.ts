@@ -221,12 +221,13 @@ export async function listDashboardRevisionsPaginated(
 export async function restoreDashboardRevision(
   orgSlug: string,
   dashboardId: string,
-  revisionId: number
+  revisionId: string
 ): Promise<DashboardDetail> {
   const regionUrl = await resolveOrgRegion(orgSlug);
+  const encodedRevisionId = encodeURIComponent(revisionId);
   const { data } = await apiRequestToRegion<DashboardDetail>(
     regionUrl,
-    `/organizations/${orgSlug}/dashboards/${dashboardId}/revisions/${revisionId}/`,
+    `/organizations/${orgSlug}/dashboards/${dashboardId}/revisions/${encodedRevisionId}/`,
     { method: "POST", schema: DashboardDetailSchema }
   );
   return data;
