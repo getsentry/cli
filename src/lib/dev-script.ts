@@ -1,5 +1,6 @@
 /** Auto-detect the project's development server command from filesystem markers. */
 
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { logger } from "./logger.js";
 
@@ -58,12 +59,11 @@ export async function detectDevCommand(
 async function tryPackageJson(cwd: string): Promise<DetectedCommand | null> {
   try {
     const pkgPath = join(cwd, "package.json");
-    if (!(await Bun.file(pkgPath).exists())) {
+    const raw = await readFile(pkgPath, "utf-8").catch(() => null);
+    if (raw === null) {
       return null;
     }
-    const pkg = (await Bun.file(pkgPath).json()) as {
-      scripts?: Record<string, string>;
-    };
+    const pkg = JSON.parse(raw) as { scripts?: Record<string, string> };
     const scripts = pkg.scripts;
     if (!scripts || typeof scripts !== "object") {
       return null;
@@ -95,12 +95,9 @@ async function tryPythonFile(
   args: string[]
 ): Promise<DetectedCommand | null> {
   try {
-    if (await Bun.file(join(cwd, filename)).exists()) {
-      return { args, source: filename };
-    }
-    return null;
-  } catch (error) {
-    logger.debug(`Failed to check ${filename}`, error);
+    await access(join(cwd, filename));
+    return { args, source: filename };
+  } catch {
     return null;
   }
 }
@@ -108,27 +105,22 @@ async function tryPythonFile(
 /** Check for go.mod and return `go run .` */
 async function tryGoMod(cwd: string): Promise<DetectedCommand | null> {
   try {
-    if (await Bun.file(join(cwd, "go.mod")).exists()) {
-      return { args: ["go", "run", "."], source: "go.mod" };
-    }
-    return null;
-  } catch (error) {
-    logger.debug("Failed to check go.mod", error);
+    await access(join(cwd, "go.mod"));
+    return { args: ["go", "run", "."], source: "go.mod" };
+  } catch {
     return null;
   }
 }
 
 /** Check for docker-compose.yml or compose.yml. */
 async function tryDockerCompose(cwd: string): Promise<DetectedCommand | null> {
-  try {
-    for (const filename of ["docker-compose.yml", "compose.yml"]) {
-      if (await Bun.file(join(cwd, filename)).exists()) {
-        return { args: ["docker", "compose", "up"], source: filename };
-      }
+  for (const filename of ["docker-compose.yml", "compose.yml"]) {
+    try {
+      await access(join(cwd, filename));
+      return { args: ["docker", "compose", "up"], source: filename };
+    } catch {
+      // File doesn't exist — try next
     }
-    return null;
-  } catch (error) {
-    logger.debug("Failed to check docker-compose files", error);
-    return null;
   }
+  return null;
 }

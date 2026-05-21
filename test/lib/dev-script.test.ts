@@ -6,9 +6,9 @@
  * tests focus on filesystem integration, fallback chains, and priority ordering.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { detectDevCommand } from "../../src/lib/dev-script.js";
 import { TEST_TMP_DIR } from "../constants.js";
 

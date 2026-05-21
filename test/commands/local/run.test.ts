@@ -5,9 +5,9 @@
  * exit code propagation, auto-detection, --verify, and --timeout.
  */
 
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { runCommand } from "../../../src/commands/local/run.js";
 import { CliError, ValidationError } from "../../../src/lib/errors.js";
 import { TEST_TMP_DIR } from "../../constants.js";
@@ -42,7 +42,6 @@ function makeContext(cwd?: string) {
   };
 }
 
-// biome-ignore lint/suspicious/noSkippedTests: requires Bun.spawn (not available in vitest Node workers)
 describe.skipIf(!isBun)("sentry local run", () => {
   test("throws ValidationError when no command and no auto-detect", async () => {
     const func = (await runCommand.loader()) as unknown as RunFunc;

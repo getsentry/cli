@@ -16,7 +16,6 @@ import { join } from "node:path";
 import { build } from "esbuild";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { textImportPlugin } from "../../script/text-import-plugin.js";
-import { TEST_TMP_DIR } from "../constants.js";
 
 const TEST_DIR = join(
   process.env.VITEST_POOL_ID

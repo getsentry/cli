@@ -5,8 +5,7 @@
  * package.json scripts object, is detected by detectDevCommand.
  */
 
-import { describe, expect, test } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   asyncProperty,
@@ -14,6 +13,7 @@ import {
   assert as fcAssert,
   string,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { detectDevCommand } from "../../src/lib/dev-script.js";
 import { TEST_TMP_DIR } from "../constants.js";
 
@@ -40,7 +40,7 @@ describe("property: detectDevCommand", () => {
           // Each iteration gets its own directory to avoid cross-contamination
           const dir = await mkdtemp(join(TEST_TMP_DIR, "dev-prop-"));
           try {
-            await Bun.write(
+            await writeFile(
               join(dir, "package.json"),
               JSON.stringify({ scripts: { [name]: value } })
             );
