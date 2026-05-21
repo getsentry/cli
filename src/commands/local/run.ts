@@ -49,10 +49,10 @@ const BUFFER_SIZE = 500;
  */
 function shutdownServer(server: Server): Promise<void> {
   return new Promise<void>((resolve) => {
+    server.close(() => resolve());
     if (typeof server.closeAllConnections === "function") {
       server.closeAllConnections();
     }
-    server.close(() => resolve());
   });
 }
 
