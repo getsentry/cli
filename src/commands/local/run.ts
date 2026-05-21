@@ -99,7 +99,6 @@ export const runCommand = buildCommand({
     },
   },
   auth: false,
-  // biome-ignore lint/correctness/useYield: child process wrapper, no structured output
   async *func(this: SentryContext, flags: RunFlags, ...rawArgs: string[]) {
     // Strip leading "--" separator that Stricli passes through
     const args = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;

@@ -85,8 +85,9 @@ function parsePort(value: string): number {
   return port;
 }
 
-/** Match localhost origins on any port (http or https). */
-const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+/** Match localhost origins on any port (http or https), including IPv6. */
+const LOCALHOST_ORIGIN_RE =
+  /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
 /**
  * Build the Hono application.

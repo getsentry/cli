@@ -231,7 +231,11 @@ export function formatSingleLog(logEntry: LogEntry, source: string): string {
     const attrs = Object.entries(logEntry.attributes)
       .filter(
         ([k, v]) =>
-          !k.startsWith("sentry.") && v.value !== null && v.value !== undefined
+          !k.startsWith("sentry.") &&
+          v !== null &&
+          v !== undefined &&
+          v.value !== null &&
+          v.value !== undefined
       )
       .map(([k, v]) => muted(`[${sanitize(k)}=${sanitize(String(v.value))}]`));
     if (attrs.length > 0) {
