@@ -97,8 +97,12 @@ export async function verifySetup(
     return;
   }
 
-  const onSigint = () => child.kill("SIGINT");
-  const onSigterm = () => child.kill("SIGTERM");
+  const onSigint = () => {
+    try { child.kill("SIGINT"); } catch {}
+  };
+  const onSigterm = () => {
+    try { child.kill("SIGTERM"); } catch {}
+  };
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);
 
