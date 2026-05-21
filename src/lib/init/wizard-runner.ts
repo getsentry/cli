@@ -60,6 +60,7 @@ import type {
 import { getUIAsync } from "./ui/factory.js";
 import { LoggingUIPromptError } from "./ui/logging-ui.js";
 import type { SpinnerHandle, WelcomeOptions, WizardUI } from "./ui/types.js";
+import { verifySetup } from "./verify-setup.js";
 import {
   precomputeDirListing,
   precomputeSentryDetection,
@@ -830,7 +831,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     ui.setStep?.(activeStepId, "completed");
   }
 
-  handleFinalResult(result, spin, spinState, ui);
+  await handleFinalResult(result, spin, spinState, ui, directory);
   setTag("wizard.outcome", "completed");
   if (result.result?.platform) {
     setTag("wizard.platform", String(result.result.platform));
@@ -846,12 +847,14 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   }
 }
 
-export function handleFinalResult(
+// biome-ignore lint/nursery/useMaxParams: existing 4-param shape; cwd is a defaulted extension
+export async function handleFinalResult(
   result: WorkflowRunResult,
   spin: SpinnerHandle,
   spinState: SpinState,
-  ui: WizardUI
-): void {
+  ui: WizardUI,
+  cwd?: string
+): Promise<void> {
   const hasError = result.status !== "success" || result.result?.exitCode;
 
   if (hasError) {
@@ -879,6 +882,10 @@ export function handleFinalResult(
     spinState.running = false;
   }
   formatResult(result, ui);
+
+  if (cwd) {
+    await verifySetup(result, ui, cwd);
+  }
 }
 
 /**
