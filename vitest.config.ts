@@ -5,34 +5,6 @@ import { defineConfig, type Plugin } from "vitest/config";
 const JS_EXT_RE = /\.js$/;
 
 /**
- * Vite plugin to handle `import ... with { type: "text" }` assertions.
- * Bun supports `with { type: "text" }` natively; Vite does not.
- * This plugin uses a `transform` hook to rewrite the import into
- * a `?raw` suffixed import that Vite handles natively.
- */
-function textImportPlugin(): Plugin {
-  return {
-    name: "text-import",
-    enforce: "pre",
-    transform(code, _id) {
-      if (!code.includes('with { type: "text" }')) {
-        return;
-      }
-      // Rewrite: import foo from "./bar.js" with { type: "text" };
-      // Into:    import foo from "./bar.js?raw";
-      const transformed = code.replace(
-        /from\s+"([^"]+)"\s+with\s+\{\s*type:\s*"text"\s*\}/g,
-        'from "$1?raw"'
-      );
-      if (transformed !== code) {
-        return { code: transformed, map: null };
-      }
-      return;
-    },
-  };
-}
-
-/**
  * Vite plugin to rewrite lazy `require("./relative/path.js")` calls in
  * `.ts` source files to the corresponding `.ts` path when the `.ts` file
  * exists on disk. Node.js `require()` bypasses Vite's resolve pipeline,
@@ -96,7 +68,7 @@ function jsToTsResolvePlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [textImportPlugin(), requireJsToTsPlugin(), jsToTsResolvePlugin()],
+  plugins: [requireJsToTsPlugin(), jsToTsResolvePlugin()],
   resolve: {
     // Allow .js imports to resolve to .ts files (ESM convention used throughout)
     extensions: [".ts", ".tsx", ".js", ".jsx", ".json"],

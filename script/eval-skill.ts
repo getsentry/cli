@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Evaluate SKILL.md effectiveness by testing LLM command planning.
  *
@@ -10,17 +10,18 @@
  * Requires ANTHROPIC_API_KEY env var for Anthropic API access.
  *
  * Usage:
- *   bun run eval:skill
- *   EVAL_AGENT_MODELS=claude-sonnet-4-6-20250627 bun run eval:skill
+ *   tsx script/eval-skill.ts
+ *   EVAL_AGENT_MODELS=claude-sonnet-4-6-20250627 tsx script/eval-skill.ts
  *
  * Environment variables:
  *   ANTHROPIC_API_KEY   - Anthropic API key (required)
  *   EVAL_AGENT_MODELS   - Comma-separated model IDs (default: sonnet-4-6, opus-4-6)
  *   EVAL_JUDGE_MODEL    - Judge model ID (default: haiku-4-5)
  *   EVAL_THRESHOLD      - Minimum pass rate 0-1 (default: 0.75)
- *   SENTRY_CLI_BINARY   - Path to pre-built binary (falls back to bun run src/bin.ts)
+ *   SENTRY_CLI_BINARY   - Path to pre-built binary (falls back to tsx src/bin.ts)
  */
 
+import { readFile } from "node:fs/promises";
 import cases from "../test/skill-eval/cases.json";
 import { judgePlan } from "../test/skill-eval/helpers/judge.js";
 import { createClient } from "../test/skill-eval/helpers/llm-client.js";
@@ -97,7 +98,7 @@ async function main(): Promise<void> {
   }
 
   const client = await createClient(apiKey);
-  const skillContent = await Bun.file(SKILL_PATH).text();
+  const skillContent = await readFile(SKILL_PATH, "utf-8");
   const testCases = cases as unknown as TestCase[];
   const threshold = process.env.EVAL_THRESHOLD
     ? Number.parseFloat(process.env.EVAL_THRESHOLD)

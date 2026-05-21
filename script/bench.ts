@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Local benchmark harness for DSN detection, project-root finding, and
  * (after the `src/lib/scan/` refactor lands) the generic scanner module.
@@ -18,16 +18,16 @@
  * specific and intentionally not version-controlled.
  *
  * Usage:
- *   bun run bench                        # all ops, all preset sizes
- *   bun run bench --size small           # only the 'small' preset
- *   bun run bench --op detectDsn.cold    # filter by operation (substring)
- *   bun run bench --repo /path/to/repo   # bench a real repo (disables --save-baseline)
- *   bun run bench --warmup 3 --runs 10   # override default run counts
- *   bun run bench --json > report.json   # machine-readable stdout
- *   bun run bench --save-baseline        # write .bench/baseline.json
- *   bun run bench --compare              # diff current vs .bench/baseline.json
- *                                        # (exit 1 if any p50 regresses >20%)
- *   bun run bench --regen-fixtures       # force fixture regeneration
+ *   pnpm run bench                        # all ops, all preset sizes
+ *   pnpm run bench -- --size small        # only the 'small' preset
+ *   pnpm run bench -- --op detectDsn.cold # filter by operation (substring)
+ *   pnpm run bench -- --repo /path/to/repo  # bench a real repo (disables --save-baseline)
+ *   pnpm run bench -- --warmup 3 --runs 10  # override default run counts
+ *   pnpm run bench -- --json > report.json  # machine-readable stdout
+ *   pnpm run bench -- --save-baseline     # write .bench/baseline.json
+ *   pnpm run bench -- --compare           # diff current vs .bench/baseline.json
+ *                                         # (exit 1 if any p50 regresses >20%)
+ *   pnpm run bench -- --regen-fixtures    # force fixture regeneration
  *
  * Environment variables:
  *   BENCH_REPO       Path to a real repo (equivalent to --repo)
@@ -218,11 +218,11 @@ function parseArgs(argv: readonly string[]): CliArgs {
 
 function printHelp(): void {
   console.log(
-    "Usage: bun run bench [--size small|medium|large|all] [--op NAME] [--repo PATH]"
+    "Usage: pnpm run bench [-- --size small|medium|large|all] [--op NAME] [--repo PATH]"
   );
-  console.log("                     [--runs N] [--warmup N]");
+  console.log("                      [--runs N] [--warmup N]");
   console.log(
-    "                     [--json] [--save-baseline] [--compare] [--regen-fixtures]"
+    "                      [--json] [--save-baseline] [--compare] [--regen-fixtures]"
   );
 }
 

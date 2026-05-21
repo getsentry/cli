@@ -95,9 +95,18 @@ function resolveOutdir(build: {
     : dirname(resolvePath(build.initialOptions.outfile ?? "."));
 }
 
+const GREP_WORKER_SOURCE_RE = /grep-worker-source\.(js|ts)$/;
+
 export const textImportPlugin: Plugin = {
   name: "text-import",
   setup(build) {
+    // Intercept grep-worker-source.ts — replace with inlined grep-worker.js
+    // content so the compiled binary doesn't need the file on disk.
+    build.onResolve({ filter: GREP_WORKER_SOURCE_RE }, (args) => ({
+      path: resolvePath(args.resolveDir, "grep-worker.js"),
+      namespace: TEXT_IMPORT_NS,
+    }));
+
     build.onResolve({ filter: ANY_FILTER }, async (args) => {
       if (args.with?.type === "text") {
         return {

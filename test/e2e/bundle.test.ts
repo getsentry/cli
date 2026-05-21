@@ -56,7 +56,7 @@ describe("npm bundle", () => {
 
     // Build the bundle (requires SENTRY_CLIENT_ID)
     // Run the bundle script directly to avoid PATH issues in test environments
-    const result = await spawnCollect("bun", ["run", "script/bundle.ts"], {
+    const result = await spawnCollect("pnpm", ["run", "bundle"], {
       cwd: ROOT_DIR,
       env: {
         ...process.env,

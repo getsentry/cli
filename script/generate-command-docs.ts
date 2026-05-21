@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Generate Command Reference & Configuration Documentation
  *
@@ -15,7 +15,7 @@
  * source of truth for custom content.
  *
  * Usage:
- *   bun run script/generate-command-docs.ts
+ *   tsx script/generate-command-docs.ts
  *
  * Output:
  *   docs/src/content/docs/commands/{route}.md  (one per visible route)
@@ -24,6 +24,7 @@
  */
 
 import { mkdirSync, rmSync } from "node:fs";
+import { access, readFile, writeFile } from "node:fs/promises";
 
 // Ensure src/generated/skill-content.ts exists before importing the route tree.
 // The route tree transitively imports agent-skills.ts → skill-content.ts, which
@@ -34,9 +35,13 @@ import { mkdirSync, rmSync } from "node:fs";
 const SKILL_CONTENT_PATH = "src/generated/skill-content.ts";
 const SKILL_CONTENT_STUB =
   "export const SKILL_FILES: [string, string][] = [];\n";
-if (!(await Bun.file(SKILL_CONTENT_PATH).exists())) {
+const skillContentExists = await access(SKILL_CONTENT_PATH).then(
+  () => true,
+  () => false
+);
+if (!skillContentExists) {
   mkdirSync("src/generated", { recursive: true });
-  await Bun.write(SKILL_CONTENT_PATH, SKILL_CONTENT_STUB);
+  await writeFile(SKILL_CONTENT_PATH, SKILL_CONTENT_STUB);
 }
 
 import type { EnvVarEntry } from "../src/lib/env-registry.js";
@@ -364,7 +369,7 @@ function generateConfigurationPage(registry: readonly EnvVarEntry[]): string {
  */
 async function readCustomContent(fragmentName: string): Promise<string> {
   try {
-    return await Bun.file(`${FRAGMENTS_DIR}/${fragmentName}.md`).text();
+    return await readFile(`${FRAGMENTS_DIR}/${fragmentName}.md`, "utf-8");
   } catch {
     return "";
   }
@@ -377,7 +382,7 @@ async function readCustomContent(fragmentName: string): Promise<string> {
  */
 async function readTopLevelFragment(fragmentName: string): Promise<string> {
   try {
-    return await Bun.file(`${FRAGMENTS_ROOT}/${fragmentName}.md`).text();
+    return await readFile(`${FRAGMENTS_ROOT}/${fragmentName}.md`, "utf-8");
   } catch {
     return "";
   }
@@ -413,7 +418,7 @@ for (const route of routeInfos) {
     ? pageContent + customContent
     : `${pageContent}\n`;
 
-  await Bun.write(filePath, fullContent);
+  await writeFile(filePath, fullContent);
   generatedFiles.push(filePath);
 }
 
@@ -439,7 +444,7 @@ const indexContent = indexCustomContent
   ? indexLines.join("\n") + indexCustomContent
   : `${indexLines.join("\n")}\n`;
 
-await Bun.write(INDEX_PATH, indexContent);
+await writeFile(INDEX_PATH, indexContent);
 
 // ---------------------------------------------------------------------------
 // Generate configuration.md (env var reference + fragment)
@@ -451,7 +456,7 @@ const configContent = configFragment
   ? configGenerated + configFragment
   : `${configGenerated}\n`;
 
-await Bun.write(CONFIG_PATH, configContent);
+await writeFile(CONFIG_PATH, configContent);
 
 console.log(
   `Generated ${generatedFiles.length} command doc pages + ${INDEX_PATH} + ${CONFIG_PATH}`

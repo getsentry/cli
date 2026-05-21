@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Validate doc fragment files.
  *
@@ -9,17 +9,22 @@
  *   4. Top-level fragments (e.g., configuration.md) exist
  *
  * Usage:
- *   bun run script/check-fragments.ts
+ *   tsx script/check-fragments.ts
  */
 
 import { mkdirSync, readdirSync } from "node:fs";
+import { access, readFile, writeFile } from "node:fs/promises";
 import type { RouteMap } from "../src/lib/introspect.js";
 
 // Ensure skill-content stub exists (see generate-command-docs.ts for rationale)
 const SKILL_CONTENT_PATH = "src/generated/skill-content.ts";
-if (!(await Bun.file(SKILL_CONTENT_PATH).exists())) {
+const skillContentExists = await access(SKILL_CONTENT_PATH).then(
+  () => true,
+  () => false
+);
+if (!skillContentExists) {
   mkdirSync("src/generated", { recursive: true });
-  await Bun.write(
+  await writeFile(
     SKILL_CONTENT_PATH,
     "export const SKILL_FILES: [string, string][] = [];\n"
   );
@@ -82,7 +87,7 @@ for (const name of actualFragments) {
 
 // Check 3: Fragment content validation
 for (const file of fragmentFiles) {
-  const content = await Bun.file(`${FRAGMENTS_DIR}/${file}`).text();
+  const content = await readFile(`${FRAGMENTS_DIR}/${file}`, "utf-8");
 
   if (content.includes("---\ntitle:") || content.startsWith("---\n")) {
     errors.push(
@@ -108,7 +113,11 @@ const REQUIRED_TOP_LEVEL_FRAGMENTS = ["configuration"];
 
 for (const name of REQUIRED_TOP_LEVEL_FRAGMENTS) {
   const path = `${TOP_LEVEL_FRAGMENTS_DIR}/${name}.md`;
-  if (!(await Bun.file(path).exists())) {
+  const exists = await access(path).then(
+    () => true,
+    () => false
+  );
+  if (!exists) {
     errors.push(
       `Missing top-level fragment: ${path} (required for generated ${name}.md page)`
     );
