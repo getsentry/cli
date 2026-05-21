@@ -15,7 +15,6 @@
  * `ignore` package's pattern escaping quirks.
  */
 
-import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +25,7 @@ import {
   assert as fcAssert,
   integer,
 } from "fast-check";
+import { afterAll, describe, expect, test } from "vitest";
 import { walkFiles } from "../../../src/lib/scan/walker.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 

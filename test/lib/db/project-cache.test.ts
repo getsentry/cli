@@ -4,7 +4,8 @@
  * Tests for caching project information by orgId:projectId or DSN public key.
  */
 
-import { describe, expect, test } from "bun:test";
+import { setTimeout as sleep } from "node:timers/promises";
+import { describe, expect, test } from "vitest";
 import {
   cacheProjectsForOrg,
   clearProjectCache,
@@ -521,7 +522,7 @@ describe("getCachedProjectBySlug", () => {
       projectId: "111",
     });
     // Small delay so `cached_at` differs; setCachedProject uses Date.now()
-    await Bun.sleep(5);
+    await sleep(5);
     // Newer entry via orgId:projectId key
     setCachedProject("org-id", "proj-id", {
       orgSlug: "my-org",

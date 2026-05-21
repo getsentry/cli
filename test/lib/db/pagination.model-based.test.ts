@@ -16,7 +16,6 @@
 
 // biome-ignore-all lint/suspicious/noMisplacedAssertion: Model-based testing uses expect() inside command classes, not directly in test() functions. This is the standard fast-check pattern for stateful testing.
 
-import { describe, expect, test } from "bun:test";
 import {
   type AsyncCommand,
   asyncModelRun,
@@ -27,6 +26,8 @@ import {
   property,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
+import { getDatabase } from "../../../src/lib/db/index.js";
 import {
   advancePaginationState,
   clearPaginationState,
@@ -548,7 +549,6 @@ describe("model-based: pagination cursor stack", () => {
           expect(getPaginationState(CMD_KEY, CTX_KEY)).toBeDefined();
 
           // Expire it by writing directly to DB with past timestamp
-          const { getDatabase } = require("../../../src/lib/db/index.js");
           const db = getDatabase();
           db.query(
             "UPDATE pagination_cursors SET expires_at = ? WHERE command_key = ? AND context = ?"

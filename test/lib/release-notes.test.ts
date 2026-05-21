@@ -8,8 +8,8 @@
  * are tested via property-based tests in release-notes.property.test.ts.
  */
 
-import { describe, expect, test } from "bun:test";
 import { marked } from "marked";
+import { describe, expect, test } from "vitest";
 import type { GitHubRelease } from "../../src/lib/delta-upgrade.js";
 import {
   buildChangelogSummary,

@@ -5,7 +5,7 @@
  * GET /api/0/organizations/ when a reverse proxy or WAF interferes.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { listOrganizationsInRegion } from "../../../src/lib/api/organizations.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { ApiError } from "../../../src/lib/errors.js";

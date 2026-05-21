@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { parseReleaseArg } from "../../src/commands/release/parse.js";
 import { ValidationError } from "../../src/lib/errors.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";

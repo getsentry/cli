@@ -5,7 +5,6 @@
  * that should hold for any valid input.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -18,6 +17,7 @@ import {
   string,
   uniqueArray,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   filterFields,
   parseFieldsList,

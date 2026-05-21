@@ -5,25 +5,41 @@
  * and output formatting in src/commands/span/view.ts.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   parsePositionalArgs,
   viewCommand,
 } from "../../../src/commands/span/view.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 import { validateSpanId } from "../../../src/lib/hex-id.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 
@@ -309,12 +325,12 @@ describe("viewCommand.func", () => {
     return {
       context: {
         stdout: {
-          write: mock((s: string) => {
+          write: vi.fn((s: string) => {
             stdoutChunks.push(s);
           }),
         },
         stderr: {
-          write: mock((_s: string) => {
+          write: vi.fn((_s: string) => {
             /* no-op */
           }),
         },
@@ -326,13 +342,15 @@ describe("viewCommand.func", () => {
 
   beforeEach(async () => {
     func = (await viewCommand.loader()) as unknown as ViewFunc;
-    getDetailedTraceSpy = spyOn(apiClient, "getDetailedTrace");
-    getSpanDetailsSpy = spyOn(apiClient, "getSpanDetails").mockResolvedValue({
-      itemId: "mock-span",
-      itemType: "span",
-      attributes: [],
-    });
-    resolveOrgAndProjectSpy = spyOn(resolveTarget, "resolveOrgAndProject");
+    getDetailedTraceSpy = vi.spyOn(apiClient, "getDetailedTrace");
+    getSpanDetailsSpy = vi
+      .spyOn(apiClient, "getSpanDetails")
+      .mockResolvedValue({
+        itemId: "mock-span",
+        itemType: "span",
+        attributes: [],
+      });
+    resolveOrgAndProjectSpy = vi.spyOn(resolveTarget, "resolveOrgAndProject");
     resolveOrgAndProjectSpy.mockResolvedValue({
       org: "test-org",
       project: "test-project",

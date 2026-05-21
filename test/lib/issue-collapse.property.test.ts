@@ -5,8 +5,8 @@
  * parameter: always-collapsed fields, stats/lifetime control, and safety constraints.
  */
 
-import { describe, expect, test } from "bun:test";
 import { boolean, assert as fcAssert, property, tuple } from "fast-check";
+import { describe, expect, test } from "vitest";
 
 import {
   buildIssueListCollapse,

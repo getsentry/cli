@@ -6,66 +6,72 @@
  * db/user, and interactive-login to cover all branches without real HTTP
  * calls or database access.
  *
- * The interactive TTY prompt tests use mock.module() at the top of this file
+ * The interactive TTY prompt tests use vi.mock() at the top of this file
  * to stub node:tty (so isatty(0) returns true) and the logger module (so
  * `.prompt()` is controllable).
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // Mock isatty to simulate interactive terminal for the re-auth prompt path.
 // Bun's ESM wrapper for CJS built-ins exposes `default` + `ReadStream` +
 // `WriteStream` — all must be present.
-const mockIsatty = mock(() => false);
-class FakeReadStream {}
-class FakeWriteStream {}
-const ttyExports = {
-  isatty: mockIsatty,
-  ReadStream: FakeReadStream,
-  WriteStream: FakeWriteStream,
-};
-mock.module("node:tty", () => ({
+const { mockIsatty, ttyExports, noop, mockPrompt, fakeLog } = vi.hoisted(() => {
+  const _mockIsatty = vi.fn(() => false);
+  class _FakeReadStream {}
+  class _FakeWriteStream {}
+  const _ttyExports = {
+    isatty: _mockIsatty,
+    ReadStream: _FakeReadStream,
+    WriteStream: _FakeWriteStream,
+  };
+
+  /** No-op placeholder for unused logger methods. */
+  function _noop() {
+    // intentional no-op
+  }
+
+  // Mock the logger module to intercept the .prompt() call made by the
+  // module-scoped `log = logger.withTag("auth.login")` in login.ts.
+  const _mockPrompt = vi.fn(
+    (): Promise<boolean | symbol> => Promise.resolve(true)
+  );
+  const _fakeLog: {
+    prompt: typeof _mockPrompt;
+    info: ReturnType<typeof vi.fn>;
+    warn: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+    debug: ReturnType<typeof vi.fn>;
+    success: ReturnType<typeof vi.fn>;
+    withTag: () => typeof _fakeLog;
+  } = {
+    prompt: _mockPrompt,
+    info: vi.fn(_noop),
+    warn: vi.fn(_noop),
+    error: vi.fn(_noop),
+    debug: vi.fn(_noop),
+    success: vi.fn(_noop),
+    withTag: () => _fakeLog,
+  };
+
+  return {
+    mockIsatty: _mockIsatty,
+    ttyExports: _ttyExports,
+    noop: _noop,
+    mockPrompt: _mockPrompt,
+    fakeLog: _fakeLog,
+  };
+});
+
+vi.mock("node:tty", () => ({
   ...ttyExports,
   default: ttyExports,
 }));
 
-/** No-op placeholder for unused logger methods. */
-function noop() {
-  // intentional no-op
-}
-
-// Mock the logger module to intercept the .prompt() call made by the
-// module-scoped `log = logger.withTag("auth.login")` in login.ts.
-const mockPrompt = mock((): Promise<boolean | symbol> => Promise.resolve(true));
-const fakeLog: {
-  prompt: typeof mockPrompt;
-  info: ReturnType<typeof mock>;
-  warn: ReturnType<typeof mock>;
-  error: ReturnType<typeof mock>;
-  debug: ReturnType<typeof mock>;
-  success: ReturnType<typeof mock>;
-  withTag: () => typeof fakeLog;
-} = {
-  prompt: mockPrompt,
-  info: mock(noop),
-  warn: mock(noop),
-  error: mock(noop),
-  debug: mock(noop),
-  success: mock(noop),
-  withTag: () => fakeLog,
-};
-mock.module("../../../src/lib/logger.js", () => ({
+vi.mock("../../../src/lib/logger.js", () => ({
   logger: fakeLog,
-  setLogLevel: mock(noop),
-  attachSentryReporter: mock(noop),
+  setLogLevel: vi.fn(noop),
+  attachSentryReporter: vi.fn(noop),
   LOG_LEVEL_NAMES: ["error", "warn", "log", "info", "debug", "trace"],
   LOG_LEVEL_ENV_VAR: "SENTRY_LOG_LEVEL",
   parseLogLevel: (name: string) => {
@@ -76,18 +82,67 @@ mock.module("../../../src/lib/logger.js", () => ({
   getEnvLogLevel: () => null,
 }));
 
-// Dynamic import: must run AFTER mock.module() so login.ts picks up fakeLog.
+// Dynamic import: must run AFTER vi.mock() so login.ts picks up fakeLog.
 const { loginCommand, rcTokenHint } = await import(
   "../../../src/commands/auth/login.js"
 );
 
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/db/auth.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/auth.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbAuth from "../../../src/lib/db/auth.js";
+
+vi.mock("../../../src/lib/db/user.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/user.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbUser from "../../../src/lib/db/user.js";
 import { AuthError } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/interactive-login.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../src/lib/interactive-login.js")
+    >();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as interactiveLogin from "../../../src/lib/interactive-login.js";
 import type { SentryCliRcConfig } from "../../../src/lib/sentryclirc.js";
@@ -121,12 +176,12 @@ function createContext() {
   const stdoutChunks: string[] = [];
   const context = {
     stdout: {
-      write: mock((s: string) => {
+      write: vi.fn((s: string) => {
         stdoutChunks.push(s);
       }),
     },
     stderr: {
-      write: mock((_s: string) => {
+      write: vi.fn((_s: string) => {
         // unused — diagnostics go through logger
       }),
     },
@@ -165,19 +220,19 @@ describe("loginCommand.func --token path", () => {
   let func: LoginFunc;
 
   beforeEach(async () => {
-    isAuthenticatedSpy = spyOn(dbAuth, "isAuthenticated");
-    isEnvTokenActiveSpy = spyOn(dbAuth, "isEnvTokenActive");
-    setAuthTokenSpy = spyOn(dbAuth, "setAuthToken");
-    getUserRegionsSpy = spyOn(apiClient, "getUserRegions");
-    clearAuthSpy = spyOn(dbAuth, "clearAuth");
-    getCurrentUserSpy = spyOn(apiClient, "getCurrentUser");
-    setUserInfoSpy = spyOn(dbUser, "setUserInfo");
-    runInteractiveLoginSpy = spyOn(interactiveLogin, "runInteractiveLogin");
-    hasStoredAuthCredentialsSpy = spyOn(dbAuth, "hasStoredAuthCredentials");
+    isAuthenticatedSpy = vi.spyOn(dbAuth, "isAuthenticated");
+    isEnvTokenActiveSpy = vi.spyOn(dbAuth, "isEnvTokenActive");
+    setAuthTokenSpy = vi.spyOn(dbAuth, "setAuthToken");
+    getUserRegionsSpy = vi.spyOn(apiClient, "getUserRegions");
+    clearAuthSpy = vi.spyOn(dbAuth, "clearAuth");
+    getCurrentUserSpy = vi.spyOn(apiClient, "getCurrentUser");
+    setUserInfoSpy = vi.spyOn(dbUser, "setUserInfo");
+    runInteractiveLoginSpy = vi.spyOn(interactiveLogin, "runInteractiveLogin");
+    hasStoredAuthCredentialsSpy = vi.spyOn(dbAuth, "hasStoredAuthCredentials");
     // Prevent warmOrgCache() fire-and-forget from hitting real fetch.
     // After successful login, warmOrgCache() calls listOrganizationsUncached()
     // which triggers API calls that leak as "unexpected fetch" warnings.
-    listOrgsUncachedSpy = spyOn(apiClient, "listOrganizationsUncached");
+    listOrgsUncachedSpy = vi.spyOn(apiClient, "listOrganizationsUncached");
     listOrgsUncachedSpy.mockResolvedValue([]);
     isEnvTokenActiveSpy.mockReturnValue(false);
     hasStoredAuthCredentialsSpy.mockReturnValue(false);
@@ -429,7 +484,7 @@ describe("loginCommand.func --token path", () => {
 /**
  * Tests for the interactive TTY re-authentication prompt.
  *
- * Uses the module-level `mock.module()` on node:tty (so `isatty(0)` returns
+ * Uses the module-level `vi.mock()` on node:tty (so `isatty(0)` returns
  * true) and the logger (so `.prompt()` is controllable).
  */
 describe("login re-authentication interactive prompt", () => {
@@ -443,20 +498,20 @@ describe("login re-authentication interactive prompt", () => {
 
   function createPromptContext() {
     return {
-      stdout: { write: mock(() => true) },
-      stderr: { write: mock(() => true) },
+      stdout: { write: vi.fn(() => true) },
+      stderr: { write: vi.fn(() => true) },
       cwd: "/tmp",
     };
   }
 
   beforeEach(async () => {
-    isAuthenticatedSpy = spyOn(dbAuth, "isAuthenticated");
-    isEnvTokenActiveSpy = spyOn(dbAuth, "isEnvTokenActive");
-    clearAuthSpy = spyOn(dbAuth, "clearAuth");
-    runInteractiveLoginSpy = spyOn(interactiveLogin, "runInteractiveLogin");
-    getUserInfoSpy = spyOn(dbUser, "getUserInfo");
+    isAuthenticatedSpy = vi.spyOn(dbAuth, "isAuthenticated");
+    isEnvTokenActiveSpy = vi.spyOn(dbAuth, "isEnvTokenActive");
+    clearAuthSpy = vi.spyOn(dbAuth, "clearAuth");
+    runInteractiveLoginSpy = vi.spyOn(interactiveLogin, "runInteractiveLogin");
+    getUserInfoSpy = vi.spyOn(dbUser, "getUserInfo");
     // Prevent warmOrgCache() fire-and-forget from hitting real fetch.
-    listOrgsUncachedSpy = spyOn(apiClient, "listOrganizationsUncached");
+    listOrgsUncachedSpy = vi.spyOn(apiClient, "listOrganizationsUncached");
     listOrgsUncachedSpy.mockResolvedValue([]);
 
     // Defaults
@@ -567,18 +622,18 @@ describe("login re-authentication interactive prompt", () => {
     getUserInfoSpy.mockReturnValue(undefined);
     mockPrompt.mockResolvedValue(true);
 
-    const setAuthTokenSpy = spyOn(dbAuth, "setAuthToken");
+    const setAuthTokenSpy = vi.spyOn(dbAuth, "setAuthToken");
     setAuthTokenSpy.mockImplementation(noop);
-    const getUserRegionsSpy = spyOn(apiClient, "getUserRegions");
+    const getUserRegionsSpy = vi.spyOn(apiClient, "getUserRegions");
     getUserRegionsSpy.mockResolvedValue([]);
-    const getCurrentUserSpy = spyOn(apiClient, "getCurrentUser");
+    const getCurrentUserSpy = vi.spyOn(apiClient, "getCurrentUser");
     getCurrentUserSpy.mockResolvedValue({
       id: "42",
       name: "Jane",
       username: "jane",
       email: "jane@example.com",
     });
-    const setUserInfoSpy = spyOn(dbUser, "setUserInfo");
+    const setUserInfoSpy = vi.spyOn(dbUser, "setUserInfo");
     setUserInfoSpy.mockReturnValue(undefined);
 
     const context = createPromptContext();

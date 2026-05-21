@@ -4,18 +4,11 @@
  * branches in `buildEmptyDiscoveryError`.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { injectCommand } from "../../../src/commands/sourcemap/inject.js";
 import { uploadCommand } from "../../../src/commands/sourcemap/upload.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -43,8 +36,8 @@ type CmdFunc<A> = (this: unknown, flags: A, dir: string) => Promise<unknown>;
 
 function makeContext() {
   return {
-    stdout: { write: mock(() => true) },
-    stderr: { write: mock(() => true) },
+    stdout: { write: vi.fn(() => true) },
+    stderr: { write: vi.fn(() => true) },
     cwd: "/tmp",
   };
 }
@@ -325,7 +318,7 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
     await expect(func.call(ctx, {}, dir)).rejects.toBeInstanceOf(
       ValidationError
     );
-    const after = await Bun.file(jsPath).text();
+    const after = await readFile(jsPath, "utf-8");
     expect(after).toBe(original);
     expect(after).not.toContain("_sentryDebugIds");
     expect(after).not.toContain("sentry-dbid");
@@ -346,10 +339,9 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       })
     );
 
-    const uploadSpy = spyOn(
-      sourcemapsApi,
-      "uploadSourcemaps"
-    ).mockResolvedValue(undefined);
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
     try {
       const ctx = makeContext();
       await func.call(ctx, {}, dir);
@@ -379,10 +371,9 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       })
     );
 
-    const uploadSpy = spyOn(
-      sourcemapsApi,
-      "uploadSourcemaps"
-    ).mockResolvedValue(undefined);
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
     try {
       const ctx = makeContext();
       await func.call(ctx, { release: "1.0.0", dist: "12345" }, dir);
@@ -411,10 +402,9 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       })
     );
 
-    const uploadSpy = spyOn(
-      sourcemapsApi,
-      "uploadSourcemaps"
-    ).mockResolvedValue(undefined);
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
     try {
       const ctx = makeContext();
       await func.call(ctx, { "no-rewrite": true }, dir);
@@ -425,7 +415,7 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
         expect(file.debugId).toBeUndefined();
       }
       // JS file should not have been modified
-      const afterJs = await Bun.file(jsPath).text();
+      const afterJs = await readFile(jsPath, "utf-8");
       expect(afterJs).toBe(originalJs);
       expect(afterJs).not.toContain("_sentryDebugIds");
     } finally {
@@ -447,10 +437,9 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
     // A .js file that should NOT be discovered when --ext is .ts
     writeFileSync(join(dir, "other.js"), "console.log(2)\n");
 
-    const uploadSpy = spyOn(
-      sourcemapsApi,
-      "uploadSourcemaps"
-    ).mockResolvedValue(undefined);
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
     try {
       const ctx = makeContext();
       await func.call(ctx, { ext: ".ts" }, dir);
@@ -480,10 +469,9 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
 
-    const uploadSpy = spyOn(
-      sourcemapsApi,
-      "uploadSourcemaps"
-    ).mockResolvedValue(undefined);
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
     try {
       const ctx = makeContext();
       await func.call(ctx, { ignore: "vendor/**" }, dir);
@@ -515,10 +503,9 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
     const ignoreFilePath = join(dir, ".sourcemapignore");
     writeFileSync(ignoreFilePath, "vendor/\n");
 
-    const uploadSpy = spyOn(
-      sourcemapsApi,
-      "uploadSourcemaps"
-    ).mockResolvedValue(undefined);
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
     try {
       const ctx = makeContext();
       await func.call(ctx, { "ignore-file": ignoreFilePath }, dir);
@@ -557,10 +544,9 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
 
-    const uploadSpy = spyOn(
-      sourcemapsApi,
-      "uploadSourcemaps"
-    ).mockResolvedValue(undefined);
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
     try {
       const ctx = makeContext();
       await func.call(ctx, { "strip-prefix": "static/js/" }, dir);
@@ -591,10 +577,9 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
 
-    const uploadSpy = spyOn(
-      sourcemapsApi,
-      "uploadSourcemaps"
-    ).mockResolvedValue(undefined);
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
     try {
       const ctx = makeContext();
       await func.call(ctx, { "strip-common-prefix": true }, dir);
@@ -647,10 +632,9 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
 
-    const uploadSpy = spyOn(
-      sourcemapsApi,
-      "uploadSourcemaps"
-    ).mockResolvedValue(undefined);
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
     try {
       const ctx = makeContext();
       await func.call(ctx, {}, dir);

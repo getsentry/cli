@@ -27,7 +27,7 @@
  * trust anchor (didn't come from explicit `--url` or boot-time env).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { loginCommand } from "../../../src/commands/auth/login.js";
 import { captureEnvTokenHost } from "../../../src/lib/env-token-host.js";
 import { HostScopeError } from "../../../src/lib/errors.js";

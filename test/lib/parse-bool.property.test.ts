@@ -6,7 +6,6 @@
  * returns null for unrecognized input.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   constantFrom,
   assert as fcAssert,
@@ -14,6 +13,7 @@ import {
   string,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { parseBoolValue } from "../../src/lib/parse-bool.js";
 
 const DEFAULT_NUM_RUNS = 50;

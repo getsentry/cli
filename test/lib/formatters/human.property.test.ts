@@ -5,7 +5,6 @@
  * that are difficult to exhaustively test with example-based tests.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   constant,
   double,
@@ -15,6 +14,7 @@ import {
   stringMatching,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   formatFixability,
   formatFixabilityDetail,

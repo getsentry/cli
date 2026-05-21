@@ -2,7 +2,7 @@
  * Tests for span tree formatting
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { formatSimpleSpanTree } from "../../../src/lib/formatters/human.js";
 import type { TraceSpan } from "../../../src/types/index.js";
 

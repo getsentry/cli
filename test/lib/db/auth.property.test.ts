@@ -8,7 +8,6 @@
  * - AuthConfig.source correctly identifies the origin
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   asyncProperty,
   assert as fcAssert,
@@ -16,6 +15,7 @@ import {
   property,
   string,
 } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   type AuthSource,
   getAuthConfig,

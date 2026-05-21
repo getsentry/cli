@@ -3,7 +3,7 @@
  * `src/lib/git.ts` and uses `MockUI` to record/replay all UI traffic.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as gitLib from "../../../src/lib/git.js";
 import {
@@ -18,8 +18,8 @@ let isInsideWorkTreeSpy: ReturnType<typeof spyOn>;
 let getUncommittedFilesSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
-  isInsideWorkTreeSpy = spyOn(gitLib, "isInsideGitWorkTree");
-  getUncommittedFilesSpy = spyOn(gitLib, "getUncommittedFiles");
+  isInsideWorkTreeSpy = vi.spyOn(gitLib, "isInsideGitWorkTree");
+  getUncommittedFilesSpy = vi.spyOn(gitLib, "getUncommittedFiles");
 });
 
 afterEach(() => {

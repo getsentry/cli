@@ -7,7 +7,7 @@
  * promptAndStartTrial which doesn't call isatty directly.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../src/lib/api-client.js";
@@ -75,17 +75,15 @@ describe("promptAndStartTrial", () => {
     logWarnCalls = [];
     logSuccessCalls = [];
 
-    getProductTrialsSpy = spyOn(
-      apiClient,
-      "getProductTrials"
-    ).mockResolvedValue([]);
-    startProductTrialSpy = spyOn(
-      apiClient,
-      "startProductTrial"
-    ).mockResolvedValue(undefined);
+    getProductTrialsSpy = vi
+      .spyOn(apiClient, "getProductTrials")
+      .mockResolvedValue([]);
+    startProductTrialSpy = vi
+      .spyOn(apiClient, "startProductTrial")
+      .mockResolvedValue(undefined);
 
     // Mock the logger's withTag to return an object with all needed methods
-    loggerPromptSpy = spyOn({ prompt: async () => false }, "prompt");
+    loggerPromptSpy = vi.spyOn({ prompt: async () => false }, "prompt");
     const mockLogInstance = {
       prompt: loggerPromptSpy,
       info: (...args: unknown[]) => {
@@ -98,9 +96,11 @@ describe("promptAndStartTrial", () => {
         logSuccessCalls.push(args.map(String).join(" "));
       },
     };
-    loggerWithTagSpy = spyOn(loggerModule.logger, "withTag").mockReturnValue(
-      mockLogInstance as ReturnType<typeof loggerModule.logger.withTag>
-    );
+    loggerWithTagSpy = vi
+      .spyOn(loggerModule.logger, "withTag")
+      .mockReturnValue(
+        mockLogInstance as ReturnType<typeof loggerModule.logger.withTag>
+      );
   });
 
   afterEach(() => {

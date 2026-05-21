@@ -5,11 +5,11 @@
  * Group D unification.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { applyPatchset } from "../../src/lib/init/tools/apply-patchset.js";
 import { readFiles } from "../../src/lib/init/tools/read-files.js";
 import type { DirEntry } from "../../src/lib/init/types.js";

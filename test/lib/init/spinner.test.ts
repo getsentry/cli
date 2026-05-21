@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import { Writable } from "node:stream";
+import { describe, expect, test } from "vitest";
 import { createWizardSpinner } from "../../../src/lib/init/spinner.js";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in rendered terminal output

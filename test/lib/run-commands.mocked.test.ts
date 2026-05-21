@@ -1,11 +1,11 @@
 /**
  * Unit tests for the run-commands tool.
  *
- * Kept as a mocked sibling file because mock.module() on @sentry/node-core/light
+ * Kept as a mocked sibling file because vi.mock() on @sentry/node-core/light
  * must precede all module imports to take effect.
  */
 
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { RunCommandsPayload } from "../../src/lib/init/types.js";
 
 // ============================================================================
@@ -18,9 +18,11 @@ type Breadcrumb = {
   data: { exitCode: number; stderr: string; cwd: string };
 };
 
-const breadcrumbs: Breadcrumb[] = [];
+const { breadcrumbs } = vi.hoisted(() => ({
+  breadcrumbs: [] as Breadcrumb[],
+}));
 
-mock.module("@sentry/node-core/light", () => ({
+vi.mock("@sentry/node-core/light", () => ({
   addBreadcrumb: (crumb: Breadcrumb) => breadcrumbs.push(crumb),
 }));
 

@@ -5,7 +5,7 @@
  * the helpers in `types.ts` that ship with it.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { CANCELLED, isCancelled } from "../../../../src/lib/init/ui/types.js";
 
 describe("CANCELLED sentinel", () => {

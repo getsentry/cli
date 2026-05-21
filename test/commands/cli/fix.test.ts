@@ -10,9 +10,10 @@
  * and code spans have backticks stripped.
  */
 
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { chmodSync, statSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { fixCommand } from "../../../src/commands/cli/fix.js";
 import { closeDatabase, getDatabase } from "../../../src/lib/db/index.js";
 import {
@@ -81,12 +82,12 @@ function createContext() {
 
   const context = {
     stdout: {
-      write: mock((s: string) => {
+      write: vi.fn((s: string) => {
         stdoutChunks.push(s);
       }),
     },
     stderr: {
-      write: mock((_s: string) => {
+      write: vi.fn((_s: string) => {
         /* consola routes here — not used for structured output */
       }),
     },
@@ -337,7 +338,7 @@ describe("sentry cli fix", () => {
     // Write garbage so SQLite cannot parse it — getRawDatabase will throw.
     const dbPath = join(getTestDir(), "cli.db");
     closeDatabase();
-    await Bun.write(dbPath, "not a sqlite database");
+    await writeFile(dbPath, "not a sqlite database");
     chmodSync(dbPath, 0o600);
     chmodSync(getTestDir(), 0o700);
 
@@ -355,7 +356,7 @@ describe("sentry cli fix", () => {
     // Same corrupt DB scenario, but in dry-run mode
     const dbPath = join(getTestDir(), "cli.db");
     closeDatabase();
-    await Bun.write(dbPath, "not a sqlite database");
+    await writeFile(dbPath, "not a sqlite database");
     chmodSync(dbPath, 0o600);
     chmodSync(getTestDir(), 0o700);
 
@@ -476,7 +477,7 @@ describe("sentry cli fix — ownership detection", () => {
    */
   async function runFixWithUid(dryRun: boolean, getuid: () => number) {
     const { context, getOutput } = createContext();
-    const getuidSpy = spyOn(process, "getuid").mockImplementation(getuid);
+    const getuidSpy = vi.spyOn(process, "getuid").mockImplementation(getuid);
 
     let exitCode = 0;
 

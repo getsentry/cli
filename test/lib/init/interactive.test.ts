@@ -7,7 +7,7 @@
  * terminal.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { WizardError } from "../../../src/lib/errors.js";
 import { handleInteractive } from "../../../src/lib/init/interactive.js";
 import type { InteractiveContext } from "../../../src/lib/init/types.js";

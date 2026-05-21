@@ -1,11 +1,15 @@
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { getCliCommand } from "../../fixture.js";
 import type { Platform } from "./platforms.js";
 
+function noop(): void {
+  // Intentionally empty — absorbs async spawn errors
+}
+
 /** Root of the CLI repo (three levels up from this file). */
-const CLI_ROOT = resolve(import.meta.dir, "../../..");
+const CLI_ROOT = resolvePath(import.meta.dirname, "../../..");
 
 export type WizardResult = {
   exitCode: number;
@@ -27,7 +31,7 @@ export async function runWizard(
   // Resolve relative paths (e.g. "src/bin.ts") against the CLI repo root,
   // since the wizard spawns with cwd set to the temp project directory.
   const cmd = getCliCommand().map((part) =>
-    part.includes("/") ? resolve(CLI_ROOT, part) : part
+    part.includes("/") ? resolvePath(CLI_ROOT, part) : part
   );
   const mastraUrl = process.env.MASTRA_API_URL;
   if (!mastraUrl) {
@@ -62,10 +66,10 @@ export async function runWizard(
     initArgs.push("--features", features.join(","));
   }
 
-  const proc = Bun.spawn(initArgs, {
+  const [initCmd, ...initRestArgs] = initArgs;
+  const proc = spawn(initCmd, initRestArgs, {
     cwd: projectDir,
-    stdout: "pipe",
-    stderr: "pipe",
+    stdio: ["pipe", "pipe", "pipe"],
     env: {
       ...process.env,
       // Override the hardcoded Mastra URL to point at local/test server
@@ -74,13 +78,20 @@ export async function runWizard(
       SENTRY_CLI_NO_TELEMETRY: "1",
     },
   });
+  proc.on("error", noop);
 
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
+  let stdout = "";
+  let stderr = "";
+  proc.stdout.on("data", (d: Buffer) => {
+    stdout += d;
+  });
+  proc.stderr.on("data", (d: Buffer) => {
+    stderr += d;
+  });
 
-  const exitCode = await proc.exited;
+  const exitCode = await new Promise<number>((resolve) =>
+    proc.on("close", (code) => resolve(code ?? 1))
+  );
 
   // Capture git diff (staged + unstaged changes since last commit)
   let diff = "";

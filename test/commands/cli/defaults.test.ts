@@ -5,8 +5,8 @@
  * and the telemetry/URL integration points.
  */
 
-import { describe, expect, test } from "bun:test";
 import chalk from "chalk";
+import { describe, expect, test } from "vitest";
 import {
   clearAllDefaults,
   getAllDefaults,
@@ -20,6 +20,7 @@ import {
   setDefaultUrl,
   setTelemetryPreference,
 } from "../../../src/lib/db/defaults.js";
+import { getDatabase } from "../../../src/lib/db/index.js";
 import { formatDefaultsResult } from "../../../src/lib/formatters/human.js";
 import { stripAnsi } from "../../../src/lib/formatters/plain-detect.js";
 import {
@@ -173,6 +174,10 @@ describe("isTelemetryEnabled", () => {
 
   // Save and restore env vars around each test
   const setup = () => {
+    // Force DB initialization while SENTRY_CLI_NO_TELEMETRY is still set,
+    // so the lazy require("../telemetry.js") is skipped. Under vitest
+    // (Node.js), that CJS require path can't resolve ESM .js imports.
+    getDatabase();
     savedNoTelemetry = process.env.SENTRY_CLI_NO_TELEMETRY;
     savedDoNotTrack = process.env.DO_NOT_TRACK;
     // Clear both env vars so persistent preference is tested
@@ -275,6 +280,9 @@ describe("computeTelemetryEffective", () => {
   let savedDoNotTrack: string | undefined;
 
   const setup = () => {
+    // Force DB initialization while SENTRY_CLI_NO_TELEMETRY is still set
+    // (see isTelemetryEnabled setup comment for rationale).
+    getDatabase();
     savedNoTelemetry = process.env.SENTRY_CLI_NO_TELEMETRY;
     savedDoNotTrack = process.env.DO_NOT_TRACK;
     delete process.env.SENTRY_CLI_NO_TELEMETRY;

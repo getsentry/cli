@@ -6,26 +6,52 @@
  * plus cursor pagination, --cursor next/prev, and error paths.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { listCommand } from "../../../src/commands/repo/list.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
+// biome-ignore lint/performance/noNamespaceImport: needed for vi.mocked access
 import * as apiClient from "../../../src/lib/api-client.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
-import * as defaults from "../../../src/lib/db/defaults.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+
+vi.mock("../../../src/lib/db/pagination.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/pagination.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
+// biome-ignore lint/performance/noNamespaceImport: needed for vi.mocked access
 import * as paginationDb from "../../../src/lib/db/pagination.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ValidationError } from "../../../src/lib/errors.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
+// biome-ignore lint/performance/noNamespaceImport: needed for vi.mocked access
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryRepository } from "../../../src/types/sentry.js";
 
@@ -56,8 +82,8 @@ const sampleRepos: SentryRepository[] = [
 ];
 
 function createMockContext(cwd = "/tmp") {
-  const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
+  const stderrWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
@@ -70,17 +96,12 @@ function createMockContext(cwd = "/tmp") {
 }
 
 describe("listCommand.func — project-search (bare slug)", () => {
-  let listRepositoriesSpy: ReturnType<typeof spyOn>;
-  let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
-
-  beforeEach(() => {
-    listRepositoriesSpy = spyOn(apiClient, "listRepositories");
-    findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
-  });
+  const listRepositoriesSpy = vi.mocked(apiClient.listRepositories);
+  const findProjectsBySlugSpy = vi.mocked(apiClient.findProjectsBySlug);
 
   afterEach(() => {
-    listRepositoriesSpy.mockRestore();
-    findProjectsBySlugSpy.mockRestore();
+    listRepositoriesSpy.mockReset();
+    findProjectsBySlugSpy.mockReset();
   });
 
   test("outputs JSON array when --json flag is set", async () => {
@@ -205,15 +226,14 @@ describe("listCommand.func — project-search (bare slug)", () => {
 });
 
 describe("listCommand.func — explicit org/project (org-scoped with note)", () => {
-  let listRepositoriesSpy: ReturnType<typeof spyOn>;
+  const listRepositoriesSpy = vi.mocked(apiClient.listRepositories);
 
   beforeEach(async () => {
-    listRepositoriesSpy = spyOn(apiClient, "listRepositories");
     setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
-    listRepositoriesSpy.mockRestore();
+    listRepositoriesSpy.mockReset();
   });
 
   test("explicit org/project uses org part (repos are org-scoped)", async () => {
@@ -252,30 +272,24 @@ describe("listCommand.func — explicit org/project (org-scoped with note)", () 
 });
 
 describe("listCommand.func — auto-detect mode", () => {
-  let listRepositoriesSpy: ReturnType<typeof spyOn>;
-  let listOrganizationsSpy: ReturnType<typeof spyOn>;
-  let getDefaultOrganizationSpy: ReturnType<typeof spyOn>;
-  let resolveAllTargetsSpy: ReturnType<typeof spyOn>;
+  const listRepositoriesSpy = vi.mocked(apiClient.listRepositories);
+  const listOrganizationsSpy = vi.mocked(apiClient.listOrganizations);
+  const resolveOrgsForListingSpy = vi.mocked(
+    resolveTarget.resolveOrgsForListing
+  );
 
   beforeEach(() => {
-    listRepositoriesSpy = spyOn(apiClient, "listRepositories");
-    listOrganizationsSpy = spyOn(apiClient, "listOrganizations");
-    getDefaultOrganizationSpy = spyOn(defaults, "getDefaultOrganization");
-    resolveAllTargetsSpy = spyOn(resolveTarget, "resolveAllTargets");
-
-    getDefaultOrganizationSpy.mockReturnValue(null);
-    resolveAllTargetsSpy.mockResolvedValue({ targets: [] });
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: [] });
   });
 
   afterEach(() => {
-    listRepositoriesSpy.mockRestore();
-    listOrganizationsSpy.mockRestore();
-    getDefaultOrganizationSpy.mockRestore();
-    resolveAllTargetsSpy.mockRestore();
+    listRepositoriesSpy.mockReset();
+    listOrganizationsSpy.mockReset();
+    resolveOrgsForListingSpy.mockReset();
   });
 
   test("uses default organization when no org provided", async () => {
-    getDefaultOrganizationSpy.mockReturnValue("default-org");
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: ["default-org"] });
     listRepositoriesSpy.mockResolvedValue(sampleRepos);
 
     const { context } = createMockContext();
@@ -286,9 +300,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("uses DSN auto-detection when no org and no default", async () => {
-    resolveAllTargetsSpy.mockResolvedValue({
-      targets: [{ org: "detected-org", project: "some-project" }],
-    });
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: ["detected-org"] });
     listRepositoriesSpy.mockResolvedValue(sampleRepos);
 
     const { context } = createMockContext();
@@ -299,6 +311,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("falls back to all orgs when no org specified and no detection", async () => {
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: [] });
     listOrganizationsSpy.mockResolvedValue([
       { id: "1", slug: "org-a", name: "Org A" },
       { id: "2", slug: "org-b", name: "Org B" },
@@ -313,7 +326,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("outputs JSON in auto-detect mode", async () => {
-    getDefaultOrganizationSpy.mockReturnValue("auto-org");
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: ["auto-org"] });
     listRepositoriesSpy.mockResolvedValue(sampleRepos);
 
     const { context, stdoutWrite } = createMockContext();
@@ -327,7 +340,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("shows 'No repositories found' in auto-detect when empty and single org", async () => {
-    getDefaultOrganizationSpy.mockReturnValue("empty-org");
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: ["empty-org"] });
     listRepositoriesSpy.mockResolvedValue([]);
 
     const { context, stdoutWrite } = createMockContext();
@@ -339,6 +352,7 @@ describe("listCommand.func — auto-detect mode", () => {
   });
 
   test("shows 'No repositories found.' fallback when no orgs at all", async () => {
+    resolveOrgsForListingSpy.mockResolvedValue({ orgs: [] });
     listOrganizationsSpy.mockResolvedValue([]);
     listRepositoriesSpy.mockResolvedValue([]);
 
@@ -352,30 +366,26 @@ describe("listCommand.func — auto-detect mode", () => {
 });
 
 describe("listCommand.func — org-all mode (cursor pagination)", () => {
-  let listRepositoriesPaginatedSpy: ReturnType<typeof spyOn>;
-  let advancePaginationStateSpy: ReturnType<typeof spyOn>;
-  let hasPreviousPageSpy: ReturnType<typeof spyOn>;
-  let resolveCursorSpy: ReturnType<typeof spyOn>;
+  const listRepositoriesPaginatedSpy = vi.mocked(
+    apiClient.listRepositoriesPaginated
+  );
+  const advancePaginationStateSpy = vi.mocked(
+    paginationDb.advancePaginationState
+  );
+  const hasPreviousPageSpy = vi.mocked(paginationDb.hasPreviousPage);
+  const resolveCursorSpy = vi.mocked(paginationDb.resolveCursor);
 
   beforeEach(async () => {
-    listRepositoriesPaginatedSpy = spyOn(
-      apiClient,
-      "listRepositoriesPaginated"
-    );
-    advancePaginationStateSpy = spyOn(paginationDb, "advancePaginationState");
-    hasPreviousPageSpy = spyOn(paginationDb, "hasPreviousPage");
-    resolveCursorSpy = spyOn(paginationDb, "resolveCursor");
-
     advancePaginationStateSpy.mockReturnValue(undefined);
     hasPreviousPageSpy.mockReturnValue(false);
     setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
   afterEach(() => {
-    listRepositoriesPaginatedSpy.mockRestore();
-    advancePaginationStateSpy.mockRestore();
-    hasPreviousPageSpy.mockRestore();
-    resolveCursorSpy.mockRestore();
+    listRepositoriesPaginatedSpy.mockReset();
+    advancePaginationStateSpy.mockReset();
+    hasPreviousPageSpy.mockReset();
+    resolveCursorSpy.mockReset();
   });
 
   test("returns paginated JSON with hasMore=false when no nextCursor", async () => {

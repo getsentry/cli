@@ -20,6 +20,7 @@ import {
   SENTRY_CLI_DSN,
 } from "./constants.js";
 import { getCustomCaCerts } from "./custom-ca.js";
+import { getTelemetryPreference } from "./db/defaults.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
 import {
   type AgentInfo,
@@ -132,9 +133,6 @@ export function computeTelemetryEffective(): TelemetryEffective {
   }
 
   try {
-    const { getTelemetryPreference } = require("./db/defaults.js") as {
-      getTelemetryPreference: () => boolean | undefined;
-    };
     const pref = getTelemetryPreference();
     if (pref !== undefined) {
       return { enabled: pref, source: "preference" };

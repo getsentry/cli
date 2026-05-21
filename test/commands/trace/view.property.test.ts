@@ -7,7 +7,6 @@
  * and trace logs.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   assert as fcAssert,
   integer,
@@ -16,6 +15,7 @@ import {
   tuple,
   uniqueArray,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { flattenSpanTree } from "../../../src/commands/trace/view.js";
 import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 import { parseTraceTarget } from "../../../src/lib/trace-target.js";

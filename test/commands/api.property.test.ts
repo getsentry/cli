@@ -5,7 +5,6 @@
  * that are difficult to exhaustively test with example-based tests.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   asyncProperty,
@@ -21,6 +20,7 @@ import {
   tuple,
   uniqueArray,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   buildFromFields,
   extractJsonBody,

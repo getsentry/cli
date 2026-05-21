@@ -7,8 +7,8 @@
  * the real terminal during tests.
  */
 
-import { describe, expect, test } from "bun:test";
 import { Writable } from "node:stream";
+import { describe, expect, test } from "vitest";
 import { stripAnsi } from "../../../../src/lib/formatters/plain-detect.js";
 import {
   LoggingUI,

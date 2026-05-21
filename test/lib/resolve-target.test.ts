@@ -6,8 +6,8 @@
  * the complexity of mocking module dependencies in Bun's test environment.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { parseOrgProjectArg } from "../../src/lib/arg-parsing.js";
 import { DEFAULT_SENTRY_URL } from "../../src/lib/constants.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";

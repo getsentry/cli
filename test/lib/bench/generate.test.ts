@@ -12,7 +12,6 @@
  * consumed by script/bench.ts outside the test runner.
  */
 
-import { afterAll, describe, expect, test } from "bun:test";
 import {
   mkdtempSync,
   readdirSync,
@@ -22,6 +21,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterAll, describe, expect, test } from "vitest";
 import {
   type FixtureMeta,
   type FixtureSpec,

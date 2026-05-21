@@ -10,7 +10,7 @@
  * and error messages.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { ValidationError } from "../../src/lib/errors.js";
 import { __testing, sanitizeQuery } from "../../src/lib/search-query.js";
 

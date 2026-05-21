@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "vitest";
 import { runAssertions } from "./assertions";
 import { fetchDocsContent } from "./docs-fetcher";
 import { judgeFeature } from "./judge";

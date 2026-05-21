@@ -15,9 +15,9 @@ import {
   beforeEach,
   describe,
   expect,
-  spyOn,
   test,
-} from "bun:test";
+  vi,
+} from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../src/lib/browser.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -136,21 +136,20 @@ describe("runInteractiveLogin", () => {
   }
 
   beforeEach(() => {
-    completeOAuthFlowSpy = spyOn(oauth, "completeOAuthFlow").mockResolvedValue(
-      undefined
-    );
-    openBrowserSpy = spyOn(browser, "openBrowser").mockResolvedValue(false);
-    generateQRCodeSpy = spyOn(qrcode, "generateQRCode").mockResolvedValue(
-      "[QR]"
-    );
-    setupCopyKeyListenerSpy = spyOn(
-      clipboard,
-      "setupCopyKeyListener"
-    ).mockReturnValue(() => {
-      // no-op cleanup
-    });
-    setUserInfoSpy = spyOn(dbUser, "setUserInfo").mockReturnValue(undefined);
-    getDbPathSpy = spyOn(dbInstance, "getDbPath").mockReturnValue("/tmp/db");
+    completeOAuthFlowSpy = vi
+      .spyOn(oauth, "completeOAuthFlow")
+      .mockResolvedValue(undefined);
+    openBrowserSpy = vi.spyOn(browser, "openBrowser").mockResolvedValue(false);
+    generateQRCodeSpy = vi
+      .spyOn(qrcode, "generateQRCode")
+      .mockResolvedValue("[QR]");
+    setupCopyKeyListenerSpy = vi
+      .spyOn(clipboard, "setupCopyKeyListener")
+      .mockReturnValue(() => {
+        // no-op cleanup
+      });
+    setUserInfoSpy = vi.spyOn(dbUser, "setUserInfo").mockReturnValue(undefined);
+    getDbPathSpy = vi.spyOn(dbInstance, "getDbPath").mockReturnValue("/tmp/db");
   });
 
   afterEach(() => {
@@ -164,8 +163,9 @@ describe("runInteractiveLogin", () => {
   });
 
   test("null user.name is omitted from result and stored as undefined in setUserInfo", async () => {
-    performDeviceFlowSpy = spyOn(oauth, "performDeviceFlow").mockImplementation(
-      async (callbacks) => {
+    performDeviceFlowSpy = vi
+      .spyOn(oauth, "performDeviceFlow")
+      .mockImplementation(async (callbacks) => {
         await callbacks.onUserCode(
           "ABCD",
           "https://sentry.io/auth/device/",
@@ -176,8 +176,7 @@ describe("runInteractiveLogin", () => {
           name: null,
           email: "user@example.com",
         });
-      }
-    );
+      });
 
     const result = await runInteractiveLogin({ timeout: 1000 });
 
@@ -196,8 +195,9 @@ describe("runInteractiveLogin", () => {
   });
 
   test("null user.email is omitted from result", async () => {
-    performDeviceFlowSpy = spyOn(oauth, "performDeviceFlow").mockImplementation(
-      async (callbacks) => {
+    performDeviceFlowSpy = vi
+      .spyOn(oauth, "performDeviceFlow")
+      .mockImplementation(async (callbacks) => {
         await callbacks.onUserCode(
           "EFGH",
           "https://sentry.io/auth/device/",
@@ -208,8 +208,7 @@ describe("runInteractiveLogin", () => {
           name: "Jane Doe",
           email: null,
         });
-      }
-    );
+      });
 
     const result = await runInteractiveLogin({ timeout: 1000 });
 
@@ -226,16 +225,16 @@ describe("runInteractiveLogin", () => {
   });
 
   test("no user in token response: result.user is undefined, setUserInfo not called", async () => {
-    performDeviceFlowSpy = spyOn(oauth, "performDeviceFlow").mockImplementation(
-      async (callbacks) => {
+    performDeviceFlowSpy = vi
+      .spyOn(oauth, "performDeviceFlow")
+      .mockImplementation(async (callbacks) => {
         await callbacks.onUserCode(
           "WXYZ",
           "https://sentry.io/auth/device/",
           "https://sentry.io/auth/device/?user_code=WXYZ"
         );
         return makeTokenResponse(); // no user
-      }
-    );
+      });
 
     const result = await runInteractiveLogin({ timeout: 1000 });
 

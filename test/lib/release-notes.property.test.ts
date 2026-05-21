@@ -5,7 +5,6 @@
  * for the release notes extraction and commit parsing, regardless of input.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -15,6 +14,7 @@ import {
   record,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   type ChangeCategory,
   extractNightlyTimestamp,

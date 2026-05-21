@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gunzipSync } from "node:zlib";
+import { gunzipSync, zstdDecompressSync } from "node:zlib";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   buildArtifactBundle,
   ChunkServerOptionsSchema,
@@ -50,7 +50,7 @@ describe("encodeChunk", () => {
     expect(encoded[1]).toBe(0xb5);
     expect(encoded[2]).toBe(0x2f);
     expect(encoded[3]).toBe(0xfd);
-    const decoded = Bun.zstdDecompressSync(encoded);
+    const decoded = zstdDecompressSync(encoded);
     expect(Buffer.from(decoded).equals(payload)).toBe(true);
   });
 

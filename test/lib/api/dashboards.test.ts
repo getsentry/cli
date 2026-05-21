@@ -5,7 +5,7 @@
  * from src/lib/api/dashboards.ts.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   computeOptimalInterval,
   periodToSeconds,

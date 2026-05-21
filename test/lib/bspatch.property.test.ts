@@ -5,8 +5,8 @@
  * functions across random inputs.
  */
 
-import { describe, expect, test } from "bun:test";
 import { assert as fcAssert, integer, property, uint8Array } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { offtin, parsePatchHeader } from "../../src/lib/bspatch.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 

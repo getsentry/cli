@@ -7,7 +7,7 @@
  * cases and the env-var integration path.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   getCliEnvironment,
   getConfiguredSentryUrl,

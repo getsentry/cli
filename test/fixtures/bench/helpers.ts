@@ -16,6 +16,7 @@
  */
 
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { arch, cpus, platform, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -243,7 +244,7 @@ export async function writeJsonReport(
   report: BenchReport,
   path: string
 ): Promise<void> {
-  await Bun.write(path, `${JSON.stringify(report, null, 2)}\n`);
+  await writeFile(path, `${JSON.stringify(report, null, 2)}\n`);
 }
 
 /**
@@ -384,10 +385,10 @@ export function printComparison(
   return ok;
 }
 
-/** Bun version or a best-effort fallback for non-Bun runtimes. */
+/** Runtime version info. */
 export function runtimeInfo(): BenchReport["runtime"] {
   return {
-    bun: typeof Bun !== "undefined" ? Bun.version : "unknown",
+    bun: process.version,
     platform: platform(),
     arch: arch(),
     cpus: cpus().length,

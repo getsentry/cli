@@ -5,15 +5,7 @@
  * Covers the env-token guard and the main refresh flow.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { refreshCommand } from "../../../src/commands/auth/refresh.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbAuth from "../../../src/lib/db/auth.js";
@@ -26,12 +18,12 @@ function createContext() {
   const stdoutLines: string[] = [];
   const context = {
     stdout: {
-      write: mock((s: string) => {
+      write: vi.fn((s: string) => {
         stdoutLines.push(s);
       }),
     },
     stderr: {
-      write: mock((_s: string) => {
+      write: vi.fn((_s: string) => {
         /* no-op */
       }),
     },
@@ -47,9 +39,9 @@ describe("refreshCommand.func", () => {
   let func: RefreshFunc;
 
   beforeEach(async () => {
-    isEnvTokenActiveSpy = spyOn(dbAuth, "isEnvTokenActive");
-    getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig");
-    refreshTokenSpy = spyOn(dbAuth, "refreshToken");
+    isEnvTokenActiveSpy = vi.spyOn(dbAuth, "isEnvTokenActive");
+    getAuthConfigSpy = vi.spyOn(dbAuth, "getAuthConfig");
+    refreshTokenSpy = vi.spyOn(dbAuth, "refreshToken");
     func = (await refreshCommand.loader()) as unknown as RefreshFunc;
   });
 

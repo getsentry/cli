@@ -12,8 +12,8 @@
  * and verify help output is shown when resolution fails.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { run } from "@stricli/core";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { app } from "../../src/app.js";
 import type { SentryContext } from "../../src/context.js";
 import { mockFetch, useTestConfigDir } from "../helpers.js";

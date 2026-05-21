@@ -4,21 +4,56 @@
  * Tests for `sentry issue resolve` and `sentry issue unresolve` func() bodies.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { resolveCommand } from "../../../src/commands/issue/resolve.js";
+
+vi.mock(
+  "../../../src/commands/issue/resolve-commit-spec.js",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../../src/commands/issue/resolve-commit-spec.js")
+      >();
+    return Object.fromEntries(
+      Object.entries(actual).map(([k, v]) => [
+        k,
+        typeof v === "function" ? vi.fn(v) : v,
+      ])
+    );
+  }
+);
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as commitSpec from "../../../src/commands/issue/resolve-commit-spec.js";
 import { unresolveCommand } from "../../../src/commands/issue/unresolve.js";
+
+vi.mock("../../../src/commands/issue/utils.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../src/commands/issue/utils.js")
+    >();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as issueUtils from "../../../src/commands/issue/utils.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import type { SentryIssue } from "../../../src/types/sentry.js";
@@ -42,11 +77,11 @@ function makeMockIssue(overrides?: Partial<SentryIssue>): SentryIssue {
 }
 
 function createMockContext() {
-  const stdoutWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
+      stderr: { write: vi.fn(() => true) },
       cwd: "/tmp",
     },
     stdoutWrite,
@@ -58,8 +93,8 @@ describe("resolveCommand.func()", () => {
   let updateSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    resolveIssueSpy = spyOn(issueUtils, "resolveIssue");
-    updateSpy = spyOn(apiClient, "updateIssueStatus");
+    resolveIssueSpy = vi.spyOn(issueUtils, "resolveIssue");
+    updateSpy = vi.spyOn(apiClient, "updateIssueStatus");
   });
 
   afterEach(() => {
@@ -124,10 +159,12 @@ describe("resolveCommand.func()", () => {
       issue: makeMockIssue(),
     });
     updateSpy.mockResolvedValue(makeMockIssue());
-    const commitSpy = spyOn(commitSpec, "resolveCommitSpec").mockResolvedValue({
-      commit: "abc123def",
-      repository: "getsentry/cli",
-    });
+    const commitSpy = vi
+      .spyOn(commitSpec, "resolveCommitSpec")
+      .mockResolvedValue({
+        commit: "abc123def",
+        repository: "getsentry/cli",
+      });
 
     try {
       const { context } = createMockContext();
@@ -156,10 +193,12 @@ describe("resolveCommand.func()", () => {
       issue: makeMockIssue(),
     });
     updateSpy.mockResolvedValue(makeMockIssue());
-    const commitSpy = spyOn(commitSpec, "resolveCommitSpec").mockResolvedValue({
-      commit: "abc123",
-      repository: "getsentry/cli",
-    });
+    const commitSpy = vi
+      .spyOn(commitSpec, "resolveCommitSpec")
+      .mockResolvedValue({
+        commit: "abc123",
+        repository: "getsentry/cli",
+      });
 
     try {
       const { context } = createMockContext();
@@ -245,8 +284,8 @@ describe("unresolveCommand.func()", () => {
   let updateSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    resolveIssueSpy = spyOn(issueUtils, "resolveIssue");
-    updateSpy = spyOn(apiClient, "updateIssueStatus");
+    resolveIssueSpy = vi.spyOn(issueUtils, "resolveIssue");
+    updateSpy = vi.spyOn(apiClient, "updateIssueStatus");
   });
 
   afterEach(() => {
