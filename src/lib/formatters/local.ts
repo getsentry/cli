@@ -4,13 +4,16 @@ import { blue, bold, cyan, green, muted, red, yellow } from "./colors.js";
 import { stripAnsi } from "./plain-detect.js";
 
 /**
- * Strip ANSI escapes, collapse newlines, and remove C0 control characters
+ * Strip ANSI escapes, collapse newlines, and remove C0/C1 control characters
  * so envelope fields can't inject fake log lines or terminal commands.
  */
 export function sanitize(text: string): string {
-  const stripped = stripAnsi(text).replace(/[\r\n]+/g, " ");
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping C0 control chars from untrusted envelope data
-  return stripped.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+  // Collapse CR, LF, and NEL (U+0085) which terminals treat as line breaks.
+  const stripped = stripAnsi(text).replace(/[\r\n\x85]+/g, " ");
+  // Strip C0 (0x00-0x1F, 0x7F) and C1 (0x80-0x9F) control characters.
+  // C1 includes raw 8-bit CSI (0x9B), OSC (0x9D), and DCS (0x90) introducers.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars from untrusted envelope data
+  return stripped.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]/g, "");
 }
 
 /** Canonical content type for Sentry envelopes. */
