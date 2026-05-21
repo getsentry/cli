@@ -29,7 +29,7 @@ Run a command with the local dev server enabled
 - `-p, --port <value> - Port for the local server (default 8969) - (default: "8969")`
 - `--host <value> - Hostname for the local server (default localhost) - (default: "localhost")`
 - `-V, --verify - Verify SDK sends events, then exit`
-- `-t, --timeout <value> - Kill the child after N seconds (0 = no timeout) - (default: "0")`
+- `-t, --timeout <value> - Kill the child after N seconds (0 = no timeout; defaults to 30 s in --verify mode) - (default: "0")`
 
 **Examples:**
 
