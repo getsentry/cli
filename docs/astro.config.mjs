@@ -221,7 +221,7 @@ export default defineConfig({
         },
         {
           label: "Commands",
-          autogenerate: { directory: "commands" },
+          items: [{ autogenerate: { directory: "commands" } }],
         },
         {
           label: "Resources",
