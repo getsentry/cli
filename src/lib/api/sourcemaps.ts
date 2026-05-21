@@ -24,7 +24,11 @@ import { open, readFile, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { gzip as gzipCb } from "node:zlib";
+import {
+  gzip as gzipCb,
+  constants as zlibConstants,
+  zstdCompress as zstdCompressCb,
+} from "node:zlib";
 import pLimit from "p-limit";
 import { z } from "zod";
 import { ApiError } from "../errors.js";
@@ -35,6 +39,7 @@ import { type ZipCompression, ZipWriter } from "../sourcemap/zip.js";
 import { apiRequestToRegion } from "./infrastructure.js";
 
 const gzipAsync = promisify(gzipCb);
+const zstdCompressAsync = promisify(zstdCompressCb);
 const log = logger.withTag("api.sourcemaps");
 
 // ── Schemas ─────────────────────────────────────────────────────────
@@ -195,8 +200,8 @@ export function pickUploadEncoding(
 /**
  * Compress a chunk buffer with the chosen codec. Exported for testing.
  *
- * Both codecs run off-thread (Bun's zstd worker and libuv's zlib thread
- * pool), so a chunk being compressed doesn't block the event loop --
+ * Both codecs run off-thread via libuv's thread pool, so a chunk
+ * being compressed doesn't block the event loop --
  * with `concurrency=8`, eight uploads truly compress in parallel.
  */
 export async function encodeChunk(
@@ -208,7 +213,9 @@ export async function encodeChunk(
     // code. L9+ trades ~14% size for 4x compress time and forces the
     // server's decoder to allocate 15-30 MiB of window state -- not
     // worth it once decode cost is counted.
-    return await Bun.zstdCompress(buf, { level: 3 });
+    return await zstdCompressAsync(buf, {
+      params: { [zlibConstants.ZSTD_c_compressionLevel]: 3 },
+    });
   }
   if (encoding === "gzip") {
     // zlib default (L6). Counter-intuitively, lower levels (L1/L5)

@@ -6,7 +6,7 @@ import { MAX_OUTPUT_BYTES } from "../constants.js";
 const WHITESPACE_CHAR_RE = /\s/u;
 
 /**
- * Patterns that indicate shell injection. Commands run via `Bun.spawn`
+ * Patterns that indicate shell injection. Commands run via `child_process.spawn`
  * without a shell, so these patterns are defense-in-depth for chaining,
  * piping, redirection, and command substitution.
  */

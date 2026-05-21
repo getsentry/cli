@@ -22,6 +22,7 @@ import {
   renderInlineMarkdown,
   renderMarkdown,
 } from "../../formatters/markdown.js";
+import { renderTextTable } from "../../formatters/text-table.js";
 import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
 import { buildFileTree, flattenTree } from "./file-tree.js";
 import type {
@@ -94,7 +95,11 @@ export class LoggingUI implements WizardUI {
   }
 
   summary(summary: WizardSummary): void {
-    if (summary.fields.length === 0 && !summary.changedFiles?.length) {
+    if (
+      summary.fields.length === 0 &&
+      !summary.changedFiles?.length &&
+      !summary.featureBlurbs?.length
+    ) {
       return;
     }
     // Compact two-column key/value listing — one line per field. The
@@ -108,6 +113,20 @@ export class LoggingUI implements WizardUI {
     for (const field of summary.fields) {
       const padded = field.label.padEnd(labelWidth);
       this.writeLine(this.stdout, `  ${padded}  ${field.value}`);
+    }
+    if (summary.featureBlurbs && summary.featureBlurbs.length > 0) {
+      this.writeLine(this.stdout, "");
+      this.writeLine(this.stdout, "  Here's what we set up");
+      const tableRows = summary.featureBlurbs.map(({ label, blurb }) => [
+        label,
+        blurb,
+      ]);
+      const table = renderTextTable(["", ""], tableRows, {
+        shrinkable: [false, true],
+      });
+      for (const line of table.trimEnd().split("\n")) {
+        this.writeLine(this.stdout, `  ${line}`);
+      }
     }
     if (summary.changedFiles && summary.changedFiles.length > 0) {
       this.writeLine(this.stdout, "");

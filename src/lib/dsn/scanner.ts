@@ -5,6 +5,7 @@
  * Used by env-file detection for scanning .env file variants.
  */
 
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { handleFileError, isRegularFile } from "./fs-utils.js";
 import type { DetectedDsn } from "./types.js";
@@ -71,26 +72,38 @@ export async function scanSpecificFiles(
 
     try {
       // Guard: skip non-regular files (FIFOs, sockets, etc.) that would block.
-      // 1Password streams secrets via symlinked named pipes; Bun.file().text()
-      // blocks indefinitely on these.
+      // 1Password streams secrets via symlinked named pipes; open() on a FIFO
+      // blocks indefinitely waiting for a writer.
       if (!(await isRegularFile(filepath, "scanSpecificFiles.stat"))) {
         continue;
       }
-      const file = Bun.file(filepath);
-      const content = await file.text();
-      const result = processFile(filename, content);
 
-      if (result?.dsn) {
-        const detected = createDsn(result.dsn, filename, result.metadata);
-        if (detected) {
-          dsns.push(detected);
-          // Record mtime for cache invalidation
-          sourceMtimes[filename] = file.lastModified;
+      // Use a single file handle for atomic read + stat to avoid TOCTOU:
+      // reading content and mtime from the same open handle ensures they
+      // correspond to the same file version.
+      const fh = await open(filepath, "r");
+      try {
+        const [content, stats] = await Promise.all([
+          fh.readFile("utf-8"),
+          fh.stat(),
+        ]);
+        const result = processFile(filename, content);
 
-          if (stopOnFirst) {
-            return { dsns, sourceMtimes };
+        if (result?.dsn) {
+          const detected = createDsn(result.dsn, filename, result.metadata);
+          if (detected) {
+            dsns.push(detected);
+            // Record mtime for cache invalidation (from same handle as content).
+            // Floor to integer — all mtime comparisons in dsn-cache.ts use Math.floor.
+            sourceMtimes[filename] = Math.floor(stats.mtimeMs);
+
+            if (stopOnFirst) {
+              return { dsns, sourceMtimes };
+            }
           }
         }
+      } finally {
+        await fh.close();
       }
     } catch (error) {
       handleFileError(error, {

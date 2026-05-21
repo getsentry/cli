@@ -143,6 +143,8 @@ export type WizardSummary = {
   fields: { label: string; value: string }[];
   /** Optional list of files the wizard added/edited/removed. */
   changedFiles?: { action: string; path: string }[];
+  /** AI-generated per-feature blurbs personalised to the analysed project. */
+  featureBlurbs?: { label: string; blurb: string }[];
 };
 
 /**

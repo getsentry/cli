@@ -176,16 +176,44 @@ function shouldCollapseStats(json: boolean): boolean {
 }
 
 /**
+ * Fields that depend on the `lifetime` API data. When `collapse=lifetime`
+ * is sent, the server omits these from the list response. See #969.
+ */
+const LIFETIME_FIELDS = new Set([
+  "count",
+  "userCount",
+  "firstSeen",
+  "lastSeen",
+]);
+
+/**
  * Build the collapse and groupStatsPeriod options for issue list API calls.
  *
  * When stats are collapsed, groupStatsPeriod is omitted (undefined) since
  * the server won't compute stats anyway. This avoids wasted server-side
  * processing and makes the request intent explicit.
+ *
+ * Lifetime is only collapsed in JSON mode when explicit `--fields` are
+ * provided and none of them are lifetime-dependent (`count`, `userCount`,
+ * `firstSeen`, `lastSeen`). Human output always needs these for the
+ * EVENTS, USERS, SEEN, and AGE columns.
  */
-function buildListApiOptions(json: boolean): ListApiOptions {
+function buildListApiOptions(json: boolean, fields?: string[]): ListApiOptions {
   const collapseStats = shouldCollapseStats(json);
+  // Collapse lifetime only when in JSON mode with explicit --fields that
+  // don't include any lifetime-dependent field. Human output always needs
+  // these (EVENTS, USERS, SEEN, AGE columns), and JSON without --fields
+  // returns all fields.
+  const collapseLifetime =
+    json &&
+    fields !== undefined &&
+    fields.length > 0 &&
+    !fields.some((f) => LIFETIME_FIELDS.has(f));
   return {
-    collapse: buildIssueListCollapse({ shouldCollapseStats: collapseStats }),
+    collapse: buildIssueListCollapse({
+      shouldCollapseStats: collapseStats,
+      shouldCollapseLifetime: collapseLifetime,
+    }),
     groupStatsPeriod: collapseStats ? undefined : "auto",
   };
 }
@@ -870,14 +898,14 @@ function prevPageHint(org: string, flags: ListFlags): string {
  */
 async function fetchOrgAllIssues(
   org: string,
-  flags: Pick<ListFlags, "query" | "limit" | "sort" | "json">,
+  flags: Pick<ListFlags, "query" | "limit" | "sort" | "json" | "fields">,
   timeRange: TimeRange,
   options: {
     cursor?: string;
     onPage?: (fetched: number, limit: number) => void;
   }
 ): Promise<IssuesPage> {
-  const apiOpts = buildListApiOptions(flags.json);
+  const apiOpts = buildListApiOptions(flags.json, flags.fields);
   const timeParams = timeRangeToApiParams(timeRange);
   const { cursor, onPage } = options;
 
@@ -1165,7 +1193,7 @@ function build403Detail(originalDetail: unknown): string {
         : `Your ${getActiveEnvVarName()} token may lack the required scopes`;
     lines.push(
       `  • ${leader} (${scopeList})`,
-      "  • Check token scopes at: https://sentry.io/settings/auth-tokens/"
+      "  • Check token scopes at: https://sentry.io/settings/account/api/auth-tokens/"
     );
   } else {
     lines.push("  • Re-authenticate with: sentry auth login");
@@ -1257,7 +1285,7 @@ async function handleResolvedTargets(
       ? `Fetching issues from ${targetCount} projects`
       : "Fetching issues";
 
-  const apiOpts = buildListApiOptions(flags.json);
+  const apiOpts = buildListApiOptions(flags.json, flags.fields);
 
   const { results, hasMore } = await withProgress(
     { message: `${baseMessage} (up to ${flags.limit})...`, json: flags.json },

@@ -307,4 +307,27 @@ describe("LoggingUI summary", () => {
     expect(lines.some((l) => l.includes("−") && l.includes("b.ts"))).toBe(true);
     expect(lines.some((l) => l.includes("~") && l.includes("c.ts"))).toBe(true);
   });
+
+  test("featureBlurbs renders Here's what we set up table with label and blurb", () => {
+    const { ui, stdout } = createUI();
+    ui.summary({
+      fields: [],
+      featureBlurbs: [
+        { label: "Error Monitoring", blurb: "Captures exceptions." },
+        { label: "Tracing", blurb: "Traces requests." },
+      ],
+    });
+    const out = stdout();
+    expect(out).toContain("Here's what we set up");
+    expect(out).toContain("Error Monitoring");
+    expect(out).toContain("Captures exceptions.");
+    expect(out).toContain("Tracing");
+    expect(out).toContain("Traces requests.");
+  });
+
+  test("no featureBlurbs section when featureBlurbs is absent", () => {
+    const { ui, stdout } = createUI();
+    ui.summary({ fields: [{ label: "Platform", value: "Next.js" }] });
+    expect(stdout()).not.toContain("Here's what we set up");
+  });
 });

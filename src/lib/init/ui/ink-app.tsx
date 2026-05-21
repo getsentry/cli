@@ -1173,6 +1173,28 @@ function SummaryPanel({
           ))}
         </Box>
       ) : null}
+      {summary.featureBlurbs !== undefined &&
+      summary.featureBlurbs.length > 0 ? (
+        <Box flexDirection="column" flexShrink={0} marginTop={1}>
+          <Text bold color={MUTED}>
+            Here&apos;s what we set up
+          </Text>
+          {summary.featureBlurbs.map(({ label, blurb }) => (
+            <Box flexDirection="row" flexShrink={0} key={label}>
+              <Box flexShrink={0} width={22}>
+                <Text bold color={PRIMARY}>
+                  {label}
+                </Text>
+              </Box>
+              <Box flexShrink={1}>
+                <Text color={MUTED} wrap="wrap">
+                  {blurb}
+                </Text>
+              </Box>
+            </Box>
+          ))}
+        </Box>
+      ) : null}
       {summary.changedFiles !== undefined && summary.changedFiles.length > 0 ? (
         <ChangedFilesTree files={summary.changedFiles} />
       ) : null}

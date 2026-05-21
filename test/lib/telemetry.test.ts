@@ -4,7 +4,6 @@
  * Tests for withTelemetry wrapper and opt-out behavior.
  */
 
-import { Database } from "bun:sqlite";
 import {
   afterAll,
   afterEach,
@@ -17,6 +16,7 @@ import {
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as Sentry from "@sentry/node-core/light";
+import { Database } from "../../src/lib/db/sqlite.js";
 import { ApiError, AuthError, OutputError } from "../../src/lib/errors.js";
 import {
   createTracedDatabase,

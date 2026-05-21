@@ -9,7 +9,17 @@
  * via a spy on process.stderr.write and assert on the collected output.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as child_process from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -641,22 +651,34 @@ describe("sentry cli upgrade — nightly channel", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Download + setup paths (Option B: Bun.spawn spy)
+// Download + setup paths (Option B: child_process.spawn spy)
 //
 // These tests cover runSetupOnNewBinary and the full executeUpgrade flow by:
 //   1. Mocking fetch to return a fake binary payload for downloadBinaryToTemp
-//   2. Replacing Bun.spawn with a spy that resolves immediately with exit 0
+//   2. Spying on child_process.spawn so it resolves immediately with exit 0
 //
-// Bun.spawn is writable on the global Bun object, so it can be temporarily
-// replaced without mock.module.
+// child_process.spawn is spied via spyOn so the module-level import in the
+// production code picks up the mock.
 // ---------------------------------------------------------------------------
 
-describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => {
+/**
+ * Create a fake ChildProcess-like object that emits "close" with the given
+ * exit code on the next microtask. Used to mock child_process.spawn in tests.
+ */
+function fakeChildProcess(exitCode: number): child_process.ChildProcess {
+  const { EventEmitter } = require("node:events");
+  const emitter = new EventEmitter();
+  // Emit "close" asynchronously so the caller can attach listeners first
+  queueMicrotask(() => emitter.emit("close", exitCode));
+  return emitter as unknown as child_process.ChildProcess;
+}
+
+describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy)", () => {
   useTestConfigDir("test-upgrade-spawn-");
 
   let testDir: string;
-  let originalSpawn: typeof Bun.spawn;
-  let spawnedArgs: string[][];
+  let spawnedArgs: Array<{ cmd: string; args: string[] }>;
+  let spawnSpy: ReturnType<typeof spyOn>;
   let restoreStderr: (() => void) | undefined;
 
   /** Redirect curl install paths to temp dir instead of ~/.sentry/bin/ */
@@ -680,21 +702,22 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
     });
 
     originalFetch = globalThis.fetch;
-    originalSpawn = Bun.spawn;
     spawnedArgs = [];
 
-    // Replace Bun.spawn with a spy that immediately resolves with exit 0
-    Bun.spawn = ((cmd: string[], _opts: unknown) => {
-      spawnedArgs.push(cmd);
-      return { exited: Promise.resolve(0) };
-    }) as typeof Bun.spawn;
+    // Spy on child_process.spawn — captures args and resolves with exit 0
+    spawnSpy = spyOn(child_process, "spawn").mockImplementation(
+      (cmd: string, args?: readonly string[]) => {
+        spawnedArgs.push({ cmd, args: [...(args ?? [])] });
+        return fakeChildProcess(0);
+      }
+    );
   });
 
   afterEach(async () => {
     restoreStderr?.();
     restoreStderr = undefined;
     globalThis.fetch = originalFetch;
-    Bun.spawn = originalSpawn;
+    spawnSpy.mockRestore();
     rmSync(testDir, { recursive: true, force: true });
 
     // Clean up any temp binary files written to the redirected install path
@@ -745,19 +768,19 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
     expect(combined).toContain("Upgraded to");
     expect(combined).toContain("99.99.99");
 
-    // Verify Bun.spawn was called with the downloaded binary + setup args
+    // Verify child_process.spawn was called with the downloaded binary + setup args
     expect(spawnedArgs.length).toBeGreaterThan(0);
-    const setupCall = spawnedArgs.find((args) => args.includes("setup"));
+    const setupCall = spawnedArgs.find((entry) => entry.args.includes("setup"));
     expect(setupCall).toBeDefined();
-    expect(setupCall).toContain("cli");
-    expect(setupCall).toContain("setup");
-    expect(setupCall).toContain("--quiet");
-    expect(setupCall).toContain("--method");
-    expect(setupCall).toContain("curl");
-    expect(setupCall).toContain("--install");
+    expect(setupCall?.args).toContain("cli");
+    expect(setupCall?.args).toContain("setup");
+    expect(setupCall?.args).toContain("--quiet");
+    expect(setupCall?.args).toContain("--method");
+    expect(setupCall?.args).toContain("curl");
+    expect(setupCall?.args).toContain("--install");
   });
 
-  test("reports setup failure when Bun.spawn exits non-zero", async () => {
+  test("reports setup failure when spawn exits non-zero", async () => {
     // Use a unified mock that handles both the version endpoint and binary download
     const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
     const gzipped = Bun.gzipSync(fakeContent);
@@ -773,9 +796,7 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
       return new Response(gzipped, { status: 200 });
     });
 
-    Bun.spawn = ((_cmd: string[], _opts: unknown) => ({
-      exited: Promise.resolve(1),
-    })) as typeof Bun.spawn;
+    spawnSpy.mockImplementation(() => fakeChildProcess(1));
 
     const { context, errors, restore } = createMockContext({
       homeDir: testDir,
@@ -872,11 +893,11 @@ describe("sentry cli upgrade — curl full upgrade path (Bun.spawn spy)", () => 
   });
 });
 
-describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)", () => {
+describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.spawn spy)", () => {
   useTestConfigDir("test-upgrade-migrate-");
 
   let testDir: string;
-  let originalSpawn: typeof Bun.spawn;
+  let migrateSpawnSpy: ReturnType<typeof spyOn>;
   let restoreStderr: (() => void) | undefined;
 
   /** Redirect curl install paths to temp dir instead of ~/.sentry/bin/ */
@@ -900,18 +921,17 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (Bun.spawn spy)",
     });
 
     originalFetch = globalThis.fetch;
-    originalSpawn = Bun.spawn;
 
-    Bun.spawn = ((_cmd: string[], _opts: unknown) => ({
-      exited: Promise.resolve(0),
-    })) as typeof Bun.spawn;
+    migrateSpawnSpy = spyOn(child_process, "spawn").mockImplementation(() =>
+      fakeChildProcess(0)
+    );
   });
 
   afterEach(async () => {
     restoreStderr?.();
     restoreStderr = undefined;
     globalThis.fetch = originalFetch;
-    Bun.spawn = originalSpawn;
+    migrateSpawnSpy.mockRestore();
     rmSync(testDir, { recursive: true, force: true });
 
     for (const suffix of ["", ".download", ".old", ".lock"]) {

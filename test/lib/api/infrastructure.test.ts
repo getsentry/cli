@@ -166,7 +166,7 @@ describe("throwApiError", () => {
         );
         expect(apiError.detail).toContain("SENTRY_AUTH_TOKEN");
         expect(apiError.detail).toContain(
-          "https://sentry.io/settings/auth-tokens/"
+          "https://sentry.io/settings/account/api/auth-tokens/"
         );
       }
     });
@@ -329,6 +329,132 @@ describe("throwApiError", () => {
           expect(apiError.detail).toContain(
             "You may not have access to this resource."
           );
+          expect(apiError.detail).toContain("sentry auth login");
+          // Should NOT mention SENTRY_AUTH_TOKEN
+          expect(apiError.detail).not.toContain("SENTRY_AUTH_TOKEN");
+        }
+      });
+    });
+  });
+
+  describe("401 enrichment", () => {
+    // Test preload sets SENTRY_AUTH_TOKEN, so isEnvTokenActive() returns true
+    // by default in these tests.
+
+    test("uses 'not recognized or has been revoked' for invalid token", () => {
+      const mockResponse = new Response("", {
+        status: 401,
+        statusText: "Unauthorized",
+      });
+
+      try {
+        throwApiError(
+          { detail: "Invalid token" },
+          mockResponse,
+          "Failed to list organizations"
+        );
+      } catch (error) {
+        const apiError = error as ApiError;
+        expect(apiError.status).toBe(401);
+        expect(apiError.message).toBe(
+          "Failed to list organizations: 401 Unauthorized"
+        );
+        expect(apiError.detail).toContain("Invalid token");
+        expect(apiError.detail).toContain("SENTRY_AUTH_TOKEN");
+        expect(apiError.detail).toContain("not recognized or has been revoked");
+        expect(apiError.detail).toContain(
+          "https://sentry.io/settings/account/api/auth-tokens/"
+        );
+      }
+    });
+
+    test("uses 'has expired' for Token expired detail", () => {
+      const mockResponse = new Response("", {
+        status: 401,
+        statusText: "Unauthorized",
+      });
+
+      try {
+        throwApiError(
+          { detail: "Token expired" },
+          mockResponse,
+          "Failed to list organizations"
+        );
+      } catch (error) {
+        const apiError = error as ApiError;
+        expect(apiError.status).toBe(401);
+        expect(apiError.detail).toContain("Token expired");
+        expect(apiError.detail).toContain("SENTRY_AUTH_TOKEN");
+        expect(apiError.detail).toContain("has expired");
+        expect(apiError.detail).not.toContain("not recognized");
+        expect(apiError.detail).toContain(
+          "https://sentry.io/settings/account/api/auth-tokens/"
+        );
+      }
+    });
+
+    test("falls back to 'not recognized' when detail is absent", () => {
+      const mockResponse = new Response("", {
+        status: 401,
+        statusText: "Unauthorized",
+      });
+
+      try {
+        throwApiError(
+          { detail: undefined },
+          mockResponse,
+          "Failed to list organizations"
+        );
+      } catch (error) {
+        const apiError = error as ApiError;
+        expect(apiError.status).toBe(401);
+        expect(apiError.detail).toContain("SENTRY_AUTH_TOKEN");
+        expect(apiError.detail).toContain("not recognized or has been revoked");
+        expect(apiError.detail).not.toMatch(/^undefined/);
+        expect(apiError.detail).not.toContain("{}");
+      }
+    });
+
+    describe("with OAuth token (no env var)", () => {
+      let savedAuthToken: string | undefined;
+      let savedToken: string | undefined;
+
+      beforeEach(() => {
+        savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
+        savedToken = process.env.SENTRY_TOKEN;
+        delete process.env.SENTRY_AUTH_TOKEN;
+        delete process.env.SENTRY_TOKEN;
+      });
+
+      afterEach(() => {
+        if (savedAuthToken !== undefined) {
+          process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
+        } else {
+          delete process.env.SENTRY_AUTH_TOKEN;
+        }
+        if (savedToken !== undefined) {
+          process.env.SENTRY_TOKEN = savedToken;
+        } else {
+          delete process.env.SENTRY_TOKEN;
+        }
+      });
+
+      test("suggests re-authentication for OAuth tokens", () => {
+        const mockResponse = new Response("", {
+          status: 401,
+          statusText: "Unauthorized",
+        });
+
+        try {
+          throwApiError(
+            { detail: "Authentication credentials were not provided." },
+            mockResponse,
+            "Failed to list organizations"
+          );
+        } catch (error) {
+          const apiError = error as ApiError;
+          expect(apiError.status).toBe(401);
+          expect(apiError.detail).toContain("session has expired");
           expect(apiError.detail).toContain("sentry auth login");
           // Should NOT mention SENTRY_AUTH_TOKEN
           expect(apiError.detail).not.toContain("SENTRY_AUTH_TOKEN");

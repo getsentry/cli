@@ -1,14 +1,15 @@
 /**
  * SQLite database connection manager for CLI configuration storage.
- * Uses bun:sqlite natively; Node.js uses a polyfill in node-polyfills.ts.
+ * Uses the sqlite.ts adapter which wraps node:sqlite's DatabaseSync
+ * with a bun:sqlite-compatible API surface.
  */
 
-import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getEnv } from "../env.js";
 import { migrateFromJson } from "./migration.js";
 import { initSchema, runMigrations } from "./schema.js";
+import { Database } from "./sqlite.js";
 
 export const CONFIG_DIR_ENV_VAR = "SENTRY_CONFIG_DIR";
 

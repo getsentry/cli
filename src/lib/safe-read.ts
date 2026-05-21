@@ -2,16 +2,16 @@
  * FIFO-safe file-read helper for user-controlled paths.
  *
  * Named pipes (FIFOs), commonly created by 1Password's `.env` symlink
- * integration, cause `Bun.file(path).text()` to block indefinitely
- * waiting for a writer. Any read of a path under the user's project
- * tree or home directory needs a `stat`-based regular-file check
- * first.
+ * integration, cause `readFile()` to block indefinitely waiting for a
+ * writer. Any read of a path under the user's project tree or home
+ * directory needs a `stat`-based regular-file check first.
  *
- * Prefer this helper over calling `isRegularFile` + `Bun.file().text()`
- * by hand: a single call, consistent error handling, no way to forget
+ * Prefer this helper over calling `isRegularFile` + `readFile()` by
+ * hand: a single call, consistent error handling, no way to forget
  * the guard.
  */
 
+import { readFile } from "node:fs/promises";
 import { handleFileError, isRegularFile } from "./dsn/fs-utils.js";
 
 /**
@@ -37,7 +37,7 @@ export async function safeReadFile(
     return null;
   }
   try {
-    return await Bun.file(filePath).text();
+    return await readFile(filePath, "utf-8");
   } catch (error) {
     handleFileError(error, { operation, path: filePath });
     return null;

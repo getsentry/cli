@@ -5,6 +5,7 @@
  * Used by commands that need to wait for async operations to complete.
  */
 
+import { setTimeout as sleepMs } from "node:timers/promises";
 import { TimeoutError } from "./errors.js";
 import { isPlainOutput } from "./formatters/plain-detect.js";
 import {
@@ -101,7 +102,7 @@ export async function poll<T>(options: PollOptions<T>): Promise<T> {
         }
       }
 
-      await Bun.sleep(pollIntervalMs);
+      await sleepMs(pollIntervalMs);
     }
 
     throw new TimeoutError(timeoutMessage, timeoutHint);

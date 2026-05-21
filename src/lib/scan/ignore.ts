@@ -41,6 +41,7 @@
  * `${cwd}/.git/info/exclude` if it exists. Matches ripgrep's behavior.
  */
 
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import ignore, { type Ignore } from "ignore";
 import { handleFileError } from "../dsn/fs-utils.js";
@@ -147,7 +148,7 @@ export class IgnoreStack implements IgnoreMatcher {
     }
     const gitignorePath = path.join(absDir, ".gitignore");
     try {
-      const content = await Bun.file(gitignorePath).text();
+      const content = await readFile(gitignorePath, "utf-8");
       if (!content || content.trim().length === 0) {
         return;
       }
@@ -268,7 +269,7 @@ export class IgnoreStack implements IgnoreMatcher {
  */
 async function appendGitignoreFile(ig: Ignore, absPath: string): Promise<void> {
   try {
-    const content = await Bun.file(absPath).text();
+    const content = await readFile(absPath, "utf-8");
     if (content.length > 0) {
       ig.add(content);
     }

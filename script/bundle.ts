@@ -19,34 +19,6 @@ if (!SENTRY_CLIENT_ID) {
   process.exit(1);
 }
 
-// Regex patterns for esbuild plugin (must be top-level for performance)
-const BUN_SQLITE_FILTER = /^bun:sqlite$/;
-const ANY_FILTER = /.*/;
-
-/** Plugin to replace bun:sqlite with our node:sqlite polyfill. */
-const bunSqlitePlugin: Plugin = {
-  name: "bun-sqlite-polyfill",
-  setup(pluginBuild) {
-    pluginBuild.onResolve({ filter: BUN_SQLITE_FILTER }, () => ({
-      path: "bun:sqlite",
-      namespace: "bun-sqlite-polyfill",
-    }));
-
-    pluginBuild.onLoad(
-      { filter: ANY_FILTER, namespace: "bun-sqlite-polyfill" },
-      () => ({
-        contents: `
-          // Use the polyfill injected by node-polyfills.ts
-          const polyfill = globalThis.__bun_sqlite_polyfill;
-          export const Database = polyfill.Database;
-          export default polyfill;
-        `,
-        loader: "js",
-      })
-    );
-  },
-};
-
 type InjectedFile = { jsPath: string; mapPath: string; debugId: string };
 
 /** Delete .map files after a successful upload — they shouldn't ship to users. */
@@ -180,11 +152,7 @@ const sentrySourcemapPlugin: Plugin = {
 };
 
 // Always inject debug IDs (even without auth token); upload is gated inside the plugin
-const plugins: Plugin[] = [
-  bunSqlitePlugin,
-  sentrySourcemapPlugin,
-  textImportPlugin,
-];
+const plugins: Plugin[] = [sentrySourcemapPlugin, textImportPlugin];
 
 if (process.env.SENTRY_AUTH_TOKEN) {
   console.log("  Sentry auth token found, source maps will be uploaded");
@@ -226,6 +194,10 @@ const result = await build({
   // from trying to resolve these packages in the main bundle graph.
   external: [
     "node:*",
+    // bun:sqlite is referenced as a fallback in src/lib/db/sqlite.ts (never
+    // reached on Node 22+ where node:sqlite is available). Mark external so
+    // esbuild doesn't fail trying to resolve a Bun-only module.
+    "bun:sqlite",
     "ink",
     "ink-spinner",
     "react",
@@ -242,7 +214,7 @@ const result = await build({
 // Write the CLI bin wrapper (tiny — shebang + version check + dispatch).
 // Version floor must track `engines.node` in package.json.
 const BIN_WRAPPER = `#!/usr/bin/env node
-{let v=process.versions.node.split(".").map(Number);if(v[0]<22||(v[0]===22&&v[1]<12)){console.error("Error: sentry requires Node.js 22.12 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}}
+{let v=process.versions.node.split(".").map(Number);if(v[0]<22||(v[0]===22&&v[1]<15)){console.error("Error: sentry requires Node.js 22.15 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}}
 {let e=process.emit;process.emit=function(n,...a){return n==="warning"?!1:e.apply(this,[n,...a])}}
 require('./index.cjs')._cli().catch(()=>{process.exitCode=1});
 `;

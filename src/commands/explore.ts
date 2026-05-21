@@ -85,7 +85,7 @@ const DATASET_ALIASES: Record<string, string> = {
   error: "errors",
   spans: "spans",
   span: "spans",
-  metrics: "metricsEnhanced",
+  metrics: "tracemetrics",
   logs: "logs",
   log: "logs",
   replays: "replays",
@@ -113,7 +113,7 @@ const VALID_DATASETS = new Set([
 
 /**
  * Reverse map from API-level dataset name → canonical user-facing name.
- * Used by pagination hints so they emit `--dataset metrics` not `--dataset metricsEnhanced`.
+ * Used by pagination hints so they emit `--dataset metrics` not `--dataset tracemetrics`.
  */
 const API_TO_USER_DATASET = new Map(
   Array.from(VALID_DATASETS, (name) => [DATASET_ALIASES[name] ?? name, name])
@@ -363,7 +363,7 @@ function appendFlagHints(
   const defaultSort =
     flags.dataset === "replays" ? DEFAULT_REPLAY_SORT : undefined;
   if (flags.dataset !== DEFAULT_DATASET) {
-    // Emit user-facing name, not API-level name (e.g. "metrics" not "metricsEnhanced")
+    // Emit user-facing name, not API-level name (e.g. "metrics" not "tracemetrics")
     const displayDataset =
       API_TO_USER_DATASET.get(flags.dataset) ?? flags.dataset;
     parts.push(`--dataset ${displayDataset}`);
@@ -412,7 +412,7 @@ function isTracemetricsAggregate(aggregate: string): boolean {
 
 /**
  * Validate that aggregate fields use the tracemetrics format when querying
- * the `metricsEnhanced` dataset. Standard aggregates like `count()` or
+ * the `tracemetrics` dataset. Standard aggregates like `count()` or
  * `avg(measurements.fcp)` are invalid — the API requires the four-part
  * comma-separated format: `aggregation(value,metric_name,metric_type,unit)`.
  */
@@ -720,9 +720,9 @@ export const exploreCommand = buildListCommand("explore", {
 
     // --metric auto mode: resolve metric name → tracemetrics aggregate
     if (flags.metric) {
-      if (dataset !== "metricsEnhanced") {
+      if (dataset !== "tracemetrics") {
         log.warn("--metric implies --dataset metrics; switching dataset.");
-        dataset = "metricsEnhanced";
+        dataset = "tracemetrics";
       }
 
       // Use the user's --period for metadata discovery so older metrics are found
@@ -745,7 +745,7 @@ export const exploreCommand = buildListCommand("explore", {
         ? fieldList.filter((f) => !isAggregate(f))
         : [];
       fieldList = [...groupByFields, aggField];
-    } else if (dataset === "metricsEnhanced") {
+    } else if (dataset === "tracemetrics") {
       if (!userSuppliedFields) {
         throw new ValidationError(
           "The metrics dataset requires --metric or explicit --field flags.\n\n" +

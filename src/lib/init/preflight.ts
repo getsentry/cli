@@ -99,6 +99,7 @@ function buildResolvedInitContext(
     org,
     team,
     project: selection.project,
+    app: initial.app,
     authToken: getAuthToken(),
     existingProject: selection.existingProject,
   };
@@ -342,6 +343,38 @@ async function resolveTeam(
   }
 }
 
+/**
+ * Format a 403/401 ApiError from listOrganizations() into a { ok: false }
+ * result, or re-throw if the error is something else.
+ *
+ * 403: token lacks org:read scope — user can bypass by supplying the org slug
+ * directly. 401: token is invalid/expired — supplying an org won't help, only
+ * re-authenticating will.
+ */
+function handleOrgListError(error: unknown): { ok: false; error: string } {
+  if (error instanceof ApiError && error.status === 403) {
+    const lines: string[] = ["Could not list organizations (403 Forbidden)."];
+    if (error.detail) {
+      lines.push(error.detail, "");
+    }
+    lines.push(
+      "Specify the org on the command line:  sentry init <org-slug>/",
+      "Or set an environment variable:       SENTRY_ORG=<org-slug> sentry init"
+    );
+    return { ok: false, error: lines.join("\n  ") };
+  }
+  if (error instanceof ApiError && error.status === 401) {
+    const lines: string[] = [
+      "Could not list organizations (401 Unauthorized).",
+    ];
+    if (error.detail) {
+      lines.push(error.detail);
+    }
+    return { ok: false, error: lines.join("\n  ") };
+  }
+  throw error;
+}
+
 async function resolveOrgSlug(
   cwd: string,
   yes: boolean,
@@ -356,23 +389,12 @@ async function resolveOrgSlug(
   try {
     orgs = await listOrganizations();
   } catch (error) {
-    if (error instanceof ApiError && error.status === 403) {
-      const lines: string[] = ["Could not list organizations (403 Forbidden)."];
-      if (error.detail) {
-        lines.push(error.detail, "");
-      }
-      lines.push(
-        "Specify the org on the command line:  sentry init <org-slug>/",
-        "Or set an environment variable:       SENTRY_ORG=<org-slug> sentry init"
-      );
-      return { ok: false, error: lines.join("\n  ") };
-    }
-    throw error;
+    return handleOrgListError(error);
   }
   if (orgs.length === 0) {
     return {
       ok: false,
-      error: "Not authenticated. Run 'sentry login' first.",
+      error: "Not authenticated. Run 'sentry auth login' first.",
     };
   }
   if (orgs.length === 1 && orgs[0]) {
@@ -383,7 +405,11 @@ async function resolveOrgSlug(
     const slugs = orgs.map((org) => org.slug).join(", ");
     return {
       ok: false,
-      error: `Multiple organizations found (${slugs}). Set SENTRY_ORG to specify which one.`,
+      error: [
+        `Multiple organizations found (${slugs}).`,
+        "Specify one with: sentry init <org-slug>/ [directory]",
+        "  or set SENTRY_ORG=<org-slug>",
+      ].join("\n"),
     };
   }
 

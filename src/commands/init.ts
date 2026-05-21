@@ -41,8 +41,6 @@ const FEATURE_DELIMITER = /[,+ ]+/;
 const NON_INTERACTIVE_USAGE_HINT =
   "sentry init --yes --features errors,tracing,replay [target] [directory]";
 
-const USAGE_HINT = "sentry init <org>/<project> [directory]";
-
 const FEATURE_ALIASES = {
   errors: "errorMonitoring",
   errorMonitoring: "errorMonitoring",
@@ -82,6 +80,7 @@ type InitFlags = {
   readonly "dry-run": boolean;
   readonly features?: string[];
   readonly team?: string;
+  readonly app?: string;
   /**
    * Default `true` — Ink is the default UI on both the Bun binary
    * and the npm/Node distribution. Stricli auto-generates a negated
@@ -122,16 +121,26 @@ function classifyArgs(
 
   // Two paths → error
   if (firstIsPath && secondIsPath) {
-    throw new ContextError("Arguments", USAGE_HINT, [
-      "Two directory paths provided. Only one directory is allowed.",
-    ]);
+    throw new ValidationError(
+      [
+        `"${first}" and "${second}" are both directory paths — only one directory is allowed.`,
+        "",
+        "Provide a single directory:",
+        `  sentry init [<org>/<project>] ${first}`,
+      ].join("\n")
+    );
   }
 
   // Two targets → error
   if (!(firstIsPath || secondIsPath)) {
-    throw new ContextError("Arguments", USAGE_HINT, [
-      "Two targets provided. Use <org>/<project> for the target and a path (e.g., ./dir) for the directory.",
-    ]);
+    throw new ValidationError(
+      [
+        `"${first}" and "${second}" are both treated as targets — only one is allowed.`,
+        "",
+        "Pair a target with a directory path:",
+        `  sentry init ${first} ./my-project`,
+      ].join("\n")
+    );
   }
 
   // (TARGET, PATH) — correct order
@@ -336,6 +345,13 @@ export const initCommand = buildCommand<
         brief: "Team slug to create the project under",
         optional: true,
       },
+      app: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "App to initialize in a monorepo (required with --yes when multiple apps are detected)",
+        optional: true,
+      },
       tui: {
         kind: "boolean",
         brief:
@@ -406,6 +422,7 @@ export const initCommand = buildCommand<
         dryRun: flags["dry-run"],
         features: featuresList,
         team: flags.team,
+        app: flags.app,
         org: explicitOrg,
         project: explicitProject,
         // `flags.tui` defaults to `true`. `--no-tui` (auto-generated

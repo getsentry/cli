@@ -14,8 +14,10 @@
  * so that subsequent bare `sentry cli upgrade` calls use the same channel.
  */
 
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
+import { setTimeout } from "node:timers/promises";
 import type { SentryContext } from "../../context.js";
 import {
   determineInstallDir,
@@ -425,12 +427,14 @@ async function spawnWithRetry(
 ): Promise<number> {
   for (let attempt = 1; attempt <= SPAWN_MAX_ATTEMPTS; attempt++) {
     try {
-      const proc = Bun.spawn([binaryPath, ...args], {
-        stdout: "inherit",
-        stderr: "inherit",
+      const proc = spawn(binaryPath, args, {
+        stdio: ["ignore", "inherit", "inherit"],
         env,
       });
-      return await proc.exited;
+      return await new Promise<number>((resolve, reject) => {
+        proc.on("close", (code) => resolve(code ?? 1));
+        proc.on("error", (err) => reject(err));
+      });
     } catch (error) {
       // Translate the opaque Bun "Executable not found" error into an
       // actionable UpgradeError. This path triggers when the binary at
@@ -454,7 +458,7 @@ async function spawnWithRetry(
       log.warn(
         `Binary is locked (antivirus scan?), retrying in ${delay}ms... (attempt ${attempt}/${SPAWN_MAX_ATTEMPTS})`
       );
-      await Bun.sleep(delay);
+      await setTimeout(delay);
     }
   }
   // Unreachable — the loop either returns or throws

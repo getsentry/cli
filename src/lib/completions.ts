@@ -13,6 +13,7 @@
  */
 
 import { existsSync, mkdirSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { routes } from "../app.js";
 import { type FlagDef, isCommand, isRouteMap } from "./introspect.js";
@@ -649,7 +650,7 @@ export async function installCompletions(
     }
 
     const alreadyExists = existsSync(path);
-    await Bun.write(path, script);
+    await writeFile(path, script, "utf-8");
 
     return {
       path,

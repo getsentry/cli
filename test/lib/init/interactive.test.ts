@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { WizardError } from "../../../src/lib/errors.js";
 import { handleInteractive } from "../../../src/lib/init/interactive.js";
 import type { InteractiveContext } from "../../../src/lib/init/types.js";
 import { CANCELLED } from "../../../src/lib/init/ui/types.js";
@@ -24,14 +25,15 @@ function makeOptions(
 }
 
 describe("handleInteractive dispatcher", () => {
-  test("returns cancelled for unknown kind", async () => {
+  test("throws WizardError for unknown kind", async () => {
     const { ui } = createMockUI();
-    const result = await handleInteractive(
-      { type: "interactive", prompt: "test", kind: "unknown" as "select" },
-      makeOptions(),
-      ui
-    );
-    expect(result).toEqual({ cancelled: true });
+    await expect(
+      handleInteractive(
+        { type: "interactive", prompt: "test", kind: "unknown" as "select" },
+        makeOptions(),
+        ui
+      )
+    ).rejects.toBeInstanceOf(WizardError);
   });
 });
 
@@ -55,37 +57,58 @@ describe("handleSelect", () => {
     ).toBe(true);
   });
 
-  test("cancels with --yes when multiple options exist", async () => {
+  test("throws WizardError with app list when --yes and multiple apps", async () => {
     const { ui, calls } = createMockUI();
+    await expect(
+      handleInteractive(
+        {
+          type: "interactive",
+          prompt: "Choose app",
+          kind: "select",
+          apps: [
+            { name: "react", path: "/repo/apps/react" },
+            { name: "vue", path: "/repo/apps/vue" },
+          ],
+        },
+        makeOptions({ yes: true }),
+        ui
+      )
+    ).rejects.toBeInstanceOf(WizardError);
+    expect(calls.some((c) => c.kind === "log.error")).toBe(true);
+  });
+
+  test("falls through to ui.select when --yes and non-monorepo select", async () => {
+    // --yes must not throw the monorepo error for select prompts that have
+    // no payload.apps — only app-selection prompts provide that array.
+    const { ui, respond } = createMockUI();
+    respond.select("create");
     const result = await handleInteractive(
       {
         type: "interactive",
-        prompt: "Choose app",
+        prompt: "Found an existing project.",
         kind: "select",
-        options: ["react", "vue"],
+        options: ["existing", "create"],
       },
       makeOptions({ yes: true }),
       ui
     );
-
-    expect(result).toEqual({ cancelled: true });
-    expect(calls.some((c) => c.kind === "log.error")).toBe(true);
+    expect(result).toEqual({ selectedApp: "create" });
   });
 
-  test("cancels when options list is empty", async () => {
+  test("throws WizardError when options list is empty", async () => {
     const { ui } = createMockUI();
-    const result = await handleInteractive(
-      {
-        type: "interactive",
-        prompt: "Choose app",
-        kind: "select",
-        options: [],
-      },
-      makeOptions(),
-      ui
-    );
-
-    expect(result).toEqual({ cancelled: true });
+    await expect(
+      handleInteractive(
+        {
+          type: "interactive",
+          prompt: "Choose app",
+          kind: "select",
+          options: [],
+        },
+        makeOptions(),
+        ui
+      )
+    ).rejects.toBeInstanceOf(WizardError);
   });
 
   test("uses apps array names when options not provided", async () => {
@@ -139,6 +162,110 @@ describe("handleSelect", () => {
         ui
       )
     ).rejects.toThrow("Setup cancelled");
+  });
+});
+
+describe("handleSelect with --app flag", () => {
+  test("selects matching app by name", async () => {
+    const { ui, calls } = createMockUI();
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Select the target application:",
+        kind: "select",
+        apps: [
+          { name: "web", path: "/repo/apps/web", framework: "Next.js" },
+          { name: "api", path: "/repo/apps/api", framework: "Express" },
+        ],
+      },
+      makeOptions({ yes: true, app: "web" }),
+      ui
+    );
+
+    expect(result).toEqual({ selectedApp: "web" });
+    expect(
+      calls.some((c) => c.kind === "log.info" && c.message.includes("web"))
+    ).toBe(true);
+  });
+
+  test("matches --app case-insensitively", async () => {
+    const { ui } = createMockUI();
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Select the target application:",
+        kind: "select",
+        apps: [{ name: "Web", path: "/repo/apps/web" }],
+      },
+      makeOptions({ app: "WEB" }),
+      ui
+    );
+
+    expect(result).toEqual({ selectedApp: "Web" });
+  });
+
+  test("throws WizardError when --app name is not found", async () => {
+    const { ui, calls } = createMockUI();
+    await expect(
+      handleInteractive(
+        {
+          type: "interactive",
+          prompt: "Select the target application:",
+          kind: "select",
+          apps: [
+            { name: "web", path: "/repo/apps/web" },
+            { name: "api", path: "/repo/apps/api" },
+          ],
+        },
+        makeOptions({ yes: true, app: "missing" }),
+        ui
+      )
+    ).rejects.toBeInstanceOf(WizardError);
+    const errorCall = calls.find((c) => c.kind === "log.error");
+    expect(errorCall?.message).toContain("missing");
+    expect(errorCall?.message).toContain("web");
+  });
+
+  test("ignores --app when payload has no apps array", async () => {
+    // --app only activates for monorepo app-selection prompts (payload.apps present).
+    // For other select prompts it must fall through to the normal interactive pick.
+    const { ui, respond } = createMockUI();
+    respond.select("existing");
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Found an existing project.",
+        kind: "select",
+        options: ["existing", "create"],
+      },
+      makeOptions({ app: "web" }),
+      ui
+    );
+
+    expect(result).toEqual({ selectedApp: "existing" });
+  });
+
+  test("error message for --yes with multiple apps includes app names and --app hint", async () => {
+    const { ui, calls } = createMockUI();
+    await expect(
+      handleInteractive(
+        {
+          type: "interactive",
+          prompt: "Select the target application:",
+          kind: "select",
+          apps: [
+            { name: "web", path: "/repo/apps/web", framework: "Next.js" },
+            { name: "api", path: "/repo/apps/api" },
+          ],
+        },
+        makeOptions({ yes: true }),
+        ui
+      )
+    ).rejects.toBeInstanceOf(WizardError);
+    const errorCall = calls.find((c) => c.kind === "log.error");
+    expect(errorCall?.message).toContain("web");
+    expect(errorCall?.message).toContain("api");
+    expect(errorCall?.message).toContain("--app");
   });
 });
 
