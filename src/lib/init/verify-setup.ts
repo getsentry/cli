@@ -123,8 +123,6 @@ export async function verifySetup(
   if (timeoutHandle !== undefined) {
     clearTimeout(timeoutHandle);
   }
-  process.removeListener("SIGINT", onSigint);
-  process.removeListener("SIGTERM", onSigterm);
 
   // Clean up — kill and wait for the child to release its port
   try {
@@ -144,6 +142,8 @@ export async function verifySetup(
   } catch (error) {
     logger.debug("Failed to kill verification child", error);
   }
+  process.removeListener("SIGINT", onSigint);
+  process.removeListener("SIGTERM", onSigterm);
   await shutdownServer(server);
 
   const telemetryTags = {

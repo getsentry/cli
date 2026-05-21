@@ -384,13 +384,13 @@ async function* runWithVerify(
   if (timeoutHandle !== undefined) {
     clearTimeout(timeoutHandle);
   }
-  process.removeListener("SIGINT", onSigint);
-  process.removeListener("SIGTERM", onSigterm);
 
   switch (outcome.kind) {
     case "envelope": {
       logger.info("Setup verified — your app is sending events to Sentry");
       await gracefulKill(child);
+      process.removeListener("SIGINT", onSigint);
+      process.removeListener("SIGTERM", onSigterm);
       await shutdownServer(server);
       return;
     }
@@ -399,6 +399,8 @@ async function* runWithVerify(
         `Verification timed out after ${verifyTimeout}s — no events received from the SDK`
       );
       await gracefulKill(child);
+      process.removeListener("SIGINT", onSigint);
+      process.removeListener("SIGTERM", onSigterm);
       await shutdownServer(server);
       throw new CliError(
         `Verification timed out after ${verifyTimeout}s`,
@@ -406,6 +408,8 @@ async function* runWithVerify(
       );
     }
     case "exited": {
+      process.removeListener("SIGINT", onSigint);
+      process.removeListener("SIGTERM", onSigterm);
       await shutdownServer(server);
       if (outcome.code === 0) {
         logger.warn("Process exited before sending any events");
