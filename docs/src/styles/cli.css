@@ -141,14 +141,17 @@
   text-decoration: none;
 }
 
-/* Stack container - page layout for splash */
-[data-page-type="splash"] .sl-container {
-  max-width: var(--sl-content-width);
+/* Stack container - page layout for splash.
+   The splash page needs a wider container than the default
+   --sl-content-width (50rem / 800px) because the feature sections
+   use a side-by-side layout with wide terminal ASCII art. */
+html[data-has-hero] .sl-container {
+  max-width: 68rem;
   margin: 0 auto;
   padding: 0 1.5rem;
 }
 
-[data-page-type="splash"] main {
+html[data-has-hero] main {
   padding-top: 0;
 }
 
@@ -210,6 +213,7 @@
 
 .feature-visual {
   flex: 0 0 55%;
+  min-width: 0;
   min-height: 420px;
   margin: 0.5rem 0.75rem 0.75rem 0;
   padding: 10%;
@@ -221,6 +225,7 @@
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .feature-section-inner.reverse .feature-visual {
