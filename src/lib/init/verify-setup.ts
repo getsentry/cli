@@ -97,6 +97,12 @@ export async function verifySetup(
     return;
   }
 
+  const forwardSignal = (signal: NodeJS.Signals) => {
+    child.kill(signal);
+  };
+  process.once("SIGINT", () => forwardSignal("SIGINT"));
+  process.once("SIGTERM", () => forwardSignal("SIGTERM"));
+
   const childExited = child.exited.then((code) => ({
     kind: "exited" as const,
     code,
@@ -119,9 +125,10 @@ export async function verifySetup(
     clearTimeout(timeoutHandle);
   }
 
-  // Clean up
+  // Clean up — kill and wait for the child to release its port
   try {
     child.kill("SIGTERM");
+    await child.exited;
   } catch (error) {
     logger.debug("Failed to kill verification child", error);
   }

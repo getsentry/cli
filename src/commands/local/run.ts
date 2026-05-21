@@ -369,6 +369,7 @@ async function* runWithVerify(
     case "envelope": {
       logger.info("Setup verified — your app is sending events to Sentry");
       child.kill("SIGTERM");
+      await child.exited;
       await shutdownServer(server);
       return;
     }
@@ -377,6 +378,7 @@ async function* runWithVerify(
         `Verification timed out after ${flags.timeout}s — no events received from the SDK`
       );
       child.kill("SIGTERM");
+      await child.exited;
       await shutdownServer(server);
       throw new CliError(
         `Verification timed out after ${flags.timeout}s`,
