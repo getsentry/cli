@@ -1036,13 +1036,25 @@ export const TABLE_DISPLAY_TYPES = new Set(["table", "top_n"]);
 // Dashboard revision types
 // ---------------------------------------------------------------------------
 
+/** Schema for the createdBy field in a dashboard revision */
+const DashboardRevisionCreatedBySchema = z
+  .object({
+    id: z.string().optional(),
+    name: z.string().nullish(),
+    email: z.string().nullish(),
+    avatarType: z.string().nullish(),
+    avatarUrl: z.string().nullish(),
+  })
+  .passthrough();
+
 /** Schema for a dashboard revision (from GET /dashboards/{id}/revisions/) */
 export const DashboardRevisionSchema = z
   .object({
-    id: z.number(),
-    version: z.number(),
+    id: z.string(),
+    title: z.string(),
     dateCreated: z.string(),
-    dashboardId: z.number(),
+    createdBy: DashboardRevisionCreatedBySchema.nullable(),
+    source: z.string(),
   })
   .passthrough();
 

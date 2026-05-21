@@ -34,7 +34,7 @@ function createMockContext(cwd = "/tmp") {
 }
 
 type RestoreFlags = {
-  readonly revision: number;
+  readonly revision: string;
   readonly json?: boolean;
   readonly fields?: string[];
 };
@@ -42,7 +42,7 @@ type RestoreFlags = {
 function defaultFlags(overrides: Partial<RestoreFlags> = {}): RestoreFlags {
   return {
     json: false,
-    revision: 1,
+    revision: "1",
     ...overrides,
   };
 }
@@ -110,26 +110,26 @@ describe("dashboard restore command", () => {
   test("restores dashboard and outputs JSON", async () => {
     const { context, stdoutWrite } = createMockContext();
     const func = await restoreCommand.loader();
-    await func.call(context, defaultFlags({ json: true, revision: 42 }), "123");
+    await func.call(context, defaultFlags({ json: true, revision: "42" }), "123");
 
     expect(restoreDashboardRevisionSpy).toHaveBeenCalledWith(
       "test-org",
       "123",
-      42
+      "42"
     );
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
     expect(parsed.dashboard.id).toBe("123");
     expect(parsed.dashboard.title).toBe("My Dashboard");
-    expect(parsed.revisionId).toBe(42);
+    expect(parsed.revisionId).toBe("42");
     expect(parsed.orgSlug).toBe("test-org");
   });
 
   test("restores dashboard and outputs human-readable format", async () => {
     const { context, stdoutWrite } = createMockContext();
     const func = await restoreCommand.loader();
-    await func.call(context, defaultFlags({ revision: 42 }), "123");
+    await func.call(context, defaultFlags({ revision: "42" }), "123");
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("Restored dashboard");
@@ -157,13 +157,13 @@ describe("dashboard restore command", () => {
   test("uses dashboard ID from positional argument", async () => {
     const { context } = createMockContext();
     const func = await restoreCommand.loader();
-    await func.call(context, defaultFlags({ json: true, revision: 5 }), "456");
+    await func.call(context, defaultFlags({ json: true, revision: "5" }), "456");
 
     expect(resolveDashboardIdSpy).toHaveBeenCalledWith("test-org", "456");
     expect(restoreDashboardRevisionSpy).toHaveBeenCalledWith(
       "test-org",
       "123",
-      5
+      "5"
     );
   });
 
@@ -172,7 +172,7 @@ describe("dashboard restore command", () => {
     const func = await restoreCommand.loader();
     await func.call(
       context,
-      defaultFlags({ json: true, revision: 10 }),
+      defaultFlags({ json: true, revision: "10" }),
       "my-org/",
       "789"
     );
@@ -185,7 +185,7 @@ describe("dashboard restore command", () => {
     const func = await restoreCommand.loader();
     await func.call(
       context,
-      defaultFlags({ json: true, revision: 3 }),
+      defaultFlags({ json: true, revision: "3" }),
       "My Dashboard Title"
     );
 
@@ -208,12 +208,12 @@ describe("dashboard restore command", () => {
 
     // We can't easily test the flag parsing directly, but we can verify
     // the API is called with the correct revision when valid
-    await func.call(context, defaultFlags({ revision: 1 }), "123");
+    await func.call(context, defaultFlags({ revision: "1" }), "123");
 
     expect(restoreDashboardRevisionSpy).toHaveBeenCalledWith(
       "test-org",
       "123",
-      1
+      "1"
     );
   });
 
@@ -225,7 +225,7 @@ describe("dashboard restore command", () => {
     const func = await restoreCommand.loader();
 
     await expect(
-      func.call(context, defaultFlags({ revision: 999 }), "123")
+      func.call(context, defaultFlags({ revision: "999" }), "123")
     ).rejects.toThrow();
   });
 
@@ -236,7 +236,7 @@ describe("dashboard restore command", () => {
   test("shows progress message during restore", async () => {
     const { context } = createMockContext();
     const func = await restoreCommand.loader();
-    await func.call(context, defaultFlags({ revision: 42 }), "123");
+    await func.call(context, defaultFlags({ revision: "42" }), "123");
 
     expect(withProgressSpy).toHaveBeenCalled();
     const [opts] = withProgressSpy.mock.calls[0] as [

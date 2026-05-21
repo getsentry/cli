@@ -55,24 +55,39 @@ function defaultFlags(overrides: Partial<RevisionsFlags> = {}): RevisionsFlags {
 // ---------------------------------------------------------------------------
 
 const REVISION_A: DashboardRevision = {
-  id: 1,
-  version: 1,
+  id: "1",
+  title: "My Dashboard",
   dateCreated: "2026-01-15T10:00:00Z",
-  dashboardId: 123,
+  createdBy: {
+    id: "u1",
+    name: "Alice",
+    email: "alice@example.com",
+    avatarType: "letter_avatar",
+    avatarUrl: null,
+  },
+  source: "ui",
 };
 
 const REVISION_B: DashboardRevision = {
-  id: 2,
-  version: 2,
+  id: "2",
+  title: "My Dashboard (updated)",
   dateCreated: "2026-02-20T12:00:00Z",
-  dashboardId: 123,
+  createdBy: {
+    id: "u2",
+    name: "Bob",
+    email: "bob@example.com",
+    avatarType: "letter_avatar",
+    avatarUrl: null,
+  },
+  source: "ui",
 };
 
 const REVISION_C: DashboardRevision = {
-  id: 3,
-  version: 3,
+  id: "3",
+  title: "My Dashboard (v3)",
   dateCreated: "2026-03-01T08:00:00Z",
-  dashboardId: 123,
+  createdBy: null,
+  source: "api",
 };
 
 // ---------------------------------------------------------------------------
@@ -149,9 +164,9 @@ describe("dashboard revisions command", () => {
     expect(parsed).toHaveProperty("hasMore", false);
     expect(parsed).toHaveProperty("hasPrev", false);
     expect(parsed.data).toHaveLength(2);
-    expect(parsed.data[0].id).toBe(1);
-    expect(parsed.data[0].version).toBe(1);
-    expect(parsed.data[1].id).toBe(2);
+    expect(parsed.data[0].id).toBe("1");
+    expect(parsed.data[0].title).toBe("My Dashboard");
+    expect(parsed.data[1].id).toBe("2");
   });
 
   test("outputs { data: [], hasMore: false } when no revisions exist", async () => {
@@ -185,7 +200,8 @@ describe("dashboard revisions command", () => {
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("ID");
-    expect(output).toContain("VERSION");
+    expect(output).toContain("TITLE");
+    expect(output).toContain("AUTHOR");
     expect(output).toContain("CREATED");
   });
 

@@ -23,7 +23,7 @@ import {
 } from "./resolve.js";
 
 type RestoreFlags = {
-  readonly revision: number;
+  readonly revision: string;
   readonly json: boolean;
   readonly fields?: string[];
 };
@@ -31,7 +31,7 @@ type RestoreFlags = {
 type RestoreResult = {
   dashboard: DashboardDetail;
   orgSlug: string;
-  revisionId: number;
+  revisionId: string;
 };
 
 function formatRestoreHuman(result: RestoreResult): string {
@@ -80,14 +80,14 @@ export const restoreCommand = buildCommand({
       revision: {
         kind: "parsed",
         parse: (value: string) => {
-          const num = Number.parseInt(value, 10);
-          if (Number.isNaN(num) || num < 1) {
+          const revision = value.trim();
+          if (!revision) {
             throw new ValidationError(
-              "--revision must be a positive integer.",
+              "--revision must be a non-empty revision ID.",
               "revision"
             );
           }
-          return num;
+          return revision;
         },
         brief: "Revision ID to restore",
       },
