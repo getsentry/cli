@@ -49,7 +49,6 @@ export default defineConfig({
       favicon: "/favicon.png",
       logo: {
         src: "./src/assets/logo.svg",
-        replacesTitle: true,
       },
       social: [
         {
