@@ -18,10 +18,10 @@ const WHITESPACE_RE = /\s+/;
 
 /**
  * Matches script values that use shell features (env-var assignments,
- * operators, redirects) which cannot be tokenized by simple whitespace
- * splitting and must be run via `sh -c`.
+ * variable expansion, operators, redirects) which cannot be tokenized
+ * by simple whitespace splitting and must be run via `sh -c`.
  */
-const SHELL_FEATURES_RE = /^[A-Z_]+=\S|&&|\|\||[|><;]/;
+const SHELL_FEATURES_RE = /^[A-Za-z_]+=\S|&&|\|\||[|><;$]/;
 
 /**
  * Detect the project's dev command by inspecting filesystem markers in priority order.

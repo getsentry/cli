@@ -288,7 +288,11 @@ const KILL_GRACE_MS = 5000;
 async function gracefulKill(
   child: ReturnType<typeof Bun.spawn>
 ): Promise<void> {
-  child.kill("SIGTERM");
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    return;
+  }
   let graceTimer: ReturnType<typeof setTimeout> | undefined;
   const exited = await Promise.race([
     child.exited.then(() => true),

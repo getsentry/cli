@@ -153,7 +153,7 @@ export async function verifySetup(
     features: result.result?.features,
     detectedCommand: detected.args
       .join(" ")
-      .replace(/[A-Z_]+=\S+/g, (m) => `${m.split("=")[0]}=[REDACTED]`),
+      .replace(/[A-Za-z_]\w*=\S+/g, (m) => `${m.split("=")[0]}=[REDACTED]`),
     detectedSource: detected.source,
   };
 
