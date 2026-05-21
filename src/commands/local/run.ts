@@ -289,10 +289,14 @@ async function gracefulKill(
   child: ReturnType<typeof Bun.spawn>
 ): Promise<void> {
   child.kill("SIGTERM");
+  let graceTimer: ReturnType<typeof setTimeout> | undefined;
   const exited = await Promise.race([
     child.exited.then(() => true),
-    new Promise<false>((r) => setTimeout(() => r(false), KILL_GRACE_MS)),
+    new Promise<false>((r) => {
+      graceTimer = setTimeout(() => r(false), KILL_GRACE_MS);
+    }),
   ]);
+  clearTimeout(graceTimer);
   if (!exited) {
     child.kill("SIGKILL");
     await child.exited;

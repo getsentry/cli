@@ -129,10 +129,14 @@ export async function verifySetup(
   // Clean up — kill and wait for the child to release its port
   try {
     child.kill("SIGTERM");
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const exited = await Promise.race([
       child.exited.then(() => true),
-      new Promise<false>((r) => setTimeout(() => r(false), 5000)),
+      new Promise<false>((r) => {
+        graceTimer = setTimeout(() => r(false), 5_000);
+      }),
     ]);
+    clearTimeout(graceTimer);
     if (!exited) {
       child.kill("SIGKILL");
       await child.exited;
