@@ -329,11 +329,10 @@ async function* runWithVerify(
     );
   }
 
-  const forwardSignal = (signal: NodeJS.Signals) => {
-    child.kill(signal);
-  };
-  process.once("SIGINT", () => forwardSignal("SIGINT"));
-  process.once("SIGTERM", () => forwardSignal("SIGTERM"));
+  const onSigint = () => child.kill("SIGINT");
+  const onSigterm = () => child.kill("SIGTERM");
+  process.once("SIGINT", onSigint);
+  process.once("SIGTERM", onSigterm);
 
   const childExited = child.exited.then((code) => ({
     kind: "exited" as const,
@@ -359,6 +358,8 @@ async function* runWithVerify(
   if (timeoutHandle !== undefined) {
     clearTimeout(timeoutHandle);
   }
+  process.removeListener("SIGINT", onSigint);
+  process.removeListener("SIGTERM", onSigterm);
 
   switch (outcome.kind) {
     case "envelope": {

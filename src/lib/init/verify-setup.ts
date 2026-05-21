@@ -97,11 +97,10 @@ export async function verifySetup(
     return;
   }
 
-  const forwardSignal = (signal: NodeJS.Signals) => {
-    child.kill(signal);
-  };
-  process.once("SIGINT", () => forwardSignal("SIGINT"));
-  process.once("SIGTERM", () => forwardSignal("SIGTERM"));
+  const onSigint = () => child.kill("SIGINT");
+  const onSigterm = () => child.kill("SIGTERM");
+  process.once("SIGINT", onSigint);
+  process.once("SIGTERM", onSigterm);
 
   const childExited = child.exited.then((code) => ({
     kind: "exited" as const,
@@ -124,6 +123,8 @@ export async function verifySetup(
   if (timeoutHandle !== undefined) {
     clearTimeout(timeoutHandle);
   }
+  process.removeListener("SIGINT", onSigint);
+  process.removeListener("SIGTERM", onSigterm);
 
   // Clean up — kill and wait for the child to release its port
   try {
