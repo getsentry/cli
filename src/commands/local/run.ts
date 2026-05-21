@@ -257,7 +257,7 @@ export const runCommand = buildCommand({
     if (flags.timeout > 0) {
       timeoutId = setTimeout(() => {
         logger.warn(`Timeout: killing child after ${flags.timeout}s`);
-        child.kill("SIGTERM");
+        gracefulKill(child);
       }, flags.timeout * 1000);
     }
 
