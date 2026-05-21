@@ -11,9 +11,13 @@ export function sanitize(text: string): string {
   // Collapse CR, LF, and NEL (U+0085) which terminals treat as line breaks.
   const stripped = stripAnsi(text).replace(/[\r\n\x85]+/g, " ");
   // Strip C0 (0x00-0x1F, 0x7F) and C1 (0x80-0x9F) control characters.
-  // C1 includes raw 8-bit CSI (0x9B), OSC (0x9D), and DCS (0x90) introducers.
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars from untrusted envelope data
-  return stripped.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]/g, "");
+  const noCtrl = stripped.replace(
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars from untrusted envelope data
+    /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]/g,
+    ""
+  );
+  // Strip Unicode bidirectional override/isolate characters that can reorder terminal output.
+  return noCtrl.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
 }
 
 /** Canonical content type for Sentry envelopes. */
