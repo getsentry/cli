@@ -139,7 +139,9 @@ export async function verifySetup(
   };
   const telemetryExtra = {
     features: result.result?.features,
-    detectedCommand: detected.args.join(" "),
+    detectedCommand: detected.args
+      .join(" ")
+      .replace(/[A-Z_]+=\S+/g, (m) => `${m.split("=")[0]}=[REDACTED]`),
     detectedSource: detected.source,
   };
 

@@ -278,6 +278,9 @@ export const runCommand = buildCommand({
   },
 });
 
+/** Default timeout for --verify when no explicit --timeout is given. */
+const DEFAULT_VERIFY_TIMEOUT_S = 30;
+
 /**
  * Run in --verify mode: start a background server, subscribe to the buffer
  * for the first envelope, and race between envelope arrival, timeout,
@@ -337,29 +340,21 @@ async function* runWithVerify(
     code,
   }));
 
+  const verifyTimeout =
+    flags.timeout > 0 ? flags.timeout : DEFAULT_VERIFY_TIMEOUT_S;
+
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
-  const racers: Promise<
-    | { kind: "envelope" }
-    | { kind: "exited"; code: number }
-    | { kind: "timeout" }
-  >[] = [
+  const outcome = await Promise.race([
     envelopeReceived.then(() => ({ kind: "envelope" as const })),
     childExited,
-  ];
-
-  if (flags.timeout > 0) {
-    racers.push(
-      new Promise((r) => {
-        timeoutHandle = setTimeout(
-          () => r({ kind: "timeout" as const }),
-          flags.timeout * 1000
-        );
-      })
-    );
-  }
-
-  const outcome = await Promise.race(racers);
+    new Promise<{ kind: "timeout" }>((r) => {
+      timeoutHandle = setTimeout(
+        () => r({ kind: "timeout" as const }),
+        verifyTimeout * 1000
+      );
+    }),
+  ]);
 
   if (timeoutHandle !== undefined) {
     clearTimeout(timeoutHandle);
@@ -375,13 +370,13 @@ async function* runWithVerify(
     }
     case "timeout": {
       logger.warn(
-        `Verification timed out after ${flags.timeout}s — no events received from the SDK`
+        `Verification timed out after ${verifyTimeout}s — no events received from the SDK`
       );
       child.kill("SIGTERM");
       await child.exited;
       await shutdownServer(server);
       throw new CliError(
-        `Verification timed out after ${flags.timeout}s`,
+        `Verification timed out after ${verifyTimeout}s`,
         EXIT.WIZARD_VERIFY
       );
     }
