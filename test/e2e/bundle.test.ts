@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 function noop(): void {
@@ -221,7 +222,7 @@ describe("npm bundle", () => {
     const { stdout, stderr, exitCode } = await spawnCollect("node", [
       "--input-type=module",
       "-e",
-      `import { mountApp } from ${JSON.stringify(`file://${INK_APP_PATH}`)};\n` +
+      `import { mountApp } from ${JSON.stringify(pathToFileURL(INK_APP_PATH).href)};\n` +
         'if (typeof mountApp !== "function") {\n' +
         '  process.stderr.write("mountApp is " + typeof mountApp + ", expected function");\n' +
         "  process.exit(1);\n" +
