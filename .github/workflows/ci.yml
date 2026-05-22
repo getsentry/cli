@@ -312,6 +312,9 @@ jobs:
       - name: Smoke test (deep — SQLite, telemetry, auth DB)
         if: matrix.can-test
         shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ""
+          SENTRY_TOKEN: ""
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
             BIN=./dist-bin/sentry-windows-x64.exe
@@ -735,6 +738,9 @@ jobs:
         run: node dist/bin.cjs --help
       - name: Smoke test (Node.js — deep)
         shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ""
+          SENTRY_TOKEN: ""
         run: |
           # auth status without a token exercises SQLite init, schema
           # migrations, telemetry lazy import, and the CJS require chain.

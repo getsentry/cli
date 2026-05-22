@@ -9,7 +9,6 @@ import { spawn } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 function noop(): void {
@@ -214,11 +213,27 @@ describe("npm bundle", () => {
     // by Node, and exports mountApp as a function. This catches sidecar
     // bundling/resolution bugs — the exact class of bug where `with { type: "file" }`
     // crashed in tsx dev mode.
+    //
+    // Run in a subprocess to avoid polluting the vitest process with
+    // React/Ink globals from the sidecar's bundled dependencies.
     expect(existsSync(INK_APP_PATH)).toBe(true);
 
-    // Node requires a file:// URL for dynamic import of absolute ESM paths
-    const sidecar = await import(pathToFileURL(INK_APP_PATH).href);
+    const { stdout, stderr, exitCode } = await spawnCollect("node", [
+      "--input-type=module",
+      "-e",
+      `import { mountApp } from ${JSON.stringify(`file://${INK_APP_PATH}`)};\n` +
+        'if (typeof mountApp !== "function") {\n' +
+        '  process.stderr.write("mountApp is " + typeof mountApp + ", expected function");\n' +
+        "  process.exit(1);\n" +
+        "}",
+    ]);
 
-    expect(typeof sidecar.mountApp).toBe("function");
+    if (exitCode !== 0) {
+      const output = stdout + stderr;
+      throw new Error(
+        `Ink sidecar import failed (exit ${exitCode}): ${output}`
+      );
+    }
+    expect(exitCode).toBe(0);
   }, 15_000);
 });
