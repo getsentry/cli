@@ -501,10 +501,27 @@ pre.table-box * {
 }
 
 /* ==========================================================================
-   Mobile Responsive (splash-specific)
+   Mobile Responsive
    ========================================================================== */
 
 @media (max-width: 768px) {
+  /* Reset search bar to flow naturally in the compact docs header. */
+  site-search button {
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    transform: none !important;
+    z-index: auto !important;
+    width: auto !important;
+    min-width: auto !important;
+    padding: 0.5rem !important;
+  }
+
+  site-search button span,
+  site-search button kbd {
+    display: none !important;
+  }
+
   .hero {
     text-align: center !important;
   }
