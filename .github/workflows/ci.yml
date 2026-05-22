@@ -259,7 +259,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Setup codesign dependencies
         env:
-          APPLE_CERT_DATA: ${{ secrets.CSC_LINK }}
+          APPLE_CERT_DATA: ${{ secrets.APPLE_CERT_DATA }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         run: |
           curl -L 'https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz' -o 'rcodesign.tar.gz'
@@ -297,8 +297,8 @@ jobs:
           RELEASE_BUILD: ${{ github.event_name != 'pull_request' && '1' || '' }}
           # Codesigning: only on main/release pushes (fork PRs lack secrets)
           FOSSILIZE_SIGN: ${{ github.event_name == 'push' && (github.ref_name == 'main' || startsWith(github.ref_name, 'release/')) && 'y' || 'n' }}
-          APPLE_CERT_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: pnpm run build -- --target ${{ matrix.target }}
       - name: Smoke test
         if: matrix.can-test
