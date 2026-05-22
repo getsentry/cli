@@ -50,6 +50,14 @@
   fill: rgba(255, 255, 255, 0.8) !important;
 }
 
+/* Docs section heading accent - keep it below the text, not through it. */
+html[data-has-sidebar] .sl-markdown-content h2:not(:where(.not-content *))::before {
+  bottom: 0.02em;
+  height: 0.12em;
+  left: 0;
+  right: var(--sl-anchor-icon-space, 0);
+  transform: none;
+}
 
 /* ==========================================================================
    Splash / Landing Page Styles
@@ -137,16 +145,87 @@
 }
 
 /* Stack container - page layout for splash.
-   The splash page needs a wider container than the default
-   --sl-content-width (50rem / 800px) because the feature sections
-   use a side-by-side layout with wide terminal ASCII art. */
-html[data-has-hero] .sl-container {
-  max-width: 68rem;
-  margin: 0 auto;
-  padding: 0 1.5rem;
+   Keep the landing page at the pre-theme width; normal docs pages use the
+   shared Sentry Starlight theme defaults. */
+html[data-has-hero]:not([data-has-sidebar]) {
+  --sl-content-width: 67.5rem !important;
+  --sl-content-pad-x: 2rem !important;
 }
 
-html[data-has-hero] main {
+@media (max-width: 49.999rem) {
+  html[data-has-hero]:not([data-has-sidebar]) {
+    --sl-nav-height: 3.5rem !important;
+    --sl-nav-pad-x: 1rem !important;
+  }
+}
+
+@media (min-width: 50rem) {
+  html[data-has-hero]:not([data-has-sidebar]) {
+    --sl-nav-height: 4rem !important;
+    --sl-nav-pad-x: 1.5rem !important;
+  }
+}
+
+html[data-has-hero]:not([data-has-sidebar]) header.header {
+  background: rgba(10, 10, 15, 0.95);
+  border-bottom: none;
+}
+
+html[data-has-hero]:not([data-has-sidebar]) header.header > .header {
+  background: transparent;
+  backdrop-filter: none;
+}
+
+html[data-has-hero]:not([data-has-sidebar]) .header-homepage {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  height: 100%;
+  width: 100%;
+  max-width: var(--sl-content-width);
+  margin: 0 auto;
+  padding: 0;
+}
+
+html[data-has-hero]:not([data-has-sidebar]) .header-left {
+  flex: 0 0 auto;
+}
+
+html[data-has-hero]:not([data-has-sidebar]) .header-right {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 1rem;
+  margin-left: auto;
+}
+
+html[data-has-hero]:not([data-has-sidebar]) .content-panel {
+  padding: 1.5rem var(--sl-content-pad-x);
+}
+
+html[data-has-hero]:not([data-has-sidebar]) .sl-container {
+  max-width: var(--sl-content-width);
+  margin: 0 auto;
+  padding: 0;
+}
+
+html[data-has-hero]:not([data-has-sidebar]) main > .content-panel:first-child .sl-container > * + * {
+  margin-top: 1.5rem;
+}
+
+html[data-has-hero]:not([data-has-sidebar]) .sl-markdown-content {
+  line-height: 1.8;
+}
+
+html[data-has-hero]:not([data-has-sidebar]) .command-text {
+  font-size: 0.875em;
+  font-weight: 500;
+  line-height: 1;
+  padding: 0.2em 0.5em;
+}
+
+html[data-has-hero]:not([data-has-sidebar]) main {
   padding-top: 0;
 }
 

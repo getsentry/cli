@@ -1,20 +1,6 @@
 ---
-/**
- * CLI-specific Header — conditionally renders:
- * - Homepage: branded header with logo, "Docs" link, social icons, no search
- * - Docs pages: theme's standard header with text title + search
- */
-import config from "virtual:starlight/user-config";
-
-import LanguageSelect from "virtual:starlight/components/LanguageSelect";
-import Search from "virtual:starlight/components/Search";
-import SiteTitle from "virtual:starlight/components/SiteTitle";
+import SentryThemeHeader from "@sentry/starlight-theme/components/Header.astro";
 import SocialIcons from "virtual:starlight/components/SocialIcons";
-import ThemeSelect from "virtual:starlight/components/ThemeSelect";
-
-const shouldRenderSearch =
-  config.pagefind ||
-  config.components.Search !== "@astrojs/starlight/components/Search.astro";
 
 const isHomepage = Astro.locals.starlightRoute.id === "";
 
@@ -23,40 +9,45 @@ const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
 ---
 
 {isHomepage ? (
-  <!-- Homepage: branded header with logo -->
-  <div class="header sentry-header header-homepage">
-    <div class="title-wrapper sl-flex">
+  <!-- Homepage: custom landing-page header; docs pages use the shared theme header. -->
+  <div class="header sl-flex header-homepage">
+    <div class="sl-flex header-left">
       <a href={base} class="site-title sl-flex">
         <img src={`${base}wordmark-light.svg`} alt="Sentry CLI" class="homepage-logo" />
       </a>
     </div>
-    <div class="sentry-header-actions sl-flex print:hidden">
+    <div class="sl-flex header-right">
       <a href={`${base}getting-started/`} class="header-nav-link">Docs</a>
-      <div class="sl-hidden md:sl-flex sentry-header-secondary">
-        <SocialIcons />
-      </div>
+      <SocialIcons />
     </div>
   </div>
 ) : (
-  <!-- Docs pages: theme's standard header with text title + search -->
-  <div class="header sentry-header">
-    <div class="title-wrapper sl-flex">
-      <SiteTitle />
-    </div>
-    <div class="sentry-header-actions sl-flex print:hidden">
-      {shouldRenderSearch && <Search />}
-      <div class="sl-hidden md:sl-flex sentry-header-secondary">
-        <ThemeSelect />
-        <LanguageSelect />
-      </div>
-    </div>
-  </div>
+  <SentryThemeHeader />
 )}
 
 <style>
+  .header {
+    gap: 1rem;
+    justify-content: space-between;
+    align-items: center;
+    height: 100%;
+    width: 100%;
+    padding: 0;
+  }
+
   .header-homepage {
     max-width: var(--sl-content-width);
     margin: 0 auto;
+  }
+
+  .header-left {
+    flex: 0 0 auto;
+  }
+
+  .header-right {
+    flex: 0 0 auto;
+    gap: 1rem;
+    align-items: center;
   }
 
   .homepage-logo {
