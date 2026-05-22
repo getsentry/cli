@@ -137,17 +137,15 @@ export const textImportPlugin: Plugin = {
           );
         }
 
-        // For CJS bundles (npm distribution), emit a virtual module that
-        // exports the sidecar filename as a string. The consumer resolves
+        // Emit a virtual module that exports the sidecar filename as a
+        // string. For CJS bundles (npm distribution), the consumer resolves
         // the full path at runtime using import.meta.url. For ESM bundles
-        // (Bun binary build), mark external so Bun.compile embeds the file.
-        if (build.initialOptions.format === "cjs") {
-          return {
-            path: outFilename,
-            namespace: FILE_PATH_NS,
-          };
-        }
-        return { path: `./${outFilename}`, external: true };
+        // (Node SEA binary), the sidecar is embedded via fossilize --assets
+        // and extracted at runtime via node:sea.getAsset().
+        return {
+          path: outFilename,
+          namespace: FILE_PATH_NS,
+        };
       }
       return null;
     });
