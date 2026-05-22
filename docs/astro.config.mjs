@@ -47,6 +47,10 @@ export default defineConfig({
     starlight({
       title: "Sentry CLI",
       favicon: "/favicon.png",
+      logo: {
+        src: "./src/assets/logo.svg",
+        replacesTitle: true,
+      },
       social: [
         {
           icon: "github",

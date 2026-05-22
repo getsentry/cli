@@ -1,29 +1,31 @@
 ---
-import SentryThemeHeader from "@sentry/starlight-theme/components/Header.astro";
+import config from "virtual:starlight/user-config";
+
+import Search from "virtual:starlight/components/Search";
+import SiteTitle from "virtual:starlight/components/SiteTitle";
 import SocialIcons from "virtual:starlight/components/SocialIcons";
 
 const isHomepage = Astro.locals.starlightRoute.id === "";
+const shouldRenderSearch =
+  config.pagefind ||
+  config.components.Search !== "@astrojs/starlight/components/Search.astro";
 
 const baseUrl = import.meta.env.BASE_URL;
 const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
 ---
 
-{isHomepage ? (
-  <!-- Homepage: custom landing-page header; docs pages use the shared theme header. -->
-  <div class="header sl-flex header-homepage">
-    <div class="sl-flex header-left">
-      <a href={base} class="site-title sl-flex">
-        <img src={`${base}wordmark-light.svg`} alt="Sentry CLI" class="homepage-logo" />
-      </a>
-    </div>
-    <div class="sl-flex header-right">
-      <a href={`${base}getting-started/`} class="header-nav-link">Docs</a>
-      <SocialIcons />
-    </div>
+<div class:list={["header", "sl-flex", { "header-homepage": isHomepage }]}>
+  <div class="sl-flex header-left">
+    <SiteTitle />
   </div>
-) : (
-  <SentryThemeHeader />
-)}
+
+  <div class="sl-flex header-right">
+    {!isHomepage && shouldRenderSearch && <Search />}
+    {isHomepage && <a href={`${base}getting-started/`} class="header-nav-link">Docs</a>}
+    {!isHomepage && <span class="header-nav-link header-nav-active">Docs</span>}
+    <SocialIcons />
+  </div>
+</div>
 
 <style>
   .header {
@@ -50,11 +52,6 @@ const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
     align-items: center;
   }
 
-  .homepage-logo {
-    height: 2.3rem;
-    width: auto;
-  }
-
   .header-nav-link {
     color: #fff !important;
     text-decoration: none;
@@ -70,5 +67,14 @@ const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
   .header-nav-link:hover {
     opacity: 1;
     background: rgba(255, 255, 255, 0.1);
+  }
+
+  .header-nav-active {
+    opacity: 1;
+    cursor: default;
+  }
+
+  .header-nav-active:hover {
+    background: none;
   }
 </style>

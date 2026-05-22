@@ -12,6 +12,11 @@
   /* CLI uses Inter + JetBrains Mono */
   --sl-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --sl-font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Match the original CLI docs header sizing. */
+  --sl-nav-height: 4rem !important;
+  --sl-nav-pad-x: 1.5rem !important;
+  --sl-nav-gap: 2rem !important;
 }
 
 /* Subtle background gradient glow */
@@ -39,15 +44,107 @@
 
 /* GitHub icon - white in header */
 .social-icons a,
-.social-icons a svg {
+.social-icons a svg,
+a[href*="github.com"],
+a[href*="github.com"] svg {
   color: #fff !important;
   fill: #fff !important;
 }
 
 .social-icons a:hover,
-.social-icons a:hover svg {
+.social-icons a:hover svg,
+a[href*="github.com"]:hover,
+a[href*="github.com"]:hover svg {
   color: rgba(255, 255, 255, 0.8) !important;
   fill: rgba(255, 255, 255, 0.8) !important;
+}
+
+/* Header / Navigation */
+header.header {
+  background: rgba(10, 10, 15, 0.95);
+  backdrop-filter: blur(12px);
+  border-bottom: none;
+}
+
+header.header > .header {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  align-items: center;
+  height: 100%;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.header-left {
+  flex: 0 0 auto;
+}
+
+.header-right {
+  flex: 0 0 auto;
+  gap: 1rem;
+  align-items: center;
+}
+
+.site-title img {
+  height: 2.3rem !important;
+  width: auto !important;
+}
+
+starlight-menu-button button {
+  background-color: #1a1a1f !important;
+  color: #fff !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: none !important;
+}
+
+site-search {
+  --sl-search-width: 22rem;
+}
+
+site-search button {
+  background: var(--sl-color-bg) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  border-radius: 6px !important;
+  padding: 0.35rem 0.75rem !important;
+  font-size: 0.8rem !important;
+  height: auto !important;
+  min-height: unset !important;
+  gap: 0.5rem !important;
+  width: 22rem !important;
+  min-width: 22rem !important;
+  justify-content: space-between !important;
+  position: fixed !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  top: 0.75rem !important;
+  z-index: 1000 !important;
+}
+
+site-search button:hover {
+  border-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+site-search button svg {
+  width: 14px !important;
+  height: 14px !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+site-search button span {
+  font-size: 0.8rem !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+site-search button kbd {
+  background: transparent !important;
+  border: none !important;
+  color: rgba(255, 255, 255, 0.5) !important;
+  font-size: 0.75rem !important;
+  padding: 0 !important;
+  box-shadow: none !important;
 }
 
 /* Docs section heading accent - keep it below the text, not through it. */
