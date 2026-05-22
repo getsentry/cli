@@ -47,7 +47,11 @@
  */
 
 import { openSync } from "node:fs";
+import { createRequire } from "node:module";
 import { ReadStream } from "node:tty";
+
+const _require = createRequire(import.meta.url);
+
 import { setTag } from "@sentry/node-core/light";
 import { CLI_VERSION } from "../../constants.js";
 import { stripAnsi } from "../../formatters/plain-detect.js";
@@ -235,7 +239,7 @@ export async function createInkUI(
   let isSea = false;
   try {
     // biome-ignore lint/suspicious/noExplicitAny: node:sea types not yet in @types/node
-    const sea = require("node:sea") as any;
+    const sea = _require("node:sea") as any;
     isSea = sea.isSea?.() === true;
   } catch {
     // node:sea not available (older Node or non-SEA context)
@@ -245,7 +249,7 @@ export async function createInkUI(
     // Extract the embedded sidecar to a temp file and import it.
     // The asset key matches what fossilize registered via --assets.
     // biome-ignore lint/suspicious/noExplicitAny: node:sea types not yet in @types/node
-    const sea = require("node:sea") as any;
+    const sea = _require("node:sea") as any;
     const { writeFileSync, mkdtempSync } = await import("node:fs");
     const { join } = await import("node:path");
     const { tmpdir } = await import("node:os");

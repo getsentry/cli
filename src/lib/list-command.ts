@@ -13,8 +13,12 @@
  *   buildOrgListCommand
  */
 
+import { createRequire } from "node:module";
 import type { Aliases, Command, CommandContext } from "@stricli/core";
 import type { SentryContext } from "../context.js";
+
+const _require = createRequire(import.meta.url);
+
 import { parseOrgProjectArg } from "./arg-parsing.js";
 import { buildCommand, numberParser } from "./command.js";
 import { disableOrgCache } from "./db/regions.js";
@@ -414,6 +418,7 @@ function getSubcommandsForRoute(routeName: string): Set<string> {
     _subcommandsByRoute = new Map();
 
     try {
+      // bare require so esbuild resolves this at bundle time (breaks circular dep)
       const { routes } = require("../app.js") as {
         routes: { getAllEntries: () => readonly RouteEntry[] };
       };

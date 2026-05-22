@@ -10,8 +10,12 @@
  */
 
 import { chmodSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
+
+const _require = createRequire(import.meta.url);
+
 import { isMusl } from "./binary.js";
 import {
   CLI_VERSION,
@@ -383,7 +387,7 @@ const LIBRARY_EXCLUDED_INTEGRATIONS = new Set([
 const hasGetSystemErrorMap = (() => {
   try {
     // Dynamic require to avoid bundler issues — the check only matters at runtime
-    const util = require("node:util") as Record<string, unknown>;
+    const util = _require("node:util") as Record<string, unknown>;
     return typeof util.getSystemErrorMap === "function";
   } catch {
     return false;
@@ -1017,6 +1021,7 @@ const noop = (): void => {};
 /** Resolves the database path, falling back to a default if the import fails. */
 function resolveDbPath(): string {
   try {
+    // bare require so esbuild resolves this at bundle time (breaks circular dep)
     const { getDbPath } = require("./db/index.js") as {
       getDbPath: () => string;
     };
@@ -1102,7 +1107,7 @@ function tryRepairReadonly(): boolean {
   repairAttempted = true;
 
   const dbPath = resolveDbPath();
-  const { dirname } = require("node:path") as {
+  const { dirname } = _require("node:path") as {
     dirname: (p: string) => string;
   };
   const configDir = dirname(dbPath);

@@ -470,7 +470,7 @@ async function build(): Promise<void> {
   await uploadSourcemapToSentry();
 
   // Clean up intermediate build directory (only the binaries are artifacts).
-  await rm(BUILD_DIR, { recursive: true, force: true });
+  // await rm(BUILD_DIR, { recursive: true, force: true });
 
   // Summary
   console.log(`\n${"=".repeat(40)}`);

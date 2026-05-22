@@ -8,7 +8,10 @@
  * Uses `node:sqlite` (Node 22.15+ with `--experimental-sqlite` flag).
  */
 
+import { createRequire } from "node:module";
 import { logger } from "../logger.js";
+
+const _require = createRequire(import.meta.url);
 
 const log = logger.withTag("sqlite");
 
@@ -58,7 +61,7 @@ function wrapStatement(stmt: any): StatementWrapper {
  * Uses `node:sqlite` (Node 22.15+ with `--experimental-sqlite`).
  */
 // biome-ignore lint/suspicious/noExplicitAny: driver types loaded lazily
-const SqliteImpl: any = require("node:sqlite").DatabaseSync;
+const SqliteImpl: any = _require("node:sqlite").DatabaseSync;
 
 /**
  * SQLite database wrapper.
