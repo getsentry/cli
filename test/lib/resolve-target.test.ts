@@ -390,7 +390,7 @@ describe("fetchProjectId", () => {
         })
     );
 
-    expect(fetchProjectId("test-org", "test-project")).rejects.toThrow(
+    await expect(fetchProjectId("test-org", "test-project")).rejects.toThrow(
       ResolutionError
     );
   });
