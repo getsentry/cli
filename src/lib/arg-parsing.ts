@@ -1028,14 +1028,35 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
     // The @ character will be caught by validateResourceId below.
   }
 
+  // 1b. GitHub-style fragment notation: `org/project#SHORTID` (or bare `#SHORTID`).
+  // AI agents (claude-code, codex) frequently pass this form, treating `#` as the
+  // separator before the issue short ID. Recognize and rewrite as a regular
+  // `org/project/SHORTID` so the slash-parsing path below handles it. See CLI-1G1.
+  let normalized = input;
+  const hashIdx = normalized.indexOf("#");
+  if (hashIdx !== -1) {
+    const prefix = normalized.slice(0, hashIdx);
+    const fragment = normalized.slice(hashIdx + 1);
+    if (fragment.includes("#") || !fragment) {
+      throw new ValidationError(
+        'Invalid issue identifier: contains "#" (URL fragment).\n' +
+          "  Did you mean `org/project/SHORTID` (e.g., `my-org/my-project/PROJ-123`)?"
+      );
+    }
+    // Validate the fragment (intended short ID) on its own — it must not contain
+    // any further forbidden characters like ?, %, whitespace, etc.
+    validateResourceId(fragment, "issue identifier");
+    normalized = prefix ? `${prefix}/${fragment}` : fragment;
+  }
+
   // Validate raw input against injection characters before parsing.
   // Slashes are allowed (they're structural separators), but ?, #, %, whitespace,
   // and control characters are never valid in issue identifiers.
-  validateResourceId(input.replace(/\//g, ""), "issue identifier");
+  validateResourceId(normalized.replace(/\//g, ""), "issue identifier");
 
   // 2. Pure numeric → direct fetch by ID
-  if (isAllDigits(input)) {
-    return { type: "numeric", id: input };
+  if (isAllDigits(normalized)) {
+    return { type: "numeric", id: normalized };
   }
 
   // 2b. Colon separator — treat as project:identifier notation.
@@ -1044,8 +1065,8 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
   // e.g., "CHATEX:CHATEX-W9" → project=chatex, suffix=W9
   //       "MYAH-FRONTEND:115562020" → numeric ID 115562020
   //       "CHATEX:W9" → project=chatex, suffix=W9
-  if (input.includes(":")) {
-    const colonResult = parseWithColon(input);
+  if (normalized.includes(":")) {
+    const colonResult = parseWithColon(normalized);
     if (colonResult) {
       return colonResult;
     }
@@ -1054,17 +1075,17 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
 
   // 3. Has slash → check slash FIRST (takes precedence over dashes)
   // This ensures "my-org/123" parses as org="my-org", not project="my"
-  if (input.includes("/")) {
-    return parseWithSlash(input);
+  if (normalized.includes("/")) {
+    return parseWithSlash(normalized);
   }
 
   // 4. Has dash but no slash → split on last "-" for project-suffix
-  if (input.includes("-")) {
-    return parseWithDash(input);
+  if (normalized.includes("-")) {
+    return parseWithDash(normalized);
   }
 
   // 5. No dash, no slash → suffix only (needs DSN context)
-  return { type: "suffix-only", suffix: input.toUpperCase() };
+  return { type: "suffix-only", suffix: normalized.toUpperCase() };
 }
 
 // ---------------------------------------------------------------------------
