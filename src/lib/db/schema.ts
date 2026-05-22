@@ -11,10 +11,13 @@
  * - Migration checks
  */
 
+import { createRequire } from "node:module";
 import { getEnv } from "../env.js";
 import { stringifyUnknown } from "../errors.js";
 import { logger } from "../logger.js";
 import type { Database } from "./sqlite.js";
+
+const _require = createRequire(import.meta.url);
 
 export const CURRENT_SCHEMA_VERSION = 16;
 
@@ -671,7 +674,7 @@ export function tryRepairAndRetry<T>(
   let repairSucceeded = false;
   try {
     // Dynamic imports to avoid circular dependencies with db/index.js
-    const { getRawDatabase } = require("./index.js") as {
+    const { getRawDatabase } = _require("./index.js") as {
       getRawDatabase: () => Database;
     };
 

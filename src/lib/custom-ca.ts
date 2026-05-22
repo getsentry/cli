@@ -17,7 +17,10 @@
  */
 
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { rootCertificates } from "node:tls";
+
+const _require = createRequire(import.meta.url);
 import { getDefaultCaCert } from "./db/defaults.js";
 import { getEnv } from "./env.js";
 import { logger } from "./logger.js";
@@ -30,7 +33,7 @@ import { isSentrySaasUrl } from "./sentry-urls.js";
  * option instead.
  */
 const setDefaultCACertificates: ((certs: string[]) => void) | undefined = (
-  require("node:tls") as {
+  _require("node:tls") as {
     setDefaultCACertificates?: (certs: string[]) => void;
   }
 ).setDefaultCACertificates;

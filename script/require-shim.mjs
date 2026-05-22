@@ -8,10 +8,10 @@
  *
  * The `require` function is anchored at the project root (package.json) so
  * that `node:*` builtins and npm package requires resolve correctly. Note
- * that relative `require("./foo.js")` calls will resolve from the project
- * root, not from the calling file — this is acceptable because all relative
- * `require()` calls in `src/` are behind runtime-only code paths (DB init,
- * telemetry) that don't execute during tsx script runs.
+ * that relative `require("./foo.js")` calls resolve from the project root,
+ * not from the calling file. Files in `src/` that use lazy relative requires
+ * must use a file-local `createRequire(import.meta.url)` instead of relying
+ * on this global shim.
  *
  * Usage: NODE_OPTIONS="--import ./script/require-shim.mjs" tsx script/...
  * Or in package.json scripts via the `pnpm tsx` alias.

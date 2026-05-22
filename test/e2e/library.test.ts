@@ -35,7 +35,7 @@ async function runNodeScript(
     SENTRY_CLI_NO_TELEMETRY: "1",
   };
   // Ensure no auth leaks into tests — delete rather than set to undefined
-  // because Bun.spawn may pass "undefined" as a literal string
+  // because spawn may pass "undefined" as a literal string
   delete env.SENTRY_AUTH_TOKEN;
   delete env.SENTRY_TOKEN;
 
