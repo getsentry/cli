@@ -58,6 +58,26 @@ pnpm run test:unit                        # Run unit tests only
 pnpm run test:e2e                         # Run e2e tests only
 ```
 
+## Rules: esbuild Bundling & `require()` in `src/`
+
+**CRITICAL**: The CLI ships as a CJS bundle (both the Node SEA binary and the npm package). esbuild bundles all `src/` code into a single file. This has important implications for `require()`:
+
+| Pattern | esbuild resolves it? | Safe in bundle? | Use for |
+|---------|---------------------|-----------------|---------|
+| `require("./foo.js")` | **Yes** — inlined at bundle time | Yes | Relative lazy imports (circular dep breaking) |
+| `require("node:fs")` | **Yes** — left as external | Yes | Node builtins |
+| `_require("node:fs")` | **No** — opaque call, passes through | Yes (builtins resolve by name) | Node builtins via `createRequire` |
+| `_require("./foo.js")` | **No** — opaque call, passes through | **NO** — resolves from bundle location | **Never use this** |
+
+**Key rules:**
+1. **Never alias `require()` for relative imports.** esbuild only statically resolves bare `require()` calls. Any aliased require (`_require`, `localRequire`, etc.) passes through as-is into the bundle. At runtime, relative paths resolve from the bundle file's location (`dist/index.cjs` or the SEA binary), where `./foo.js` doesn't exist.
+
+2. **Use `createRequire(import.meta.url)` as `_require` only for node builtins and npm packages.** These resolve by name (not relative path) so the base directory doesn't matter: `_require("node:sqlite")`, `_require("@sentry/node-core/light")`.
+
+3. **Keep bare `require()` for relative lazy imports.** The global `require` shim (`script/require-shim.mjs`) provides `require` in ESM/tsx dev mode. esbuild resolves relative requires at bundle time, so they never reach runtime.
+
+4. **Never merge a PR with failing CI.** The build jobs (binary + npm bundle) catch require resolution bugs that unit tests miss. Always wait for all CI jobs to pass.
+
 ## Rules: No Runtime Dependencies
 
 **CRITICAL**: All packages must be in `devDependencies`, never `dependencies`. Everything is bundled at build time via esbuild. CI enforces this with `pnpm run check:deps`.
