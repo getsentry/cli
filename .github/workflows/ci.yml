@@ -309,6 +309,29 @@ jobs:
           else
             ./dist-bin/sentry-${{ matrix.target }} --help
           fi
+      - name: Smoke test (deep — SQLite, telemetry, auth DB)
+        if: matrix.can-test
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            BIN=./dist-bin/sentry-windows-x64.exe
+          else
+            BIN=./dist-bin/sentry-${{ matrix.target }}
+          fi
+          # auth status without a token exercises SQLite init, schema
+          # migrations, telemetry lazy import, and the CJS require chain.
+          # Expected: exit 10 (AUTH_NOT_AUTHENTICATED), NOT a crash/syntax error.
+          OUTPUT=$($BIN auth status 2>&1) && EXIT_CODE=$? || EXIT_CODE=$?
+          if [[ $EXIT_CODE -ne 10 ]]; then
+            echo "::error::Expected exit code 10 (not authenticated), got $EXIT_CODE"
+            echo "$OUTPUT"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -qi "not authenticated"; then
+            echo "::error::Expected 'not authenticated' in output, got:"
+            echo "$OUTPUT"
+            exit 1
+          fi
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
         with:
@@ -710,6 +733,23 @@ jobs:
         run: pnpm run bundle
       - name: Smoke test (Node.js)
         run: node dist/bin.cjs --help
+      - name: Smoke test (Node.js — deep)
+        shell: bash
+        run: |
+          # auth status without a token exercises SQLite init, schema
+          # migrations, telemetry lazy import, and the CJS require chain.
+          # Expected: exit 10 (AUTH_NOT_AUTHENTICATED), NOT a crash/syntax error.
+          OUTPUT=$(node dist/bin.cjs auth status 2>&1) && EXIT_CODE=$? || EXIT_CODE=$?
+          if [[ $EXIT_CODE -ne 10 ]]; then
+            echo "::error::Expected exit code 10 (not authenticated), got $EXIT_CODE"
+            echo "$OUTPUT"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -qi "not authenticated"; then
+            echo "::error::Expected 'not authenticated' in output, got:"
+            echo "$OUTPUT"
+            exit 1
+          fi
       - run: npm pack
       - name: Upload artifact
         if: matrix.node == '22'
