@@ -18,6 +18,12 @@ const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
       <button class="pm-tab" data-pm="yarn">yarn</button>
       <button class="pm-tab" data-pm="bun">bun</button>
     </div>
+  </div>
+  <div class="pm-content">
+    <pre class="pm-pre" data-pm="npm"><code>{npm}</code></pre>
+    <pre class="pm-pre" data-pm="pnpm" hidden><code>{pnpm}</code></pre>
+    <pre class="pm-pre" data-pm="yarn" hidden><code>{yarn}</code></pre>
+    <pre class="pm-pre" data-pm="bun" hidden><code>{bun}</code></pre>
     <button class="pm-copy" aria-label="Copy to clipboard">
       <span class="pm-copied">Copied!</span>
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -25,12 +31,6 @@ const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
         <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
       </svg>
     </button>
-  </div>
-  <div class="pm-content">
-    <pre class="pm-pre" data-pm="npm"><code>{npm}</code></pre>
-    <pre class="pm-pre" data-pm="pnpm" hidden><code>{pnpm}</code></pre>
-    <pre class="pm-pre" data-pm="yarn" hidden><code>{yarn}</code></pre>
-    <pre class="pm-pre" data-pm="bun" hidden><code>{bun}</code></pre>
   </div>
 </div>
 
@@ -40,61 +40,77 @@ const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
     overflow: hidden;
     margin: 1rem 0;
     background: rgba(255, 255, 255, 0.04);
-    padding: 0 0.5rem 0.5rem;
+    padding: 0.5rem;
   }
 
   .pm-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 0 0.5rem;
+    padding: 0;
+    margin: 0 0 0.5rem !important;
   }
 
   .pm-tabs {
-    display: flex;
-    align-items: baseline;
+    display: inline-flex;
+    flex: 0 1 auto;
+    align-items: center;
+    gap: 0.15rem;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.045);
+    padding: 0.18rem;
   }
 
   .pm-tab {
-    padding: 0.35rem 0.75rem;
-    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    min-height: 1.9rem;
+    margin: 0 !important;
+    padding: 0.34rem 0.72rem;
+    font-size: 0.82rem;
     font-weight: 500;
-    color: rgba(255, 255, 255, 0.4);
+    line-height: 1;
+    color: var(--ve-text-tertiary, rgba(255, 255, 255, 0.4));
     background: none;
     border: none;
+    border-radius: 6px;
+    box-shadow: none;
     cursor: pointer;
-    transition: color 0.15s ease;
+    transition: background 120ms ease, color 120ms ease;
     font-family: inherit;
-    position: relative;
+    white-space: nowrap;
   }
 
   .pm-tab:hover {
-    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.055);
+    color: var(--ve-text-secondary, rgba(255, 255, 255, 0.7));
   }
 
   .pm-tab.active {
-    color: #fff;
-  }
-
-  .pm-tab.active::after {
-    content: '';
-    position: absolute;
-    left: 0.75rem;
-    right: 0.75rem;
-    bottom: 0;
-    height: 2px;
-    background: #fff;
+    background: var(--ve-accent-soft, rgba(139, 92, 246, 0.2));
+    color: var(--ve-text, #fafafa);
+    font-weight: 650;
   }
 
   .pm-copy {
     position: relative;
     display: flex;
     align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 2rem;
+    height: 2rem;
+    margin: 0 !important;
     background: none;
     border: none;
+    border-radius: 6px;
     color: rgba(255, 255, 255, 0.4);
     cursor: pointer;
-    padding: 0.5rem;
+    padding: 0;
     transition: color 0.15s ease;
   }
 
@@ -106,13 +122,11 @@ const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
     color: rgba(255, 255, 255, 0.8);
     outline: 2px solid rgb(var(--sl-color-accent-rgb) / 0.5);
     outline-offset: 2px;
-    border-radius: 4px;
   }
 
   .pm-copied {
     position: absolute;
-    right: 100%;
-    margin-right: 0.5rem;
+    right: calc(100% + 0.5rem);
     font-size: 0.75rem;
     color: #22c55e;
     opacity: 0;
@@ -127,12 +141,20 @@ const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   .pm-content {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+    margin: 0 !important;
     padding: 0.75rem 1rem;
-    background: #0a0a0f;
+    background: var(--ve-code-bg, #141419);
     border-radius: 8px;
   }
 
   .pm-pre {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
     margin: 0 !important;
     padding: 0 !important;
     background: transparent !important;
@@ -143,6 +165,10 @@ const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
   .pm-pre code {
     border: none !important;
     background: transparent !important;
+    border-radius: 0 !important;
+    display: block;
+    padding: 0 !important;
+    white-space: pre;
   }
 
   .pm-pre {
@@ -158,7 +184,7 @@ const id = `pm-${Math.random().toString(36).substr(2, 9)}`;
 
   .pm-pre code {
     color: rgba(255, 255, 255, 0.85);
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-family: var(--sl-font-mono);
     font-size: 0.875rem;
     line-height: 1.7;
   }

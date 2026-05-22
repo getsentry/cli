@@ -1,16 +1,17 @@
 ---
-import Search from "@astrojs/starlight/components/Search.astro";
-import SiteTitle from "@astrojs/starlight/components/SiteTitle.astro";
-import SocialIcons from "@astrojs/starlight/components/SocialIcons.astro";
+import config from "virtual:starlight/user-config";
 
-// Check if we're on the homepage (splash page).
-// In Starlight >=0.33, route data lives on Astro.locals.starlightRoute; the
-// old `slug` field is now `id` (empty string for the landing page).
+import Search from "virtual:starlight/components/Search";
+import SiteTitle from "virtual:starlight/components/SiteTitle";
+import SocialIcons from "virtual:starlight/components/SocialIcons";
+
 const isHomepage = Astro.locals.starlightRoute.id === "";
+const shouldRenderSearch =
+  config.pagefind ||
+  config.components.Search !== "@astrojs/starlight/components/Search.astro";
 
-// Get base path for links
 const baseUrl = import.meta.env.BASE_URL;
-const base = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
+const base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
 ---
 
 <div class:list={["header", "sl-flex", { "header-homepage": isHomepage }]}>
@@ -19,7 +20,7 @@ const base = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
   </div>
 
   <div class="sl-flex header-right">
-    {!isHomepage && <Search />}
+    {!isHomepage && shouldRenderSearch && <Search />}
     {isHomepage && <a href={`${base}getting-started/`} class="header-nav-link">Docs</a>}
     {!isHomepage && <span class="header-nav-link header-nav-active">Docs</span>}
     <SocialIcons />
