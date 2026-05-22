@@ -9,8 +9,6 @@ import { describe, expect, test, vi } from "vitest";
 import { runCommand } from "../../../src/commands/local/run.js";
 import { CliError, ValidationError } from "../../../src/lib/errors.js";
 
-const isBun = typeof globalThis.Bun !== "undefined";
-
 type RunFunc = (
   this: unknown,
   flags: { port: number; host: string },
@@ -25,8 +23,7 @@ function makeContext() {
   };
 }
 
-// biome-ignore lint/suspicious/noSkippedTests: requires Bun.spawn (not available in vitest Node workers)
-describe.skipIf(!isBun)("sentry local run", () => {
+describe("sentry local run", () => {
   test("throws ValidationError when no command provided", async () => {
     const func = (await runCommand.loader()) as unknown as RunFunc;
     const ctx = makeContext();

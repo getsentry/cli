@@ -19,7 +19,6 @@
     "@spotlightjs/spotlight": "^4.11.3",
     "@stricli/auto-complete": "^1.2.4",
     "@stricli/core": "^1.2.4",
-    "@types/bun": "latest",
     "@types/http-cache-semantics": "^4.2.0",
     "@types/node": "^22",
     "@types/picomatch": "^4.0.3",

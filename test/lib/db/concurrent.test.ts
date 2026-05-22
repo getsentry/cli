@@ -4,7 +4,7 @@
  * Tests that multiple CLI processes can safely access the SQLite database
  * simultaneously without SQLITE_BUSY errors or data corruption.
  *
- * These tests spawn actual Bun subprocesses to simulate real concurrent
+ * These tests spawn tsx subprocesses to simulate real concurrent
  * CLI usage (e.g., multiple terminals, CI jobs, editor integrations).
  */
 
@@ -42,12 +42,23 @@ async function spawnWorker(
   workerId: string,
   operation: string
 ): Promise<WorkerResult> {
+  const requireShim = join(
+    import.meta.dirname,
+    "../../../script/require-shim.mjs"
+  );
   const proc = spawn(
     process.execPath,
-    [WORKER_SCRIPT, configDir, workerId, operation],
-    {
-      stdio: ["pipe", "pipe", "pipe"],
-    }
+    [
+      "--import",
+      "tsx/esm",
+      "--import",
+      requireShim,
+      WORKER_SCRIPT,
+      configDir,
+      workerId,
+      operation,
+    ],
+    { stdio: ["pipe", "pipe", "pipe"] }
   );
   proc.on("error", noop);
 
@@ -60,8 +71,8 @@ async function spawnWorker(
     stderr += d;
   });
 
-  const exitCode = await new Promise<number>((resolve) =>
-    proc.on("close", (code) => resolve(code ?? 1))
+  const exitCode = await new Promise<number>((done) =>
+    proc.on("close", (code) => done(code ?? 1))
   );
 
   if (exitCode !== 0) {
@@ -102,12 +113,7 @@ async function spawnWorkersConcurrently(
   return Promise.all(promises);
 }
 
-// These tests spawn child processes with process.execPath to run .ts worker
-// scripts. Under Bun this works natively; under Node.js (vitest) it fails
-// because Node can't execute .ts files directly.
-const isBun = typeof globalThis.Bun !== "undefined";
-
-describe.skipIf(!isBun)("concurrent database access", () => {
+describe("concurrent database access", () => {
   const getConfigDir = useTestConfigDir("concurrent-");
 
   beforeEach(async () => {
