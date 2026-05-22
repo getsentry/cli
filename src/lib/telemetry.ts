@@ -1021,7 +1021,8 @@ const noop = (): void => {};
 /** Resolves the database path, falling back to a default if the import fails. */
 function resolveDbPath(): string {
   try {
-    const { getDbPath } = _require("./db/index.js") as {
+    // bare require so esbuild resolves this at bundle time (breaks circular dep)
+    const { getDbPath } = require("./db/index.js") as {
       getDbPath: () => string;
     };
     return getDbPath();

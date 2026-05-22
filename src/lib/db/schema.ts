@@ -674,7 +674,8 @@ export function tryRepairAndRetry<T>(
   let repairSucceeded = false;
   try {
     // Dynamic imports to avoid circular dependencies with db/index.js
-    const { getRawDatabase } = _require("./index.js") as {
+    // bare require so esbuild resolves this at bundle time (breaks circular dep)
+    const { getRawDatabase } = require("./index.js") as {
       getRawDatabase: () => Database;
     };
 
