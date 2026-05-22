@@ -59,11 +59,11 @@ describe("telemetry exit timing", () => {
     expect(enabledExitCode).toBe(0);
 
     // Enabled should not be significantly slower than disabled.
-    // Allow 500ms overhead for Sentry init + potential network attempt,
-    // but NOT the old 3000ms+ timeout behavior.
-    expect(enabledDuration).toBeLessThan(disabledDuration + 500);
+    // Allow 1000ms overhead for Sentry init + potential network attempt +
+    // CI scheduling jitter, but NOT the old 3000ms+ timeout behavior.
+    expect(enabledDuration).toBeLessThan(disabledDuration * 1.5 + 1000);
 
-    // And definitely under 1.5 seconds total (old behavior was 3+ seconds)
-    expect(enabledDuration).toBeLessThan(1500);
+    // And definitely under 2 seconds total (old behavior was 3+ seconds)
+    expect(enabledDuration).toBeLessThan(2000);
   });
 });

@@ -144,9 +144,6 @@ export const runCommand = buildCommand({
         },
         stdio: "inherit",
       });
-      child.on("error", (err) => {
-        logger.debug(`Child process error: ${err.message}`);
-      });
     } catch (err) {
       if (bgServer) {
         await shutdownServer(bgServer);
@@ -169,7 +166,10 @@ export const runCommand = buildCommand({
       exitCode = await new Promise<number>((resolve, reject) => {
         child.on("close", (code) => resolve(code ?? 1));
         // If spawn itself fails (e.g. ENOENT), 'close' may never fire.
-        child.on("error", (err) => reject(err));
+        child.on("error", (err) => {
+          logger.debug(`Child process error: ${err.message}`);
+          reject(err);
+        });
       });
     } finally {
       if (bgServer) {

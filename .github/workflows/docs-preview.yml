@@ -33,9 +33,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.13"
       - uses: pnpm/action-setup@v4
 
       # Astro 6 requires Node >= 22.12. Pin an explicit version so the docs
@@ -58,7 +55,7 @@ jobs:
         run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
 
       - name: Generate docs content
-        run: bun run generate:schema && bun run generate:docs
+        run: pnpm run generate:schema && pnpm run generate:docs
 
       - name: Build Docs for Preview
         working-directory: docs
@@ -70,8 +67,8 @@ jobs:
           SENTRY_RELEASE: ${{ steps.version.outputs.version }}
           PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
-          bun install --frozen-lockfile
-          bun run build
+          pnpm install --frozen-lockfile
+          pnpm run build
 
       - name: Inject debug IDs and upload sourcemaps
         if: env.SENTRY_AUTH_TOKEN != ''
@@ -80,8 +77,8 @@ jobs:
           SENTRY_ORG: sentry
           SENTRY_PROJECT: cli-website
         run: |
-          bun run --bun src/bin.ts sourcemap inject docs/dist/
-          bun run --bun src/bin.ts sourcemap upload docs/dist/ \
+          pnpm run cli sourcemap inject docs/dist/
+          pnpm run cli sourcemap upload docs/dist/ \
             --release "${{ steps.version.outputs.version }}" \
             --url-prefix "~/"
 

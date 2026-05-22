@@ -1,51 +1,51 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 
 /**
  * Build script for Sentry CLI
  *
- * Creates standalone executables for multiple platforms using Bun.build().
+ * Creates standalone executables for multiple platforms using Node SEA
+ * binaries via fossilize.
  * Binaries are uploaded to GitHub Releases.
  *
  * Uses a two-step build to produce external sourcemaps for Sentry:
  * 1. Bundle TS → single minified JS + external .map (esbuild)
- * 2. Compile JS → native binary per platform (Bun.build with compile)
+ * 2. Compile JS → native SEA binary per platform (fossilize)
  * 3. Upload .map to Sentry for server-side stack trace resolution
  *
- * This approach adds ~0.5 MB to the raw binary and ~40 KB to gzipped downloads
- * (vs ~3.8 MB / ~2.3 MB for inline sourcemaps), while giving Sentry full
- * source-mapped stack traces for accurate issue grouping.
- *
  * Usage:
- *   bun run script/build.ts                        # Build for all platforms
- *   bun run script/build.ts --single               # Build for current platform only
- *   bun run script/build.ts --target darwin-x64    # Build for specific target (cross-compile)
+ *   pnpm run script/build.ts                        # Build for all platforms
+ *   pnpm run script/build.ts --single               # Build for current platform only
+ *   pnpm run script/build.ts --target darwin-x64    # Build for specific target (cross-compile)
  *
  * Output structure:
  *   dist-bin/
  *     sentry-darwin-arm64
  *     sentry-darwin-x64
  *     sentry-linux-arm64
- *     sentry-linux-arm64-musl
  *     sentry-linux-x64
- *     sentry-linux-x64-musl
  *     sentry-windows-x64.exe
  *     bin.js.map          (sourcemap, uploaded to Sentry then deleted)
  */
 
+import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
+import { readFile, rm, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { processBinary } from "binpunch";
-import { $ } from "bun";
 import { build as esbuild } from "esbuild";
-import pkg from "../package.json";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
 import { injectDebugId, PLACEHOLDER_DEBUG_ID } from "./debug-id.js";
 import { textImportPlugin } from "./text-import-plugin.js";
 
 const gzipAsync = promisify(gzip);
 
-const VERSION = pkg.version;
+const pkg = JSON.parse(await readFile("package.json", "utf-8"));
+const VERSION: string = pkg.version;
+
+/** Pin to Node 22 LTS for SEA binaries */
+const NODE_VERSION = "22";
 
 /** Build-time constants injected into the binary */
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
@@ -54,50 +54,39 @@ const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
 type BuildTarget = {
   os: "darwin" | "linux" | "win32";
   arch: "arm64" | "x64";
-  /** C library variant. Only relevant for Linux targets (musl for Alpine, etc.) */
-  libc?: "musl";
 };
 
 const ALL_TARGETS: BuildTarget[] = [
   { os: "darwin", arch: "arm64" },
   { os: "darwin", arch: "x64" },
   { os: "linux", arch: "arm64" },
-  { os: "linux", arch: "arm64", libc: "musl" },
   { os: "linux", arch: "x64" },
-  { os: "linux", arch: "x64", libc: "musl" },
   { os: "win32", arch: "x64" },
 ];
 
 /** Get package name for a target (uses "windows" instead of "win32") */
 function getPackageName(target: BuildTarget): string {
   const platformName = target.os === "win32" ? "windows" : target.os;
-  const libcSuffix = target.libc ? `-${target.libc}` : "";
-  return `sentry-${platformName}-${target.arch}${libcSuffix}`;
+  return `sentry-${platformName}-${target.arch}`;
 }
 
 /**
- * Detect musl libc on the current system (for `--single` builds).
- * Checks for the musl dynamic linker at the well-known path.
+ * Map our BuildTarget to fossilize's platform string.
+ * Fossilize uses Node's archive naming: "win" not "win32".
  */
-function detectMusl(): boolean {
-  if (process.platform !== "linux") {
-    return false;
-  }
-  const muslArch = process.arch === "x64" ? "x86_64" : "aarch64";
-  return existsSync(`/lib/ld-musl-${muslArch}.so.1`);
+function getFossilizePlatform(target: BuildTarget): string {
+  const os = target.os === "win32" ? "win" : target.os;
+  return `${os}-${target.arch}`;
 }
 
-/** Get Bun compile target string */
-function getBunTarget(target: BuildTarget): string {
-  const libcSuffix = target.libc ? `-${target.libc}` : "";
-  return `bun-${target.os}-${target.arch}${libcSuffix}`;
-}
+/** Intermediate build directory for esbuild output (separate from fossilize's output). */
+const BUILD_DIR = "dist-build";
 
 /** Path to the pre-bundled JS used by Step 2 (compile). */
-const BUNDLE_JS = "dist-bin/bin.js";
+const BUNDLE_JS = `${BUILD_DIR}/bin.js`;
 
 /** Path to the sourcemap produced by Step 1 (bundle). */
-const SOURCEMAP_FILE = "dist-bin/bin.js.map";
+const SOURCEMAP_FILE = `${BUILD_DIR}/bin.js.map`;
 
 /**
  * Step 1: Bundle TypeScript sources into a single minified JS file
@@ -122,24 +111,16 @@ async function bundleJs(): Promise<boolean> {
       bundle: true,
       outfile: BUNDLE_JS,
       platform: "node",
-      target: "esnext",
-      format: "esm",
+      // Target Node 22 to downlevel `using` declarations (not supported
+      // in CJS). Node SEA runs embedded JS as CJS.
+      target: "node22",
+      format: "cjs",
       // Externalize the Ink + React stack from the esbuild bundling
-      // step. `react`'s CJS jsx-runtime, when pulled into esbuild's
-      // `__commonJS` wrappers and re-bundled by Bun.compile, produces
-      // malformed output containing a TDZ `init_react` symbol
-      // embedded in the wrong scope. Keeping React (and its
-      // consumers) external lets Bun's runtime resolve them fresh at
-      // first invocation, outside the buggy bundler path.
-      //
-      // Note: the `with { type: "file" }` sidecar (ink-app.tsx) is
-      // handled separately by the text-import-plugin, which pre-
-      // bundles it into a self-contained JS file with ink/react
-      // inlined. That sidecar runs from `/$bunfs/root/` at runtime
-      // where `node_modules` is not available, so it MUST be
-      // self-contained.
+      // step. The main bundle never calls `import("ink")` at runtime —
+      // the sidecar is pre-bundled by text-import-plugin as a
+      // self-contained JS file with ink/react inlined. Keeping these
+      // external avoids pulling CJS React wrappers into the bundle.
       external: [
-        "bun:*",
         "ink",
         "ink-spinner",
         "react",
@@ -148,10 +129,12 @@ async function bundleJs(): Promise<boolean> {
         "react-reconciler/*",
       ],
       sourcemap: "linked",
-      // Minify syntax and whitespace but NOT identifiers. Bun.build
       minify: true,
       metafile: true,
+      // CJS format needs import.meta.url shimmed via inject + define.
+      inject: ["./script/import-meta-url.js"],
       define: {
+        "import.meta.url": "import_meta_url",
         SENTRY_CLI_VERSION: JSON.stringify(VERSION),
         SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
         "process.env.NODE_ENV": JSON.stringify("production"),
@@ -162,15 +145,13 @@ async function bundleJs(): Promise<boolean> {
 
     const output = result.metafile?.outputs[BUNDLE_JS];
     const jsSize = (
-      (output?.bytes ?? (await Bun.file(BUNDLE_JS).size)) /
+      (output?.bytes ?? (await stat(BUNDLE_JS)).size) /
       1024 /
       1024
     ).toFixed(2);
-    const mapSize = (
-      (await Bun.file(SOURCEMAP_FILE).size) /
-      1024 /
-      1024
-    ).toFixed(2);
+    const mapSize = ((await stat(SOURCEMAP_FILE)).size / 1024 / 1024).toFixed(
+      2
+    );
     console.log(`    -> ${BUNDLE_JS} (${jsSize} MB)`);
     console.log(`    -> ${SOURCEMAP_FILE} (${mapSize} MB, for Sentry upload)`);
     return true;
@@ -220,8 +201,8 @@ async function injectDebugIds(): Promise<void> {
   // Replace the placeholder UUID with the real debug ID in the JS bundle.
   // Both are 36-char UUIDs so sourcemap character positions stay valid.
   try {
-    const jsContent = await Bun.file(BUNDLE_JS).text();
-    await Bun.write(
+    const jsContent = await readFile(BUNDLE_JS, "utf-8");
+    await writeFile(
       BUNDLE_JS,
       jsContent.split(PLACEHOLDER_DEBUG_ID).join(currentDebugId)
     );
@@ -234,9 +215,7 @@ async function injectDebugIds(): Promise<void> {
 }
 
 /**
- * Upload the (composed) sourcemap to Sentry. Runs after compilation
- * because {@link compileTarget} composes the Bun sourcemap with the
- * esbuild sourcemap first.
+ * Upload the sourcemap to Sentry. Runs after compilation.
  */
 async function uploadSourcemapToSentry(): Promise<void> {
   const debugId = currentDebugId;
@@ -252,11 +231,6 @@ async function uploadSourcemapToSentry(): Promise<void> {
   console.log(`  Uploading sourcemap to Sentry (release: ${VERSION})...`);
 
   try {
-    // With sourcemap: "linked", Bun's runtime auto-resolves Error.stack
-    // paths via the embedded map, producing relative paths like
-    // "dist-bin/bin.js". The beforeSend hook normalizes these to absolute
-    // ("/dist-bin/bin.js") so the symbolicator's candidate URL generator
-    // produces "~/dist-bin/bin.js" — matching our upload URL.
     const dir = BUNDLE_JS.slice(0, BUNDLE_JS.lastIndexOf("/") + 1);
     const urlPrefix = `~/${dir}`;
     const jsBasename = BUNDLE_JS.split("/").pop() ?? "bin.js";
@@ -291,103 +265,97 @@ async function uploadSourcemapToSentry(): Promise<void> {
 }
 
 /**
- * Step 2: Compile the pre-bundled JS into a native binary for a target.
- *
- * Uses the JS file produced by {@link bundleJs}. The esbuild sourcemap
- * (JS → original TS) is uploaded to Sentry as-is — no composition needed
- * because `sourcemap: "linked"` causes Bun to embed a sourcemap in the
- * binary that its runtime uses to auto-resolve `Error.stack` positions
- * back to the esbuild output's coordinate space.
+ * Step 2: Compile the pre-bundled JS into Node SEA binaries for all targets
+ * using fossilize. Runs a single fossilize invocation for all platforms
+ * (fossilize parallelizes internally), then post-processes each binary.
  */
-async function compileTarget(target: BuildTarget): Promise<boolean> {
-  const packageName = getPackageName(target);
-  const extension = target.os === "win32" ? ".exe" : "";
-  const binaryName = `${packageName}${extension}`;
-  const outfile = `dist-bin/${binaryName}`;
+async function compileAllTargets(
+  targets: BuildTarget[]
+): Promise<{ successes: number; failures: number }> {
+  const platforms = targets.map((t) => getFossilizePlatform(t));
 
-  console.log(`  Step 2: Compiling ${packageName}...`);
+  // Add ink sidecar as asset if it exists (pre-bundled by text-import-plugin)
+  const assetArgs: string[] = [];
+  // The text-import-plugin pre-bundles the Ink sidecar into BUILD_DIR.
+  // Pass it to fossilize as a SEA asset so it's available at runtime
+  // via node:sea.getAsset(INK_SIDECAR_ASSET_KEY).
+  const INK_SIDECAR = `${BUILD_DIR}/ink-app.js`;
+  if (existsSync(INK_SIDECAR)) {
+    assetArgs.push("--assets", INK_SIDECAR);
+  }
 
-  // Rename the esbuild map out of the way before Bun.build overwrites it
-  // (sourcemap: "linked" writes Bun's own map to bin.js.map).
-  // Restored in the finally block so subsequent targets and the upload
-  // always find the esbuild map, even if compilation fails.
-  const esbuildMapBackup = `${SOURCEMAP_FILE}.esbuild`;
-  renameSync(SOURCEMAP_FILE, esbuildMapBackup);
+  console.log(
+    `  Step 2: Compiling ${platforms.length} target(s) (Node SEA via fossilize)...`
+  );
+
+  const fossilizeBin = join("node_modules", ".bin", "fossilize");
 
   try {
-    const result = await Bun.build({
-      entrypoints: [BUNDLE_JS],
-      // Force React to load its production builds. React's CJS
-      // entry switches at runtime via
-      //   `if (process.env.NODE_ENV === "production")`
-      // — leaving NODE_ENV unset would drag in the development
-      // builds, whose CJS wrappers Bun.compile can't bundle cleanly
-      // (it injects `__promiseAll` runtime helpers in positions the
-      // dev-build's IIFE doesn't tolerate, causing a SyntaxError at
-      // startup). Production builds parse fine.
-      //
-      // `react-devtools-core` is gated behind `process.env.DEV ===
-      // "true"` inside Ink's reconciler — never reached in our
-      // production binary. We still install it as a devDep so
-      // Bun.compile can resolve the static `import devtools from
-      // "react-devtools-core"` reference; without it the build
-      // fails with "Could not resolve". The inlined module gets
-      // dead-code-eliminated by the DEV gate at runtime.
-      define: {
-        "process.env.NODE_ENV": JSON.stringify("production"),
-      },
-      compile: {
-        target: getBunTarget(target) as
-          | "bun-darwin-arm64"
-          | "bun-darwin-x64"
-          | "bun-linux-x64"
-          | "bun-linux-x64-musl"
-          | "bun-linux-arm64"
-          | "bun-linux-arm64-musl"
-          | "bun-windows-x64",
-        outfile,
-        // Deterministic runtime: don't let a `.env` or `bunfig.toml` in the
-        // user's CWD silently inject configuration into the compiled CLI.
-        // Our env vars (SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_DSN, ...) are
-        // documented as shell-level; picking them up from a project-local
-        // `.env.local` is a footgun — e.g. a Next.js project's file could
-        // override the stored OAuth token via `getRawEnvToken()` in
-        // `src/lib/db/auth.ts`, or pre-empt DSN auto-detection in
-        // `src/lib/resolve-target.ts`. Users who want these vars set in a
-        // directory can use `direnv` or source their `.env` explicitly.
-        autoloadDotenv: false,
-        autoloadBunfig: false,
-      },
-      // "linked" embeds a sourcemap in the binary. At runtime, Bun's engine
-      // auto-resolves Error.stack positions through this embedded map back to
-      // the esbuild output positions. The esbuild sourcemap (uploaded to
-      // Sentry) then maps those to original TypeScript sources.
-      sourcemap: "linked",
-      // Minify whitespace and syntax but NOT identifiers to avoid Bun's
-      // identifier renaming collision bug (oven-sh/bun#14585).
-      minify: { whitespace: true, syntax: true, identifiers: false },
-      // NOTE: `bytecode: true` would move JS parse cost from startup to
-      // build time, but as of Bun 1.3.13 it still crashes our ESM bundle
-      // at runtime with "Expected CommonJS module to have a function
-      // wrapper" before any of our code runs (esbuild emits ESM at line
-      // 126; the bytecode loader mis-caches it as CJS). Tracks
-      // oven-sh/bun#21097 / #23490. Retested on Bun 1.3.13; still broken.
-      // Revisit once Bun's bytecode path supports ESM under compile.
-    });
-
-    if (!result.success) {
-      console.error(`  Failed to compile ${packageName}:`);
-      for (const log of result.logs) {
-        console.error(`    ${log}`);
-      }
-      return false;
-    }
-
-    console.log(`    -> ${outfile}`);
-  } finally {
-    // Restore the esbuild sourcemap (Bun.build wrote its own map).
-    renameSync(esbuildMapBackup, SOURCEMAP_FILE);
+    execSync(
+      [
+        fossilizeBin,
+        "--no-bundle",
+        "--output-name",
+        "sentry",
+        "--platforms",
+        platforms.join(","),
+        "--out-dir",
+        "dist-bin",
+        "--node-version",
+        NODE_VERSION,
+        ...assetArgs,
+        BUNDLE_JS,
+      ].join(" "),
+      { stdio: "inherit" }
+    );
+  } catch (error) {
+    console.error("  Fossilize compilation failed:");
+    console.error(
+      `    ${error instanceof Error ? error.message : String(error)}`
+    );
+    return { successes: 0, failures: targets.length };
   }
+
+  // Post-process each target: rename Windows binary, hole-punch ICU, gzip
+  let successes = 0;
+  let failures = 0;
+  for (const target of targets) {
+    try {
+      await postProcessTarget(target);
+      successes += 1;
+    } catch (error) {
+      console.error(
+        `  Post-processing ${getPackageName(target)} failed: ${error}`
+      );
+      failures += 1;
+    }
+  }
+  return { successes, failures };
+}
+
+/**
+ * Post-process a single compiled binary: rename from fossilize's output
+ * naming to our expected naming, hole-punch ICU data, and optionally gzip.
+ *
+ * Fossilize outputs `sentry-{os}-{arch}[.exe]` where os is "win" for Windows.
+ * We rename "win" → "windows" to match our release naming convention.
+ */
+async function postProcessTarget(target: BuildTarget): Promise<void> {
+  const packageName = getPackageName(target);
+  const extension = target.os === "win32" ? ".exe" : "";
+  const outfile = `dist-bin/${packageName}${extension}`;
+
+  // Fossilize uses "win" not "windows" — rename if needed
+  const fossilizeName = `dist-bin/sentry-${getFossilizePlatform(target)}${extension}`;
+  if (fossilizeName !== outfile && existsSync(fossilizeName)) {
+    renameSync(fossilizeName, outfile);
+  }
+
+  if (!existsSync(outfile)) {
+    throw new Error(`Expected output not found: ${outfile}`);
+  }
+
+  console.log(`    -> ${outfile}`);
 
   // Hole-punch: zero unused ICU data entries so they compress to nearly nothing.
   // Always runs so the smoke test exercises the same binary as the release.
@@ -401,31 +369,26 @@ async function compileTarget(target: BuildTarget): Promise<boolean> {
   // On main and release branches (RELEASE_BUILD=1), create gzip-compressed
   // copies for release downloads / GHCR nightly (~70% smaller with hole-punch).
   if (process.env.RELEASE_BUILD) {
-    const binary = await Bun.file(outfile).arrayBuffer();
+    const binary = await readFile(outfile);
     const compressed = await gzipAsync(Buffer.from(binary), { level: 6 });
-    await Bun.write(`${outfile}.gz`, compressed);
+    await writeFile(`${outfile}.gz`, compressed);
     const ratio = (
       (1 - compressed.byteLength / binary.byteLength) *
       100
     ).toFixed(0);
     console.log(`    -> ${outfile}.gz (${ratio}% smaller)`);
   }
-
-  return true;
 }
 
-/** Parse target string (e.g., "darwin-x64", "linux-arm64", "linux-x64-musl") into BuildTarget */
+/** Parse target string (e.g., "darwin-x64", "linux-arm64") into BuildTarget */
 function parseTarget(targetStr: string): BuildTarget | null {
   // Handle "windows" alias for "win32"
   const normalized = targetStr.replace("windows-", "win32-");
   const parts = normalized.split("-");
   const os = parts[0] as BuildTarget["os"];
   const arch = parts[1] as BuildTarget["arch"];
-  const libc = parts[2] === "musl" ? ("musl" as const) : undefined;
 
-  const target = ALL_TARGETS.find(
-    (t) => t.os === os && t.arch === arch && t.libc === libc
-  );
+  const target = ALL_TARGETS.find((t) => t.os === os && t.arch === arch);
   return target ?? null;
 }
 
@@ -444,7 +407,7 @@ async function build(): Promise<void> {
       "\nError: SENTRY_CLIENT_ID environment variable is required."
     );
     console.error("   The CLI requires OAuth to function.");
-    console.error("   Set it via: SENTRY_CLIENT_ID=xxx bun run build\n");
+    console.error("   Set it via: SENTRY_CLIENT_ID=xxx pnpm run build\n");
     process.exit(1);
   }
 
@@ -457,19 +420,15 @@ async function build(): Promise<void> {
     if (!target) {
       console.error(`Invalid target: ${targetArg}`);
       console.error(
-        `Valid targets: ${ALL_TARGETS.map((t) => `${t.os === "win32" ? "windows" : t.os}-${t.arch}${t.libc ? `-${t.libc}` : ""}`).join(", ")}`
+        `Valid targets: ${ALL_TARGETS.map((t) => `${t.os === "win32" ? "windows" : t.os}-${t.arch}`).join(", ")}`
       );
       process.exit(1);
     }
     targets = [target];
     console.log(`\nBuilding for target: ${getPackageName(target)}`);
   } else if (singleBuild) {
-    const musl = detectMusl();
     const currentTarget = ALL_TARGETS.find(
-      (t) =>
-        t.os === process.platform &&
-        t.arch === process.arch &&
-        (musl ? t.libc === "musl" : !t.libc)
+      (t) => t.os === process.platform && t.arch === process.arch
     );
     if (!currentTarget) {
       console.error(
@@ -487,7 +446,7 @@ async function build(): Promise<void> {
   }
 
   // Clean and recreate output directory (esbuild requires it to exist)
-  await $`rm -rf dist-bin`;
+  await rm("dist-bin", { recursive: true, force: true });
   mkdirSync("dist-bin", { recursive: true });
 
   console.log("");
@@ -499,34 +458,19 @@ async function build(): Promise<void> {
   }
 
   // Inject debug IDs into the JS and sourcemap (non-fatal on failure).
-  // Upload happens AFTER compilation because Bun.build (with sourcemap: "linked")
-  // overwrites bin.js.map. We restore it from the saved copy before uploading.
   await injectDebugIds();
 
   console.log("");
 
-  // Step 2: Compile JS → native binary per target
-  let successCount = 0;
-  let failCount = 0;
+  // Step 2: Compile JS → native SEA binary for all targets at once
+  const { successes: successCount, failures: failCount } =
+    await compileAllTargets(targets);
 
-  for (const target of targets) {
-    const success = await compileTarget(target);
-    if (success) {
-      successCount += 1;
-    } else {
-      failCount += 1;
-    }
-  }
-
-  // Step 3: Upload the composed sourcemap to Sentry (after compilation)
+  // Step 3: Upload the sourcemap to Sentry (after compilation)
   await uploadSourcemapToSentry();
 
-  // Clean up intermediate bundle (only the binaries are artifacts).
-  // The `ink-app.js` sidecar comes from the text-import-plugin's
-  // pre-bundle of the `with { type: "file" }` import — it gets
-  // embedded into the compiled binary, so the copy is no longer
-  // needed once every target has compiled.
-  await $`rm -f ${BUNDLE_JS} ${SOURCEMAP_FILE} dist-bin/ink-app.js`;
+  // Clean up intermediate build directory (only the binaries are artifacts).
+  await rm(BUILD_DIR, { recursive: true, force: true });
 
   // Summary
   console.log(`\n${"=".repeat(40)}`);
