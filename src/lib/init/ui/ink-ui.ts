@@ -48,6 +48,7 @@
 
 import { openSync } from "node:fs";
 import { ReadStream } from "node:tty";
+import { setTag } from "@sentry/node-core/light";
 import { CLI_VERSION } from "../../constants.js";
 import { stripAnsi } from "../../formatters/plain-detect.js";
 import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
@@ -817,12 +818,16 @@ export class InkUI implements WizardUI {
     if (this.cancelRequested) {
       // Safety valve: teardown already started but hasn't finished
       // (or something is stuck). Force-exit so the user isn't trapped.
+      setTag("wizard.outcome", "abandoned");
       process.exit(130);
     }
     this.cancelRequested = true;
     this.failureMessage = "Setup cancelled.";
     this.feedback("cancelled");
     this.tearDown();
+    // Mark as abandoned before exit so the Sentry span carries the
+    // outcome even though beforeExit never fires for explicit process.exit().
+    setTag("wizard.outcome", "abandoned");
     // Match the SIGINT convention so shells (and CI) see a
     // distinguishable exit. The runner's `await using` won't get a
     // chance to run after this, but tearDown above already did all

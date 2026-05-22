@@ -453,6 +453,19 @@ describe("runWizard", () => {
     expect(formatResultSpy).toHaveBeenCalled();
   });
 
+  test("aborts cleanly when user declines the experimental prompt", async () => {
+    const { ui, calls, respond } = createMockUI();
+    respond.select("exit");
+    useMockUI(ui, calls);
+
+    await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
+
+    expect(process.exitCode).toBe(0);
+    expect(lastCancelMessage()).toBe("Setup cancelled.");
+    expect(lastFeedbackOutcome()).toBe("cancelled");
+    expect(getWorkflowSpy).not.toHaveBeenCalled();
+  });
+
   test("stops before workflow creation when preflight returns null", async () => {
     resolveInitContextSpy.mockResolvedValue(null);
 
