@@ -10,6 +10,10 @@
  * exception, and error attributes.
  */
 
+import { logger } from "../logger.js";
+
+const log = logger.withTag("semantic-display");
+
 /** Display result from semantic rendering. */
 export type SemanticSpanDisplay = {
   /** Primary label for the span/transaction. */
@@ -102,6 +106,11 @@ export function formatSemanticSpanDisplay(
 /**
  * Derive a semantic op category from attributes for the `[op]` display.
  * Returns undefined if no semantic category is detected (falls back to trace.op).
+ *
+ * Only domains with a natural one-word op category are included.
+ * ObjectStore, CloudEvents, CICD, FeatureFlag, Exception, and Error are
+ * intentionally omitted — they should preserve the original trace.op.
+ * HTTP also returns undefined to keep the SDK-assigned op (e.g. `http.client`).
  */
 export function inferSemanticOp(attrs: AttributeSource): string | undefined {
   if (getAttr(attrs, ["mcp.method.name"])) {
@@ -657,7 +666,8 @@ function formatHttpTarget(value: string): string {
     const url = new URL(trimmed);
     const path = url.pathname === "/" ? "" : url.pathname;
     return `${url.host}${path}`;
-  } catch {
+  } catch (error) {
+    log.debug("Failed to parse URL for HTTP target display", error);
     const noFragment = trimmed.split("#")[0] ?? trimmed;
     return noFragment.split("?")[0] ?? noFragment;
   }
@@ -681,7 +691,7 @@ function formatResourceTarget(value?: string): string | undefined {
   if (!value) {
     return;
   }
-  return truncate(value.split("?", 1)[0], SPAN_LABEL_MAX_LENGTH);
+  return truncate(value.split("?")[0], SPAN_LABEL_MAX_LENGTH);
 }
 
 function formatDbQueryText(value?: string): string | undefined {
@@ -712,6 +722,13 @@ function truncate(value: unknown, maxLength: number): string | undefined {
     text = value;
   } else if (typeof value === "number" || typeof value === "boolean") {
     text = String(value);
+  } else if (
+    Array.isArray(value) &&
+    value.length === 1 &&
+    typeof value[0] === "string"
+  ) {
+    // OTel multi-value attributes are arrays; render single-element ones.
+    text = value[0];
   }
 
   const normalized = text?.replace(/\s+/g, " ").trim();
@@ -732,21 +749,20 @@ export function formatDisplayPart(
   return truncate(value, maxLength);
 }
 
-/** Deduplicate metadata entries case-insensitively. */
+/** Deduplicate metadata entries case-insensitively. Values are already truncated by `getAttr`. */
 function dedupeMetadata(values: string[]): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
   for (const v of values) {
-    const normalized = truncate(v, SPAN_METADATA_MAX_LENGTH);
-    if (!normalized) {
+    if (!v) {
       continue;
     }
-    const key = normalized.toLowerCase();
+    const key = v.toLowerCase();
     if (seen.has(key)) {
       continue;
     }
     seen.add(key);
-    result.push(normalized);
+    result.push(v);
   }
   return result;
 }

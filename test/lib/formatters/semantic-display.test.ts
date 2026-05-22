@@ -161,6 +161,16 @@ describe("formatSemanticSpanDisplay", () => {
       const result = formatSemanticSpanDisplay(attrs, "fallback");
       expect(result.label).toBe("POST api.anthropic.com:443");
     });
+
+    test("handles numeric status code", () => {
+      const attrs: AttributeSource = {
+        "http.request.method": "GET",
+        "http.response.status_code": 200,
+        "url.full": "https://api.example.com/v1/users",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.metadata).toContain("200");
+    });
   });
 
   describe("Database spans", () => {
@@ -242,6 +252,159 @@ describe("formatSemanticSpanDisplay", () => {
       const result = formatSemanticSpanDisplay(attrs, "fallback");
       expect(result.label).toBe("http handler");
       expect(result.metadata).not.toContain("coldstart");
+    });
+  });
+
+  describe("GraphQL spans", () => {
+    test("renders operation type with name", () => {
+      const attrs: AttributeSource = {
+        "graphql.operation.type": "query",
+        "graphql.operation.name": "GetUser",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.label).toBe("query GetUser");
+    });
+
+    test("falls back to document when no operation name", () => {
+      const attrs: AttributeSource = {
+        "graphql.document": "{ user(id: 1) { name } }",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.label).toBe("{ user(id: 1) { name } }");
+    });
+
+    test("returns null for non-graphql attributes", () => {
+      const result = formatSemanticSpanDisplay({}, "fallback");
+      expect(result.label).toBe("fallback");
+    });
+  });
+
+  describe("RPC spans", () => {
+    test("renders service and method", () => {
+      const attrs: AttributeSource = {
+        "rpc.system.name": "grpc",
+        "rpc.service": "UserService",
+        "rpc.method": "GetUser",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.label).toBe("UserService/GetUser");
+      expect(result.metadata).toContain("grpc");
+    });
+
+    test("shows region and status", () => {
+      const attrs: AttributeSource = {
+        "rpc.system.name": "aws-api",
+        "rpc.service": "S3",
+        "rpc.method": "PutObject",
+        "rpc.response.status_code": "200",
+        "cloud.region": "us-east-1",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.label).toBe("S3/PutObject");
+      expect(result.metadata).toContain("us-east-1");
+      expect(result.metadata).toContain("200");
+    });
+  });
+
+  describe("Messaging spans", () => {
+    test("renders operation with destination", () => {
+      const attrs: AttributeSource = {
+        "messaging.system": "kafka",
+        "messaging.operation.name": "publish",
+        "messaging.destination.name": "user-events",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.label).toBe("publish user-events");
+      expect(result.metadata).toContain("kafka");
+    });
+
+    test("shows batch message count", () => {
+      const attrs: AttributeSource = {
+        "messaging.system": "rabbitmq",
+        "messaging.operation.name": "receive",
+        "messaging.destination.name": "orders",
+        "messaging.batch.message_count": "50",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.metadata).toContain("messages:50");
+    });
+  });
+
+  describe("Object store spans", () => {
+    test("renders bucket and key", () => {
+      const attrs: AttributeSource = {
+        "aws.s3.bucket": "my-bucket",
+        "aws.s3.key": "uploads/photo.jpg",
+        "rpc.method": "PutObject",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.label).toBe("PutObject my-bucket/uploads/photo.jpg");
+    });
+
+    test("renders bucket alone", () => {
+      const attrs: AttributeSource = {
+        "aws.s3.bucket": "my-bucket",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.label).toBe("my-bucket");
+    });
+  });
+
+  describe("CloudEvents spans", () => {
+    test("renders event type with subject", () => {
+      const attrs: AttributeSource = {
+        "cloudevents.event_type": "com.example.order.created",
+        "cloudevents.event_subject": "order-123",
+        "cloudevents.event_spec_version": "1.0",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.label).toBe("com.example.order.created order-123");
+      expect(result.metadata).toContain("cloudevents:1.0");
+    });
+  });
+
+  describe("CICD spans", () => {
+    test("renders pipeline action with name", () => {
+      const attrs: AttributeSource = {
+        "cicd.pipeline.action.name": "build",
+        "cicd.pipeline.name": "main-ci",
+        "cicd.pipeline.result": "success",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.label).toBe("build main-ci");
+      expect(result.metadata).toContain("success");
+    });
+
+    test("renders task name as fallback", () => {
+      const attrs: AttributeSource = {
+        "cicd.pipeline.task.name": "run-tests",
+        "cicd.pipeline.task.run.result": "failed",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.label).toBe("run-tests");
+      expect(result.metadata).toContain("failed");
+    });
+  });
+
+  describe("Feature flag spans", () => {
+    test("renders flag key with variant", () => {
+      const attrs: AttributeSource = {
+        "feature_flag.key": "new-checkout",
+        "feature_flag.result.variant": "enabled",
+        "feature_flag.provider.name": "launchdarkly",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.label).toBe("new-checkout enabled");
+      expect(result.metadata).toContain("launchdarkly");
+    });
+
+    test("renders flag key with value when no variant", () => {
+      const attrs: AttributeSource = {
+        "feature_flag.key": "rate-limit",
+        "feature_flag.result.value": "100",
+      };
+      const result = formatSemanticSpanDisplay(attrs, "fallback");
+      expect(result.label).toBe("rate-limit 100");
     });
   });
 
@@ -390,5 +553,17 @@ describe("formatDisplayPart", () => {
 
   test("collapses whitespace", () => {
     expect(formatDisplayPart("hello  \n  world", 64)).toBe("hello world");
+  });
+
+  test("renders single-element string arrays", () => {
+    expect(formatDisplayPart(["postgresql"], 64)).toBe("postgresql");
+  });
+
+  test("ignores multi-element arrays", () => {
+    expect(formatDisplayPart(["a", "b"], 64)).toBeUndefined();
+  });
+
+  test("ignores arrays with non-string elements", () => {
+    expect(formatDisplayPart([42], 64)).toBeUndefined();
   });
 });
