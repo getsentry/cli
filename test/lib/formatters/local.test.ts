@@ -207,6 +207,136 @@ describe("formatTransactionItem", () => {
     const result = stripAnsi(formatTransactionItem(event, browserHeader));
     expect(result).toContain("Transaction");
   });
+
+  describe("semantic display from OTel attributes", () => {
+    const serverHeader = { sdk: { name: "sentry.python" } };
+
+    test("renders GenAI operation with model from trace data", () => {
+      const event = {
+        timestamp: 1_700_000_002,
+        start_timestamp: 1_700_000_000,
+        transaction: "process_user_request",
+        contexts: {
+          trace: {
+            op: "ai.pipeline",
+            data: {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.request.model": "claude-4-sonnet",
+              "gen_ai.provider.name": "anthropic",
+            },
+          },
+        },
+        spans: [{}, {}, {}, {}, {}],
+      };
+      const result = stripAnsi(formatTransactionItem(event, serverHeader));
+      expect(result).toContain("[gen_ai]");
+      expect(result).toContain("chat anthropic/claude-4-sonnet");
+      expect(result).toContain("[2000ms]");
+      expect(result).toContain("[5 spans]");
+    });
+
+    test("renders MCP tool call from trace data", () => {
+      const event = {
+        timestamp: 1_700_000_001,
+        start_timestamp: 1_700_000_000,
+        transaction: "mcp-request",
+        contexts: {
+          trace: {
+            op: "http.client",
+            data: {
+              "mcp.method.name": "tools/call",
+              "gen_ai.tool.name": "search_files",
+            },
+          },
+        },
+      };
+      const result = stripAnsi(formatTransactionItem(event, serverHeader));
+      expect(result).toContain("[mcp]");
+      expect(result).toContain("tools/call search_files");
+    });
+
+    test("renders HTTP with server address from OTel attributes", () => {
+      const event = {
+        timestamp: 1_700_000_002,
+        start_timestamp: 1_700_000_000,
+        transaction: "POST",
+        contexts: {
+          trace: {
+            op: "http.client",
+            data: {
+              "http.request.method": "POST",
+              "server.address": "api.anthropic.com",
+              "http.response.status_code": "200",
+            },
+          },
+        },
+      };
+      const result = stripAnsi(formatTransactionItem(event, serverHeader));
+      expect(result).toContain("[http.client]");
+      expect(result).toContain("POST api.anthropic.com");
+      expect(result).toContain("[200]");
+    });
+
+    test("renders database query from OTel attributes", () => {
+      const event = {
+        timestamp: 1_700_000_001,
+        start_timestamp: 1_700_000_000,
+        transaction: "db-query",
+        contexts: {
+          trace: {
+            op: "db",
+            data: {
+              "db.system.name": "postgresql",
+              "db.query.summary": "SELECT users",
+            },
+          },
+        },
+      };
+      const result = stripAnsi(formatTransactionItem(event, serverHeader));
+      expect(result).toContain("[db]");
+      expect(result).toContain("SELECT users");
+      expect(result).toContain("[postgresql]");
+    });
+
+    test("falls back to transaction name when no semantic attributes", () => {
+      const event = {
+        timestamp: 1_700_000_001,
+        start_timestamp: 1_700_000_000,
+        transaction: "GET /api/users",
+        contexts: {
+          trace: {
+            op: "http.server",
+            data: {},
+          },
+        },
+      };
+      const result = stripAnsi(formatTransactionItem(event, serverHeader));
+      expect(result).toContain("[http.server]");
+      expect(result).toContain("GET /api/users");
+    });
+
+    test("renders GenAI error with error type metadata", () => {
+      const event = {
+        timestamp: 1_700_000_001,
+        start_timestamp: 1_700_000_000,
+        transaction: "ai-chat",
+        contexts: {
+          trace: {
+            op: "ai.pipeline",
+            data: {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.request.model": "gpt-4o",
+              "error.type": "RateLimitError",
+            },
+          },
+        },
+      };
+      const result = stripAnsi(formatTransactionItem(event, serverHeader));
+      expect(result).toContain("[gen_ai]");
+      expect(result).toContain("chat gpt-4o");
+      expect(result).toContain("[RateLimitError]");
+    });
+  });
 });
 
 describe("formatSingleLog", () => {

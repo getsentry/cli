@@ -2,6 +2,11 @@
 
 import { blue, bold, cyan, green, muted, red, yellow } from "./colors.js";
 import { stripAnsi } from "./plain-detect.js";
+import {
+  formatSemanticSpanDisplay,
+  inferSemanticOp,
+  mergeTransactionAttributes,
+} from "./semantic-display.js";
 
 /**
  * Strip ANSI escapes, collapse newlines, and remove C0/C1 control characters
@@ -179,7 +184,13 @@ export function formatErrorItem(
 /**
  * Format a transaction event item into a colored one-liner.
  *
- * Output: `HH:MM:SS [TRACE]   [BROWSER] [http.client] GET /api/users [245ms] [3 spans]`
+ * When OTel semantic attributes are present (e.g. `gen_ai.*`, `mcp.*`,
+ * `db.*`), the label is derived from those attributes for richer output.
+ * Falls back to the raw transaction name + trace.op otherwise.
+ *
+ * Output examples:
+ * - `HH:MM:SS [TRACE]   [BROWSER] [http.client] GET /api/users [245ms] [3 spans]`
+ * - `HH:MM:SS [TRACE]   [SERVER]  [gen_ai] chat anthropic/claude-4-sonnet [1.2s] [5 spans]`
  */
 export function formatTransactionItem(
   event: Record<string, unknown>,
@@ -193,9 +204,21 @@ export function formatTransactionItem(
     typeof event.transaction === "string"
       ? event.transaction
       : (trace?.description ?? "Transaction");
-  let msg = sanitize(txnName);
 
-  const op = trace?.op;
+  // Try semantic display from OTel attributes first
+  const attrs = mergeTransactionAttributes(event);
+  const semantic = formatSemanticSpanDisplay(attrs, sanitize(txnName));
+
+  let msg = sanitize(semantic.label);
+
+  // Append semantic metadata (e.g. model name, status code, error type)
+  if (semantic.metadata.length > 0) {
+    msg += ` ${semantic.metadata.map((m) => muted(`[${sanitize(m)}]`)).join(" ")}`;
+  }
+
+  // Show op tag — prefer semantic category if detected
+  const semanticOp = inferSemanticOp(attrs);
+  const op = semanticOp ?? trace?.op;
   if (op && op !== "default" && op !== "unknown") {
     msg = `[${sanitize(op)}] ${msg}`;
   }
