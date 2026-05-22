@@ -81,13 +81,14 @@ jobs:
               ]}'
             else
               # main, release/**, workflow_call: full cross-platform matrix.
-              # All targets cross-compiled from ubuntu-latest via fossilize.
+              # macOS targets build natively for V8 code cache (~15% faster startup).
+              # Other targets cross-compile from ubuntu-latest via fossilize.
               echo '{"include":[
-                {"target":"darwin-arm64",  "os":"ubuntu-latest", "can-test":false},
+                {"target":"darwin-arm64",  "os":"macos-latest",  "can-test":true},
+                {"target":"darwin-x64",    "os":"macos-13",      "can-test":false},
                 {"target":"linux-x64",     "os":"ubuntu-latest", "can-test":true},
-                {"target":"windows-x64",   "os":"ubuntu-latest", "can-test":false},
-                {"target":"darwin-x64",    "os":"ubuntu-latest", "can-test":false},
-                {"target":"linux-arm64",   "os":"ubuntu-latest", "can-test":false}
+                {"target":"linux-arm64",   "os":"ubuntu-latest", "can-test":false},
+                {"target":"windows-x64",   "os":"ubuntu-latest", "can-test":false}
               ]}'
             fi
             echo 'MATRIX_EOF'
@@ -261,12 +262,25 @@ jobs:
         env:
           APPLE_CERT_DATA: ${{ secrets.APPLE_CERT_DATA }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        shell: bash
         run: |
-          curl -L 'https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz' -o 'rcodesign.tar.gz'
-          echo 'dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002 rcodesign.tar.gz' | sha256sum -c
+          # Install rcodesign (platform-aware binary + checksum tool)
+          if [[ "$RUNNER_OS" == "macOS" && "$RUNNER_ARCH" == "ARM64" ]]; then
+            RCODESIGN_ARCHIVE="apple-codesign-0.29.0-aarch64-apple-darwin.tar.gz"
+            RCODESIGN_SHA256="d1a532150adaf90048260d76359261aa716abafc45c53c5dc18845029184334a"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            RCODESIGN_ARCHIVE="apple-codesign-0.29.0-x86_64-apple-darwin.tar.gz"
+            RCODESIGN_SHA256="14ef11bedd51a8d95eafd767939ae96d5900e5a61511bef75bb21db6e7c74140"
+          else
+            RCODESIGN_ARCHIVE="apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz"
+            RCODESIGN_SHA256="dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002"
+          fi
+          curl -L "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/${RCODESIGN_ARCHIVE}" -o 'rcodesign.tar.gz'
+          echo "${RCODESIGN_SHA256}  rcodesign.tar.gz" | shasum -a 256 -c
           tar -xzf rcodesign.tar.gz --strip-components=1
           mv rcodesign /usr/local/bin/rcodesign
           rm rcodesign.tar.gz
+          # Decode Apple signing credentials
           if [ -n "$APPLE_CERT_DATA" ]; then
             echo "$APPLE_CERT_DATA" | base64 --decode > /tmp/certs.p12
             echo 'APPLE_CERT_PATH=/tmp/certs.p12' >> $GITHUB_ENV
