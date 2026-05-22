@@ -191,7 +191,9 @@ describe("formatSemanticSpanDisplay", () => {
         "db.query.text": "SELECT * FROM users WHERE id = 42 AND name = 'Alice'",
       };
       const result = formatSemanticSpanDisplay(attrs, "fallback");
-      expect(result.label).toBe("SELECT * FROM users WHERE id = ? AND name = ?");
+      expect(result.label).toBe(
+        "SELECT * FROM users WHERE id = ? AND name = ?"
+      );
     });
   });
 
@@ -319,7 +321,9 @@ describe("inferSemanticOp", () => {
   });
 
   test("returns process for process attributes", () => {
-    expect(inferSemanticOp({ "process.executable.name": "git" })).toBe("process");
+    expect(inferSemanticOp({ "process.executable.name": "git" })).toBe(
+      "process"
+    );
   });
 
   test("returns rpc for RPC attributes", () => {
@@ -381,7 +385,7 @@ describe("formatDisplayPart", () => {
   test("truncates long values", () => {
     const long = "a".repeat(100);
     const result = formatDisplayPart(long, 20);
-    expect(result).toBe("a".repeat(17) + "...");
+    expect(result).toBe(`${"a".repeat(17)}...`);
   });
 
   test("collapses whitespace", () => {

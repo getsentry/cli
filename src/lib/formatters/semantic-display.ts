@@ -11,22 +11,25 @@
  */
 
 /** Display result from semantic rendering. */
-export interface SemanticSpanDisplay {
+export type SemanticSpanDisplay = {
   /** Primary label for the span/transaction. */
   label: string;
   /** Additional metadata tokens shown after the label. */
   metadata: string[];
-}
+};
 
 /** A function that attempts to render semantic display for an item. */
 type SpanDisplayFormatter = (
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ) => SemanticSpanDisplay | null;
 
 const SPAN_LABEL_MAX_LENGTH = 120;
 const SPAN_METADATA_MAX_LENGTH = 64;
 const SPAN_ATTRIBUTE_MAX_LENGTH = 2048;
+
+/** Matches a URL scheme prefix like `https://` or `ftp://`. */
+const URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 
 /**
  * Ordered list of semantic formatters. The first match wins.
@@ -60,17 +63,17 @@ export type AttributeSource = Record<string, unknown>;
 function getAttr(
   attrs: AttributeSource,
   keys: string[],
-  maxLength = SPAN_METADATA_MAX_LENGTH,
+  maxLength = SPAN_METADATA_MAX_LENGTH
 ): string | undefined {
   for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(attrs, key)) {
+    if (Object.hasOwn(attrs, key)) {
       const value = formatDisplayPart(attrs[key], maxLength);
       if (value) {
         return value;
       }
     }
   }
-  return undefined;
+  return;
 }
 
 /**
@@ -82,7 +85,7 @@ function getAttr(
  */
 export function formatSemanticSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay {
   for (const formatter of SEMANTIC_SPAN_FORMATTERS) {
     const result = formatter(attrs, fallbackLabel);
@@ -101,16 +104,42 @@ export function formatSemanticSpanDisplay(
  * Returns undefined if no semantic category is detected (falls back to trace.op).
  */
 export function inferSemanticOp(attrs: AttributeSource): string | undefined {
-  if (getAttr(attrs, ["mcp.method.name"])) return "mcp";
-  if (getAttr(attrs, ["gen_ai.operation.name", "gen_ai.tool.name", "gen_ai.agent.name"])) return "gen_ai";
-  if (getAttr(attrs, ["http.request.method", "http.response.status_code"])) return undefined; // keep original op
-  if (getAttr(attrs, ["db.system.name", "db.query.summary", "db.operation.name"])) return "db";
-  if (getAttr(attrs, ["graphql.operation.type"])) return "graphql";
-  if (getAttr(attrs, ["rpc.system.name", "rpc.service"])) return "rpc";
-  if (getAttr(attrs, ["messaging.system", "messaging.operation.name"])) return "messaging";
-  if (getAttr(attrs, ["faas.trigger", "faas.invoked_name"])) return "faas";
-  if (getAttr(attrs, ["process.executable.name", "process.command"])) return "process";
-  return undefined;
+  if (getAttr(attrs, ["mcp.method.name"])) {
+    return "mcp";
+  }
+  if (
+    getAttr(attrs, [
+      "gen_ai.operation.name",
+      "gen_ai.tool.name",
+      "gen_ai.agent.name",
+    ])
+  ) {
+    return "gen_ai";
+  }
+  if (getAttr(attrs, ["http.request.method", "http.response.status_code"])) {
+    return; // keep original op
+  }
+  if (
+    getAttr(attrs, ["db.system.name", "db.query.summary", "db.operation.name"])
+  ) {
+    return "db";
+  }
+  if (getAttr(attrs, ["graphql.operation.type"])) {
+    return "graphql";
+  }
+  if (getAttr(attrs, ["rpc.system.name", "rpc.service"])) {
+    return "rpc";
+  }
+  if (getAttr(attrs, ["messaging.system", "messaging.operation.name"])) {
+    return "messaging";
+  }
+  if (getAttr(attrs, ["faas.trigger", "faas.invoked_name"])) {
+    return "faas";
+  }
+  if (getAttr(attrs, ["process.executable.name", "process.command"])) {
+    return "process";
+  }
+  return;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +148,7 @@ export function inferSemanticOp(attrs: AttributeSource): string | undefined {
 
 function formatGenAiSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const operation = getAttr(attrs, ["gen_ai.operation.name"]);
   const toolName = getAttr(attrs, ["gen_ai.tool.name"]);
@@ -128,7 +157,7 @@ function formatGenAiSpanDisplay(
   const dataSourceId = getAttr(attrs, ["gen_ai.data_source.id"]);
   const errorType = getErrorType(attrs);
 
-  if (!operation && !toolName && !agentName && !model && !dataSourceId) {
+  if (!(operation || toolName || agentName || model || dataSourceId)) {
     return null;
   }
 
@@ -148,17 +177,21 @@ function formatGenAiSpanDisplay(
 
 function formatMcpSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const method = getAttr(attrs, ["mcp.method.name"]);
-  const resourceUri = getAttr(attrs, ["mcp.resource.uri"], SPAN_ATTRIBUTE_MAX_LENGTH);
+  const resourceUri = getAttr(
+    attrs,
+    ["mcp.resource.uri"],
+    SPAN_ATTRIBUTE_MAX_LENGTH
+  );
   const target =
     getAttr(attrs, ["gen_ai.tool.name", "gen_ai.prompt.name"]) ??
     formatResourceTarget(resourceUri);
   const statusCode = getAttr(attrs, ["rpc.response.status_code"]);
   const errorType = getErrorType(attrs);
 
-  if (!method && !resourceUri) {
+  if (!(method || resourceUri)) {
     return null;
   }
 
@@ -170,7 +203,7 @@ function formatMcpSpanDisplay(
 
 function formatHttpSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const method = getAttr(attrs, ["http.request.method"])?.toUpperCase();
   const statusCode = getAttr(attrs, ["http.response.status_code"]);
@@ -179,7 +212,7 @@ function formatHttpSpanDisplay(
   });
   const errorType = getErrorType(attrs);
 
-  if (!method && !target && !statusCode) {
+  if (!(method || target || statusCode)) {
     return null;
   }
 
@@ -193,7 +226,7 @@ function formatHttpSpanDisplay(
 
 function formatDatabaseSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const dbSystem = getAttr(attrs, ["db.system.name"]);
   const querySummary = getAttr(attrs, ["db.query.summary"]);
@@ -202,9 +235,22 @@ function formatDatabaseSpanDisplay(
     getAttr(attrs, ["db.collection.name", "db.namespace"]) ??
     getServerTarget(attrs);
   const storedProcedure = getAttr(attrs, ["db.stored_procedure.name"]);
-  const queryText = getAttr(attrs, ["db.query.text"], SPAN_ATTRIBUTE_MAX_LENGTH);
+  const queryText = getAttr(
+    attrs,
+    ["db.query.text"],
+    SPAN_ATTRIBUTE_MAX_LENGTH
+  );
 
-  if (!dbSystem && !querySummary && !operationName && !target && !storedProcedure && !queryText) {
+  if (
+    !(
+      dbSystem ||
+      querySummary ||
+      operationName ||
+      target ||
+      storedProcedure ||
+      queryText
+    )
+  ) {
     return null;
   }
 
@@ -225,13 +271,17 @@ function formatDatabaseSpanDisplay(
 
 function formatGraphqlSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const operationType = getAttr(attrs, ["graphql.operation.type"]);
   const operationName = getAttr(attrs, ["graphql.operation.name"]);
-  const document = getAttr(attrs, ["graphql.document"], SPAN_ATTRIBUTE_MAX_LENGTH);
+  const document = getAttr(
+    attrs,
+    ["graphql.document"],
+    SPAN_ATTRIBUTE_MAX_LENGTH
+  );
 
-  if (!operationType && !operationName && !document) {
+  if (!(operationType || operationName || document)) {
     return null;
   }
 
@@ -246,7 +296,7 @@ function formatGraphqlSpanDisplay(
 
 function formatRpcSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const rpcSystem = getAttr(attrs, ["rpc.system.name"]);
   const service = getAttr(attrs, ["rpc.service"]);
@@ -255,11 +305,12 @@ function formatRpcSpanDisplay(
   const region = getAttr(attrs, ["cloud.region"]);
   const errorType = getErrorType(attrs);
 
-  if (!rpcSystem && !service && !method && !statusCode) {
+  if (!(rpcSystem || service || method || statusCode)) {
     return null;
   }
 
-  const methodLabel = service && method ? `${service}/${method}` : method || service;
+  const methodLabel =
+    service && method ? `${service}/${method}` : method || service;
 
   return {
     label: methodLabel || fallbackLabel,
@@ -269,10 +320,13 @@ function formatRpcSpanDisplay(
 
 function formatMessagingSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const messagingSystem = getAttr(attrs, ["messaging.system"]);
-  const operation = getAttr(attrs, ["messaging.operation.name", "messaging.operation.type"]);
+  const operation = getAttr(attrs, [
+    "messaging.operation.name",
+    "messaging.operation.type",
+  ]);
   const destination = getAttr(attrs, [
     "messaging.destination.template",
     "messaging.destination.name",
@@ -282,7 +336,7 @@ function formatMessagingSpanDisplay(
   const messageCount = getAttr(attrs, ["messaging.batch.message_count"]);
   const errorType = getErrorType(attrs);
 
-  if (!messagingSystem && !operation && !destination) {
+  if (!(messagingSystem || operation || destination)) {
     return null;
   }
 
@@ -299,7 +353,7 @@ function formatMessagingSpanDisplay(
 
 function formatFaasSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const trigger = getAttr(attrs, ["faas.trigger"]);
   const name = getAttr(attrs, ["faas.invoked_name", "faas.name"]);
@@ -307,12 +361,26 @@ function formatFaasSpanDisplay(
   const region = getAttr(attrs, ["faas.invoked_region"]);
   const coldStart = getAttr(attrs, ["faas.coldstart"]);
   const documentOperation = getAttr(attrs, ["faas.document.operation"]);
-  const documentTarget = getAttr(attrs, ["faas.document.collection", "faas.document.name"]);
+  const documentTarget = getAttr(attrs, [
+    "faas.document.collection",
+    "faas.document.name",
+  ]);
   const cron = getAttr(attrs, ["faas.cron"]);
   const errorType = getErrorType(attrs);
   const isColdStart = coldStart === "true";
 
-  if (!trigger && !name && !provider && !region && !isColdStart && !documentOperation && !documentTarget && !cron) {
+  if (
+    !(
+      trigger ||
+      name ||
+      provider ||
+      region ||
+      isColdStart ||
+      documentOperation ||
+      documentTarget ||
+      cron
+    )
+  ) {
     return null;
   }
 
@@ -334,13 +402,16 @@ function formatFaasSpanDisplay(
 
 function formatProcessSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
-  const command = getAttr(attrs, ["process.executable.name", "process.command"]);
+  const command = getAttr(attrs, [
+    "process.executable.name",
+    "process.command",
+  ]);
   const exitCode = getAttr(attrs, ["process.exit.code"]);
   const errorType = getErrorType(attrs);
 
-  if (!command && !exitCode) {
+  if (!(command || exitCode)) {
     return null;
   }
 
@@ -355,11 +426,15 @@ function formatProcessSpanDisplay(
 
 function formatObjectStoreSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const bucket = getAttr(attrs, ["aws.s3.bucket"]);
   const key = getAttr(attrs, ["aws.s3.key"], SPAN_ATTRIBUTE_MAX_LENGTH);
-  const copySource = getAttr(attrs, ["aws.s3.copy_source"], SPAN_ATTRIBUTE_MAX_LENGTH);
+  const copySource = getAttr(
+    attrs,
+    ["aws.s3.copy_source"],
+    SPAN_ATTRIBUTE_MAX_LENGTH
+  );
   const operation = getAttr(attrs, ["rpc.method"]);
   const region = getAttr(attrs, ["cloud.region"]);
   const errorType = getErrorType(attrs);
@@ -367,7 +442,7 @@ function formatObjectStoreSpanDisplay(
     formatObjectStoreTarget(bucket, key) ??
     truncate(copySource, SPAN_LABEL_MAX_LENGTH);
 
-  if (!bucket && !key && !copySource) {
+  if (!(bucket || key || copySource)) {
     return null;
   }
 
@@ -379,27 +454,34 @@ function formatObjectStoreSpanDisplay(
 
 function formatCloudEventsSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const eventType = getAttr(attrs, ["cloudevents.event_type"]);
   const eventSubject = getAttr(attrs, ["cloudevents.event_subject"]);
-  const eventSource = getAttr(attrs, ["cloudevents.event_source"], SPAN_ATTRIBUTE_MAX_LENGTH);
+  const eventSource = getAttr(
+    attrs,
+    ["cloudevents.event_source"],
+    SPAN_ATTRIBUTE_MAX_LENGTH
+  );
   const specVersion = getAttr(attrs, ["cloudevents.event_spec_version"]);
 
-  if (!eventType && !eventSubject && !eventSource && !specVersion) {
+  if (!(eventType || eventSubject || eventSource || specVersion)) {
     return null;
   }
 
   return {
     label:
-      joinParts([eventType, eventSubject ?? formatResourceTarget(eventSource)]) || fallbackLabel,
+      joinParts([
+        eventType,
+        eventSubject ?? formatResourceTarget(eventSource),
+      ]) || fallbackLabel,
     metadata: specVersion ? [`cloudevents:${specVersion}`] : [],
   };
 }
 
 function formatCicdSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const action = getAttr(attrs, ["cicd.pipeline.action.name"]);
   const pipeline = getAttr(attrs, ["cicd.pipeline.name"]);
@@ -408,7 +490,7 @@ function formatCicdSpanDisplay(
   const taskResult = getAttr(attrs, ["cicd.pipeline.task.run.result"]);
   const errorType = getErrorType(attrs);
 
-  if (!action && !pipeline && !pipelineResult && !taskName && !taskResult) {
+  if (!(action || pipeline || pipelineResult || taskName || taskResult)) {
     return null;
   }
 
@@ -420,7 +502,7 @@ function formatCicdSpanDisplay(
 
 function formatFeatureFlagSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const flagKey = getAttr(attrs, ["feature_flag.key"]);
   const variant = getAttr(attrs, ["feature_flag.result.variant"]);
@@ -429,7 +511,7 @@ function formatFeatureFlagSpanDisplay(
   const reason = getAttr(attrs, ["feature_flag.result.reason"]);
   const errorType = getErrorType(attrs);
 
-  if (!flagKey && !variant && !value && !provider && !reason) {
+  if (!(flagKey || variant || value || provider || reason)) {
     return null;
   }
 
@@ -441,12 +523,16 @@ function formatFeatureFlagSpanDisplay(
 
 function formatExceptionSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const exceptionType = getAttr(attrs, ["exception.type"]);
-  const exceptionMessage = getAttr(attrs, ["exception.message"], SPAN_ATTRIBUTE_MAX_LENGTH);
+  const exceptionMessage = getAttr(
+    attrs,
+    ["exception.message"],
+    SPAN_ATTRIBUTE_MAX_LENGTH
+  );
 
-  if (!exceptionType && !exceptionMessage) {
+  if (!(exceptionType || exceptionMessage)) {
     return null;
   }
 
@@ -457,14 +543,17 @@ function formatExceptionSpanDisplay(
   const metadata =
     fallbackLabel === "unnamed"
       ? []
-      : compactStrings([exceptionType, exceptionType ? undefined : exceptionMessage]);
+      : compactStrings([
+          exceptionType,
+          exceptionType ? undefined : exceptionMessage,
+        ]);
 
   return { label, metadata };
 }
 
 function formatErrorSpanDisplay(
   attrs: AttributeSource,
-  fallbackLabel: string,
+  fallbackLabel: string
 ): SemanticSpanDisplay | null {
   const errorType = getErrorType(attrs);
   if (!errorType) {
@@ -479,34 +568,57 @@ function formatErrorSpanDisplay(
 
 function getGenAiModelIdentifier(attrs: AttributeSource): string | undefined {
   const provider = getAttr(attrs, ["gen_ai.provider.name"]);
-  const model = getAttr(attrs, ["gen_ai.response.model", "gen_ai.request.model"]);
+  const model = getAttr(attrs, [
+    "gen_ai.response.model",
+    "gen_ai.request.model",
+  ]);
 
-  if (!model) return provider;
-  if (!provider || model.includes("/")) return model;
+  if (!model) {
+    return provider;
+  }
+  if (!provider || model.includes("/")) {
+    return model;
+  }
   return `${provider}/${model}`;
 }
 
 function getHttpTarget(
   attrs: AttributeSource,
-  { includeServerTarget = false }: { includeServerTarget?: boolean } = {},
+  { includeServerTarget = false }: { includeServerTarget?: boolean } = {}
 ): string | undefined {
-  const route = getAttr(attrs, ["http.route", "url.template"], SPAN_ATTRIBUTE_MAX_LENGTH);
+  const route = getAttr(
+    attrs,
+    ["http.route", "url.template"],
+    SPAN_ATTRIBUTE_MAX_LENGTH
+  );
   const fullUrl = getAttr(attrs, ["url.full"], SPAN_ATTRIBUTE_MAX_LENGTH);
   const path = getAttr(attrs, ["url.path"], SPAN_ATTRIBUTE_MAX_LENGTH);
   const serverTarget = getServerTarget(attrs);
 
-  if (route) return formatHttpTarget(route);
-  if (fullUrl) return formatHttpTarget(fullUrl);
-  if (path) return formatHttpTarget(path);
-  if (includeServerTarget && serverTarget) return formatHttpTarget(serverTarget);
-  return undefined;
+  if (route) {
+    return formatHttpTarget(route);
+  }
+  if (fullUrl) {
+    return formatHttpTarget(fullUrl);
+  }
+  if (path) {
+    return formatHttpTarget(path);
+  }
+  if (includeServerTarget && serverTarget) {
+    return formatHttpTarget(serverTarget);
+  }
+  return;
 }
 
 function getServerTarget(attrs: AttributeSource): string | undefined {
   const address = getAttr(attrs, ["server.address"]);
   const port = getAttr(attrs, ["server.port"]);
-  if (!address) return undefined;
-  if (!port || address.includes(":")) return address;
+  if (!address) {
+    return;
+  }
+  if (!port || address.includes(":")) {
+    return address;
+  }
   return `${address}:${port}`;
 }
 
@@ -519,19 +631,25 @@ function formatHttpLabel({
   target?: string;
   fallbackLabel: string;
 }): string {
-  if (method && target) return joinParts([method, target]);
-  if (target) return target;
+  if (method && target) {
+    return joinParts([method, target]);
+  }
+  if (target) {
+    return target;
+  }
 
   const normalized = fallbackLabel.toUpperCase();
   if (method && normalized !== method && fallbackLabel !== "unnamed") {
-    return normalized.startsWith(`${method} `) ? fallbackLabel : joinParts([method, fallbackLabel]);
+    return normalized.startsWith(`${method} `)
+      ? fallbackLabel
+      : joinParts([method, fallbackLabel]);
   }
   return method || fallbackLabel;
 }
 
 function formatHttpTarget(value: string): string {
   const trimmed = value.trim();
-  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+  if (!URL_SCHEME_RE.test(trimmed)) {
     const noFragment = trimmed.split("#")[0] ?? trimmed;
     return noFragment.split("?")[0] ?? noFragment;
   }
@@ -549,21 +667,30 @@ function formatOperationLabel(operation: string, subject?: string): string {
   return subject ? `${operation} ${subject}` : operation;
 }
 
-function formatObjectStoreTarget(bucket?: string, key?: string): string | undefined {
-  if (bucket && key) return truncate(`${bucket}/${key}`, SPAN_LABEL_MAX_LENGTH);
+function formatObjectStoreTarget(
+  bucket?: string,
+  key?: string
+): string | undefined {
+  if (bucket && key) {
+    return truncate(`${bucket}/${key}`, SPAN_LABEL_MAX_LENGTH);
+  }
   return bucket ?? truncate(key, SPAN_LABEL_MAX_LENGTH);
 }
 
 function formatResourceTarget(value?: string): string | undefined {
-  if (!value) return undefined;
+  if (!value) {
+    return;
+  }
   return truncate(value.split("?", 1)[0], SPAN_LABEL_MAX_LENGTH);
 }
 
 function formatDbQueryText(value?: string): string | undefined {
-  if (!value) return undefined;
+  if (!value) {
+    return;
+  }
   return truncate(
     value.replace(/'([^']|'')*'/g, "?").replace(/\b\d+(\.\d+)?\b/g, "?"),
-    SPAN_LABEL_MAX_LENGTH,
+    SPAN_LABEL_MAX_LENGTH
   );
 }
 
@@ -581,17 +708,27 @@ function getErrorType(attrs: AttributeSource): string | undefined {
 
 function truncate(value: unknown, maxLength: number): string | undefined {
   let text: string | undefined;
-  if (typeof value === "string") text = value;
-  else if (typeof value === "number" || typeof value === "boolean") text = String(value);
+  if (typeof value === "string") {
+    text = value;
+  } else if (typeof value === "number" || typeof value === "boolean") {
+    text = String(value);
+  }
 
   const normalized = text?.replace(/\s+/g, " ").trim();
-  if (!normalized) return undefined;
-  if (normalized.length <= maxLength) return normalized;
+  if (!normalized) {
+    return;
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
   return `${normalized.slice(0, maxLength - 3)}...`;
 }
 
 /** Format a display part, same as truncate but exported for tests. */
-export function formatDisplayPart(value: unknown, maxLength: number): string | undefined {
+export function formatDisplayPart(
+  value: unknown,
+  maxLength: number
+): string | undefined {
   return truncate(value, maxLength);
 }
 
@@ -601,9 +738,13 @@ function dedupeMetadata(values: string[]): string[] {
   const seen = new Set<string>();
   for (const v of values) {
     const normalized = truncate(v, SPAN_METADATA_MAX_LENGTH);
-    if (!normalized) continue;
+    if (!normalized) {
+      continue;
+    }
     const key = normalized.toLowerCase();
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      continue;
+    }
     seen.add(key);
     result.push(normalized);
   }
@@ -614,7 +755,9 @@ function dedupeMetadata(values: string[]): string[] {
  * Merge attribute sources from a raw envelope transaction item.
  * Transaction-level attributes live in `contexts.trace.data`.
  */
-export function mergeTransactionAttributes(event: Record<string, unknown>): AttributeSource {
+export function mergeTransactionAttributes(
+  event: Record<string, unknown>
+): AttributeSource {
   const contexts = event.contexts as Record<string, unknown> | undefined;
   const trace = contexts?.trace as Record<string, unknown> | undefined;
   const data = trace?.data as Record<string, unknown> | undefined;
