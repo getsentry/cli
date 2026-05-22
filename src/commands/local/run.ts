@@ -9,6 +9,7 @@
  * automatically in the background and shut down when the child exits.
  */
 
+import { type ChildProcess, spawn } from "node:child_process";
 import type { Server } from "node:http";
 import { createSpotlightBuffer } from "@spotlightjs/spotlight/sdk";
 import type { SentryContext } from "../../context.js";
@@ -131,18 +132,20 @@ export const runCommand = buildCommand({
     logger.info(`Starting: ${bold(args.join(" "))}`);
     logger.info(`SENTRY_SPOTLIGHT=${spotlightUrl}`);
 
-    let child: ReturnType<typeof Bun.spawn>;
+    let child: ChildProcess;
     try {
-      child = Bun.spawn(args, {
+      const [cmd = "", ...cmdArgs] = args;
+      child = spawn(cmd, cmdArgs, {
         env: {
           ...process.env,
           SENTRY_SPOTLIGHT: spotlightUrl,
           NEXT_PUBLIC_SENTRY_SPOTLIGHT: spotlightUrl,
           SENTRY_TRACES_SAMPLE_RATE: "1",
         },
-        stdout: "inherit",
-        stderr: "inherit",
-        stdin: "inherit",
+        stdio: "inherit",
+      });
+      child.on("error", (err) => {
+        logger.debug(`Child process error: ${err.message}`);
       });
     } catch (err) {
       if (bgServer) {
@@ -161,11 +164,18 @@ export const runCommand = buildCommand({
     process.once("SIGINT", () => forwardSignal("SIGINT"));
     process.once("SIGTERM", () => forwardSignal("SIGTERM"));
 
-    const exitCode = await child.exited;
-
-    if (bgServer) {
-      logger.info("Stopping background server...");
-      await shutdownServer(bgServer);
+    let exitCode: number;
+    try {
+      exitCode = await new Promise<number>((resolve, reject) => {
+        child.on("close", (code) => resolve(code ?? 1));
+        // If spawn itself fails (e.g. ENOENT), 'close' may never fire.
+        child.on("error", (err) => reject(err));
+      });
+    } finally {
+      if (bgServer) {
+        logger.info("Stopping background server...");
+        await shutdownServer(bgServer);
+      }
     }
 
     if (exitCode !== 0) {

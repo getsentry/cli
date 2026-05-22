@@ -10,7 +10,10 @@
     "./lint-rules/no-stderr-write-in-commands.grit"
   ],
   "files": {
-    "includes": ["!docs", "!test/init-eval/templates"]
+    // custom-ca.ts excluded: Biome's type analysis hits the 200k type limit
+    // on the node:tls module graph — an internal Biome bug that surfaces
+    // non-deterministically as error vs warning. See biome issue tracker.
+    "includes": ["!docs", "!test/init-eval/templates", "!!src/lib/custom-ca.ts"]
   },
   "javascript": {
     "globals": ["Bun"]

@@ -1,5 +1,0 @@
-[test]
-preload = ["./test/preload.ts"]
-
-[test.reporter]
-junit = "test-results.junit.xml"

@@ -12,6 +12,7 @@
  */
 
 import type { Server } from "node:http";
+import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import {
   createSpotlightBuffer,
@@ -311,7 +312,7 @@ export function tryListen(
           logger.warn(
             `Port ${port} is in use, retrying in ${PORT_RETRY_DELAY_MS / 1000}s (attempt ${attempts}/${MAX_PORT_RETRIES})...`
           );
-          await Bun.sleep(PORT_RETRY_DELAY_MS);
+          await sleep(PORT_RETRY_DELAY_MS);
           resolve(attempt());
           return;
         }
