@@ -32,7 +32,7 @@
     "consola": "^3.4.2",
     "esbuild": "^0.25.0",
     "fast-check": "^4.5.3",
-    "fossilize": "^0.5.0",
+    "fossilize": "^0.6.0",
     "hono": "^4.12.15",
     "http-cache-semantics": "^4.2.0",
     "ignore": "^7.0.5",
