@@ -489,6 +489,17 @@ describe("inferSemanticOp", () => {
     );
   });
 
+  test("returns s3 for S3 attributes (not rpc)", () => {
+    // S3 spans carry rpc.method but should be tagged as s3
+    expect(
+      inferSemanticOp({
+        "aws.s3.bucket": "my-bucket",
+        "rpc.method": "PutObject",
+        "rpc.service": "S3",
+      })
+    ).toBe("s3");
+  });
+
   test("returns rpc for RPC attributes", () => {
     expect(inferSemanticOp({ "rpc.system.name": "grpc" })).toBe("rpc");
   });

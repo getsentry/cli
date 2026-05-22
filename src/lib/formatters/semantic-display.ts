@@ -108,9 +108,11 @@ export function formatSemanticSpanDisplay(
  * Returns undefined if no semantic category is detected (falls back to trace.op).
  *
  * Only domains with a natural one-word op category are included.
- * ObjectStore, CloudEvents, CICD, FeatureFlag, Exception, and Error are
- * intentionally omitted — they should preserve the original trace.op.
+ * CloudEvents, CICD, FeatureFlag, Exception, and Error are intentionally
+ * omitted — they should preserve the original trace.op.
  * HTTP also returns undefined to keep the SDK-assigned op (e.g. `http.client`).
+ * S3 is checked before RPC since S3 spans carry `rpc.method` but should
+ * be tagged as `s3` rather than `rpc`.
  */
 export function inferSemanticOp(attrs: AttributeSource): string | undefined {
   if (getAttr(attrs, ["mcp.method.name"])) {
@@ -126,7 +128,23 @@ export function inferSemanticOp(attrs: AttributeSource): string | undefined {
     return "gen_ai";
   }
   if (getAttr(attrs, ["http.request.method", "http.response.status_code"])) {
-    return; // keep original op
+    return;
+  }
+  if (
+    getAttr(attrs, ["db.system.name", "db.query.summary", "db.operation.name"])
+  ) {
+    return "db";
+  }
+  if (getAttr(attrs, ["graphql.operation.type"])) {
+    return "graphql";
+  }
+  // Check S3/object store before RPC — S3 spans carry rpc.method but should
+  // be displayed as object store operations, not generic RPC.
+  if (getAttr(attrs, ["aws.s3.bucket", "aws.s3.key"])) {
+    return "s3";
+  }
+  if (getAttr(attrs, ["rpc.system.name", "rpc.service"])) {
+    return "rpc";
   }
   if (
     getAttr(attrs, ["db.system.name", "db.query.summary", "db.operation.name"])
