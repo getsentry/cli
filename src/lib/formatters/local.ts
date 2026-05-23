@@ -33,7 +33,7 @@ export const FORMAT_VALUES = ["human", "json"] as const;
 export type FormatValue = (typeof FORMAT_VALUES)[number];
 
 /** Envelope item categories that can be filtered via `--filter`. */
-export const FILTER_VALUES = ["error", "transaction", "log"] as const;
+export const FILTER_VALUES = ["error", "transaction", "log", "ai"] as const;
 export type FilterValue = (typeof FILTER_VALUES)[number];
 
 /** Format a local timestamp as HH:MM:SS from a Sentry timestamp. */
@@ -339,20 +339,33 @@ export function resolveUnparseableLabel(container: {
   return ct === "application/x-sentry-envelope" ? "envelope" : ct;
 }
 
-/** Format an error item as a JSON object. */
+/** Format an error item as a JSON object, including the best stack frame. */
 function formatErrorJson(
   payload: Record<string, unknown>,
   header: Record<string, unknown>
 ): string {
   const exception = payload.exception as
-    | { values?: { type?: string; value?: string }[] }
+    | {
+        values?: {
+          type?: string;
+          value?: string;
+          stacktrace?: { frames?: StackFrame[] };
+        }[];
+      }
     | undefined;
   const first = exception?.values?.at(-1);
+  const frame =
+    first?.stacktrace?.frames?.find((f) => f.in_app) ??
+    first?.stacktrace?.frames?.at(-1);
   return JSON.stringify({
     type: "error",
     timestamp: payload.timestamp,
     error_type: first?.type ?? "Error",
     message: first?.value ?? payload.message ?? "Unknown error",
+    filename: frame?.filename,
+    lineno: frame?.lineno,
+    colno: frame?.colno,
+    function: frame?.function,
     source: inferSourceName(header),
   });
 }
@@ -427,6 +440,12 @@ function formatLogJson(
  * Produces a compact JSON object per item with `type`, `timestamp`,
  * and item-specific fields. Designed for machine consumption by AI
  * coding agents and automation tools.
+ *
+ * Unlike the human formatters, JSON output does NOT call `sanitize()` on
+ * envelope data. This is intentional: `JSON.stringify()` escapes all
+ * control characters to `\uXXXX` notation, making the output safe for
+ * terminal display and downstream JSON parsers. Raw values are preserved
+ * so consumers get the original data without lossy stripping.
  */
 export function formatItemJson(
   itemType: string | undefined,
@@ -485,16 +504,31 @@ export function formatItem(
   return [formatFallbackLine(fallbackLabel)];
 }
 
-/** Check whether an item should be shown given active filters. */
+/**
+ * Check whether an item should be shown given active filters.
+ *
+ * When `payload` is provided and the `ai` filter is active, transactions
+ * are checked for GenAI/MCP OTel attributes.
+ */
 export function isItemIncluded(
   itemType: string | undefined,
-  activeFilters: ReadonlySet<FilterValue>
+  activeFilters: ReadonlySet<FilterValue>,
+  payload?: Record<string, unknown>
 ): boolean {
   if (activeFilters.size === 0) {
     return true;
   }
   const category = itemTypeToFilterCategory(itemType);
-  return category !== undefined && activeFilters.has(category);
+  if (category !== undefined && activeFilters.has(category)) {
+    return true;
+  }
+  // The "ai" filter matches transactions with GenAI or MCP attributes.
+  if (activeFilters.has("ai") && itemType === "transaction" && payload) {
+    const attrs = mergeTransactionAttributes(payload);
+    const op = inferSemanticOp(attrs);
+    return op === "gen_ai" || op === "mcp";
+  }
+  return false;
 }
 
 /**
@@ -521,16 +555,11 @@ export function formatEnvelopeLinesJson(
   const [header, items] = parsed.envelope;
   const lines: string[] = [];
   for (const [itemHeader, itemPayload] of items) {
-    if (!isItemIncluded(itemHeader.type, activeFilters)) {
+    const payload = itemPayload as Record<string, unknown>;
+    if (!isItemIncluded(itemHeader.type, activeFilters, payload)) {
       continue;
     }
-    lines.push(
-      ...formatItemJson(
-        itemHeader.type,
-        itemPayload as Record<string, unknown>,
-        header
-      )
-    );
+    lines.push(...formatItemJson(itemHeader.type, payload, header));
   }
   return lines;
 }
@@ -563,13 +592,14 @@ export function formatEnvelopeLines(
   const [header, items] = parsed.envelope;
   const lines: string[] = [];
   for (const [itemHeader, itemPayload] of items) {
-    if (!isItemIncluded(itemHeader.type, activeFilters)) {
+    const payload = itemPayload as Record<string, unknown>;
+    if (!isItemIncluded(itemHeader.type, activeFilters, payload)) {
       continue;
     }
     lines.push(
       ...formatItem(
         itemHeader.type,
-        itemPayload as Record<string, unknown>,
+        payload,
         header,
         itemHeader.type ?? container.getContentType()
       )

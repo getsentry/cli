@@ -97,7 +97,7 @@ describe("sentry local run", () => {
     }
   });
 
-  test("throws CliError on ENOENT (command not found)", async () => {
+  test("throws on ENOENT (command not found)", async () => {
     const func = (await runCommand.loader()) as unknown as RunFunc;
     const ctx = makeContext();
 
@@ -109,8 +109,10 @@ describe("sentry local run", () => {
       );
       expect.unreachable("should have thrown");
     } catch (err) {
-      // Either CliError from spawn failure or error propagation
-      expect(err).toBeDefined();
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toMatch(
+        /exited with code|Failed to start|ENOENT|spawn/i
+      );
     }
   });
 

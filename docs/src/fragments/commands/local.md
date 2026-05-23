@@ -34,7 +34,7 @@ Env vars injected into the child process:
 |----------|-------|
 | `SENTRY_SPOTLIGHT` | `http://localhost:<port>/stream` |
 | `NEXT_PUBLIC_SENTRY_SPOTLIGHT` | `http://localhost:<port>/stream` |
-| `SENTRY_TRACES_SAMPLE_RATE` | `1` |
+| `SENTRY_TRACES_SAMPLE_RATE` | `1` (unless already set) |
 
 ## Endpoints
 

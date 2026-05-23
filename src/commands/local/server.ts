@@ -590,10 +590,10 @@ function processSSEEvent(
     ];
     const [header, items] = envelope;
     for (const [itemHeader, itemPayload] of items) {
-      if (!isItemIncluded(itemHeader.type, activeFilters)) {
+      const payload = itemPayload as Record<string, unknown>;
+      if (!isItemIncluded(itemHeader.type, activeFilters, payload)) {
         continue;
       }
-      const payload = itemPayload as Record<string, unknown>;
       const lines = useJson
         ? formatItemJson(itemHeader.type, payload, header)
         : formatItem(
@@ -647,7 +647,7 @@ export const serverCommand = buildCommand({
         kind: "parsed",
         parse: parseFilter,
         brief:
-          "Only show items of this type (repeatable: error, transaction, log)",
+          "Only show items of this type (repeatable: error, transaction, log, ai)",
         variadic: true,
         optional: true,
       },
@@ -730,10 +730,23 @@ export const serverCommand = buildCommand({
     );
 
     const listenUrl = `http://${flags.host}:${boundPort}`;
-    logger.info(`Listening on ${bold(listenUrl)}`);
+    logger.info("Sentry Local Dev Server");
+    logger.info(`  Ingest: ${bold(`${listenUrl}/stream`)}`);
+    logger.info(`  Events: ${bold(`${listenUrl}/stream`)} (SSE)`);
+    logger.info("");
+    logger.info(
+      `  Set ${bold("SENTRY_SPOTLIGHT")}=${listenUrl}/stream in your app`
+    );
+    logger.info(
+      `  Or run: ${bold(`sentry local run -p ${boundPort} -- <your-command>`)}`
+    );
     if (activeFilters.size > 0) {
-      logger.info(`Filtering: ${[...activeFilters].join(", ")}`);
+      logger.info(`  Filtering: ${[...activeFilters].join(", ")}`);
     }
+    if (useJson) {
+      logger.info("  Output: JSON (NDJSON)");
+    }
+    logger.info("");
     logger.info("Press Ctrl-C to stop.");
 
     await waitForShutdown(server);

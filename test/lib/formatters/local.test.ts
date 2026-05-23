@@ -11,6 +11,7 @@ import type { FilterValue } from "../../../src/lib/formatters/local.js";
 import {
   formatErrorItem,
   formatItem,
+  formatItemJson,
   formatSingleLog,
   formatTime,
   formatTransactionItem,
@@ -543,5 +544,155 @@ describe("inferSource", () => {
   test("defaults to server when no SDK", () => {
     const result = stripAnsi(inferSource({}));
     expect(result).toContain("[SERVER]");
+  });
+});
+
+describe("formatItemJson", () => {
+  const serverHeader = { sdk: { name: "sentry.node" } };
+  const browserHeader = { sdk: { name: "sentry.javascript.browser" } };
+
+  test("formats error with exception and stack frame", () => {
+    const event = {
+      timestamp: 1_700_000_000,
+      exception: {
+        values: [
+          {
+            type: "TypeError",
+            value: "x is not a function",
+            stacktrace: {
+              frames: [
+                {
+                  filename: "src/handler.ts",
+                  lineno: 42,
+                  colno: 5,
+                  function: "handleRequest",
+                  in_app: true,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+    const lines = formatItemJson("error", event, serverHeader);
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.type).toBe("error");
+    expect(parsed.error_type).toBe("TypeError");
+    expect(parsed.message).toBe("x is not a function");
+    expect(parsed.filename).toBe("src/handler.ts");
+    expect(parsed.lineno).toBe(42);
+    expect(parsed.colno).toBe(5);
+    expect(parsed.function).toBe("handleRequest");
+    expect(parsed.source).toBe("server");
+  });
+
+  test("formats error without stack frame", () => {
+    const event = {
+      timestamp: 1_700_000_000,
+      message: "Something went wrong",
+    };
+    const lines = formatItemJson("error", event, serverHeader);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.error_type).toBe("Error");
+    expect(parsed.message).toBe("Something went wrong");
+    expect(parsed.filename).toBeUndefined();
+  });
+
+  test("formats event type as error", () => {
+    const event = { timestamp: 1_700_000_000, message: "boom" };
+    const lines = formatItemJson("event", event, serverHeader);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.type).toBe("error");
+  });
+
+  test("formats transaction with semantic attributes", () => {
+    const event = {
+      timestamp: 1_700_000_002,
+      start_timestamp: 1_700_000_000,
+      transaction: "process_request",
+      contexts: {
+        trace: {
+          op: "ai.pipeline",
+          data: {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.request.model": "gpt-4o",
+          },
+        },
+      },
+      spans: [{}, {}, {}],
+    };
+    const lines = formatItemJson("transaction", event, serverHeader);
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.type).toBe("transaction");
+    expect(parsed.op).toBe("gen_ai");
+    expect(parsed.label).toBe("chat gpt-4o");
+    expect(parsed.duration_ms).toBe(2000);
+    expect(parsed.span_count).toBe(3);
+    expect(parsed.source).toBe("server");
+  });
+
+  test("formats transaction without semantic attributes", () => {
+    const event = {
+      timestamp: 1_700_000_001,
+      start_timestamp: 1_700_000_000,
+      transaction: "GET /api/users",
+      contexts: { trace: { op: "http.server" } },
+    };
+    const lines = formatItemJson("transaction", event, serverHeader);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.label).toBe("GET /api/users");
+    expect(parsed.op).toBe("http.server");
+  });
+
+  test("formats log entries", () => {
+    const event = {
+      items: [
+        {
+          level: "info",
+          body: "User logged in",
+          timestamp: 1_700_000_000,
+          attributes: {
+            "sentry.sdk.name": { value: "node" },
+            user_id: { value: 42 },
+          },
+        },
+        { level: "debug", body: "Cache hit" },
+      ],
+    };
+    const lines = formatItemJson("log", event, serverHeader);
+    expect(lines).toHaveLength(2);
+
+    const first = JSON.parse(lines[0]);
+    expect(first.type).toBe("log");
+    expect(first.level).toBe("info");
+    expect(first.message).toBe("User logged in");
+    expect(first.attributes).toEqual({ user_id: 42 });
+    expect(first.attributes["sentry.sdk.name"]).toBeUndefined();
+
+    const second = JSON.parse(lines[1]);
+    expect(second.level).toBe("debug");
+    expect(second.message).toBe("Cache hit");
+  });
+
+  test("returns empty for log with no items", () => {
+    const lines = formatItemJson("log", { items: [] }, serverHeader);
+    expect(lines).toHaveLength(0);
+  });
+
+  test("formats unknown item types", () => {
+    const event = { timestamp: 1_700_000_000 };
+    const lines = formatItemJson("attachment", event, serverHeader);
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.type).toBe("attachment");
+  });
+
+  test("detects browser source in JSON", () => {
+    const event = { timestamp: 1_700_000_000, message: "error" };
+    const lines = formatItemJson("error", event, browserHeader);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.source).toBe("browser");
   });
 });
