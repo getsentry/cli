@@ -492,15 +492,22 @@ async function consumeSSE(opts: ConsumeSSEOptions): Promise<void> {
 /**
  * Attempt a single SSE connection. Returns:
  * - `"no-connection"` if the server couldn't be reached or aborted
- * - `"connected-then-lost"` if the connection was established then dropped
- * - `"error"` if an error occurred (may or may not have connected)
+ * - `"connected-then-lost"` if a connection was established (got HTTP 200)
+ *   but the stream ended or errored — eligible for reconnection
  */
 async function attemptSSEConnection(
   opts: ConsumeSSEOnceOptions
-): Promise<"no-connection" | "connected-then-lost" | "error"> {
+): Promise<"no-connection" | "connected-then-lost"> {
+  let wasConnected = false;
+  const augmented = {
+    ...opts,
+    onConnected: () => {
+      wasConnected = true;
+    },
+  };
   try {
-    const connected = await consumeSSEOnce(opts);
-    return connected ? "connected-then-lost" : "no-connection";
+    const completed = await consumeSSEOnce(augmented);
+    return completed ? "connected-then-lost" : "no-connection";
   } catch (err: unknown) {
     if (isAbortError(err) || opts.signal.aborted) {
       return "no-connection";
@@ -508,7 +515,9 @@ async function attemptSSEConnection(
     logger.debug(
       `SSE error: ${err instanceof Error ? err.message : String(err)}`
     );
-    return "error";
+    // If we got a 200 response before the error, the connection existed
+    // and is worth retrying. Otherwise, the server is unreachable.
+    return wasConnected ? "connected-then-lost" : "no-connection";
   }
 }
 
@@ -521,15 +530,26 @@ type ConsumeSSEOnceOptions = {
   useJson: boolean;
   lastEventId: string | undefined;
   onId: (id: string) => void;
+  /** Called when the HTTP response is received (200 OK with body). */
+  onConnected?: () => void;
 };
 
 /**
  * Single SSE connection attempt. Returns `true` if a connection was
- * established (even if it later dropped), `false` if it never connected.
+ * established (received a 200 response), `false` if it never connected.
+ * The caller uses this to decide whether to retry on failure.
  */
 async function consumeSSEOnce(opts: ConsumeSSEOnceOptions): Promise<boolean> {
-  const { url, activeFilters, signal, quiet, useJson, lastEventId, onId } =
-    opts;
+  const {
+    url,
+    activeFilters,
+    signal,
+    quiet,
+    useJson,
+    lastEventId,
+    onId,
+    onConnected,
+  } = opts;
   const headers: Record<string, string> = { Accept: "text/event-stream" };
   if (lastEventId) {
     headers["Last-Event-ID"] = lastEventId;
@@ -542,6 +562,9 @@ async function consumeSSEOnce(opts: ConsumeSSEOnceOptions): Promise<boolean> {
   if (!res.body) {
     return false;
   }
+  // Signal that we have a live connection — the caller uses this to
+  // decide whether mid-stream errors are worth retrying.
+  onConnected?.();
 
   // In quiet mode we still consume the stream to detect disconnection,
   // but skip parsing/formatting entirely.
