@@ -53,6 +53,54 @@ const REQUIRE_ALIAS_FILTER =
   /(?:db[\\/](?:index|schema)|list-command|telemetry)\.ts$/;
 const REQUIRE_ALIAS_RE = /\b_require\(/g;
 
+/** Fossilize's Node binary cache directory. */
+const NODE_CACHE_DIR = ".node-cache";
+
+/**
+ * Strip debug symbols from cached Node binaries BEFORE fossilize uses them.
+ *
+ * Node.js ships with full symbol tables (~17 MiB on linux-x64) that aren't
+ * needed at runtime. Stripping must happen before SEA injection because
+ * postject corrupts the ELF section-to-segment mapping, making strip fail.
+ *
+ * Stripping is idempotent — already-stripped binaries are unchanged.
+ * Windows PE binaries are skipped (no debug symbols in release builds).
+ */
+async function stripCachedNodeBinaries(platforms: string[]): Promise<void> {
+  if (!existsSync(NODE_CACHE_DIR)) {
+    return;
+  }
+
+  const { readdirSync } = await import("node:fs");
+  const files = readdirSync(NODE_CACHE_DIR);
+
+  for (const platform of platforms) {
+    // Skip Windows — no debug symbols to strip
+    if (platform.startsWith("win")) {
+      continue;
+    }
+
+    // Strip ALL cached binaries for this platform (multiple versions may exist)
+    const matches = files.filter(
+      (f) => f.endsWith(`-${platform}`) || f.endsWith(`-${platform}.exe`)
+    );
+
+    for (const match of matches) {
+      const cached = join(NODE_CACHE_DIR, match);
+      try {
+        const stripCmd = platform.startsWith("darwin")
+          ? `strip -x "${cached}"`
+          : `strip --strip-unneeded "${cached}"`;
+        execSync(stripCmd, { stdio: "ignore" });
+        console.log(`    Stripped ${match}`);
+      } catch {
+        // Non-fatal: stripping may fail on cross-platform binaries (e.g.,
+        // stripping a macOS Mach-O on Linux). The binary still works unstripped.
+      }
+    }
+  }
+}
+
 /** Build-time constants injected into the binary */
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
 
@@ -313,6 +361,12 @@ async function compileAllTargets(
   console.log(
     `  Step 2: Compiling ${platforms.length} target(s) (Node SEA via fossilize)...`
   );
+
+  // Pre-strip Node binaries in fossilize's cache to reduce final binary size.
+  // strip removes debug symbols and unneeded sections (~17 MiB on linux-x64).
+  // Must run BEFORE fossilize's SEA injection — postject corrupts ELF section
+  // layout, making strip fail on the injected binary.
+  await stripCachedNodeBinaries(platforms);
 
   const fossilizeBin = join("node_modules", ".bin", "fossilize");
 
