@@ -25,11 +25,14 @@ import type { SentryContext } from "../../context.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import { ValidationError } from "../../lib/errors.js";
 import { bold } from "../../lib/formatters/colors.js";
-import type { FilterValue } from "../../lib/formatters/local.js";
+import type { FilterValue, FormatValue } from "../../lib/formatters/local.js";
 import {
   FILTER_VALUES,
+  FORMAT_VALUES,
   formatEnvelopeLines,
+  formatEnvelopeLinesJson,
   formatItem,
+  formatItemJson,
   isItemIncluded,
   SENTRY_CONTENT_TYPE,
 } from "../../lib/formatters/local.js";
@@ -46,6 +49,21 @@ const CR_RE = /\r$/;
 
 /** Maximum ingest body size (10 MB). Rejects oversized payloads early. */
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Parse and validate a `--format` value.
+ * Accepts: human, json.
+ */
+function parseFormat(value: string): FormatValue {
+  const lower = value.toLowerCase();
+  if (!FORMAT_VALUES.includes(lower as FormatValue)) {
+    throw new ValidationError(
+      `Invalid format "${value}". Valid values: ${FORMAT_VALUES.join(", ")}`,
+      "format"
+    );
+  }
+  return lower as FormatValue;
+}
 
 /**
  * Parse and validate a `--filter` value.
@@ -67,6 +85,7 @@ type LocalFlags = {
   readonly host: string;
   readonly quiet: boolean;
   readonly filter: FilterValue[];
+  readonly format: FormatValue;
 };
 
 /**
@@ -75,7 +94,7 @@ type LocalFlags = {
  * Hard-fails on out-of-range values so users get a clean error rather than
  * a `listen EADDRNOTAVAIL` from the kernel.
  */
-function parsePort(value: string): number {
+export function parsePort(value: string): number {
   const port = numberParser(value);
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
     throw new ValidationError(
@@ -346,13 +365,14 @@ export async function isServerRunning(url: string): Promise<boolean> {
 type SSEParserState = {
   eventType: string;
   dataLines: string[];
+  id: string;
 };
 
 /** Process a single SSE line, dispatching complete events via callback. */
-function feedSSELine(
+export function feedSSELine(
   line: string,
   state: SSEParserState,
-  onEvent: (type: string, data: string) => void
+  onEvent: (type: string, data: string, id: string) => void
 ): void {
   if (line.startsWith("event:")) {
     const value = line.slice(6);
@@ -360,36 +380,191 @@ function feedSSELine(
   } else if (line.startsWith("data:")) {
     const value = line.slice(5);
     state.dataLines.push(value.startsWith(" ") ? value.slice(1) : value);
+  } else if (line.startsWith("id:")) {
+    const value = line.slice(3);
+    state.id = value.startsWith(" ") ? value.slice(1) : value;
   } else if (line === "" && state.dataLines.length > 0) {
-    onEvent(state.eventType, state.dataLines.join("\n"));
+    onEvent(state.eventType, state.dataLines.join("\n"), state.id);
     state.eventType = "";
     state.dataLines = [];
+    state.id = "";
+  }
+}
+
+/** Maximum SSE reconnection attempts before giving up. */
+const SSE_MAX_RECONNECTS = 10;
+
+/** Initial delay between SSE reconnection attempts (doubles each retry). */
+const SSE_INITIAL_RETRY_MS = 1000;
+
+/** Maximum delay between SSE reconnection attempts. */
+const SSE_MAX_RETRY_MS = 30_000;
+
+/** Options for consuming an SSE stream. */
+type ConsumeSSEOptions = {
+  url: string;
+  activeFilters: ReadonlySet<FilterValue>;
+  signal: AbortSignal;
+  quiet?: boolean;
+  useJson?: boolean;
+};
+
+/** Check whether an error is an abort signal. */
+function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === "AbortError") ||
+    (err instanceof Error && err.name === "AbortError")
+  );
+}
+
+/** Sleep with abort support, suppressing abort errors. */
+async function sleepUnlessAborted(
+  ms: number,
+  signal: AbortSignal
+): Promise<void> {
+  try {
+    await sleep(ms, undefined, { signal });
+  } catch (err) {
+    if (!isAbortError(err)) {
+      throw err;
+    }
   }
 }
 
 /**
  * Consume SSE events from an upstream server and print them.
  *
- * Bun doesn't have a global `EventSource`, so we use `fetch` with a
- * streaming body and parse the SSE wire format manually.
+ * Reconnects automatically on connection loss with exponential backoff,
+ * using `Last-Event-ID` to resume from where the stream left off.
  */
-async function consumeSSE(
-  url: string,
-  activeFilters: ReadonlySet<FilterValue>,
-  signal: AbortSignal,
-  quiet = false
-): Promise<void> {
-  const res = await fetch(`${url}/stream`, {
-    headers: { Accept: "text/event-stream" },
+async function consumeSSE(opts: ConsumeSSEOptions): Promise<void> {
+  const { url, activeFilters, signal, quiet = false, useJson = false } = opts;
+  let lastEventId: string | undefined;
+  let retries = 0;
+  let retryDelay = SSE_INITIAL_RETRY_MS;
+  let hasConnectedBefore = false;
+
+  while (!signal.aborted) {
+    const result = await attemptSSEConnection({
+      url,
+      activeFilters,
+      signal,
+      quiet,
+      useJson,
+      lastEventId,
+      onId: (id) => {
+        lastEventId = id;
+      },
+    });
+
+    if (signal.aborted) {
+      return;
+    }
+    // On the first attempt, both "no-connection" (HTTP error/no body) and
+    // "error" (network failure) are fatal — the server doesn't exist.
+    // After a previous successful connection, retry on any failure since
+    // the server may be restarting.
+    if (!hasConnectedBefore && result !== "connected-then-lost") {
+      return;
+    }
+    // Reset backoff after a successful connection that later dropped,
+    // so transient disconnects don't permanently exhaust the retry budget.
+    if (result === "connected-then-lost") {
+      hasConnectedBefore = true;
+      retries = 0;
+      retryDelay = SSE_INITIAL_RETRY_MS;
+    }
+    retries += 1;
+    if (retries > SSE_MAX_RECONNECTS) {
+      logger.warn(
+        `SSE connection lost after ${SSE_MAX_RECONNECTS} reconnection attempts`
+      );
+      return;
+    }
+    logger.info(
+      `SSE connection lost, reconnecting in ${retryDelay / 1000}s...`
+    );
+    await sleepUnlessAborted(retryDelay, signal);
+    retryDelay = Math.min(retryDelay * 2, SSE_MAX_RETRY_MS);
+  }
+}
+
+/**
+ * Attempt a single SSE connection. Returns:
+ * - `"no-connection"` if the server couldn't be reached or aborted
+ * - `"connected-then-lost"` if a connection was established (got HTTP 200)
+ *   but the stream ended or errored — eligible for reconnection
+ */
+async function attemptSSEConnection(
+  opts: ConsumeSSEOnceOptions
+): Promise<"no-connection" | "connected-then-lost"> {
+  let wasConnected = false;
+  const augmented = {
+    ...opts,
+    onConnected: () => {
+      wasConnected = true;
+    },
+  };
+  try {
+    const completed = await consumeSSEOnce(augmented);
+    return completed ? "connected-then-lost" : "no-connection";
+  } catch (err: unknown) {
+    if (isAbortError(err) || opts.signal.aborted) {
+      return "no-connection";
+    }
+    logger.debug(
+      `SSE error: ${err instanceof Error ? err.message : String(err)}`
+    );
+    // If we got a 200 response before the error, the connection existed
+    // and is worth retrying. Otherwise, the server is unreachable.
+    return wasConnected ? "connected-then-lost" : "no-connection";
+  }
+}
+
+/** Options for a single SSE connection attempt. */
+type ConsumeSSEOnceOptions = {
+  url: string;
+  activeFilters: ReadonlySet<FilterValue>;
+  signal: AbortSignal;
+  quiet: boolean;
+  useJson: boolean;
+  lastEventId: string | undefined;
+  onId: (id: string) => void;
+  /** Called when the HTTP response is received (200 OK with body). */
+  onConnected?: () => void;
+};
+
+/**
+ * Single SSE connection attempt. Returns `true` if a connection was
+ * established (received a 200 response), `false` if it never connected.
+ * The caller uses this to decide whether to retry on failure.
+ */
+async function consumeSSEOnce(opts: ConsumeSSEOnceOptions): Promise<boolean> {
+  const {
+    url,
+    activeFilters,
     signal,
-  });
+    quiet,
+    useJson,
+    lastEventId,
+    onId,
+    onConnected,
+  } = opts;
+  const headers: Record<string, string> = { Accept: "text/event-stream" };
+  if (lastEventId) {
+    headers["Last-Event-ID"] = lastEventId;
+  }
+  const res = await fetch(`${url}/stream`, { headers, signal });
   if (!res.ok) {
     logger.warn(`SSE stream returned HTTP ${res.status}`);
-    return;
+    return false;
   }
   if (!res.body) {
-    return;
+    return false;
   }
+  // Signal that we have a live connection — the caller uses this to
+  // decide whether mid-stream errors are worth retrying.
+  onConnected?.();
 
   // In quiet mode we still consume the stream to detect disconnection,
   // but skip parsing/formatting entirely.
@@ -397,14 +572,17 @@ async function consumeSSE(
     for await (const _chunk of res.body) {
       // drain
     }
-    return;
+    return true;
   }
 
   const decoder = new TextDecoder();
-  const state: SSEParserState = { eventType: "", dataLines: [] };
-  const onEvent = (type: string, data: string) => {
+  const state: SSEParserState = { eventType: "", dataLines: [], id: "" };
+  const onEvent = (type: string, data: string, id: string) => {
+    if (id) {
+      onId(id);
+    }
     if (type === SENTRY_CONTENT_TYPE) {
-      processSSEEvent(data, activeFilters);
+      processSSEEvent(data, activeFilters, useJson);
     }
   };
 
@@ -421,12 +599,14 @@ async function consumeSSE(
   if (partial) {
     feedSSELine(partial.replace(CR_RE, ""), state, onEvent);
   }
+  return true;
 }
 
 /** Parse and format a single SSE data payload from upstream. */
 function processSSEEvent(
   data: string,
-  activeFilters: ReadonlySet<FilterValue>
+  activeFilters: ReadonlySet<FilterValue>,
+  useJson = false
 ): void {
   try {
     const envelope = JSON.parse(data) as [
@@ -435,15 +615,19 @@ function processSSEEvent(
     ];
     const [header, items] = envelope;
     for (const [itemHeader, itemPayload] of items) {
-      if (!isItemIncluded(itemHeader.type, activeFilters)) {
+      const payload = itemPayload as Record<string, unknown>;
+      if (!isItemIncluded(itemHeader.type, activeFilters, payload)) {
         continue;
       }
-      for (const line of formatItem(
-        itemHeader.type,
-        itemPayload as Record<string, unknown>,
-        header,
-        itemHeader.type ?? "envelope"
-      )) {
+      const lines = useJson
+        ? formatItemJson(itemHeader.type, payload, header)
+        : formatItem(
+            itemHeader.type,
+            payload,
+            header,
+            itemHeader.type ?? "envelope"
+          );
+      for (const line of lines) {
         logger.log(line);
       }
     }
@@ -488,9 +672,15 @@ export const serverCommand = buildCommand({
         kind: "parsed",
         parse: parseFilter,
         brief:
-          "Only show items of this type (repeatable: error, transaction, log)",
+          "Only show items of this type (repeatable: error, transaction, log, ai)",
         variadic: true,
         optional: true,
+      },
+      format: {
+        kind: "parsed",
+        parse: parseFormat,
+        brief: "Output format: human (default) or json (NDJSON)",
+        default: "human",
       },
     },
     aliases: {
@@ -498,6 +688,7 @@ export const serverCommand = buildCommand({
       H: "host",
       q: "quiet",
       f: "filter",
+      F: "format",
     },
   },
   auth: false,
@@ -518,7 +709,13 @@ export const serverCommand = buildCommand({
       process.once("SIGTERM", stop);
 
       try {
-        await consumeSSE(url, activeFilters, ac.signal, flags.quiet);
+        await consumeSSE({
+          url,
+          activeFilters,
+          signal: ac.signal,
+          quiet: flags.quiet,
+          useJson: flags.format === "json",
+        });
       } catch (err: unknown) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {
           throw err;
@@ -532,11 +729,13 @@ export const serverCommand = buildCommand({
     }
 
     const buffer = createSpotlightBuffer(BUFFER_SIZE);
+    const useJson = flags.format === "json";
 
     if (!flags.quiet) {
+      const formatFn = useJson ? formatEnvelopeLinesJson : formatEnvelopeLines;
       buffer.subscribe((container) => {
         try {
-          for (const line of formatEnvelopeLines(container, activeFilters)) {
+          for (const line of formatFn(container, activeFilters)) {
             logger.log(line);
           }
         } catch (err) {
@@ -556,10 +755,23 @@ export const serverCommand = buildCommand({
     );
 
     const listenUrl = `http://${flags.host}:${boundPort}`;
-    logger.info(`Listening on ${bold(listenUrl)}`);
+    logger.info("Sentry Local Dev Server");
+    logger.info(`  Ingest: ${bold(`${listenUrl}/stream`)}`);
+    logger.info(`  Events: ${bold(`${listenUrl}/stream`)} (SSE)`);
+    logger.info("");
+    logger.info(
+      `  Set ${bold("SENTRY_SPOTLIGHT")}=${listenUrl}/stream in your app`
+    );
+    logger.info(
+      `  Or run: ${bold(`sentry local run -p ${boundPort} -- <your-command>`)}`
+    );
     if (activeFilters.size > 0) {
-      logger.info(`Filtering: ${[...activeFilters].join(", ")}`);
+      logger.info(`  Filtering: ${[...activeFilters].join(", ")}`);
     }
+    if (useJson) {
+      logger.info("  Output: JSON (NDJSON)");
+    }
+    logger.info("");
     logger.info("Press Ctrl-C to stop.");
 
     await waitForShutdown(server);

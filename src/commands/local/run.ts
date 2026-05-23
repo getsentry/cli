@@ -21,6 +21,7 @@ import {
   buildApp,
   DEFAULT_PORT,
   isServerRunning,
+  parsePort,
   tryListen,
 } from "./server.js";
 
@@ -28,18 +29,6 @@ type RunFlags = {
   readonly port: number;
   readonly host: string;
 };
-
-/** Parse and validate a port number. */
-function parsePort(value: string): number {
-  const port = Number(value);
-  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    throw new ValidationError(
-      `Invalid port: ${value}. Must be an integer between 0 and 65535.`,
-      "port"
-    );
-  }
-  return port;
-}
 
 /** Buffer size for the auto-started background server. */
 const BUFFER_SIZE = 500;
@@ -140,7 +129,8 @@ export const runCommand = buildCommand({
           ...process.env,
           SENTRY_SPOTLIGHT: spotlightUrl,
           NEXT_PUBLIC_SENTRY_SPOTLIGHT: spotlightUrl,
-          SENTRY_TRACES_SAMPLE_RATE: "1",
+          SENTRY_TRACES_SAMPLE_RATE:
+            process.env.SENTRY_TRACES_SAMPLE_RATE ?? "1",
         },
         stdio: "inherit",
       });
@@ -155,23 +145,34 @@ export const runCommand = buildCommand({
     }
 
     // Forward signals to the child so the whole process tree shuts down.
-    const forwardSignal = (signal: NodeJS.Signals) => {
-      child.kill(signal);
-    };
-    process.once("SIGINT", () => forwardSignal("SIGINT"));
-    process.once("SIGTERM", () => forwardSignal("SIGTERM"));
+    // Store references so handlers can be removed in finally.
+    const onSigint = () => child.kill("SIGINT");
+    const onSigterm = () => child.kill("SIGTERM");
+    process.once("SIGINT", onSigint);
+    process.once("SIGTERM", onSigterm);
 
     let exitCode: number;
     try {
       exitCode = await new Promise<number>((resolve, reject) => {
-        child.on("close", (code) => resolve(code ?? 1));
+        let settled = false;
+        child.on("close", (code) => {
+          if (!settled) {
+            settled = true;
+            resolve(code ?? 1);
+          }
+        });
         // If spawn itself fails (e.g. ENOENT), 'close' may never fire.
         child.on("error", (err) => {
           logger.debug(`Child process error: ${err.message}`);
-          reject(err);
+          if (!settled) {
+            settled = true;
+            reject(err);
+          }
         });
       });
     } finally {
+      process.removeListener("SIGINT", onSigint);
+      process.removeListener("SIGTERM", onSigterm);
       if (bgServer) {
         logger.info("Stopping background server...");
         await shutdownServer(bgServer);
