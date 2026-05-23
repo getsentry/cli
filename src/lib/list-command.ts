@@ -418,8 +418,7 @@ function getSubcommandsForRoute(routeName: string): Set<string> {
     _subcommandsByRoute = new Map();
 
     try {
-      // bare require so esbuild resolves this at bundle time (breaks circular dep)
-      const { routes } = require("../app.js") as {
+      const { routes } = _require("../app.js") as {
         routes: { getAllEntries: () => readonly RouteEntry[] };
       };
 

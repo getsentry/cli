@@ -47,6 +47,11 @@ const VERSION: string = pkg.version;
 /** Pin to Node 22 LTS for SEA binaries */
 const NODE_VERSION = "22";
 
+/** Files that use _require() for lazy relative imports (circular dep breaking). */
+const REQUIRE_ALIAS_FILTER =
+  /(?:db[\\/](?:index|schema)|list-command|telemetry)\.ts$/;
+const REQUIRE_ALIAS_RE = /\b_require\(/g;
+
 /** Build-time constants injected into the binary */
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
 
@@ -140,7 +145,26 @@ async function bundleJs(): Promise<boolean> {
         "process.env.NODE_ENV": JSON.stringify("production"),
         __SENTRY_DEBUG_ID__: JSON.stringify(PLACEHOLDER_DEBUG_ID),
       },
-      plugins: [textImportPlugin],
+      plugins: [
+        textImportPlugin,
+        // Transform _require() → require() so esbuild resolves lazy relative
+        // requires at bundle time. In tsx dev mode, _require is a file-local
+        // createRequire(import.meta.url) that resolves relative to the file.
+        // esbuild only statically resolves bare require() calls.
+        // Only targets the specific files that use _require with relative paths.
+        {
+          name: "require-alias",
+          setup(b) {
+            b.onLoad({ filter: REQUIRE_ALIAS_FILTER }, async (args) => {
+              const source = await readFile(args.path, "utf-8");
+              return {
+                contents: source.replace(REQUIRE_ALIAS_RE, "require("),
+                loader: args.path.endsWith(".tsx") ? "tsx" : "ts",
+              };
+            });
+          },
+        },
+      ],
     });
 
     const output = result.metafile?.outputs[BUNDLE_JS];
