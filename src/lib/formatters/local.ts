@@ -28,6 +28,10 @@ export function sanitize(text: string): string {
 /** Canonical content type for Sentry envelopes. */
 export const SENTRY_CONTENT_TYPE = "application/x-sentry-envelope";
 
+/** Output format options for `--format`. */
+export const FORMAT_VALUES = ["human", "json"] as const;
+export type FormatValue = (typeof FORMAT_VALUES)[number];
+
 /** Envelope item categories that can be filtered via `--filter`. */
 export const FILTER_VALUES = ["error", "transaction", "log"] as const;
 export type FilterValue = (typeof FILTER_VALUES)[number];
@@ -335,6 +339,133 @@ export function resolveUnparseableLabel(container: {
   return ct === "application/x-sentry-envelope" ? "envelope" : ct;
 }
 
+/** Format an error item as a JSON object. */
+function formatErrorJson(
+  payload: Record<string, unknown>,
+  header: Record<string, unknown>
+): string {
+  const exception = payload.exception as
+    | { values?: { type?: string; value?: string }[] }
+    | undefined;
+  const first = exception?.values?.at(-1);
+  return JSON.stringify({
+    type: "error",
+    timestamp: payload.timestamp,
+    error_type: first?.type ?? "Error",
+    message: first?.value ?? payload.message ?? "Unknown error",
+    source: inferSourceName(header),
+  });
+}
+
+/** Format a transaction item as a JSON object. */
+function formatTransactionJson(
+  payload: Record<string, unknown>,
+  header: Record<string, unknown>
+): string {
+  const trace = (payload.contexts as Record<string, unknown> | undefined)
+    ?.trace as Record<string, unknown> | undefined;
+  const attrs = mergeTransactionAttributes(payload);
+  const semantic = formatSemanticSpanDisplay(
+    attrs,
+    String(payload.transaction ?? trace?.description ?? "Transaction")
+  );
+  const start = payload.start_timestamp as number | undefined;
+  const end = payload.timestamp as number | undefined;
+  const durationMs =
+    start !== undefined && end !== undefined
+      ? Math.round((end - start) * 1000)
+      : undefined;
+  return JSON.stringify({
+    type: "transaction",
+    timestamp: payload.timestamp,
+    op: inferSemanticOp(attrs) ?? trace?.op,
+    label: semantic.label,
+    metadata: semantic.metadata.length > 0 ? semantic.metadata : undefined,
+    duration_ms: durationMs,
+    status: trace?.status,
+    span_count: (payload.spans as unknown[] | undefined)?.length,
+    source: inferSourceName(header),
+  });
+}
+
+/** Format a log item as JSON objects (one per entry). */
+function formatLogJson(
+  payload: Record<string, unknown>,
+  header: Record<string, unknown>
+): string[] {
+  const items = payload.items as LogEntry[] | undefined;
+  if (!items?.length) {
+    return [];
+  }
+  const source = inferSourceName(header);
+  return items.map((entry) =>
+    JSON.stringify({
+      type: "log",
+      timestamp: entry.timestamp,
+      level: entry.level ?? "log",
+      message: entry.body ?? "",
+      attributes: entry.attributes
+        ? Object.fromEntries(
+            Object.entries(entry.attributes)
+              .filter(
+                ([k, v]) =>
+                  !k.startsWith("sentry.") &&
+                  v?.value !== null &&
+                  v?.value !== undefined
+              )
+              .map(([k, v]) => [k, v.value])
+          )
+        : undefined,
+      source,
+    })
+  );
+}
+
+/**
+ * Format a single envelope item as a JSON line (NDJSON).
+ *
+ * Produces a compact JSON object per item with `type`, `timestamp`,
+ * and item-specific fields. Designed for machine consumption by AI
+ * coding agents and automation tools.
+ */
+export function formatItemJson(
+  itemType: string | undefined,
+  payload: Record<string, unknown>,
+  header: Record<string, unknown>
+): string[] {
+  if (itemType && ERROR_TYPES.has(itemType)) {
+    return [formatErrorJson(payload, header)];
+  }
+  if (itemType === "transaction") {
+    return [formatTransactionJson(payload, header)];
+  }
+  if (itemType === "log") {
+    return formatLogJson(payload, header);
+  }
+  return [
+    JSON.stringify({
+      type: itemType ?? "unknown",
+      timestamp: payload.timestamp,
+    }),
+  ];
+}
+
+/** Infer the source platform name from the SDK header (for JSON output). */
+function inferSourceName(header: Record<string, unknown>): string {
+  const sdk = header.sdk as { name?: string } | undefined;
+  const name = sdk?.name ?? "";
+  if (MOBILE_MARKERS.some((m) => name.includes(m))) {
+    return "mobile";
+  }
+  if (
+    name.startsWith("sentry.javascript.") &&
+    !SERVER_JS_MARKERS.some((m) => name.includes(m))
+  ) {
+    return "browser";
+  }
+  return "server";
+}
+
 /** Format a single envelope item into one or more output lines. */
 export function formatItem(
   itemType: string | undefined,
@@ -364,6 +495,44 @@ export function isItemIncluded(
   }
   const category = itemTypeToFilterCategory(itemType);
   return category !== undefined && activeFilters.has(category);
+}
+
+/**
+ * Format a freshly received envelope as NDJSON lines.
+ *
+ * Each item produces one JSON line. Filtering works identically to
+ * the human formatter.
+ */
+export function formatEnvelopeLinesJson(
+  container: {
+    getParsedEnvelope: () => {
+      envelope: [Record<string, unknown>, [{ type?: string }, unknown][]];
+    } | null;
+    getContentType: () => string;
+    getEventTypes: () => string[] | null;
+  },
+  activeFilters: ReadonlySet<FilterValue>
+): string[] {
+  const parsed = container.getParsedEnvelope();
+  if (!parsed) {
+    return [];
+  }
+
+  const [header, items] = parsed.envelope;
+  const lines: string[] = [];
+  for (const [itemHeader, itemPayload] of items) {
+    if (!isItemIncluded(itemHeader.type, activeFilters)) {
+      continue;
+    }
+    lines.push(
+      ...formatItemJson(
+        itemHeader.type,
+        itemPayload as Record<string, unknown>,
+        header
+      )
+    );
+  }
+  return lines;
 }
 
 /**
