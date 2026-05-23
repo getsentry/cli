@@ -19,7 +19,7 @@ Start the local dev server and tail events
 - `-p, --port <value> - Port to listen on (default 8969) - (default: "8969")`
 - `-H, --host <value> - Hostname to bind to (default localhost) - (default: "localhost")`
 - `-q, --quiet - Suppress per-envelope tail output`
-- `-f, --filter <value>... - Only show items of this type (repeatable: error, transaction, log)`
+- `-f, --filter <value>... - Only show items of this type (repeatable: error, transaction, log, ai)`
 - `-F, --format <value> - Output format: human (default) or json (NDJSON) - (default: "human")`
 
 ### `sentry local run <command...>`
