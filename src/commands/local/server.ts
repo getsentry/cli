@@ -442,6 +442,7 @@ async function consumeSSE(opts: ConsumeSSEOptions): Promise<void> {
   let lastEventId: string | undefined;
   let retries = 0;
   let retryDelay = SSE_INITIAL_RETRY_MS;
+  let hasConnectedBefore = false;
 
   while (!signal.aborted) {
     const result = await attemptSSEConnection({
@@ -456,12 +457,18 @@ async function consumeSSE(opts: ConsumeSSEOptions): Promise<void> {
       },
     });
 
-    if (signal.aborted || result === "no-connection") {
+    if (signal.aborted) {
+      return;
+    }
+    // Only treat "no-connection" as fatal on the first attempt.
+    // If we've connected before, the server may be restarting — retry.
+    if (result === "no-connection" && !hasConnectedBefore) {
       return;
     }
     // Reset backoff after a successful connection that later dropped,
     // so transient disconnects don't permanently exhaust the retry budget.
     if (result === "connected-then-lost") {
+      hasConnectedBefore = true;
       retries = 0;
       retryDelay = SSE_INITIAL_RETRY_MS;
     }
