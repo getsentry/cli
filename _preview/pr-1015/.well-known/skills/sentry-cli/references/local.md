@@ -20,6 +20,7 @@ Start the local dev server and tail events
 - `-H, --host <value> - Hostname to bind to (default localhost) - (default: "localhost")`
 - `-q, --quiet - Suppress per-envelope tail output`
 - `-f, --filter <value>... - Only show items of this type (repeatable: error, transaction, log)`
+- `-F, --format <value> - Output format: human (default) or json (NDJSON) - (default: "human")`
 
 ### `sentry local run <command...>`
 
@@ -49,6 +50,8 @@ sentry local -f error -f log
 sentry local --quiet
 
 sentry local -f error -f log    # only errors and logs
+
+sentry local --format json
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
