@@ -45,7 +45,8 @@ const pkg = JSON.parse(await readFile("package.json", "utf-8"));
 const VERSION: string = pkg.version;
 
 /** Pin to Node 22 LTS for SEA binaries */
-const NODE_VERSION = "22";
+/** Node version for SEA binaries. "lts" resolves to the latest LTS via fossilize. */
+const NODE_VERSION = "lts";
 
 /** Files that use _require() for lazy relative imports (circular dep breaking). */
 const REQUIRE_ALIAS_FILTER =
@@ -116,10 +117,11 @@ async function bundleJs(): Promise<boolean> {
       bundle: true,
       outfile: BUNDLE_JS,
       platform: "node",
-      // Target Node 22 to downlevel `using` declarations (not supported
-      // in CJS). Node SEA runs embedded JS as CJS.
-      target: "node22",
+      // Target Node 24 LTS. Downlevels `using` declarations (not
+      // supported in CJS). Node SEA runs embedded JS as CJS.
+      target: "node24",
       format: "cjs",
+      treeShaking: true,
       // Externalize the Ink + React stack from the esbuild bundling
       // step. The main bundle never calls `import("ink")` at runtime —
       // the sidecar is pre-bundled by text-import-plugin as a

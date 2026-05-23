@@ -189,11 +189,12 @@ const result = await build({
   entryPoints: ["./src/index.ts"],
   bundle: true,
   minify: true,
+  treeShaking: true,
   // No banner — warning suppression moved to dist/bin.cjs (CLI-only).
   // The library bundle must not suppress the host application's warnings.
   sourcemap: true,
   platform: "node",
-  target: "node22",
+  target: "node24",
   format: "cjs",
   outfile: "./dist/index.cjs",
   // Inject Bun polyfills and import.meta.url shim for CJS compatibility
