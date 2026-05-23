@@ -459,7 +459,12 @@ async function consumeSSE(opts: ConsumeSSEOptions): Promise<void> {
     if (signal.aborted || result === "no-connection") {
       return;
     }
-    // result === "disconnected" — retry
+    // Reset backoff after a successful connection that later dropped,
+    // so transient disconnects don't permanently exhaust the retry budget.
+    if (result === "connected-then-lost") {
+      retries = 0;
+      retryDelay = SSE_INITIAL_RETRY_MS;
+    }
     retries += 1;
     if (retries > SSE_MAX_RECONNECTS) {
       logger.warn(
@@ -477,15 +482,16 @@ async function consumeSSE(opts: ConsumeSSEOptions): Promise<void> {
 
 /**
  * Attempt a single SSE connection. Returns:
- * - `"no-connection"` if the server couldn't be reached
- * - `"disconnected"` if the connection was established then dropped
+ * - `"no-connection"` if the server couldn't be reached or aborted
+ * - `"connected-then-lost"` if the connection was established then dropped
+ * - `"error"` if an error occurred (may or may not have connected)
  */
 async function attemptSSEConnection(
   opts: ConsumeSSEOnceOptions
-): Promise<"no-connection" | "disconnected"> {
+): Promise<"no-connection" | "connected-then-lost" | "error"> {
   try {
     const connected = await consumeSSEOnce(opts);
-    return connected ? "disconnected" : "no-connection";
+    return connected ? "connected-then-lost" : "no-connection";
   } catch (err: unknown) {
     if (isAbortError(err) || opts.signal.aborted) {
       return "no-connection";
@@ -493,7 +499,7 @@ async function attemptSSEConnection(
     logger.debug(
       `SSE error: ${err instanceof Error ? err.message : String(err)}`
     );
-    return "disconnected";
+    return "error";
   }
 }
 

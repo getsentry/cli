@@ -146,17 +146,6 @@ export function inferSemanticOp(attrs: AttributeSource): string | undefined {
   if (getAttr(attrs, ["rpc.system.name", "rpc.service"])) {
     return "rpc";
   }
-  if (
-    getAttr(attrs, ["db.system.name", "db.query.summary", "db.operation.name"])
-  ) {
-    return "db";
-  }
-  if (getAttr(attrs, ["graphql.operation.type"])) {
-    return "graphql";
-  }
-  if (getAttr(attrs, ["rpc.system.name", "rpc.service"])) {
-    return "rpc";
-  }
   if (getAttr(attrs, ["messaging.system", "messaging.operation.name"])) {
     return "messaging";
   }
