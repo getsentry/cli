@@ -8,16 +8,26 @@ import {
   mergeTransactionAttributes,
 } from "./semantic-display.js";
 
-/** Unicode bidirectional override/isolate characters that can reorder terminal output. */
+/**
+ * Characters unsafe for JSON terminal display: C1 control characters
+ * (U+0080–U+009F, e.g. CSI=U+009B) and Unicode bidirectional overrides.
+ * `JSON.stringify` only escapes C0 (U+0000–U+001F) per RFC 8259;
+ * C1 and BiDi pass through unescaped.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping C1 control chars from untrusted data
+const JSON_UNSAFE_RE = /[\x80-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+/** BiDi-only regex for the full `sanitize()` function. */
 const BIDI_RE = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 
 /**
- * Strip Unicode bidirectional override characters from a string.
- * Used for JSON output where `JSON.stringify` handles C0/C1 escaping
- * but BiDi characters pass through and can reorder terminal text.
+ * Strip C1 control characters and Unicode BiDi overrides from a string.
+ * Used for JSON output where `JSON.stringify` escapes C0 controls but
+ * leaves C1 (U+0080–U+009F) and BiDi chars intact — both can cause
+ * terminal injection when JSON output is displayed in a terminal.
  */
 export function stripBidi(text: string): string {
-  return text.replace(BIDI_RE, "");
+  return text.replace(JSON_UNSAFE_RE, "");
 }
 
 /**
@@ -466,10 +476,11 @@ function formatLogJson(
  * coding agents and automation tools.
  *
  * Unlike the human formatters, JSON output uses `stripBidi()` instead of
- * the full `sanitize()`. `JSON.stringify()` escapes C0/C1 control characters
- * to `\uXXXX` notation, but Unicode bidirectional override characters pass
- * through and can reorder terminal text. `stripBidi()` removes those while
- * preserving the original data for downstream consumers.
+ * the full `sanitize()`. `JSON.stringify()` escapes C0 control characters
+ * (U+0000–U+001F) but leaves C1 controls (U+0080–U+009F) and BiDi overrides
+ * intact. `stripBidi()` strips both, preventing terminal injection when
+ * JSON output is viewed in a terminal, while preserving the original data
+ * structure for downstream consumers.
  */
 export function formatItemJson(
   itemType: string | undefined,
