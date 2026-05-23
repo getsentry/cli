@@ -111,8 +111,7 @@ export function getDatabase(): Database {
     if (getEnv().SENTRY_CLI_NO_TELEMETRY === "1") {
       db = rawDb;
     } else {
-      // bare require so esbuild resolves this at bundle time (breaks circular dep)
-      const { createTracedDatabase } = require("../telemetry.js") as {
+      const { createTracedDatabase } = _require("../telemetry.js") as {
         createTracedDatabase: (d: Database) => Database;
       };
       db = createTracedDatabase(rawDb);

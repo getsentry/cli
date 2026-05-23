@@ -152,7 +152,30 @@ const sentrySourcemapPlugin: Plugin = {
 };
 
 // Always inject debug IDs (even without auth token); upload is gated inside the plugin
-const plugins: Plugin[] = [sentrySourcemapPlugin, textImportPlugin];
+/** Files that use _require() for lazy relative imports (circular dep breaking). */
+const REQUIRE_ALIAS_FILTER =
+  /(?:db[\\/](?:index|schema)|list-command|telemetry)\.ts$/;
+const REQUIRE_ALIAS_RE = /\b_require\(/g;
+
+/** Transform _require() → require() so esbuild resolves lazy relative requires. */
+const requireAliasPlugin: Plugin = {
+  name: "require-alias",
+  setup(b) {
+    b.onLoad({ filter: REQUIRE_ALIAS_FILTER }, async (args) => {
+      const source = await readFile(args.path, "utf-8");
+      return {
+        contents: source.replace(REQUIRE_ALIAS_RE, "require("),
+        loader: args.path.endsWith(".tsx") ? "tsx" : "ts",
+      };
+    });
+  },
+};
+
+const plugins: Plugin[] = [
+  sentrySourcemapPlugin,
+  textImportPlugin,
+  requireAliasPlugin,
+];
 
 if (process.env.SENTRY_AUTH_TOKEN) {
   console.log("  Sentry auth token found, source maps will be uploaded");
