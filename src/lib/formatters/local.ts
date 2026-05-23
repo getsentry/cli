@@ -8,6 +8,18 @@ import {
   mergeTransactionAttributes,
 } from "./semantic-display.js";
 
+/** Unicode bidirectional override/isolate characters that can reorder terminal output. */
+const BIDI_RE = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+/**
+ * Strip Unicode bidirectional override characters from a string.
+ * Used for JSON output where `JSON.stringify` handles C0/C1 escaping
+ * but BiDi characters pass through and can reorder terminal text.
+ */
+export function stripBidi(text: string): string {
+  return text.replace(BIDI_RE, "");
+}
+
 /**
  * Strip ANSI escapes, collapse newlines, and remove C0/C1 control characters
  * so envelope fields can't inject fake log lines or terminal commands.
@@ -22,7 +34,7 @@ export function sanitize(text: string): string {
     ""
   );
   // Strip Unicode bidirectional override/isolate characters that can reorder terminal output.
-  return noCtrl.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
+  return noCtrl.replace(BIDI_RE, "");
 }
 
 /** Canonical content type for Sentry envelopes. */
@@ -339,6 +351,11 @@ export function resolveUnparseableLabel(container: {
   return ct === "application/x-sentry-envelope" ? "envelope" : ct;
 }
 
+/** Strip BiDi from a string value, returning undefined for non-strings. */
+function jsonSafe(value: unknown): string | undefined {
+  return typeof value === "string" ? stripBidi(value) : undefined;
+}
+
 /** Format an error item as a JSON object, including the best stack frame. */
 function formatErrorJson(
   payload: Record<string, unknown>,
@@ -360,12 +377,13 @@ function formatErrorJson(
   return JSON.stringify({
     type: "error",
     timestamp: payload.timestamp,
-    error_type: first?.type ?? "Error",
-    message: first?.value ?? payload.message ?? "Unknown error",
-    filename: frame?.filename,
+    error_type: jsonSafe(first?.type) ?? "Error",
+    message:
+      jsonSafe(first?.value) ?? jsonSafe(payload.message) ?? "Unknown error",
+    filename: jsonSafe(frame?.filename),
     lineno: frame?.lineno,
     colno: frame?.colno,
-    function: frame?.function,
+    function: jsonSafe(frame?.function),
     source: inferSourceName(header),
   });
 }
@@ -392,8 +410,11 @@ function formatTransactionJson(
     type: "transaction",
     timestamp: payload.timestamp,
     op: inferSemanticOp(attrs) ?? trace?.op,
-    label: semantic.label,
-    metadata: semantic.metadata.length > 0 ? semantic.metadata : undefined,
+    label: stripBidi(semantic.label),
+    metadata:
+      semantic.metadata.length > 0
+        ? semantic.metadata.map(stripBidi)
+        : undefined,
     duration_ms: durationMs,
     status: trace?.status,
     span_count: (payload.spans as unknown[] | undefined)?.length,
@@ -416,7 +437,7 @@ function formatLogJson(
       type: "log",
       timestamp: entry.timestamp,
       level: entry.level ?? "log",
-      message: entry.body ?? "",
+      message: stripBidi(entry.body ?? ""),
       attributes: entry.attributes
         ? Object.fromEntries(
             Object.entries(entry.attributes)
@@ -426,7 +447,10 @@ function formatLogJson(
                   v?.value !== null &&
                   v?.value !== undefined
               )
-              .map(([k, v]) => [k, v.value])
+              .map(([k, v]) => [
+                k,
+                typeof v.value === "string" ? stripBidi(v.value) : v.value,
+              ])
           )
         : undefined,
       source,
@@ -441,11 +465,11 @@ function formatLogJson(
  * and item-specific fields. Designed for machine consumption by AI
  * coding agents and automation tools.
  *
- * Unlike the human formatters, JSON output does NOT call `sanitize()` on
- * envelope data. This is intentional: `JSON.stringify()` escapes all
- * control characters to `\uXXXX` notation, making the output safe for
- * terminal display and downstream JSON parsers. Raw values are preserved
- * so consumers get the original data without lossy stripping.
+ * Unlike the human formatters, JSON output uses `stripBidi()` instead of
+ * the full `sanitize()`. `JSON.stringify()` escapes C0/C1 control characters
+ * to `\uXXXX` notation, but Unicode bidirectional override characters pass
+ * through and can reorder terminal text. `stripBidi()` removes those while
+ * preserving the original data for downstream consumers.
  */
 export function formatItemJson(
   itemType: string | undefined,

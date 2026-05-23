@@ -460,9 +460,11 @@ async function consumeSSE(opts: ConsumeSSEOptions): Promise<void> {
     if (signal.aborted) {
       return;
     }
-    // Only treat "no-connection" as fatal on the first attempt.
-    // If we've connected before, the server may be restarting — retry.
-    if (result === "no-connection" && !hasConnectedBefore) {
+    // On the first attempt, both "no-connection" (HTTP error/no body) and
+    // "error" (network failure) are fatal — the server doesn't exist.
+    // After a previous successful connection, retry on any failure since
+    // the server may be restarting.
+    if (!hasConnectedBefore && result !== "connected-then-lost") {
       return;
     }
     // Reset backoff after a successful connection that later dropped,
