@@ -58,7 +58,7 @@ type ConversationListResult = {
 
 const COMMAND_NAME = "ai-conversations list";
 const PAGINATION_KEY = "ai-conversations-list";
-const DEFAULT_PERIOD = "14d";
+const DEFAULT_PERIOD = "7d";
 
 function parseLimit(value: string): number {
   return validateLimit(value, LIST_MIN_LIMIT, LIST_MAX_LIMIT);

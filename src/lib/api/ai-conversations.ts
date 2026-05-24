@@ -87,7 +87,7 @@ export async function getConversationSpans(
 
   const params: Record<string, string> = {
     per_page: String(options.perPage ?? 1000),
-    statsPeriod: options.statsPeriod ?? "30d",
+    statsPeriod: options.statsPeriod ?? "90d",
   };
   if (options.project) {
     params.project = options.project;

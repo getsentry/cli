@@ -175,7 +175,11 @@ function collectMessages(value: unknown): { role?: string; content: string }[] {
         return null;
       }
       const r = msg as Record<string, unknown>;
-      const content = stringifyContent(r.content ?? r.text ?? r);
+      const raw = r.content ?? r.text;
+      if (raw === null || raw === undefined) {
+        return null;
+      }
+      const content = stringifyContent(raw);
       if (!content) {
         return null;
       }
