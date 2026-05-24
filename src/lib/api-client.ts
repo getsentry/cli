@@ -16,10 +16,15 @@
  * - traces: trace details and transactions
  * - logs: log listing, detailed fetch, trace-logs
  * - seer: Seer AI root cause analysis and planning
+ * - ai-conversations: AI conversation listing and detail
  * - trials: product trial management
  * - users: current user info
  */
 
+export {
+  getConversationSpans,
+  listConversations,
+} from "./api/ai-conversations.js";
 export {
   createDashboard,
   getDashboard,

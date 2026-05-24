@@ -1,0 +1,208 @@
+/**
+ * sentry ai-conversations list
+ *
+ * List recent AI conversations from Sentry projects.
+ */
+
+import type { SentryContext } from "../../context.js";
+import { listConversations } from "../../lib/api/ai-conversations.js";
+import { validateLimit } from "../../lib/arg-parsing.js";
+import {
+  advancePaginationState,
+  buildPaginationContextKey,
+  hasPreviousPage,
+  resolveCursor,
+} from "../../lib/db/pagination.js";
+import { formatConversationTable } from "../../lib/formatters/ai-conversations.js";
+import { filterFields } from "../../lib/formatters/json.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
+import {
+  buildListCommand,
+  LIST_DEFAULT_LIMIT,
+  LIST_MAX_LIMIT,
+  LIST_MIN_LIMIT,
+  LIST_PERIOD_FLAG,
+  PERIOD_ALIASES,
+  paginationHint,
+} from "../../lib/list-command.js";
+import { withProgress } from "../../lib/polling.js";
+import { resolveOrg } from "../../lib/resolve-target.js";
+import {
+  appendPeriodHint,
+  serializeTimeRange,
+  type TimeRange,
+  timeRangeToApiParams,
+} from "../../lib/time-range.js";
+import {
+  type ConversationListItem,
+  ConversationListItemSchema,
+} from "../../types/ai-conversations.js";
+
+type ListFlags = {
+  readonly limit: number;
+  readonly query?: string;
+  readonly period: TimeRange;
+  readonly json: boolean;
+  readonly cursor?: string;
+  readonly fresh: boolean;
+  readonly fields?: string[];
+};
+
+type ConversationListResult = {
+  conversations: ConversationListItem[];
+  hasMore: boolean;
+  hasPrev?: boolean;
+  nextCursor?: string;
+  org: string;
+};
+
+const COMMAND_NAME = "ai-conversations list";
+const PAGINATION_KEY = "ai-conversations-list";
+const DEFAULT_PERIOD = "14d";
+
+function parseLimit(value: string): number {
+  return validateLimit(value, LIST_MIN_LIMIT, LIST_MAX_LIMIT);
+}
+
+function formatListHuman(result: ConversationListResult): string {
+  const { conversations, hasMore, org } = result;
+  if (conversations.length === 0) {
+    return hasMore
+      ? "No conversations on this page."
+      : "No AI conversations found.";
+  }
+  return `AI conversations in ${org}:\n\n${formatConversationTable(conversations)}`;
+}
+
+function jsonTransform(
+  result: ConversationListResult,
+  fields?: string[],
+): unknown {
+  const items =
+    fields && fields.length > 0
+      ? result.conversations.map((c) => filterFields(c, fields))
+      : result.conversations;
+
+  const envelope: Record<string, unknown> = {
+    data: items,
+    hasMore: result.hasMore,
+    hasPrev: !!result.hasPrev,
+  };
+  if (result.nextCursor) envelope.nextCursor = result.nextCursor;
+  return envelope;
+}
+
+export const listCommand = buildListCommand("ai-conversations", {
+  docs: {
+    brief: "List recent AI conversations",
+    fullDescription:
+      "List recent AI conversations from a Sentry organization.\n\n" +
+      "Examples:\n" +
+      "  sentry ai-conversations list                # List last 10 conversations\n" +
+      "  sentry ai-conversations list my-org         # Explicit org\n" +
+      "  sentry ai-conversations list --limit 50     # Show more\n" +
+      "  sentry ai-conversations list --period 24h   # Last 24 hours\n" +
+      '  sentry ai-conversations list -q "has:errors" # Filter\n',
+  },
+  output: {
+    human: formatListHuman,
+    jsonTransform: jsonTransform,
+    schema: ConversationListItemSchema,
+  },
+  parameters: {
+    positional: {
+      kind: "tuple",
+      parameters: [
+        {
+          placeholder: "org",
+          brief: "Organization slug",
+          parse: String,
+          optional: true,
+        },
+      ],
+    },
+    flags: {
+      limit: {
+        kind: "parsed",
+        parse: parseLimit,
+        brief: `Number of conversations (${LIST_MIN_LIMIT}-${LIST_MAX_LIMIT})`,
+        default: String(LIST_DEFAULT_LIMIT),
+      },
+      query: {
+        kind: "parsed",
+        parse: String,
+        brief: "Search query",
+        optional: true,
+      },
+      period: LIST_PERIOD_FLAG,
+    },
+    aliases: {
+      ...PERIOD_ALIASES,
+      n: "limit",
+      q: "query",
+    },
+  },
+  async *func(this: SentryContext, flags: ListFlags, target?: string) {
+    const { cwd } = this;
+
+    const resolved = await resolveOrg({ org: target, cwd });
+    if (!resolved) {
+      throw new Error(
+        `Could not determine organization. Pass it explicitly: sentry ${COMMAND_NAME} <org>`,
+      );
+    }
+    const org = resolved.org;
+
+    const contextKey = buildPaginationContextKey(
+      "ai-conversations",
+      org,
+      { q: flags.query, period: serializeTimeRange(flags.period) },
+    );
+    const { cursor, direction } = resolveCursor(
+      flags.cursor,
+      PAGINATION_KEY,
+      contextKey,
+    );
+
+    const timeParams = timeRangeToApiParams(flags.period);
+
+    const { data: conversations, nextCursor } = await withProgress(
+      {
+        message: `Fetching conversations (up to ${flags.limit})...`,
+        json: flags.json,
+      },
+      () =>
+        listConversations(org, {
+          query: flags.query,
+          limit: flags.limit,
+          cursor,
+          statsPeriod: timeParams.statsPeriod,
+        }),
+    );
+
+    advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);
+    const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
+    const hasMore = !!nextCursor;
+
+    yield new CommandOutput<ConversationListResult>({
+      conversations,
+      hasMore,
+      hasPrev,
+      nextCursor,
+      org,
+    });
+
+    const parts: string[] = [];
+    appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
+    const flagSuffix = parts.length > 0 ? ` ${parts.join(" ")}` : "";
+
+    return {
+      hint: paginationHint({
+        hasMore,
+        hasPrev: !!hasPrev,
+        nextHint: `sentry ai-conversations list ${org} -c next${flagSuffix}`,
+        prevHint: `sentry ai-conversations list ${org} -c prev${flagSuffix}`,
+      }),
+    };
+  },
+});

@@ -5,6 +5,8 @@ import {
   UnexpectedPositionalError,
   UnsatisfiedPositionalError,
 } from "@stricli/core";
+import { aiConversationsRoute } from "./commands/ai-conversations/index.js";
+import { listCommand as aiConversationsListCommand } from "./commands/ai-conversations/list.js";
 import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
 import { whoamiCommand } from "./commands/auth/whoami.js";
@@ -83,6 +85,7 @@ const PLURAL_TO_SINGULAR: Record<string, string> = {
 /** Top-level route map containing all CLI commands */
 export const routes = buildRouteMap({
   routes: {
+    "ai-conversations": aiConversationsRoute,
     help: helpCommand,
     auth: authRoute,
     cli: cliRoute,
