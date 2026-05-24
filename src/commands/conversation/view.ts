@@ -53,6 +53,7 @@ export const viewCommand = buildCommand({
           placeholder: "conversation-id",
           brief: "AI conversation ID",
           parse: String,
+          optional: true,
         },
       ],
     },

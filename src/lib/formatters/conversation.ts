@@ -34,7 +34,7 @@ export function formatConversationTable(items: ConversationListItem[]): string {
     const input = c.firstInput ? sanitize(truncate(c.firstInput)) : "—";
     const user = sanitize(c.user?.email ?? c.user?.username ?? "—");
     const time = formatTimestamp(c.startTimestamp);
-    return `  ${truncate(c.conversationId, 40)}  ${time}  ${String(c.totalTokens).padStart(8)}  ${String(c.toolCalls).padStart(5)}  ${String(c.errors).padStart(4)}  ${user}  ${input}`;
+    return `  ${sanitize(truncate(c.conversationId, 40))}  ${time}  ${String(c.totalTokens).padStart(8)}  ${String(c.toolCalls).padStart(5)}  ${String(c.errors).padStart(4)}  ${user}  ${input}`;
   });
 
   const header =
@@ -308,18 +308,16 @@ function formatTurnHuman(turn: ConversationTurn): string {
 
   if (turn.userContent) {
     lines.push("   [user]");
-    for (const line of sanitize(truncate(turn.userContent, 600)).split("\n")) {
-      lines.push(`   ${line}`);
+    for (const line of truncate(turn.userContent, 600).split("\n")) {
+      lines.push(`   ${sanitize(line)}`);
     }
     lines.push("");
   }
 
   if (turn.assistantContent) {
     lines.push("   [assistant]");
-    for (const line of sanitize(truncate(turn.assistantContent, 600)).split(
-      "\n"
-    )) {
-      lines.push(`   ${line}`);
+    for (const line of truncate(turn.assistantContent, 600).split("\n")) {
+      lines.push(`   ${sanitize(line)}`);
     }
     lines.push("");
   }
