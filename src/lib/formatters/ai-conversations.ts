@@ -45,7 +45,7 @@ export function formatConversationTable(items: ConversationListItem[]): string {
 // Transcript parsing (ported from sentry-mcp get-ai-conversation-details)
 // ---------------------------------------------------------------------------
 
-type ToolCall = {
+export type ToolCall = {
   name: string;
   spanId: string;
   timestamp: number;
@@ -53,7 +53,7 @@ type ToolCall = {
   status?: string | null;
 };
 
-type ConversationTurn = {
+export type ConversationTurn = {
   turn: number;
   spanId: string;
   traceId: string;
@@ -278,6 +278,9 @@ function formatDuration(ms: number): string {
 }
 
 function formatEpoch(ts: number): string {
+  if (!Number.isFinite(ts) || ts === 0) {
+    return "—";
+  }
   return new Date(ts * 1000).toISOString();
 }
 
@@ -376,11 +379,17 @@ export function buildTranscriptResult(
     projects: [...new Set(spans.map((s) => s.project))].sort(),
     startTimestamp:
       spans.length > 0
-        ? Math.min(...spans.map((s) => s["precise.start_ts"]))
+        ? spans.reduce(
+            (min, s) => Math.min(min, s["precise.start_ts"]),
+            Infinity
+          )
         : 0,
     endTimestamp:
       spans.length > 0
-        ? Math.max(...spans.map((s) => s["precise.finish_ts"]))
+        ? spans.reduce(
+            (max, s) => Math.max(max, s["precise.finish_ts"]),
+            -Infinity
+          )
         : 0,
   };
 }

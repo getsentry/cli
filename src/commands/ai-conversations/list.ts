@@ -5,7 +5,7 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { listConversations } from "../../lib/api/ai-conversations.js";
+import { listConversations } from "../../lib/api-client.js";
 import { validateLimit } from "../../lib/arg-parsing.js";
 import {
   advancePaginationState,

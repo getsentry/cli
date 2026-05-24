@@ -5,6 +5,15 @@
  * Re-exports all types from domain-specific modules.
  */
 
+// AI Conversations types
+export type {
+  AIConversationSpan,
+  ConversationListItem,
+} from "./ai-conversations.js";
+export {
+  AIConversationSpanSchema,
+  ConversationListItemSchema,
+} from "./ai-conversations.js";
 // DSN types
 export type { DetectedDsn, DsnSource, ParsedDsn } from "../lib/dsn/types.js";
 // Configuration types

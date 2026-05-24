@@ -5,7 +5,7 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { getConversationSpans } from "../../lib/api/ai-conversations.js";
+import { getConversationSpans } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   buildTranscriptResult,

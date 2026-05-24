@@ -5,6 +5,8 @@
  * from the Sentry Explore conversations endpoints.
  */
 
+import { z } from "zod";
+
 import {
   type AIConversationSpan,
   AIConversationSpanSchema,
@@ -12,13 +14,17 @@ import {
   ConversationListItemSchema,
 } from "../../types/ai-conversations.js";
 
+import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 
 import {
   apiRequestToRegion,
+  MAX_PAGINATION_PAGES,
   type PaginatedResponse,
   parseLinkHeader,
 } from "./infrastructure.js";
+
+const log = logger.withTag("api.ai-conversations");
 
 export async function listConversations(
   orgSlug: string,
@@ -56,16 +62,15 @@ export async function listConversations(
     params.project = options.project;
   }
 
-  const { data, headers } = await apiRequestToRegion<unknown[]>(
+  const { data, headers } = await apiRequestToRegion<ConversationListItem[]>(
     regionUrl,
     `/organizations/${orgSlug}/ai-conversations/`,
-    { params }
+    { params, schema: z.array(ConversationListItemSchema) }
   );
 
-  const items = data.map((item) => ConversationListItemSchema.parse(item));
   const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
 
-  return { data: items, nextCursor };
+  return { data, nextCursor };
 }
 
 export async function getConversationSpans(
@@ -78,6 +83,7 @@ export async function getConversationSpans(
   } = {}
 ): Promise<AIConversationSpan[]> {
   const regionUrl = await resolveOrgRegion(orgSlug);
+  const pageSchema = z.array(AIConversationSpanSchema);
 
   const params: Record<string, string> = {
     per_page: String(options.perPage ?? 1000),
@@ -90,23 +96,29 @@ export async function getConversationSpans(
   const spans: AIConversationSpan[] = [];
   let cursor: string | undefined;
 
-  for (let page = 0; page < 10; page++) {
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
     if (cursor) {
       params.cursor = cursor;
     }
 
-    const { data, headers } = await apiRequestToRegion<unknown[]>(
+    const { data, headers } = await apiRequestToRegion<AIConversationSpan[]>(
       regionUrl,
       `/organizations/${orgSlug}/ai-conversations/${encodeURIComponent(conversationId)}/`,
-      { params }
+      { params, schema: pageSchema }
     );
 
-    spans.push(...data.map((s) => AIConversationSpanSchema.parse(s)));
+    spans.push(...data);
     const parsed = parseLinkHeader(headers.get("link") ?? null);
     cursor = parsed.nextCursor;
     if (!cursor) {
       break;
     }
+  }
+
+  if (cursor) {
+    log.warn(
+      `Pagination limit reached (${MAX_PAGINATION_PAGES} pages, ${spans.length} spans). Conversation transcript may be incomplete.`
+    );
   }
 
   return spans;
