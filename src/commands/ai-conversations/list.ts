@@ -76,7 +76,7 @@ function formatListHuman(result: ConversationListResult): string {
 
 function jsonTransform(
   result: ConversationListResult,
-  fields?: string[],
+  fields?: string[]
 ): unknown {
   const items =
     fields && fields.length > 0
@@ -88,7 +88,9 @@ function jsonTransform(
     hasMore: result.hasMore,
     hasPrev: !!result.hasPrev,
   };
-  if (result.nextCursor) envelope.nextCursor = result.nextCursor;
+  if (result.nextCursor) {
+    envelope.nextCursor = result.nextCursor;
+  }
   return envelope;
 }
 
@@ -106,7 +108,7 @@ export const listCommand = buildListCommand("ai-conversations", {
   },
   output: {
     human: formatListHuman,
-    jsonTransform: jsonTransform,
+    jsonTransform,
     schema: ConversationListItemSchema,
   },
   parameters: {
@@ -148,20 +150,19 @@ export const listCommand = buildListCommand("ai-conversations", {
     const resolved = await resolveOrg({ org: target, cwd });
     if (!resolved) {
       throw new Error(
-        `Could not determine organization. Pass it explicitly: sentry ${COMMAND_NAME} <org>`,
+        `Could not determine organization. Pass it explicitly: sentry ${COMMAND_NAME} <org>`
       );
     }
     const org = resolved.org;
 
-    const contextKey = buildPaginationContextKey(
-      "ai-conversations",
-      org,
-      { q: flags.query, period: serializeTimeRange(flags.period) },
-    );
+    const contextKey = buildPaginationContextKey("ai-conversations", org, {
+      q: flags.query,
+      period: serializeTimeRange(flags.period),
+    });
     const { cursor, direction } = resolveCursor(
       flags.cursor,
       PAGINATION_KEY,
-      contextKey,
+      contextKey
     );
 
     const timeParams = timeRangeToApiParams(flags.period);
@@ -176,8 +177,8 @@ export const listCommand = buildListCommand("ai-conversations", {
           query: flags.query,
           limit: flags.limit,
           cursor,
-          statsPeriod: timeParams.statsPeriod,
-        }),
+          ...timeParams,
+        })
     );
 
     advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);

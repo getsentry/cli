@@ -6,10 +6,10 @@
  */
 
 import {
-  AIConversationSpanSchema,
-  ConversationListItemSchema,
   type AIConversationSpan,
+  AIConversationSpanSchema,
   type ConversationListItem,
+  ConversationListItemSchema,
 } from "../../types/ai-conversations.js";
 
 import { resolveOrgRegion } from "../region.js";
@@ -27,23 +27,39 @@ export async function listConversations(
     limit?: number;
     cursor?: string;
     statsPeriod?: string;
+    start?: string;
+    end?: string;
     project?: string;
-  } = {},
+  } = {}
 ): Promise<PaginatedResponse<ConversationListItem[]>> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
   const params: Record<string, string> = {
     per_page: String(options.limit ?? 10),
   };
-  if (options.statsPeriod) params.statsPeriod = options.statsPeriod;
-  if (options.cursor) params.cursor = options.cursor;
-  if (options.query) params.query = options.query;
-  if (options.project) params.project = options.project;
+  if (options.statsPeriod) {
+    params.statsPeriod = options.statsPeriod;
+  }
+  if (options.start) {
+    params.start = options.start;
+  }
+  if (options.end) {
+    params.end = options.end;
+  }
+  if (options.cursor) {
+    params.cursor = options.cursor;
+  }
+  if (options.query) {
+    params.query = options.query;
+  }
+  if (options.project) {
+    params.project = options.project;
+  }
 
   const { data, headers } = await apiRequestToRegion<unknown[]>(
     regionUrl,
     `/organizations/${orgSlug}/ai-conversations/`,
-    { params },
+    { params }
   );
 
   const items = data.map((item) => ConversationListItemSchema.parse(item));
@@ -59,7 +75,7 @@ export async function getConversationSpans(
     statsPeriod?: string;
     project?: string;
     perPage?: number;
-  } = {},
+  } = {}
 ): Promise<AIConversationSpan[]> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
@@ -67,24 +83,30 @@ export async function getConversationSpans(
     per_page: String(options.perPage ?? 1000),
     statsPeriod: options.statsPeriod ?? "30d",
   };
-  if (options.project) params.project = options.project;
+  if (options.project) {
+    params.project = options.project;
+  }
 
   const spans: AIConversationSpan[] = [];
   let cursor: string | undefined;
 
   for (let page = 0; page < 10; page++) {
-    if (cursor) params.cursor = cursor;
+    if (cursor) {
+      params.cursor = cursor;
+    }
 
     const { data, headers } = await apiRequestToRegion<unknown[]>(
       regionUrl,
       `/organizations/${orgSlug}/ai-conversations/${encodeURIComponent(conversationId)}/`,
-      { params },
+      { params }
     );
 
     spans.push(...data.map((s) => AIConversationSpanSchema.parse(s)));
     const parsed = parseLinkHeader(headers.get("link") ?? null);
     cursor = parsed.nextCursor;
-    if (!cursor) break;
+    if (!cursor) {
+      break;
+    }
   }
 
   return spans;

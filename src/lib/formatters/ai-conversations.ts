@@ -15,12 +15,16 @@ import type {
 // ---------------------------------------------------------------------------
 
 function truncate(value: string, max = 60): string {
-  if (value.length <= max) return value;
+  if (value.length <= max) {
+    return value;
+  }
   return `${value.slice(0, max - 1)}…`;
 }
 
 function formatTimestamp(ms: number): string {
-  if (ms === 0) return "—";
+  if (ms === 0) {
+    return "—";
+  }
   return new Date(ms).toLocaleString();
 }
 
@@ -66,7 +70,9 @@ type ConversationTurn = {
 };
 
 function numeric(value: string | number | null | undefined): number {
-  if (typeof value === "number") return value;
+  if (typeof value === "number") {
+    return value;
+  }
   if (typeof value === "string") {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
@@ -76,17 +82,26 @@ function numeric(value: string | number | null | undefined): number {
 
 function getOperationType(span: AIConversationSpan): string | undefined {
   const explicit = span["gen_ai.operation.type"];
-  if (explicit) return explicit;
+  if (explicit) {
+    return explicit;
+  }
 
   const spanName = span["span.name"];
-  if (!spanName?.startsWith("gen_ai.")) return undefined;
-  if (spanName === "gen_ai.execute_tool") return "tool";
+  if (!spanName?.startsWith("gen_ai.")) {
+    return;
+  }
+  if (spanName === "gen_ai.execute_tool") {
+    return "tool";
+  }
   if (
     spanName === "gen_ai.invoke_agent" ||
     spanName === "gen_ai.create_agent"
-  )
+  ) {
     return "agent";
-  if (spanName === "gen_ai.handoff") return "handoff";
+  }
+  if (spanName === "gen_ai.handoff") {
+    return "handoff";
+  }
   return "ai_client";
 }
 
@@ -99,15 +114,23 @@ function parseJson(value: string): unknown {
 }
 
 function stringifyContent(value: unknown): string | null {
-  if (typeof value === "string") return value;
+  if (typeof value === "string") {
+    return value;
+  }
   if (Array.isArray(value)) {
     const parts = value
       .map((part) => {
-        if (typeof part === "string") return part;
+        if (typeof part === "string") {
+          return part;
+        }
         if (part && typeof part === "object") {
           const r = part as Record<string, unknown>;
-          if (typeof r.text === "string") return r.text;
-          if (typeof r.content === "string") return r.content;
+          if (typeof r.text === "string") {
+            return r.text;
+          }
+          if (typeof r.content === "string") {
+            return r.content;
+          }
         }
         return null;
       })
@@ -116,16 +139,20 @@ function stringifyContent(value: unknown): string | null {
   }
   if (value && typeof value === "object") {
     const r = value as Record<string, unknown>;
-    if (typeof r.text === "string") return r.text;
-    if (typeof r.content === "string") return r.content;
-    if (typeof r.message === "string") return r.message;
+    if (typeof r.text === "string") {
+      return r.text;
+    }
+    if (typeof r.content === "string") {
+      return r.content;
+    }
+    if (typeof r.message === "string") {
+      return r.message;
+    }
   }
-  return value == null ? null : JSON.stringify(value);
+  return value === null ? null : JSON.stringify(value);
 }
 
-function collectMessages(
-  value: unknown,
-): { role?: string; content: string }[] {
+function collectMessages(value: unknown): { role?: string; content: string }[] {
   const source =
     value &&
     typeof value === "object" &&
@@ -141,11 +168,17 @@ function collectMessages(
 
   return source
     .map((msg) => {
-      if (typeof msg === "string") return { content: msg };
-      if (!msg || typeof msg !== "object") return null;
+      if (typeof msg === "string") {
+        return { content: msg };
+      }
+      if (!msg || typeof msg !== "object") {
+        return null;
+      }
       const r = msg as Record<string, unknown>;
       const content = stringifyContent(r.content ?? r.text ?? r);
-      if (!content) return null;
+      if (!content) {
+        return null;
+      }
       return {
         role: typeof r.role === "string" ? r.role : undefined,
         content,
@@ -157,8 +190,12 @@ function collectMessages(
 function extractUserContent(span: AIConversationSpan): string | null {
   const raw =
     span["gen_ai.input.messages"] ?? span["gen_ai.request.messages"] ?? null;
-  if (!raw) return null;
-  if (raw === "[Filtered]") return raw;
+  if (!raw) {
+    return null;
+  }
+  if (raw === "[Filtered]") {
+    return raw;
+  }
   const messages = collectMessages(parseJson(raw));
   const userMsg = messages.findLast((m) => m.role === "user");
   return userMsg?.content ?? messages.at(-1)?.content ?? null;
@@ -167,31 +204,33 @@ function extractUserContent(span: AIConversationSpan): string | null {
 function extractAssistantContent(span: AIConversationSpan): string | null {
   const outputMessages = span["gen_ai.output.messages"];
   if (outputMessages) {
-    if (outputMessages === "[Filtered]") return outputMessages;
+    if (outputMessages === "[Filtered]") {
+      return outputMessages;
+    }
     const messages = collectMessages(parseJson(outputMessages));
     const assistantMsg = messages.findLast((m) => m.role === "assistant");
     const content = assistantMsg?.content ?? messages.at(-1)?.content;
-    if (content) return content;
+    if (content) {
+      return content;
+    }
   }
-  return (
-    span["gen_ai.response.text"] ?? span["gen_ai.response.object"] ?? null
-  );
+  return span["gen_ai.response.text"] ?? span["gen_ai.response.object"] ?? null;
 }
 
 export function extractTurns(spans: AIConversationSpan[]): ConversationTurn[] {
   const sorted = [...spans].sort(
-    (a, b) => a["precise.start_ts"] - b["precise.start_ts"],
+    (a, b) => a["precise.start_ts"] - b["precise.start_ts"]
   );
   const aiClientSpans = sorted.filter(
-    (s) => getOperationType(s) === "ai_client",
+    (s) => getOperationType(s) === "ai_client"
   );
   const toolSpans = sorted.filter((s) => getOperationType(s) === "tool");
 
   return aiClientSpans.map((span, index) => {
-    const nextTs =
-      index < aiClientSpans.length - 1
-        ? aiClientSpans[index + 1]!["precise.start_ts"]
-        : Number.POSITIVE_INFINITY;
+    const nextSpan = aiClientSpans[index + 1];
+    const nextTs = nextSpan
+      ? nextSpan["precise.start_ts"]
+      : Number.POSITIVE_INFINITY;
     const toolCalls = toolSpans
       .filter((ts) => {
         const t = ts["precise.start_ts"];
@@ -202,7 +241,7 @@ export function extractTurns(spans: AIConversationSpan[]): ConversationTurn[] {
         spanId: ts.span_id,
         timestamp: ts["precise.start_ts"],
         durationMs: Math.round(
-          (ts["precise.finish_ts"] - ts["precise.start_ts"]) * 1000,
+          (ts["precise.finish_ts"] - ts["precise.start_ts"]) * 1000
         ),
         status: ts["span.status"],
       }));
@@ -214,7 +253,7 @@ export function extractTurns(spans: AIConversationSpan[]): ConversationTurn[] {
       started: span["precise.start_ts"],
       ended: span["precise.finish_ts"],
       durationMs: Math.round(
-        (span["precise.finish_ts"] - span["precise.start_ts"]) * 1000,
+        (span["precise.finish_ts"] - span["precise.start_ts"]) * 1000
       ),
       userContent: extractUserContent(span),
       assistantContent: extractAssistantContent(span),
@@ -232,7 +271,9 @@ export function extractTurns(spans: AIConversationSpan[]): ConversationTurn[] {
 // ---------------------------------------------------------------------------
 
 function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
   return `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)}s`;
 }
 
@@ -252,7 +293,9 @@ function formatTurnHuman(turn: ConversationTurn): string {
 
   const lines: string[] = [];
   lines.push(`── Turn ${turn.turn} — ${formatEpoch(turn.started)}`);
-  if (meta) lines.push(`   ${meta}`);
+  if (meta) {
+    lines.push(`   ${meta}`);
+  }
   lines.push("");
 
   if (turn.userContent) {
@@ -283,40 +326,6 @@ function formatTurnHuman(turn: ConversationTurn): string {
   return lines.join("\n");
 }
 
-export function formatTranscript(
-  conversationId: string,
-  org: string,
-  spans: AIConversationSpan[],
-): string {
-  if (spans.length === 0) {
-    return `No spans found for conversation ${conversationId} in the last 30 days.`;
-  }
-
-  const turns = extractTurns(spans);
-  const totalTokens = spans.reduce(
-    (sum, s) => sum + numeric(s["gen_ai.usage.total_tokens"]),
-    0,
-  );
-  const projects = [...new Set(spans.map((s) => s.project))].sort();
-  const start = Math.min(...spans.map((s) => s["precise.start_ts"]));
-  const end = Math.max(...spans.map((s) => s["precise.finish_ts"]));
-
-  const header = [
-    `AI Conversation: ${conversationId}`,
-    "",
-    `  Org:      ${org}`,
-    `  Projects: ${projects.join(", ") || "—"}`,
-    `  Started:  ${formatEpoch(start)}`,
-    `  Ended:    ${formatEpoch(end)}`,
-    `  Turns:    ${turns.length}`,
-    `  Spans:    ${spans.length}`,
-    `  Tokens:   ${totalTokens}`,
-    "",
-  ];
-
-  return [...header, ...turns.map(formatTurnHuman)].join("\n");
-}
-
 export type TranscriptResult = {
   conversationId: string;
   org: string;
@@ -328,10 +337,31 @@ export type TranscriptResult = {
   endTimestamp: number;
 };
 
+export function formatTranscriptResult(result: TranscriptResult): string {
+  if (result.spanCount === 0) {
+    return `No spans found for conversation ${result.conversationId} in the last 30 days.`;
+  }
+
+  const header = [
+    `AI Conversation: ${result.conversationId}`,
+    "",
+    `  Org:      ${result.org}`,
+    `  Projects: ${result.projects.join(", ") || "—"}`,
+    `  Started:  ${formatEpoch(result.startTimestamp)}`,
+    `  Ended:    ${formatEpoch(result.endTimestamp)}`,
+    `  Turns:    ${result.turns.length}`,
+    `  Spans:    ${result.spanCount}`,
+    `  Tokens:   ${result.totalTokens}`,
+    "",
+  ];
+
+  return [...header, ...result.turns.map(formatTurnHuman)].join("\n");
+}
+
 export function buildTranscriptResult(
   conversationId: string,
   org: string,
-  spans: AIConversationSpan[],
+  spans: AIConversationSpan[]
 ): TranscriptResult {
   const turns = extractTurns(spans);
   return {
@@ -340,11 +370,17 @@ export function buildTranscriptResult(
     turns,
     totalTokens: spans.reduce(
       (sum, s) => sum + numeric(s["gen_ai.usage.total_tokens"]),
-      0,
+      0
     ),
     spanCount: spans.length,
     projects: [...new Set(spans.map((s) => s.project))].sort(),
-    startTimestamp: Math.min(...spans.map((s) => s["precise.start_ts"])),
-    endTimestamp: Math.max(...spans.map((s) => s["precise.finish_ts"])),
+    startTimestamp:
+      spans.length > 0
+        ? Math.min(...spans.map((s) => s["precise.start_ts"]))
+        : 0,
+    endTimestamp:
+      spans.length > 0
+        ? Math.max(...spans.map((s) => s["precise.finish_ts"]))
+        : 0,
   };
 }
