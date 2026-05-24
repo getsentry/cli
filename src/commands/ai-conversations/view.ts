@@ -76,7 +76,7 @@ export const viewCommand = buildCommand({
     if (maybeConversationId) {
       org = orgOrConversationId;
       conversationId = maybeConversationId;
-    } else {
+    } else if (orgOrConversationId) {
       const resolved = await resolveOrg({ cwd });
       if (!resolved) {
         throw new ContextError(
@@ -86,6 +86,10 @@ export const viewCommand = buildCommand({
       }
       org = resolved.org;
       conversationId = orgOrConversationId;
+    } else {
+      throw new Error(
+        "Missing conversation ID. Usage: sentry ai-conversations view [org] <conversation-id>"
+      );
     }
 
     const { spans, truncated } = await withProgress(
