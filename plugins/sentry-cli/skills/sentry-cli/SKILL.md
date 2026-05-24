@@ -338,6 +338,15 @@ Make an authenticated API request
 
 → Full flags and examples: `references/api.md`
 
+### Ai-conversations
+
+List and view AI conversations
+
+- `sentry ai-conversations list <org>` — List recent AI conversations
+- `sentry ai-conversations view <org> <conversation-id>` — View an AI conversation transcript
+
+→ Full flags and examples: `references/ai-conversations.md`
+
 ### CLI
 
 CLI-related commands

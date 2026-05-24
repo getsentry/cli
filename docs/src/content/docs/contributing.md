@@ -51,6 +51,7 @@ cli/
 │   ├── app.ts          # Stricli application setup
 │   ├── context.ts      # Dependency injection context
 │   ├── commands/       # CLI commands
+│   │   ├── ai-conversations/# list, view
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
 │   │   ├── cli/         # defaults, feedback, fix, import, setup, upgrade
 │   │   ├── dashboard/   # list, view, create, add, edit, delete, revisions, restore
