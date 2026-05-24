@@ -6,7 +6,6 @@ import {
   UnsatisfiedPositionalError,
 } from "@stricli/core";
 import { aiConversationsRoute } from "./commands/ai-conversations/index.js";
-import { listCommand as aiConversationsListCommand } from "./commands/ai-conversations/list.js";
 import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
 import { whoamiCommand } from "./commands/auth/whoami.js";
