@@ -81,7 +81,7 @@ export async function getConversationSpans(
     project?: string;
     perPage?: number;
   } = {}
-): Promise<AIConversationSpan[]> {
+): Promise<{ spans: AIConversationSpan[]; truncated: boolean }> {
   const regionUrl = await resolveOrgRegion(orgSlug);
   const pageSchema = z.array(AIConversationSpanSchema);
 
@@ -115,11 +115,12 @@ export async function getConversationSpans(
     }
   }
 
-  if (cursor) {
+  const truncated = !!cursor;
+  if (truncated) {
     log.warn(
       `Pagination limit reached (${MAX_PAGINATION_PAGES} pages, ${spans.length} spans). Conversation transcript may be incomplete.`
     );
   }
 
-  return spans;
+  return { spans, truncated };
 }

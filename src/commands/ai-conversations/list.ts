@@ -194,6 +194,9 @@ export const listCommand = buildListCommand("ai-conversations", {
     });
 
     const parts: string[] = [];
+    if (flags.query) {
+      parts.push(`-q "${flags.query}"`);
+    }
     appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
     const flagSuffix = parts.length > 0 ? ` ${parts.join(" ")}` : "";
 

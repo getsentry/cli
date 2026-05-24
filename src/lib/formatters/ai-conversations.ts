@@ -21,11 +21,11 @@ function truncate(value: string, max = 60): string {
   return `${value.slice(0, max - 1)}…`;
 }
 
-function formatTimestamp(ms: number): string {
-  if (ms === 0) {
+function formatTimestamp(epochSeconds: number): string {
+  if (epochSeconds === 0) {
     return "—";
   }
-  return new Date(ms).toLocaleString();
+  return new Date(epochSeconds * 1000).toLocaleString();
 }
 
 export function formatConversationTable(items: ConversationListItem[]): string {
@@ -338,6 +338,7 @@ export type TranscriptResult = {
   projects: string[];
   startTimestamp: number;
   endTimestamp: number;
+  truncated?: boolean;
 };
 
 export function formatTranscriptResult(result: TranscriptResult): string {
@@ -358,7 +359,13 @@ export function formatTranscriptResult(result: TranscriptResult): string {
     "",
   ];
 
-  return [...header, ...result.turns.map(formatTurnHuman)].join("\n");
+  const sections = [...header, ...result.turns.map(formatTurnHuman)];
+  if (result.truncated) {
+    sections.push(
+      "⚠ Transcript truncated — the conversation exceeds the pagination limit."
+    );
+  }
+  return sections.join("\n");
 }
 
 export function buildTranscriptResult(
@@ -381,14 +388,14 @@ export function buildTranscriptResult(
       spans.length > 0
         ? spans.reduce(
             (min, s) => Math.min(min, s["precise.start_ts"]),
-            Infinity
+            Number.POSITIVE_INFINITY
           )
         : 0,
     endTimestamp:
       spans.length > 0
         ? spans.reduce(
             (max, s) => Math.max(max, s["precise.finish_ts"]),
-            -Infinity
+            Number.NEGATIVE_INFINITY
           )
         : 0,
   };

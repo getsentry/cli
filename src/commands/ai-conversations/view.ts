@@ -7,6 +7,7 @@
 import type { SentryContext } from "../../context.js";
 import { getConversationSpans } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
+import { ContextError } from "../../lib/errors.js";
 import {
   buildTranscriptResult,
   formatTranscriptResult,
@@ -19,6 +20,7 @@ import {
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
+import { resolveOrg } from "../../lib/resolve-target.js";
 
 type ViewFlags = {
   readonly json: boolean;
@@ -43,8 +45,9 @@ export const viewCommand = buildCommand({
       parameters: [
         {
           placeholder: "org",
-          brief: "Organization slug",
+          brief: "Organization slug (optional if auto-detected)",
           parse: String,
+          optional: true,
         },
         {
           placeholder: "conversation-id",
@@ -61,12 +64,31 @@ export const viewCommand = buildCommand({
   async *func(
     this: SentryContext,
     flags: ViewFlags,
-    org: string,
-    conversationId: string
+    orgOrConversationId: string,
+    maybeConversationId?: string
   ) {
     applyFreshFlag(flags);
+    const { cwd } = this;
 
-    const spans = await withProgress(
+    let org: string;
+    let conversationId: string;
+
+    if (maybeConversationId) {
+      org = orgOrConversationId;
+      conversationId = maybeConversationId;
+    } else {
+      const resolved = await resolveOrg({ cwd });
+      if (!resolved) {
+        throw new ContextError(
+          "Organization",
+          "sentry ai-conversations view <org> <conversation-id>"
+        );
+      }
+      org = resolved.org;
+      conversationId = orgOrConversationId;
+    }
+
+    const { spans, truncated } = await withProgress(
       {
         message: "Fetching conversation spans...",
         json: flags.json,
@@ -75,6 +97,7 @@ export const viewCommand = buildCommand({
     );
 
     const result = buildTranscriptResult(conversationId, org, spans);
+    result.truncated = truncated;
     yield new CommandOutput<TranscriptResult>(result);
   },
 });
