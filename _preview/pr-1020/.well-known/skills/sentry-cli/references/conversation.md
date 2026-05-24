@@ -43,11 +43,40 @@ List recent AI conversations
 | `toolNames` | array |  |
 | `toolErrors` | number |  |
 
+**Examples:**
+
+```bash
+# List recent AI conversations
+sentry conversation list
+
+# Explicit organization
+sentry conversation list my-org
+
+# Show more, last 24 hours
+sentry conversation list --limit 50 --period 24h
+
+# Filter conversations
+sentry conversation list -q "has:errors"
+
+# Paginate through results
+sentry conversation list my-org -c next
+```
+
 ### `sentry conversation view <org> <conversation-id>`
 
 View an AI conversation transcript
 
 **Flags:**
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+
+**Examples:**
+
+```bash
+# View full transcript
+sentry conversation view my-org conv-123
+
+# JSON output
+sentry conversation view my-org conv-123 --json
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
