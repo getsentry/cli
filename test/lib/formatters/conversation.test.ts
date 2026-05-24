@@ -246,4 +246,215 @@ describe("formatTranscriptResult", () => {
     expect(output).toContain("line two");
     expect(output).toContain("line three");
   });
+
+  test("renders tool calls in turns", () => {
+    const aiSpan = makeSpan({
+      "precise.start_ts": 100,
+      "precise.finish_ts": 110,
+    });
+    const toolSpan = makeSpan({
+      span_id: "tool111122223333",
+      "gen_ai.operation.type": "tool",
+      "span.name": "gen_ai.execute_tool",
+      "gen_ai.tool.name": "web_search",
+      "precise.start_ts": 105,
+      "precise.finish_ts": 106,
+      "span.status": "ok",
+    });
+    const transcript = buildTranscriptResult("conv-123", "my-org", [
+      aiSpan,
+      toolSpan,
+    ]);
+    const output = formatTranscriptResult(transcript);
+    expect(output).toContain("[tools]");
+    expect(output).toContain("web_search");
+  });
+
+  test("renders tool call with non-ok status", () => {
+    const aiSpan = makeSpan({
+      "precise.start_ts": 100,
+      "precise.finish_ts": 110,
+    });
+    const toolSpan = makeSpan({
+      span_id: "tool111122223333",
+      "gen_ai.operation.type": "tool",
+      "span.name": "gen_ai.execute_tool",
+      "gen_ai.tool.name": "db_query",
+      "precise.start_ts": 105,
+      "precise.finish_ts": 106,
+      "span.status": "internal_error",
+    });
+    const transcript = buildTranscriptResult("conv-123", "my-org", [
+      aiSpan,
+      toolSpan,
+    ]);
+    const output = formatTranscriptResult(transcript);
+    expect(output).toContain("(internal_error)");
+  });
+
+  test("renders model and agent name in turn metadata", () => {
+    const span = makeSpan({
+      "gen_ai.response.model": "claude-3",
+      "gen_ai.agent.name": "my-agent",
+    });
+    const transcript = buildTranscriptResult("conv-123", "my-org", [span]);
+    const output = formatTranscriptResult(transcript);
+    expect(output).toContain("claude-3");
+    expect(output).toContain("my-agent");
+  });
+
+  test("renders token count in metadata", () => {
+    const span = makeSpan({ "gen_ai.usage.total_tokens": "1500" });
+    const transcript = buildTranscriptResult("conv-123", "my-org", [span]);
+    const output = formatTranscriptResult(transcript);
+    expect(output).toContain("1500 tokens");
+  });
+});
+
+describe("extractTurns: content extraction edge cases", () => {
+  test("extracts from gen_ai.response.text fallback", () => {
+    const span = makeSpan({
+      "gen_ai.output.messages": undefined,
+      "gen_ai.response.text": "fallback text",
+    });
+    const turns = extractTurns([span]);
+    expect(turns[0].assistantContent).toBe("fallback text");
+  });
+
+  test("extracts from gen_ai.response.object fallback", () => {
+    const span = makeSpan({
+      "gen_ai.output.messages": undefined,
+      "gen_ai.response.text": undefined,
+      "gen_ai.response.object": '{"result": true}',
+    });
+    const turns = extractTurns([span]);
+    expect(turns[0].assistantContent).toBe('{"result": true}');
+  });
+
+  test("handles plain string input messages", () => {
+    const span = makeSpan({
+      "gen_ai.input.messages": "plain string input",
+    });
+    const turns = extractTurns([span]);
+    expect(turns[0].userContent).toBe("plain string input");
+  });
+
+  test("handles array of string messages", () => {
+    const span = makeSpan({
+      "gen_ai.input.messages": JSON.stringify(["msg1", "msg2"]),
+    });
+    const turns = extractTurns([span]);
+    expect(turns[0].userContent).toBe("msg2");
+  });
+
+  test("handles message with text field instead of content", () => {
+    const span = makeSpan({
+      "gen_ai.input.messages": JSON.stringify({
+        messages: [{ role: "user", text: "from text field" }],
+      }),
+    });
+    const turns = extractTurns([span]);
+    expect(turns[0].userContent).toBe("from text field");
+  });
+
+  test("handles array content parts with text", () => {
+    const span = makeSpan({
+      "gen_ai.output.messages": JSON.stringify({
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "part one" }, { text: "part two" }],
+          },
+        ],
+      }),
+    });
+    const turns = extractTurns([span]);
+    expect(turns[0].assistantContent).toContain("part one");
+    expect(turns[0].assistantContent).toContain("part two");
+  });
+
+  test("handles no input or output messages", () => {
+    const span = makeSpan({
+      "gen_ai.input.messages": undefined,
+      "gen_ai.request.messages": undefined,
+      "gen_ai.output.messages": undefined,
+      "gen_ai.response.text": undefined,
+      "gen_ai.response.object": undefined,
+    });
+    const turns = extractTurns([span]);
+    expect(turns[0].userContent).toBeNull();
+    expect(turns[0].assistantContent).toBeNull();
+  });
+
+  test("extracts from gen_ai.request.messages fallback", () => {
+    const span = makeSpan({
+      "gen_ai.input.messages": undefined,
+      "gen_ai.request.messages": JSON.stringify({
+        messages: [{ role: "user", content: "from request" }],
+      }),
+    });
+    const turns = extractTurns([span]);
+    expect(turns[0].userContent).toBe("from request");
+  });
+
+  test("handles numeric token values", () => {
+    const span = makeSpan({
+      "gen_ai.usage.total_tokens": 42,
+    });
+    const turns = extractTurns([span]);
+    expect(turns[0].totalTokens).toBe(42);
+  });
+
+  test("handles missing token values", () => {
+    const span = makeSpan({
+      "gen_ai.usage.total_tokens": undefined,
+    });
+    const turns = extractTurns([span]);
+    expect(turns[0].totalTokens).toBe(0);
+  });
+
+  test("detects operation type from span name when explicit type missing", () => {
+    const span = makeSpan({
+      "gen_ai.operation.type": undefined,
+      "span.name": "gen_ai.execute_tool",
+    });
+    const turns = extractTurns([span]);
+    expect(turns).toHaveLength(0);
+  });
+
+  test("detects agent operation type from span name", () => {
+    const span = makeSpan({
+      "gen_ai.operation.type": undefined,
+      "span.name": "gen_ai.invoke_agent",
+    });
+    const turns = extractTurns([span]);
+    expect(turns).toHaveLength(0);
+  });
+
+  test("ignores non-gen_ai span names", () => {
+    const span = makeSpan({
+      "gen_ai.operation.type": undefined,
+      "span.name": "http.client",
+    });
+    const turns = extractTurns([span]);
+    expect(turns).toHaveLength(0);
+  });
+
+  test("detects handoff operation type", () => {
+    const span = makeSpan({
+      "gen_ai.operation.type": undefined,
+      "span.name": "gen_ai.handoff",
+    });
+    const turns = extractTurns([span]);
+    expect(turns).toHaveLength(0);
+  });
+
+  test("falls back to ai_client for unknown gen_ai span names", () => {
+    const span = makeSpan({
+      "gen_ai.operation.type": undefined,
+      "span.name": "gen_ai.something_new",
+    });
+    const turns = extractTurns([span]);
+    expect(turns).toHaveLength(1);
+  });
 });

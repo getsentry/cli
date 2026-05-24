@@ -289,10 +289,22 @@ function formatEpoch(ts: number): string {
   return new Date(ts * 1000).toISOString();
 }
 
+function appendContentBlock(
+  lines: string[],
+  label: string,
+  content: string
+): void {
+  lines.push(`   [${label}]`);
+  for (const line of truncate(content, 600).split("\n")) {
+    lines.push(`   ${sanitize(line)}`);
+  }
+  lines.push("");
+}
+
 function formatTurnHuman(turn: ConversationTurn): string {
   const meta = [
-    turn.model,
-    turn.agentName,
+    turn.model ? sanitize(turn.model) : null,
+    turn.agentName ? sanitize(turn.agentName) : null,
     turn.totalTokens > 0 ? `${turn.totalTokens} tokens` : null,
     formatDuration(turn.durationMs),
   ]
@@ -307,25 +319,17 @@ function formatTurnHuman(turn: ConversationTurn): string {
   lines.push("");
 
   if (turn.userContent) {
-    lines.push("   [user]");
-    for (const line of truncate(turn.userContent, 600).split("\n")) {
-      lines.push(`   ${sanitize(line)}`);
-    }
-    lines.push("");
+    appendContentBlock(lines, "user", turn.userContent);
   }
-
   if (turn.assistantContent) {
-    lines.push("   [assistant]");
-    for (const line of truncate(turn.assistantContent, 600).split("\n")) {
-      lines.push(`   ${sanitize(line)}`);
-    }
-    lines.push("");
+    appendContentBlock(lines, "assistant", turn.assistantContent);
   }
 
   if (turn.toolCalls.length > 0) {
     lines.push("   [tools]");
     for (const tc of turn.toolCalls) {
-      const status = tc.status && tc.status !== "ok" ? ` (${tc.status})` : "";
+      const status =
+        tc.status && tc.status !== "ok" ? ` (${sanitize(tc.status)})` : "";
       lines.push(
         `   • ${sanitize(tc.name)} — ${formatDuration(tc.durationMs)}${status}`
       );
