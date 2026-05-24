@@ -354,14 +354,14 @@ export type TranscriptResult = {
 
 export function formatTranscriptResult(result: TranscriptResult): string {
   if (result.spanCount === 0) {
-    return `No spans found for conversation ${result.conversationId} in the last 30 days.`;
+    return `No spans found for conversation ${sanitize(result.conversationId)} in the last 30 days.`;
   }
 
   const header = [
-    `AI Conversation: ${result.conversationId}`,
+    `AI Conversation: ${sanitize(result.conversationId)}`,
     "",
-    `  Org:      ${result.org}`,
-    `  Projects: ${result.projects.join(", ") || "—"}`,
+    `  Org:      ${sanitize(result.org)}`,
+    `  Projects: ${result.projects.map(sanitize).join(", ") || "—"}`,
     `  Started:  ${formatEpoch(result.startTimestamp)}`,
     `  Ended:    ${formatEpoch(result.endTimestamp)}`,
     `  Turns:    ${result.turns.length}`,

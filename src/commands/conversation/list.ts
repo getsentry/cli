@@ -15,6 +15,7 @@ import {
 } from "../../lib/db/pagination.js";
 import { formatConversationTable } from "../../lib/formatters/conversation.js";
 import { filterFields } from "../../lib/formatters/json.js";
+import { sanitize } from "../../lib/formatters/local.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   buildListCommand,
@@ -71,7 +72,7 @@ function formatListHuman(result: ConversationListResult): string {
       ? "No conversations on this page."
       : "No AI conversations found.";
   }
-  return `AI conversations in ${org}:\n\n${formatConversationTable(conversations)}`;
+  return `AI conversations in ${sanitize(org)}:\n\n${formatConversationTable(conversations)}`;
 }
 
 function jsonTransform(
@@ -100,7 +101,7 @@ export const listCommand = buildListCommand("conversation", {
     fullDescription:
       "List recent AI conversations from a Sentry organization.\n\n" +
       "Examples:\n" +
-      "  sentry conversation list                # List last 10 conversations\n" +
+      "  sentry conversation list                # List recent conversations\n" +
       "  sentry conversation list my-org         # Explicit org\n" +
       "  sentry conversation list --limit 50     # Show more\n" +
       "  sentry conversation list --period 24h   # Last 24 hours\n" +
