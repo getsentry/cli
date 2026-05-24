@@ -95,8 +95,8 @@ importers:
         specifier: ^4.5.3
         version: 4.8.0
       fossilize:
-        specifier: ^0.6.0
-        version: 0.6.0
+        specifier: ^0.7.0
+        version: 0.7.0
       hono:
         specifier: ^4.12.15
         version: 4.12.18
@@ -1785,8 +1785,8 @@ packages:
     resolution: {integrity: sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==}
     engines: {node: '>= 0.6'}
 
-  fossilize@0.6.0:
-    resolution: {integrity: sha512-Hw+OHDmBmnXgs/mxQ4WCgEzs95+jsGwBbsSk3Md45217WHmLFrhm+7d6RfvpIJBILAZCmPr9ov0t92W8Vf2O9Q==}
+  fossilize@0.7.0:
+    resolution: {integrity: sha512-DMY/j38pRnMgAjz+2PzOGn0WlDQ4Aa5/gQMgrsBLSv1LK+eSH51IIyxjMEvonv1Xs9LpIdJIGlVVXPmZGJR8Qg==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -4625,7 +4625,7 @@ snapshots:
 
   forwarded@0.2.0: {}
 
-  fossilize@0.6.0:
+  fossilize@0.7.0:
     dependencies:
       '@stricli/auto-complete': 1.2.7
       '@stricli/core': 1.2.7(patch_hash=10f8318359902742c80029abdcec31fe4c64de89b6f2a3f5afb09f05aacc506d)
