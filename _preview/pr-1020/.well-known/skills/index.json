@@ -5,10 +5,10 @@
       "description": "Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.",
       "files": [
         "SKILL.md",
-        "references/ai-conversations.md",
         "references/api.md",
         "references/auth.md",
         "references/cli.md",
+        "references/conversation.md",
         "references/dashboard.md",
         "references/event.md",
         "references/explore.md",

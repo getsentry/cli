@@ -1,5 +1,5 @@
 ---
-name: sentry-cli-ai-conversations
+name: sentry-cli-conversation
 version: 0.35.0-dev.0
 description: List and view AI conversations
 requires:
@@ -7,11 +7,11 @@ requires:
   auth: true
 ---
 
-# Ai-conversations Commands
+# Conversation Commands
 
 List and view AI conversations
 
-### `sentry ai-conversations list <org>`
+### `sentry conversation list <org>`
 
 List recent AI conversations
 
@@ -43,40 +43,11 @@ List recent AI conversations
 | `toolNames` | array |  |
 | `toolErrors` | number |  |
 
-**Examples:**
-
-```bash
-# List last 10 AI conversations
-sentry ai-conversations list
-
-# Explicit organization
-sentry ai-conversations list my-org
-
-# Show more, last 24 hours
-sentry ai-conversations list --limit 50 --period 24h
-
-# Filter conversations
-sentry ai-conversations list -q "has:errors"
-
-# Paginate through results
-sentry ai-conversations list my-org -c next
-```
-
-### `sentry ai-conversations view <org> <conversation-id>`
+### `sentry conversation view <org> <conversation-id>`
 
 View an AI conversation transcript
 
 **Flags:**
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
-
-**Examples:**
-
-```bash
-# View full transcript
-sentry ai-conversations view my-org conv-123
-
-# JSON output
-sentry ai-conversations view my-org conv-123 --json
-```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
