@@ -12,7 +12,7 @@ import {
   AIConversationSpanSchema,
   type ConversationListItem,
   ConversationListItemSchema,
-} from "../../types/ai-conversations.js";
+} from "../../types/conversation.js";
 
 import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
@@ -24,7 +24,7 @@ import {
   parseLinkHeader,
 } from "./infrastructure.js";
 
-const log = logger.withTag("api.ai-conversations");
+const log = logger.withTag("api.conversations");
 
 export async function listConversations(
   orgSlug: string,

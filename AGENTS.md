@@ -92,6 +92,7 @@ cli/
 │   ├── commands/           # CLI commands
 │   │   ├── auth/           # login, logout, refresh, status, token, whoami
 │   │   ├── cli/            # defaults, feedback, fix, setup, upgrade
+│   │   ├── conversation/    # list, view (AI conversations)
 │   │   ├── dashboard/      # list, view, create, widget (add, edit, delete)
 │   │   ├── event/          # list, view
 │   │   ├── issue/          # list, view, events, explain, plan, resolve, unresolve, merge

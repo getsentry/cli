@@ -1,5 +1,5 @@
 /**
- * sentry ai-conversations list
+ * sentry conversation list
  *
  * List recent AI conversations from Sentry projects.
  */
@@ -13,7 +13,7 @@ import {
   hasPreviousPage,
   resolveCursor,
 } from "../../lib/db/pagination.js";
-import { formatConversationTable } from "../../lib/formatters/ai-conversations.js";
+import { formatConversationTable } from "../../lib/formatters/conversation.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
@@ -36,7 +36,7 @@ import {
 import {
   type ConversationListItem,
   ConversationListItemSchema,
-} from "../../types/ai-conversations.js";
+} from "../../types/conversation.js";
 
 type ListFlags = {
   readonly limit: number;
@@ -56,8 +56,8 @@ type ConversationListResult = {
   org: string;
 };
 
-const COMMAND_NAME = "ai-conversations list";
-const PAGINATION_KEY = "ai-conversations-list";
+const COMMAND_NAME = "conversation list";
+const PAGINATION_KEY = "conversation-list";
 const DEFAULT_PERIOD = "7d";
 
 function parseLimit(value: string): number {
@@ -94,17 +94,17 @@ function jsonTransform(
   return envelope;
 }
 
-export const listCommand = buildListCommand("ai-conversations", {
+export const listCommand = buildListCommand("conversation", {
   docs: {
     brief: "List recent AI conversations",
     fullDescription:
       "List recent AI conversations from a Sentry organization.\n\n" +
       "Examples:\n" +
-      "  sentry ai-conversations list                # List last 10 conversations\n" +
-      "  sentry ai-conversations list my-org         # Explicit org\n" +
-      "  sentry ai-conversations list --limit 50     # Show more\n" +
-      "  sentry ai-conversations list --period 24h   # Last 24 hours\n" +
-      '  sentry ai-conversations list -q "has:errors" # Filter\n',
+      "  sentry conversation list                # List last 10 conversations\n" +
+      "  sentry conversation list my-org         # Explicit org\n" +
+      "  sentry conversation list --limit 50     # Show more\n" +
+      "  sentry conversation list --period 24h   # Last 24 hours\n" +
+      '  sentry conversation list -q "has:errors" # Filter\n',
   },
   output: {
     human: formatListHuman,
@@ -155,7 +155,7 @@ export const listCommand = buildListCommand("ai-conversations", {
     }
     const org = resolved.org;
 
-    const contextKey = buildPaginationContextKey("ai-conversations", org, {
+    const contextKey = buildPaginationContextKey("conversation", org, {
       q: flags.query,
       period: serializeTimeRange(flags.period),
     });
@@ -204,8 +204,8 @@ export const listCommand = buildListCommand("ai-conversations", {
       hint: paginationHint({
         hasMore,
         hasPrev: !!hasPrev,
-        nextHint: `sentry ai-conversations list ${org} -c next${flagSuffix}`,
-        prevHint: `sentry ai-conversations list ${org} -c prev${flagSuffix}`,
+        nextHint: `sentry conversation list ${org} -c next${flagSuffix}`,
+        prevHint: `sentry conversation list ${org} -c prev${flagSuffix}`,
       }),
     };
   },

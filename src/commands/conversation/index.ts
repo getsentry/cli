@@ -1,5 +1,5 @@
 /**
- * sentry ai-conversations
+ * sentry conversation
  *
  * List and view AI conversations from Sentry Explore.
  */
@@ -8,7 +8,7 @@ import { buildRouteMap } from "../../lib/route-map.js";
 import { listCommand } from "./list.js";
 import { viewCommand } from "./view.js";
 
-export const aiConversationsRoute = buildRouteMap({
+export const conversationRoute = buildRouteMap({
   routes: {
     list: listCommand,
     view: viewCommand,

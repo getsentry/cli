@@ -1,5 +1,5 @@
 /**
- * sentry ai-conversations view
+ * sentry conversation view
  *
  * View the transcript of a specific AI conversation.
  */
@@ -12,7 +12,7 @@ import {
   buildTranscriptResult,
   formatTranscriptResult,
   type TranscriptResult,
-} from "../../lib/formatters/ai-conversations.js";
+} from "../../lib/formatters/conversation.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
@@ -33,8 +33,8 @@ export const viewCommand = buildCommand({
     fullDescription:
       "View the full transcript of an AI conversation.\n\n" +
       "Examples:\n" +
-      "  sentry ai-conversations view my-org conv-123\n" +
-      "  sentry ai-conversations view my-org conv-123 --json\n",
+      "  sentry conversation view my-org conv-123\n" +
+      "  sentry conversation view my-org conv-123 --json\n",
   },
   output: {
     human: formatTranscriptResult,
@@ -81,14 +81,14 @@ export const viewCommand = buildCommand({
       if (!resolved) {
         throw new ContextError(
           "Organization",
-          "sentry ai-conversations view <org> <conversation-id>"
+          "sentry conversation view <org> <conversation-id>"
         );
       }
       org = resolved.org;
       conversationId = orgOrConversationId;
     } else {
       throw new Error(
-        "Missing conversation ID. Usage: sentry ai-conversations view [org] <conversation-id>"
+        "Missing conversation ID. Usage: sentry conversation view [org] <conversation-id>"
       );
     }
 

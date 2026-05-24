@@ -7,15 +7,6 @@
 
 // DSN types
 export type { DetectedDsn, DsnSource, ParsedDsn } from "../lib/dsn/types.js";
-// AI Conversations types
-export type {
-  AIConversationSpan,
-  ConversationListItem,
-} from "./ai-conversations.js";
-export {
-  AIConversationSpanSchema,
-  ConversationListItemSchema,
-} from "./ai-conversations.js";
 // Configuration types
 export type {
   CachedProject,
@@ -28,6 +19,15 @@ export {
   ProjectAliasesSchema,
   SentryConfigSchema,
 } from "./config.js";
+// AI Conversations types
+export type {
+  AIConversationSpan,
+  ConversationListItem,
+} from "./conversation.js";
+export {
+  AIConversationSpanSchema,
+  ConversationListItemSchema,
+} from "./conversation.js";
 // Dashboard types
 export type {
   DashboardDetail,

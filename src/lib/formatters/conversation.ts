@@ -8,7 +8,7 @@
 import type {
   AIConversationSpan,
   ConversationListItem,
-} from "../../types/ai-conversations.js";
+} from "../../types/conversation.js";
 import { sanitize } from "./local.js";
 
 // ---------------------------------------------------------------------------
