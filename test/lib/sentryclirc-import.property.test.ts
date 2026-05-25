@@ -131,15 +131,19 @@ describe("property: maskToken", () => {
     );
   });
 
-  test("output never equals the original input (when input contains non-asterisk chars)", () => {
+  test("output never equals the original input", () => {
+    // Tokens that are entirely asterisks are already fully masked, so
+    // maskToken cannot meaningfully change them — exclude that edge case.
     fcAssert(
-      property(string({ minLength: 1, maxLength: 100 }), (token) => {
-        // Skip tokens that are already all asterisks — masking them
-        // produces an identical string, which is correct behavior.
-        if (/^\*+$/.test(token)) return;
-        const masked = maskToken(token);
-        expect(masked).not.toBe(token);
-      }),
+      property(
+        string({ minLength: 1, maxLength: 100 }).filter(
+          (t) => !/^\*+$/.test(t)
+        ),
+        (token) => {
+          const masked = maskToken(token);
+          expect(masked).not.toBe(token);
+        }
+      ),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });

@@ -4,7 +4,7 @@ Guidelines for AI agents working in this codebase.
 
 ## Project Overview
 
-**Sentry CLI** is a command-line interface for [Sentry](https://sentry.io), built with [Bun](https://bun.sh) and [Stricli](https://bloomberg.github.io/stricli/).
+**Sentry CLI** is a command-line interface for [Sentry](https://sentry.io), built with [Node.js](https://nodejs.org) and [Stricli](https://bloomberg.github.io/stricli/).
 
 ### Goals
 
@@ -12,7 +12,7 @@ Guidelines for AI agents working in this codebase.
 - **AI-powered debugging** - Integrate Seer AI for root cause analysis and fix plans
 - **Developer-friendly** - Follow `gh` CLI conventions for intuitive UX
 - **Agent-friendly** - JSON output and predictable behavior for AI coding agents
-- **Fast** - Native binaries via Bun, SQLite caching for API responses
+- **Fast** - Native binaries via Node SEA, SQLite caching for API responses
 
 ### Key Features
 
@@ -28,7 +28,6 @@ Guidelines for AI agents working in this codebase.
 
 Before working on this codebase, read the Cursor rules:
 
-- **`.cursor/rules/bun-cli.mdc`** - Bun API usage, file I/O, process spawning, testing
 - **`.cursor/rules/ultracite.mdc`** - Code style, formatting, linting rules
 
 ## Quick Reference: Commands
@@ -37,71 +36,70 @@ Before working on this codebase, read the Cursor rules:
 
 ```bash
 # Development
-bun install                              # Install dependencies
-bun run dev                              # Run CLI in dev mode
-bun run --env-file=.env.local src/bin.ts # Dev with env vars
+pnpm install                              # Install dependencies
+pnpm run dev                              # Run CLI in dev mode
+pnpm run cli                              # Run CLI directly via tsx
 
 # Build
-bun run build                            # Build for current platform
-bun run build:all                        # Build for all platforms
+pnpm run build                            # Build for current platform
+pnpm run build:all                        # Build for all platforms
 
 # Type Checking
-bun run typecheck                        # Check types
+pnpm run typecheck                        # Check types
 
 # Linting & Formatting
-bun run lint                             # Check for issues
-bun run lint:fix                         # Auto-fix issues (run before committing)
+pnpm run lint                             # Check for issues
+pnpm run lint:fix                         # Auto-fix issues (run before committing)
 
 # Testing
-bun test                                 # Run all tests
-bun test path/to/file.test.ts            # Run single test file
-bun test --watch                         # Watch mode
-bun test --filter "test name"            # Run tests matching pattern
-bun run test:unit                        # Run unit tests only
-bun run test:e2e                         # Run e2e tests only
+pnpm test                                 # Run all tests
+pnpm test -- path/to/file.test.ts         # Run single test file
+pnpm run test:unit                        # Run unit tests only
+pnpm run test:e2e                         # Run e2e tests only
 ```
+
+## Rules: esbuild Bundling & `require()` in `src/`
+
+**CRITICAL**: The CLI ships as a CJS bundle (both the Node SEA binary and the npm package). esbuild bundles all `src/` code into a single file. This has important implications for `require()`:
+
+| Pattern | esbuild resolves it? | Safe in bundle? | Use for |
+|---------|---------------------|-----------------|---------|
+| `require("./foo.js")` | **Yes** — inlined at bundle time | Yes | Relative lazy imports (circular dep breaking) |
+| `require("node:fs")` | **Yes** — left as external | Yes | Node builtins |
+| `_require("node:fs")` | **No** — opaque call, passes through | Yes (builtins resolve by name) | Node builtins via `createRequire` |
+| `_require("./foo.js")` | **No** — opaque call, passes through | **NO** — resolves from bundle location | **Never use this** |
+
+**Key rules:**
+1. **Never alias `require()` for relative imports.** esbuild only statically resolves bare `require()` calls. Any aliased require (`_require`, `localRequire`, etc.) passes through as-is into the bundle. At runtime, relative paths resolve from the bundle file's location (`dist/index.cjs` or the SEA binary), where `./foo.js` doesn't exist.
+
+2. **Use `createRequire(import.meta.url)` as `_require` only for node builtins and npm packages.** These resolve by name (not relative path) so the base directory doesn't matter: `_require("node:sqlite")`, `_require("@sentry/node-core/light")`.
+
+3. **Keep bare `require()` for relative lazy imports.** The global `require` shim (`script/require-shim.mjs`) provides `require` in ESM/tsx dev mode. esbuild resolves relative requires at bundle time, so they never reach runtime.
+
+4. **Never merge a PR with failing CI.** The build jobs (binary + npm bundle) catch require resolution bugs that unit tests miss. Always wait for all CI jobs to pass.
 
 ## Rules: No Runtime Dependencies
 
-**CRITICAL**: All packages must be in `devDependencies`, never `dependencies`. Everything is bundled at build time via esbuild. CI enforces this with `bun run check:deps`.
+**CRITICAL**: All packages must be in `devDependencies`, never `dependencies`. Everything is bundled at build time via esbuild. CI enforces this with `pnpm run check:deps`.
 
-When adding a package, always use `bun add -d <package>` (the `-d` flag).
+When adding a package, always use `pnpm add -D <package>` (the `-D` flag).
 
 When the `@sentry/api` SDK provides types for an API response, import them directly from `@sentry/api` instead of creating redundant Zod schemas in `src/types/sentry.ts`.
 
-## Rules: Use Bun APIs
+## Rules: Use Node.js APIs
 
-**CRITICAL**: This project uses Bun as runtime. Always prefer Bun-native APIs over Node.js equivalents.
-
-Read the full guidelines in `.cursor/rules/bun-cli.mdc`.
-
-**Bun Documentation**: https://bun.sh/docs - Consult these docs when unsure about Bun APIs.
-
-### Quick Bun API Reference
+**CRITICAL**: This project uses Node.js as its runtime. Use standard `node:*` built-in modules.
 
 | Task | Use This | NOT This |
 |------|----------|----------|
-| Read file | `await Bun.file(path).text()` | `fs.readFileSync()` |
-| Write file | `await Bun.write(path, content)` | `fs.writeFileSync()` |
-| Check file exists | `await Bun.file(path).exists()` | `fs.existsSync()` |
-| Spawn process | `Bun.spawn()` | `child_process.spawn()` |
-| Shell commands | `Bun.$\`command\`` ⚠️ | `child_process.exec()` |
-| Find executable | `Bun.which("git")` | `which` package |
-| Glob patterns | `new Bun.Glob()` | `glob` / `fast-glob` packages |
-| Sleep | `await Bun.sleep(ms)` | `setTimeout` with Promise |
-| Parse JSON file | `await Bun.file(path).json()` | Read + JSON.parse |
-
-**Exception**: Use `node:fs` for directory creation with permissions:
-```typescript
-import { mkdirSync } from "node:fs";
-mkdirSync(dir, { recursive: true, mode: 0o700 });
-```
-
-**Exception**: `Bun.$` (shell tagged template) has no shim in `script/node-polyfills.ts` and will crash on the npm/node distribution. Until a shim is added, use `execSync` from `node:child_process` for shell commands that must work in both runtimes:
-```typescript
-import { execSync } from "node:child_process";
-const result = execSync("id -u username", { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] });
-```
+| Read file | `readFileSync(path, "utf-8")` | `Bun.file(path).text()` |
+| Write file | `writeFileSync(path, content)` | `Bun.write(path, content)` |
+| Check file exists | `existsSync(path)` | `Bun.file(path).exists()` |
+| Spawn process | `spawn()` from `node:child_process` | `Bun.spawn()` |
+| Find executable | `whichSync()` from `src/lib/which.ts` | `Bun.which()` |
+| Glob patterns | `picomatch` | `new Bun.Glob()` |
+| Sleep | `setTimeout` from `node:timers/promises` | `Bun.sleep(ms)` |
+| Parse JSON file | `JSON.parse(readFileSync(path, "utf-8"))` | `Bun.file(path).json()` |
 
 ## Architecture
 
@@ -511,12 +509,12 @@ Use `"date"` for timestamp-based sort (not `"time"`). Export sort types from the
 
 ### Generated Docs & Skills
 
-All command docs and skill files are generated via `bun run generate:docs` (which runs `generate:command-docs` then `generate:skill`). This runs automatically as part of `dev`, `build`, `typecheck`, and `test` scripts.
+All command docs and skill files are generated via `pnpm run generate:docs` (which runs `generate:command-docs` then `generate:skill`). This runs automatically as part of `dev`, `build`, `typecheck`, and `test` scripts.
 
 - **Command docs** (`docs/src/content/docs/commands/*.md`) are **gitignored** and generated from CLI metadata + hand-written fragments in `docs/src/fragments/commands/`.
 - **Skill files** (`plugins/sentry-cli/skills/sentry-cli/`) are **committed** (consumed by external plugin systems) and auto-committed by CI when stale.
 - Edit fragments in `docs/src/fragments/commands/` for custom examples and guides.
-- `bun run check:fragments` validates fragment ↔ route consistency.
+- `pnpm run check:fragments` validates fragment ↔ route consistency.
 - Positional `placeholder` values must be descriptive: `"org/project/trace-id"` not `"args"`.
 
 ### Zod Schemas for Validation
@@ -612,7 +610,7 @@ CliError (base, exitCode=1)
 - Pass `alternatives: []` when defaults are irrelevant (e.g., for missing Trace ID, Event ID)
 - Use `" and "` in `resource` for plural grammar: `"Trace ID and span ID"` → "are required"
 
-**CI enforcement:** `bun run check:errors` scans for `ContextError` with multiline commands and `CliError` with ad-hoc "Try:" strings.
+**CI enforcement:** `pnpm run check:errors` scans for `ContextError` with multiline commands and `CliError` with ad-hoc "Try:" strings.
 
 ```typescript
 // Usage examples
@@ -796,7 +794,7 @@ await deleteUserData(userId)
 ### Goal
 Minimal comments, maximum clarity. Comments explain **intent and reasoning**, not syntax.
 
-## Testing (bun:test + fast-check)
+## Testing (vitest + fast-check)
 
 **Prefer property-based and model-based testing** over traditional unit tests. These approaches find edge cases automatically and provide better coverage with less code.
 
@@ -830,7 +828,7 @@ Tests that need a database or config directory **must** use `useTestConfigDir()`
 - `const baseDir = process.env[CONFIG_DIR_ENV_VAR]!` at module scope — This captures a value that may be stale
 - Manual `beforeEach`/`afterEach` that sets/deletes `SENTRY_CONFIG_DIR`
 
-**Why**: Bun's test runner uses `--isolate --parallel` (see `test:unit` in `package.json`), so each test file runs in a fresh global environment within a worker process. That bounds most cross-file leaks to a single worker, but `process.env` is still shared within a file's lifecycle — if your `afterEach` deletes the env var, the next describe/test's module-level code (or a beforeEach that re-reads env) gets `undefined`, causing `TypeError: The "paths[0]" property must be of type string`. Also, `TEST_TMP_DIR` is namespaced by `BUN_TEST_WORKER_ID` in `test/constants.ts` so parallel workers don't wipe each other's temp state during preload.
+**Why**: The test runner uses `--isolate --parallel` (see `test:unit` in `package.json`), so each test file runs in a fresh global environment within a worker process. That bounds most cross-file leaks to a single worker, but `process.env` is still shared within a file's lifecycle — if your `afterEach` deletes the env var, the next describe/test's module-level code (or a beforeEach that re-reads env) gets `undefined`, causing `TypeError: The "paths[0]" property must be of type string`. Also, `TEST_TMP_DIR` is namespaced by worker ID in `test/constants.ts` so parallel workers don't wipe each other's temp state during preload.
 
 ```typescript
 // CORRECT: Use the helper
@@ -853,7 +851,7 @@ afterEach(() => { delete process.env.SENTRY_CONFIG_DIR; }); // BUG!
 Use property-based tests when verifying invariants that should hold for **any valid input**.
 
 ```typescript
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { constantFrom, assert as fcAssert, property, tuple } from "fast-check";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
@@ -901,7 +899,7 @@ describe("property: myFunction", () => {
 Use model-based tests for **stateful systems** where sequences of operations should maintain invariants.
 
 ```typescript
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   type AsyncCommand,
   asyncModelRun,
@@ -1029,7 +1027,7 @@ When adding property tests for a function that already has unit tests, **remove 
 ```
 
 ```typescript
-import { describe, expect, test, mock } from "bun:test";
+import { describe, expect, test, vi } from "vitest";
 
 describe("feature", () => {
   test("should return specific value", async () => {
@@ -1038,7 +1036,7 @@ describe("feature", () => {
 });
 
 // Mock modules when needed
-mock.module("./some-module", () => ({
+vi.mock("./some-module", () => ({
   default: () => "mocked",
 }));
 ```

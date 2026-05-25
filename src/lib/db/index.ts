@@ -5,8 +5,12 @@
  */
 
 import { chmodSync, mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { getEnv } from "../env.js";
+
+const _require = createRequire(import.meta.url);
+
 import { migrateFromJson } from "./migration.js";
 import { initSchema, runMigrations } from "./schema.js";
 import { Database } from "./sqlite.js";
@@ -30,7 +34,7 @@ let rawDb: Database | null = null;
 let dbOpenedPath: string | null = null;
 
 export function getConfigDir(): string {
-  const { homedir } = require("node:os");
+  const { homedir } = _require("node:os");
   return (
     getEnv()[CONFIG_DIR_ENV_VAR] || join(homedir(), DEFAULT_CONFIG_DIR_NAME)
   );
@@ -107,7 +111,7 @@ export function getDatabase(): Database {
     if (getEnv().SENTRY_CLI_NO_TELEMETRY === "1") {
       db = rawDb;
     } else {
-      const { createTracedDatabase } = require("../telemetry.js") as {
+      const { createTracedDatabase } = _require("../telemetry.js") as {
         createTracedDatabase: (d: Database) => Database;
       };
       db = createTracedDatabase(rawDb);

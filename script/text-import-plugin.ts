@@ -95,9 +95,18 @@ function resolveOutdir(build: {
     : dirname(resolvePath(build.initialOptions.outfile ?? "."));
 }
 
+const GREP_WORKER_SOURCE_RE = /grep-worker-source\.(js|ts)$/;
+
 export const textImportPlugin: Plugin = {
   name: "text-import",
   setup(build) {
+    // Intercept grep-worker-source.ts — replace with inlined grep-worker.js
+    // content so the compiled binary doesn't need the file on disk.
+    build.onResolve({ filter: GREP_WORKER_SOURCE_RE }, (args) => ({
+      path: resolvePath(args.resolveDir, "grep-worker.js"),
+      namespace: TEXT_IMPORT_NS,
+    }));
+
     build.onResolve({ filter: ANY_FILTER }, async (args) => {
       if (args.with?.type === "text") {
         return {
@@ -128,17 +137,15 @@ export const textImportPlugin: Plugin = {
           );
         }
 
-        // For CJS bundles (npm distribution), emit a virtual module that
-        // exports the sidecar filename as a string. The consumer resolves
+        // Emit a virtual module that exports the sidecar filename as a
+        // string. For CJS bundles (npm distribution), the consumer resolves
         // the full path at runtime using import.meta.url. For ESM bundles
-        // (Bun binary build), mark external so Bun.compile embeds the file.
-        if (build.initialOptions.format === "cjs") {
-          return {
-            path: outFilename,
-            namespace: FILE_PATH_NS,
-          };
-        }
-        return { path: `./${outFilename}`, external: true };
+        // (Node SEA binary), the sidecar is embedded via fossilize --assets
+        // and extracted at runtime via node:sea.getAsset().
+        return {
+          path: outFilename,
+          namespace: FILE_PATH_NS,
+        };
       }
       return null;
     });

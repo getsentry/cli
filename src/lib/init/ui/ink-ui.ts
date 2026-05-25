@@ -47,7 +47,12 @@
  */
 
 import { openSync } from "node:fs";
+import { createRequire } from "node:module";
 import { ReadStream } from "node:tty";
+
+const _require = createRequire(import.meta.url);
+
+import { setTag } from "@sentry/node-core/light";
 import { CLI_VERSION } from "../../constants.js";
 import { stripAnsi } from "../../formatters/plain-detect.js";
 import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
@@ -164,29 +169,28 @@ function severityForStopCode(code: SpinnerExitCode): LogSeverity {
 }
 
 /**
- * Embed the Ink App sidecar as a Bun-compile file resource.
+ * Resolve the Ink sidecar path/source for the current runtime context.
  *
- * `with { type: "file" }` tells Bun.compile to embed the file into
- * the binary's virtual filesystem (`/$bunfs/root/`) and replace the
- * import with the embedded path string at runtime. The
- * `text-import-plugin` in `script/build.ts` intercepts this during
- * esbuild: it pre-bundles the .tsx source into self-contained JS
- * (stripping TypeScript, inlining local deps and npm packages,
- * injecting a `createRequire` banner for CJS deps).
+ * The sidecar (`ink-app.js`) is a self-contained ESM bundle produced
+ * by `text-import-plugin` during the esbuild step. It inlines ink,
+ * react, and all local deps so it can run without `node_modules`.
  *
- * Why pre-bundle? Bun's `/$bunfs/` virtual FS uses a JavaScript
- * parser, not TypeScript — raw .tsx fails on `import { type Foo }`.
- * The `/$bunfs/` environment also has no `node_modules`, so all
- * deps (ink, react, local modules) must be inlined.
+ * Three runtime contexts:
  *
- * For the Bun binary build (ESM), the import is marked external so
- * Bun.compile embeds the file. For the npm CJS bundle, the plugin
- * emits a virtual module that exports the sidecar filename as a
- * string — `createInkUI` then resolves it relative to the bundle
- * and loads it via dynamic `import()`. The sidecar ships as
- * `dist/ink-app.js` in the npm package.
+ * 1. **Node SEA binary**: The sidecar is embedded as a SEA asset via
+ *    fossilize's `--assets` flag. Extract with `node:sea.getAsset()`,
+ *    write to a temp file, and `import()` it.
+ *
+ * 2. **Node/npm bundle** (`npx sentry`): The sidecar ships as
+ *    `dist/ink-app.js` alongside the CJS bundle. The `text-import-plugin`
+ *    emits a virtual module exporting the relative path `"./ink-app.js"`.
+ *    Resolved via `import.meta.url` at runtime.
+ *
+ * 3. **Dev mode** (`pnpm run cli`): The absolute filesystem path to
+ *    `ink-app.tsx` is resolved by the text-import-plugin at build time.
+ *    In dev (tsx), it points to the source file directly.
  */
-// @ts-expect-error: `with { type: "file" }` is Bun-specific and not yet typed in @types/bun
+// @ts-expect-error: `with { type: "file" }` handled by text-import-plugin at build time
 import inkAppPath from "./ink-app.tsx" with { type: "file" };
 
 /**
@@ -216,31 +220,64 @@ export async function createInkUI(
 ): Promise<InkUI> {
   // Import the Ink App sidecar. Three runtime contexts:
   //
-  // 1. Bun binary: inkAppPath is "/$bunfs/root/ink-app-xxx.js"
-  //    (embedded by Bun.compile). Import directly — no query string
-  //    (/$bunfs/ doesn't support them).
+  // 1. Node SEA binary: the sidecar is embedded as a SEA asset.
+  //    Extract it via node:sea.getAsset(), write to a temp file,
+  //    and import() it.
   //
-  // 2. Dev mode (bun run src/bin.ts): inkAppPath is the absolute
-  //    filesystem path to ink-app.tsx. Append ?bridge=1 to bust
-  //    Bun's module cache (otherwise the import returns the path
-  //    string instead of the module's exports).
-  //
-  // 3. Node/npm (npx sentry@latest): inkAppPath is a relative path
+  // 2. Node/npm (npx sentry@latest): inkAppPath is a relative path
   //    like "./ink-app.js" (emitted by text-import-plugin as a
   //    string literal). Resolve it to an absolute file:// URL using
   //    import.meta.url so Node's dynamic import() can load the
   //    self-contained ESM sidecar from the dist/ directory.
+  //
+  // 3. Dev mode (pnpm run cli): inkAppPath is the absolute
+  //    filesystem path to ink-app.tsx.
   let importPath: string;
-  if (inkAppPath.startsWith("/$bunfs/")) {
-    importPath = inkAppPath;
+  let seaTmpDir: string | undefined;
+
+  // Check if running inside a Node SEA binary
+  let isSea = false;
+  try {
+    // biome-ignore lint/suspicious/noExplicitAny: node:sea types not yet in @types/node
+    const sea = _require("node:sea") as any;
+    isSea = sea.isSea?.() === true;
+  } catch {
+    // node:sea not available (older Node or non-SEA context)
+  }
+
+  if (isSea) {
+    // Extract the embedded sidecar to a temp file and import it.
+    // The asset key matches what fossilize registered via --assets.
+    // biome-ignore lint/suspicious/noExplicitAny: node:sea types not yet in @types/node
+    const sea = _require("node:sea") as any;
+    const { writeFileSync, mkdtempSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const tmpDir = mkdtempSync(join(tmpdir(), "sentry-ink-"));
+    const tmpFile = join(tmpDir, "ink-app.js");
+    writeFileSync(tmpFile, sea.getAsset("dist-build/ink-app.js", "utf-8"));
+    // Node's dynamic import() requires file:// URLs for absolute paths on Windows
+    const { pathToFileURL } = await import("node:url");
+    importPath = pathToFileURL(tmpFile).href;
+    seaTmpDir = tmpDir;
   } else if (inkAppPath.startsWith("./")) {
     // Node/npm bundle — resolve relative to the bundle location
     importPath = new URL(inkAppPath, import.meta.url).href;
   } else {
-    // Dev mode — absolute filesystem path, cache-bust for Bun
-    importPath = `${inkAppPath}?bridge=1`;
+    // Dev mode — absolute filesystem path
+    importPath = inkAppPath;
   }
   const app = (await import(importPath)) as typeof import("./ink-app.js");
+
+  // Clean up SEA temp file — module is cached in memory after import()
+  if (seaTmpDir) {
+    try {
+      const { rmSync } = await import("node:fs");
+      rmSync(seaTmpDir, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
+    }
+  }
 
   const store = new WizardStore({
     cliVersion: CLI_VERSION,
@@ -785,12 +822,16 @@ export class InkUI implements WizardUI {
     if (this.cancelRequested) {
       // Safety valve: teardown already started but hasn't finished
       // (or something is stuck). Force-exit so the user isn't trapped.
+      setTag("wizard.outcome", "abandoned");
       process.exit(130);
     }
     this.cancelRequested = true;
     this.failureMessage = "Setup cancelled.";
     this.feedback("cancelled");
     this.tearDown();
+    // Mark as abandoned before exit so the Sentry span carries the
+    // outcome even though beforeExit never fires for explicit process.exit().
+    setTag("wizard.outcome", "abandoned");
     // Match the SIGINT convention so shells (and CI) see a
     // distinguishable exit. The runner's `await using` won't get a
     // chance to run after this, but tearDown above already did all

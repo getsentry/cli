@@ -864,7 +864,7 @@ describe("sentry cli setup", () => {
     });
 
     test("setup completes gracefully when completion directory is not writable", async () => {
-      // Make the completions dir unwritable so Bun.write() can't write the
+      // Make the completions dir unwritable so write() can't write the
       // completion script. installCompletions() catches the permission error
       // and returns null — setup completes without error or warning.
       const { chmodSync: chmod } = await import("node:fs");

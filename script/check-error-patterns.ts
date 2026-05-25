@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Check for Error Class Misuse Patterns
  *
@@ -11,21 +11,22 @@
  *    → Should use ResolutionError with structured hint/suggestions
  *
  * Usage:
- *   bun run script/check-error-patterns.ts
+ *   tsx script/check-error-patterns.ts
  *
  * Exit codes:
  *   0 - No anti-patterns found
  *   1 - Anti-patterns detected
  */
 
-export {};
+import { readFile } from "node:fs/promises";
+import { glob } from "tinyglobby";
 
 type Violation = { file: string; line: number; message: string };
 
 const CONTEXT_ERROR_RE = /new ContextError\(/g;
 const TRY_PATTERN_RE = /["'`]Try:/;
 
-const glob = new Bun.Glob("src/**/*.ts");
+const files = await glob("src/**/*.ts");
 const violations: Violation[] = [];
 
 /** Characters that open a nesting level in JavaScript source. */
@@ -254,8 +255,8 @@ function checkAdHocTryPatterns(content: string, filePath: string): void {
   }
 }
 
-for await (const filePath of glob.scan(".")) {
-  const content = await Bun.file(filePath).text();
+for (const filePath of files) {
+  const content = await readFile(filePath, "utf-8");
   checkContextErrorNewlines(content, filePath);
   checkAdHocTryPatterns(content, filePath);
 }

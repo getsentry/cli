@@ -397,6 +397,7 @@ async function preamble(
   } catch (err) {
     if (err instanceof WizardCancelledError) {
       captureException(err);
+      setTag("wizard.outcome", "bailed");
       showCancelledFeedback(ui);
       process.exitCode = 0;
       return false;
@@ -410,6 +411,7 @@ async function preamble(
     throw err;
   }
   if (!confirmed) {
+    setTag("wizard.outcome", "bailed");
     showCancelledFeedback(ui);
     process.exitCode = 0;
     return false;
@@ -425,6 +427,7 @@ async function preamble(
     ui,
   });
   if (!gitOk) {
+    setTag("wizard.outcome", "bailed");
     showCancelledFeedback(ui);
     process.exitCode = 0;
     return false;
@@ -609,6 +612,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     : initialOptions;
   const context = await resolveInitContext(effectiveOptions, ui);
   if (!context) {
+    setTag("wizard.outcome", "bailed");
     return;
   }
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Generate API Schema Index from Sentry's OpenAPI Specification
  *
@@ -13,13 +13,23 @@
  * map operationIds to their TypeScript SDK function names.
  *
  * Usage:
- *   bun run script/generate-api-schema.ts
+ *   tsx script/generate-api-schema.ts
  *
  * Output:
  *   src/generated/api-schema.json
  */
 
-import { resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** Resolve the root directory of @sentry/api by finding its main entry point. */
+function sentryApiDir(): string {
+  // import.meta.resolve returns a file:// URL for the exported entry point
+  const entryUrl = import.meta.resolve("@sentry/api");
+  // Entry is at dist/index.js → go up two levels to get the package root
+  return resolve(dirname(fileURLToPath(entryUrl)), "..");
+}
 
 const OUTPUT_PATH = "src/generated/api-schema.json";
 
@@ -27,9 +37,11 @@ const OUTPUT_PATH = "src/generated/api-schema.json";
  * Build the OpenAPI spec URL from the installed @sentry/api version.
  * The sentry-api-schema repo tags match the @sentry/api npm version.
  */
-function getOpenApiUrl(): string {
-  const pkgPath = require.resolve("@sentry/api/package.json");
-  const pkg = require(pkgPath) as { version: string };
+async function getOpenApiUrl(): Promise<string> {
+  const pkgPath = resolve(sentryApiDir(), "package.json");
+  const pkg = JSON.parse(await readFile(pkgPath, "utf-8")) as {
+    version: string;
+  };
   return `https://raw.githubusercontent.com/getsentry/sentry-api-schema/${pkg.version}/openapi-derefed.json`;
 }
 
@@ -74,12 +86,8 @@ type OpenApiParameter = {
  * the @sentry/api index.js bundle.
  */
 async function buildSdkFunctionMap(): Promise<Map<string, string>> {
-  const pkgDir = resolve(
-    require.resolve("@sentry/api/package.json"),
-    "..",
-    "dist"
-  );
-  const js = await Bun.file(`${pkgDir}/index.js`).text();
+  const pkgDir = resolve(sentryApiDir(), "dist");
+  const js = await readFile(`${pkgDir}/index.js`, "utf-8");
   const results = new Map<string, string>();
 
   // Match: var NAME = (options...) => (options...client ?? client).METHOD({
@@ -160,7 +168,7 @@ function extractPathParams(url: string): string[] {
 // Main
 // ---------------------------------------------------------------------------
 
-const openApiUrl = getOpenApiUrl();
+const openApiUrl = await getOpenApiUrl();
 console.log(`Fetching OpenAPI spec from ${openApiUrl}...`);
 const response = await fetch(openApiUrl);
 if (!response.ok) {
@@ -217,7 +225,8 @@ endpoints.sort((a, b) => {
   return a.operationId.localeCompare(b.operationId);
 });
 
-await Bun.write(OUTPUT_PATH, JSON.stringify(endpoints, null, 2));
+await mkdir(dirname(OUTPUT_PATH), { recursive: true });
+await writeFile(OUTPUT_PATH, JSON.stringify(endpoints, null, 2));
 
 console.log(
   `Generated ${OUTPUT_PATH} (${endpoints.length} endpoints, ${Math.round(JSON.stringify(endpoints).length / 1024)}KB)`

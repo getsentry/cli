@@ -1,11 +1,7 @@
 /**
  * Node.js polyfills for Bun APIs. Injected at bundle time via esbuild.
  */
-import {
-  execFileSync,
-  spawn as nodeSpawn,
-  spawnSync as nodeSpawnSync,
-} from "node:child_process";
+import { execFileSync, spawnSync as nodeSpawnSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { access, readFile, stat, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -141,46 +137,6 @@ const BunPolyfill = {
       stdout: result.stdout,
       stderr: result.stderr,
     };
-  },
-
-  spawn(
-    cmd: string[],
-    opts?: {
-      stdin?: "pipe" | "ignore" | "inherit";
-      stdout?: "pipe" | "ignore" | "inherit";
-      stderr?: "pipe" | "ignore" | "inherit";
-      env?: Record<string, string | undefined>;
-    }
-  ) {
-    const [command, ...args] = cmd;
-    const proc = nodeSpawn(command, args, {
-      stdio: [
-        opts?.stdin ?? "ignore",
-        opts?.stdout ?? "ignore",
-        opts?.stderr ?? "ignore",
-      ],
-      env: opts?.env,
-    });
-
-    // Promise that resolves with the exit code when the process exits.
-    // Bun's proc.exited resolves to the numeric exit code; we match that
-    // contract, falling back to 1 on signal-only termination.
-    const exited = new Promise<number>((resolve) => {
-      proc.on("close", (code) => resolve(code ?? 1));
-      proc.on("error", () => resolve(1));
-    });
-
-    return {
-      stdin: proc.stdin,
-      exited,
-      unref() {
-        proc.unref();
-      },
-    };
-  },
-
-  sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   },
 
   Glob: class BunGlobPolyfill {

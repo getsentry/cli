@@ -1,5 +1,6 @@
 /** Post-init verification: run the dev server and check for SDK events. */
 
+import { type ChildProcess, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { captureException } from "@sentry/node-core/light";
 import { createSpotlightBuffer } from "@spotlightjs/spotlight/sdk";
@@ -12,6 +13,20 @@ import type { WizardUI } from "./ui/types.js";
 
 /** Verification timeout in seconds. */
 const VERIFY_TIMEOUT_S = 30;
+
+/**
+ * Platforms whose SDKs lack Spotlight support. These run in non-Node runtimes
+ * (V8 isolates, edge runtimes) where `process.env` is unavailable and the
+ * SDK has no `spotlightIntegration`. Verification would always time out.
+ *
+ * Values may be SDK identifiers (e.g. `sentry.javascript.cloudflare`) or
+ * Sentry project platform IDs (e.g. `node-cloudflare-workers`).
+ */
+const SPOTLIGHT_UNSUPPORTED_PLATFORMS = new Set([
+  "node-cloudflare-pages",
+  "node-cloudflare-workers",
+  "sentry.javascript.cloudflare",
+]);
 
 /**
  * Run the dev server, spawn the child process, and verify that the Sentry
@@ -30,6 +45,15 @@ export async function verifySetup(
   ui: WizardUI,
   cwd: string
 ): Promise<void> {
+  const platform = result.result?.platform;
+  if (platform && SPOTLIGHT_UNSUPPORTED_PLATFORMS.has(platform)) {
+    ui.log.info(
+      "Skipping verification — the Cloudflare Workers SDK does not support local Spotlight yet.\n" +
+        "Deploy your worker and check for events in the Sentry dashboard."
+    );
+    return;
+  }
+
   const detected = await detectDevCommand(cwd);
   if (!detected) {
     ui.log.info(
@@ -81,14 +105,13 @@ export async function verifySetup(
     };
   }
 
-  let child: ReturnType<typeof Bun.spawn>;
+  let child: ChildProcess;
   try {
-    child = Bun.spawn(detected.args, {
+    const [cmd = "", ...cmdArgs] = detected.args;
+    child = spawn(cmd, cmdArgs, {
       cwd,
       env: childEnv,
-      stdout: "ignore",
-      stderr: "ignore",
-      stdin: "ignore",
+      stdio: "ignore",
     });
   } catch (error) {
     logger.debug("Failed to spawn verification child", error);
@@ -97,27 +120,16 @@ export async function verifySetup(
     return;
   }
 
-  const onSigint = () => {
-    try {
-      child.kill("SIGINT");
-    } catch {
-      logger.debug("Child already exited");
-    }
-  };
-  const onSigterm = () => {
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      logger.debug("Child already exited");
-    }
-  };
+  const onSigint = () => child.kill("SIGINT");
+  const onSigterm = () => child.kill("SIGTERM");
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);
 
-  const childExited = child.exited.then((code) => ({
-    kind: "exited" as const,
-    code,
-  }));
+  const childExited = new Promise<{ kind: "exited"; code: number }>((r) => {
+    child.on("close", (code) =>
+      r({ kind: "exited" as const, code: code ?? 1 })
+    );
+  });
 
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
@@ -141,7 +153,7 @@ export async function verifySetup(
     child.kill("SIGTERM");
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const exited = await Promise.race([
-      child.exited.then(() => true),
+      new Promise<true>((r) => child.on("close", () => r(true))),
       new Promise<false>((r) => {
         graceTimer = setTimeout(() => r(false), 5000);
       }),
@@ -149,7 +161,7 @@ export async function verifySetup(
     clearTimeout(graceTimer);
     if (!exited) {
       child.kill("SIGKILL");
-      await child.exited;
+      await new Promise<void>((r) => child.on("close", () => r()));
     }
   } catch (error) {
     logger.debug("Failed to kill verification child", error);

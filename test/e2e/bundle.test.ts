@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 function noop(): void {
@@ -45,6 +46,7 @@ async function spawnCollect(
 
 const ROOT_DIR = join(import.meta.dirname, "../..");
 const BUNDLE_PATH = join(ROOT_DIR, "dist/bin.cjs");
+const INK_APP_PATH = join(ROOT_DIR, "dist/ink-app.js");
 
 describe("npm bundle", () => {
   beforeAll(async () => {
@@ -56,7 +58,7 @@ describe("npm bundle", () => {
 
     // Build the bundle (requires SENTRY_CLIENT_ID)
     // Run the bundle script directly to avoid PATH issues in test environments
-    const result = await spawnCollect("bun", ["run", "script/bundle.ts"], {
+    const result = await spawnCollect("pnpm", ["run", "bundle"], {
       cwd: ROOT_DIR,
       env: {
         ...process.env,
@@ -149,4 +151,90 @@ describe("npm bundle", () => {
     const output = stdout + stderr;
     expect(output.length).toBeGreaterThan(0);
   }, 15_000); // Allow up to 15s for cold Node.js JIT startup on slow CI runners
+
+  test("bundle exercises SQLite and auth DB (auth status)", async () => {
+    // Run `auth status` without a token — exercises SQLite initialization,
+    // schema migrations, auth DB reads, and telemetry lazy import.
+    // This catches lazy-import and require-resolution bugs that --version misses.
+    const { stdout, stderr, exitCode } = await spawnCollect(
+      "node",
+      [BUNDLE_PATH, "auth", "status"],
+      {
+        cwd: ROOT_DIR,
+        env: {
+          ...process.env,
+          // Do NOT set SENTRY_CLI_NO_TELEMETRY — we want to exercise telemetry init
+          SENTRY_AUTH_TOKEN: "",
+          SENTRY_TOKEN: "",
+        },
+      }
+    );
+
+    const output = stdout + stderr;
+
+    // Must exit 10 (AUTH_NOT_AUTHENTICATED), not crash
+    expect(exitCode).toBe(10);
+    expect(output.toLowerCase()).toContain("not authenticated");
+
+    // Must not contain Node.js module resolution errors
+    expect(output).not.toContain("Cannot find module");
+    expect(output).not.toContain("MODULE_NOT_FOUND");
+    expect(output).not.toContain("ERR_MODULE_NOT_FOUND");
+  }, 15_000);
+
+  test("bundle exercises SQLite with cli defaults", async () => {
+    // `cli defaults` (no args) reads all defaults from SQLite — exercises
+    // DB init and the metadata KV store without requiring auth.
+    const { stdout, stderr, exitCode } = await spawnCollect(
+      "node",
+      [BUNDLE_PATH, "cli", "defaults"],
+      {
+        cwd: ROOT_DIR,
+        env: {
+          ...process.env,
+          SENTRY_AUTH_TOKEN: "",
+          SENTRY_TOKEN: "",
+        },
+      }
+    );
+
+    const output = stdout + stderr;
+
+    // Should succeed — cli defaults with no args just shows current state
+    expect(exitCode).toBe(0);
+
+    // Must not contain module resolution errors
+    expect(output).not.toContain("Cannot find module");
+    expect(output).not.toContain("MODULE_NOT_FOUND");
+  }, 15_000);
+
+  test("Ink sidecar can be imported and exports mountApp", async () => {
+    // The Ink sidecar (dist/ink-app.js) is a pre-bundled self-contained ESM
+    // module that ships with the npm package. Verify it exists, can be imported
+    // by Node, and exports mountApp as a function. This catches sidecar
+    // bundling/resolution bugs — the exact class of bug where `with { type: "file" }`
+    // crashed in tsx dev mode.
+    //
+    // Run in a subprocess to avoid polluting the vitest process with
+    // React/Ink globals from the sidecar's bundled dependencies.
+    expect(existsSync(INK_APP_PATH)).toBe(true);
+
+    const { stdout, stderr, exitCode } = await spawnCollect("node", [
+      "--input-type=module",
+      "-e",
+      `import { mountApp } from ${JSON.stringify(pathToFileURL(INK_APP_PATH).href)};\n` +
+        'if (typeof mountApp !== "function") {\n' +
+        '  process.stderr.write("mountApp is " + typeof mountApp + ", expected function");\n' +
+        "  process.exit(1);\n" +
+        "}",
+    ]);
+
+    if (exitCode !== 0) {
+      const output = stdout + stderr;
+      throw new Error(
+        `Ink sidecar import failed (exit ${exitCode}): ${output}`
+      );
+    }
+    expect(exitCode).toBe(0);
+  }, 15_000);
 });

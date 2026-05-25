@@ -75,21 +75,20 @@ jobs:
           {
             echo 'matrix<<MATRIX_EOF'
             if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-              # PRs build linux-x64 (smoke test + e2e) and linux-x64-musl (Alpine smoke test)
+              # PRs build linux-x64 (smoke test + e2e)
               echo '{"include":[
-                {"target":"linux-x64",      "os":"ubuntu-latest", "can-test":true},
-                {"target":"linux-x64-musl", "os":"ubuntu-latest", "can-test":false}
+                {"target":"linux-x64", "os":"ubuntu-latest", "can-test":true}
               ]}'
             else
-              # main, release/**, workflow_call: full cross-platform matrix
+              # main, release/**, workflow_call: full cross-platform matrix.
+              # macOS targets build natively for V8 code cache (~15% faster startup).
+              # Other targets cross-compile from ubuntu-latest via fossilize.
               echo '{"include":[
-                {"target":"darwin-arm64",      "os":"macos-latest",  "can-test":true},
-                {"target":"linux-x64",         "os":"ubuntu-latest", "can-test":true},
-                {"target":"linux-x64-musl",    "os":"ubuntu-latest", "can-test":false},
-                {"target":"windows-x64",       "os":"windows-latest","can-test":true},
-                {"target":"darwin-x64",        "os":"macos-latest",  "can-test":false},
-                {"target":"linux-arm64",       "os":"ubuntu-latest", "can-test":false},
-                {"target":"linux-arm64-musl",  "os":"ubuntu-latest", "can-test":false}
+                {"target":"darwin-arm64",  "os":"macos-latest",  "can-test":true},
+                {"target":"darwin-x64",    "os":"macos-13",      "can-test":false},
+                {"target":"linux-x64",     "os":"ubuntu-latest", "can-test":true},
+                {"target":"linux-arm64",   "os":"ubuntu-latest", "can-test":false},
+                {"target":"windows-x64",   "os":"ubuntu-latest", "can-test":false}
               ]}'
             fi
             echo 'MATRIX_EOF'
@@ -126,10 +125,10 @@ jobs:
           # `ref` empty so checkout defaults to GITHUB_REF (the pull_request
           # merge SHA, always fetchable from the base repo with github.token).
           ref: ${{ steps.token.outcome == 'success' && (github.head_ref || github.ref_name) || '' }}
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.13"
       - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
       - uses: actions/cache@v5
         id: cache
         with:
@@ -138,11 +137,11 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Generate API Schema
-        run: bun run generate:schema
+        run: pnpm run generate:schema
       - name: Generate docs and skill files
-        run: bun run generate:docs
+        run: pnpm run generate:docs
       - name: Validate fragments
-        run: bun run check:fragments
+        run: pnpm run check:fragments
       - name: Check skill files
         id: check-skill
         run: |
@@ -171,7 +170,7 @@ jobs:
       - name: Fail for fork PRs with stale generated files
         if: (steps.check-skill.outputs.stale == 'true' || steps.check-sections.outputs.stale == 'true') && steps.token.outcome != 'success'
         run: |
-          echo "::error::Generated files are out of date. Run 'bun run generate:docs' locally and commit the result."
+          echo "::error::Generated files are out of date. Run 'pnpm run generate:docs' locally and commit the result."
           exit 1
 
   lint:
@@ -181,10 +180,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.13"
       - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
       - uses: actions/cache@v5
         id: cache
         with:
@@ -192,12 +191,12 @@ jobs:
           key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
-      - run: bun run generate:schema
-      - run: bun run lint
-      - run: bun run typecheck
-      - run: bun run check:deps
-      - run: bun run check:errors
-      - run: bun run check:patches
+      - run: pnpm run generate:schema
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run check:deps
+      - run: pnpm run check:errors
+      - run: pnpm run check:patches
 
   test-unit:
     name: Unit Tests
@@ -211,9 +210,6 @@ jobs:
       statuses: write
     steps:
       - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.13"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
@@ -226,9 +222,9 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Generate API Schema
-        run: bun run generate:schema
+        run: pnpm run generate:schema
       - name: Unit Tests
-        run: bun run test:unit
+        run: pnpm run test:unit
       - name: Coverage Report
         uses: getsentry/codecov-action@main
         with:
@@ -249,10 +245,10 @@ jobs:
       matrix: ${{ fromJSON(needs.changes.outputs.build-targets) }}
     steps:
       - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.13"
       - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
       - uses: actions/cache@v5
         id: cache
         with:
@@ -262,6 +258,41 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         shell: bash
         run: pnpm install --frozen-lockfile
+      - name: Setup codesign dependencies
+        env:
+          APPLE_CERT_DATA: ${{ secrets.APPLE_CERT_DATA }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        shell: bash
+        run: |
+          # Install rcodesign (platform-aware binary + checksum tool)
+          if [[ "$RUNNER_OS" == "macOS" && "$RUNNER_ARCH" == "ARM64" ]]; then
+            RCODESIGN_ARCHIVE="apple-codesign-0.29.0-aarch64-apple-darwin.tar.gz"
+            RCODESIGN_SHA256="d1a532150adaf90048260d76359261aa716abafc45c53c5dc18845029184334a"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            RCODESIGN_ARCHIVE="apple-codesign-0.29.0-x86_64-apple-darwin.tar.gz"
+            RCODESIGN_SHA256="14ef11bedd51a8d95eafd767939ae96d5900e5a61511bef75bb21db6e7c74140"
+          else
+            RCODESIGN_ARCHIVE="apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz"
+            RCODESIGN_SHA256="dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002"
+          fi
+          curl -L "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/${RCODESIGN_ARCHIVE}" -o 'rcodesign.tar.gz'
+          echo "${RCODESIGN_SHA256}  rcodesign.tar.gz" | shasum -a 256 -c
+          tar -xzf rcodesign.tar.gz --strip-components=1
+          mv rcodesign /usr/local/bin/rcodesign
+          rm rcodesign.tar.gz
+          # Decode Apple signing credentials
+          if [ -n "$APPLE_CERT_DATA" ]; then
+            echo "$APPLE_CERT_DATA" | base64 --decode > /tmp/certs.p12
+            echo 'APPLE_CERT_PATH=/tmp/certs.p12' >> $GITHUB_ENV
+          fi
+          if [ -n "$APPLE_API_KEY" ]; then
+            echo "$APPLE_API_KEY" | base64 -d > /tmp/apple_key.json
+            cat /tmp/apple_key.json | jq .private_key -r > /tmp/apple_key.pem
+            echo "APPLE_API_KEY_ISSUER_ID=$(cat /tmp/apple_key.json | jq .issuer_id -r | tr -d '\n\r')" >> $GITHUB_ENV
+            echo "APPLE_API_KEY_ID=$(cat /tmp/apple_key.json | jq .key_id -r | tr -d '\n\r')" >> $GITHUB_ENV
+            echo "APPLE_API_KEY_P8_PATH=/tmp/apple_key.pem" >> $GITHUB_ENV
+            echo 'APPLE_API_KEY_PATH=/tmp/apple_key.json' >> $GITHUB_ENV
+          fi
       - name: Set nightly version
         # Inject the nightly version (computed once in the changes job) into
         # package.json before the build so it gets baked into the binary.
@@ -278,7 +309,11 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           # Set on main/release branches so build.ts runs binpunch + creates .gz
           RELEASE_BUILD: ${{ github.event_name != 'pull_request' && '1' || '' }}
-        run: bun run build --target ${{ matrix.target }}
+          # Codesigning: only on main/release pushes (fork PRs lack secrets)
+          FOSSILIZE_SIGN: ${{ github.event_name == 'push' && (github.ref_name == 'main' || startsWith(github.ref_name, 'release/')) && 'y' || 'n' }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm run build -- --target ${{ matrix.target }}
       - name: Smoke test
         if: matrix.can-test
         shell: bash
@@ -288,11 +323,32 @@ jobs:
           else
             ./dist-bin/sentry-${{ matrix.target }} --help
           fi
-      - name: Smoke test (musl/Alpine)
-        if: matrix.target == 'linux-x64-musl'
+      - name: Smoke test (deep — SQLite, telemetry, auth DB)
+        if: matrix.can-test
+        shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ""
+          SENTRY_TOKEN: ""
         run: |
-          docker run --rm -v "$PWD/dist-bin:/dist-bin:ro" alpine:latest \
-            sh -c "apk add --no-cache libstdc++ libgcc >/dev/null 2>&1 && /dist-bin/sentry-linux-x64-musl --help"
+          if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
+            BIN=./dist-bin/sentry-windows-x64.exe
+          else
+            BIN=./dist-bin/sentry-${{ matrix.target }}
+          fi
+          # auth status without a token exercises SQLite init, schema
+          # migrations, telemetry lazy import, and the CJS require chain.
+          # Expected: exit 10 (AUTH_NOT_AUTHENTICATED), NOT a crash/syntax error.
+          OUTPUT=$($BIN auth status 2>&1) && EXIT_CODE=$? || EXIT_CODE=$?
+          if [[ $EXIT_CODE -ne 10 ]]; then
+            echo "::error::Expected exit code 10 (not authenticated), got $EXIT_CODE"
+            echo "$OUTPUT"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -qi "not authenticated"; then
+            echo "::error::Expected 'not authenticated' in output, got:"
+            echo "$OUTPUT"
+            exit 1
+          fi
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
         with:
@@ -637,9 +693,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.13"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
@@ -659,14 +712,14 @@ jobs:
       - name: Make binary executable
         run: chmod +x dist-bin/sentry-linux-x64
       - name: Generate API Schema
-        run: bun run generate:schema
+        run: pnpm run generate:schema
       - name: E2E Tests
         env:
           SENTRY_CLI_BINARY: ${{ github.workspace }}/dist-bin/sentry-linux-x64
           # Pass API key only when skill files changed — the skill-eval e2e test
           # auto-skips when the key is absent, so non-skill PRs aren't affected.
           ANTHROPIC_API_KEY: ${{ needs.changes.outputs.skill == 'true' && secrets.ANTHROPIC_API_KEY || '' }}
-        run: bun run test:e2e
+        run: pnpm run test:e2e
 
   build-npm:
     name: Build npm Package (Node ${{ matrix.node }})
@@ -679,9 +732,6 @@ jobs:
         node: ["22", "24"]
     steps:
       - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.13"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
@@ -697,9 +747,29 @@ jobs:
         env:
           # Environment-scoped (production) — see note in build-binary.
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        run: bun run bundle
+        run: pnpm run bundle
       - name: Smoke test (Node.js)
         run: node dist/bin.cjs --help
+      - name: Smoke test (Node.js — deep)
+        shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ""
+          SENTRY_TOKEN: ""
+        run: |
+          # auth status without a token exercises SQLite init, schema
+          # migrations, telemetry lazy import, and the CJS require chain.
+          # Expected: exit 10 (AUTH_NOT_AUTHENTICATED), NOT a crash/syntax error.
+          OUTPUT=$(node dist/bin.cjs auth status 2>&1) && EXIT_CODE=$? || EXIT_CODE=$?
+          if [[ $EXIT_CODE -ne 10 ]]; then
+            echo "::error::Expected exit code 10 (not authenticated), got $EXIT_CODE"
+            echo "$OUTPUT"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -qi "not authenticated"; then
+            echo "::error::Expected 'not authenticated' in output, got:"
+            echo "$OUTPUT"
+            exit 1
+          fi
       - run: npm pack
       - name: Upload artifact
         if: matrix.node == '22'
@@ -723,9 +793,6 @@ jobs:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.13"
       - uses: pnpm/action-setup@v4
       # Astro 6 requires Node >= 22.12. Pin an explicit version so the docs
       # build doesn't rely on whatever ships on the runner image.
@@ -750,7 +817,7 @@ jobs:
       - name: Make binary executable
         run: chmod +x dist-bin/sentry-linux-x64
       - name: Generate docs content
-        run: bun run generate:schema && bun run generate:docs
+        run: pnpm run generate:schema && pnpm run generate:docs
       - name: Build Docs
         working-directory: docs
         env:
@@ -758,8 +825,8 @@ jobs:
           SENTRY_RELEASE: ${{ steps.version.outputs.version }}
           PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
-          bun install --frozen-lockfile
-          bun run build
+          pnpm install --frozen-lockfile
+          pnpm run build
       # Inject debug IDs and upload sourcemaps. The inject step adds
       # //# debugId= and the _sentryDebugIds IIFE to deployed JS files.
       # Both steps require SENTRY_AUTH_TOKEN (the CLI checks auth on startup).

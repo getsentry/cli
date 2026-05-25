@@ -35,7 +35,7 @@ async function runNodeScript(
     SENTRY_CLI_NO_TELEMETRY: "1",
   };
   // Ensure no auth leaks into tests — delete rather than set to undefined
-  // because Bun.spawn may pass "undefined" as a literal string
+  // because spawn may pass "undefined" as a literal string
   delete env.SENTRY_AUTH_TOKEN;
   delete env.SENTRY_TOKEN;
 
@@ -93,7 +93,7 @@ describe("library mode (bundled)", () => {
 
       await new Promise<number>((resolve) => {
         let buildStderr = "";
-        const proc = spawn("bun", ["run", "script/bundle.ts"], {
+        const proc = spawn("pnpm", ["run", "bundle"], {
           cwd: ROOT_DIR,
           env: {
             ...process.env,

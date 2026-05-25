@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Check Patched Dependency Versions
  *
@@ -13,21 +13,22 @@
  * notice and can regenerate the patch if needed.
  *
  * Usage:
- *   bun run script/check-patches.ts
+ *   tsx script/check-patches.ts
  *
  * Exit codes:
  *   0 - All patch versions match, or mismatches are non-critical (warnings)
  *   1 - A patched package is missing entirely
  */
 
+import { readFile } from "node:fs/promises";
+
 const pkg: {
   pnpm?: { patchedDependencies?: Record<string, string> };
-} = await Bun.file("package.json").json();
+} = JSON.parse(await readFile("package.json", "utf-8"));
 
 const patches = pkg.pnpm?.patchedDependencies ?? {};
 const warnings: string[] = [];
 const errors: string[] = [];
-export {};
 
 for (const [name, patchPath] of Object.entries(patches)) {
   // Extract version from patch path: "patches/@stricli%2Fcore@1.2.5.patch" → "1.2.5"
@@ -44,7 +45,9 @@ for (const [name, patchPath] of Object.entries(patches)) {
   // Resolve installed version
   const pkgJsonPath = `node_modules/${name}/package.json`;
   try {
-    const installed: { version: string } = await Bun.file(pkgJsonPath).json();
+    const installed: { version: string } = JSON.parse(
+      await readFile(pkgJsonPath, "utf-8")
+    );
     if (installed.version !== patchVersion) {
       warnings.push(
         `  ${name}: patch targets ${patchVersion}, installed ${installed.version} — regenerate with: pnpm patch ${name}`

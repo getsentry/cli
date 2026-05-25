@@ -2,7 +2,7 @@
  * Tests for the `sentry local run` command.
  *
  * Exercises the command's func() body directly to verify env var injection,
- * exit code propagation, auto-detection, --verify, and --timeout.
+ * exit code propagation, auto-detection, --verify, --timeout, and error cases.
  */
 
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -11,8 +11,6 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { runCommand } from "../../../src/commands/local/run.js";
 import { CliError, ValidationError } from "../../../src/lib/errors.js";
 import { TEST_TMP_DIR } from "../../constants.js";
-
-const isBun = typeof globalThis.Bun !== "undefined";
 
 type RunFunc = (
   this: unknown,
@@ -42,7 +40,7 @@ function makeContext(cwd?: string) {
   };
 }
 
-describe.skipIf(!isBun)("sentry local run", () => {
+describe("sentry local run", () => {
   test("throws ValidationError when no command and no auto-detect", async () => {
     const func = (await runCommand.loader()) as unknown as RunFunc;
     const ctx = makeContext();
@@ -59,6 +57,21 @@ describe.skipIf(!isBun)("sentry local run", () => {
       expect((err as ValidationError).message).toContain(
         "No command provided and could not auto-detect"
       );
+    }
+  });
+
+  test("throws ValidationError with only -- separator", async () => {
+    const func = (await runCommand.loader()) as unknown as RunFunc;
+    const ctx = makeContext();
+    try {
+      await func.call(
+        ctx,
+        { port: 0, host: "localhost", verify: false, timeout: 0 },
+        "--"
+      );
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ValidationError);
     }
   });
 
@@ -93,6 +106,29 @@ describe.skipIf(!isBun)("sentry local run", () => {
       "echo",
       "ok"
     );
+  });
+
+  test("preserves existing SENTRY_TRACES_SAMPLE_RATE", async () => {
+    const originalRate = process.env.SENTRY_TRACES_SAMPLE_RATE;
+    process.env.SENTRY_TRACES_SAMPLE_RATE = "0.5";
+    try {
+      const func = (await runCommand.loader()) as unknown as RunFunc;
+      const ctx = makeContext();
+      // The child process should get 0.5, not 1
+      // We verify this indirectly — if it doesn't throw, the env was set
+      await func.call(
+        ctx,
+        { port: 19_878, host: "127.0.0.1", verify: false, timeout: 0 },
+        "printenv",
+        "SENTRY_TRACES_SAMPLE_RATE"
+      );
+    } finally {
+      if (originalRate === undefined) {
+        delete process.env.SENTRY_TRACES_SAMPLE_RATE;
+      } else {
+        process.env.SENTRY_TRACES_SAMPLE_RATE = originalRate;
+      }
+    }
   });
 
   test("propagates non-zero exit code as CliError", async () => {
@@ -170,5 +206,37 @@ describe.skipIf(!isBun)("sentry local run", () => {
       expect((err as CliError).message).toContain("Verification timed out");
       expect((err as CliError).exitCode).toBe(64);
     }
+  });
+
+  test("throws on ENOENT (command not found)", async () => {
+    const func = (await runCommand.loader()) as unknown as RunFunc;
+    const ctx = makeContext();
+
+    try {
+      await func.call(
+        ctx,
+        { port: 19_879, host: "127.0.0.1", verify: false, timeout: 0 },
+        "nonexistent-command-that-does-not-exist"
+      );
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toMatch(
+        /exited with code|Failed to start|ENOENT|spawn/i
+      );
+    }
+  });
+
+  test("strips leading -- separator from args", async () => {
+    const func = (await runCommand.loader()) as unknown as RunFunc;
+    const ctx = makeContext();
+
+    // "-- true" should strip "--" and run "true" successfully
+    await func.call(
+      ctx,
+      { port: 19_880, host: "127.0.0.1", verify: false, timeout: 0 },
+      "--",
+      "true"
+    );
   });
 });

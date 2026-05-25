@@ -22,13 +22,13 @@ git clone https://github.com/getsentry/cli.git
 cd cli
 
 # Install dependencies
-bun install
+pnpm install
 
 # Run CLI in development mode
-bun run --env-file=.env.local cli --help
+pnpm run cli -- --help
 
 # Run tests
-bun test
+pnpm run test
 ```
 
 ### Environment Variables
@@ -85,30 +85,30 @@ cli/
 ## Building
 
 ```bash
-# Build for current platform
-bun run build
+# Build for current platform (requires Bun for native binary compilation)
+pnpm run build
 
 # Build for all platforms
-bun run build:all
+pnpm run build:all
 
 # Create npm bundle
-bun run bundle
+pnpm run bundle
 ```
 
 ## Testing
 
 ```bash
 # Run all tests
-bun test
+pnpm run test
 
 # Run specific test file
-bun test test/path/to/test.ts
+pnpm run test -- test/path/to/test.ts
 
 # Run with watch mode
-bun test --watch
+pnpm run test -- --watch
 
 # Run with coverage
-bun test --coverage
+pnpm run test -- --coverage
 ```
 
 ## Code Style
@@ -117,13 +117,13 @@ The project uses [Ultracite](https://github.com/getsentry/ultracite) for linting
 
 ```bash
 # Check for issues
-bun run lint
+pnpm run lint
 
 # Auto-fix issues
-bun run lint:fix
+pnpm run lint:fix
 
 # Type checking
-bun run typecheck
+pnpm run typecheck
 ```
 
 ## Submitting Changes
@@ -131,7 +131,7 @@ bun run typecheck
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feat/my-feature`
 3. Make your changes
-4. Run tests and linting: `bun test && bun run lint`
+4. Run tests and linting: `pnpm run test && pnpm run lint`
 5. Commit with [conventional commits](https://www.conventionalcommits.org/): `git commit -m "feat: add new feature"`
 6. Push and create a pull request
 

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { logger } from "./logger.js";
 
 export type DetectedCommand = {
-  /** The command args to pass to Bun.spawn. */
+  /** The command args to pass to spawn. */
   args: string[];
   /** Human label for what was detected (e.g., "package.json scripts.dev"). */
   source: string;

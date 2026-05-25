@@ -9,6 +9,7 @@
  * automatically in the background and shut down when the child exits.
  */
 
+import { type ChildProcess, spawn } from "node:child_process";
 import type { Server } from "node:http";
 import { resolve } from "node:path";
 import { createSpotlightBuffer } from "@spotlightjs/spotlight/sdk";
@@ -22,6 +23,7 @@ import {
   buildApp,
   DEFAULT_PORT,
   isServerRunning,
+  parsePort,
   tryListen,
 } from "./server.js";
 
@@ -31,18 +33,6 @@ type RunFlags = {
   readonly verify: boolean;
   readonly timeout: number;
 };
-
-/** Parse and validate a port number. */
-function parsePort(value: string): number {
-  const port = Number(value);
-  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    throw new ValidationError(
-      `Invalid port: ${value}. Must be an integer between 0 and 65535.`,
-      "port"
-    );
-  }
-  return port;
-}
 
 /** Buffer size for the auto-started background server. */
 export const BUFFER_SIZE = 500;
@@ -229,14 +219,13 @@ export const runCommand = buildCommand({
 
     const childEnv = buildChildEnv(spotlightUrl, commandSource, this.cwd);
 
-    let child: ReturnType<typeof Bun.spawn>;
+    let child: ChildProcess;
     try {
-      child = Bun.spawn(args, {
+      const [cmd = "", ...cmdArgs] = args;
+      child = spawn(cmd, cmdArgs, {
         cwd: this.cwd,
         env: childEnv,
-        stdout: "inherit",
-        stderr: "inherit",
-        stdin: "inherit",
+        stdio: "inherit",
       });
     } catch (err) {
       if (bgServer) {
@@ -248,11 +237,10 @@ export const runCommand = buildCommand({
       );
     }
 
-    const forwardSignal = (signal: NodeJS.Signals) => {
-      child.kill(signal);
-    };
-    process.once("SIGINT", () => forwardSignal("SIGINT"));
-    process.once("SIGTERM", () => forwardSignal("SIGTERM"));
+    const onSigint = () => child.kill("SIGINT");
+    const onSigterm = () => child.kill("SIGTERM");
+    process.once("SIGINT", onSigint);
+    process.once("SIGTERM", onSigterm);
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     if (flags.timeout > 0) {
@@ -262,15 +250,34 @@ export const runCommand = buildCommand({
       }, flags.timeout * 1000);
     }
 
-    const exitCode = await child.exited;
-
-    if (timeoutId !== undefined) {
-      clearTimeout(timeoutId);
-    }
-
-    if (bgServer) {
-      logger.info("Stopping background server...");
-      await shutdownServer(bgServer);
+    let exitCode: number;
+    try {
+      exitCode = await new Promise<number>((done, fail) => {
+        let settled = false;
+        child.on("close", (code) => {
+          if (!settled) {
+            settled = true;
+            done(code ?? 1);
+          }
+        });
+        child.on("error", (err) => {
+          logger.debug(`Child process error: ${err.message}`);
+          if (!settled) {
+            settled = true;
+            fail(err);
+          }
+        });
+      });
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      process.removeListener("SIGINT", onSigint);
+      process.removeListener("SIGTERM", onSigterm);
+      if (bgServer) {
+        logger.info("Stopping background server...");
+        await shutdownServer(bgServer);
+      }
     }
 
     if (exitCode !== 0) {
@@ -286,9 +293,10 @@ const DEFAULT_VERIFY_TIMEOUT_S = 30;
 const KILL_GRACE_MS = 5000;
 
 /** Send SIGTERM, wait up to {@link KILL_GRACE_MS}, then SIGKILL if still alive. */
-async function gracefulKill(
-  child: ReturnType<typeof Bun.spawn>
-): Promise<void> {
+async function gracefulKill(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null) {
+    return;
+  }
   try {
     child.kill("SIGTERM");
   } catch (error) {
@@ -297,7 +305,7 @@ async function gracefulKill(
   }
   let graceTimer: ReturnType<typeof setTimeout> | undefined;
   const exited = await Promise.race([
-    child.exited.then(() => true),
+    new Promise<true>((r) => child.on("close", () => r(true))),
     new Promise<false>((r) => {
       graceTimer = setTimeout(() => r(false), KILL_GRACE_MS);
     }),
@@ -310,7 +318,7 @@ async function gracefulKill(
       logger.debug("Child already exited during graceful kill", error);
       return;
     }
-    await child.exited;
+    await new Promise<void>((r) => child.on("close", () => r()));
   }
 }
 
@@ -345,14 +353,13 @@ async function* runWithVerify(
 
   const childEnv = buildChildEnv(spotlightUrl, commandSource, cwd);
 
-  let child: ReturnType<typeof Bun.spawn>;
+  let child: ChildProcess;
   try {
-    child = Bun.spawn(args, {
+    const [cmd = "", ...cmdArgs] = args;
+    child = spawn(cmd, cmdArgs, {
       cwd,
       env: childEnv,
-      stdout: "inherit",
-      stderr: "inherit",
-      stdin: "inherit",
+      stdio: "inherit",
     });
   } catch (err) {
     await shutdownServer(server);
@@ -362,27 +369,16 @@ async function* runWithVerify(
     );
   }
 
-  const onSigint = () => {
-    try {
-      child.kill("SIGINT");
-    } catch {
-      logger.debug("Child already exited");
-    }
-  };
-  const onSigterm = () => {
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      logger.debug("Child already exited");
-    }
-  };
+  const onSigint = () => child.kill("SIGINT");
+  const onSigterm = () => child.kill("SIGTERM");
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);
 
-  const childExited = child.exited.then((code) => ({
-    kind: "exited" as const,
-    code,
-  }));
+  const childExited = new Promise<{ kind: "exited"; code: number }>((r) => {
+    child.on("close", (code) =>
+      r({ kind: "exited" as const, code: code ?? 1 })
+    );
+  });
 
   const verifyTimeout =
     flags.timeout > 0 ? flags.timeout : DEFAULT_VERIFY_TIMEOUT_S;

@@ -64,19 +64,24 @@ function formatRevisionsHuman(result: RevisionsResult): string {
 
   type RevisionRow = {
     id: string;
-    version: string;
+    title: string;
+    author: string;
     created: string;
   };
 
   const rows: RevisionRow[] = result.revisions.map((r) => ({
-    id: String(r.id),
-    version: String(r.version),
+    id: r.id,
+    title: escapeMarkdownCell(r.title),
+    author: escapeMarkdownCell(
+      r.createdBy?.name ?? r.createdBy?.email ?? r.createdBy?.id ?? "—"
+    ),
     created: `${escapeMarkdownCell(formatRelativeTime(r.dateCreated))}\n${colorTag("muted", r.dateCreated)}`,
   }));
 
   const columns: Column<RevisionRow>[] = [
     { header: "ID", value: (r) => r.id },
-    { header: "VERSION", value: (r) => r.version },
+    { header: "TITLE", value: (r) => r.title },
+    { header: "AUTHOR", value: (r) => r.author },
     { header: "CREATED", value: (r) => r.created },
   ];
 
@@ -112,7 +117,7 @@ export const revisionsCommand = buildCommand({
     brief: "List dashboard revisions",
     fullDescription:
       "List revision history for a Sentry dashboard.\n\n" +
-      "Shows all saved revisions with their version numbers and timestamps.\n" +
+      "Shows saved revisions with their IDs, titles, authors, and timestamps.\n" +
       "Use `sentry dashboard restore` to revert to a previous revision.\n\n" +
       "Examples:\n" +
       "  sentry dashboard revisions 12345\n" +
@@ -231,7 +236,7 @@ export const revisionsCommand = buildCommand({
     return {
       hint:
         `Showing ${trimmed.length} revision(s) for dashboard ${dashboardId}.${navStr}\n` +
-        `Restore: sentry dashboard restore ${orgSlug}/ ${dashboardId} <revision-id>\n` +
+        `Restore: sentry dashboard restore ${orgSlug}/ ${dashboardId} --revision <revision-id>\n` +
         `Dashboard: ${url}`,
     };
   },
