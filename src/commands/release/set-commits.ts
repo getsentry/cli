@@ -134,7 +134,11 @@ async function setCommitsDefault(
     clearRepoIntegrationCache(org);
     return release;
   } catch (error) {
-    if (error instanceof ApiError && error.status === 400) {
+    if (
+      error instanceof ApiError &&
+      error.status === 400 &&
+      error.message.includes("No repository integrations")
+    ) {
       cacheNoRepoIntegration(org);
       log.warn(
         "Could not auto-discover commits (no repository integration). " +

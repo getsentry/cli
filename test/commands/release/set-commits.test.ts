@@ -21,7 +21,7 @@ vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
 
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
-import { ValidationError } from "../../../src/lib/errors.js";
+import { ApiError, ValidationError } from "../../../src/lib/errors.js";
 
 vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
   const actual =
@@ -263,6 +263,72 @@ describe("release set-commits (default mode)", () => {
     setCommitsAutoSpy.mockRestore();
     setCommitsLocalSpy.mockRestore();
     resolveOrgSpy.mockRestore();
+  });
+
+  test("propagates unrelated 400 errors from setCommitsAuto", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    setCommitsAutoSpy.mockRejectedValue(
+      new ApiError("Invalid commit SHA.", 400, undefined, "releases/1.0.0/")
+    );
+
+    const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
+      /\/$/,
+      ""
+    );
+    const { context } = createMockContext(repoRoot);
+    const func = await setCommitsCommand.loader();
+    await expect(
+      func.call(
+        context,
+        {
+          auto: false,
+          local: false,
+          clear: false,
+          commit: undefined,
+          "initial-depth": 20,
+          json: true,
+        },
+        "1.0.0"
+      )
+    ).rejects.toThrow("Invalid commit SHA.");
+
+    expect(setCommitsAutoSpy).toHaveBeenCalled();
+    expect(setCommitsLocalSpy).not.toHaveBeenCalled();
+  });
+
+  test("falls back to local only on 'No repository integrations' 400", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    setCommitsAutoSpy.mockRejectedValue(
+      new ApiError(
+        "No repository integrations configured for this organization.",
+        400,
+        undefined,
+        "releases/1.0.0/"
+      )
+    );
+    setCommitsLocalSpy.mockResolvedValue(sampleRelease);
+
+    const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
+      /\/$/,
+      ""
+    );
+    const { context } = createMockContext(repoRoot);
+    const func = await setCommitsCommand.loader();
+    await func.call(
+      context,
+      {
+        auto: false,
+        local: false,
+        clear: false,
+        commit: undefined,
+        "initial-depth": 20,
+        json: true,
+      },
+      "1.0.0"
+    );
+
+    expect(setCommitsAutoSpy).toHaveBeenCalled();
+    expect(setCommitsLocalSpy).toHaveBeenCalled();
   });
 
   test("falls back to local on ValidationError from auto", async () => {
