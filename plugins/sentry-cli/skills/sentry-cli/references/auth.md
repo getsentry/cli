@@ -28,9 +28,17 @@ sentry auth login
 
 sentry auth login --token YOUR_SENTRY_API_TOKEN
 
-SENTRY_URL=https://sentry.example.com sentry auth login
+# OAuth login to a self-hosted instance (requires --url on first use)
+sentry auth login --url https://sentry.example.com
 
-SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
+# Token-based auth with self-hosted
+sentry auth login --token YOUR_TOKEN --url https://sentry.example.com
+
+# Force re-authentication (skip "already logged in" prompt)
+sentry auth login --force
+
+# Set a custom timeout for the OAuth flow (default: 900 seconds)
+sentry auth login --timeout 300
 ```
 
 ### `sentry auth logout`
