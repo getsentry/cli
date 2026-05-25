@@ -10,7 +10,8 @@ We welcome contributions to the Sentry CLI! This guide will help you get started
 ### Prerequisites
 
 <!-- GENERATED:START dev-prereq -->
-- [Bun](https://bun.sh) runtime (v1.3 or later)
+- [Node.js](https://nodejs.org) (v22.15 or later)
+- [pnpm](https://pnpm.io) (v10.11 or later)
 <!-- GENERATED:END dev-prereq -->
 - Git
 
@@ -84,8 +85,9 @@ cli/
 
 ## Building
 
+<!-- GENERATED:START build-commands -->
 ```bash
-# Build for current platform (requires Bun for native binary compilation)
+# Build for current platform (uses esbuild + fossilize for Node SEA packaging)
 pnpm run build
 
 # Build for all platforms
@@ -94,6 +96,7 @@ pnpm run build:all
 # Create npm bundle
 pnpm run bundle
 ```
+<!-- GENERATED:END build-commands -->
 
 ## Testing
 
