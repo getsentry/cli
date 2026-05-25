@@ -261,39 +261,28 @@ function generateScopesInline(scopes: readonly string[]): string {
 // Section: Prerequisites (README.md, contributing.md)
 // ---------------------------------------------------------------------------
 
-const BUN_VERSION_RE = /bun@(\d+\.\d+)/;
 const SEMVER_RE = /(\d+\.\d+)/;
 
-/**
- * Extract the Bun major.minor version from the `packageManager` field.
- * `bun@1.3.13` → `1.3`
- */
-function extractBunVersion(): string {
-  const pm: string = pkg.packageManager ?? "";
-  const match = pm.match(BUN_VERSION_RE);
-  return match ? match[1] : "1.3";
-}
-
-/** Extract the Node.js minimum version from `engines.node` (e.g., `>=22.12` → `22.12`). */
+/** Extract the Node.js minimum version from `engines.node` (e.g., `>=22.15` → `22.15`). */
 function extractNodeVersion(): string {
-  const constraint: string = pkg.engines?.node ?? ">=22.12";
+  const constraint: string = pkg.engines?.node ?? ">=22.15";
   const match = constraint.match(SEMVER_RE);
-  return match ? match[1] : "22.12";
+  return match ? match[1] : "22.15";
 }
 
-/** Generate dev prerequisite line for README.md and contributing.md. */
+/** Generate dev prerequisite line for README.md. */
 function generateDevPrereq(): string {
-  return `- [Bun](https://bun.sh) v${extractBunVersion()}+`;
+  return `- [Node.js](https://nodejs.org) v${extractNodeVersion()}+`;
 }
 
 /** Also used by contributing.md (same content, different phrasing). */
 function generateDevPrereqContributing(): string {
-  return `- [Bun](https://bun.sh) runtime (v${extractBunVersion()} or later)`;
+  return `- [Node.js](https://nodejs.org) v${extractNodeVersion()} or later`;
 }
 
 /** Generate the library-usage prerequisite line for README.md. */
 function generateLibraryPrereq(): string {
-  return `Use Sentry CLI programmatically in Node.js (≥${extractNodeVersion()}) or Bun without spawning a subprocess:`;
+  return `Use Sentry CLI programmatically in Node.js (≥${extractNodeVersion()}) without spawning a subprocess:`;
 }
 
 // ---------------------------------------------------------------------------

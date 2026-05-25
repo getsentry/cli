@@ -77,7 +77,7 @@ Credentials are stored in `~/.sentry/` with restricted permissions (mode 600).
 ## Library Usage
 
 <!-- GENERATED:START library-prereq -->
-Use Sentry CLI programmatically in Node.js (≥22.15) or Bun without spawning a subprocess:
+Use Sentry CLI programmatically in Node.js (≥22.15) without spawning a subprocess:
 <!-- GENERATED:END library-prereq -->
 
 ```typescript
@@ -118,7 +118,7 @@ Errors are thrown as `SentryError` with `.exitCode` and `.stderr`.
 ### Prerequisites
 
 <!-- GENERATED:START dev-prereq -->
-- [Bun](https://bun.sh) v1.3+
+- [Node.js](https://nodejs.org) v22.15+
 <!-- GENERATED:END dev-prereq -->
 
 ### Setup

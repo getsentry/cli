@@ -10,7 +10,7 @@ We welcome contributions to the Sentry CLI! This guide will help you get started
 ### Prerequisites
 
 <!-- GENERATED:START dev-prereq -->
-- [Bun](https://bun.sh) runtime (v1.3 or later)
+- [Node.js](https://nodejs.org) v22.15 or later
 <!-- GENERATED:END dev-prereq -->
 - Git
 

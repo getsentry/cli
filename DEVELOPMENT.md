@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- [Bun](https://bun.sh/) installed
+- [Node.js](https://nodejs.org/) v22.15 or later
 - A Sentry OAuth application (create one at https://sentry.io/settings/account/api/applications/)
 
 ## Setup
@@ -88,7 +88,7 @@ The table below lists the most common development variables. For the complete re
 
 ## Building
 
-Building the native binary still requires Bun:
+Build the native binary (uses esbuild for bundling and fossilize for Node SEA packaging):
 
 ```bash
 pnpm run build
