@@ -226,6 +226,44 @@ describe("extractRootCauses", () => {
     expect(causes[0]?.relevant_repos).toEqual(["org/backend"]);
   });
 
+  test("falls through to agent artifacts when legacy causes array is empty", () => {
+    const state = {
+      run_id: 789,
+      status: "COMPLETED",
+      blocks: [
+        {
+          key: "root_cause_analysis",
+          status: "COMPLETED",
+          causes: [],
+          artifacts: [],
+        },
+        {
+          id: "block-2",
+          message: { role: "assistant", content: "Found it" },
+          timestamp: "2025-01-01T00:00:00Z",
+          artifacts: [
+            {
+              key: "root_cause",
+              data: {
+                one_line_description: "Race condition in auth middleware",
+                five_whys: ["Token refresh not atomic"],
+                relevant_repo: "org/api-server",
+              },
+              reason: "",
+            },
+          ],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const causes = extractRootCauses(state);
+    expect(causes).toHaveLength(1);
+    expect(causes[0]?.description).toBe(
+      "Race condition in auth middleware"
+    );
+    expect(causes[0]?.relevant_repos).toEqual(["org/api-server"]);
+  });
+
   test("extracts root cause from agent artifact without relevant_repo", () => {
     const state = {
       run_id: 101,
