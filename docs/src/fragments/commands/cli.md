@@ -91,3 +91,49 @@ sentry cli setup --no-agent-skills
 # Skip PATH and completion modifications
 sentry cli setup --no-modify-path --no-completions
 ```
+
+### View and manage defaults
+
+```bash
+# Show all current defaults
+sentry cli defaults
+
+# Set default organization
+sentry cli defaults org my-org
+
+# Set default project
+sentry cli defaults project my-project
+
+# Set Sentry URL (self-hosted)
+sentry cli defaults url https://sentry.example.com
+
+# Disable telemetry
+sentry cli defaults telemetry off
+
+# Clear a specific default
+sentry cli defaults org --clear
+
+# Clear all defaults (with confirmation)
+sentry cli defaults --clear
+```
+
+See [Configuration](../configuration/#persistent-defaults) for more details on defaults.
+
+### Import settings from legacy `.sentryclirc`
+
+```bash
+# Scan for and import legacy .sentryclirc settings
+sentry cli import
+
+# Preview what would be imported
+sentry cli import --dry-run
+
+# Skip confirmation prompts
+sentry cli import --yes
+
+# Trust a specific self-hosted URL during import
+sentry cli import --url https://sentry.example.com
+
+# Skip API validation of the imported token
+sentry cli import --skip-validation
+```

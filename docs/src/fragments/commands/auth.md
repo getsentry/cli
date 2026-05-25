@@ -22,17 +22,28 @@ sentry auth login --token YOUR_SENTRY_API_TOKEN
 
 ### Self-hosted Sentry
 
-```bash
-SENTRY_URL=https://sentry.example.com sentry auth login
-```
-
-For token-based auth with self-hosted:
+The `--url` flag is required when first connecting to a self-hosted instance.
+This registers the host as trusted so subsequent commands don't need the flag:
 
 ```bash
-SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
+# OAuth login to a self-hosted instance (requires --url on first use)
+sentry auth login --url https://sentry.example.com
+
+# Token-based auth with self-hosted
+sentry auth login --token YOUR_TOKEN --url https://sentry.example.com
 ```
 
 See [Self-Hosted Sentry](../self-hosted/) for details.
+
+### Re-authenticate and timeouts
+
+```bash
+# Force re-authentication (skip "already logged in" prompt)
+sentry auth login --force
+
+# Set a custom timeout for the OAuth flow (default: 900 seconds)
+sentry auth login --timeout 300
+```
 
 ### Logout
 

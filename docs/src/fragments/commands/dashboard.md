@@ -108,6 +108,29 @@ sentry dashboard widget delete 'My Dashboard' --title 'Error Count'
 sentry dashboard widget delete 12345 --index 2
 ```
 
+### View revision history
+
+```bash
+# List revisions for a dashboard
+sentry dashboard revisions 'Frontend Performance'
+
+# By dashboard ID
+sentry dashboard revisions 12345
+
+# Paginate through revision history
+sentry dashboard revisions 12345 -c next
+```
+
+### Restore a previous revision
+
+```bash
+# Restore a specific revision (use `revisions` to find the revision ID)
+sentry dashboard restore 'Frontend Performance' --revision 3
+
+# Restore by dashboard ID
+sentry dashboard restore 12345 --revision 1
+```
+
 ## Query Shorthand
 
 The `--query` flag supports shorthand for aggregate functions:

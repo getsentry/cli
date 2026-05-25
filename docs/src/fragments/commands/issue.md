@@ -79,6 +79,41 @@ Latest event:
 sentry issue view FRONT-ABC -w
 ```
 
+### List events for an issue
+
+```bash
+# List recent events for an issue
+sentry issue events FRONT-ABC
+
+# With search filter
+sentry issue events FRONT-ABC --query "browser:Chrome"
+
+# Include full event body with stacktraces
+sentry issue events FRONT-ABC --full
+
+# Limit and time range
+sentry issue events FRONT-ABC --limit 50 --period 24h
+
+# Paginate through events
+sentry issue events FRONT-ABC -c next
+```
+
+### Magic selectors
+
+Use `@latest` and `@most_frequent` to quickly access common issues without looking up IDs:
+
+```bash
+# View the most recently seen issue
+sentry issue view @latest
+
+# Explain the most frequently occurring issue
+sentry issue explain @most_frequent
+
+# Works with any issue subcommand
+sentry issue plan @latest
+sentry issue events @latest --limit 5
+```
+
 ### Explain and plan with Seer AI
 
 ```bash
