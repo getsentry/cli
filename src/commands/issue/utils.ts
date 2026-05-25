@@ -455,7 +455,7 @@ async function resolveSelector(
     throw new ResolutionError(
       `Selector '${selector}'`,
       "no unresolved issues found",
-      `sentry issue list ${orgSlug}/ -q "is:resolved"`,
+      `sentry issue list ${orgSlug}/`,
       [`The ${label} issue selector only matches unresolved issues.`]
     );
   }
