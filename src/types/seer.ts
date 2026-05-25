@@ -253,7 +253,11 @@ function searchContainersForRootCauses(
   containers: WithCauses[]
 ): RootCause[] | null {
   for (const container of containers) {
-    if (container.key === "root_cause_analysis" && container.causes) {
+    if (
+      container.key === "root_cause_analysis" &&
+      container.causes &&
+      container.causes.length > 0
+    ) {
       return container.causes;
     }
   }
