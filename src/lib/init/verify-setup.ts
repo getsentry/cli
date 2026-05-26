@@ -47,6 +47,19 @@ const FATAL_ERROR_PATTERNS = [
 /** Maximum number of output lines to keep for error reporting. */
 const MAX_OUTPUT_LINES = 50;
 
+/** Absolute-path pattern — scrub user-specific directory paths from telemetry. */
+const ABS_PATH_RE = /(?:\/[\w.@-]+){2,}/g;
+
+/** Env-var assignment pattern for redaction. */
+const ENV_VAR_RE = /[A-Za-z_]\w*=\S+/g;
+
+/** Strip absolute paths and env-var values from a dev-server output line. */
+function scrubOutputLine(line: string): string {
+  return line
+    .replace(ENV_VAR_RE, (m) => `${m.split("=")[0]}=[REDACTED]`)
+    .replace(ABS_PATH_RE, "[PATH]");
+}
+
 /** Newline splitter — hoisted to top level per lint rule. */
 const NEWLINE_RE = /\r?\n/;
 
@@ -264,23 +277,26 @@ export async function verifySetup(
     clearTimeout(timeoutHandle);
   }
 
-  // Clean up — kill and wait for the child to release its port
-  try {
-    child.kill("SIGTERM");
-    let graceTimer: ReturnType<typeof setTimeout> | undefined;
-    const exited = await Promise.race([
-      new Promise<true>((r) => child.on("close", () => r(true))),
-      new Promise<false>((r) => {
-        graceTimer = setTimeout(() => r(false), 5000);
-      }),
-    ]);
-    clearTimeout(graceTimer);
-    if (!exited) {
-      child.kill("SIGKILL");
-      await new Promise<void>((r) => child.on("close", () => r()));
+  // Clean up — kill and wait for the child to release its port.
+  // Skip if the child already exited (avoids hanging on close listeners).
+  if (child.exitCode === null) {
+    try {
+      child.kill("SIGTERM");
+      let graceTimer: ReturnType<typeof setTimeout> | undefined;
+      const exited = await Promise.race([
+        new Promise<true>((r) => child.on("close", () => r(true))),
+        new Promise<false>((r) => {
+          graceTimer = setTimeout(() => r(false), 5000);
+        }),
+      ]);
+      clearTimeout(graceTimer);
+      if (!exited) {
+        child.kill("SIGKILL");
+        await new Promise<void>((r) => child.on("close", () => r()));
+      }
+    } catch (error) {
+      logger.debug("Failed to kill verification child", error);
     }
-  } catch (error) {
-    logger.debug("Failed to kill verification child", error);
   }
   process.removeListener("SIGINT", onSigint);
   process.removeListener("SIGTERM", onSigterm);
@@ -340,7 +356,10 @@ function reportOutcome(outcome: VerifyOutcome, ctx: ReportContext): void {
     logger.debug(`Startup error: ${outcome.errorLine}`);
     captureException(new Error("init verification: startup error"), {
       tags: { ...telemetryTags, "wizard.verify": "startup_error" },
-      extra: { ...telemetryExtra, errorLine: outcome.errorLine },
+      extra: {
+        ...telemetryExtra,
+        errorLine: scrubOutputLine(outcome.errorLine),
+      },
     });
     return;
   }
