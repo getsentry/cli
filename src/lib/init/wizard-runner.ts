@@ -881,15 +881,20 @@ export async function handleFinalResult(
     );
   }
 
+  // Run verification before printing the final summary so the user
+  // sees the result inline with the rest of the output.
+  if (cwd) {
+    if (spinState.running) {
+      spin.message("Verifying setup...");
+    }
+    await verifySetup(result, ui, cwd);
+  }
+
   if (spinState.running) {
     spin.stop("Done");
     spinState.running = false;
   }
   formatResult(result, ui);
-
-  if (cwd) {
-    await verifySetup(result, ui, cwd);
-  }
 }
 
 /**

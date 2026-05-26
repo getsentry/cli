@@ -174,23 +174,17 @@ export async function verifySetup(
 ): Promise<void> {
   const platform = result.result?.platform;
   if (platform && SPOTLIGHT_UNSUPPORTED_PLATFORMS.has(platform)) {
-    ui.log.info(
-      "Skipping verification — the Cloudflare Workers SDK does not support local Spotlight yet.\n" +
-        "Deploy your worker and check for events in the Sentry dashboard."
-    );
+    logger.debug("Skipping verification — platform lacks Spotlight support");
     return;
   }
 
   const detected = await detectDevCommand(cwd);
   if (!detected) {
-    ui.log.info(
-      "Skipping verification — could not detect a dev command.\n" +
-        "Run your dev server manually and check for events in Sentry."
-    );
+    logger.debug("Skipping verification — could not detect a dev command");
     return;
   }
 
-  ui.log.info(`Verifying setup with: ${detected.args.join(" ")}...`);
+  logger.debug(`Verification command: ${detected.args.join(" ")}`);
 
   const buffer = createSpotlightBuffer(BUFFER_SIZE);
   const app = buildApp(buffer);
@@ -344,24 +338,20 @@ function reportOutcome(outcome: VerifyOutcome, ctx: ReportContext): void {
   };
 
   if (outcome.kind === "envelope") {
-    ui.log.success("Your app is sending events to Sentry");
+    ui.log.success("Verified — your app is sending events to Sentry");
     return;
   }
 
   if (outcome.kind === "started") {
-    ui.log.success(
-      "Your app started successfully — events will appear in Sentry when requests come in."
-    );
+    ui.log.success("Verified — app started successfully");
     return;
   }
 
   if (outcome.kind === "errored") {
-    const errorExcerpt = outcome.errorLine.slice(0, 200);
     ui.log.warn(
-      `Dev server encountered an error during startup:\n  ${errorExcerpt}\n` +
-        "The SDK was installed but the dev server could not start cleanly.\n" +
-        "Please review the error above and check your configuration."
+      "Sentry.init() call found in changed files — SDK may not initialize correctly"
     );
+    logger.debug(`Startup error: ${outcome.errorLine}`);
     captureException(new Error("init verification: startup error"), {
       tags: { ...telemetryTags, "wizard.verify": "startup_error" },
       extra: { ...telemetryExtra, errorLine: outcome.errorLine },
@@ -371,16 +361,13 @@ function reportOutcome(outcome: VerifyOutcome, ctx: ReportContext): void {
 
   if (outcome.kind === "exited") {
     if (outcome.code === 0) {
-      ui.log.success("Dev server exited cleanly");
+      ui.log.success("Verified — dev server exited cleanly");
       return;
     }
-    const lastLines = getLines().slice(-5).join("\n  ");
     ui.log.warn(
-      `Dev server exited with code ${outcome.code}` +
-        (lastLines ? `:\n  ${lastLines}` : "") +
-        "\nThe SDK was installed but the dev server could not start.\n" +
-        "Please check your project configuration."
+      `Could not verify — dev server exited with code ${outcome.code}`
     );
+    logger.debug(`Last output: ${getLines().slice(-3).join(" | ")}`);
     captureException(new Error("init verification failed"), {
       tags: { ...telemetryTags, "wizard.verify": "child_exited" },
       extra: { ...telemetryExtra, exitCode: outcome.code },
@@ -389,10 +376,7 @@ function reportOutcome(outcome: VerifyOutcome, ctx: ReportContext): void {
   }
 
   // timeout or silent
-  ui.log.warn(
-    `Could not verify — no output received within ${VERIFY_TIMEOUT_S}s.\n` +
-      "Run your dev server manually and check for events in Sentry."
-  );
+  ui.log.warn(`Could not verify — no output within ${VERIFY_TIMEOUT_S}s`);
   captureException(new Error("init verification failed"), {
     tags: { ...telemetryTags, "wizard.verify": "timeout" },
     extra: telemetryExtra,
