@@ -27,20 +27,6 @@ import type { WizardUI } from "./ui/types.js";
 const VERIFY_TIMEOUT_S = 15;
 
 /**
- * Platforms whose SDKs lack Spotlight support. These run in non-Node runtimes
- * (V8 isolates, edge runtimes) where `process.env` is unavailable and the
- * SDK has no `spotlightIntegration`. Verification would always time out.
- *
- * Values may be SDK identifiers (e.g. `sentry.javascript.cloudflare`) or
- * Sentry project platform IDs (e.g. `node-cloudflare-workers`).
- */
-const SPOTLIGHT_UNSUPPORTED_PLATFORMS = new Set([
-  "node-cloudflare-pages",
-  "node-cloudflare-workers",
-  "sentry.javascript.cloudflare",
-]);
-
-/**
  * Patterns in stderr/stdout that indicate a fatal startup failure.
  * Matched case-insensitively against each collected output line.
  */
@@ -172,15 +158,15 @@ export async function verifySetup(
   ui: WizardUI,
   cwd: string
 ): Promise<void> {
-  const platform = result.result?.platform;
-  if (platform && SPOTLIGHT_UNSUPPORTED_PLATFORMS.has(platform)) {
-    logger.debug("Skipping verification — platform lacks Spotlight support");
-    return;
-  }
-
   const detected = await detectDevCommand(cwd);
   if (!detected) {
-    logger.debug("Skipping verification — could not detect a dev command");
+    ui.log.info("Skipping verification — could not detect a dev command");
+    captureException(new Error("init verification skipped"), {
+      tags: {
+        "wizard.platform": String(result.result?.platform ?? "unknown"),
+        "wizard.verify": "no_dev_command",
+      },
+    });
     return;
   }
 

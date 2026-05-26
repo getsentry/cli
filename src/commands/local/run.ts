@@ -384,49 +384,63 @@ async function* runWithVerify(
   const verifyTimeout =
     flags.timeout > 0 ? flags.timeout : DEFAULT_VERIFY_TIMEOUT_S;
 
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-
-  const outcome = await Promise.race([
+  const racers: Promise<
+    | { kind: "envelope" }
+    | { kind: "exited"; code: number }
+    | { kind: "timeout" }
+  >[] = [
     envelopeReceived.then(() => ({ kind: "envelope" as const })),
     childExited,
-    new Promise<{ kind: "timeout" }>((r) => {
-      timeoutHandle = setTimeout(
-        () => r({ kind: "timeout" as const }),
-        verifyTimeout * 1000
-      );
-    }),
-  ]);
+  ];
 
-  if (timeoutHandle !== undefined) {
-    clearTimeout(timeoutHandle);
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  if (verifyTimeout > 0) {
+    racers.push(
+      new Promise<{ kind: "timeout" }>((r) => {
+        timeoutHandle = setTimeout(
+          () => r({ kind: "timeout" as const }),
+          verifyTimeout * 1000
+        );
+      })
+    );
+  }
+
+  let outcome:
+    | { kind: "envelope" }
+    | { kind: "exited"; code: number }
+    | { kind: "timeout" };
+  try {
+    outcome = await Promise.race(racers);
+  } finally {
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+
+  // Clean up — keep signal handlers active during graceful kill
+  try {
+    await gracefulKill(child);
+  } finally {
+    process.removeListener("SIGINT", onSigint);
+    process.removeListener("SIGTERM", onSigterm);
+    await shutdownServer(server);
   }
 
   switch (outcome.kind) {
     case "envelope": {
       logger.info("Setup verified — your app is sending events to Sentry");
-      await gracefulKill(child);
-      process.removeListener("SIGINT", onSigint);
-      process.removeListener("SIGTERM", onSigterm);
-      await shutdownServer(server);
       return;
     }
     case "timeout": {
       logger.warn(
         `Verification timed out after ${verifyTimeout}s — no events received from the SDK`
       );
-      await gracefulKill(child);
-      process.removeListener("SIGINT", onSigint);
-      process.removeListener("SIGTERM", onSigterm);
-      await shutdownServer(server);
       throw new CliError(
         `Verification timed out after ${verifyTimeout}s`,
         EXIT.WIZARD_VERIFY
       );
     }
     case "exited": {
-      process.removeListener("SIGINT", onSigint);
-      process.removeListener("SIGTERM", onSigterm);
-      await shutdownServer(server);
       if (outcome.code === 0) {
         logger.warn("Process exited before sending any events");
         throw new CliError(
