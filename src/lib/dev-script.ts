@@ -22,7 +22,7 @@ const WHITESPACE_RE = /\s+/;
  * variable expansion, operators, redirects, quotes) which cannot be
  * tokenized by simple whitespace splitting and must be run via a shell.
  */
-const SHELL_FEATURES_RE = /^[A-Za-z_]+=\S|&&|\|\||[|><;$"'`]/;
+const SHELL_FEATURES_RE = /^[A-Za-z_]\w*=\S|&&|\|\||[|><;$"'`]/;
 
 /**
  * Detect the project's dev command by inspecting filesystem markers in priority order.
