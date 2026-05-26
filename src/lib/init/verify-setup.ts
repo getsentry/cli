@@ -212,7 +212,8 @@ export async function verifySetup(
     ...process.env,
     SENTRY_SPOTLIGHT: spotlightUrl,
     NEXT_PUBLIC_SENTRY_SPOTLIGHT: spotlightUrl,
-    SENTRY_TRACES_SAMPLE_RATE: "1",
+    SENTRY_TRACES_SAMPLE_RATE:
+      process.env.SENTRY_TRACES_SAMPLE_RATE ?? "1",
     SENTRY_RELEASE: "sentry-cli-verify",
   };
 
