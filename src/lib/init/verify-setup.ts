@@ -208,6 +208,10 @@ async function cleanupChild(child: ChildProcess): Promise<void> {
       } catch {
         logger.debug("Child exited before SIGKILL");
       }
+      // Await close so child.exitCode is populated for crash detection.
+      if (child.exitCode === null) {
+        await new Promise<void>((r) => child.on("close", () => r()));
+      }
     }
   } catch (error) {
     logger.debug("Failed to kill verification child", error);
@@ -330,11 +334,7 @@ export async function verifySetup(
   // crash is reported instead of a false success.
   const exitCode = child.exitCode;
   let effectiveOutcome: VerifyOutcome = outcome;
-  if (
-    outcome.kind === "started" &&
-    exitCode !== null &&
-    exitCode !== 0
-  ) {
+  if (outcome.kind === "started" && exitCode !== null && exitCode !== 0) {
     effectiveOutcome = { kind: "exited", code: exitCode };
   }
 
