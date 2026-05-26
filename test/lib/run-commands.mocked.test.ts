@@ -15,7 +15,7 @@ import type { RunCommandsPayload } from "../../src/lib/init/types.js";
 type Breadcrumb = {
   level: string;
   message: string;
-  data: { exitCode: number; stderr: string; cwd: string };
+  data: { exitCode: number; stdout: string; stderr: string; cwd: string };
 };
 
 const { breadcrumbs } = vi.hoisted(() => ({
@@ -60,6 +60,7 @@ describe("runCommands breadcrumb on failure", () => {
     expect(crumb.level).toBe("error");
     expect(crumb.message).toContain("ls");
     expect(crumb.data.exitCode).not.toBe(0);
+    expect(typeof crumb.data.stdout).toBe("string");
     expect(typeof crumb.data.stderr).toBe("string");
     expect(crumb.data.cwd).toBe("/tmp");
   });

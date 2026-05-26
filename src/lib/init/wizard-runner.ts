@@ -438,6 +438,7 @@ async function preamble(
 const MAX_RESUME_RETRIES = 3;
 const RETRY_BACKOFF_MS = [2000, 4000, 8000];
 const RUN_STATE_RECOVERY_BACKOFF_MS = [0, 250, 750, 1500];
+const RUN_STATE_RECOVERY_TIMEOUT_MS = 10_000;
 
 type ResumeRetryArgs = {
   run: {
@@ -485,7 +486,7 @@ async function tryRecoverCurrentRunState(
         workflow.runById(runId, {
           fields: ["steps", "activeStepsPath", "result"],
         }),
-        API_TIMEOUT_MS,
+        RUN_STATE_RECOVERY_TIMEOUT_MS,
         "Run state recovery"
       );
       // runById returns activeStepsPath (Record<stepId, executionPath>) but
