@@ -437,6 +437,7 @@ async function preamble(
 
 const MAX_RESUME_RETRIES = 3;
 const RETRY_BACKOFF_MS = [2000, 4000, 8000];
+const RUN_STATE_RECOVERY_BACKOFF_MS = [0, 250, 750, 1500];
 
 type ResumeRetryArgs = {
   run: {
@@ -454,11 +455,13 @@ type ResumeRetryArgs = {
 };
 
 /**
- * Detect Mastra's "step not suspended" 500 — means the server already
+ * Detect Mastra's "not suspended" 500 — means the server already
  * processed this step (our previous request succeeded but the response was
  * dropped before we received it). The MastraClientError message embeds the
  * server body, e.g.:
  *   "HTTP error! status: 500 - {"error":"This workflow step 'X' was not suspended..."}"
+ * or:
+ *   "HTTP error! status: 500 - {"error":"This workflow run was not suspended"}"
  */
 function isStepAlreadyAdvancedError(err: unknown): boolean {
   return err instanceof Error && err.message.includes("was not suspended");
@@ -473,31 +476,39 @@ async function tryRecoverCurrentRunState(
   workflow: ResumeRetryArgs["workflow"],
   runId: string
 ): Promise<WorkflowRunResult | null> {
-  try {
-    const raw = await withTimeout(
-      workflow.runById(runId, {
-        fields: ["steps", "activeStepsPath", "result"],
-      }),
-      API_TIMEOUT_MS,
-      "Run state recovery"
-    );
-    // runById returns activeStepsPath (Record<stepId, executionPath>) but
-    // not suspended (string[][]). The main loop reads result.suspended to
-    // find the active step; without it, stepId falls back to "unknown" and
-    // extractSuspendPayload iterates all steps — picking the first with any
-    // suspendPayload, which could be a completed step with stale D1 data.
-    // Derive suspended from the activeStepsPath keys so the lookup is
-    // deterministic: those keys are exactly the currently-active step IDs.
-    const state = raw as Record<string, unknown>;
-    if (!state.suspended && state.activeStepsPath) {
-      state.suspended = Object.keys(
-        state.activeStepsPath as Record<string, unknown>
-      ).map((id) => [id]);
+  for (const delayMs of RUN_STATE_RECOVERY_BACKOFF_MS) {
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
-    return assertWorkflowResult(state);
-  } catch {
-    return null;
+    try {
+      const raw = await withTimeout(
+        workflow.runById(runId, {
+          fields: ["steps", "activeStepsPath", "result"],
+        }),
+        API_TIMEOUT_MS,
+        "Run state recovery"
+      );
+      // runById returns activeStepsPath (Record<stepId, executionPath>) but
+      // not suspended (string[][]). The main loop reads result.suspended to
+      // find the active step; without it, stepId falls back to "unknown" and
+      // extractSuspendPayload iterates all steps — picking the first with any
+      // suspendPayload, which could be a completed step with stale D1 data.
+      // Derive suspended from the activeStepsPath keys so the lookup is
+      // deterministic: those keys are exactly the currently-active step IDs.
+      const state = raw as Record<string, unknown>;
+      if (!state.suspended && state.activeStepsPath) {
+        state.suspended = Object.keys(
+          state.activeStepsPath as Record<string, unknown>
+        ).map((id) => [id]);
+      }
+      return assertWorkflowResult(state);
+    } catch {
+      // Mastra/D1 can briefly return a not-yet-readable or intermediate run
+      // state immediately after rejecting a stale resume. Poll a few times
+      // before surfacing the original 500 to the user.
+    }
   }
+  return null;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: retry loop branches across transient errors, stale-step recovery, and backoff
