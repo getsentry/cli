@@ -4,7 +4,7 @@
  * These are pure utility functions that don't require module mocking.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   abortIfCancelled,
   featureHint,
@@ -46,9 +46,7 @@ describe("abortIfCancelled", () => {
 describe("featureLabel", () => {
   test("returns label for known feature", () => {
     expect(featureLabel("errorMonitoring")).toBe("Error Monitoring");
-    expect(featureLabel("performanceMonitoring")).toBe(
-      "Performance Monitoring (Tracing)"
-    );
+    expect(featureLabel("performanceMonitoring")).toBe("Tracing");
     expect(featureLabel("logs")).toBe("Logging");
     expect(featureLabel("crons")).toBe("Crons");
     expect(featureLabel("aiMonitoring")).toBe("AI Monitoring");
@@ -62,14 +60,34 @@ describe("featureLabel", () => {
 
 describe("featureHint", () => {
   test("returns hint for known feature", () => {
-    expect(featureHint("errorMonitoring")).toBe("Error and crash reporting");
-    expect(featureHint("sessionReplay")).toBe("Visual replay of user sessions");
-    expect(featureHint("crons")).toBe("Monitor scheduled and recurring jobs");
+    expect(featureHint("errorMonitoring")).toBe(
+      "Group exceptions into issues with context"
+    );
+    expect(featureHint("performanceMonitoring")).toBe(
+      "See request paths, spans, and bottlenecks"
+    );
+    expect(featureHint("sessionReplay")).toBe(
+      "Replay sessions linked to errors"
+    );
+    expect(featureHint("profiling")).toBe(
+      "Find CPU-heavy functions in production"
+    );
+    expect(featureHint("logs")).toBe("Search logs beside errors and traces");
+    expect(featureHint("metrics")).toBe("Track custom measurements over time");
+    expect(featureHint("sourceMaps")).toBe(
+      "Turn minified stacks into your source"
+    );
+    expect(featureHint("crons")).toBe(
+      "Alert on failed or missed scheduled jobs"
+    );
     expect(featureHint("aiMonitoring")).toBe(
-      "Track AI model calls, latency, and failures"
+      "Track AI calls, latency, cost, and failures"
     );
     expect(featureHint("userFeedback")).toBe(
-      "Collect in-app user feedback and reports"
+      "Collect user reports with issue context"
+    );
+    expect(featureHint("reactFeatures")).toBe(
+      "Add React-specific context and integrations"
     );
   });
 

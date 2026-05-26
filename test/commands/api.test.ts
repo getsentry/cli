@@ -5,8 +5,9 @@
  * Tests for parsing functions in the api command.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   buildBodyFromFields,
   buildBodyFromInput,
@@ -1010,7 +1011,7 @@ describe("buildBodyFromInput", () => {
     );
     const testDir = await createTestConfigDir("test-api-file-");
     const tempFile = `${testDir}/test-input.json`;
-    await Bun.write(tempFile, JSON.stringify({ key: "value" }));
+    await writeFile(tempFile, JSON.stringify({ key: "value" }));
 
     try {
       const mockStdin = createMockStdin("");
@@ -1028,7 +1029,7 @@ describe("buildBodyFromInput", () => {
     );
     const testDir = await createTestConfigDir("test-api-file-");
     const tempFile = `${testDir}/test-input.txt`;
-    await Bun.write(tempFile, "plain text from file");
+    await writeFile(tempFile, "plain text from file");
 
     try {
       const mockStdin = createMockStdin("");
@@ -1039,12 +1040,12 @@ describe("buildBodyFromInput", () => {
     }
   });
 
-  test("throws for non-existent file", async () => {
+  test("throws ValidationError for non-existent file", async () => {
     const mockStdin = createMockStdin("");
 
     await expect(
       buildBodyFromInput("/nonexistent/path/file.json", mockStdin)
-    ).rejects.toThrow(/File not found/);
+    ).rejects.toBeInstanceOf(ValidationError);
   });
 });
 

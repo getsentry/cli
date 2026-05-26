@@ -8,6 +8,7 @@
  * through the SDK function options (baseUrl, fetch, headers).
  */
 
+import { setTimeout as sleepMs } from "node:timers/promises";
 import { getTraceData } from "@sentry/node-core/light";
 import { maybeWarnEnvTokenIgnored } from "./auth-hint.js";
 import { computeInvalidationPrefixes } from "./cache-keys.js";
@@ -16,16 +17,30 @@ import {
   getConfiguredSentryUrl,
   getUserAgent,
 } from "./constants.js";
+import {
+  buildTlsErrorDetail,
+  getCustomTlsOptions,
+  isTlsCertError,
+  warnIfSaasWithEnvCa,
+} from "./custom-ca.js";
 import { applyCustomHeaders } from "./custom-headers.js";
 import { getAuthToken, refreshToken } from "./db/auth.js";
-import { TimeoutError } from "./errors.js";
+import { ApiError, HostScopeError, TimeoutError } from "./errors.js";
 import { logger } from "./logger.js";
 import {
+  clearLastCacheHitAge,
   getCachedResponse,
   invalidateCachedResponsesMatching,
   storeCachedResponse,
 } from "./response-cache.js";
+import { normalizeOrigin } from "./sentry-urls.js";
 import { withTracingSpan } from "./telemetry.js";
+import { parseSntrysClaim } from "./token-claims.js";
+import {
+  getActiveTokenHost,
+  isHostTrustedForClaim,
+  isRequestOriginTrusted,
+} from "./token-host.js";
 
 const log = logger.withTag("http");
 
@@ -100,6 +115,30 @@ function prepareHeaders(
   init: RequestInit | undefined,
   token: string
 ): Headers {
+  // Host-scoping guard (defense in depth). Primary rejection happens at the
+  // URL-arg / rc-shim entry points; this catches any code path that mutated
+  // SENTRY_HOST/SENTRY_URL without going through those guards.
+  if (!isRequestOriginTrusted(input)) {
+    throw new HostScopeError(
+      "Credentials",
+      normalizeOrigin(input) ?? "<unknown host>",
+      getActiveTokenHost()
+    );
+  }
+
+  // sntrys_ claim check — defense-in-depth for users with access to
+  // multiple Sentry instances. The claim is unsigned (see token-claims.ts);
+  // fail-open on parse errors. Uses isHostTrustedForClaim so multi-region
+  // fan-out via the control silo's region URLs still works.
+  const claimUrl = parseSntrysClaim(token)?.url;
+  if (claimUrl && !isHostTrustedForClaim(input, claimUrl)) {
+    throw new HostScopeError(
+      "Credentials",
+      normalizeOrigin(input) ?? "<unknown host>",
+      claimUrl
+    );
+  }
+
   // When the SDK calls fetch(request) with no init, read headers from the Request
   // object to preserve Content-Type. On Node.js, fetch(request, {headers}) replaces
   // the Request's headers entirely per spec, so we must carry them forward explicitly.
@@ -123,8 +162,9 @@ function prepareHeaders(
     headers.set("baggage", traceData.baggage);
   }
 
-  // Inject user-configured custom headers for self-hosted proxies (IAP, mTLS, etc.)
-  applyCustomHeaders(headers);
+  // Inject user-configured custom headers for self-hosted proxies (IAP,
+  // mTLS, etc.) — scoped to the request URL.
+  applyCustomHeaders(headers, input);
 
   return headers;
 }
@@ -217,10 +257,19 @@ async function fetchWithTimeout({
   linkAbortSignal(externalSignal, controller);
 
   try {
+    // Spread custom TLS options (CA certs for corporate proxies).
+    // On Bun, this passes `tls: { ca }` to fetch(); on Node, the
+    // extra property is harmless (Node honors NODE_EXTRA_CA_CERTS natively).
+    const customTls = getCustomTlsOptions();
+    if (customTls) {
+      warnIfSaasWithEnvCa(extractFullUrl(input));
+    }
+
     return await fetch(input, {
       ...init,
       headers,
       signal: controller.signal,
+      ...customTls,
     });
   } catch (error) {
     if (timedOut) {
@@ -266,8 +315,9 @@ async function handleResponse(
 
 /**
  * Decide what to do with a fetch error. User aborts and an internal
- * timeout on the last attempt throw immediately; other errors retry
- * until the last attempt, then propagate.
+ * timeout on the last attempt throw immediately; TLS cert errors throw
+ * immediately with actionable guidance (retrying is pointless); other
+ * errors retry until the last attempt, then propagate.
  */
 function handleFetchError(
   error: unknown,
@@ -277,6 +327,19 @@ function handleFetchError(
   if (isUserAbort(error, signal)) {
     return { action: "throw", error };
   }
+
+  // TLS certificate errors are deterministic — don't retry
+  if (isTlsCertError(error)) {
+    return {
+      action: "throw",
+      error: new ApiError(
+        "TLS certificate error",
+        0,
+        buildTlsErrorDetail(error as Error)
+      ),
+    };
+  }
+
   if (isInternalTimeout(error) && isLastAttempt) {
     const timeoutMs =
       (error as { timeoutMs?: number }).timeoutMs ?? REQUEST_TIMEOUT_MS;
@@ -482,7 +545,7 @@ async function fetchWithRetry(
     log.debug(
       `${method} ${new URL(fullUrl).pathname} → retry ${attempt + 1}/${MAX_RETRIES} after ${delay}ms`
     );
-    await Bun.sleep(delay);
+    await sleepMs(delay);
   }
 
   // Unreachable: the last attempt always returns 'done' or 'throw'
@@ -516,6 +579,10 @@ function createAuthenticatedFetch(): (
     input: Request | string | URL,
     init?: RequestInit
   ): Promise<Response> {
+    // Reset cache-hit age so it reflects only this request's outcome.
+    // Commands read it after their primary API call to show cache-age hints.
+    clearLastCacheHitAge();
+
     // Once-per-process hint when env-var auth token is shadowed by a
     // stored OAuth login. Runs here (rather than at command entry) so
     // the hint only fires for commands that actually exercise auth —

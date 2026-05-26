@@ -5,9 +5,9 @@
  * Uses isolated temp directories per test to avoid interference.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import {
   buildCacheKey,

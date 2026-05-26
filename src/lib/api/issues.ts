@@ -8,7 +8,13 @@ import type { ListAnOrganizationSissuesData } from "@sentry/api";
 import { listAnOrganization_sIssues } from "@sentry/api";
 
 import type { SentryIssue } from "../../types/index.js";
-
+import type { IssueSubstatus } from "../../types/sentry.js";
+import {
+  buildTlsErrorDetail,
+  customFetch,
+  isTlsCertError,
+  warnIfSaasWithEnvCa,
+} from "../custom-ca.js";
 import { applyCustomHeaders } from "../custom-headers.js";
 import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
@@ -41,7 +47,7 @@ export type IssueSort = NonNullable<
  * expensive Snuba/ClickHouse queries on the backend.
  *
  * - `'stats'` — time-series event counts (sparkline data)
- * - `'lifetime'` — lifetime aggregate counts (count, userCount, firstSeen)
+ * - `'lifetime'` — lifetime aggregate sub-object AND top-level count/userCount/firstSeen/lastSeen on list endpoints
  * - `'filtered'` — filtered aggregate counts
  * - `'unhandled'` — unhandled event flag computation
  * - `'base'` — base group fields (rarely useful to collapse)
@@ -53,9 +59,17 @@ export type IssueCollapseField = NonNullable<
 /**
  * Build the `collapse` parameter for issue list API calls.
  *
- * Always collapses fields the CLI never consumes in issue list:
- * `filtered`, `lifetime`, `unhandled`. Conditionally collapses `stats`
- * when sparklines won't be rendered (narrow terminal, non-TTY, or JSON).
+ * Always collapses `filtered` and `unhandled` — the CLI never consumes
+ * these in issue list views. Conditionally collapses `stats` when
+ * sparklines won't be rendered (narrow terminal, non-TTY, or JSON),
+ * and `lifetime` when the caller confirms the lifetime-dependent
+ * top-level fields (`count`, `userCount`, `firstSeen`, `lastSeen`)
+ * aren't needed.
+ *
+ * **Important:** Despite being documented as removing only the `lifetime`
+ * sub-object, `collapse=lifetime` also strips the top-level `count`,
+ * `userCount`, `firstSeen`, and `lastSeen` fields from list responses.
+ * Only collapse it when those fields are confirmed unnecessary. See #969.
  *
  * Matches the Sentry web UI's optimization: the initial page load sends
  * `collapse=stats,unhandled` to skip expensive Snuba queries, fetching
@@ -64,12 +78,20 @@ export type IssueCollapseField = NonNullable<
  * @param options - Context for determining what to collapse
  * @param options.shouldCollapseStats - Whether stats data can be skipped
  *   (true when sparklines won't be shown: narrow terminal, non-TTY, --json)
+ * @param options.shouldCollapseLifetime - Whether lifetime data can be skipped.
+ *   Defaults to `false` because most output paths need `count`/`userCount`/
+ *   `firstSeen`/`lastSeen`. Only set to `true` when `--json --fields` omits
+ *   all lifetime-dependent fields.
  * @returns Array of fields to collapse
  */
 export function buildIssueListCollapse(options: {
   shouldCollapseStats: boolean;
+  shouldCollapseLifetime?: boolean;
 }): IssueCollapseField[] {
-  const collapse: IssueCollapseField[] = ["filtered", "lifetime", "unhandled"];
+  const collapse: IssueCollapseField[] = ["filtered", "unhandled"];
+  if (options.shouldCollapseLifetime) {
+    collapse.push("lifetime");
+  }
   if (options.shouldCollapseStats) {
     collapse.push("stats");
   }
@@ -84,8 +106,10 @@ export function buildIssueListCollapse(options: {
  * in detail views (`issue view`, `issue explain`, `issue plan`).
  * Collapsing these skips expensive Snuba queries, saving 100-300ms per request.
  *
- * Note: `count`, `userCount`, `firstSeen`, `lastSeen` are top-level fields
- * and remain unaffected by collapsing.
+ * Note: On the **list** endpoint, `collapse=lifetime` strips top-level
+ * `count`, `userCount`, `firstSeen`, `lastSeen` (see #969). The detail
+ * endpoint preserves these fields regardless of collapse — safe to include
+ * `lifetime` here.
  */
 export const ISSUE_DETAIL_COLLAPSE: IssueCollapseField[] = [
   "stats",
@@ -535,12 +559,28 @@ export function parseResolveSpec(
 }
 
 /**
+ * Ignore/archive conditions for {@link updateIssueStatus}.
+ *
+ * - `ignoreDuration` — ignore for N minutes
+ * - `ignoreCount` / `ignoreWindow` — ignore until N events in M minutes
+ * - `ignoreUserCount` / `ignoreUserWindow` — ignore until N users in M minutes
+ */
+export type IgnoreStatusDetails = {
+  ignoreDuration?: number;
+  ignoreCount?: number;
+  ignoreWindow?: number;
+  ignoreUserCount?: number;
+  ignoreUserWindow?: number;
+};
+
+/**
  * Update an issue's status.
  *
- * When `status === "resolved"`, optional `statusDetails` can pin the fix
- * to a release or commit (see {@link ResolveStatusDetails}). Without
- * `statusDetails`, the issue is resolved immediately with no regression
- * tracking — equivalent to clicking "Resolve" in the Sentry UI.
+ * - `"resolved"` — optional `statusDetails` can pin the fix to a release
+ *   or commit (see {@link ResolveStatusDetails}).
+ * - `"ignored"` — optional `substatus` controls archive granularity;
+ *   optional `statusDetails` sets conditions (see {@link IgnoreStatusDetails}).
+ * - `"unresolved"` — reopens the issue; no additional options needed.
  *
  * When `options.orgSlug` is provided, the request is routed to that org's
  * region via the org-scoped endpoint. Without it, falls back to the legacy
@@ -550,13 +590,18 @@ export async function updateIssueStatus(
   issueId: string,
   status: "resolved" | "unresolved" | "ignored",
   options?: {
-    statusDetails?: ResolveStatusDetails;
+    statusDetails?: ResolveStatusDetails | IgnoreStatusDetails;
+    /** Substatus for archive granularity. */
+    substatus?: IssueSubstatus;
     orgSlug?: string;
   }
 ): Promise<SentryIssue> {
   const body: Record<string, unknown> = { status };
   if (options?.statusDetails) {
     body.statusDetails = options.statusDetails;
+  }
+  if (options?.substatus) {
+    body.substatus = options.substatus;
   }
 
   if (options?.orgSlug) {
@@ -669,8 +714,25 @@ export async function getSharedIssue(
 ): Promise<{ groupID: string }> {
   const url = `${baseUrl}/api/0/shared/issues/${encodeURIComponent(shareId)}/`;
   const headers = new Headers({ "Content-Type": "application/json" });
-  applyCustomHeaders(headers);
-  const response = await fetch(url, { headers });
+  // URL-scoped: headers only attach when `url`'s origin matches the trusted
+  // host, so IAP tokens etc. can't leak to an attacker-controlled share URL.
+  applyCustomHeaders(headers, url);
+  warnIfSaasWithEnvCa(url);
+
+  let response: Response;
+  try {
+    response = await customFetch(url, { headers });
+  } catch (error) {
+    if (error instanceof Error && isTlsCertError(error)) {
+      throw new ApiError(
+        "TLS certificate error",
+        0,
+        buildTlsErrorDetail(error),
+        `shared/issues/${shareId}`
+      );
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     if (response.status === 404) {

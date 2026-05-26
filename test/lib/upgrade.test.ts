@@ -2,13 +2,118 @@
  * Upgrade Module Tests
  *
  * Tests for upgrade detection and logic.
+ *
+ * The `executeUpgrade` and `detectInstallationMethod` subprocess tests use
+ * `vi.mock("node:child_process", ...)` at the top of this file to
+ * intercept `spawn()` calls via a swappable `spawnImpl`. Non-spawn exports
+ * pass through to the real `node:child_process`.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { EventEmitter } from "node:events";
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { access, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { gzipSync } from "node:zlib";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+// ---------------------------------------------------------------------------
+// Fake ChildProcess helpers used by the subprocess-based upgrade tests.
+// ---------------------------------------------------------------------------
+
+type FakeStdio = {
+  on: (event: string, cb: (chunk: Buffer) => void) => FakeStdio;
+  resume: () => void;
+};
+
+type FakeProc = EventEmitter & {
+  stdout: FakeStdio;
+  stderr: FakeStdio;
+};
+
+/** No-op placeholder for stream methods we don't exercise. */
+function noopStream() {
+  // intentional no-op
+}
+
+/**
+ * Build a minimal fake ChildProcess EventEmitter that emits 'close'
+ * with the given exit code after a microtask tick.
+ */
+function fakeProcess(exitCode: number, stdoutData = ""): FakeProc {
+  const emitter = new EventEmitter() as FakeProc;
+
+  const listeners: Array<(chunk: Buffer) => void> = [];
+  emitter.stdout = {
+    on: (_event: string, cb: (chunk: Buffer) => void) => {
+      listeners.push(cb);
+      return emitter.stdout;
+    },
+    resume: noopStream,
+  };
+  emitter.stderr = {
+    on: (_event: string, _cb: (chunk: Buffer) => void) => emitter.stderr,
+    resume: noopStream,
+  };
+
+  queueMicrotask(() => {
+    if (stdoutData) {
+      for (const cb of listeners) {
+        cb(Buffer.from(stdoutData));
+      }
+    }
+    emitter.emit("close", exitCode);
+  });
+
+  return emitter;
+}
+
+/** Build a fake ChildProcess that emits an 'error' event instead of closing. */
+function fakeErrorProcess(message: string): FakeProc {
+  const emitter = new EventEmitter() as FakeProc;
+  emitter.stdout = {
+    on: (_e: string, _cb: (chunk: Buffer) => void) => emitter.stdout,
+    resume: noopStream,
+  };
+  emitter.stderr = {
+    on: (_e: string, _cb: (chunk: Buffer) => void) => emitter.stderr,
+    resume: noopStream,
+  };
+  queueMicrotask(() => emitter.emit("error", new Error(message)));
+  return emitter;
+}
+
+// Swappable spawn implementation. Individual tests replace `spawnImpl.fn`
+// before calling the code under test. The holder object is hoisted so
+// vi.mock() can capture the reference; tests mutate `.fn` to swap behavior.
+const { spawnImpl } = vi.hoisted(() => ({
+  spawnImpl: {
+    fn: (() => {
+      // placeholder — replaced per-test
+    }) as (cmd: string, args: string[], opts: object) => FakeProc,
+  },
+}));
+// Initialize with the real default now that fakeProcess is defined
+spawnImpl.fn = () => fakeProcess(0);
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...orig,
+    spawn: (cmd: string, args: string[], opts: object) =>
+      spawnImpl.fn(cmd, args, opts),
+  };
+});
+
+// Dynamic imports: must run AFTER vi.mock() so upgrade.ts picks up the
+// mocked spawn.
 import { isEnoentSpawnError } from "../../src/commands/cli/upgrade.js";
 import {
   acquireLock,
@@ -22,7 +127,8 @@ import {
   setInstallInfo,
 } from "../../src/lib/db/install-info.js";
 import { UpgradeError } from "../../src/lib/errors.js";
-import {
+
+const {
   detectInstallationMethod,
   detectPackageManagerFromPath,
   downloadBinaryToTemp,
@@ -35,7 +141,8 @@ import {
   parseInstallationMethod,
   startCleanupOldBinary,
   versionExists,
-} from "../../src/lib/upgrade.js";
+} = await import("../../src/lib/upgrade.js");
+
 import { TEST_TMP_DIR, useTestConfigDir } from "../helpers.js";
 
 // Store original fetch for restoration
@@ -976,7 +1083,7 @@ describe("isProcessRunning", () => {
   test("returns true on EPERM (process exists but owned by different user)", () => {
     // Mock process.kill to throw EPERM
     const epermError = Object.assign(new Error("EPERM"), { code: "EPERM" });
-    const spy = spyOn(process, "kill").mockImplementation(() => {
+    const spy = vi.spyOn(process, "kill").mockImplementation(() => {
       throw epermError;
     });
 
@@ -991,7 +1098,7 @@ describe("isProcessRunning", () => {
   test("returns false on ESRCH (process does not exist)", () => {
     // Mock process.kill to throw ESRCH
     const esrchError = Object.assign(new Error("ESRCH"), { code: "ESRCH" });
-    const spy = spyOn(process, "kill").mockImplementation(() => {
+    const spy = vi.spyOn(process, "kill").mockImplementation(() => {
       throw esrchError;
     });
 
@@ -1101,13 +1208,18 @@ describe("releaseLock", () => {
     writeFileSync(testLockPath, String(process.pid));
 
     // Verify it exists
-    expect(Bun.file(testLockPath).size).toBeGreaterThan(0);
+    expect(statSync(testLockPath).size).toBeGreaterThan(0);
 
     // Release lock
     releaseLock(testLockPath);
 
     // File should be gone
-    expect(await Bun.file(testLockPath).exists()).toBe(false);
+    expect(
+      await access(testLockPath).then(
+        () => true,
+        () => false
+      )
+    ).toBe(false);
   });
 
   test("does not throw if lock file does not exist", () => {
@@ -1159,7 +1271,7 @@ describe("executeUpgrade with curl method", () => {
     const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF magic bytes
 
     // Compress the mock content with gzip
-    const gzipped = Bun.gzipSync(mockBinaryContent);
+    const gzipped = gzipSync(mockBinaryContent);
 
     // Mock fetch: first call returns gzipped content (.gz URL)
     mockFetch(async () => new Response(gzipped, { status: 200 }));
@@ -1174,8 +1286,13 @@ describe("executeUpgrade with curl method", () => {
     const paths = getTestPaths();
     expect(result!.tempBinaryPath).toBe(paths.tempPath);
     expect(result!.lockPath).toBe(paths.lockPath);
-    expect(await Bun.file(result!.tempBinaryPath).exists()).toBe(true);
-    const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
+    expect(
+      await access(result!.tempBinaryPath).then(
+        () => true,
+        () => false
+      )
+    ).toBe(true);
+    const content = await readFile(result!.tempBinaryPath);
     expect(new Uint8Array(content)).toEqual(mockBinaryContent);
   });
 
@@ -1198,8 +1315,13 @@ describe("executeUpgrade with curl method", () => {
     expect(callCount).toBe(2); // Both .gz and raw URL were tried
 
     // Verify the binary was downloaded
-    expect(await Bun.file(result!.tempBinaryPath).exists()).toBe(true);
-    const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
+    expect(
+      await access(result!.tempBinaryPath).then(
+        () => true,
+        () => false
+      )
+    ).toBe(true);
+    const content = await readFile(result!.tempBinaryPath);
     expect(new Uint8Array(content)).toEqual(mockBinaryContent);
   });
 
@@ -1221,7 +1343,7 @@ describe("executeUpgrade with curl method", () => {
     expect(result).not.toBeNull();
     expect(callCount).toBe(2);
 
-    const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
+    const content = await readFile(result!.tempBinaryPath);
     expect(new Uint8Array(content)).toEqual(mockBinaryContent);
   });
 
@@ -1259,7 +1381,12 @@ describe("executeUpgrade with curl method", () => {
 
     // Lock should be released even on failure
     const paths = getTestPaths();
-    expect(await Bun.file(paths.lockPath).exists()).toBe(false);
+    expect(
+      await access(paths.lockPath).then(
+        () => true,
+        () => false
+      )
+    ).toBe(false);
   });
 });
 
@@ -1281,14 +1408,24 @@ describe("startCleanupOldBinary", () => {
     writeFileSync(oldPath, "test content");
 
     // Verify file exists
-    expect(await Bun.file(oldPath).exists()).toBe(true);
+    expect(
+      await access(oldPath).then(
+        () => true,
+        () => false
+      )
+    ).toBe(true);
 
     // Clean up is fire-and-forget async, so we need to wait a bit
     startCleanupOldBinary();
-    await Bun.sleep(50);
+    await sleep(50);
 
     // File should be gone
-    expect(await Bun.file(oldPath).exists()).toBe(false);
+    expect(
+      await access(oldPath).then(
+        () => true,
+        () => false
+      )
+    ).toBe(false);
   });
 
   // Note: cleanupOldBinary intentionally does NOT clean up .download files
@@ -1429,7 +1566,7 @@ describe("executeUpgrade with curl method (nightly)", () => {
 
   test("downloads and decompresses nightly binary from GHCR", async () => {
     const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF
-    const gzipped = Bun.gzipSync(mockBinaryContent);
+    const gzipped = gzipSync(mockBinaryContent);
 
     // Mock: token exchange + manifest + blob (200 with gzipped content)
     mockFetch(async (url) => {
@@ -1476,7 +1613,7 @@ describe("executeUpgrade with curl method (nightly)", () => {
     expect(result).toHaveProperty("tempBinaryPath");
 
     // Verify decompressed content matches original
-    const content = await Bun.file(result!.tempBinaryPath).arrayBuffer();
+    const content = await readFile(result!.tempBinaryPath);
     expect(new Uint8Array(content)).toEqual(mockBinaryContent);
   });
 });
@@ -1585,7 +1722,7 @@ describe("downloadBinaryToTemp verifies download integrity (CLI-1D3)", () => {
     // 5 times (~3.1s cumulative) before giving up with an actionable
     // error; without it the caller would spawn the empty file and fail
     // with "Executable not found in $PATH" (the CLI-1D3 symptom).
-    const emptyGzip = Bun.gzipSync(new Uint8Array(0));
+    const emptyGzip = gzipSync(new Uint8Array(0));
     mockFetch(async (url) => {
       const urlStr = String(url);
       if (urlStr.endsWith(".gz")) {
@@ -1607,7 +1744,7 @@ describe("downloadBinaryToTemp verifies download integrity (CLI-1D3)", () => {
   }, 10_000);
 
   test("releases the download lock when verification fails", async () => {
-    const emptyGzip = Bun.gzipSync(new Uint8Array(0));
+    const emptyGzip = gzipSync(new Uint8Array(0));
     mockFetch(async (url) => {
       const urlStr = String(url);
       if (urlStr.endsWith(".gz")) {
@@ -1639,7 +1776,7 @@ describe("downloadBinaryToTemp verifies download integrity (CLI-1D3)", () => {
     // the good bytes. Otherwise a slow CI could let our Bun.write land
     // before the download completes and get clobbered by the empty write.
     const mockBinaryContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]); // ELF
-    const emptyGzip = Bun.gzipSync(new Uint8Array(0));
+    const emptyGzip = gzipSync(new Uint8Array(0));
     mockFetch(async (url) => {
       const urlStr = String(url);
       if (urlStr.endsWith(".gz")) {
@@ -1653,15 +1790,20 @@ describe("downloadBinaryToTemp verifies download integrity (CLI-1D3)", () => {
       // Wait for the empty download to land on disk first, so we
       // overwrite it instead of racing it.
       for (let i = 0; i < 200; i++) {
-        if (await Bun.file(tempPath).exists()) {
+        if (
+          await access(tempPath).then(
+            () => true,
+            () => false
+          )
+        ) {
           break;
         }
-        await Bun.sleep(10);
+        await sleep(10);
       }
       // Give the probe loop at least one zero-byte observation so the
       // recovery branch (attempt > 1) actually fires.
-      await Bun.sleep(150);
-      await Bun.write(tempPath, mockBinaryContent);
+      await sleep(150);
+      await writeFile(tempPath, mockBinaryContent);
     })();
 
     const result = await downloadBinaryToTemp("0.26.1");
@@ -1670,7 +1812,7 @@ describe("downloadBinaryToTemp verifies download integrity (CLI-1D3)", () => {
 
     // Verify the good bytes survived — catches the regression where a
     // late download completion clobbers the delayed write.
-    const onDisk = new Uint8Array(await Bun.file(tempPath).arrayBuffer());
+    const onDisk = new Uint8Array(await readFile(tempPath));
     expect(onDisk).toEqual(mockBinaryContent);
 
     // Release the lock so afterEach cleanup runs cleanly.
@@ -1701,5 +1843,254 @@ describe("isEnoentSpawnError", () => {
     expect(isEnoentSpawnError(new Error("permission denied"))).toBe(false);
     expect(isEnoentSpawnError("string error")).toBe(false);
     expect(isEnoentSpawnError(null)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// executeUpgrade — brew
+// ---------------------------------------------------------------------------
+
+describe("executeUpgrade (brew)", () => {
+  test("returns null on successful brew upgrade", async () => {
+    spawnImpl.fn = () => fakeProcess(0);
+    expect(await executeUpgrade("brew", "1.0.0")).toBeNull();
+  });
+
+  test("throws UpgradeError on non-zero brew exit", async () => {
+    spawnImpl.fn = () => fakeProcess(1);
+    try {
+      await executeUpgrade("brew", "1.0.0");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpgradeError);
+      expect((err as UpgradeError).reason).toBe("execution_failed");
+      expect((err as UpgradeError).message).toContain("exit code 1");
+    }
+  });
+
+  test("throws UpgradeError on brew spawn error", async () => {
+    spawnImpl.fn = () => fakeErrorProcess("brew not found");
+    try {
+      await executeUpgrade("brew", "1.0.0");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpgradeError);
+      expect((err as UpgradeError).reason).toBe("execution_failed");
+      expect((err as UpgradeError).message).toContain("brew not found");
+    }
+  });
+
+  test("invokes brew with correct arguments", async () => {
+    let capturedCmd = "";
+    let capturedArgs: string[] = [];
+    let capturedOpts: object = {};
+    spawnImpl.fn = (cmd, args, opts) => {
+      capturedCmd = cmd;
+      capturedArgs = args;
+      capturedOpts = opts;
+      return fakeProcess(0);
+    };
+    await executeUpgrade("brew", "1.0.0");
+    expect(capturedCmd).toBe("brew");
+    expect(capturedArgs).toEqual(["upgrade", "getsentry/tools/sentry"]);
+    expect(capturedOpts).toHaveProperty("shell", process.platform === "win32");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// executeUpgrade — package managers (npm, pnpm, bun, yarn)
+// ---------------------------------------------------------------------------
+
+describe("executeUpgrade (package managers)", () => {
+  test("npm: returns null on success", async () => {
+    spawnImpl.fn = () => fakeProcess(0);
+    expect(await executeUpgrade("npm", "1.0.0")).toBeNull();
+  });
+
+  test("npm: uses correct install arguments", async () => {
+    let capturedCmd = "";
+    let capturedArgs: string[] = [];
+    let capturedOpts: object = {};
+    spawnImpl.fn = (cmd, args, opts) => {
+      capturedCmd = cmd;
+      capturedArgs = args;
+      capturedOpts = opts;
+      return fakeProcess(0);
+    };
+    await executeUpgrade("npm", "1.2.3");
+    expect(capturedCmd).toBe("npm");
+    expect(capturedArgs).toEqual(["install", "-g", "sentry@1.2.3"]);
+    expect(capturedOpts).toHaveProperty("shell", process.platform === "win32");
+  });
+
+  test("pnpm: uses correct install arguments", async () => {
+    let capturedArgs: string[] = [];
+    spawnImpl.fn = (_cmd, args) => {
+      capturedArgs = args;
+      return fakeProcess(0);
+    };
+    await executeUpgrade("pnpm", "1.2.3");
+    expect(capturedArgs).toEqual(["install", "-g", "sentry@1.2.3"]);
+  });
+
+  test("bun: uses correct install arguments", async () => {
+    let capturedArgs: string[] = [];
+    spawnImpl.fn = (_cmd, args) => {
+      capturedArgs = args;
+      return fakeProcess(0);
+    };
+    await executeUpgrade("bun", "1.2.3");
+    expect(capturedArgs).toEqual(["install", "-g", "sentry@1.2.3"]);
+  });
+
+  test("yarn: uses 'global add' arguments", async () => {
+    let capturedCmd = "";
+    let capturedArgs: string[] = [];
+    let capturedOpts: object = {};
+    spawnImpl.fn = (cmd, args, opts) => {
+      capturedCmd = cmd;
+      capturedArgs = args;
+      capturedOpts = opts;
+      return fakeProcess(0);
+    };
+    await executeUpgrade("yarn", "1.2.3");
+    expect(capturedCmd).toBe("yarn");
+    expect(capturedArgs).toEqual(["global", "add", "sentry@1.2.3"]);
+    expect(capturedOpts).toHaveProperty("shell", process.platform === "win32");
+  });
+
+  test("npm: throws UpgradeError on non-zero exit", async () => {
+    spawnImpl.fn = () => fakeProcess(1);
+    try {
+      await executeUpgrade("npm", "1.0.0");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpgradeError);
+      expect((err as UpgradeError).reason).toBe("execution_failed");
+      expect((err as UpgradeError).message).toContain("npm install failed");
+    }
+  });
+
+  test("npm: throws UpgradeError on spawn error", async () => {
+    spawnImpl.fn = () => fakeErrorProcess("npm not found");
+    try {
+      await executeUpgrade("npm", "1.0.0");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpgradeError);
+      expect((err as UpgradeError).reason).toBe("execution_failed");
+      expect((err as UpgradeError).message).toContain("npm not found");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// executeUpgrade — unknown method (default switch case)
+// ---------------------------------------------------------------------------
+
+describe("executeUpgrade (unknown method)", () => {
+  test("throws UpgradeError with unknown_method reason", async () => {
+    try {
+      await executeUpgrade("unknown" as never, "1.0.0");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(UpgradeError);
+      expect((err as UpgradeError).reason).toBe("unknown_method");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runCommand via isInstalledWith (indirect coverage of runCommand)
+// ---------------------------------------------------------------------------
+
+describe("detectInstallationMethod — legacy pm detection via isInstalledWith", () => {
+  useTestConfigDir("test-detect-legacy-");
+
+  let originalExecPath: string;
+  let originalArgv: string[];
+
+  beforeEach(() => {
+    originalExecPath = process.execPath;
+    originalArgv = [...process.argv];
+    // Non-Homebrew, non-known-curl execPath so detection falls through to pm checks
+    Object.defineProperty(process, "execPath", {
+      value: "/usr/bin/sentry",
+      configurable: true,
+    });
+    // Clear argv[1] to prevent detectPackageManagerFromPath() from detecting
+    // vitest's node_modules path as an npm install
+    process.argv[1] = "sentry";
+    clearInstallInfo();
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "execPath", {
+      value: originalExecPath,
+      configurable: true,
+    });
+    process.argv = originalArgv;
+    clearInstallInfo();
+  });
+
+  test("detects npm when 'npm list -g sentry' output includes 'sentry@'", async () => {
+    let capturedOpts: object = {};
+    spawnImpl.fn = (_cmd, args, opts) => {
+      capturedOpts = opts;
+      return fakeProcess(0, args.includes("sentry") ? "sentry@1.0.0" : "");
+    };
+    const method = await detectInstallationMethod();
+    expect(method).toBe("npm");
+    // runCommand passes shell: true on Windows for .cmd compatibility
+    expect(capturedOpts).toHaveProperty("shell", process.platform === "win32");
+  });
+
+  test("detects yarn when 'yarn global list' output includes 'sentry@'", async () => {
+    // npm is checked first — make npm/pnpm/bun return empty; only yarn matches
+    spawnImpl.fn = (cmd) => {
+      if (cmd === "yarn") return fakeProcess(0, "sentry@1.0.0");
+      return fakeProcess(0, "");
+    };
+    const method = await detectInstallationMethod();
+    expect(method).toBe("yarn");
+  });
+
+  test("returns 'unknown' when no package manager lists sentry", async () => {
+    spawnImpl.fn = () => fakeProcess(0, ""); // all return empty stdout
+    const method = await detectInstallationMethod();
+    expect(method).toBe("unknown");
+  });
+
+  test("returns 'unknown' when all package manager spawns error", async () => {
+    spawnImpl.fn = () => fakeErrorProcess("command not found");
+    const method = await detectInstallationMethod();
+    expect(method).toBe("unknown");
+  });
+
+  test("auto-saves detected method when non-unknown", async () => {
+    spawnImpl.fn = (_cmd, args) =>
+      fakeProcess(0, args.includes("sentry") ? "sentry@2.0.0" : "");
+    await detectInstallationMethod();
+    // After detection, install info should be auto-saved with method=npm
+    const { getInstallInfo } = await import("../../src/lib/db/install-info.js");
+    const stored = getInstallInfo();
+    expect(stored?.method).toBe("npm");
+  });
+
+  test("returns stored method on second call (auto-save fast path)", async () => {
+    // First call: npm detected and auto-saved
+    spawnImpl.fn = (_cmd, args) =>
+      fakeProcess(0, args.includes("sentry") ? "sentry@1.0.0" : "");
+    await detectInstallationMethod();
+
+    // Second call: spawn should not be called again (stored info takes precedence)
+    let spawnCalled = false;
+    spawnImpl.fn = () => {
+      spawnCalled = true;
+      return fakeProcess(0, "sentry@1.0.0");
+    };
+    const method = await detectInstallationMethod();
+    expect(method).toBe("npm");
+    expect(spawnCalled).toBe(false);
   });
 });

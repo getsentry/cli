@@ -7,8 +7,8 @@
 
 import type { SentryContext } from "../../context.js";
 import { triggerSolutionPlanning } from "../../lib/api-client.js";
-import { buildCommand, numberParser } from "../../lib/command.js";
-import { ApiError, ValidationError } from "../../lib/errors.js";
+import { buildCommand } from "../../lib/command.js";
+import { ApiError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   formatSolution,
@@ -22,9 +22,10 @@ import {
 import { logger } from "../../lib/logger.js";
 import {
   type AutofixState,
+  extractExaminedFiles,
+  extractNoSolutionReason,
   extractRootCauses,
   extractSolution,
-  type RootCause,
   type SolutionArtifact,
 } from "../../types/seer.js";
 import {
@@ -35,77 +36,21 @@ import {
 } from "./utils.js";
 
 type PlanFlags = {
-  readonly cause?: number;
   readonly json: boolean;
   readonly force: boolean;
   readonly fresh: boolean;
   readonly fields?: string[];
 };
 
-/**
- * Validate that the autofix state has root causes identified.
- *
- * @param state - Current autofix state (already ensured to exist)
- * @returns Array of root causes
- * @throws {ValidationError} If no root causes found
- */
-function validateRootCauses(state: AutofixState): RootCause[] {
-  const causes = extractRootCauses(state);
-  if (causes.length === 0) {
-    throw new ValidationError(
-      "No root causes identified. Cannot create a plan without a root cause."
-    );
-  }
-  return causes;
-}
-
-/**
- * Validate and resolve the cause selection for solution planning.
- *
- * @param causes - Array of available root causes
- * @param selectedCause - User-specified cause index, or undefined for auto-select
- * @param issueId - Issue ID for error message hints
- * @returns Validated cause index (0-based)
- * @throws {ValidationError} If multiple causes exist without selection, or if selection is out of range
- */
-function validateCauseSelection(
-  causes: RootCause[],
-  selectedCause: number | undefined,
-  issueId: string
-): number {
-  // If only one cause and none specified, use it
-  if (causes.length === 1 && selectedCause === undefined) {
-    return 0;
-  }
-
-  // If multiple causes and none specified, error with list
-  if (causes.length > 1 && selectedCause === undefined) {
-    const lines = [
-      "Multiple root causes found. Please specify one with --cause <id>:",
-      "",
-    ];
-    for (let i = 0; i < causes.length; i++) {
-      const cause = causes[i];
-      if (cause) {
-        lines.push(`  ${i}: ${cause.description.slice(0, 60)}...`);
-      }
-    }
-    lines.push("");
-    lines.push(`Example: sentry issue plan ${issueId} --cause 0`);
-    throw new ValidationError(lines.join("\n"));
-  }
-
-  const causeId = selectedCause ?? 0;
-
-  // Validate the cause ID is in range
-  if (causeId < 0 || causeId >= causes.length) {
-    throw new ValidationError(
-      `Invalid cause ID: ${causeId}. Valid range is 0-${causes.length - 1}.`
-    );
-  }
-
-  return causeId;
-}
+/** Context about why no solution was produced */
+type NoSolutionContext = {
+  /** Seer's reason for not producing a solution (from the artifact) */
+  reason?: string;
+  /** Root cause description that was analyzed */
+  root_cause?: string;
+  /** Files Seer examined during analysis */
+  files_examined?: string[];
+};
 
 /** Return type for issue plan — includes state metadata and solution data */
 type PlanData = {
@@ -113,18 +58,74 @@ type PlanData = {
   status: string;
   /** The solution data (without the artifact wrapper). Null when no solution is available. */
   solution: SolutionArtifact["data"] | null;
+  /** Context about why no solution was produced. Only present when solution is null. */
+  no_solution_context?: NoSolutionContext;
 };
 
 /**
  * Format solution plan data for human-readable terminal output.
  *
- * Returns the formatted solution or a "no solution" message.
+ * Returns the formatted solution, or a contextual message explaining
+ * why no solution was produced.
  */
 function formatPlanOutput(data: PlanData): string {
   if (data.solution) {
     return formatSolution({ key: "solution", data: data.solution });
   }
-  return "No solution found. Check the Sentry web UI for details.";
+
+  const lines: string[] = [];
+  const ctx = data.no_solution_context;
+
+  if (ctx?.reason) {
+    lines.push(`No solution found: ${ctx.reason}`);
+  } else {
+    lines.push(
+      "No solution found. Seer completed analysis but could not identify a code fix."
+    );
+    if (ctx?.root_cause) {
+      lines.push("");
+      lines.push(`Root cause analyzed: ${ctx.root_cause}`);
+    }
+  }
+
+  if (ctx?.files_examined && ctx.files_examined.length > 0) {
+    lines.push("");
+    lines.push("Files examined:");
+    for (const file of ctx.files_examined) {
+      lines.push(`  ${file}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Gather context about why Seer produced no solution.
+ *
+ * Returns undefined when there's nothing useful to report.
+ */
+function buildNoSolutionContext(
+  state: AutofixState
+): NoSolutionContext | undefined {
+  const reason = extractNoSolutionReason(state);
+  const cause = extractRootCauses(state)[0];
+  const files = cause ? extractExaminedFiles([cause]) : [];
+
+  if (!(reason || cause?.description) && files.length === 0) {
+    return;
+  }
+
+  const ctx: NoSolutionContext = {};
+  if (reason) {
+    ctx.reason = reason;
+  }
+  if (cause?.description) {
+    ctx.root_cause = cause.description;
+  }
+  if (files.length > 0) {
+    ctx.files_examined = files;
+  }
+  return ctx;
 }
 
 /**
@@ -132,14 +133,24 @@ function formatPlanOutput(data: PlanData): string {
  *
  * Stores `solution.data` (not the full artifact) to keep the JSON shape flat —
  * consumers get `{ run_id, status, solution: { one_line_summary, steps, ... } }`.
+ *
+ * When no solution is available, includes context about why (reason from the
+ * API, root cause description, and files examined) so the user isn't left
+ * with a bare "no solution found" message.
  */
 function buildPlanData(state: AutofixState): PlanData {
   const solution = extractSolution(state);
-  return {
+  const data: PlanData = {
     run_id: state.run_id,
     status: state.status,
     solution: solution?.data ?? null,
   };
+
+  if (!solution) {
+    data.no_solution_context = buildNoSolutionContext(state);
+  }
+
+  return data;
 }
 
 export const planCommand = buildCommand({
@@ -149,7 +160,6 @@ export const planCommand = buildCommand({
       "Generate a solution plan for a Sentry issue using Seer AI.\n\n" +
       "This command automatically runs root cause analysis if needed, then " +
       "generates a solution plan with specific implementation steps to fix the issue.\n\n" +
-      "If multiple root causes are identified, use --cause to specify which one.\n" +
       "Use --force to regenerate a plan even if one already exists.\n\n" +
       "Issue formats:\n" +
       "  @latest          - Most recent unresolved issue\n" +
@@ -164,10 +174,10 @@ export const planCommand = buildCommand({
       "  - GitHub integration configured for your organization\n" +
       "  - Code mappings set up for your project\n\n" +
       "Examples:\n" +
-      "  sentry issue plan @latest --cause 0\n" +
-      "  sentry issue plan 123456789 --cause 0\n" +
-      "  sentry issue plan sentry/EXTENSION-7 --cause 1\n" +
-      "  sentry issue plan cli-G --cause 0\n" +
+      "  sentry issue plan @latest\n" +
+      "  sentry issue plan 123456789\n" +
+      "  sentry issue plan sentry/EXTENSION-7\n" +
+      "  sentry issue plan cli-G\n" +
       "  sentry issue plan 123456789 --force",
   },
   output: {
@@ -176,12 +186,6 @@ export const planCommand = buildCommand({
   parameters: {
     positional: issueIdPositional,
     flags: {
-      cause: {
-        kind: "parsed",
-        parse: numberParser,
-        brief: "Root cause ID to plan (required if multiple causes exist)",
-        optional: true,
-      },
       force: {
         kind: "boolean",
         brief: "Force new plan even if one exists",
@@ -195,11 +199,9 @@ export const planCommand = buildCommand({
     applyFreshFlag(flags);
     const { cwd } = this;
 
-    // Declare org outside try block so it's accessible in catch for error messages
     let resolvedOrg: string | undefined;
 
     try {
-      // Resolve org and issue ID
       const { org, issueId: numericId } = await resolveOrgAndIssueId({
         issueArg,
         cwd,
@@ -214,13 +216,6 @@ export const planCommand = buildCommand({
         json: flags.json,
       });
 
-      // Validate we have root causes
-      const causes = validateRootCauses(state);
-
-      // Validate cause selection
-      const causeId = validateCauseSelection(causes, flags.cause, issueArg);
-      const selectedCause = causes[causeId];
-
       // Check if solution already exists (skip if --force)
       if (!flags.force) {
         const existingSolution = extractSolution(state);
@@ -229,22 +224,25 @@ export const planCommand = buildCommand({
         }
       }
 
-      // No solution exists, trigger planning
-      if (!flags.json) {
+      // Trigger solution planning
+      const causes = extractRootCauses(state);
+      if (!flags.json && causes.length > 0) {
         const log = logger.withTag("issue.plan");
-        log.info(`Creating plan for cause #${causeId}...`);
-        if (selectedCause) {
-          log.info(`"${selectedCause.description}"`);
+        const cause = causes[0];
+        if (cause) {
+          log.info("Creating plan...");
+          log.info(`"${cause.description}"`);
         }
       }
 
       await triggerSolutionPlanning(org, numericId, state.run_id);
 
-      // Poll until PR is created
+      // Poll until solution is ready or terminal
       const finalState = await pollAutofixState({
         orgSlug: org,
         issueId: numericId,
         json: flags.json,
+        stopOnWaitingForUser: true,
         timeoutMessage:
           "Plan creation timed out after 6 minutes. Try again or check the issue in Sentry web UI.",
         timeoutHint:
@@ -252,7 +250,6 @@ export const planCommand = buildCommand({
           `  Or retry: sentry issue plan ${issueArg}`,
       });
 
-      // Handle errors
       if (finalState.status === "ERROR") {
         throw new Error(
           "Plan creation failed. Check the Sentry web UI for details."
@@ -265,7 +262,6 @@ export const planCommand = buildCommand({
 
       return yield new CommandOutput(buildPlanData(finalState));
     } catch (error) {
-      // Handle API errors with friendly messages
       if (error instanceof ApiError) {
         throw handleSeerApiError(error.status, error.detail, resolvedOrg);
       }

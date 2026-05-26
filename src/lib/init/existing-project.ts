@@ -23,6 +23,7 @@ export async function tryGetExistingProjectData(
       projectId: project.id,
       dsn: dsn ?? "",
       url: buildProjectUrl(orgSlug, project.slug),
+      ...(project.platform ? { platform: project.platform } : {}),
     };
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {

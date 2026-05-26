@@ -9,7 +9,6 @@
  * @see https://github.com/getsentry/cli/issues/350
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   constantFrom,
   assert as fcAssert,
@@ -18,6 +17,7 @@ import {
   stringMatching,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   rejectControlChars,
   rejectPreEncoded,

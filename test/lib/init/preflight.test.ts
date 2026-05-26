@@ -1,21 +1,100 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as clack from "@clack/prompts";
+/**
+ * Tests for `resolveInitContext`. Stubs API and DSN-detection layers
+ * with `spyOn` and uses `MockUI` to drive prompts deterministically.
+ */
+
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/db/auth.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/auth.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as auth from "../../../src/lib/db/auth.js";
+
+vi.mock("../../../src/lib/dsn/index.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/dsn/index.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as dsnIndex from "../../../src/lib/dsn/index.js";
 import { ApiError } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/init/org-prefetch.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../src/lib/init/org-prefetch.js")
+    >();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as prefetch from "../../../src/lib/init/org-prefetch.js";
 import { resolveInitContext } from "../../../src/lib/init/preflight.js";
 import type { WizardOptions } from "../../../src/lib/init/types.js";
+import { CANCELLED } from "../../../src/lib/init/ui/types.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+
+vi.mock("../../../src/lib/resolve-team.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-team.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as resolveTeam from "../../../src/lib/resolve-team.js";
+import { createMockUI, type MockCall } from "./ui/mock-ui.js";
 
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   return {
@@ -26,14 +105,14 @@ function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   };
 }
 
-const noop = () => {
-  /* suppress prompt output */
-};
+function feedbackOutcomes(calls: MockCall[]): string[] {
+  return calls
+    .filter(
+      (c): c is Extract<MockCall, { kind: "feedback" }> => c.kind === "feedback"
+    )
+    .map((c) => c.outcome);
+}
 
-let selectSpy: ReturnType<typeof spyOn>;
-let isCancelSpy: ReturnType<typeof spyOn>;
-let cancelSpy: ReturnType<typeof spyOn>;
-let logErrorSpy: ReturnType<typeof spyOn>;
 let resolveOrgPrefetchedSpy: ReturnType<typeof spyOn>;
 let listOrganizationsSpy: ReturnType<typeof spyOn>;
 let getProjectSpy: ReturnType<typeof spyOn>;
@@ -44,51 +123,38 @@ let detectDsnSpy: ReturnType<typeof spyOn>;
 let resolveDsnByPublicKeySpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
-  selectSpy = spyOn(clack, "select").mockResolvedValue("existing");
-  isCancelSpy = spyOn(clack, "isCancel").mockImplementation(
-    (value: unknown) => value === Symbol.for("cancel")
-  );
-  cancelSpy = spyOn(clack, "cancel").mockImplementation(noop);
-  logErrorSpy = spyOn(clack.log, "error").mockImplementation(noop);
-
-  resolveOrgPrefetchedSpy = spyOn(
-    prefetch,
-    "resolveOrgPrefetched"
-  ).mockResolvedValue({ org: "acme" });
-  listOrganizationsSpy = spyOn(
-    apiClient,
-    "listOrganizations"
-  ).mockResolvedValue([{ id: "1", slug: "acme", name: "Acme" }]);
-  getProjectSpy = spyOn(apiClient, "getProject").mockResolvedValue({
+  resolveOrgPrefetchedSpy = vi
+    .spyOn(prefetch, "resolveOrgPrefetched")
+    .mockResolvedValue({ org: "acme" });
+  listOrganizationsSpy = vi
+    .spyOn(apiClient, "listOrganizations")
+    .mockResolvedValue([{ id: "1", slug: "acme", name: "Acme" }]);
+  getProjectSpy = vi.spyOn(apiClient, "getProject").mockResolvedValue({
     id: "42",
     slug: "my-app",
     name: "my-app",
     platform: "javascript-react",
     dateCreated: "2026-04-16T00:00:00Z",
   } as any);
-  tryGetPrimaryDsnSpy = spyOn(apiClient, "tryGetPrimaryDsn").mockResolvedValue(
-    "https://abc@o1.ingest.sentry.io/42"
-  );
-  getAuthTokenSpy = spyOn(auth, "getAuthToken").mockReturnValue("sntrys_test");
-  resolveOrCreateTeamSpy = spyOn(
-    resolveTeam,
-    "resolveOrCreateTeam"
-  ).mockResolvedValue({
-    slug: "platform",
-    source: "auto-selected",
-  });
-  detectDsnSpy = spyOn(dsnIndex, "detectDsn").mockResolvedValue(null);
-  resolveDsnByPublicKeySpy = spyOn(
-    resolveTarget,
-    "resolveDsnByPublicKey"
-  ).mockResolvedValue(null);
+  tryGetPrimaryDsnSpy = vi
+    .spyOn(apiClient, "tryGetPrimaryDsn")
+    .mockResolvedValue("https://abc@o1.ingest.sentry.io/42");
+  getAuthTokenSpy = vi
+    .spyOn(auth, "getAuthToken")
+    .mockReturnValue("sntrys_test");
+  resolveOrCreateTeamSpy = vi
+    .spyOn(resolveTeam, "resolveOrCreateTeam")
+    .mockResolvedValue({
+      slug: "platform",
+      source: "auto-selected",
+    });
+  detectDsnSpy = vi.spyOn(dsnIndex, "detectDsn").mockResolvedValue(null);
+  resolveDsnByPublicKeySpy = vi
+    .spyOn(resolveTarget, "resolveDsnByPublicKey")
+    .mockResolvedValue(null);
 });
 
 afterEach(() => {
-  selectSpy.mockRestore();
-  isCancelSpy.mockRestore();
-  cancelSpy.mockRestore();
-  logErrorSpy.mockRestore();
   resolveOrgPrefetchedSpy.mockRestore();
   listOrganizationsSpy.mockRestore();
   getProjectSpy.mockRestore();
@@ -115,7 +181,8 @@ describe("resolveInitContext", () => {
       project: "my-app",
     });
 
-    const context = await resolveInitContext(makeOptions());
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
 
     expect(context).toEqual(
       expect.objectContaining({
@@ -148,7 +215,8 @@ describe("resolveInitContext", () => {
     });
     getProjectSpy.mockRejectedValue(new ApiError("temporary failure", 503));
 
-    const context = await resolveInitContext(makeOptions());
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
 
     expect(context).toEqual(
       expect.objectContaining({
@@ -183,7 +251,8 @@ describe("resolveInitContext", () => {
         dateCreated: "2026-04-16T00:00:00Z",
       } as any);
 
-    const context = await resolveInitContext(makeOptions());
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
 
     expect(context?.existingProject).toEqual(
       expect.objectContaining({
@@ -201,16 +270,19 @@ describe("resolveInitContext", () => {
       { id: "1", slug: "solo-org", name: "Solo Org" },
     ]);
 
-    const context = await resolveInitContext(makeOptions({ yes: false }));
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions({ yes: false }), ui);
 
     expect(context?.org).toBe("solo-org");
   });
 
   test("lets the user choose an existing bare-slug project", async () => {
-    selectSpy.mockResolvedValue("existing");
+    const { ui, respond } = createMockUI();
+    respond.select("existing");
 
     const context = await resolveInitContext(
-      makeOptions({ yes: false, project: "my-app" })
+      makeOptions({ yes: false, project: "my-app" }),
+      ui
     );
 
     expect(context?.project).toBe("my-app");
@@ -220,8 +292,10 @@ describe("resolveInitContext", () => {
   test("keeps the bare slug when the existence lookup fails", async () => {
     getProjectSpy.mockRejectedValue(new ApiError("temporary failure", 503));
 
+    const { ui } = createMockUI();
     const context = await resolveInitContext(
-      makeOptions({ yes: false, project: "my-app" })
+      makeOptions({ yes: false, project: "my-app" }),
+      ui
     );
 
     expect(context?.project).toBe("my-app");
@@ -231,7 +305,8 @@ describe("resolveInitContext", () => {
   test("defers empty-org team creation until project creation", async () => {
     resolveOrCreateTeamSpy.mockResolvedValue({ source: "deferred" } as any);
 
-    const context = await resolveInitContext(makeOptions());
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
 
     expect(context?.team).toBeUndefined();
     expect(resolveOrCreateTeamSpy).toHaveBeenCalledWith(
@@ -244,10 +319,12 @@ describe("resolveInitContext", () => {
   });
 
   test("clears the project when the user chooses to create new", async () => {
-    selectSpy.mockResolvedValue("create");
+    const { ui, respond } = createMockUI();
+    respond.select("create");
 
     const context = await resolveInitContext(
-      makeOptions({ yes: false, project: "my-app" })
+      makeOptions({ yes: false, project: "my-app" }),
+      ui
     );
 
     expect(context?.project).toBeUndefined();
@@ -260,8 +337,10 @@ describe("resolveInitContext", () => {
       source: options.team ? "explicit" : "auto-selected",
     }));
 
+    const { ui } = createMockUI();
     const context = await resolveInitContext(
-      makeOptions({ team: "backend", yes: false })
+      makeOptions({ team: "backend", yes: false }),
+      ui
     );
 
     expect(context?.team).toBe("backend");
@@ -275,7 +354,8 @@ describe("resolveInitContext", () => {
   });
 
   test("uses the ambiguity callback when team selection requires it", async () => {
-    selectSpy.mockResolvedValue("mobile");
+    const { ui, respond } = createMockUI();
+    respond.select("mobile");
     resolveOrCreateTeamSpy.mockImplementation(async (_org, options) => {
       const slug = await options.onAmbiguous?.([
         { slug: "mobile", name: "Mobile", isMember: true },
@@ -284,7 +364,7 @@ describe("resolveInitContext", () => {
       return { slug, source: "auto-selected" };
     });
 
-    const context = await resolveInitContext(makeOptions({ yes: false }));
+    const context = await resolveInitContext(makeOptions({ yes: false }), ui);
 
     expect(context?.team).toBe("mobile");
   });
@@ -295,16 +375,65 @@ describe("resolveInitContext", () => {
       { id: "1", slug: "acme", name: "Acme" },
       { id: "2", slug: "beta", name: "Beta" },
     ]);
-    selectSpy.mockResolvedValue(Symbol.for("cancel"));
 
-    const context = await resolveInitContext(makeOptions({ yes: false }));
+    const { ui, calls, respond } = createMockUI();
+    respond.select(CANCELLED);
+
+    const context = await resolveInitContext(makeOptions({ yes: false }), ui);
 
     expect(context).toBeNull();
-    expect(cancelSpy).toHaveBeenCalledWith("Setup cancelled.");
+    const cancelCall = calls.find((c) => c.kind === "cancel");
+    expect(cancelCall?.kind === "cancel" && cancelCall.message).toBe(
+      "Setup cancelled."
+    );
+    expect(feedbackOutcomes(calls)).toEqual(["cancelled"]);
+  });
+
+  test("surfaces 403 guidance when listOrganizations is forbidden", async () => {
+    resolveOrgPrefetchedSpy.mockResolvedValue(null);
+    listOrganizationsSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Failed to list organizations",
+        403,
+        "You do not have permission."
+      )
+    );
+
+    const { ui, calls } = createMockUI();
+    await expect(
+      resolveInitContext(makeOptions({ yes: true }), ui)
+    ).rejects.toThrow("403 Forbidden");
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toContain("403 Forbidden");
+    expect(errorCall?.message).toContain("sentry init <org-slug>/");
+  });
+
+  test("surfaces 401 guidance when listOrganizations is unauthorized", async () => {
+    resolveOrgPrefetchedSpy.mockResolvedValue(null);
+    listOrganizationsSpy.mockRejectedValueOnce(
+      new ApiError("Failed to list organizations", 401, "Token expired")
+    );
+
+    const { ui, calls } = createMockUI();
+    await expect(
+      resolveInitContext(makeOptions({ yes: true }), ui)
+    ).rejects.toThrow("401 Unauthorized");
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toContain("401 Unauthorized");
+    expect(errorCall?.message).toContain("Token expired");
   });
 
   test("includes the auth token in the resolved context", async () => {
-    const context = await resolveInitContext(makeOptions());
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
 
     expect(context?.authToken).toBe("sntrys_test");
   });

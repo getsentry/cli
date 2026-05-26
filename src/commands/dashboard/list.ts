@@ -5,6 +5,7 @@
  * and optional client-side glob filtering by title.
  */
 
+import picomatch from "picomatch";
 import type { SentryContext } from "../../context.js";
 import { MAX_PAGINATION_PAGES } from "../../lib/api/infrastructure.js";
 import {
@@ -233,7 +234,7 @@ function processPage(
     limit: number;
     serverCursor: string | undefined;
     afterId: string | undefined;
-    glob: InstanceType<typeof Bun.Glob> | undefined;
+    glob: ((input: string) => boolean) | undefined;
   }
 ): PageResult {
   // When resuming mid-page, find the afterId and skip everything up to and
@@ -249,7 +250,7 @@ function processPage(
 
   for (let i = startIdx; i < data.length; i++) {
     const item = data[i] as DashboardListItem;
-    if (!opts.glob || opts.glob.match(item.title.toLowerCase())) {
+    if (!opts.glob || opts.glob(item.title.toLowerCase())) {
       results.push(item);
       if (results.length >= opts.limit) {
         return {
@@ -283,7 +284,7 @@ async function fetchDashboards(
     perPage: number;
     serverCursor: string | undefined;
     afterId: string | undefined;
-    glob: InstanceType<typeof Bun.Glob> | undefined;
+    glob: ((input: string) => boolean) | undefined;
   }
 ): Promise<FetchResult> {
   let { serverCursor, afterId } = opts;
@@ -434,7 +435,7 @@ export const listCommand = buildListCommand("dashboard", {
     const { serverCursor, afterId } = decodeCursor(rawCursor ?? "");
 
     const glob = titleFilter
-      ? new Bun.Glob(titleFilter.toLowerCase())
+      ? picomatch(titleFilter.toLowerCase(), { dot: true })
       : undefined;
 
     // When filtering, fetch max-size pages to minimize round trips.
@@ -460,7 +461,7 @@ export const listCommand = buildListCommand("dashboard", {
           afterId,
           glob,
         })
-    ).catch((error: unknown) =>
+    ).catch(async (error: unknown) =>
       enrichDashboardError(error, { orgSlug, operation: "list" })
     );
 

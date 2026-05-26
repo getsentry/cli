@@ -100,6 +100,33 @@ export function formatCompactWithUnit(
 }
 
 /**
+ * Format a byte count as a human-readable string with binary units.
+ *
+ * Uses 1024-based conversion with one fractional digit. Values below 1 KB
+ * are shown as whole bytes. Unlike {@link formatCompactWithUnit} with
+ * `"byte"`, this avoids the "BB" collision where `Intl.NumberFormat`
+ * compact notation uses "B" for billions and `appendUnitSuffix` adds
+ * another "B" for bytes.
+ *
+ * @example formatBytes(512)         // "512 B"
+ * @example formatBytes(3435689)     // "3.3 MB"
+ * @example formatBytes(106989888)   // "102.0 MB"
+ * @example formatBytes(1073741824)  // "1.0 GB"
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+/**
  * Format a percentage value with one decimal place, or "—" when absent.
  *
  * @example fmtPct(42.3) // "42.3%"

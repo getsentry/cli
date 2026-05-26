@@ -228,7 +228,7 @@ export const viewCommand = buildCommand({
     const dashboard = await withProgress(
       { message: "Fetching dashboard...", json: flags.json },
       () => getDashboard(orgSlug, dashboardId)
-    ).catch((error: unknown) =>
+    ).catch(async (error: unknown) =>
       enrichDashboardError(error, {
         orgSlug,
         dashboardId,

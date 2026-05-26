@@ -10,24 +10,76 @@
  * output and parse JSON for --json output.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { statusCommand } from "../../../src/commands/auth/status.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/db/auth.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/auth.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbAuth from "../../../src/lib/db/auth.js";
+
+vi.mock("../../../src/lib/db/defaults.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/defaults.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbDefaults from "../../../src/lib/db/defaults.js";
+
+vi.mock("../../../src/lib/db/index.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/index.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbIndex from "../../../src/lib/db/index.js";
+
+vi.mock("../../../src/lib/db/user.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/user.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbUser from "../../../src/lib/db/user.js";
 import { AuthError } from "../../../src/lib/errors.js";
@@ -46,12 +98,12 @@ function createContext() {
   return {
     context: {
       stdout: {
-        write: mock((s: string) => {
+        write: vi.fn((s: string) => {
           stdoutChunks.push(s);
         }),
       },
       stderr: {
-        write: mock((_s: string) => {
+        write: vi.fn((_s: string) => {
           /* unused */
         }),
       },
@@ -63,6 +115,7 @@ function createContext() {
 
 describe("statusCommand.func", () => {
   let getAuthConfigSpy: ReturnType<typeof spyOn>;
+  let getAuthTokenSpy: ReturnType<typeof spyOn>;
   let isAuthenticatedSpy: ReturnType<typeof spyOn>;
   let getUserInfoSpy: ReturnType<typeof spyOn>;
   let getDefaultOrgSpy: ReturnType<typeof spyOn>;
@@ -72,15 +125,17 @@ describe("statusCommand.func", () => {
   let func: StatusFunc;
 
   beforeEach(async () => {
-    getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig");
-    isAuthenticatedSpy = spyOn(dbAuth, "isAuthenticated");
-    getUserInfoSpy = spyOn(dbUser, "getUserInfo");
-    getDefaultOrgSpy = spyOn(dbDefaults, "getDefaultOrganization");
-    getDefaultProjectSpy = spyOn(dbDefaults, "getDefaultProject");
-    getDbPathSpy = spyOn(dbIndex, "getDbPath");
-    listOrgsSpy = spyOn(apiClient, "listOrganizationsUncached");
+    getAuthConfigSpy = vi.spyOn(dbAuth, "getAuthConfig");
+    getAuthTokenSpy = vi.spyOn(dbAuth, "getAuthToken");
+    isAuthenticatedSpy = vi.spyOn(dbAuth, "isAuthenticated");
+    getUserInfoSpy = vi.spyOn(dbUser, "getUserInfo");
+    getDefaultOrgSpy = vi.spyOn(dbDefaults, "getDefaultOrganization");
+    getDefaultProjectSpy = vi.spyOn(dbDefaults, "getDefaultProject");
+    getDbPathSpy = vi.spyOn(dbIndex, "getDbPath");
+    listOrgsSpy = vi.spyOn(apiClient, "listOrganizationsUncached");
 
     // Defaults that most tests override
+    getAuthTokenSpy.mockReturnValue("fake-oauth-token");
     getUserInfoSpy.mockReturnValue(null);
     getDefaultOrgSpy.mockReturnValue(null);
     getDefaultProjectSpy.mockReturnValue(null);
@@ -92,6 +147,7 @@ describe("statusCommand.func", () => {
 
   afterEach(() => {
     getAuthConfigSpy.mockRestore();
+    getAuthTokenSpy.mockRestore();
     isAuthenticatedSpy.mockRestore();
     getUserInfoSpy.mockRestore();
     getDefaultOrgSpy.mockRestore();
@@ -265,6 +321,34 @@ describe("statusCommand.func", () => {
       await func.call(context, { ...humanFlags, "show-token": true });
 
       expect(getOutput()).toContain("sntrys_env_token_123_long_enough");
+    });
+
+    test("hint says 'organization' for sntrys_ env tokens", async () => {
+      getAuthConfigSpy.mockReturnValue({
+        token: "sntrys_env_token_123",
+        source: "env:SENTRY_AUTH_TOKEN",
+      });
+      isAuthenticatedSpy.mockReturnValue(true);
+      getAuthTokenSpy.mockReturnValue("sntrys_env_token_123");
+
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
+
+      expect(getOutput()).toContain("organization");
+    });
+
+    test("hint says 'user' for non-sntrys_ env tokens", async () => {
+      getAuthConfigSpy.mockReturnValue({
+        token: "some_oauth_env_token",
+        source: "env:SENTRY_AUTH_TOKEN",
+      });
+      isAuthenticatedSpy.mockReturnValue(true);
+      getAuthTokenSpy.mockReturnValue("some_oauth_env_token");
+
+      const { context, getOutput } = createContext();
+      await func.call(context, humanFlags);
+
+      expect(getOutput()).toContain("which user");
     });
   });
 

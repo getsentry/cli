@@ -1,12 +1,41 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+vi.mock("../../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as apiClient from "../../../../src/lib/api-client.js";
 import { ApiError } from "../../../../src/lib/errors.js";
-import { createSentryProject } from "../../../../src/lib/init/tools/create-sentry-project.js";
+import {
+  createSentryProject,
+  createSentryProjectTool,
+} from "../../../../src/lib/init/tools/create-sentry-project.js";
 import type {
   CreateSentryProjectPayload,
   EnsureSentryProjectPayload,
 } from "../../../../src/lib/init/types.js";
+
+vi.mock("../../../../src/lib/resolve-team.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../../src/lib/resolve-team.js")
+    >();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as resolveTeam from "../../../../src/lib/resolve-team.js";
 
@@ -41,37 +70,35 @@ let tryGetPrimaryDsnSpy: ReturnType<typeof spyOn>;
 let resolveOrCreateTeamSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
-  createProjectWithDsnSpy = spyOn(
-    apiClient,
-    "createProjectWithDsn"
-  ).mockResolvedValue({
-    project: {
-      id: "42",
-      slug: "my-app",
-      name: "my-app",
-      platform: "javascript-react",
-      dateCreated: "2026-04-16T00:00:00Z",
-    } as any,
-    dsn: "https://abc@o1.ingest.sentry.io/42",
-    url: "https://sentry.io/settings/acme/projects/my-app/",
-  });
-  getProjectSpy = spyOn(apiClient, "getProject").mockResolvedValue({
+  createProjectWithDsnSpy = vi
+    .spyOn(apiClient, "createProjectWithDsn")
+    .mockResolvedValue({
+      project: {
+        id: "42",
+        slug: "my-app",
+        name: "my-app",
+        platform: "javascript-react",
+        dateCreated: "2026-04-16T00:00:00Z",
+      } as any,
+      dsn: "https://abc@o1.ingest.sentry.io/42",
+      url: "https://sentry.io/settings/acme/projects/my-app/",
+    });
+  getProjectSpy = vi.spyOn(apiClient, "getProject").mockResolvedValue({
     id: "42",
     slug: "my-app",
     name: "my-app",
     platform: "javascript-react",
     dateCreated: "2026-04-16T00:00:00Z",
   } as any);
-  tryGetPrimaryDsnSpy = spyOn(apiClient, "tryGetPrimaryDsn").mockResolvedValue(
-    "https://abc@o1.ingest.sentry.io/42"
-  );
-  resolveOrCreateTeamSpy = spyOn(
-    resolveTeam,
-    "resolveOrCreateTeam"
-  ).mockResolvedValue({
-    slug: "generated-team",
-    source: "auto-created",
-  } as any);
+  tryGetPrimaryDsnSpy = vi
+    .spyOn(apiClient, "tryGetPrimaryDsn")
+    .mockResolvedValue("https://abc@o1.ingest.sentry.io/42");
+  resolveOrCreateTeamSpy = vi
+    .spyOn(resolveTeam, "resolveOrCreateTeam")
+    .mockResolvedValue({
+      slug: "generated-team",
+      source: "auto-created",
+    } as any);
 });
 
 afterEach(() => {
@@ -120,6 +147,19 @@ describe("createSentryProject", () => {
 
     expect(result.ok).toBe(true);
     expect(result.message).toContain("Using existing project");
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+  });
+
+  test("returns error when project name produces an empty slug", async () => {
+    const result = await createSentryProject(makePayload({ name: "---" }), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("produces an empty slug");
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 
@@ -220,6 +260,42 @@ describe("createSentryProject", () => {
         platform: "javascript-react",
       })
     );
+  });
+
+  test("returns clear error with sentry-init guidance when org disables member creation", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Failed to create project: 403 Forbidden",
+        403,
+        "Your organization has disabled this feature for members.",
+        undefined,
+        true
+      )
+    );
+
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("disabled for members");
+    expect(result.error).toContain("sentry init acme/");
+    expect(result.error).not.toContain("Re-authenticate");
+  });
+
+  test("tool describe uses payload.detail when provided", () => {
+    const payload = { ...makePayload(), detail: "Setting up my-app..." };
+    expect(createSentryProjectTool.describe(payload)).toBe(
+      "Setting up my-app..."
+    );
+  });
+
+  test("tool describe falls back to project name and platform", () => {
+    expect(createSentryProjectTool.describe(makePayload())).toContain("my-app");
   });
 
   test("uses the final project slug for deferred team resolution in dry-run mode", async () => {

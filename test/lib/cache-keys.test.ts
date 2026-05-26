@@ -2,7 +2,7 @@
  * Unit tests for `computeInvalidationPrefixes`.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { computeInvalidationPrefixes as computeInvalidationPrefixesRaw } from "../../src/lib/cache-keys.js";
 
 const BASE = "https://us.sentry.io/api/0/";

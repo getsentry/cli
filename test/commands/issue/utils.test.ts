@@ -4,7 +4,7 @@
  * Tests for shared utilities in src/commands/issue/utils.ts
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   buildCommandHint,
   ensureRootCauseAnalysis,
@@ -1991,6 +1991,8 @@ describe("resolveOrgAndIssueId: magic @ selectors", () => {
     expect(err).toBeInstanceOf(ResolutionError);
     expect(String(err)).toContain("no unresolved issues found");
     expect(String(err)).toContain("most recent");
+    expect(String(err)).toContain("sentry issue list");
+    expect(String(err)).toContain('-q "is:resolved"');
   });
 
   test("throws ContextError when org cannot be resolved for bare @selector", async () => {

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import createSentrySDK, { SentryError } from "../../src/index.js";
 import { mockFetch } from "../helpers.js";
 
@@ -56,17 +56,27 @@ describe("createSentrySDK() library API", () => {
   });
 
   test("sdk.run throws when auth is required but missing", async () => {
-    // Use cwd:/tmp to prevent DSN scanning of the repo root which finds
-    // real DSNs and triggers async project resolution that can outlive the test.
-    const sdk = createSentrySDK({ cwd: "/tmp" });
+    // Clear the preload's test auth token so the auth guard fires.
+    const savedToken = process.env.SENTRY_AUTH_TOKEN;
+    delete process.env.SENTRY_AUTH_TOKEN;
     try {
-      // issue list requires auth — with no token and isolated config, it should fail
-      await sdk.run("issue", "list");
-      expect.unreachable("Should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(Error);
-      // The error should have an exitCode (either SentryError or CliError subclass)
-      expect((err as { exitCode?: number }).exitCode).toBeGreaterThan(0);
+      // Use cwd:/tmp to prevent DSN scanning of the repo root which finds
+      // real DSNs and triggers async project resolution that can outlive the test.
+      const sdk = createSentrySDK({ cwd: "/tmp" });
+      try {
+        // issue list requires auth — with no token and isolated config, it should fail
+        await sdk.run("issue", "list");
+        expect.unreachable("Should have thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(Error);
+        // The error should have an exitCode (either SentryError or CliError subclass)
+        expect((err as { exitCode?: number }).exitCode).toBeGreaterThan(0);
+      }
+    } finally {
+      // Restore the preload token for other tests
+      if (savedToken !== undefined) {
+        process.env.SENTRY_AUTH_TOKEN = savedToken;
+      }
     }
   });
 
@@ -113,19 +123,15 @@ describe("createSentrySDK() library API", () => {
     expect(typeof sdk.dashboard.widget.add).toBe("function");
   });
 
-  test(
-    "token option is plumbed through",
-    async () => {
-      const sdk = createSentrySDK({ token: "invalid-token" });
-      try {
-        await sdk.org.list();
-        expect.unreachable("Should have thrown");
-      } catch (err) {
-        expect(err).toBeInstanceOf(SentryError);
-      }
-    },
-    { timeout: 15_000 }
-  );
+  test("token option is plumbed through", { timeout: 15_000 }, async () => {
+    const sdk = createSentrySDK({ token: "invalid-token" });
+    try {
+      await sdk.org.list();
+      expect.unreachable("Should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SentryError);
+    }
+  });
 
   test("sdk.run returns AsyncIterable for streaming flag --follow", () => {
     const sdk = createSentrySDK();

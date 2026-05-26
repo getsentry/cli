@@ -256,11 +256,11 @@ async function validateFileMtime(
   cachedMtime: number
 ): Promise<boolean> {
   try {
-    const file = Bun.file(fullPath);
-    if (!(await file.exists())) {
+    const stats = await stat(fullPath);
+    if (!stats.isFile()) {
       return false;
     }
-    return file.lastModified === cachedMtime;
+    return Math.floor(stats.mtimeMs) === cachedMtime;
   } catch {
     return false;
   }

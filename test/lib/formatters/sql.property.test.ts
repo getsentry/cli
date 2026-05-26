@@ -7,7 +7,6 @@
  * - Colorization is deterministic
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import chalk from "chalk";
 import {
   array,
@@ -17,6 +16,7 @@ import {
   property,
   stringMatching,
 } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { stripAnsi } from "../../../src/lib/formatters/plain-detect.js";
 import { colorizeSql, isDbSpanOp } from "../../../src/lib/formatters/sql.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
@@ -126,13 +126,14 @@ describe("property: isDbSpanOp", () => {
 });
 
 describe("property: colorizeSql", () => {
-  test("stripping ANSI preserves original text content", () => {
+  test("stripping ANSI preserves original text content (case-insensitive)", () => {
     process.env.SENTRY_PLAIN_OUTPUT = "0";
     fcAssert(
       property(sqlStringArb, (sql) => {
         const colorized = colorizeSql(sql);
         const stripped = stripAnsi(colorized);
-        expect(stripped).toBe(sql);
+        // Case-insensitive: @sentry/sqlish uppercases SQL keywords (e.g. "by" → "BY")
+        expect(stripped.toLowerCase()).toBe(sql.toLowerCase());
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );

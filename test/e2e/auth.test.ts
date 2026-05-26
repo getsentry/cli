@@ -12,7 +12,8 @@ import {
   describe,
   expect,
   test,
-} from "bun:test";
+} from "vitest";
+import { EXIT } from "../../src/lib/errors.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import { createSentryMockServer, TEST_TOKEN } from "../mocks/routes.js";
@@ -47,7 +48,7 @@ describe("sentry auth status", () => {
     // Error message may be in stdout or stderr depending on CLI framework
     const output = result.stdout + result.stderr;
     expect(output).toMatch(/not authenticated/i);
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
   });
 
   test("shows authenticated with valid token", async () => {
@@ -76,23 +77,26 @@ describe("sentry auth status", () => {
 });
 
 describe("sentry auth login --token", () => {
-  test(
-    "stores valid API token",
-    async () => {
-      const result = await ctx.run(["auth", "login", "--token", TEST_TOKEN]);
+  test("stores valid API token", { timeout: 10_000 }, async () => {
+    const result = await ctx.run([
+      "auth",
+      "login",
+      "--token",
+      TEST_TOKEN,
+      "--url",
+      ctx.serverUrl,
+    ]);
 
-      // Login messages go to stderr via consola
-      const output = result.stdout + result.stderr;
-      expect(output).toContain("Authenticated");
-      expect(result.exitCode).toBe(0);
+    // Login messages go to stderr via consola
+    const output = result.stdout + result.stderr;
+    expect(output).toContain("Authenticated");
+    expect(result.exitCode).toBe(0);
 
-      // Verify token was stored
-      const statusResult = await ctx.run(["auth", "status"]);
-      const statusOutput = statusResult.stdout + statusResult.stderr;
-      expect(statusOutput).toContain("Authenticated");
-    },
-    { timeout: 10_000 }
-  );
+    // Verify token was stored
+    const statusResult = await ctx.run(["auth", "status"]);
+    const statusOutput = statusResult.stdout + statusResult.stderr;
+    expect(statusOutput).toContain("Authenticated");
+  });
 
   test("rejects invalid token", async () => {
     const result = await ctx.run([
@@ -102,7 +106,7 @@ describe("sentry auth login --token", () => {
       "invalid-token-12345",
     ]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_HOST_SCOPE);
     expect(result.stderr + result.stdout).toMatch(
       /invalid|unauthorized|error/i
     );
@@ -115,7 +119,7 @@ describe("sentry auth whoami", () => {
 
     const output = result.stdout + result.stderr;
     expect(output).toMatch(/not authenticated/i);
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
   });
 
   test("shows current user identity", async () => {
@@ -150,33 +154,31 @@ describe("sentry auth whoami", () => {
 });
 
 describe("sentry auth logout", () => {
-  test(
-    "clears stored auth",
-    async () => {
-      // First login
-      const loginResult = await ctx.run([
-        "auth",
-        "login",
-        "--token",
-        TEST_TOKEN,
-      ]);
-      expect(loginResult.exitCode).toBe(0);
+  test("clears stored auth", { timeout: 15_000 }, async () => {
+    // First login (--url required for non-SaaS mock server)
+    const loginResult = await ctx.run([
+      "auth",
+      "login",
+      "--token",
+      TEST_TOKEN,
+      "--url",
+      ctx.serverUrl,
+    ]);
+    expect(loginResult.exitCode).toBe(0);
 
-      // Then logout
-      const result = await ctx.run(["auth", "logout"]);
+    // Then logout
+    const result = await ctx.run(["auth", "logout"]);
 
-      expect(result.exitCode).toBe(0);
-      // Logout messages go to stderr via consola
-      const logoutOutput = result.stdout + result.stderr;
-      expect(logoutOutput).toMatch(/logged out/i);
+    expect(result.exitCode).toBe(0);
+    // Logout messages go to stderr via consola
+    const logoutOutput = result.stdout + result.stderr;
+    expect(logoutOutput).toMatch(/logged out/i);
 
-      // Verify we're logged out
-      const statusResult = await ctx.run(["auth", "status"]);
-      const output = statusResult.stdout + statusResult.stderr;
-      expect(output).toMatch(/not authenticated/i);
-    },
-    { timeout: 15_000 }
-  );
+    // Verify we're logged out
+    const statusResult = await ctx.run(["auth", "status"]);
+    const output = statusResult.stdout + statusResult.stderr;
+    expect(output).toMatch(/not authenticated/i);
+  });
 
   test("succeeds even when not authenticated", async () => {
     const result = await ctx.run(["auth", "logout"]);

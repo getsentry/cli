@@ -8,9 +8,9 @@
  * - End-to-end behavior of reportCliError (metric emission + capture)
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as Sentry from "@sentry/node-core/light";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   classifySilenced,
   enrichEventWithGroupingTags,
@@ -55,6 +55,29 @@ describe("extractResourceKind", () => {
   test("strips long numeric IDs", () => {
     expect(extractResourceKind("Issue 7420431306 not found.")).toBe(
       "Issue not found."
+    );
+  });
+
+  test("strips small numeric IDs", () => {
+    expect(extractResourceKind("Issue 19 not found.")).toBe("Issue not found.");
+    expect(extractResourceKind("Issue 11 not found.")).toBe("Issue not found.");
+  });
+
+  test("strips org/project paths after 'in'", () => {
+    expect(extractResourceKind("not found in neurio/installer-app")).toBe(
+      "not found"
+    );
+    expect(extractResourceKind("not found in olli-inc/olli-app")).toBe(
+      "not found"
+    );
+    expect(extractResourceKind("access denied in sentry-sdks/cli")).toBe(
+      "access denied"
+    );
+  });
+
+  test("does not strip 'in' without org/project path", () => {
+    expect(extractResourceKind("not found in organization")).toBe(
+      "not found in organization"
     );
   });
 
@@ -216,9 +239,9 @@ describe("reportCliError integration", () => {
   let withScopeSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    captureSpy = spyOn(Sentry, "captureException");
-    metricSpy = spyOn(Sentry.metrics, "distribution");
-    withScopeSpy = spyOn(Sentry, "withScope");
+    captureSpy = vi.spyOn(Sentry, "captureException");
+    metricSpy = vi.spyOn(Sentry.metrics, "distribution");
+    withScopeSpy = vi.spyOn(Sentry, "withScope");
   });
 
   afterEach(() => {

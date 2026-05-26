@@ -95,11 +95,14 @@ export const ORG_PROJECT_COMMANDS = new Set([
   "issue plan",
   "issue resolve",
   "issue unresolve",
+  "issue archive",
   "issue merge",
   "project list",
   "project view",
   "project delete",
   "project create",
+  "replay list",
+  "replay view",
   "trace list",
   "trace view",
   "trace logs",
@@ -112,6 +115,8 @@ export const ORG_PROJECT_COMMANDS = new Set([
   "dashboard list",
   "dashboard view",
   "dashboard create",
+  "dashboard revisions",
+  "dashboard restore",
 ]);
 
 /**

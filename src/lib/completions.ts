@@ -13,6 +13,7 @@
  */
 
 import { existsSync, mkdirSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { routes } from "../app.js";
 import { type FlagDef, isCommand, isRouteMap } from "./introspect.js";
@@ -615,10 +616,16 @@ export function getCompletionPath(
 /**
  * Install completion script for a shell type.
  *
+ * Returns `null` when the shell is unsupported or when the target directory
+ * cannot be created due to filesystem permission restrictions (EPERM/EACCES).
+ * This is common on macOS where `~/.local/share/zsh` may be owned by root
+ * or protected by SIP, and during Homebrew post-install when the home
+ * directory has restrictive permissions.
+ *
  * @param shellType - The shell type
  * @param homeDir - User's home directory
  * @param xdgDataHome - XDG_DATA_HOME or undefined for default
- * @returns Location info if installed, null if shell not supported
+ * @returns Location info if installed, null if shell not supported or path not writable
  */
 export async function installCompletions(
   shellType: ShellType,
@@ -635,17 +642,46 @@ export async function installCompletions(
     return null;
   }
 
-  // Create directory if needed
-  const dir = dirname(path);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true, mode: 0o755 });
+  try {
+    // Create directory if needed
+    const dir = dirname(path);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true, mode: 0o755 });
+    }
+
+    const alreadyExists = existsSync(path);
+    await writeFile(path, script, "utf-8");
+
+    return {
+      path,
+      created: !alreadyExists,
+    };
+  } catch (error: unknown) {
+    // Permission errors are expected when the target directory is owned by
+    // root, protected by macOS SIP, or when running in a restricted context
+    // (e.g. Homebrew post-install). Silently skip — the caller (bestEffort
+    // in setup.ts) would catch anyway, but handling here avoids noisy Sentry
+    // reports for a non-critical operation.
+    if (isPermissionError(error)) {
+      return null;
+    }
+    throw error;
   }
+}
 
-  const alreadyExists = existsSync(path);
-  await Bun.write(path, script);
+/** Filesystem error codes that indicate a permission problem */
+const PERMISSION_ERROR_CODES = new Set(["EPERM", "EACCES", "EROFS"]);
 
-  return {
-    path,
-    created: !alreadyExists,
-  };
+/**
+ * Check whether an error is a filesystem permission error.
+ *
+ * Matches EPERM (operation not permitted), EACCES (permission denied),
+ * and EROFS (read-only filesystem).
+ */
+function isPermissionError(error: unknown): boolean {
+  if (!(error instanceof Error && "code" in error)) {
+    return false;
+  }
+  const code = (error as NodeJS.ErrnoException).code;
+  return typeof code === "string" && PERMISSION_ERROR_CODES.has(code);
 }

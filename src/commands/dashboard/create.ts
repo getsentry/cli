@@ -173,7 +173,7 @@ export const createCommand = buildCommand({
       title,
       widgets: [],
       projects: projectIds.length > 0 ? projectIds : undefined,
-    }).catch((error: unknown) =>
+    }).catch(async (error: unknown) =>
       enrichDashboardError(error, { orgSlug, operation: "create" })
     );
     const url = buildDashboardUrl(orgSlug, dashboard.id);

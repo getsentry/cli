@@ -6,23 +6,56 @@
  * branches without real HTTP calls or database access.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { whoamiCommand } from "../../../src/commands/auth/whoami.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/db/auth.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/auth.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbAuth from "../../../src/lib/db/auth.js";
+
+vi.mock("../../../src/lib/db/user.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/user.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbUser from "../../../src/lib/db/user.js";
-import { AuthError } from "../../../src/lib/errors.js";
+import {
+  AuthError,
+  CliError,
+  ResolutionError,
+} from "../../../src/lib/errors.js";
+import { mintSntrysToken } from "../../helpers.js";
 
 type WhoamiFlags = { readonly json: boolean };
 
@@ -45,16 +78,43 @@ const ID_ONLY_USER = {
   id: "7",
 };
 
+/**
+ * OAuth-style token used when the test doesn't care about token type and
+ * just needs `getAuthToken()` to return something non-org/non-user-PAT.
+ */
+const OAUTH_TOKEN = "17faa5dfa5e64d5a9b3e8bf7c4d5e6f7a8b9c0d1e2f3a4b567ee";
+
+/** Well-formed sntrys_ token with parseable claim. */
+const ORG_TOKEN = mintSntrysToken({
+  iat: 1_700_000_000,
+  url: "https://sentry.acme.com",
+  region_url: "https://us.sentry.acme.com",
+  org: "acme",
+});
+
+/** Well-formed sntrys_ token without org field (older tokens). */
+const ORG_TOKEN_NO_ORG = mintSntrysToken({
+  iat: 1_700_000_000,
+  url: "https://sentry.io",
+  region_url: "https://us.sentry.io",
+});
+
+/** sntrys_ token whose claim lacks iat — parseSntrysClaim returns undefined. */
+const MALFORMED_ORG_TOKEN = mintSntrysToken({
+  url: "https://sentry.acme.com",
+  org: "acme",
+});
+
 function createContext() {
   const output: string[] = [];
   const context = {
     stdout: {
-      write: mock((s: string) => {
+      write: vi.fn((s: string) => {
         output.push(s);
       }),
     },
     stderr: {
-      write: mock((_s: string) => {
+      write: vi.fn((_s: string) => {
         /* no-op */
       }),
     },
@@ -66,19 +126,25 @@ function createContext() {
 
 describe("whoamiCommand.func", () => {
   let isAuthenticatedSpy: ReturnType<typeof spyOn>;
+  let getAuthTokenSpy: ReturnType<typeof spyOn>;
   let getCurrentUserSpy: ReturnType<typeof spyOn>;
   let setUserInfoSpy: ReturnType<typeof spyOn>;
   let func: WhoamiFunc;
 
   beforeEach(async () => {
-    isAuthenticatedSpy = spyOn(dbAuth, "isAuthenticated");
-    getCurrentUserSpy = spyOn(apiClient, "getCurrentUser");
-    setUserInfoSpy = spyOn(dbUser, "setUserInfo");
+    isAuthenticatedSpy = vi.spyOn(dbAuth, "isAuthenticated");
+    getAuthTokenSpy = vi.spyOn(dbAuth, "getAuthToken");
+    getCurrentUserSpy = vi.spyOn(apiClient, "getCurrentUser");
+    setUserInfoSpy = vi.spyOn(dbUser, "setUserInfo");
+    // Default token type: OAuth (not org, not PAT). Tests that need a
+    // different type override this mock within their own block.
+    getAuthTokenSpy.mockReturnValue(OAUTH_TOKEN);
     func = (await whoamiCommand.loader()) as unknown as WhoamiFunc;
   });
 
   afterEach(() => {
     isAuthenticatedSpy.mockRestore();
+    getAuthTokenSpy.mockRestore();
     getCurrentUserSpy.mockRestore();
     setUserInfoSpy.mockRestore();
   });
@@ -90,9 +156,13 @@ describe("whoamiCommand.func", () => {
     beforeEach(() => {
       savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
       delete process.env.SENTRY_AUTH_TOKEN;
-      getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig").mockReturnValue(
-        undefined
-      );
+      getAuthConfigSpy = vi
+        .spyOn(dbAuth, "getAuthConfig")
+        .mockReturnValue(undefined);
+      // With no stored auth, getAuthToken returns undefined, and the
+      // natural AuthError bubbles up from getCurrentUser().
+      getAuthTokenSpy.mockReturnValue(undefined);
+      getCurrentUserSpy.mockRejectedValue(new AuthError("not_authenticated"));
     });
 
     afterEach(() => {
@@ -110,8 +180,6 @@ describe("whoamiCommand.func", () => {
       await expect(func.call(context, { json: false })).rejects.toBeInstanceOf(
         AuthError
       );
-
-      expect(getCurrentUserSpy).not.toHaveBeenCalled();
     });
 
     test("does not call setUserInfo when not authenticated", async () => {
@@ -126,6 +194,110 @@ describe("whoamiCommand.func", () => {
       }
 
       expect(setUserInfoSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("org auth token — well-formed claim", () => {
+    beforeEach(() => {
+      getAuthTokenSpy.mockReturnValue(ORG_TOKEN);
+    });
+
+    test("yields org identity instead of calling the API", async () => {
+      const { context, getOutput } = createContext();
+      await func.call(context, { json: false });
+
+      expect(getCurrentUserSpy).not.toHaveBeenCalled();
+      expect(setUserInfoSpy).not.toHaveBeenCalled();
+      const out = getOutput();
+      expect(out).toContain("Organization auth token");
+      expect(out).toContain("acme");
+      expect(out).toContain("https://sentry.acme.com");
+    });
+
+    test("JSON output includes type, organization, url, and regionUrl", async () => {
+      const { context, getOutput } = createContext();
+      await func.call(context, { json: true });
+
+      const parsed = JSON.parse(getOutput());
+      expect(parsed.type).toBe("org-auth-token");
+      expect(parsed.organization).toBe("acme");
+      expect(parsed.url).toBe("https://sentry.acme.com");
+      expect(parsed.regionUrl).toBe("https://us.sentry.acme.com");
+    });
+  });
+
+  describe("org auth token — well-formed claim without org field", () => {
+    beforeEach(() => {
+      getAuthTokenSpy.mockReturnValue(ORG_TOKEN_NO_ORG);
+    });
+
+    test("yields output without organization row", async () => {
+      const { context, getOutput } = createContext();
+      await func.call(context, { json: false });
+
+      expect(getCurrentUserSpy).not.toHaveBeenCalled();
+      const out = getOutput();
+      expect(out).toContain("Organization auth token");
+      expect(out).toContain("https://sentry.io");
+      expect(out).not.toContain("acme");
+    });
+
+    test("JSON output omits organization when claim has no org", async () => {
+      const { context, getOutput } = createContext();
+      await func.call(context, { json: true });
+
+      const parsed = JSON.parse(getOutput());
+      expect(parsed.type).toBe("org-auth-token");
+      expect(parsed).not.toHaveProperty("organization");
+      expect(parsed.url).toBe("https://sentry.io");
+    });
+  });
+
+  describe("org auth token — malformed claim", () => {
+    test("throws ResolutionError when claim parsing fails", async () => {
+      getAuthTokenSpy.mockReturnValue(MALFORMED_ORG_TOKEN);
+
+      const { context } = createContext();
+
+      const promise = func.call(context, { json: false });
+      await expect(promise).rejects.toBeInstanceOf(ResolutionError);
+      await expect(promise).rejects.toBeInstanceOf(CliError);
+      await expect(promise).rejects.not.toBeInstanceOf(AuthError);
+
+      expect(getCurrentUserSpy).not.toHaveBeenCalled();
+      expect(setUserInfoSpy).not.toHaveBeenCalled();
+    });
+
+    test("error message points to auth status and org list", async () => {
+      getAuthTokenSpy.mockReturnValue(MALFORMED_ORG_TOKEN);
+
+      const { context } = createContext();
+
+      try {
+        await func.call(context, { json: false });
+        throw new Error("expected ResolutionError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(ResolutionError);
+        const msg = (err as ResolutionError).message;
+        expect(msg).toContain("Organization auth tokens");
+        expect(msg.toLowerCase()).toContain("user");
+        expect(msg).toContain("sentry auth status");
+        expect(msg).toContain("sentry org list");
+      }
+    });
+  });
+
+  describe("user PAT (sntryu_) passes through", () => {
+    test("sntryu_ token calls getCurrentUser normally", async () => {
+      getAuthTokenSpy.mockReturnValue("sntryu_personaltoken");
+      getCurrentUserSpy.mockResolvedValue(FULL_USER);
+      setUserInfoSpy.mockReturnValue(undefined);
+
+      const { context, getOutput } = createContext();
+      await func.call(context, { json: false });
+
+      expect(getCurrentUserSpy).toHaveBeenCalled();
+      expect(getOutput()).toContain("Jane Doe");
     });
   });
 

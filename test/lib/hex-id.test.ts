@@ -10,8 +10,8 @@
  * whitespace handling, UUID normalization, and edge cases.
  */
 
-import { describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { ValidationError } from "../../src/lib/errors.js";
 import {
   ageInDaysFromUuidV7,

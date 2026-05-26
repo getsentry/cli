@@ -5,7 +5,7 @@
  * including nullable fields that the Sentry API may return.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { TokenResponseSchema } from "../../src/types/oauth.js";
 
 describe("TokenResponseSchema", () => {

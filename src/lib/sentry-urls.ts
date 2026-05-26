@@ -9,6 +9,7 @@ import {
   DEFAULT_SENTRY_HOST,
   DEFAULT_SENTRY_URL,
   getConfiguredSentryUrl,
+  normalizeUrl,
 } from "./constants.js";
 
 /**
@@ -41,10 +42,18 @@ function isSaaS(): boolean {
 }
 
 /**
- * Check if a URL is a Sentry SaaS domain.
+ * Check if a URL is a Sentry SaaS domain (hostname check only).
  *
- * Used to determine if multi-region support should be enabled and to
- * validate region URLs before sending authenticated requests.
+ * Used for routing decisions: which URLs are multi-region-eligible, which
+ * are self-hosted, whether telemetry should route to SaaS, etc. Matches
+ * on hostname alone — scheme and port are NOT checked, so this accepts
+ * e.g. `http://sentry.io` and `https://sentry.io:8443` even though those
+ * aren't legitimate production SaaS addresses. That's intentional for
+ * routing (test harnesses occasionally use these).
+ *
+ * For TRUST decisions (deciding whether a SaaS-scoped token is valid for
+ * a given origin), use {@link isSaaSTrustOrigin} which additionally
+ * requires https scheme and default port.
  *
  * @param url - URL string to validate
  * @returns true if the hostname is sentry.io or a subdomain of sentry.io
@@ -59,6 +68,77 @@ export function isSentrySaasUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Check if a URL is a Sentry SaaS origin for TRUST purposes.
+ *
+ * Stricter than {@link isSentrySaasUrl}: additionally requires
+ * - scheme = `https:` (production SaaS is HTTPS-only; `http://sentry.io`
+ *   is never legitimate and a crafted plaintext URL must NOT inherit
+ *   SaaS trust)
+ * - port = default (empty `port` in WHATWG URL means the scheme's
+ *   default port; any explicit non-default port indicates either a
+ *   crafted URL or DNS redirect we don't trust)
+ *
+ * Used by the host-scoping trust check (`token-host.ts::isHostTrusted`)
+ * to decide SaaS equivalence. Keep in sync with {@link isSentrySaasUrl}
+ * when adding new trust classes.
+ *
+ * @param url - URL string to validate
+ * @returns true only if the URL is a strictly-SaaS origin
+ */
+export function isSaaSTrustOrigin(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "https:" && parsed.port === "" && isSentrySaasUrl(url)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Normalize a URL (or fetch input) to its canonical origin
+ * (`scheme://host[:port]`). Returns `undefined` for inputs that don't parse
+ * as URLs. Bare hostnames are NOT accepted — use {@link normalizeUserInputToOrigin}
+ * for user-supplied strings that may be bare hostnames.
+ */
+export function normalizeOrigin(
+  input: string | URL | Request | undefined | null
+): string | undefined {
+  if (input === null || input === undefined) {
+    return;
+  }
+  let raw: string;
+  if (typeof input === "string") {
+    raw = input;
+  } else if (input instanceof URL) {
+    raw = input.href;
+  } else {
+    raw = input.url;
+  }
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Normalize a user-supplied string (env var, CLI flag, rc file value) to a
+ * canonical origin. Accepts bare hostnames (`sentry.acme.com`) by prefixing
+ * with `https://` via {@link normalizeUrl} before parsing.
+ *
+ * Returns `undefined` for empty/whitespace input or strings that still fail
+ * to parse after the prefix.
+ */
+export function normalizeUserInputToOrigin(
+  input: string | undefined
+): string | undefined {
+  const prefixed = normalizeUrl(input);
+  return prefixed ? normalizeOrigin(prefixed) : undefined;
 }
 
 /**
@@ -174,6 +254,20 @@ export function buildLogsUrl(orgSlug: string, logId?: string): string {
     ? `${getOrgBaseUrl(orgSlug)}/explore/logs/`
     : `${getSentryBaseUrl()}/organizations/${orgSlug}/explore/logs/`;
   return logId ? `${base}?query=sentry.item_id:${logId}` : base;
+}
+
+/**
+ * Build URL to view a replay in the Replay explorer.
+ *
+ * @param orgSlug - Organization slug
+ * @param replayId - Replay ID (32-character hex string)
+ * @returns Full URL to the replay detail view
+ */
+export function buildReplayUrl(orgSlug: string, replayId: string): string {
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/explore/replays/${replayId}/`;
+  }
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/explore/replays/${replayId}/`;
 }
 
 // Dashboard URLs

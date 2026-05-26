@@ -5,6 +5,7 @@
  * Uses UUIDv7 for time-sortable, unique identifiers.
  */
 
+import { uuidv7 } from "uuidv7";
 import { getDatabase } from "./index.js";
 
 /**
@@ -28,8 +29,7 @@ export function getInstanceId(): string {
   // Generate and store new instance ID
   // Use INSERT OR IGNORE to handle race condition when multiple CLI processes
   // start simultaneously - only the first insert succeeds
-  // Bun.randomUUIDv7() is native in Bun, polyfilled via uuidv7 package for Node.js
-  const instanceId = Bun.randomUUIDv7();
+  const instanceId = uuidv7();
   const now = Date.now();
 
   db.query(`
@@ -40,7 +40,10 @@ export function getInstanceId(): string {
   // Re-fetch to get the actual stored value (may differ if another process won the race)
   const row = db
     .query("SELECT instance_id FROM instance_info WHERE id = 1")
-    .get() as { instance_id: string };
+    .get() as { instance_id: string } | undefined;
 
-  return row.instance_id;
+  // If re-fetch fails (readonly DB, concurrent corruption), fall back to
+  // the generated ID. It won't be persisted, but the CLI can still
+  // function for this invocation — instance ID is only used for telemetry.
+  return row?.instance_id ?? instanceId;
 }

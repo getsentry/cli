@@ -2,6 +2,34 @@
 
 ## Examples
 
+### Listing Events
+
+```bash
+# List events for an issue (using short ID)
+sentry event list PROJ-ABC
+
+# List events for an issue (using numeric ID)
+sentry event list 123456789
+
+# Filter by search query
+sentry event list PROJ-ABC --query "browser:Chrome"
+
+# Include full event bodies (stacktraces)
+sentry event list PROJ-ABC --full
+
+# Limit results and time range
+sentry event list PROJ-ABC --limit 50 --period 24h
+
+# Paginate through results
+sentry event list PROJ-ABC -c next
+sentry event list PROJ-ABC -c prev
+
+# Output as JSON
+sentry event list PROJ-ABC --json
+```
+
+### Viewing Events
+
 ```bash
 sentry event view abc123def456abc123def456abc12345
 ```

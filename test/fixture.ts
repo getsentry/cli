@@ -4,8 +4,15 @@
  * Shared utilities for creating isolated test environments.
  */
 
+import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { setAuthToken as dbSetAuthToken } from "../src/lib/db/auth.js";
+import { closeDatabase } from "../src/lib/db/index.js";
+
+function noop(): void {
+  // Intentionally empty — absorbs async spawn errors
+}
 
 /**
  * Mock process for capturing CLI output
@@ -52,7 +59,7 @@ export function getCliCommand(): string[] {
   if (binaryPath) {
     return [binaryPath];
   }
-  return [process.execPath, "run", "src/bin.ts"];
+  return ["bun", "run", "src/bin.ts"];
 }
 
 /**
@@ -65,25 +72,33 @@ export async function runCli(
     env?: Record<string, string>;
   }
 ): Promise<CliResult> {
-  const cliDir = join(import.meta.dir, "..");
-  const cmd = getCliCommand();
+  const cliDir = join(import.meta.dirname, "..");
+  const [cmdBin, ...cmdArgs] = getCliCommand();
 
-  const proc = Bun.spawn([...cmd, ...args], {
+  const proc = spawn(cmdBin, [...cmdArgs, ...args], {
     cwd: options?.cwd ?? cliDir,
     env: { ...process.env, ...options?.env },
-    stdout: "pipe",
-    stderr: "pipe",
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  proc.on("error", noop);
+
+  let stdout = "";
+  let stderr = "";
+  proc.stdout.on("data", (d: Buffer) => {
+    stdout += d;
+  });
+  proc.stderr.on("data", (d: Buffer) => {
+    stderr += d;
   });
 
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
+  const exitCode = await new Promise<number>((resolve) =>
+    proc.on("close", (code) => resolve(code ?? 1))
+  );
 
   return {
     stdout,
     stderr,
-    exitCode: await proc.exited,
+    exitCode,
   };
 }
 
@@ -107,7 +122,9 @@ export function createE2EContext(
   configDir: string,
   serverUrl: string
 ): E2EContext {
-  const { CONFIG_DIR_ENV_VAR } = require("../src/lib/db/index.js");
+  // Use the constant directly instead of require() to avoid .js→.ts
+  // resolution issues in vitest Node workers.
+  const CONFIG_DIR_ENV_VAR = "SENTRY_CONFIG_DIR";
   return {
     configDir,
     serverUrl,
@@ -125,16 +142,19 @@ export function createE2EContext(
      * Write auth token directly to this context's database.
      * This bypasses the global process.env to avoid race conditions
      * when multiple test files run in parallel.
+     *
+     * Scopes the token to this context's `serverUrl` (the mock server) so
+     * the host-scoping fetch-layer guard admits the request — without this,
+     * the stored token would default to SaaS (DEFAULT_SENTRY_URL) while
+     * `ctx.run` points `SENTRY_URL` at the mock server, causing the guard
+     * to refuse to attach credentials.
      */
     async setAuthToken(token: string): Promise<void> {
       mkdirSync(configDir, { recursive: true, mode: 0o700 });
       const prevDir = process.env[CONFIG_DIR_ENV_VAR];
       process.env[CONFIG_DIR_ENV_VAR] = configDir;
       try {
-        const { setAuthToken: dbSetAuthToken } =
-          require("../src/lib/db/auth.js");
-        const { closeDatabase } = require("../src/lib/db/index.js");
-        await dbSetAuthToken(token);
+        await dbSetAuthToken(token, undefined, undefined, { host: serverUrl });
         closeDatabase();
       } finally {
         if (prevDir !== undefined) {

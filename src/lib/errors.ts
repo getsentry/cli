@@ -2,6 +2,25 @@
  * CLI Error Hierarchy
  *
  * Unified error classes for consistent error handling across the CLI.
+ *
+ * ## Exit Code Ranges
+ *
+ * Each error class maps to a semantic exit code so scripts and agents can
+ * react to failure categories without parsing stderr. Codes are grouped
+ * into decades inspired by HTTP status semantics:
+ *
+ * | Range | Category          | HTTP Analogy         |
+ * |-------|-------------------|----------------------|
+ * | 0     | Success           | 200 OK               |
+ * | 1     | General error     | 500 Internal         |
+ * | 10–19 | Auth & identity   | 401/403              |
+ * | 20–29 | Input & config    | 400/404/422          |
+ * | 30–39 | API & network     | 502/503/504          |
+ * | 40–49 | Feature/billing   | 402/451              |
+ * | 50–59 | Operations        | —                    |
+ * | 60–69 | Command-specific  | —                    |
+ *
+ * @see https://cli.sentry.dev/exit-codes/ for full reference
  */
 
 import {
@@ -9,6 +28,75 @@ import {
   buildOrgSettingsUrl,
   buildSeerSettingsUrl,
 } from "./sentry-urls.js";
+
+// ---------------------------------------------------------------------------
+// Exit code constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Semantic exit codes for all CLI error classes.
+ *
+ * Grouped into decades so scripts can match on ranges:
+ * `if code >= 10 && code < 20 → auth problem`.
+ *
+ * All codes stay below 128 to avoid collision with Unix signal exits (128+N).
+ */
+export const EXIT = {
+  /** Catch-all for unexpected errors */
+  GENERAL: 1,
+
+  // 10–19: Auth & identity (HTTP 401/403 family)
+  /** Not authenticated — run `sentry auth login` */
+  AUTH_NOT_AUTHENTICATED: 10,
+  /** Token expired — re-authenticate */
+  AUTH_EXPIRED: 11,
+  /** Token invalid / rejected */
+  AUTH_INVALID: 12,
+  /** Request blocked by host-scope trust check */
+  AUTH_HOST_SCOPE: 13,
+
+  // 20–29: Input & config (HTTP 400/404/422 family)
+  /** Configuration or DSN error */
+  CONFIG: 20,
+  /** Input validation failed */
+  VALIDATION: 21,
+  /** Required context (org, project, etc.) missing */
+  CONTEXT_MISSING: 22,
+  /** User-provided value could not be resolved */
+  RESOLUTION: 23,
+
+  // 30–39: API & network (HTTP 502/503/504 family)
+  /** Sentry API returned an error */
+  API: 30,
+  /** Operation timed out */
+  TIMEOUT: 31,
+
+  // 40–49: Feature / billing (HTTP 402/451 family)
+  /** Seer not enabled for the organization */
+  SEER_NOT_ENABLED: 40,
+  /** Seer requires a paid plan */
+  SEER_NO_BUDGET: 41,
+  /** AI features disabled by org admin */
+  SEER_AI_DISABLED: 42,
+
+  // 50–59: Operations
+  /** CLI upgrade failed */
+  UPGRADE: 50,
+  /** OAuth device flow error */
+  DEVICE_FLOW: 51,
+
+  // 60–69: Command-specific
+  /** Command produced output but should exit non-zero */
+  OUTPUT_ERROR: 60,
+  /** Init wizard error (generic) */
+  WIZARD: 61,
+  /** Init wizard: dependency installation failed */
+  WIZARD_DEPS: 62,
+  /** Init wizard: codemod plan or apply failed */
+  WIZARD_CODEMOD: 63,
+  /** Init wizard: user stopped after verification */
+  WIZARD_VERIFY: 64,
+} as const;
 
 /**
  * Base class for all CLI errors.
@@ -19,7 +107,7 @@ import {
 export class CliError extends Error {
   readonly exitCode: number;
 
-  constructor(message: string, exitCode = 1) {
+  constructor(message: string, exitCode: number = EXIT.GENERAL) {
     super(message);
     this.name = "CliError";
     this.exitCode = exitCode;
@@ -30,6 +118,49 @@ export class CliError extends Error {
    */
   format(): string {
     return this.message;
+  }
+}
+
+/**
+ * Host-scoping trust violation — thrown by the fetch-layer and entry-point
+ * guards when a request's destination doesn't match the active token's
+ * scoped host.
+ *
+ * Distinct from plain `CliError` so that `withAuthGuard` can re-throw these
+ * (like `AuthError`) while still swallowing `ApiError` and other transient
+ * failures.
+ *
+ * Two construction forms:
+ * - `new HostScopeError(source, destinationUrl, tokenHost)` — standard
+ *   mismatch message used by most guard sites.
+ * - `new HostScopeError(message)` — freeform message for the login-command
+ *   refusal (different shape: "confirm with --url", not a mismatch).
+ */
+export class HostScopeError extends CliError {
+  constructor(
+    sourceOrMessage: string,
+    destinationUrl?: string,
+    tokenHost?: string | undefined
+  ) {
+    if (destinationUrl === undefined) {
+      super(sourceOrMessage, EXIT.AUTH_HOST_SCOPE);
+    } else if (tokenHost === undefined) {
+      super(
+        `${sourceOrMessage}: ${destinationUrl}\n` +
+          "Refusing to route requests to this host because no Sentry credentials are configured for it.\n" +
+          `To use this host, run: sentry auth login --url ${destinationUrl}`,
+        EXIT.AUTH_HOST_SCOPE
+      );
+    } else {
+      super(
+        `${sourceOrMessage}: ${destinationUrl}\n` +
+          `Refusing to route requests here because it doesn't match the host your Sentry credentials are for (${tokenHost}).\n` +
+          `To use this host, run: sentry auth login --url ${destinationUrl}\n` +
+          "To keep using your current credentials, remove this URL override.",
+        EXIT.AUTH_HOST_SCOPE
+      );
+    }
+    this.name = "HostScopeError";
   }
 }
 
@@ -46,17 +177,27 @@ export class ApiError extends CliError {
   readonly detail?: string;
   readonly endpoint?: string;
 
+  /**
+   * Set by centralized 403 enrichment in `infrastructure.ts`.
+   * Command-layer code can check this to avoid double-enriching
+   * the error detail with scope/token hints.
+   */
+  readonly enriched403: boolean;
+
+  // biome-ignore lint/nursery/useMaxParams: established 4-param shape; enriched403 is a defaulted extension
   constructor(
     message: string,
     status: number,
     detail?: string,
-    endpoint?: string
+    endpoint?: string,
+    enriched403 = false
   ) {
-    super(message);
+    super(message, EXIT.API);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
     this.endpoint = endpoint;
+    this.enriched403 = enriched403;
   }
 
   override format(): string {
@@ -102,7 +243,12 @@ export class AuthError extends CliError {
         "Authentication expired. Run 'sentry auth login' to re-authenticate.",
       invalid: "Invalid authentication token.",
     };
-    super(message ?? defaultMessages[reason]);
+    const exitCodes: Record<AuthErrorReason, number> = {
+      not_authenticated: EXIT.AUTH_NOT_AUTHENTICATED,
+      expired: EXIT.AUTH_EXPIRED,
+      invalid: EXIT.AUTH_INVALID,
+    };
+    super(message ?? defaultMessages[reason], exitCodes[reason]);
     this.name = "AuthError";
     this.reason = reason;
     this.skipAutoAuth = options?.skipAutoAuth ?? false;
@@ -119,7 +265,7 @@ export class ConfigError extends CliError {
   readonly suggestion?: string;
 
   constructor(message: string, suggestion?: string) {
-    super(message);
+    super(message, EXIT.CONFIG);
     this.name = "ConfigError";
     this.suggestion = suggestion;
   }
@@ -147,7 +293,7 @@ export class OutputError extends CliError {
   readonly data: unknown;
 
   constructor(data: unknown) {
-    super("", 1);
+    super("", EXIT.OUTPUT_ERROR);
     this.name = "OutputError";
     this.data = data;
   }
@@ -281,7 +427,8 @@ export class ContextError extends CliError {
       buildContextMessage(resource, command, resolvedAlternatives, {
         note,
         isAutoDetect,
-      })
+      }),
+      EXIT.CONTEXT_MISSING
     );
     this.name = "ContextError";
     this.resource = resource;
@@ -340,7 +487,10 @@ export class ResolutionError extends CliError {
     hint: string,
     suggestions: string[] = []
   ) {
-    super(buildResolutionMessage(resource, headline, hint, suggestions));
+    super(
+      buildResolutionMessage(resource, headline, hint, suggestions),
+      EXIT.RESOLUTION
+    );
     this.name = "ResolutionError";
     this.resource = resource;
     this.headline = headline;
@@ -363,7 +513,7 @@ export class ValidationError extends CliError {
   readonly field?: string;
 
   constructor(message: string, field?: string) {
-    super(message);
+    super(message, EXIT.VALIDATION);
     this.name = "ValidationError";
     this.field = field;
   }
@@ -379,7 +529,7 @@ export class DeviceFlowError extends CliError {
   readonly code: string;
 
   constructor(code: string, description?: string) {
-    super(description ?? code);
+    super(description ?? code, EXIT.DEVICE_FLOW);
     this.name = "DeviceFlowError";
     this.code = code;
   }
@@ -416,7 +566,7 @@ export class UpgradeError extends CliError {
       offline_cache_miss:
         "Cannot upgrade offline — no pre-downloaded update is available.",
     };
-    super(message ?? defaultMessages[reason]);
+    super(message ?? defaultMessages[reason], EXIT.UPGRADE);
     this.name = "UpgradeError";
     this.reason = reason;
   }
@@ -442,7 +592,12 @@ export class SeerError extends CliError {
       no_budget: "Seer requires a paid plan.",
       ai_disabled: "AI features are disabled for this organization.",
     };
-    super(messages[reason]);
+    const exitCodes: Record<SeerErrorReason, number> = {
+      not_enabled: EXIT.SEER_NOT_ENABLED,
+      no_budget: EXIT.SEER_NO_BUDGET,
+      ai_disabled: EXIT.SEER_AI_DISABLED,
+    };
+    super(messages[reason], exitCodes[reason]);
     this.name = "SeerError";
     this.reason = reason;
     this.orgSlug = orgSlug;
@@ -494,7 +649,7 @@ export class TimeoutError extends CliError {
   readonly hint?: string;
 
   constructor(message: string, hint?: string) {
-    super(message);
+    super(message, EXIT.TIMEOUT);
     this.name = "TimeoutError";
     this.hint = hint;
   }
@@ -516,8 +671,11 @@ export class TimeoutError extends CliError {
 export class WizardError extends CliError {
   readonly rendered: boolean;
 
-  constructor(message: string, options?: { rendered?: boolean }) {
-    super(message);
+  constructor(
+    message: string,
+    options?: { rendered?: boolean; exitCode?: number }
+  ) {
+    super(message, options?.exitCode ?? EXIT.WIZARD);
     this.name = "WizardError";
     this.rendered = options?.rendered ?? true;
   }
@@ -596,6 +754,51 @@ export function getExitCode(error: unknown): number {
   return 1;
 }
 
+/**
+ * Classify errors caused by user input, configuration, auth state, or account
+ * settings. These errors already tell the user what to fix, so upgrade nudges
+ * should use the neutral update banner instead of implying a CLI bug fix.
+ *
+ * Generic {@link CliError} instances are treated as user-facing by default.
+ * Explicit non-user subclasses must be checked before that fallback.
+ */
+export function isUserError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    // Status 0 = network-level failure (DNS, ECONNREFUSED) — user environment,
+    // not a CLI bug. 400 usually means the CLI constructed a bad request.
+    // Other 4xx statuses are user/account/API-state problems.
+    if (error.status === 0) {
+      return true;
+    }
+    return error.status > 400 && error.status < 500;
+  }
+
+  if (
+    error instanceof AbortError ||
+    error instanceof TimeoutError ||
+    error instanceof UpgradeError
+  ) {
+    return false;
+  }
+
+  if (
+    error instanceof AuthError ||
+    error instanceof HostScopeError ||
+    error instanceof ConfigError ||
+    error instanceof ContextError ||
+    error instanceof ResolutionError ||
+    error instanceof ValidationError ||
+    error instanceof DeviceFlowError ||
+    error instanceof SeerError ||
+    error instanceof OutputError ||
+    error instanceof WizardError
+  ) {
+    return true;
+  }
+
+  return error instanceof CliError;
+}
+
 /** Result when the guarded operation succeeded */
 export type AuthGuardSuccess<T> = { ok: true; value: T };
 
@@ -606,18 +809,26 @@ export type AuthGuardFailure = { ok: false; error: unknown };
 export type AuthGuardResult<T> = AuthGuardSuccess<T> | AuthGuardFailure;
 
 /**
- * Execute an async operation, rethrowing {@link AuthError} while capturing
- * all other failures in a discriminated result.
+ * Execute an async operation, rethrowing {@link AuthError} and
+ * {@link HostScopeError} while capturing all other failures in a
+ * discriminated result.
  *
  * This is the standard "safe fetch" pattern used throughout the CLI:
- * auth errors must propagate so the auto-login flow in bin.ts can
- * trigger, but transient failures (network, 404, permissions) should
- * degrade gracefully. Callers inspect `result.ok` to decide what to do
- * and have access to the caught error via `result.error` when needed.
+ *
+ * - `AuthError` propagates so the auto-login flow in bin.ts can trigger.
+ * - `HostScopeError` propagates so the user sees the security-fix
+ *   rejection with its actionable message. Without this, host-scoping
+ *   violations would be silently swallowed into "no results" and the
+ *   caller might fall back to a second authenticated request that ALSO
+ *   trips the guard (doubling the log noise and masking the root cause).
+ *
+ * Transient failures (network, `ApiError` for 4xx/5xx, permissions) are
+ * captured in `{ ok: false, error }` so callers can degrade gracefully.
  *
  * @param fn - Async operation that may throw
- * @returns `{ ok: true, value }` on success, `{ ok: false, error }` on non-auth failure
+ * @returns `{ ok: true, value }` on success, `{ ok: false, error }` on transient failure
  * @throws {AuthError} Always re-thrown so the auto-login flow can trigger
+ * @throws {HostScopeError} Always re-thrown so host-scoping rejections surface to the user
  */
 export async function withAuthGuard<T>(
   fn: () => Promise<T>
@@ -625,7 +836,7 @@ export async function withAuthGuard<T>(
   try {
     return { ok: true, value: await fn() };
   } catch (error) {
-    if (error instanceof AuthError) {
+    if (error instanceof AuthError || error instanceof HostScopeError) {
       throw error;
     }
     return { ok: false, error };

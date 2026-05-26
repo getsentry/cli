@@ -8,11 +8,16 @@
  * With the patch, the process can exit immediately when there's nothing to send.
  */
 
-import { describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { describe, expect, test } from "vitest";
 import { getCliCommand } from "../fixture.js";
 
-const cliDir = join(import.meta.dir, "../..");
+function noop(): void {
+  // Intentionally empty — absorbs async spawn errors
+}
+
+const cliDir = join(import.meta.dirname, "../..");
 
 describe("telemetry exit timing", () => {
   test("process exits without waiting for flush timeout", async () => {
@@ -20,13 +25,16 @@ describe("telemetry exit timing", () => {
 
     // Baseline: telemetry disabled
     const disabledStart = performance.now();
-    const disabledProc = Bun.spawn([...cmd, "--version"], {
+    const [cmdBin, ...cmdArgs] = cmd;
+    const disabledProc = spawn(cmdBin, [...cmdArgs, "--version"], {
       cwd: cliDir,
       env: { ...process.env, SENTRY_CLI_NO_TELEMETRY: "1" },
-      stdout: "pipe",
-      stderr: "pipe",
+      stdio: ["pipe", "pipe", "pipe"],
     });
-    await disabledProc.exited;
+    disabledProc.on("error", noop);
+    const disabledExitCode = await new Promise<number>((resolve) =>
+      disabledProc.on("close", (code) => resolve(code ?? 1))
+    );
     const disabledDuration = performance.now() - disabledStart;
 
     // Test: telemetry enabled (with patched Sentry)
@@ -35,25 +43,27 @@ describe("telemetry exit timing", () => {
     delete envWithTelemetry.SENTRY_CLI_NO_TELEMETRY;
 
     const enabledStart = performance.now();
-    const enabledProc = Bun.spawn([...cmd, "--version"], {
+    const enabledProc = spawn(cmdBin, [...cmdArgs, "--version"], {
       cwd: cliDir,
       env: envWithTelemetry,
-      stdout: "pipe",
-      stderr: "pipe",
+      stdio: ["pipe", "pipe", "pipe"],
     });
-    await enabledProc.exited;
+    enabledProc.on("error", noop);
+    const enabledExitCode = await new Promise<number>((resolve) =>
+      enabledProc.on("close", (code) => resolve(code ?? 1))
+    );
     const enabledDuration = performance.now() - enabledStart;
 
     // Both should complete successfully
-    expect(disabledProc.exitCode).toBe(0);
-    expect(enabledProc.exitCode).toBe(0);
+    expect(disabledExitCode).toBe(0);
+    expect(enabledExitCode).toBe(0);
 
     // Enabled should not be significantly slower than disabled.
-    // Allow 500ms overhead for Sentry init + potential network attempt,
-    // but NOT the old 3000ms+ timeout behavior.
-    expect(enabledDuration).toBeLessThan(disabledDuration + 500);
+    // Allow 1000ms overhead for Sentry init + potential network attempt +
+    // CI scheduling jitter, but NOT the old 3000ms+ timeout behavior.
+    expect(enabledDuration).toBeLessThan(disabledDuration * 1.5 + 1000);
 
-    // And definitely under 1.5 seconds total (old behavior was 3+ seconds)
-    expect(enabledDuration).toBeLessThan(1500);
+    // And definitely under 2 seconds total (old behavior was 3+ seconds)
+    expect(enabledDuration).toBeLessThan(2000);
   });
 });

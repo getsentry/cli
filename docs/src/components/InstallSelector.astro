@@ -142,7 +142,7 @@ const defaultOption = highlightedOptions[defaultIndex];
     background: transparent;
     border: none;
     padding: 0.6rem 1rem;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--sl-font-mono, 'JetBrains Mono', monospace);
     font-size: 0.875rem;
     line-height: 1;
   }
@@ -150,6 +150,10 @@ const defaultOption = highlightedOptions[defaultIndex];
   .command-text {
     white-space: nowrap;
     background: transparent;
+    font-size: 0.875em;
+    font-weight: 500;
+    line-height: 1;
+    padding: 0.2em 0.5em;
     min-width: 47ch; /* Fixed width for longest command (curl) */
   }
 

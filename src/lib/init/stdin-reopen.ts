@@ -13,6 +13,17 @@
  * original object). But the original `process.stdin` object IS the same
  * reference clack holds, so patching listeners + setRawMode on it reaches
  * clack transparently.
+ *
+ * Platform scope: **macOS only (Bun 1.3.11).** PRs #824/#831/#833/#835
+ * tracked this down: the original keystroke-delivery bug is FIXED on Linux
+ * (verified via PTY harness mimicking install.sh's `exec bin </dev/tty`
+ * flow), so `wizard-runner.ts` only installs this workaround when
+ * `process.platform === "darwin"`. It comes with a side cost — opening a
+ * second `tty.ReadStream` leaks a libuv handle that keeps the event loop
+ * alive after the wizard completes (upstream oven-sh/bun#29126), so the
+ * `initCommand.func` caller pairs this install with a
+ * `setTimeout(process.exit, 100).unref()` safety net to force-exit on
+ * macOS once the wizard returns.
  */
 
 import { openSync } from "node:fs";

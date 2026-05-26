@@ -10,8 +10,12 @@
  */
 
 import { chmodSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
+
+const _require = createRequire(import.meta.url);
+
 import { isMusl } from "./binary.js";
 import {
   CLI_VERSION,
@@ -19,8 +23,14 @@ import {
   getConfiguredSentryUrl,
   SENTRY_CLI_DSN,
 } from "./constants.js";
+import { getCustomCaCerts } from "./custom-ca.js";
+import { getTelemetryPreference } from "./db/defaults.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
-import { detectAgent, detectAgentFromProcessTree } from "./detect-agent.js";
+import {
+  type AgentInfo,
+  detectAgent,
+  detectAgentFromProcessTree,
+} from "./detect-agent.js";
 import { getEnv } from "./env.js";
 import {
   classifySilenced,
@@ -30,6 +40,7 @@ import {
 import { ApiError } from "./errors.js";
 import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
+import { makeCompressedTransport } from "./telemetry/zstd-transport.js";
 import { getRealUsername } from "./utils.js";
 
 export type { Span } from "@sentry/core";
@@ -126,9 +137,6 @@ export function computeTelemetryEffective(): TelemetryEffective {
   }
 
   try {
-    const { getTelemetryPreference } = require("./db/defaults.js") as {
-      getTelemetryPreference: () => boolean | undefined;
-    };
     const pref = getTelemetryPreference();
     if (pref !== undefined) {
       return { enabled: pref, source: "preference" };
@@ -200,7 +208,7 @@ export async function withTelemetry<T>(
   }
 
   try {
-    return await Sentry.startSpanManual(
+    return await Sentry.startSpan(
       { name: "cli.command", op: "cli.command", forceTransaction: true },
       async (span) => {
         try {
@@ -214,8 +222,6 @@ export async function withTelemetry<T>(
             recordApiErrorOnSpan(span, e as ApiError);
           }
           throw e;
-        } finally {
-          span.end();
         }
       }
     );
@@ -345,6 +351,7 @@ export function recordApiErrorOnSpan(span: Span, error: ApiError): void {
  */
 const EXCLUDED_INTEGRATIONS = new Set([
   "Console", // Captures console output - too noisy for CLI
+  "Context", // Replaced below with cpu: false to avoid os.cpus() crash (CLI-1ED)
   "ContextLines", // Reads source files - we rely on uploaded sourcemaps instead
   "LocalVariables", // Captures local variables - adds significant overhead
   "Modules", // Lists all loaded modules - unnecessary for CLI telemetry
@@ -366,7 +373,6 @@ const LIBRARY_EXCLUDED_INTEGRATIONS = new Set([
   "NodeFetch", // diagnostics_channel + trace headers
   "FunctionToString", // wraps Function.prototype.toString
   "ChildProcess", // monitors child processes
-  "NodeContext", // reads OS info
   "NodeRuntimeMetrics", // runtime metrics timer would keep host event loop alive
 ]);
 
@@ -381,7 +387,7 @@ const LIBRARY_EXCLUDED_INTEGRATIONS = new Set([
 const hasGetSystemErrorMap = (() => {
   try {
     // Dynamic require to avoid bundler issues — the check only matters at runtime
-    const util = require("node:util") as Record<string, unknown>;
+    const util = _require("node:util") as Record<string, unknown>;
     return typeof util.getSystemErrorMap === "function";
   } catch {
     return false;
@@ -446,6 +452,20 @@ function setLibcTag(): void {
     return;
   }
   Sentry.setTag("cli.libc", isMusl() ? "musl" : "glibc");
+}
+
+/**
+ * Set Sentry tags for a detected AI agent.
+ * Splits structured {@link AgentInfo} into `agent`, `agent.version`, and `agent.role` tags.
+ */
+function setAgentTags(info: AgentInfo): void {
+  Sentry.setTag("agent", info.name);
+  if (info.version) {
+    Sentry.setTag("agent.version", info.version);
+  }
+  if (info.role) {
+    Sentry.setTag("agent.role", info.role);
+  }
 }
 
 export function initSentry(
@@ -518,6 +538,15 @@ export function initSentry(
   const client = Sentry.init({
     dsn: SENTRY_CLI_DSN,
     enabled,
+    // Compress outgoing envelopes with zstd (level 3) instead of gzip —
+    // smaller payloads, faster compress/decompress on both sides.
+    // Automatic gzip fallback when running on Node < 22.15 without the
+    // `Bun.zstdCompress` polyfill (see script/node-polyfills.ts).
+    transport: makeCompressedTransport,
+    // Pass custom CA certificates to the transport for corporate TLS proxies.
+    // The zstd-transport reads `caCerts` and passes it as `ca:` to
+    // `http.request()`, and the SDK's fallback `makeNodeTransport` does the same.
+    transportOptions: { caCerts: getCustomCaCerts() },
     // Keep default integrations but filter out ones that add overhead without benefit.
     // Important: Don't use defaultIntegrations: false as it may break debug ID support.
     // NodeSystemError is excluded on runtimes missing util.getSystemErrorMap (Bun) — CLI-K1.
@@ -531,6 +560,14 @@ export function initSentry(
           !excluded.has(integration.name) &&
           (integration.name !== "NodeSystemError" || hasGetSystemErrorMap)
       );
+
+      // Re-add Context integration with cpu: false to avoid os.cpus() crash
+      // on systems where /proc/cpuinfo is not accessible (CLI-1ED).
+      if (!libraryMode) {
+        filtered.push(
+          Sentry.nodeContextIntegration({ device: { cpu: false } })
+        );
+      }
 
       // Collect runtime metrics (CPU, memory, event loop) for non-library mode.
       // Uses nodeRuntimeMetricsIntegration which degrades gracefully on Bun:
@@ -627,12 +664,12 @@ export function initSentry(
     // before the transaction finishes without blocking CLI startup.
     const agent = detectAgent();
     if (agent) {
-      Sentry.setTag("agent", agent);
+      setAgentTags(agent);
     } else {
       detectAgentFromProcessTree()
         .then((processAgent) => {
           if (processAgent) {
-            Sentry.setTag("agent", processAgent);
+            setAgentTags(processAgent);
           }
         })
         .catch((error) => {
@@ -708,6 +745,28 @@ export function setOrgProjectContext(orgs: string[], projects: string[]): void {
 const SENSITIVE_FLAGS = new Set(["token"]);
 
 /**
+ * Convert a flag value to a telemetry tag string.
+ *
+ * Handles booleans, objects (JSON-serialized to avoid "[object Object]"),
+ * and primitives. Truncates to 200 chars for Sentry tag limits.
+ */
+function flagValueToTag(value: unknown): string {
+  if (typeof value === "boolean") {
+    return String(value);
+  }
+  // Arrays serialize as comma-separated strings (matching existing behavior)
+  if (Array.isArray(value)) {
+    return String(value).slice(0, 200);
+  }
+  // Non-array objects (e.g., TimeRange) must be JSON-serialized to avoid
+  // "[object Object]" from String()
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value).slice(0, 200);
+  }
+  return String(value).slice(0, 200);
+}
+
+/**
  * Set command flags as telemetry tags.
  *
  * Converts flag names from camelCase to kebab-case and sets them as tags
@@ -765,10 +824,7 @@ export function setFlagContext(flags: Record<string, unknown>): void {
     }
 
     // Set the tag with flag. prefix
-    // For booleans, just set "true"; for other types, convert to string
-    const tagValue =
-      typeof value === "boolean" ? "true" : String(value).slice(0, 200); // Truncate long values
-    Sentry.setTag(`flag.${kebabKey}`, tagValue);
+    Sentry.setTag(`flag.${kebabKey}`, flagValueToTag(value));
   }
 }
 
@@ -965,7 +1021,7 @@ const noop = (): void => {};
 /** Resolves the database path, falling back to a default if the import fails. */
 function resolveDbPath(): string {
   try {
-    const { getDbPath } = require("./db/index.js") as {
+    const { getDbPath } = _require("./db/index.js") as {
       getDbPath: () => string;
     };
     return getDbPath();
@@ -1050,7 +1106,7 @@ function tryRepairReadonly(): boolean {
   repairAttempted = true;
 
   const dbPath = resolveDbPath();
-  const { dirname } = require("node:path") as {
+  const { dirname } = _require("node:path") as {
     dirname: (p: string) => string;
   };
   const configDir = dirname(dbPath);

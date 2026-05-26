@@ -5,7 +5,7 @@
  * command generation from routes, and contextual examples.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { formatBanner } from "../../src/lib/banner.js";
 import { introspectAllCommands, printCustomHelp } from "../../src/lib/help.js";
 import { useTestConfigDir } from "../helpers.js";
@@ -83,6 +83,27 @@ describe("printCustomHelp", () => {
     expect(output).toContain("SENTRY_LOG_LEVEL");
     expect(output).toContain("NO_COLOR");
   });
+
+  test("includes a Flags section with common flags", () => {
+    const output = stripAnsi(printCustomHelp());
+    expect(output).toContain("Flags:");
+    expect(output).toContain("--json");
+    expect(output).toContain("--fresh");
+    expect(output).toContain("-f");
+    expect(output).toContain("--verbose");
+    expect(output).toContain("-v");
+    expect(output).toContain("--help");
+    expect(output).toContain("--version");
+  });
+
+  test("Flags section appears before Environment Variables section", () => {
+    const output = stripAnsi(printCustomHelp());
+    const flagsIndex = output.indexOf("Flags:");
+    const envVarsIndex = output.indexOf("Environment Variables:");
+    expect(flagsIndex).toBeGreaterThan(-1);
+    expect(envVarsIndex).toBeGreaterThan(-1);
+    expect(flagsIndex).toBeLessThan(envVarsIndex);
+  });
 });
 
 describe("introspectAllCommands", () => {
@@ -112,5 +133,36 @@ describe("introspectAllCommands", () => {
       expect(typeof v.description).toBe("string");
       expect(v.description.length).toBeGreaterThan(0);
     }
+  });
+
+  test("includes a flags array with common flags", () => {
+    const result = introspectAllCommands();
+    expect(Array.isArray(result.flags)).toBe(true);
+    const longs = result.flags.map((f) => f.long);
+    expect(longs).toContain("--json");
+    expect(longs).toContain("--fresh");
+    expect(longs).toContain("--verbose");
+    expect(longs).toContain("--help");
+    expect(longs).toContain("--version");
+  });
+
+  test("each flags entry has long and description", () => {
+    const { flags } = introspectAllCommands();
+    for (const f of flags) {
+      expect(typeof f.long).toBe("string");
+      expect(f.long.startsWith("--")).toBe(true);
+      expect(typeof f.description).toBe("string");
+      expect(f.description.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("flags with short aliases have the correct format", () => {
+    const { flags } = introspectAllCommands();
+    const fresh = flags.find((f) => f.long === "--fresh");
+    expect(fresh).toBeDefined();
+    expect(fresh?.short).toBe("-f");
+    const verbose = flags.find((f) => f.long === "--verbose");
+    expect(verbose).toBeDefined();
+    expect(verbose?.short).toBe("-v");
   });
 });

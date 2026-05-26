@@ -12,11 +12,24 @@ import {
   TokenResponseSchema,
 } from "../types/index.js";
 import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "./constants.js";
-import { getCustomHeaders } from "./custom-headers.js";
+import {
+  buildTlsErrorDetail,
+  getCustomTlsOptions,
+  isTlsCertError,
+  warnIfSaasWithEnvCa,
+} from "./custom-ca.js";
+import { applyCustomHeaders } from "./custom-headers.js";
 import { setAuthToken } from "./db/auth.js";
 import { getEnv } from "./env.js";
-import { ApiError, AuthError, ConfigError, DeviceFlowError } from "./errors.js";
+import {
+  ApiError,
+  AuthError,
+  DeviceFlowError,
+  HostScopeError,
+} from "./errors.js";
+import { normalizeOrigin } from "./sentry-urls.js";
 import { withHttpSpan } from "./telemetry.js";
+import { getActiveTokenHost, isRequestOriginTrusted } from "./token-host.js";
 
 /**
  * Get the Sentry instance URL for OAuth endpoints.
@@ -30,10 +43,22 @@ function getSentryUrl(): string {
 }
 
 /**
+ * Public OAuth client ID for sentry.io.
+ *
+ * Device Authorization Grant (RFC 8628) is a public-client flow — no client
+ * secret is involved, so this value is safe to commit. It is equivalent to the
+ * `SENTRY_CLIENT_ID` repo variable used by CI.
+ *
+ * Self-hosted instances must override this via the `SENTRY_CLIENT_ID` env var
+ * or the `SENTRY_CLIENT_ID_BUILD` build-time define.
+ */
+const DEFAULT_OAUTH_CLIENT_ID =
+  "1d673b81d60ef84c951359c36296972ca6fd41bd8f45acd2d3a783a3b3c28e41";
+
+/**
  * OAuth client ID
  *
- * Build-time: Injected via esbuild define: { SENTRY_CLIENT_ID_BUILD: "..." }
- * Runtime: Can be overridden via SENTRY_CLIENT_ID env var (for self-hosted)
+ * Priority: SENTRY_CLIENT_ID env var → SENTRY_CLIENT_ID_BUILD (build-time) → committed default
  *
  * Read at call time (not module load time) so tests can override SENTRY_CLIENT_ID
  * after module initialization.
@@ -46,7 +71,7 @@ function getClientId(): string {
     getEnv().SENTRY_CLIENT_ID ??
     (typeof SENTRY_CLIENT_ID_BUILD !== "undefined"
       ? SENTRY_CLIENT_ID_BUILD
-      : "")
+      : DEFAULT_OAUTH_CLIENT_ID)
   );
 }
 
@@ -86,25 +111,37 @@ async function fetchWithConnectionError(
   url: string,
   init: RequestInit
 ): Promise<Response> {
-  // Inject custom headers for self-hosted proxies (IAP, mTLS, etc.)
-  let effectiveInit = init;
-  const customHeaders = getCustomHeaders();
-  if (customHeaders.length > 0) {
-    const merged = new Headers(init.headers);
-    for (const [name, value] of customHeaders) {
-      merged.set(name, value);
-    }
-    effectiveInit = { ...init, headers: merged };
-  }
+  // Inject custom headers for self-hosted proxies (IAP, mTLS, etc.) —
+  // URL-scoped so they don't leak to untrusted hosts.
+  const merged = new Headers(init.headers);
+  applyCustomHeaders(merged, url);
+  const effectiveInit: RequestInit = { ...init, headers: merged };
 
   try {
-    return await fetch(url, effectiveInit);
+    const customTls = getCustomTlsOptions();
+    if (customTls) {
+      warnIfSaasWithEnvCa(url);
+    }
+
+    return await fetch(url, { ...effectiveInit, ...customTls });
   } catch (error) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+
+    // TLS certificate errors — give actionable guidance
+    if (isTlsCertError(error)) {
+      throw new ApiError(
+        `TLS certificate error connecting to ${getSentryUrl()}`,
+        0,
+        buildTlsErrorDetail(error)
+      );
+    }
+
     const isConnectionError =
-      error instanceof Error &&
-      (error.message.includes("ECONNREFUSED") ||
-        error.message.includes("fetch failed") ||
-        error.message.includes("network"));
+      error.message.includes("ECONNREFUSED") ||
+      error.message.includes("fetch failed") ||
+      error.message.includes("network");
 
     if (isConnectionError) {
       throw new ApiError(
@@ -117,16 +154,25 @@ async function fetchWithConnectionError(
   }
 }
 
+/**
+ * Refuse to POST a refresh token to a host that doesn't match the active
+ * token's scope. Defense-in-depth for the rare case where SENTRY_HOST/URL
+ * was mutated without going through the URL-arg / rc-shim guards.
+ */
+function assertRefreshHostTrusted(): void {
+  const refreshUrl = getSentryUrl();
+  if (!isRequestOriginTrusted(refreshUrl)) {
+    throw new HostScopeError(
+      "OAuth refresh token",
+      normalizeOrigin(refreshUrl) ?? "<unknown host>",
+      getActiveTokenHost()
+    );
+  }
+}
+
 /** Request a device code from Sentry's device authorization endpoint */
 function requestDeviceCode() {
   const clientId = getClientId();
-  if (!clientId) {
-    throw new ConfigError(
-      "SENTRY_CLIENT_ID is required for authentication",
-      "Set SENTRY_CLIENT_ID environment variable or use a pre-built binary"
-    );
-  }
-
   return withHttpSpan("POST", "/oauth/device/code/", async () => {
     const response = await fetchWithConnectionError(
       `${getSentryUrl()}/oauth/device/code/`,
@@ -259,7 +305,6 @@ async function attemptPoll(deviceCode: string): Promise<PollResult> {
  * @param callbacks - Callbacks for UI updates during the flow
  * @param timeout - Maximum time to wait for authorization in ms (default: 10 minutes)
  * @returns The token response containing access_token and metadata
- * @throws {ConfigError} When SENTRY_CLIENT_ID is not configured
  * @throws {ApiError} When unable to connect to Sentry or API returns an error
  * @throws {DeviceFlowError} When authorization fails, is denied, or times out
  */
@@ -318,7 +363,9 @@ export async function performDeviceFlow(
 }
 
 /**
- * Complete the OAuth flow by storing the token in the database.
+ * Complete the OAuth flow by storing the token in the database. The token
+ * is scoped to {@link getSentryUrl} so the fetch-layer trust check refuses
+ * to attach it to other hosts.
  *
  * @param tokenResponse - The token response from performDeviceFlow
  */
@@ -328,7 +375,8 @@ export async function completeOAuthFlow(
   await setAuthToken(
     tokenResponse.access_token,
     tokenResponse.expires_in,
-    tokenResponse.refresh_token
+    tokenResponse.refresh_token,
+    { host: getSentryUrl() }
   );
 }
 
@@ -340,7 +388,7 @@ export async function completeOAuthFlow(
  * @param token - The API token to store
  */
 export async function setApiToken(token: string): Promise<void> {
-  await setAuthToken(token);
+  await setAuthToken(token, undefined, undefined, { host: getSentryUrl() });
 }
 
 /** Refresh an access token using a refresh token. */
@@ -348,12 +396,7 @@ export function refreshAccessToken(
   refreshToken: string
 ): Promise<TokenResponse> {
   const clientId = getClientId();
-  if (!clientId) {
-    throw new ConfigError(
-      "SENTRY_CLIENT_ID is required for token refresh",
-      "Set SENTRY_CLIENT_ID environment variable or use a pre-built binary"
-    );
-  }
+  assertRefreshHostTrusted();
 
   return withHttpSpan("POST", "/oauth/token/", async () => {
     const response = await fetchWithConnectionError(

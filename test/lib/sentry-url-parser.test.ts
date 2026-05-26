@@ -6,7 +6,7 @@
  * — never real customer data.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   applySentryUrlContext,
   parseSentryUrl,
@@ -185,6 +185,141 @@ describe("parseSentryUrl", () => {
     });
   });
 
+  describe("replay URLs", () => {
+    test("/organizations/{org}/explore/replays/{replayId}/", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/explore/replays/346789a703f6454384f1de473b8b9fcc/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+        replayId: "346789a703f6454384f1de473b8b9fcc",
+      });
+    });
+
+    test("legacy /organizations/{org}/replays/{replayId}/", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/replays/346789a703f6454384f1de473b8b9fcc/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+        replayId: "346789a703f6454384f1de473b8b9fcc",
+      });
+    });
+
+    test("self-hosted replay URL", () => {
+      const result = parseSentryUrl(
+        "https://sentry.example.com/organizations/acme-corp/explore/replays/346789a703f6454384f1de473b8b9fcc/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.example.com",
+        org: "acme-corp",
+        replayId: "346789a703f6454384f1de473b8b9fcc",
+      });
+    });
+
+    test("normalizes uppercase replay IDs in replay URLs", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/explore/replays/346789A703F6454384F1DE473B8B9FCC/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+        replayId: "346789a703f6454384f1de473b8b9fcc",
+      });
+    });
+
+    test("falls back to org for replay listing URL", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/explore/replays/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+      });
+    });
+
+    test("falls back to org for legacy replay listing URL", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/replays/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+      });
+    });
+
+    test("rejects non-hex replay ID on explore path", () => {
+      expect(
+        parseSentryUrl(
+          "https://sentry.io/organizations/my-org/explore/replays/some-random-page/"
+        )
+      ).toBeNull();
+    });
+
+    test("rejects non-hex replay ID on legacy path", () => {
+      expect(
+        parseSentryUrl(
+          "https://sentry.io/organizations/my-org/replays/some-random-page/"
+        )
+      ).toBeNull();
+    });
+
+    test("rejects non-hex replay ID on subdomain explore path", () => {
+      expect(
+        parseSentryUrl(
+          "https://my-org.sentry.io/explore/replays/some-random-page/"
+        )
+      ).toBeNull();
+    });
+
+    test("falls back to org for subdomain replay listing URL", () => {
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/explore/replays/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+      });
+    });
+  });
+
+  describe("dashboard URLs", () => {
+    test("/organizations/{org}/dashboard/{id}/", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/dashboard/4326879/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+        dashboardId: "4326879",
+      });
+    });
+
+    test("self-hosted dashboard URL", () => {
+      const result = parseSentryUrl(
+        "https://sentry.example.com/organizations/devops/dashboard/12345/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.example.com",
+        org: "devops",
+        dashboardId: "12345",
+      });
+    });
+
+    test("dashboard URL without trailing slash", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/dashboard/999"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+        dashboardId: "999",
+      });
+    });
+  });
+
   describe("project settings URLs", () => {
     test("/settings/{org}/projects/{project}/", () => {
       const result = parseSentryUrl(
@@ -241,6 +376,39 @@ describe("parseSentryUrl", () => {
         baseUrl: "https://my-org.sentry.io",
         org: "my-org",
         traceId: "a4d1aae7216b47ff8117cf4e09ce9d0a",
+      });
+    });
+
+    test("replay URL extracts org from subdomain", () => {
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/explore/replays/346789a703f6454384f1de473b8b9fcc/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+        replayId: "346789a703f6454384f1de473b8b9fcc",
+      });
+    });
+
+    test("legacy replay URL extracts org from subdomain", () => {
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/replays/346789a703f6454384f1de473b8b9fcc/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+        replayId: "346789a703f6454384f1de473b8b9fcc",
+      });
+    });
+
+    test("dashboard URL extracts org from subdomain", () => {
+      const result = parseSentryUrl(
+        "https://sentry-sdks.sentry.io/dashboard/4326879/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry-sdks.sentry.io",
+        org: "sentry-sdks",
+        dashboardId: "4326879",
       });
     });
 
@@ -382,17 +550,32 @@ describe("parseSentryUrl", () => {
 });
 
 describe("applySentryUrlContext", () => {
+  // Host-scoping: applySentryUrlContext honors non-SaaS URLs ONLY when the
+  // destination matches the active token's scoped host (with SaaS
+  // equivalence). Mismatches throw CliError so credentials can't leak to an
+  // attacker-chosen host.
+  //
+  // The test preload (test/preload.ts) sets `SENTRY_AUTH_TOKEN` scoped to
+  // SaaS by default. To simulate a self-hosted-authenticated user, set
+  // `SENTRY_HOST` BEFORE the module loads (which pins the env-token's scope)
+  // and use `resetEnvTokenHostForTesting()` between cases.
   let originalSentryUrl: string | undefined;
   let originalSentryHost: string | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     originalSentryUrl = process.env.SENTRY_URL;
     originalSentryHost = process.env.SENTRY_HOST;
     delete process.env.SENTRY_URL;
     delete process.env.SENTRY_HOST;
+    // Reset env-token-host capture so each test can re-pin based on the
+    // SENTRY_HOST they set (or leave unset → SaaS default).
+    const { resetEnvTokenHostForTesting } = await import(
+      "../../src/lib/env-token-host.js"
+    );
+    resetEnvTokenHostForTesting();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (originalSentryUrl !== undefined) {
       process.env.SENTRY_URL = originalSentryUrl;
     } else {
@@ -403,12 +586,29 @@ describe("applySentryUrlContext", () => {
     } else {
       delete process.env.SENTRY_HOST;
     }
+    const { resetEnvTokenHostForTesting } = await import(
+      "../../src/lib/env-token-host.js"
+    );
+    resetEnvTokenHostForTesting();
   });
 
-  test("sets both SENTRY_HOST and SENTRY_URL for self-hosted instance", () => {
+  test("writes env when non-SaaS URL matches token-scoped host", () => {
+    // Pin env-token to the self-hosted instance via SENTRY_HOST before
+    // calling captureEnvTokenHost() (implicit on first getEnvTokenHost call).
+    process.env.SENTRY_HOST = "https://sentry.example.com";
     applySentryUrlContext("https://sentry.example.com");
     expect(process.env.SENTRY_HOST).toBe("https://sentry.example.com");
     expect(process.env.SENTRY_URL).toBe("https://sentry.example.com");
+  });
+
+  test("throws CliError for non-SaaS URL that does not match token host", () => {
+    // Env-token defaults to SaaS (no SENTRY_HOST set), so a self-hosted URL
+    // is a host-scope mismatch → CliError, env untouched.
+    expect(() => applySentryUrlContext("https://sentry.example.com")).toThrow(
+      /does not match|sentry auth login --url/
+    );
+    expect(process.env.SENTRY_HOST).toBeUndefined();
+    expect(process.env.SENTRY_URL).toBeUndefined();
   });
 
   test("does not set SENTRY_HOST or SENTRY_URL for SaaS (sentry.io)", () => {
@@ -423,15 +623,22 @@ describe("applySentryUrlContext", () => {
     expect(process.env.SENTRY_URL).toBeUndefined();
   });
 
-  test("overrides existing env vars (parsed URL takes precedence)", () => {
+  test("throws on mismatch even when SENTRY_HOST is pre-set to a different host", () => {
+    // Token scoped to existing.example.com; URL-arg points at sentry.other.com.
+    // Primary guard refuses to re-scope by writing the new host — only
+    // `sentry auth login --url` may change scope.
     process.env.SENTRY_HOST = "https://existing.example.com";
     process.env.SENTRY_URL = "https://existing.example.com";
-    applySentryUrlContext("https://sentry.other.com");
-    expect(process.env.SENTRY_HOST).toBe("https://sentry.other.com");
-    expect(process.env.SENTRY_URL).toBe("https://sentry.other.com");
+    expect(() => applySentryUrlContext("https://sentry.other.com")).toThrow(
+      /does not match|sentry auth login --url/
+    );
+    // Existing env left intact — throw happens before any write.
+    expect(process.env.SENTRY_HOST).toBe("https://existing.example.com");
+    expect(process.env.SENTRY_URL).toBe("https://existing.example.com");
   });
 
-  test("sets both env vars for self-hosted with port", () => {
+  test("writes env for self-hosted URL with port when it matches token host", () => {
+    process.env.SENTRY_HOST = "https://sentry.acme.internal:9000";
     applySentryUrlContext("https://sentry.acme.internal:9000");
     expect(process.env.SENTRY_HOST).toBe("https://sentry.acme.internal:9000");
     expect(process.env.SENTRY_URL).toBe("https://sentry.acme.internal:9000");

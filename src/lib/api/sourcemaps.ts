@@ -24,17 +24,22 @@ import { open, readFile, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { gzip as gzipCb } from "node:zlib";
+import {
+  gzip as gzipCb,
+  constants as zlibConstants,
+  zstdCompress as zstdCompressCb,
+} from "node:zlib";
 import pLimit from "p-limit";
 import { z } from "zod";
 import { ApiError } from "../errors.js";
 import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import { getSdkConfig } from "../sentry-client.js";
-import { ZipWriter } from "../sourcemap/zip.js";
+import { type ZipCompression, ZipWriter } from "../sourcemap/zip.js";
 import { apiRequestToRegion } from "./infrastructure.js";
 
 const gzipAsync = promisify(gzipCb);
+const zstdCompressAsync = promisify(zstdCompressCb);
 const log = logger.withTag("api.sourcemaps");
 
 // ── Schemas ─────────────────────────────────────────────────────────
@@ -74,8 +79,8 @@ export type AssembleResponse = z.infer<typeof AssembleResponseSchema>;
 export type ArtifactFile = {
   /** Filesystem path to the file. */
   path: string;
-  /** Debug ID injected into this file (from {@link injectDebugId}). */
-  debugId: string;
+  /** Debug ID injected into this file (from {@link injectDebugId}). Omitted when uploading without rewriting. */
+  debugId?: string;
   /**
    * File type for the manifest.
    * `"minified_source"` for JS files, `"source_map"` for .map files.
@@ -87,8 +92,8 @@ export type ArtifactFile = {
    */
   url: string;
   /**
-   * Optional associated sourcemap filename (for minified_source entries).
-   * Just the basename, e.g., `"bin.js.map"`.
+   * Optional sourcemap reference for the `Sourcemap` header (minified_source entries).
+   * Relative URL from the JS file to its map, e.g., `"bin.js.map"` or `"maps/app.js.map"`.
    */
   sourcemapFilename?: string;
 };
@@ -101,6 +106,8 @@ export type UploadOptions = {
   project: string;
   /** Release version (optional — debug IDs can work without releases). */
   release?: string;
+  /** Distribution identifier (optional — disambiguates builds within a release). */
+  dist?: string;
   /** Files to upload (must already have debug IDs injected). */
   files: ArtifactFile[];
 };
@@ -193,8 +200,8 @@ export function pickUploadEncoding(
 /**
  * Compress a chunk buffer with the chosen codec. Exported for testing.
  *
- * Both codecs run off-thread (Bun's zstd worker and libuv's zlib thread
- * pool), so a chunk being compressed doesn't block the event loop --
+ * Both codecs run off-thread via libuv's thread pool, so a chunk
+ * being compressed doesn't block the event loop --
  * with `concurrency=8`, eight uploads truly compress in parallel.
  */
 export async function encodeChunk(
@@ -206,7 +213,9 @@ export async function encodeChunk(
     // code. L9+ trades ~14% size for 4x compress time and forces the
     // server's decoder to allocate 15-30 MiB of window state -- not
     // worth it once decode cost is counted.
-    return await Bun.zstdCompress(buf, { level: 3 });
+    return await zstdCompressAsync(buf, {
+      params: { [zlibConstants.ZSTD_c_compressionLevel]: 3 },
+    });
   }
   if (encoding === "gzip") {
     // zlib default (L6). Counter-intuitively, lower levels (L1/L5)
@@ -288,12 +297,23 @@ async function uploadChunk(params: {
  *
  * @param outputPath - Where to write the ZIP file
  * @param files - Source files and sourcemaps to include
- * @param options - Bundle metadata (org, project, release)
+ * @param options.org / project / release - Bundle metadata
+ * @param options.compression - ZIP entry compression. Use `"stored"`
+ *   when the wire layer will compress the chunks (zstd or gzip);
+ *   compressing twice wastes CPU and barely helps wire size.
+ *   Defaults to `"deflate"` so callers without a wire codec still
+ *   ship reasonably-sized payloads.
  */
 export async function buildArtifactBundle(
   outputPath: string,
   files: ArtifactFile[],
-  options: { org: string; project: string; release?: string }
+  options: {
+    org: string;
+    project: string;
+    release?: string;
+    dist?: string;
+    compression?: ZipCompression;
+  }
 ): Promise<void> {
   // Build manifest.json
   const filesManifest: Record<
@@ -307,9 +327,10 @@ export async function buildArtifactBundle(
 
   for (const file of files) {
     const bundlePath = urlToBundlePath(file.url);
-    const headers: Record<string, string> = {
-      "debug-id": file.debugId,
-    };
+    const headers: Record<string, string> = {};
+    if (file.debugId) {
+      headers["debug-id"] = file.debugId;
+    }
     if (file.sourcemapFilename) {
       headers.Sourcemap = file.sourcemapFilename;
     }
@@ -325,11 +346,14 @@ export async function buildArtifactBundle(
     org: options.org,
     project: options.project,
     ...(options.release ? { release: options.release } : {}),
+    ...(options.dist ? { dist: options.dist } : {}),
     files: filesManifest,
   });
 
   // Stream ZIP entries to disk
-  const zip = await ZipWriter.create(outputPath);
+  const zip = await ZipWriter.create(outputPath, {
+    compression: options.compression,
+  });
   try {
     await zip.addEntry("manifest.json", Buffer.from(manifest, "utf-8"));
 
@@ -391,21 +415,38 @@ export async function hashChunks(
  * @throws {ApiError} If the upload or assembly fails
  */
 export async function uploadSourcemaps(options: UploadOptions): Promise<void> {
-  const { org, project, release, files } = options;
+  const { org, project, release, dist, files } = options;
 
   // Step 1: Get chunk upload configuration
   const serverOptions = await getChunkUploadOptions(org);
 
+  // Pick the wire codec up-front so the ZIP can skip its own
+  // compression pass when the wire layer will handle it. Re-compressing
+  // an already-DEFLATE'd ZIP with zstd/gzip burns CPU for ~0% wire
+  // savings; STORED + zstd saves both CPU and a few percent wire bytes.
+  // Without a wire codec (kill-switch / unsupported codecs) we keep
+  // DEFLATE so the ZIP itself stays small.
+  const encoding = pickUploadEncoding(serverOptions.compression);
+  const zipCompression: ZipCompression = encoding ? "stored" : "deflate";
+
   // Step 2: Build artifact bundle ZIP to a temp file, then upload
   const tmpZipPath = join(tmpdir(), `sentry-artifact-bundle-${Date.now()}.zip`);
   try {
-    await buildArtifactBundle(tmpZipPath, files, { org, project, release });
+    await buildArtifactBundle(tmpZipPath, files, {
+      org,
+      project,
+      release,
+      dist,
+      compression: zipCompression,
+    });
     await uploadArtifactBundle({
       tmpZipPath,
       org,
       project,
       release,
+      dist,
       serverOptions,
+      encoding,
     });
   } finally {
     // Always clean up the temp file
@@ -427,9 +468,12 @@ async function uploadArtifactBundle(opts: {
   org: string;
   project: string;
   release: string | undefined;
+  dist: string | undefined;
   serverOptions: ChunkServerOptions;
+  encoding: UploadEncoding | undefined;
 }): Promise<void> {
-  const { tmpZipPath, org, project, release, serverOptions } = opts;
+  const { tmpZipPath, org, project, release, dist, serverOptions, encoding } =
+    opts;
   // Step 3: Split into chunks, hash each chunk + compute overall checksum
   const { chunks, overallChecksum } = await hashChunks(
     tmpZipPath,
@@ -444,6 +488,7 @@ async function uploadArtifactBundle(opts: {
     chunks: chunks.map((c: ChunkInfo) => c.sha1),
     projects: [project],
     ...(release ? { version: release } : {}),
+    ...(dist ? { dist } : {}),
   };
 
   const assembleEndpoint = `organizations/${org}/artifactbundle/assemble/`;
@@ -477,7 +522,6 @@ async function uploadArtifactBundle(opts: {
   const missingChunks = chunks.filter((c) => missingSet.has(c.sha1));
 
   if (missingChunks.length > 0) {
-    const encoding = pickUploadEncoding(serverOptions.compression);
     const limit = pLimit(serverOptions.concurrency);
     // Use the CLI's authenticated fetch for chunk uploads
     const { fetch: authFetch } = getSdkConfig(regionUrl);

@@ -5,6 +5,7 @@
  * Used by both `setup --install` (fresh installs) and `upgrade` (self-updates).
  */
 
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   readFileSync,
@@ -12,9 +13,15 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { chmod, mkdir, unlink } from "node:fs/promises";
+import { chmod, copyFile, mkdir, unlink } from "node:fs/promises";
 import { delimiter, join, resolve } from "node:path";
+import { compare as semverCompare } from "semver";
 import { getUserAgent } from "./constants.js";
+import {
+  buildTlsErrorDetail,
+  customFetch,
+  isTlsCertError,
+} from "./custom-ca.js";
 import { stringifyUnknown, UpgradeError } from "./errors.js";
 
 /** Known directories where the curl installer may place the binary */
@@ -51,9 +58,8 @@ export function isMusl(): boolean {
 
   // Heuristic 2: ldd --version output (musl ldd writes "musl libc" to stderr)
   try {
-    const result = Bun.spawnSync(["ldd", "--version"], {
-      stdout: "pipe",
-      stderr: "pipe",
+    const result = spawnSync("ldd", ["--version"], {
+      stdio: ["ignore", "pipe", "pipe"],
     });
     const output =
       Buffer.from(result.stdout).toString() +
@@ -125,7 +131,7 @@ export function isNightlyVersion(version: string): boolean {
  * @returns 1 if a > b, -1 if a < b, 0 if equal
  */
 export function compareVersions(a: string, b: string): -1 | 0 | 1 {
-  return Bun.semver.order(a, b);
+  return semverCompare(a, b);
 }
 
 /**
@@ -232,11 +238,14 @@ export async function fetchWithUpgradeError(
   serviceName: string
 ): Promise<Response> {
   try {
-    return await fetch(url, init);
+    return await customFetch(url, init);
   } catch (error) {
     // Re-throw AbortError as-is so callers can handle it specifically
     if (error instanceof Error && error.name === "AbortError") {
       throw error;
+    }
+    if (error instanceof Error && isTlsCertError(error)) {
+      throw new UpgradeError("network_error", buildTlsErrorDetail(error));
     }
     const msg = stringifyUnknown(error);
     throw new UpgradeError(
@@ -443,7 +452,7 @@ export async function installBinary(
       }
 
       // Copy source binary to temp path next to install location
-      await Bun.write(tempPath, Bun.file(sourcePath));
+      await copyFile(sourcePath, tempPath);
 
       // Set executable permission (Unix only)
       if (process.platform !== "win32") {

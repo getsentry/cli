@@ -5,12 +5,23 @@
  * query functions for rendering dashboard widgets with actual data.
  */
 
+import {
+  createANewDashboardForAnOrganization,
+  editAnOrganization_sCustomDashboard,
+  listAnOrganization_sCustomDashboards,
+  retrieveAnOrganization_sCustomDashboard,
+} from "@sentry/api";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 
+import { z } from "zod";
+
 import {
   type DashboardDetail,
+  DashboardDetailSchema,
   type DashboardListItem,
+  type DashboardRevision,
+  DashboardRevisionSchema,
   type DashboardWidget,
   type ErrorResult,
   type EventsStatsSeries,
@@ -26,13 +37,17 @@ import {
   type WidgetDataResult,
 } from "../../types/dashboard.js";
 import { stringifyUnknown } from "../errors.js";
+
 import { resolveOrgRegion } from "../region.js";
 
 import {
   apiRequestToRegion,
+  getOrgSdkConfig,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
   parseLinkHeader,
+  unwrapPaginatedResult,
+  unwrapResult,
 } from "./infrastructure.js";
 
 /**
@@ -49,14 +64,18 @@ export async function listDashboardsPaginated(
   orgSlug: string,
   options: { perPage?: number; cursor?: string } = {}
 ): Promise<PaginatedResponse<DashboardListItem[]>> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data, headers } = await apiRequestToRegion<DashboardListItem[]>(
-    regionUrl,
-    `/organizations/${orgSlug}/dashboards/`,
-    { params: { per_page: options.perPage, cursor: options.cursor } }
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await listAnOrganization_sCustomDashboards({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: { per_page: options.perPage, cursor: options.cursor },
+  });
+
+  return unwrapPaginatedResult<DashboardListItem[]>(
+    result,
+    "Failed to list dashboards"
   );
-  const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
-  return { data, nextCursor };
 }
 
 /**
@@ -70,12 +89,18 @@ export async function getDashboard(
   orgSlug: string,
   dashboardId: string
 ): Promise<DashboardDetail> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<DashboardDetail>(
-    regionUrl,
-    `/organizations/${orgSlug}/dashboards/${dashboardId}/`
-  );
-  return data;
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await retrieveAnOrganization_sCustomDashboard({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      dashboard_id: dashboardId as unknown as number,
+    },
+  });
+
+  const data = unwrapResult(result, `Failed to get dashboard '${dashboardId}'`);
+  return data as unknown as DashboardDetail;
 }
 
 /**
@@ -89,13 +114,18 @@ export async function createDashboard(
   orgSlug: string,
   body: { title: string; widgets?: DashboardWidget[]; projects?: number[] }
 ): Promise<DashboardDetail> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<DashboardDetail>(
-    regionUrl,
-    `/organizations/${orgSlug}/dashboards/`,
-    { method: "POST", body }
-  );
-  return data;
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await createANewDashboardForAnOrganization({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    body: body as unknown as Parameters<
+      typeof createANewDashboardForAnOrganization
+    >[0]["body"],
+  });
+
+  const data = unwrapResult(result, "Failed to create dashboard");
+  return data as unknown as DashboardDetail;
 }
 
 /**
@@ -118,12 +148,88 @@ export async function updateDashboard(
     period?: string | null;
   }
 ): Promise<DashboardDetail> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const path = `/organizations/${orgSlug}/dashboards/${dashboardId}/`;
-  const { data } = await apiRequestToRegion<DashboardDetail>(regionUrl, path, {
-    method: "PUT",
-    body,
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await editAnOrganization_sCustomDashboard({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      dashboard_id: dashboardId as unknown as number,
+    },
+    body: body as unknown as Parameters<
+      typeof editAnOrganization_sCustomDashboard
+    >[0]["body"],
   });
+
+  const data = unwrapResult(
+    result,
+    `Failed to update dashboard '${dashboardId}'`
+  );
+  return data as unknown as DashboardDetail;
+}
+
+// ---------------------------------------------------------------------------
+// Revision history
+// ---------------------------------------------------------------------------
+
+/**
+ * List revisions for a dashboard with cursor-based pagination.
+ *
+ * @param orgSlug - Organization slug
+ * @param dashboardId - Dashboard ID
+ * @param options - Pagination parameters (perPage, cursor)
+ * @returns Paginated response with dashboard revisions
+ */
+export async function listDashboardRevisionsPaginated(
+  orgSlug: string,
+  dashboardId: string,
+  options: { perPage?: number; cursor?: string } = {}
+): Promise<PaginatedResponse<DashboardRevision[]>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const params: Record<string, string | number | undefined> = {
+    per_page: options.perPage,
+    cursor: options.cursor,
+  };
+
+  const { data, headers } = await apiRequestToRegion<DashboardRevision[]>(
+    regionUrl,
+    `/organizations/${orgSlug}/dashboards/${dashboardId}/revisions/`,
+    { params, schema: z.array(DashboardRevisionSchema) }
+  );
+
+  const { nextCursor, prevCursor } = parseLinkHeader(
+    headers.get("link") ?? null
+  );
+  const out: PaginatedResponse<DashboardRevision[]> = { data };
+  if (nextCursor !== undefined) {
+    out.nextCursor = nextCursor;
+  }
+  if (prevCursor !== undefined) {
+    out.prevCursor = prevCursor;
+  }
+  return out;
+}
+
+/**
+ * Restore a dashboard to a specific revision.
+ *
+ * @param orgSlug - Organization slug
+ * @param dashboardId - Dashboard ID
+ * @param revisionId - Revision ID to restore
+ * @returns The restored dashboard detail
+ */
+export async function restoreDashboardRevision(
+  orgSlug: string,
+  dashboardId: string,
+  revisionId: string
+): Promise<DashboardDetail> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const encodedRevisionId = encodeURIComponent(revisionId);
+  const { data } = await apiRequestToRegion<DashboardDetail>(
+    regionUrl,
+    `/organizations/${orgSlug}/dashboards/${dashboardId}/revisions/${encodedRevisionId}/`,
+    { method: "POST", schema: DashboardDetailSchema }
+  );
   return data;
 }
 

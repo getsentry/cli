@@ -2,11 +2,15 @@
  * One-time migration from config.json to SQLite.
  */
 
-import type { Database } from "bun:sqlite";
 import { rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
+
+const _require = createRequire(import.meta.url);
+
 import { logger } from "../logger.js";
 import { getConfigDir } from "./index.js";
+import type { Database } from "./sqlite.js";
 
 const log = logger.withTag("migration");
 
@@ -34,14 +38,14 @@ function markMigrationCompleted(db: Database): void {
 
 function oldConfigExists(): boolean {
   const configPath = join(getConfigDir(), OLD_CONFIG_FILENAME);
-  const { existsSync } = require("node:fs");
+  const { existsSync } = _require("node:fs");
   return existsSync(configPath);
 }
 
 function readOldConfig(): OldConfig | null {
   const configPath = join(getConfigDir(), OLD_CONFIG_FILENAME);
   try {
-    const { readFileSync } = require("node:fs");
+    const { readFileSync } = _require("node:fs");
     const content = readFileSync(configPath, "utf-8");
     return JSON.parse(content);
   } catch {

@@ -5,7 +5,6 @@
  * from Sentry's RFC 5988 Link response headers.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   constantFrom,
   assert as fcAssert,
@@ -14,6 +13,7 @@ import {
   string,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { parseLinkHeader } from "../../src/lib/api-client.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 

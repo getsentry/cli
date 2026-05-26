@@ -18,18 +18,35 @@
  * because follow mode uses its own streaming banner, not the spinner.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { setTimeout as sleep } from "node:timers/promises";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { listCommand } from "../../../src/commands/log/list.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/db/auth.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/db/auth.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbAuth from "../../../src/lib/db/auth.js";
 import {
@@ -37,15 +54,77 @@ import {
   ContextError,
   ValidationError,
 } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/formatters/index.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../src/lib/formatters/index.js")
+    >();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as formatters from "../../../src/lib/formatters/index.js";
+
+vi.mock("../../../src/lib/polling.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/polling.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as polling from "../../../src/lib/polling.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import { parsePeriod } from "../../../src/lib/time-range.js";
+
+vi.mock("../../../src/lib/trace-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/trace-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as traceTarget from "../../../src/lib/trace-target.js";
+
+vi.mock("../../../src/lib/version-check.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/version-check.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as versionCheck from "../../../src/lib/version-check.js";
 import type { SentryLog, TraceLog } from "../../../src/types/sentry.js";
@@ -69,7 +148,7 @@ const PROJECT = "test-project";
 function interceptSigint() {
   let handler: ((...args: unknown[]) => void) | null = null;
   const originalOnce = process.once.bind(process);
-  const spy = spyOn(process, "once").mockImplementation(((
+  const spy = vi.spyOn(process, "once").mockImplementation(((
     event: string,
     fn: (...args: unknown[]) => void
   ) => {
@@ -82,7 +161,7 @@ function interceptSigint() {
 
   // Also intercept removeListener so AuthError path works
   const originalRemoveListener = process.removeListener.bind(process);
-  const removeSpy = spyOn(process, "removeListener").mockImplementation(((
+  const removeSpy = vi.spyOn(process, "removeListener").mockImplementation(((
     event: string,
     fn: (...args: unknown[]) => void
   ) => {
@@ -112,8 +191,8 @@ function interceptSigint() {
 }
 
 function createMockContext() {
-  const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
+  const stderrWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
@@ -247,7 +326,7 @@ const newerLogs: SentryLog[] = [
 let getAuthConfigSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
-  getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig").mockReturnValue({
+  getAuthConfigSpy = vi.spyOn(dbAuth, "getAuthConfig").mockReturnValue({
     token: "sntrys_test",
     source: "oauth" as const,
   });
@@ -267,11 +346,11 @@ describe("listCommand.func — standard mode", () => {
   let withProgressSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    listLogsSpy = spyOn(apiClient, "listLogs");
-    resolveOrgProjectSpy = spyOn(resolveTarget, "resolveOrgProjectFromArg");
-    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
-      mockWithProgress
-    );
+    listLogsSpy = vi.spyOn(apiClient, "listLogs");
+    resolveOrgProjectSpy = vi.spyOn(resolveTarget, "resolveOrgProjectFromArg");
+    withProgressSpy = vi
+      .spyOn(polling, "withProgress")
+      .mockImplementation(mockWithProgress);
   });
 
   afterEach(() => {
@@ -454,15 +533,14 @@ describe("listCommand.func — trace mode", () => {
   let withProgressSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    listTraceLogsSpy = spyOn(apiClient, "listTraceLogs");
-    resolveTraceOrgSpy = spyOn(traceTarget, "resolveTraceOrg");
-    warnIfNormalizedSpy = spyOn(
-      traceTarget,
-      "warnIfNormalized"
-    ).mockReturnValue(undefined);
-    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
-      mockWithProgress
-    );
+    listTraceLogsSpy = vi.spyOn(apiClient, "listTraceLogs");
+    resolveTraceOrgSpy = vi.spyOn(traceTarget, "resolveTraceOrg");
+    warnIfNormalizedSpy = vi
+      .spyOn(traceTarget, "warnIfNormalized")
+      .mockReturnValue(undefined);
+    withProgressSpy = vi
+      .spyOn(polling, "withProgress")
+      .mockImplementation(mockWithProgress);
   });
 
   afterEach(() => {
@@ -610,26 +688,25 @@ describe("listCommand.func — positional disambiguation", () => {
   let withProgressSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    listLogsSpy = spyOn(apiClient, "listLogs").mockResolvedValue([]);
-    listTraceLogsSpy = spyOn(apiClient, "listTraceLogs").mockResolvedValue([]);
-    resolveOrgProjectSpy = spyOn(
-      resolveTarget,
-      "resolveOrgProjectFromArg"
-    ).mockResolvedValue({ org: ORG, project: PROJECT });
-    resolveTraceOrgSpy = spyOn(
-      traceTarget,
-      "resolveTraceOrg"
-    ).mockResolvedValue({
-      traceId: TRACE_ID,
-      org: ORG,
-    });
-    warnIfNormalizedSpy = spyOn(
-      traceTarget,
-      "warnIfNormalized"
-    ).mockReturnValue(undefined);
-    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
-      mockWithProgress
-    );
+    listLogsSpy = vi.spyOn(apiClient, "listLogs").mockResolvedValue([]);
+    listTraceLogsSpy = vi
+      .spyOn(apiClient, "listTraceLogs")
+      .mockResolvedValue([]);
+    resolveOrgProjectSpy = vi
+      .spyOn(resolveTarget, "resolveOrgProjectFromArg")
+      .mockResolvedValue({ org: ORG, project: PROJECT });
+    resolveTraceOrgSpy = vi
+      .spyOn(traceTarget, "resolveTraceOrg")
+      .mockResolvedValue({
+        traceId: TRACE_ID,
+        org: ORG,
+      });
+    warnIfNormalizedSpy = vi
+      .spyOn(traceTarget, "warnIfNormalized")
+      .mockReturnValue(undefined);
+    withProgressSpy = vi
+      .spyOn(polling, "withProgress")
+      .mockImplementation(mockWithProgress);
   });
 
   afterEach(() => {
@@ -689,21 +766,21 @@ describe("listCommand.func — period flag", () => {
   let withProgressSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    listTraceLogsSpy = spyOn(apiClient, "listTraceLogs").mockResolvedValue([]);
-    resolveTraceOrgSpy = spyOn(
-      traceTarget,
-      "resolveTraceOrg"
-    ).mockResolvedValue({
-      traceId: TRACE_ID,
-      org: ORG,
-    });
-    warnIfNormalizedSpy = spyOn(
-      traceTarget,
-      "warnIfNormalized"
-    ).mockReturnValue(undefined);
-    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
-      mockWithProgress
-    );
+    listTraceLogsSpy = vi
+      .spyOn(apiClient, "listTraceLogs")
+      .mockResolvedValue([]);
+    resolveTraceOrgSpy = vi
+      .spyOn(traceTarget, "resolveTraceOrg")
+      .mockResolvedValue({
+        traceId: TRACE_ID,
+        org: ORG,
+      });
+    warnIfNormalizedSpy = vi
+      .spyOn(traceTarget, "warnIfNormalized")
+      .mockReturnValue(undefined);
+    withProgressSpy = vi
+      .spyOn(polling, "withProgress")
+      .mockImplementation(mockWithProgress);
   });
 
   afterEach(() => {
@@ -758,14 +835,13 @@ describe("listCommand.func — trace mode org resolution failure", () => {
   let withProgressSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    resolveTraceOrgSpy = spyOn(traceTarget, "resolveTraceOrg");
-    warnIfNormalizedSpy = spyOn(
-      traceTarget,
-      "warnIfNormalized"
-    ).mockReturnValue(undefined);
-    withProgressSpy = spyOn(polling, "withProgress").mockImplementation(
-      mockWithProgress
-    );
+    resolveTraceOrgSpy = vi.spyOn(traceTarget, "resolveTraceOrg");
+    warnIfNormalizedSpy = vi
+      .spyOn(traceTarget, "warnIfNormalized")
+      .mockReturnValue(undefined);
+    withProgressSpy = vi
+      .spyOn(polling, "withProgress")
+      .mockImplementation(mockWithProgress);
   });
 
   afterEach(() => {
@@ -859,12 +935,11 @@ describe("listCommand.func — flag validation", () => {
     // Should not throw ValidationError — the error (if any) comes from
     // downstream resolution, not flag validation. Mock resolution to reject
     // with a non-ValidationError so we can verify flag validation passed.
-    const resolveOrgProjectSpy = spyOn(
-      resolveTarget,
-      "resolveOrgProjectFromArg"
-    ).mockRejectedValueOnce(
-      new ContextError("Organization", "sentry log list")
-    );
+    const resolveOrgProjectSpy = vi
+      .spyOn(resolveTarget, "resolveOrgProjectFromArg")
+      .mockRejectedValueOnce(
+        new ContextError("Organization", "sentry log list")
+      );
     const { context } = createMockContext();
     const func = await listCommand.loader();
     await expect(
@@ -892,14 +967,15 @@ describe("listCommand.func — follow mode (standard)", () => {
 
   beforeEach(() => {
     sigint = interceptSigint();
-    listLogsSpy = spyOn(apiClient, "listLogs");
-    resolveOrgProjectSpy = spyOn(resolveTarget, "resolveOrgProjectFromArg");
-    isPlainSpy = spyOn(formatters, "isPlainOutput").mockReturnValue(true);
-    updateNotifSpy = spyOn(
-      versionCheck,
-      "getUpdateNotification"
-    ).mockReturnValue(null);
-    stderrSpy = spyOn(process.stderr, "write").mockImplementation(() => true);
+    listLogsSpy = vi.spyOn(apiClient, "listLogs");
+    resolveOrgProjectSpy = vi.spyOn(resolveTarget, "resolveOrgProjectFromArg");
+    isPlainSpy = vi.spyOn(formatters, "isPlainOutput").mockReturnValue(true);
+    updateNotifSpy = vi
+      .spyOn(versionCheck, "getUpdateNotification")
+      .mockReturnValue(null);
+    stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
   });
 
   afterEach(() => {
@@ -927,7 +1003,7 @@ describe("listCommand.func — follow mode (standard)", () => {
     const func = await listCommand.loader();
 
     const promise = func.call(context, followFlags, `${ORG}/${PROJECT}`);
-    await Bun.sleep(50);
+    await sleep(50);
     sigint.trigger();
     await promise;
 
@@ -949,18 +1025,18 @@ describe("listCommand.func — follow mode (standard)", () => {
     const func = await listCommand.loader();
 
     const promise = func.call(context, followFlags, `${ORG}/${PROJECT}`);
-    await Bun.sleep(10);
+    await sleep(10);
 
     // SIGINT fires while fetchInitial is still pending
     sigint.trigger();
-    await Bun.sleep(10);
+    await sleep(10);
 
     // Now resolve the fetch — the .then() should NOT schedule a poll
     resolveFetch(sampleLogs);
     await promise;
 
     // If the bug existed, a timer would be scheduled. Wait to confirm none fires.
-    await Bun.sleep(50);
+    await sleep(50);
 
     // Only 1 call to listLogs (the initial fetch). No poll calls.
     expect(listLogsSpy).toHaveBeenCalledTimes(1);
@@ -974,7 +1050,7 @@ describe("listCommand.func — follow mode (standard)", () => {
     const func = await listCommand.loader();
 
     const promise = func.call(context, followFlags, `${ORG}/${PROJECT}`);
-    await Bun.sleep(50);
+    await sleep(50);
     sigint.trigger();
     await promise;
 
@@ -996,7 +1072,7 @@ describe("listCommand.func — follow mode (standard)", () => {
       { ...followFlags, json: true },
       `${ORG}/${PROJECT}`
     );
-    await Bun.sleep(50);
+    await sleep(50);
     sigint.trigger();
     await promise;
 
@@ -1017,7 +1093,7 @@ describe("listCommand.func — follow mode (standard)", () => {
 
     const promise = func.call(context, followFlags, `${ORG}/${PROJECT}`);
     // Wait for initial fetch + poll timer (1s) + poll execution
-    await Bun.sleep(1200);
+    await sleep(1200);
     sigint.trigger();
     await promise;
 
@@ -1039,7 +1115,7 @@ describe("listCommand.func — follow mode (standard)", () => {
       { ...followFlags, json: true },
       `${ORG}/${PROJECT}`
     );
-    await Bun.sleep(50);
+    await sleep(50);
     sigint.trigger();
     await promise;
 
@@ -1094,7 +1170,7 @@ describe("listCommand.func — follow mode (standard)", () => {
 
     const promise = func.call(context, followFlags, `${ORG}/${PROJECT}`);
     // Wait for initial fetch + poll timer (1s) + poll execution
-    await Bun.sleep(1200);
+    await sleep(1200);
     sigint.trigger();
     await promise;
 
@@ -1112,7 +1188,7 @@ describe("listCommand.func — follow mode (standard)", () => {
     const func = await listCommand.loader();
 
     const promise = func.call(context, followFlags, `${ORG}/${PROJECT}`);
-    await Bun.sleep(50);
+    await sleep(50);
     sigint.trigger();
     await promise;
 
@@ -1135,7 +1211,7 @@ describe("listCommand.func — follow mode (standard)", () => {
 
     const promise = func.call(context, followFlags, `${ORG}/${PROJECT}`);
     // Wait for initial fetch + poll timer (1s) + poll execution
-    await Bun.sleep(1200);
+    await sleep(1200);
     sigint.trigger();
     await promise;
 
@@ -1155,7 +1231,7 @@ describe("listCommand.func — follow mode (standard)", () => {
     const func = await listCommand.loader();
 
     const promise = func.call(context, followFlags, `${ORG}/${PROJECT}`);
-    await Bun.sleep(50);
+    await sleep(50);
     sigint.trigger();
     await promise;
 
@@ -1180,18 +1256,18 @@ describe("listCommand.func — follow mode (trace)", () => {
 
   beforeEach(() => {
     sigint = interceptSigint();
-    listTraceLogsSpy = spyOn(apiClient, "listTraceLogs");
-    resolveTraceOrgSpy = spyOn(traceTarget, "resolveTraceOrg");
-    warnIfNormalizedSpy = spyOn(
-      traceTarget,
-      "warnIfNormalized"
-    ).mockReturnValue(undefined);
-    isPlainSpy = spyOn(formatters, "isPlainOutput").mockReturnValue(true);
-    updateNotifSpy = spyOn(
-      versionCheck,
-      "getUpdateNotification"
-    ).mockReturnValue(null);
-    stderrSpy = spyOn(process.stderr, "write").mockImplementation(() => true);
+    listTraceLogsSpy = vi.spyOn(apiClient, "listTraceLogs");
+    resolveTraceOrgSpy = vi.spyOn(traceTarget, "resolveTraceOrg");
+    warnIfNormalizedSpy = vi
+      .spyOn(traceTarget, "warnIfNormalized")
+      .mockReturnValue(undefined);
+    isPlainSpy = vi.spyOn(formatters, "isPlainOutput").mockReturnValue(true);
+    updateNotifSpy = vi
+      .spyOn(versionCheck, "getUpdateNotification")
+      .mockReturnValue(null);
+    stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
   });
 
   afterEach(() => {
@@ -1219,7 +1295,7 @@ describe("listCommand.func — follow mode (trace)", () => {
     const func = await listCommand.loader();
 
     const promise = func.call(context, traceFollowFlags, TRACE_ID);
-    await Bun.sleep(50);
+    await sleep(50);
     sigint.trigger();
     await promise;
 
@@ -1235,7 +1311,7 @@ describe("listCommand.func — follow mode (trace)", () => {
     const func = await listCommand.loader();
 
     const promise = func.call(context, traceFollowFlags, TRACE_ID);
-    await Bun.sleep(50);
+    await sleep(50);
     sigint.trigger();
     await promise;
 
@@ -1262,7 +1338,7 @@ describe("listCommand.func — follow mode (trace)", () => {
 
     const promise = func.call(context, traceFollowFlags, TRACE_ID);
     // Wait for initial fetch + poll timer (1s) + poll execution
-    await Bun.sleep(1200);
+    await sleep(1200);
     sigint.trigger();
     await promise;
 
@@ -1288,7 +1364,7 @@ describe("listCommand.func — follow mode (trace)", () => {
       TRACE_ID
     );
     // Wait for initial fetch + poll timer (1s) + poll execution
-    await Bun.sleep(1200);
+    await sleep(1200);
     sigint.trigger();
     await promise;
 
@@ -1339,7 +1415,7 @@ describe("listCommand.func — follow mode (trace)", () => {
 
     const promise = func.call(context, traceFollowFlags, TRACE_ID);
     // Wait for initial fetch + poll timer (1s) + poll execution
-    await Bun.sleep(1200);
+    await sleep(1200);
     sigint.trigger();
     await promise;
 
@@ -1357,7 +1433,7 @@ describe("listCommand.func — follow mode (trace)", () => {
     const func = await listCommand.loader();
 
     const promise = func.call(context, traceFollowFlags, TRACE_ID);
-    await Bun.sleep(50);
+    await sleep(50);
     sigint.trigger();
     await promise;
 
@@ -1379,7 +1455,7 @@ describe("listCommand.func — follow mode (trace)", () => {
 
     const promise = func.call(context, traceFollowFlags, TRACE_ID);
     // Wait for initial fetch + poll timer (1s) + poll execution
-    await Bun.sleep(1200);
+    await sleep(1200);
     sigint.trigger();
     await promise;
 
@@ -1403,7 +1479,7 @@ describe("listCommand.func — follow mode (trace)", () => {
 
     const promise = func.call(context, traceFollowFlags, TRACE_ID);
     // Wait for initial fetch + poll timer (1s) + poll execution
-    await Bun.sleep(1200);
+    await sleep(1200);
     sigint.trigger();
     await promise;
 

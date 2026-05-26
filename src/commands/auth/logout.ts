@@ -30,6 +30,7 @@ export type LogoutResult = {
 
 export const logoutCommand = buildCommand({
   auth: false,
+  skipRcUrlCheck: true,
   docs: {
     brief: "Log out of Sentry",
     fullDescription:

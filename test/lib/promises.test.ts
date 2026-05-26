@@ -6,7 +6,8 @@
  * focus on concurrency and timing behavior that property tests cannot easily verify.
  */
 
-import { describe, expect, test } from "bun:test";
+import { setTimeout as sleep } from "node:timers/promises";
+import { describe, expect, test } from "vitest";
 import { anyTrue } from "../../src/lib/promises.js";
 
 describe("anyTrue concurrency", () => {
@@ -16,7 +17,7 @@ describe("anyTrue concurrency", () => {
 
     await anyTrue([1, 2, 3], async (n) => {
       startTimes.push(Date.now() - startTime);
-      await Bun.sleep(50);
+      await sleep(50);
       return n === 3;
     });
 
@@ -30,7 +31,7 @@ describe("anyTrue concurrency", () => {
     let resolveCount = 0;
 
     const promise = anyTrue([1, 2, 3], async () => {
-      await Bun.sleep(10);
+      await sleep(10);
       return true; // All pass
     });
 
@@ -51,7 +52,7 @@ describe("anyTrue concurrency", () => {
       if (n === 1) {
         return true; // Fast true
       }
-      await Bun.sleep(500); // Slow false
+      await sleep(500); // Slow false
       return false;
     });
 

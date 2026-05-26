@@ -14,8 +14,10 @@
  * so that subsequent bare `sentry cli upgrade` calls use the same channel.
  */
 
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
+import { setTimeout } from "node:timers/promises";
 import type { SentryContext } from "../../context.js";
 import {
   determineInstallDir,
@@ -32,6 +34,7 @@ import {
 import { getVersionCheckInfo } from "../../lib/db/version-check.js";
 import { UpgradeError } from "../../lib/errors.js";
 import { formatUpgradeResult } from "../../lib/formatters/human.js";
+import { formatBytes } from "../../lib/formatters/numbers.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
@@ -424,12 +427,14 @@ async function spawnWithRetry(
 ): Promise<number> {
   for (let attempt = 1; attempt <= SPAWN_MAX_ATTEMPTS; attempt++) {
     try {
-      const proc = Bun.spawn([binaryPath, ...args], {
-        stdout: "inherit",
-        stderr: "inherit",
+      const proc = spawn(binaryPath, args, {
+        stdio: ["ignore", "inherit", "inherit"],
         env,
       });
-      return await proc.exited;
+      return await new Promise<number>((resolve, reject) => {
+        proc.on("close", (code) => resolve(code ?? 1));
+        proc.on("error", (err) => reject(err));
+      });
     } catch (error) {
       // Translate the opaque Bun "Executable not found" error into an
       // actionable UpgradeError. This path triggers when the binary at
@@ -453,7 +458,7 @@ async function spawnWithRetry(
       log.warn(
         `Binary is locked (antivirus scan?), retrying in ${delay}ms... (attempt ${attempt}/${SPAWN_MAX_ATTEMPTS})`
       );
-      await Bun.sleep(delay);
+      await setTimeout(delay);
     }
   }
   // Unreachable — the loop either returns or throws
@@ -541,8 +546,9 @@ async function executeStandardUpgrade(opts: {
   );
 
   if (downloadResult?.patchBytes) {
-    const kb = (downloadResult.patchBytes / 1024).toFixed(1);
-    log.info(`Applied delta patch (${kb} KB downloaded)`);
+    log.info(
+      `Applied delta patch (${formatBytes(downloadResult.patchBytes)} downloaded)`
+    );
   }
 
   // Run setup on the new binary to update completions, agent skills,
@@ -611,8 +617,9 @@ async function migrateToStandaloneForNightly(
   );
 
   if (downloadResult?.patchBytes) {
-    const kb = (downloadResult.patchBytes / 1024).toFixed(1);
-    log.info(`Applied delta patch (${kb} KB downloaded)`);
+    log.info(
+      `Applied delta patch (${formatBytes(downloadResult.patchBytes)} downloaded)`
+    );
   }
 
   if (!downloadResult) {

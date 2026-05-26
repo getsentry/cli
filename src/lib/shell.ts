@@ -6,7 +6,12 @@
  */
 
 import { existsSync } from "node:fs";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { basename, delimiter, join } from "node:path";
+import { logger } from "./logger.js";
+import { whichSync } from "./which.js";
+
+const log = logger.withTag("shell");
 
 /** Supported shell types */
 export type ShellType = "bash" | "zsh" | "fish" | "sh" | "ash" | "unknown";
@@ -187,12 +192,14 @@ async function addToShellConfig(
   command: string,
   label: string
 ): Promise<PathModificationResult> {
-  const file = Bun.file(configFile);
-  const exists = await file.exists();
+  const exists = await access(configFile).then(
+    () => true,
+    () => false
+  );
 
   if (!exists) {
     try {
-      await Bun.write(configFile, `# sentry\n${command}\n`);
+      await writeFile(configFile, `# sentry\n${command}\n`, "utf-8");
       return {
         modified: true,
         configFile,
@@ -209,7 +216,7 @@ async function addToShellConfig(
     }
   }
 
-  const content = await file.text();
+  const content = await readFile(configFile, "utf-8");
 
   if (content.includes(command) || content.includes(`"${directory}"`)) {
     return {
@@ -225,7 +232,7 @@ async function addToShellConfig(
       ? `${content}\n# sentry\n${command}\n`
       : `${content}\n\n# sentry\n${command}\n`;
 
-    await Bun.write(configFile, newContent);
+    await writeFile(configFile, newContent, "utf-8");
     return {
       modified: true,
       configFile,
@@ -292,17 +299,27 @@ export async function addToGitHubPath(
   }
 
   try {
-    const file = Bun.file(env.GITHUB_PATH);
-    const content = (await file.exists()) ? await file.text() : "";
+    let content = "";
+    try {
+      content = await readFile(env.GITHUB_PATH, "utf-8");
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        log.debug(`Failed to read GITHUB_PATH (${code}):`, error);
+        return false;
+      }
+      // File doesn't exist yet — start with empty content
+    }
 
     if (!content.includes(directory)) {
       const newContent = content.endsWith("\n")
         ? `${content}${directory}\n`
         : `${content}\n${directory}\n`;
-      await Bun.write(env.GITHUB_PATH, newContent);
+      await writeFile(env.GITHUB_PATH, newContent, "utf-8");
     }
     return true;
-  } catch {
+  } catch (error) {
+    log.debug("Failed to update GITHUB_PATH:", error);
     return false;
   }
 }
@@ -318,5 +335,5 @@ export async function addToGitHubPath(
  */
 export function isBashAvailable(pathEnv?: string): boolean {
   const opts = pathEnv !== undefined ? { PATH: pathEnv } : undefined;
-  return Bun.which("bash", opts) !== null;
+  return whichSync("bash", opts) !== null;
 }

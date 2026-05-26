@@ -4,16 +4,34 @@
  * Tests for finding project root by walking up from a starting directory.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+// Mock Sentry to avoid telemetry side effects. startSpan must pass a no-op
+// span object to the callback — withTracingSpan calls span.setStatus() on it,
+// and production code may call span.setAttribute()/setAttributes() as well.
+const { noopSpan } = vi.hoisted(() => ({
+  noopSpan: {
+    setStatus: vi.fn(),
+    setAttribute: vi.fn(),
+    setAttributes: vi.fn(),
+  },
+}));
+
+vi.mock("@sentry/node-core/light", () => ({
+  startSpan: (_opts: unknown, fn: (span: unknown) => unknown) => fn(noopSpan),
+  captureException: vi.fn(),
+}));
+
 import {
   findProjectRoot,
   getStopBoundary,
   hasBuildSystemMarker,
   hasLanguageMarker,
   hasRepoRootMarker,
+  STAT_CONCURRENCY,
 } from "../../../src/lib/dsn/project-root.js";
 
 // Test directory structure helper
@@ -316,5 +334,64 @@ describe("project-root", () => {
         expect(result.levelsTraversed).toBe(5);
       });
     });
+  });
+});
+
+/**
+ * Tests for stat() concurrency limiting.
+ *
+ * Note: pathExists() in project-root.ts uses a statically-bound import of
+ * node:fs/promises stat, so vi.mock() cannot intercept it post-hoc. These
+ * tests instead verify the exported STAT_CONCURRENCY constant (which configures
+ * the pLimit instance) and confirm marker detection works end-to-end. The
+ * concurrency enforcement itself is delegated to pLimit, whose correctness is
+ * covered by its own test suite.
+ */
+describe("stat() concurrency limiting", () => {
+  function makeTempConcurrencyDir(prefix: string): string {
+    const dir = join(
+      tmpdir(),
+      `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  test("STAT_CONCURRENCY is 32 — matches the pLimit budget in project-root.ts", () => {
+    // Guards against accidental changes to the budget value. The actual
+    // enforcement is delegated to pLimit; what we own is this constant.
+    expect(STAT_CONCURRENCY).toBe(32);
+  });
+
+  test("marker detection works correctly through the limiter (positive case)", async () => {
+    const testDir = makeTempConcurrencyDir("sentry-cli-marker");
+    writeFileSync(join(testDir, "Makefile"), "");
+
+    const result = await hasBuildSystemMarker(testDir);
+
+    expect(result).toBe(true);
+  });
+
+  test("marker detection returns false when no match (negative case)", async () => {
+    const testDir = makeTempConcurrencyDir("sentry-cli-no-marker");
+
+    const result = await hasBuildSystemMarker(testDir);
+
+    expect(result).toBe(false);
+  });
+
+  test("multiple marker groups run correctly in parallel through shared limiter", async () => {
+    const testDir = makeTempConcurrencyDir("sentry-cli-parallel");
+    writeFileSync(join(testDir, "package.json"), "{}");
+
+    // Fire both checks concurrently — both share statLimit. The language marker
+    // should be found; the build system marker should not.
+    const [hasBuild, hasLang] = await Promise.all([
+      hasBuildSystemMarker(testDir),
+      hasLanguageMarker(testDir),
+    ]);
+
+    expect(hasBuild).toBe(false);
+    expect(hasLang).toBe(true);
   });
 });

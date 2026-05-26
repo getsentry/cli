@@ -6,7 +6,6 @@
  * guarding against API response format variations (CLI-BH).
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   constant,
   assert as fcAssert,
@@ -17,6 +16,7 @@ import {
   string,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   DetailedSentryLogSchema,
   SentryLogSchema,

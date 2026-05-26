@@ -7,9 +7,17 @@
  */
 
 import { spawn } from "node:child_process";
-import { chmodSync, realpathSync, statSync, unlinkSync } from "node:fs";
+import {
+  chmodSync,
+  createWriteStream,
+  realpathSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
+import { setTimeout } from "node:timers/promises";
 import {
   acquireLock,
   cleanupOldBinary,
@@ -29,6 +37,7 @@ import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
 import type { ReleaseChannel } from "./db/release-channel.js";
 import { attemptDeltaUpgrade, type DeltaResult } from "./delta-upgrade.js";
 import { AbortError, UpgradeError } from "./errors.js";
+import { formatBytes } from "./formatters/numbers.js";
 import {
   downloadNightlyBlob,
   fetchManifest,
@@ -551,13 +560,48 @@ async function streamDecompressToFile(
   destPath: string
 ): Promise<void> {
   const stream = body.pipeThrough(new DecompressionStream("gzip"));
-  const writer = Bun.file(destPath).writer();
+  const writer = createWriteStream(destPath);
+  // Capture write errors early — without a listener, Node crashes with
+  // ERR_UNHANDLED_ERROR if a write fails (ENOSPC, EIO, etc.) during the loop.
+  let writeError: Error | undefined;
+  writer.on("error", (err) => {
+    writeError ??= err;
+  });
   try {
     for await (const chunk of stream) {
-      writer.write(chunk);
+      if (writeError) {
+        break;
+      }
+      const ok = writer.write(chunk);
+      if (!(ok || writeError)) {
+        // Race drain against error — an I/O failure (ENOSPC) while the
+        // buffer is full would never emit 'drain', causing a hang.
+        // Clean up the unused listener to avoid MaxListenersExceededWarning.
+        await new Promise<void>((resolve) => {
+          const onDrain = (): void => {
+            writer.removeListener("error", onError);
+            resolve();
+          };
+          const onError = (): void => {
+            writer.removeListener("drain", onDrain);
+            resolve();
+          };
+          writer.once("drain", onDrain);
+          writer.once("error", onError);
+        });
+      }
     }
   } finally {
-    await writer.end();
+    await new Promise<void>((resolve, reject) => {
+      writer.end((err?: Error | null) => {
+        const finalErr = err ?? writeError;
+        if (finalErr) {
+          reject(finalErr);
+        } else {
+          resolve();
+        }
+      });
+    });
   }
 }
 
@@ -657,7 +701,7 @@ async function downloadStableToPath(
   // process before the download completes (Bun event-loop bug).
   // See: https://github.com/oven-sh/bun/issues/13237
   const body = await response.arrayBuffer();
-  await Bun.write(destPath, body);
+  await writeFile(destPath, new Uint8Array(body));
 }
 
 /**
@@ -724,7 +768,7 @@ async function waitForBinaryVisible(path: string): Promise<number> {
     log.debug(
       `Downloaded binary not yet visible at ${path}, retrying in ${delay}ms (attempt ${attempt}/${VERIFY_MAX_ATTEMPTS})`
     );
-    await Bun.sleep(delay);
+    await setTimeout(delay);
   }
   throw new UpgradeError(
     "execution_failed",
@@ -804,7 +848,7 @@ export async function downloadBinaryToTemp(
     // exponential backoff so a transient filesystem-visibility race
     // self-heals without asking the user to rerun.
     const verifiedSize = await waitForBinaryVisible(tempPath);
-    log.debug(`Downloaded binary verified (${verifiedSize} bytes)`);
+    log.debug(`Binary verified (${formatBytes(verifiedSize)})`);
 
     // Clear consumed patch cache — patches for the old version are useless
     // after the binary has been updated (whether via delta or full download).

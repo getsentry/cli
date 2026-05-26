@@ -6,7 +6,7 @@
  * captures flags/args and calls the original function.
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { setTimeout as sleep } from "node:timers/promises";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as Sentry from "@sentry/node-core/light";
 import {
@@ -15,8 +15,10 @@ import {
   run,
   text_en,
 } from "@stricli/core";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   applyLoggingFlags,
+  applyOrgProjectFlags,
   buildCommand,
   FIELDS_FLAG,
   JSON_FLAG,
@@ -24,9 +26,10 @@ import {
   numberParser,
   VERBOSE_FLAG,
 } from "../../src/lib/command.js";
-import { OutputError } from "../../src/lib/errors.js";
+import { EXIT, OutputError } from "../../src/lib/errors.js";
 import { CommandOutput } from "../../src/lib/formatters/output.js";
 import { LOG_LEVEL_NAMES, logger, setLogLevel } from "../../src/lib/logger.js";
+import { resolveOrgAndProject } from "../../src/lib/resolve-target.js";
 import { buildRouteMap } from "../../src/lib/route-map.js";
 
 /** Minimal context for test commands */
@@ -112,8 +115,8 @@ describe("buildCommand telemetry integration", () => {
   let setContextSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    setTagSpy = spyOn(Sentry, "setTag");
-    setContextSpy = spyOn(Sentry, "setContext");
+    setTagSpy = vi.spyOn(Sentry, "setTag");
+    setContextSpy = vi.spyOn(Sentry, "setContext");
   });
 
   afterEach(() => {
@@ -318,7 +321,7 @@ describe("buildCommand telemetry integration", () => {
       },
       // biome-ignore lint/correctness/useYield: test command — no output to yield
       async *func(_flags: { delay: number }) {
-        await Bun.sleep(1);
+        await sleep(1);
         executed = true;
       },
     });
@@ -1255,7 +1258,7 @@ describe("buildCommand return-based output", () => {
       },
       parameters: {},
       async *func(this: TestContext) {
-        await Bun.sleep(1);
+        await sleep(1);
         yield new CommandOutput({ name: "Bob" });
       },
     });
@@ -1385,7 +1388,7 @@ describe("buildCommand return-based output", () => {
       expect.unreachable("Expected OutputError to be thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(OutputError);
-      expect((err as OutputError).exitCode).toBe(1);
+      expect((err as OutputError).exitCode).toBe(EXIT.OUTPUT_ERROR);
     }
     // Output was rendered BEFORE the throw
     expect(ctx.output.join("")).toContain("Error: not found");
@@ -1434,9 +1437,359 @@ describe("buildCommand return-based output", () => {
       expect.unreachable("Expected OutputError to be thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(OutputError);
-      expect((err as OutputError).exitCode).toBe(1);
+      expect((err as OutputError).exitCode).toBe(EXIT.OUTPUT_ERROR);
     }
     const jsonOutput = JSON.parse(ctx.output.join(""));
     expect(jsonOutput).toEqual({ error: "not found" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyOrgProjectFlags
+// ---------------------------------------------------------------------------
+
+describe("applyOrgProjectFlags", () => {
+  let savedOrg: string | undefined;
+  let savedProject: string | undefined;
+
+  beforeEach(() => {
+    savedOrg = process.env.SENTRY_ORG;
+    savedProject = process.env.SENTRY_PROJECT;
+    delete process.env.SENTRY_ORG;
+    delete process.env.SENTRY_PROJECT;
+  });
+
+  afterEach(() => {
+    if (savedOrg !== undefined) {
+      process.env.SENTRY_ORG = savedOrg;
+    } else {
+      delete process.env.SENTRY_ORG;
+    }
+    if (savedProject !== undefined) {
+      process.env.SENTRY_PROJECT = savedProject;
+    } else {
+      delete process.env.SENTRY_PROJECT;
+    }
+  });
+
+  test("sets both env vars when flags provided", () => {
+    applyOrgProjectFlags("my-org", "my-proj", false, false);
+    expect(process.env.SENTRY_ORG).toBe("my-org");
+    expect(process.env.SENTRY_PROJECT).toBe("my-proj");
+  });
+
+  test("skips when command owns the flag", () => {
+    applyOrgProjectFlags("my-org", "my-proj", true, true);
+    expect(process.env.SENTRY_ORG).toBeUndefined();
+    expect(process.env.SENTRY_PROJECT).toBeUndefined();
+  });
+
+  test("sets only org when project is undefined", () => {
+    applyOrgProjectFlags("my-org", undefined, false, false);
+    expect(process.env.SENTRY_ORG).toBe("my-org");
+    expect(process.env.SENTRY_PROJECT).toBeUndefined();
+  });
+
+  test("sets only project when org is undefined", () => {
+    applyOrgProjectFlags(undefined, "my-proj", false, false);
+    expect(process.env.SENTRY_ORG).toBeUndefined();
+    expect(process.env.SENTRY_PROJECT).toBe("my-proj");
+  });
+
+  test("overwrites existing env var", () => {
+    process.env.SENTRY_ORG = "old";
+    applyOrgProjectFlags("new", undefined, false, false);
+    expect(process.env.SENTRY_ORG).toBe("new");
+  });
+
+  test("does nothing when both flags are undefined", () => {
+    applyOrgProjectFlags(undefined, undefined, false, false);
+    expect(process.env.SENTRY_ORG).toBeUndefined();
+    expect(process.env.SENTRY_PROJECT).toBeUndefined();
+  });
+
+  test("trims whitespace from flag values before writing", () => {
+    applyOrgProjectFlags("  my-org  ", "  my-proj  ", false, false);
+    expect(process.env.SENTRY_ORG).toBe("my-org");
+    expect(process.env.SENTRY_PROJECT).toBe("my-proj");
+  });
+
+  test("treats empty string as not provided — preserves existing env var", () => {
+    process.env.SENTRY_ORG = "preserved-org";
+    applyOrgProjectFlags("", undefined, false, false);
+    // Empty string must NOT clobber a real pre-existing env var
+    expect(process.env.SENTRY_ORG).toBe("preserved-org");
+  });
+
+  test("treats whitespace-only as not provided — preserves existing env var", () => {
+    process.env.SENTRY_PROJECT = "preserved-proj";
+    applyOrgProjectFlags(undefined, "   ", false, false);
+    // Whitespace-only must NOT clobber a real pre-existing env var
+    expect(process.env.SENTRY_PROJECT).toBe("preserved-proj");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildCommand --org/--project compat flags (end-to-end)
+// ---------------------------------------------------------------------------
+
+describe("buildCommand --org/--project compat flags", () => {
+  let savedOrg: string | undefined;
+  let savedProject: string | undefined;
+
+  beforeEach(() => {
+    savedOrg = process.env.SENTRY_ORG;
+    savedProject = process.env.SENTRY_PROJECT;
+    delete process.env.SENTRY_ORG;
+    delete process.env.SENTRY_PROJECT;
+  });
+
+  afterEach(() => {
+    if (savedOrg !== undefined) {
+      process.env.SENTRY_ORG = savedOrg;
+    } else {
+      delete process.env.SENTRY_ORG;
+    }
+    if (savedProject !== undefined) {
+      process.env.SENTRY_PROJECT = savedProject;
+    } else {
+      delete process.env.SENTRY_PROJECT;
+    }
+  });
+
+  test("--org sets SENTRY_ORG env var", async () => {
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      async *func() {
+        // no-op
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test", "--org", "my-org"], ctx as TestContext);
+
+    expect(process.env.SENTRY_ORG).toBe("my-org");
+  });
+
+  test("--project sets SENTRY_PROJECT env var", async () => {
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      async *func() {
+        // no-op
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test", "--project", "my-project"], ctx as TestContext);
+
+    expect(process.env.SENTRY_PROJECT).toBe("my-project");
+  });
+
+  test("--org overwrites existing SENTRY_ORG", async () => {
+    process.env.SENTRY_ORG = "original-org";
+
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      async *func() {
+        // no-op
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test", "--org", "new-org"], ctx as TestContext);
+
+    expect(process.env.SENTRY_ORG).toBe("new-org");
+  });
+
+  test("--org and --project are stripped from func flags", async () => {
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    const command = buildCommand<{ limit: number }, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {
+        flags: {
+          limit: {
+            kind: "parsed",
+            parse: numberParser,
+            brief: "Limit",
+            default: "10",
+          },
+        },
+      },
+      // biome-ignore lint/correctness/useYield: test command
+      async *func(this: TestContext, flags: { limit: number }) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(
+      app,
+      ["test", "--org", "sentry", "--project", "cli", "--limit", "50"],
+      ctx as TestContext
+    );
+
+    expect(receivedFlags).toBeDefined();
+    expect(receivedFlags!.limit).toBe(50);
+    expect(receivedFlags!.org).toBeUndefined();
+    expect(receivedFlags!.project).toBeUndefined();
+    // Both env vars set
+    expect(process.env.SENTRY_ORG).toBe("sentry");
+    expect(process.env.SENTRY_PROJECT).toBe("cli");
+  });
+
+  test("command-owned --project is preserved and NOT written to env", async () => {
+    let receivedFlags: Record<string, unknown> | null = null;
+
+    // Simulates release create which has its own --project flag
+    const command = buildCommand<{ project?: string }, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {
+        flags: {
+          project: {
+            kind: "parsed",
+            parse: String,
+            brief: "Project slug",
+            optional: true,
+          },
+        },
+      },
+      // biome-ignore lint/correctness/useYield: test command
+      async *func(this: TestContext, flags: { project?: string }) {
+        receivedFlags = flags as unknown as Record<string, unknown>;
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test", "--project", "my-project"], ctx as TestContext);
+
+    // Command's own --project is passed through (not stripped)
+    expect(receivedFlags).toBeDefined();
+    expect(receivedFlags!.project).toBe("my-project");
+    // Should NOT be written to env (command owns the flag)
+    expect(process.env.SENTRY_PROJECT).toBeUndefined();
+  });
+
+  test("--org=value equals form works", async () => {
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      async *func() {
+        // no-op
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test", "--org=my-org"], ctx as TestContext);
+
+    expect(process.env.SENTRY_ORG).toBe("my-org");
+  });
+
+  test("--project overwrites existing SENTRY_PROJECT", async () => {
+    process.env.SENTRY_PROJECT = "original-proj";
+
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      async *func() {
+        // no-op
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(app, ["test", "--project", "new-proj"], ctx as TestContext);
+
+    expect(process.env.SENTRY_PROJECT).toBe("new-proj");
+  });
+
+  test("--org/--project values flow into resolveOrgAndProject (end-to-end)", async () => {
+    // Integration test: verifies the full plumbing from CLI flag → env var
+    // → resolveFromEnvVars (priority #2 in the resolution chain). This is the
+    // contract this PR exists to deliver: LLM-generated `--org foo --project
+    // bar` should make org/project resolution succeed without an explicit
+    // positional arg.
+    let resolved: Awaited<ReturnType<typeof resolveOrgAndProject>> = null;
+
+    const command = buildCommand<Record<string, never>, [], TestContext>({
+      auth: false,
+      docs: { brief: "Test" },
+      parameters: {},
+      // biome-ignore lint/correctness/useYield: test command — no output to yield
+      async *func(this: TestContext) {
+        resolved = await resolveOrgAndProject({ cwd: "/tmp" });
+      },
+    });
+
+    const routeMap = buildRouteMap({
+      routes: { test: command },
+      docs: { brief: "Test app" },
+    });
+    const app = buildApplication(routeMap, { name: "test" });
+    const ctx = createTestContext();
+
+    await run(
+      app,
+      ["test", "--org", "flag-org", "--project", "flag-proj"],
+      ctx as TestContext
+    );
+
+    expect(resolved).not.toBeNull();
+    expect(resolved?.org).toBe("flag-org");
+    expect(resolved?.project).toBe("flag-proj");
+    // detectedFrom proves the resolution went through the env-var path,
+    // not some other branch.
+    expect(resolved?.detectedFrom).toContain("env var");
   });
 });

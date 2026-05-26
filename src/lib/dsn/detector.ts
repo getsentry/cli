@@ -12,7 +12,7 @@
  * Priority: .env with SENTRY_DSN > code > .env files > SENTRY_DSN env var
  */
 
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   getCachedDetection,
@@ -291,7 +291,7 @@ async function verifyFileDsnCache(
     if (!(await isRegularFile(filePath, "verifyFileDsnCache.stat"))) {
       return null;
     }
-    const content = await Bun.file(filePath).text();
+    const content = await readFile(filePath, "utf-8");
     const foundDsn = extractDsnFromContent(content, cached.source);
 
     if (foundDsn === cached.dsn) {
@@ -400,13 +400,15 @@ async function fullScanFirst(cwd: string): Promise<DetectedDsn | null> {
 export function getDsnSourceDescription(dsn: DetectedDsn): string {
   switch (dsn.source) {
     case "env":
-      return `${SENTRY_DSN_ENV} environment variable`;
+      return `${dsn.sourcePath ?? SENTRY_DSN_ENV} environment variable`;
     case "env_file":
       return dsn.sourcePath ?? ".env file";
     case "config":
       return dsn.sourcePath ?? "config file";
     case "code":
       return dsn.sourcePath ?? "source code";
+    case "inferred":
+      return "directory name inference";
     default:
       return "unknown source";
   }

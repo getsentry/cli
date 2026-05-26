@@ -81,7 +81,7 @@ The SKILL.md file is **auto-generated** from the CLI's command definitions. Do n
 To regenerate after modifying commands:
 
 ```bash
-bun run generate:docs
+pnpm run generate:docs
 ```
 
 CI will auto-commit updated skill files when they are stale.

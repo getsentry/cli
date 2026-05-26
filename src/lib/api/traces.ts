@@ -10,18 +10,27 @@ import {
   type SpanListItem,
   type SpansResponse,
   SpansResponseSchema,
+  type TraceItemDetail,
+  TraceItemDetailSchema,
+  type TraceMeta,
+  TraceMetaSchema,
   type TraceSpan,
   type TransactionListItem,
   type TransactionsResponse,
   TransactionsResponseSchema,
 } from "../../types/index.js";
 
+// Re-export so existing callers (api-client.ts, formatters/trace.ts) don't need to change.
+export type { TraceItemAttribute, TraceItemDetail } from "../../types/index.js";
+
 import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import { isAllDigits } from "../utils.js";
 
 import {
+  API_MAX_PER_PAGE,
   apiRequestToRegion,
+  autoPaginate,
   type PaginatedResponse,
   parseLinkHeader,
 } from "./infrastructure.js";
@@ -72,21 +81,10 @@ export const REDUNDANT_DETAIL_ATTRS = new Set([
   "environment",
 ]);
 
-/** A single attribute returned by the trace-items detail endpoint */
-export type TraceItemAttribute = {
-  name: string;
-  type: "str" | "int" | "float" | "bool";
-  value: string | number | boolean;
-};
-
-/** Response from GET /projects/{org}/{project}/trace-items/{itemId}/ */
-export type TraceItemDetail = {
-  itemId: string;
-  timestamp: string;
-  attributes: TraceItemAttribute[];
-  meta: Record<string, unknown>;
-  links: unknown;
-};
+// TraceItemAttribute and TraceItemDetail are defined with Zod schemas in
+// src/types/sentry.ts and re-exported via the types barrel (src/types/index.ts).
+// They are also re-exported from this module (see top of file) for callers
+// that already import from traces.ts.
 
 /** Options for {@link getDetailedTrace}. */
 type GetDetailedTraceOptions = {
@@ -133,35 +131,81 @@ export async function getDetailedTrace(
   return data.map(normalizeTraceSpan);
 }
 
+type GetTraceItemDetailOptions = {
+  traceId: string;
+  itemType: "spans" | "logs";
+};
+
+/**
+ * Fetch full attribute details for a single trace item via the experimental
+ * /projects/{org}/{project}/trace-items/{itemId}/ endpoint.
+ *
+ * This endpoint is not yet in @sentry/api (getsentry/sentry-api-schema) because
+ * it is marked EXPERIMENTAL in Sentry. Both span and log detail views use it.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @param itemId - The item ID (span ID or log sentry.item_id)
+ * @param options - traceId (required by endpoint) and itemType ("spans" | "logs")
+ */
+export async function getTraceItemDetail(
+  orgSlug: string,
+  projectSlug: string,
+  itemId: string,
+  { traceId, itemType }: GetTraceItemDetailOptions
+): Promise<TraceItemDetail> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<TraceItemDetail>(
+    regionUrl,
+    `/projects/${orgSlug}/${projectSlug}/trace-items/${itemId}/`,
+    {
+      params: { trace_id: traceId, item_type: itemType },
+      schema: TraceItemDetailSchema,
+    }
+  );
+  return data;
+}
+
 /**
  * Fetch full attribute details for a single span.
- *
- * Uses the trace-items detail endpoint which returns ALL span attributes
- * without requiring the caller to enumerate them. This is the same endpoint
- * the Sentry frontend uses in the span detail sidebar.
  *
  * @param orgSlug - Organization slug
  * @param projectSlug - Project slug
  * @param spanId - The 16-char hex span ID
  * @param traceId - The parent trace ID (required for lookup)
- * @returns Full span detail with all attributes
  */
-export async function getSpanDetails(
+export function getSpanDetails(
   orgSlug: string,
   projectSlug: string,
   spanId: string,
   traceId: string
 ): Promise<TraceItemDetail> {
+  return getTraceItemDetail(orgSlug, projectSlug, spanId, {
+    traceId,
+    itemType: "spans",
+  });
+}
+
+/**
+ * Fetch high-level metadata for a trace.
+ *
+ * Uses the org-scoped trace-meta endpoint to retrieve counts for spans, errors,
+ * logs, and performance issues. This is useful for lightweight trace
+ * references without fetching the full trace tree.
+ */
+export async function getTraceMeta(
+  orgSlug: string,
+  traceId: string,
+  statsPeriod = "14d"
+): Promise<TraceMeta> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
-  const { data } = await apiRequestToRegion<TraceItemDetail>(
+  const { data } = await apiRequestToRegion<TraceMeta>(
     regionUrl,
-    `/projects/${orgSlug}/${projectSlug}/trace-items/${spanId}/`,
+    `/organizations/${orgSlug}/trace-meta/${traceId}/`,
     {
-      params: {
-        trace_id: traceId,
-        item_type: "spans",
-      },
+      params: { statsPeriod },
+      schema: TraceMetaSchema,
     }
   );
   return data;
@@ -293,30 +337,23 @@ type ListTransactionsOptions = {
 };
 
 /**
- * List recent transactions for a project.
- * Uses the Explore/Events API with dataset=transactions.
+ * Fetch a single page of transactions from the Explore/Events endpoint.
  *
- * Handles project slug vs numeric ID automatically:
- * - Numeric IDs are passed as the `project` parameter
- * - Slugs are added to the query string as `project:{slug}`
- *
- * @param orgSlug - Organization slug
- * @param projectSlug - Project slug or numeric ID
- * @param options - Query options (query, limit, sort, statsPeriod, cursor)
- * @returns Paginated response with transaction items and optional next cursor
+ * Internal helper used by {@link listTransactions} for both single-page and
+ * multi-page (auto-paginating) fetches.
  */
-export async function listTransactions(
+// biome-ignore lint/nursery/useMaxParams: internal helper mirrors the public API surface
+async function fetchTransactionsPage(
+  regionUrl: string,
   orgSlug: string,
   projectSlug: string,
-  options: ListTransactionsOptions = {}
+  options: ListTransactionsOptions,
+  perPage: number
 ): Promise<PaginatedResponse<TransactionListItem[]>> {
   const isNumericProject = isAllDigits(projectSlug);
   const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
-  const regionUrl = await resolveOrgRegion(orgSlug);
-
-  // Use raw request: the SDK's dataset type doesn't include "transactions"
   const { data: response, headers } =
     await apiRequestToRegion<TransactionsResponse>(
       regionUrl,
@@ -330,7 +367,7 @@ export async function listTransactions(
           // sending `query=` causes the Sentry API to behave differently than
           // omitting the parameter.
           query: fullQuery || undefined,
-          per_page: options.limit || 10,
+          per_page: perPage,
           statsPeriod:
             options.start || options.end
               ? undefined
@@ -349,6 +386,45 @@ export async function listTransactions(
 
   const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
   return { data: response.data, nextCursor };
+}
+
+/**
+ * List recent transactions for a project.
+ * Uses the Explore/Events API with dataset=transactions.
+ *
+ * Handles project slug vs numeric ID automatically:
+ * - Numeric IDs are passed as the `project` parameter
+ * - Slugs are added to the query string as `project:{slug}`
+ *
+ * When `limit` exceeds {@link API_MAX_PER_PAGE}, transparently fetches multiple
+ * pages using cursor-based pagination (bounded by {@link MAX_PAGINATION_PAGES}).
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug or numeric ID
+ * @param options - Query options (query, limit, sort, statsPeriod, cursor)
+ * @returns Paginated response with transaction items and optional next cursor
+ */
+export async function listTransactions(
+  orgSlug: string,
+  projectSlug: string,
+  options: ListTransactionsOptions = {}
+): Promise<PaginatedResponse<TransactionListItem[]>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const limit = options.limit || 10;
+  const perPage = Math.min(limit, API_MAX_PER_PAGE);
+
+  return autoPaginate(
+    (cursor) =>
+      fetchTransactionsPage(
+        regionUrl,
+        orgSlug,
+        projectSlug,
+        { ...options, cursor },
+        perPage
+      ),
+    limit,
+    options.cursor
+  );
 }
 
 // Span listing
@@ -386,31 +462,45 @@ type ListSpansOptions = {
   start?: string;
   /** Absolute end datetime (ISO-8601). Mutually exclusive with statsPeriod. */
   end?: string;
+  /** When true, search across all projects (sends project=-1). Used for trace mode. */
+  allProjects?: boolean;
 };
 
 /**
- * List spans using the EAP spans search endpoint.
- * Uses the Explore/Events API with dataset=spans.
+ * Fetch a single page of spans from the Explore/Events endpoint.
  *
- * @param orgSlug - Organization slug
- * @param projectSlug - Project slug or numeric ID
- * @param options - Query options (query, limit, sort, statsPeriod, cursor)
- * @returns Paginated response with span items and optional next cursor
+ * Internal helper used by {@link listSpans} for both single-page and
+ * multi-page (auto-paginating) fetches.
  */
-export async function listSpans(
+// biome-ignore lint/nursery/useMaxParams: internal helper mirrors the public API surface
+async function fetchSpansPage(
+  regionUrl: string,
   orgSlug: string,
   projectSlug: string,
-  options: ListSpansOptions = {}
+  options: ListSpansOptions,
+  perPage: number
 ): Promise<PaginatedResponse<SpanListItem[]>> {
   const isNumericProject = isAllDigits(projectSlug);
-  const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
+  let projectFilter: string;
+  if (options.allProjects) {
+    projectFilter = "";
+  } else if (isNumericProject) {
+    projectFilter = "";
+  } else {
+    projectFilter = `project:${projectSlug}`;
+  }
   const fullQuery = [projectFilter, options.query].filter(Boolean).join(" ");
 
   const fields = options.extraFields?.length
     ? SPAN_FIELDS.concat(options.extraFields)
     : SPAN_FIELDS;
 
-  const regionUrl = await resolveOrgRegion(orgSlug);
+  let projectParam: string | undefined;
+  if (options.allProjects) {
+    projectParam = "-1";
+  } else if (isNumericProject) {
+    projectParam = projectSlug;
+  }
 
   const { data: response, headers } = await apiRequestToRegion<SpansResponse>(
     regionUrl,
@@ -419,9 +509,9 @@ export async function listSpans(
       params: {
         dataset: "spans",
         field: fields,
-        project: isNumericProject ? projectSlug : undefined,
+        project: projectParam,
         query: fullQuery || undefined,
-        per_page: options.limit || 10,
+        per_page: perPage,
         statsPeriod:
           options.start || options.end
             ? undefined
@@ -437,4 +527,39 @@ export async function listSpans(
 
   const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
   return { data: response.data, nextCursor };
+}
+
+/**
+ * List spans using the EAP spans search endpoint.
+ * Uses the Explore/Events API with dataset=spans.
+ *
+ * When `limit` exceeds {@link API_MAX_PER_PAGE}, transparently fetches multiple
+ * pages using cursor-based pagination (bounded by {@link MAX_PAGINATION_PAGES}).
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug or numeric ID
+ * @param options - Query options (query, limit, sort, statsPeriod, cursor)
+ * @returns Paginated response with span items and optional next cursor
+ */
+export async function listSpans(
+  orgSlug: string,
+  projectSlug: string,
+  options: ListSpansOptions = {}
+): Promise<PaginatedResponse<SpanListItem[]>> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const limit = options.limit || 10;
+  const perPage = Math.min(limit, API_MAX_PER_PAGE);
+
+  return autoPaginate(
+    (cursor) =>
+      fetchSpansPage(
+        regionUrl,
+        orgSlug,
+        projectSlug,
+        { ...options, cursor },
+        perPage
+      ),
+    limit,
+    options.cursor
+  );
 }

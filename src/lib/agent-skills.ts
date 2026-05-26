@@ -10,6 +10,7 @@
  */
 
 import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { captureException } from "@sentry/node-core/light";
 import { SKILL_FILES } from "../generated/skill-content.js";
@@ -68,7 +69,7 @@ async function writeSkillFiles(
       if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true, mode: 0o755 });
       }
-      await Bun.write(fullPath, content);
+      await writeFile(fullPath, content, "utf-8");
       if (relativePath.startsWith("references/")) {
         referenceCount += 1;
       }

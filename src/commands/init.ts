@@ -18,6 +18,7 @@
  */
 
 import path from "node:path";
+import { setTag } from "@sentry/node-core/light";
 import type { SentryContext } from "../context.js";
 import { findProjectsBySlug } from "../lib/api/projects.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
@@ -37,14 +38,57 @@ import {
 const log = logger.withTag("init");
 
 const FEATURE_DELIMITER = /[,+ ]+/;
+const NON_INTERACTIVE_USAGE_HINT =
+  "sentry init --yes --features errors,tracing,replay [target] [directory]";
 
-const USAGE_HINT = "sentry init <org>/<project> [directory]";
+const FEATURE_ALIASES = {
+  errors: "errorMonitoring",
+  errorMonitoring: "errorMonitoring",
+  tracing: "performanceMonitoring",
+  performanceMonitoring: "performanceMonitoring",
+  logs: "logs",
+  replay: "sessionReplay",
+  sessionReplay: "sessionReplay",
+  metrics: "metrics",
+  profiling: "profiling",
+  sourcemaps: "sourceMaps",
+  sourceMaps: "sourceMaps",
+  crons: "crons",
+  "ai-monitoring": "aiMonitoring",
+  aiMonitoring: "aiMonitoring",
+  "user-feedback": "userFeedback",
+  userFeedback: "userFeedback",
+} as const;
+
+const SUPPORTED_FEATURE_NAMES = [
+  "errors",
+  "tracing",
+  "logs",
+  "replay",
+  "metrics",
+  "profiling",
+  "sourcemaps",
+  "crons",
+  "ai-monitoring",
+  "user-feedback",
+] as const;
+
+const SUPPORTED_FEATURE_TEXT = SUPPORTED_FEATURE_NAMES.join(", ");
 
 type InitFlags = {
   readonly yes: boolean;
   readonly "dry-run": boolean;
   readonly features?: string[];
   readonly team?: string;
+  readonly app?: string;
+  /**
+   * Default `true` — Ink is the default UI on both the Bun binary
+   * and the npm/Node distribution. Stricli auto-generates a negated
+   * `--no-tui` flag that flips this to `false` — that's the escape
+   * hatch users invoke when the Ink path misbehaves (e.g. on unusual
+   * terminal emulators).
+   */
+  readonly tui: boolean;
 };
 
 /**
@@ -77,16 +121,26 @@ function classifyArgs(
 
   // Two paths → error
   if (firstIsPath && secondIsPath) {
-    throw new ContextError("Arguments", USAGE_HINT, [
-      "Two directory paths provided. Only one directory is allowed.",
-    ]);
+    throw new ValidationError(
+      [
+        `"${first}" and "${second}" are both directory paths — only one directory is allowed.`,
+        "",
+        "Provide a single directory:",
+        `  sentry init [<org>/<project>] ${first}`,
+      ].join("\n")
+    );
   }
 
   // Two targets → error
   if (!(firstIsPath || secondIsPath)) {
-    throw new ContextError("Arguments", USAGE_HINT, [
-      "Two targets provided. Use <org>/<project> for the target and a path (e.g., ./dir) for the directory.",
-    ]);
+    throw new ValidationError(
+      [
+        `"${first}" and "${second}" are both treated as targets — only one is allowed.`,
+        "",
+        "Pair a target with a directory path:",
+        `  sentry init ${first} ./my-project`,
+      ].join("\n")
+    );
   }
 
   // (TARGET, PATH) — correct order
@@ -97,6 +151,67 @@ function classifyArgs(
   // (PATH, TARGET) — swapped, auto-correct with warning
   log.warn(`Arguments appear reversed. Interpreting as: ${second} ${first}`);
   return { target: second, directory: first };
+}
+
+function parseFeatures(
+  features: readonly string[] | undefined
+): string[] | undefined {
+  const requested = features
+    ?.flatMap((feature) => feature.split(FEATURE_DELIMITER))
+    .map((feature) => feature.trim())
+    .filter(Boolean);
+
+  if (!requested || requested.length === 0) {
+    return;
+  }
+
+  return requested.map(normalizeFeature);
+}
+
+function normalizeFeature(feature: string): string {
+  const normalized = FEATURE_ALIASES[feature as keyof typeof FEATURE_ALIASES];
+  if (!normalized) {
+    throw new ValidationError(
+      `Unknown init feature "${feature}". Supported features: ${SUPPORTED_FEATURE_TEXT}`,
+      "features"
+    );
+  }
+  return normalized;
+}
+
+function isNonInteractiveContext(context: unknown): boolean {
+  const { stdin, stdout } = context as {
+    stdin?: { isTTY?: boolean };
+    stdout?: { isTTY?: boolean };
+  };
+  return stdin?.isTTY !== true || stdout?.isTTY !== true;
+}
+
+function validateNonInteractiveInit(
+  context: unknown,
+  flags: InitFlags,
+  features: readonly string[] | undefined
+): void {
+  if (!isNonInteractiveContext(context)) {
+    return;
+  }
+
+  // --dry-run implies non-interactive mode and forces yes=true in the
+  // wizard runner, so it doesn't need explicit --yes or --features.
+  if (flags["dry-run"]) {
+    return;
+  }
+
+  if (flags.yes && features && features.length > 0) {
+    return;
+  }
+
+  throw new ContextError("Yes flag and features", NON_INTERACTIVE_USAGE_HINT, [
+    "Agent/CI mode cannot ask interactive setup questions.",
+    "Pass --yes to accept non-interactive prompts.",
+    `Pass --features with one or more supported features: ${SUPPORTED_FEATURE_TEXT}.`,
+    "Run sentry init from an interactive terminal to use the wizard UI.",
+  ]);
 }
 
 /**
@@ -210,13 +325,17 @@ export const initCommand = buildCommand<
       ],
     },
     flags: {
-      yes: { ...YES_FLAG, brief: "Non-interactive mode (accept defaults)" },
+      yes: {
+        ...YES_FLAG,
+        brief:
+          "Accept non-interactive defaults (requires --features outside a TTY)",
+      },
       "dry-run": DRY_RUN_FLAG,
       features: {
         kind: "parsed",
         parse: String,
         brief:
-          "Features to enable: errors,tracing,logs,replay,profiling,ai-monitoring,user-feedback",
+          "Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback",
         variadic: true,
         optional: true,
       },
@@ -225,6 +344,19 @@ export const initCommand = buildCommand<
         parse: String,
         brief: "Team slug to create the project under",
         optional: true,
+      },
+      app: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "App to initialize in a monorepo (required with --yes when multiple apps are detected)",
+        optional: true,
+      },
+      tui: {
+        kind: "boolean",
+        brief:
+          "Use the Ink-based interactive UI (default). Pass --no-tui to fall back to plain log output.",
+        default: true,
       },
     },
     aliases: {
@@ -248,11 +380,18 @@ export const initCommand = buildCommand<
     // 2. Resolve directory
     const targetDir = dirArg ? path.resolve(this.cwd, dirArg) : this.cwd;
 
-    // 3. Parse features
-    const featuresList = flags.features
-      ?.flatMap((f) => f.split(FEATURE_DELIMITER))
-      .map((f) => f.trim())
-      .filter(Boolean);
+    // 3. Parse and validate features before any network or wizard work.
+    const featuresList = parseFeatures(flags.features);
+
+    // Non-TTY callers (CI/agents) must provide every interactive choice
+    // needed to start setup. Fail before project lookup, org prefetch, or
+    // UI creation so the error is deterministic and actionable.
+    try {
+      validateNonInteractiveInit(this, flags, featuresList);
+    } catch (err) {
+      setTag("wizard.outcome", "context_error");
+      throw err;
+    }
 
     // 4. Resolve target → org + project
     //    Validation of user-provided slugs happens inside resolveTarget.
@@ -269,52 +408,55 @@ export const initCommand = buildCommand<
       warmOrgDetection(targetDir);
     }
 
-    // 6. Run the wizard. It owns the temporary `/dev/tty` forwarding used
-    //    for `curl | bash` flows and tears it down on every exit path.
-    await runWizard({
-      directory: targetDir,
-      yes: flags.yes,
-      dryRun: flags["dry-run"],
-      features: featuresList,
-      team: flags.team,
-      org: explicitOrg,
-      project: explicitProject,
-    });
-
-    // 7. Force-exit safety net for a Bun libuv refcount bug.
+    // 6. Run the wizard.
     //
-    // On Bun 1.3.11, combining our fresh `/dev/tty` ReadStream (needed for
-    // the `curl | bash` TTY-delivery workaround in stdin-reopen.ts) with
-    // clack's internal `readline.createInterface(process.stdin)` leaks a
-    // libuv handle that NO userland cleanup releases:
-    // `process.stdin.{pause,destroy,close}`, `rl.close()`,
-    // `removeAllListeners`, and every combination of the above all leave
-    // the event loop ref'd. `process.stdin.unref` is `undefined` on Bun.
-    // The wizard prints "Sentry SDK installed successfully!" and the
-    // process then hangs until the user presses a key (which wakes libuv).
-    //
-    // PRs #802, #824, #825, and #831 each fixed a legit contributing cause
-    // (ReadStream ref, `using` teardown, MastraClient sockets, stream
-    // flowing state) and should all stay — but none address the underlying
-    // Bun refcount bug because that's not a userland issue. PR #782's
-    // original `process.exit(0)` workaround was removed on the assumption
-    // that natural drain would work after the other fixes; it doesn't.
-    //
-    // Safety net: schedule a force-exit with `.unref()` so the timer
-    // itself doesn't hold the loop. If the loop drains naturally (future
-    // Bun versions, non-TTY flows, `--yes` with no prompts), the timer
-    // never fires and the process exits normally. If the Bun bug bites,
-    // the timer fires after a 100ms grace period — imperceptible to
-    // the user and enough for Sentry telemetry + stdio flushes to
-    // complete first.
-    //
-    // Skipped under `bun test` (which sets `NODE_ENV=test`) because the
-    // test runner calls `initCommand.func` directly; an unref'd timer
-    // would still fire and terminate the runner mid-suite.
-    if (process.env.NODE_ENV !== "test") {
-      setTimeout(() => {
-        process.exit(process.exitCode ?? 0);
-      }, 100).unref();
+    // Wrapped in try/finally so the macOS force-exit safety net (step 7)
+    // is scheduled on every exit path: success, WizardError, user cancel,
+    // and any other thrown error. Without finally, a thrown WizardError
+    // would skip the timer and the process would hang on the error
+    // display — exactly what Cursor Bugbot flagged on an earlier revision.
+    try {
+      await runWizard({
+        directory: targetDir,
+        yes: flags.yes,
+        dryRun: flags["dry-run"],
+        features: featuresList,
+        team: flags.team,
+        app: flags.app,
+        org: explicitOrg,
+        project: explicitProject,
+        // `flags.tui` defaults to `true`. `--no-tui` (auto-generated
+        // by stricli's flag negation) flips it to `false` — that's the
+        // signal we forward to the factory as `forceLegacyUi`.
+        forceLegacyUi: flags.tui === false,
+      });
+    } finally {
+      // 7. macOS-only force-exit safety net.
+      //
+      // On Darwin, `InkUI` opens a fresh `/dev/tty` `tty.ReadStream`
+      // (so Ink's `useInput` actually receives keystrokes — Bun's
+      // `process.stdin` doesn't deliver `readable` events properly,
+      // see oven-sh/bun#6862 / vadimdemedes/ink#636). The fresh
+      // stream is destroyed in the InkUI dispose path, but Bun's
+      // libuv handle for it can linger past `destroy()` on Darwin
+      // (oven-sh/bun#29126), keeping the event loop ref'd so the
+      // process hangs until the user presses a key.
+      //
+      // The .unref() timer doesn't hold the loop itself, so it's a no-op
+      // in the happy path (Linux: handle drains naturally; `--yes`
+      // on Darwin: LoggingUI doesn't open /dev/tty, may still drain
+      // naturally). On the Darwin hang path, it force-exits after a
+      // 100ms grace window — imperceptible to the user and enough
+      // for Sentry telemetry + stdio flushes to complete first.
+      //
+      // Skipped under `bun test` (which sets NODE_ENV=test automatically)
+      // because the test runner calls `initCommand.func` directly; an
+      // unref'd timer would still fire and terminate the runner mid-suite.
+      if (process.platform === "darwin" && process.env.NODE_ENV !== "test") {
+        setTimeout(() => {
+          process.exit(process.exitCode ?? 0);
+        }, 100).unref();
+      }
     }
   },
 });

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env tsx
 /**
  * Generate Skill Files from Stricli Command Metadata and Docs
  *
@@ -11,7 +11,7 @@
  *   - index.json: skill discovery manifest for .well-known
  *
  * Usage:
- *   bun run script/generate-skill.ts
+ *   tsx script/generate-skill.ts
  *
  * Output:
  *   plugins/sentry-cli/skills/sentry-cli/SKILL.md
@@ -20,6 +20,7 @@
  */
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { access, readFile, writeFile } from "node:fs/promises";
 import type { Token } from "marked";
 import { marked } from "marked";
 
@@ -30,11 +31,11 @@ import { marked } from "marked";
 // is generated at the end of this script.
 // NOTE: This must run before the dynamic import() below because static
 // imports are hoisted by the runtime before any code executes.
-const SKILL_CONTENT_STUB = "src/generated/skill-content.ts";
-if (!existsSync(SKILL_CONTENT_STUB)) {
+const SKILL_CONTENT_PATH = "src/generated/skill-content.ts";
+if (!existsSync(SKILL_CONTENT_PATH)) {
   mkdirSync("src/generated", { recursive: true });
   writeFileSync(
-    SKILL_CONTENT_STUB,
+    SKILL_CONTENT_PATH,
     "export const SKILL_FILES: ReadonlyMap<string, string> = new Map();\n"
   );
 }
@@ -62,7 +63,7 @@ const DOCS_PATH = "docs/src/content/docs";
 
 /** Read version from package.json for YAML frontmatter */
 async function getPackageVersion(): Promise<string> {
-  const pkg = await Bun.file("package.json").json();
+  const pkg = JSON.parse(await readFile("package.json", "utf-8"));
   return pkg.version;
 }
 
@@ -175,11 +176,14 @@ function escapeRegex(str: string): string {
 /** Load and parse a documentation file */
 async function loadDoc(relativePath: string): Promise<string | null> {
   const fullPath = `${DOCS_PATH}/${relativePath}`;
-  const file = Bun.file(fullPath);
-  if (!(await file.exists())) {
+  const exists = await access(fullPath).then(
+    () => true,
+    () => false
+  );
+  if (!exists) {
     return null;
   }
-  const content = await file.text();
+  const content = await readFile(fullPath, "utf-8");
   return stripMdxComponents(stripFrontmatter(content));
 }
 
@@ -235,11 +239,14 @@ function generateAuthSection(authSection: string): string[] {
 /** Load prerequisites (installation + authentication) from getting-started.mdx */
 async function loadPrerequisites(): Promise<string> {
   const fullPath = `${DOCS_PATH}/getting-started.mdx`;
-  const file = Bun.file(fullPath);
-  if (!(await file.exists())) {
+  const exists = await access(fullPath).then(
+    () => true,
+    () => false
+  );
+  if (!exists) {
     return getDefaultPrerequisites();
   }
-  const rawContent = await file.text();
+  const rawContent = await readFile(fullPath, "utf-8");
   const content = stripMdxComponents(stripFrontmatter(rawContent));
   const lines: string[] = [];
   lines.push("## Prerequisites");
@@ -869,17 +876,24 @@ try {
 // Write all generated files
 for (const [relativePath, content] of files) {
   const fullPath = `${SKILL_DIR}/${relativePath}`;
-  await Bun.write(fullPath, content);
+  // Ensure parent directory exists for reference files
+  const dir = fullPath.substring(0, fullPath.lastIndexOf("/"));
+  mkdirSync(dir, { recursive: true });
+  await writeFile(fullPath, content);
 }
 
 // Write index.json
 const indexJson = generateIndexJson(files);
-await Bun.write(INDEX_JSON_PATH, indexJson);
+const indexJsonDir = INDEX_JSON_PATH.substring(
+  0,
+  INDEX_JSON_PATH.lastIndexOf("/")
+);
+mkdirSync(indexJsonDir, { recursive: true });
+await writeFile(INDEX_JSON_PATH, indexJson);
 
 // Generate src/generated/skill-content.ts with inlined file contents.
 // This embeds all skill files into the binary at build time so that
 // agent-skills.ts can install them without any network fetching.
-const SKILL_CONTENT_PATH = "src/generated/skill-content.ts";
 const skillEntries = [...files.entries()]
   .sort(([a], [b]) => a.localeCompare(b))
   .map(([path, content]) => {
@@ -902,7 +916,7 @@ ${skillEntries}
 ]);
 `;
 
-await Bun.write(SKILL_CONTENT_PATH, skillContentModule);
+await writeFile(SKILL_CONTENT_PATH, skillContentModule);
 
 // Report what was generated
 const refCount = [...files.keys()].filter((k) =>

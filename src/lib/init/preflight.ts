@@ -1,8 +1,7 @@
-import { cancel, isCancel, log, select } from "@clack/prompts";
 import type { SentryTeam } from "../../types/index.js";
 import { listOrganizations } from "../api-client.js";
 import { getAuthToken } from "../db/auth.js";
-import { WizardError } from "../errors.js";
+import { ApiError, WizardError } from "../errors.js";
 import { resolveOrCreateTeam } from "../resolve-team.js";
 import { slugify } from "../utils.js";
 import { WizardCancelledError } from "./clack-utils.js";
@@ -13,6 +12,7 @@ import type {
   ResolvedInitContext,
   WizardOptions,
 } from "./types.js";
+import { isCancelled, type WizardUI } from "./ui/types.js";
 
 const NUMERIC_ORG_ID_RE = /^\d+$/;
 
@@ -37,41 +37,50 @@ type ProjectSelection = Pick<
  * Resolve org, project, team, and auth state before the init workflow starts.
  */
 export async function resolveInitContext(
-  initial: WizardOptions
+  initial: WizardOptions,
+  ui: WizardUI
 ): Promise<ResolvedInitContext | null> {
-  return await withPreflightHandling(async () => {
-    const seed = await resolveInitContextSeed(initial);
+  return await withPreflightHandling(ui, async () => {
+    const seed = await resolveInitContextSeed(initial, ui);
     if (!seed) {
       return null;
     }
 
-    const org = await ensureOrg(seed.org, initial);
-    const projectSelection = await resolveProjectSelection(org, initial, seed);
+    const org = await ensureOrg(seed.org, initial, ui);
+    const projectSelection = await resolveProjectSelection(
+      org,
+      initial,
+      seed,
+      ui
+    );
     if (!projectSelection) {
       return null;
     }
 
-    const team = await resolveTeam(org, initial);
+    const team = await resolveTeam(org, initial, ui);
 
     return buildResolvedInitContext(initial, org, team, projectSelection);
   });
 }
 
 async function withPreflightHandling(
+  ui: WizardUI,
   action: () => Promise<ResolvedInitContext | null>
 ): Promise<ResolvedInitContext | null> {
   try {
     return await action();
   } catch (error) {
     if (error instanceof WizardCancelledError) {
-      cancel("Setup cancelled.");
+      ui.cancel("Setup cancelled.");
+      ui.feedback("cancelled");
       process.exitCode = 0;
       return null;
     }
 
     const message = error instanceof Error ? error.message : String(error);
-    log.error(message);
-    cancel("Setup failed.");
+    ui.log.error(message);
+    ui.cancel("Setup failed.");
+    ui.feedback("failed");
     throw error instanceof WizardError ? error : new WizardError(message);
   }
 }
@@ -90,15 +99,17 @@ function buildResolvedInitContext(
     org,
     team,
     project: selection.project,
+    app: initial.app,
     authToken: getAuthToken(),
     existingProject: selection.existingProject,
   };
 }
 
 async function resolveInitContextSeed(
-  initial: WizardOptions
+  initial: WizardOptions,
+  ui: WizardUI
 ): Promise<InitContextSeed | null> {
-  const detected = await resolveDetectedProject(initial);
+  const detected = await resolveDetectedProject(initial, ui);
   if (detected?.shouldAbort) {
     return null;
   }
@@ -112,13 +123,14 @@ async function resolveInitContextSeed(
 
 async function ensureOrg(
   org: string | undefined,
-  initial: WizardOptions
+  initial: WizardOptions,
+  ui: WizardUI
 ): Promise<string> {
   if (org) {
     return org;
   }
 
-  const orgResult = await resolveOrgSlug(initial.directory, initial.yes);
+  const orgResult = await resolveOrgSlug(initial.directory, initial.yes, ui);
   if (typeof orgResult === "string") {
     return orgResult;
   }
@@ -129,7 +141,8 @@ async function ensureOrg(
 async function resolveProjectSelection(
   org: string,
   initial: WizardOptions,
-  seed: InitContextSeed
+  seed: InitContextSeed,
+  ui: WizardUI
 ): Promise<ProjectSelection | null> {
   if (!seed.project) {
     return {
@@ -144,6 +157,7 @@ async function resolveProjectSelection(
     existingProject: seed.existingProject,
     yes: initial.yes,
     promptOnExisting: Boolean(initial.project && !initial.org),
+    ui,
   });
   if (resolved.shouldAbort) {
     return null;
@@ -168,7 +182,10 @@ function mergeProjectSelection(
   };
 }
 
-async function resolveDetectedProject(initial: WizardOptions): Promise<{
+async function resolveDetectedProject(
+  initial: WizardOptions,
+  ui: WizardUI
+): Promise<{
   org?: string;
   project?: string;
   existingProject?: ExistingProjectData;
@@ -201,21 +218,21 @@ async function resolveDetectedProject(initial: WizardOptions): Promise<{
     };
   }
 
-  const choice = await select({
+  const choice = await ui.select<"existing" | "create">({
     message: "Found an existing Sentry project in this codebase.",
     options: [
       {
-        value: "existing" as const,
+        value: "existing",
         label: `Use existing project (${detectedProject.orgSlug}/${detectedProject.projectSlug})`,
         hint: "Sentry is already configured here",
       },
       {
-        value: "create" as const,
+        value: "create",
         label: "Create a new Sentry project",
       },
     ],
   });
-  if (isCancel(choice)) {
+  if (isCancelled(choice)) {
     throw new WizardCancelledError();
   }
   if (choice === "existing") {
@@ -235,6 +252,7 @@ async function resolveExistingProjectChoice(opts: {
   existingProject?: ExistingProjectData;
   yes: boolean;
   promptOnExisting: boolean;
+  ui: WizardUI;
 }): Promise<ExistingProjectChoice> {
   const slug = slugify(opts.project);
   if (!slug) {
@@ -258,22 +276,22 @@ async function resolveExistingProjectChoice(opts: {
     };
   }
 
-  const choice = await select({
+  const choice = await opts.ui.select<"existing" | "create">({
     message: `Found existing project '${slug}' in ${opts.org}.`,
     options: [
       {
-        value: "existing" as const,
+        value: "existing",
         label: `Use existing (${opts.org}/${slug})`,
         hint: "Already configured",
       },
       {
-        value: "create" as const,
+        value: "create",
         label: "Create a new project",
         hint: "Wizard will detect the project name from your codebase",
       },
     ],
   });
-  if (isCancel(choice)) {
+  if (isCancelled(choice)) {
     throw new WizardCancelledError();
   }
   if (choice === "create") {
@@ -288,7 +306,8 @@ async function resolveExistingProjectChoice(opts: {
 
 async function resolveTeam(
   org: string,
-  initial: WizardOptions
+  initial: WizardOptions,
+  ui: WizardUI
 ): Promise<string | undefined> {
   try {
     const result = await resolveOrCreateTeam(org, {
@@ -297,17 +316,17 @@ async function resolveTeam(
       dryRun: initial.dryRun,
       deferAutoCreateOnEmptyOrg: true,
       onAmbiguous: initial.yes
-        ? async (candidates) => (candidates[0] as SentryTeam).slug
+        ? (candidates) => Promise.resolve((candidates[0] as SentryTeam).slug)
         : async (candidates) => {
-            const selected = await select({
+            const selected = await ui.select<string>({
               message: "Which team should own this project?",
               options: candidates.map((team) => ({
                 value: team.slug,
                 label: team.slug,
-                hint: team.name !== team.slug ? team.name : undefined,
+                ...(team.name !== team.slug ? { hint: team.name } : {}),
               })),
             });
-            if (isCancel(selected)) {
+            if (isCancelled(selected)) {
               throw new WizardCancelledError();
             }
             return selected;
@@ -324,20 +343,58 @@ async function resolveTeam(
   }
 }
 
+/**
+ * Format a 403/401 ApiError from listOrganizations() into a { ok: false }
+ * result, or re-throw if the error is something else.
+ *
+ * 403: token lacks org:read scope — user can bypass by supplying the org slug
+ * directly. 401: token is invalid/expired — supplying an org won't help, only
+ * re-authenticating will.
+ */
+function handleOrgListError(error: unknown): { ok: false; error: string } {
+  if (error instanceof ApiError && error.status === 403) {
+    const lines: string[] = ["Could not list organizations (403 Forbidden)."];
+    if (error.detail) {
+      lines.push(error.detail, "");
+    }
+    lines.push(
+      "Specify the org on the command line:  sentry init <org-slug>/",
+      "Or set an environment variable:       SENTRY_ORG=<org-slug> sentry init"
+    );
+    return { ok: false, error: lines.join("\n  ") };
+  }
+  if (error instanceof ApiError && error.status === 401) {
+    const lines: string[] = [
+      "Could not list organizations (401 Unauthorized).",
+    ];
+    if (error.detail) {
+      lines.push(error.detail);
+    }
+    return { ok: false, error: lines.join("\n  ") };
+  }
+  throw error;
+}
+
 async function resolveOrgSlug(
   cwd: string,
-  yes: boolean
+  yes: boolean,
+  ui: WizardUI
 ): Promise<string | { ok: false; error: string }> {
   const resolved = await resolveOrgPrefetched(cwd);
   if (resolved && !NUMERIC_ORG_ID_RE.test(resolved.org)) {
     return resolved.org;
   }
 
-  const orgs = await listOrganizations();
+  let orgs: Awaited<ReturnType<typeof listOrganizations>>;
+  try {
+    orgs = await listOrganizations();
+  } catch (error) {
+    return handleOrgListError(error);
+  }
   if (orgs.length === 0) {
     return {
       ok: false,
-      error: "Not authenticated. Run 'sentry login' first.",
+      error: "Not authenticated. Run 'sentry auth login' first.",
     };
   }
   if (orgs.length === 1 && orgs[0]) {
@@ -348,11 +405,15 @@ async function resolveOrgSlug(
     const slugs = orgs.map((org) => org.slug).join(", ");
     return {
       ok: false,
-      error: `Multiple organizations found (${slugs}). Set SENTRY_ORG to specify which one.`,
+      error: [
+        `Multiple organizations found (${slugs}).`,
+        "Specify one with: sentry init <org-slug>/ [directory]",
+        "  or set SENTRY_ORG=<org-slug>",
+      ].join("\n"),
     };
   }
 
-  const selected = await select({
+  const selected = await ui.select<string>({
     message: "Which organization should the project be created in?",
     options: orgs.map((org) => ({
       value: org.slug,
@@ -360,7 +421,7 @@ async function resolveOrgSlug(
       hint: org.slug,
     })),
   });
-  if (isCancel(selected)) {
+  if (isCancelled(selected)) {
     throw new WizardCancelledError();
   }
   return selected;

@@ -1,14 +1,22 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "vitest";
 
 import {
+  AGENT_ALIASES,
+  type AgentInfo,
   detectAgent,
   detectAgentFromProcessTree,
   ENV_VAR_AGENTS,
   getProcessInfoFromOS,
+  normalizeAgent,
   PROCESS_NAME_AGENTS,
   setProcessInfoProvider,
 } from "../../src/lib/detect-agent.js";
 import { setEnv } from "../../src/lib/env.js";
+
+/** Shorthand for building an AgentInfo with only a name. */
+function named(name: string): AgentInfo {
+  return { name };
+}
 
 function withEnv(vars: Record<string, string>) {
   setEnv(vars as NodeJS.ProcessEnv);
@@ -29,7 +37,7 @@ describe("detectAgent", () => {
 
   test("AI_AGENT takes highest priority", () => {
     withEnv({ AI_AGENT: "custom-agent", CLAUDE_CODE: "1", CI: "true" });
-    expect(detectAgent()).toBe("custom-agent");
+    expect(detectAgent()).toEqual(named("custom-agent"));
   });
 
   test("AI_AGENT empty string is ignored", () => {
@@ -42,93 +50,137 @@ describe("detectAgent", () => {
     expect(detectAgent()).toBeUndefined();
   });
 
-  test("AI_AGENT is trimmed", () => {
-    withEnv({ AI_AGENT: "  my-agent  " });
-    expect(detectAgent()).toBe("my-agent");
+  test("AI_AGENT is trimmed and lowercased", () => {
+    withEnv({ AI_AGENT: "  My-Agent  " });
+    expect(detectAgent()).toEqual(named("my-agent"));
+  });
+
+  test("AI_AGENT compound value extracts name, version, and role", () => {
+    withEnv({ AI_AGENT: "claude-code/2.1.123/agent" });
+    expect(detectAgent()).toEqual({
+      name: "claude",
+      version: "2.1.123",
+      role: "agent",
+    });
+  });
+
+  test("AI_AGENT with alias resolves to canonical name", () => {
+    withEnv({ AI_AGENT: "claude-code" });
+    expect(detectAgent()).toEqual(named("claude"));
+  });
+
+  test("AI_AGENT garbage value '1' becomes unknown", () => {
+    withEnv({ AI_AGENT: "1" });
+    expect(detectAgent()).toEqual(named("unknown"));
+  });
+
+  test("AI_AGENT garbage value 'true' becomes unknown", () => {
+    withEnv({ AI_AGENT: "true" });
+    expect(detectAgent()).toEqual(named("unknown"));
+  });
+
+  test("AI_AGENT falsy value 'false' is treated as no agent", () => {
+    withEnv({ AI_AGENT: "false" });
+    expect(detectAgent()).toBeUndefined();
+  });
+
+  test("AI_AGENT falsy value '0' is treated as no agent", () => {
+    withEnv({ AI_AGENT: "0" });
+    expect(detectAgent()).toBeUndefined();
+  });
+
+  test("AI_AGENT falsy opt-out falls through to next detection level", () => {
+    withEnv({ AI_AGENT: "false", CLAUDE_CODE: "1" });
+    expect(detectAgent()).toEqual(named("claude"));
   });
 
   // ── Cursor ─────────────────────────────────────────────────────────
 
   test("CURSOR_TRACE_ID → cursor", () => {
     withEnv({ CURSOR_TRACE_ID: "abc123" });
-    expect(detectAgent()).toBe("cursor");
+    expect(detectAgent()).toEqual(named("cursor"));
   });
 
   test("CURSOR_AGENT → cursor", () => {
     withEnv({ CURSOR_AGENT: "1" });
-    expect(detectAgent()).toBe("cursor");
+    expect(detectAgent()).toEqual(named("cursor"));
   });
 
   test("CURSOR_TRACE_ID takes priority over CURSOR_AGENT", () => {
     withEnv({ CURSOR_TRACE_ID: "abc", CURSOR_AGENT: "1" });
-    expect(detectAgent()).toBe("cursor");
+    expect(detectAgent()).toEqual(named("cursor"));
   });
 
   // ── Gemini ─────────────────────────────────────────────────────────
 
   test("GEMINI_CLI → gemini", () => {
     withEnv({ GEMINI_CLI: "1" });
-    expect(detectAgent()).toBe("gemini");
+    expect(detectAgent()).toEqual(named("gemini"));
   });
 
   // ── Codex ──────────────────────────────────────────────────────────
 
   test("CODEX_SANDBOX → codex", () => {
     withEnv({ CODEX_SANDBOX: "1" });
-    expect(detectAgent()).toBe("codex");
+    expect(detectAgent()).toEqual(named("codex"));
   });
 
   test("CODEX_CI → codex", () => {
     withEnv({ CODEX_CI: "1" });
-    expect(detectAgent()).toBe("codex");
+    expect(detectAgent()).toEqual(named("codex"));
   });
 
   test("CODEX_THREAD_ID → codex", () => {
     withEnv({ CODEX_THREAD_ID: "thread-123" });
-    expect(detectAgent()).toBe("codex");
+    expect(detectAgent()).toEqual(named("codex"));
   });
 
   // ── Antigravity ────────────────────────────────────────────────────
 
   test("ANTIGRAVITY_AGENT → antigravity", () => {
     withEnv({ ANTIGRAVITY_AGENT: "1" });
-    expect(detectAgent()).toBe("antigravity");
+    expect(detectAgent()).toEqual(named("antigravity"));
   });
 
   // ── Augment ────────────────────────────────────────────────────────
 
   test("AUGMENT_AGENT → augment", () => {
     withEnv({ AUGMENT_AGENT: "1" });
-    expect(detectAgent()).toBe("augment");
+    expect(detectAgent()).toEqual(named("augment"));
   });
 
   // ── OpenCode ───────────────────────────────────────────────────────
 
   test("OPENCODE_CLIENT → opencode", () => {
     withEnv({ OPENCODE_CLIENT: "1" });
-    expect(detectAgent()).toBe("opencode");
+    expect(detectAgent()).toEqual(named("opencode"));
   });
 
   // ── Claude Code ────────────────────────────────────────────────────
 
   test("CLAUDE_CODE → claude", () => {
     withEnv({ CLAUDE_CODE: "1" });
-    expect(detectAgent()).toBe("claude");
+    expect(detectAgent()).toEqual(named("claude"));
   });
 
   test("CLAUDECODE → claude", () => {
     withEnv({ CLAUDECODE: "1" });
-    expect(detectAgent()).toBe("claude");
+    expect(detectAgent()).toEqual(named("claude"));
   });
 
   test("CLAUDE_CODE + CLAUDE_CODE_IS_COWORK → cowork", () => {
     withEnv({ CLAUDE_CODE: "1", CLAUDE_CODE_IS_COWORK: "1" });
-    expect(detectAgent()).toBe("cowork");
+    expect(detectAgent()).toEqual(named("cowork"));
   });
 
   test("CLAUDECODE + CLAUDE_CODE_IS_COWORK → cowork", () => {
     withEnv({ CLAUDECODE: "1", CLAUDE_CODE_IS_COWORK: "1" });
-    expect(detectAgent()).toBe("cowork");
+    expect(detectAgent()).toEqual(named("cowork"));
+  });
+
+  test("CLAUDE_CODE_IS_COWORK alone does not trigger detection", () => {
+    withEnv({ CLAUDE_CODE_IS_COWORK: "1" });
+    expect(detectAgent()).toBeUndefined();
   });
 
   // ── Excluded env vars (false positive risks) ──────────────────────
@@ -147,38 +199,38 @@ describe("detectAgent", () => {
 
   test("COPILOT_MODEL → github-copilot", () => {
     withEnv({ COPILOT_MODEL: "gpt-4" });
-    expect(detectAgent()).toBe("github-copilot");
+    expect(detectAgent()).toEqual(named("github-copilot"));
   });
 
   test("COPILOT_ALLOW_ALL → github-copilot", () => {
     withEnv({ COPILOT_ALLOW_ALL: "1" });
-    expect(detectAgent()).toBe("github-copilot");
+    expect(detectAgent()).toEqual(named("github-copilot"));
   });
 
   // ── Goose ──────────────────────────────────────────────────────────
 
   test("GOOSE_TERMINAL → goose", () => {
     withEnv({ GOOSE_TERMINAL: "1" });
-    expect(detectAgent()).toBe("goose");
+    expect(detectAgent()).toEqual(named("goose"));
   });
 
   // ── Amp ────────────────────────────────────────────────────────────
 
   test("AMP_THREAD_ID → amp", () => {
     withEnv({ AMP_THREAD_ID: "thread-456" });
-    expect(detectAgent()).toBe("amp");
+    expect(detectAgent()).toEqual(named("amp"));
   });
 
   // ── AGENT generic fallback ─────────────────────────────────────────
 
   test("AGENT as generic fallback", () => {
     withEnv({ AGENT: "some-new-agent" });
-    expect(detectAgent()).toBe("some-new-agent");
+    expect(detectAgent()).toEqual(named("some-new-agent"));
   });
 
   test("AGENT is trimmed", () => {
     withEnv({ AGENT: "  goose  " });
-    expect(detectAgent()).toBe("goose");
+    expect(detectAgent()).toEqual(named("goose"));
   });
 
   test("AGENT empty string is ignored", () => {
@@ -188,7 +240,22 @@ describe("detectAgent", () => {
 
   test("specific env vars take priority over AGENT", () => {
     withEnv({ AGENT: "goose", CLAUDE_CODE: "1" });
-    expect(detectAgent()).toBe("claude");
+    expect(detectAgent()).toEqual(named("claude"));
+  });
+
+  test("AGENT garbage value '1' becomes unknown", () => {
+    withEnv({ AGENT: "1" });
+    expect(detectAgent()).toEqual(named("unknown"));
+  });
+
+  test("AGENT falsy value 'false' is treated as no agent", () => {
+    withEnv({ AGENT: "false" });
+    expect(detectAgent()).toBeUndefined();
+  });
+
+  test("AGENT compound value is normalized", () => {
+    withEnv({ AGENT: "my-agent/1.0.0" });
+    expect(detectAgent()).toEqual({ name: "my-agent", version: "1.0.0" });
   });
 
   // ── No agent ───────────────────────────────────────────────────────
@@ -253,7 +320,7 @@ describe("detectAgentFromProcessTree", () => {
         return { name: "cursor", ppid: 1 };
       }
     });
-    expect(await detectAgentFromProcessTree()).toBe("cursor");
+    expect(await detectAgentFromProcessTree()).toEqual(named("cursor"));
   });
 
   test("walks up to grandparent", async () => {
@@ -267,7 +334,7 @@ describe("detectAgentFromProcessTree", () => {
         return { name: "Cursor", ppid: 1 };
       }
     });
-    expect(await detectAgentFromProcessTree()).toBe("cursor");
+    expect(await detectAgentFromProcessTree()).toEqual(named("cursor"));
   });
 
   test("case-insensitive matching", async () => {
@@ -276,7 +343,7 @@ describe("detectAgentFromProcessTree", () => {
         return { name: "Claude", ppid: 1 };
       }
     });
-    expect(await detectAgentFromProcessTree()).toBe("claude");
+    expect(await detectAgentFromProcessTree()).toEqual(named("claude"));
   });
 
   test("returns undefined when no agent in tree", async () => {
@@ -320,6 +387,155 @@ describe("detectAgentFromProcessTree", () => {
 
     setProcessInfoProvider(async (pid) => chain.get(pid));
     expect(await detectAgentFromProcessTree()).toBeUndefined();
+  });
+});
+
+describe("normalizeAgent", () => {
+  test("simple name passes through lowercase", () => {
+    expect(normalizeAgent("cursor")).toEqual(named("cursor"));
+  });
+
+  test("uppercased name is lowercased", () => {
+    expect(normalizeAgent("Cursor")).toEqual(named("cursor"));
+  });
+
+  test("whitespace is trimmed", () => {
+    expect(normalizeAgent("  cursor  ")).toEqual(named("cursor"));
+  });
+
+  test("empty string returns undefined", () => {
+    expect(normalizeAgent("")).toBeUndefined();
+  });
+
+  test("whitespace-only returns undefined", () => {
+    expect(normalizeAgent("   ")).toBeUndefined();
+  });
+
+  test("claude-code resolves to claude", () => {
+    expect(normalizeAgent("claude-code")).toEqual(named("claude"));
+  });
+
+  test("claudecode resolves to claude", () => {
+    expect(normalizeAgent("claudecode")).toEqual(named("claude"));
+  });
+
+  test("Claude-Code resolves to claude (case-insensitive)", () => {
+    expect(normalizeAgent("Claude-Code")).toEqual(named("claude"));
+  });
+
+  test("name/version extracts both", () => {
+    expect(normalizeAgent("cursor/1.2.3")).toEqual({
+      name: "cursor",
+      version: "1.2.3",
+    });
+  });
+
+  test("name/version/role extracts all three", () => {
+    expect(normalizeAgent("claude-code/2.1.123/agent")).toEqual({
+      name: "claude",
+      version: "2.1.123",
+      role: "agent",
+    });
+  });
+
+  test("version with v prefix strips the v", () => {
+    expect(normalizeAgent("my-agent/v3.0.0")).toEqual({
+      name: "my-agent",
+      version: "3.0.0",
+    });
+  });
+
+  test("non-semver second segment is ignored", () => {
+    expect(normalizeAgent("my-agent/not-a-version")).toEqual(named("my-agent"));
+  });
+
+  test("single-number version is accepted", () => {
+    expect(normalizeAgent("agent/42")).toEqual({
+      name: "agent",
+      version: "42",
+    });
+  });
+
+  test("four-segment version is accepted", () => {
+    expect(normalizeAgent("agent/1.2.3.4")).toEqual({
+      name: "agent",
+      version: "1.2.3.4",
+    });
+  });
+
+  test("garbage role is dropped", () => {
+    expect(normalizeAgent("agent/1.0.0/true")).toEqual({
+      name: "agent",
+      version: "1.0.0",
+    });
+  });
+
+  test("extra slash segments beyond role are ignored", () => {
+    expect(normalizeAgent("agent/1.0.0/role/extra")).toEqual({
+      name: "agent",
+      version: "1.0.0",
+      role: "role",
+    });
+  });
+
+  test("'1' becomes unknown", () => {
+    expect(normalizeAgent("1")).toEqual(named("unknown"));
+  });
+
+  test("'true' becomes unknown", () => {
+    expect(normalizeAgent("true")).toEqual(named("unknown"));
+  });
+
+  test("'yes' becomes unknown", () => {
+    expect(normalizeAgent("yes")).toEqual(named("unknown"));
+  });
+
+  test("'on' becomes unknown", () => {
+    expect(normalizeAgent("on")).toEqual(named("unknown"));
+  });
+
+  test("'TRUE' (uppercase) becomes unknown", () => {
+    expect(normalizeAgent("TRUE")).toEqual(named("unknown"));
+  });
+
+  test("'0' returns undefined", () => {
+    expect(normalizeAgent("0")).toBeUndefined();
+  });
+
+  test("'false' returns undefined", () => {
+    expect(normalizeAgent("false")).toBeUndefined();
+  });
+
+  test("'no' returns undefined", () => {
+    expect(normalizeAgent("no")).toBeUndefined();
+  });
+
+  test("'off' returns undefined", () => {
+    expect(normalizeAgent("off")).toBeUndefined();
+  });
+
+  test("'FALSE' (uppercase) returns undefined", () => {
+    expect(normalizeAgent("FALSE")).toBeUndefined();
+  });
+});
+
+describe("AGENT_ALIASES map structure", () => {
+  test("all keys are lowercase", () => {
+    for (const key of AGENT_ALIASES.keys()) {
+      expect(key).toBe(key.toLowerCase());
+    }
+  });
+
+  test("all values are lowercase with optional hyphens", () => {
+    for (const value of AGENT_ALIASES.values()) {
+      expect(value).toMatch(/^[a-z][a-z0-9-]*$/);
+    }
+  });
+
+  test("no alias maps to itself", () => {
+    for (const [key, value] of AGENT_ALIASES) {
+      expect(key).not.toBe(value);
+    }
   });
 });
 

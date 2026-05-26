@@ -11,7 +11,7 @@
  */
 
 import { getEnv } from "./lib/env.js";
-import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
+import { CliError } from "./lib/errors.js";
 
 /**
  * Preload project context: walk up from `cwd` once, finding both the
@@ -20,6 +20,13 @@ import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
  * to `findProjectRoot` and `loadSentryCliRc` are cache hits.
  */
 async function preloadProjectContext(cwd: string): Promise<void> {
+  // Snapshot env-token host BEFORE anything mutates env.SENTRY_HOST/URL
+  // (the .sentryclirc shim or the default-URL fallback below). Pins the
+  // env-token's trust scope to the user's shell, not a repo-local file.
+  // Dynamic import: env-token-host chains into db/auth → telemetry → @sentry/node-core
+  const { captureEnvTokenHost } = await import("./lib/env-token-host.js");
+  captureEnvTokenHost();
+
   // Dynamic import keeps the heavy DSN/DB modules out of the completion fast-path
   const [{ findProjectRoot }, { setCachedProjectRoot }] = await Promise.all([
     import("./lib/dsn/project-root.js"),
@@ -32,13 +39,14 @@ async function preloadProjectContext(cwd: string): Promise<void> {
     reason: result.reason,
   });
 
-  // Apply .sentryclirc env shim (token, URL) — sentryclirc cache was
-  // populated as a side effect of findProjectRoot's walk
+  // Apply .sentryclirc env shim (token + URL). The URL trust check is
+  // deferred to buildCommand's wrapper where commands can opt out via
+  // skipRcUrlCheck (used by auth login/logout).
+  // Dynamic import: sentryclirc chains into db/index → sqlite, logger → consola
+  const { applySentryCliRcEnvShim } = await import("./lib/sentryclirc.js");
   await applySentryCliRcEnvShim(cwd);
 
   // Apply persistent URL default (lower priority than env vars and .sentryclirc).
-  // Same mechanism as .sentryclirc — writes to env.SENTRY_URL so all downstream
-  // URL resolution code picks it up automatically.
   const env = getEnv();
   if (!(env.SENTRY_HOST?.trim() || env.SENTRY_URL?.trim())) {
     try {
@@ -167,6 +175,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const { startCleanupOldBinary } = await import("./lib/upgrade.js");
   const {
     abortPendingVersionCheck,
+    getErrorUpdateNotification,
     getUpdateNotification,
     maybeCheckForUpdateInBackground,
     shouldSuppressNotification,
@@ -206,6 +215,143 @@ export async function runCli(cliArgs: string[]): Promise<void> {
           await next(argv);
           return;
         }
+      }
+      throw err;
+    }
+  };
+
+  /**
+   * Attempt to import `.sentryclirc` settings when the user is unauthenticated.
+   *
+   * Returns `"imported"` if a trusted token was found, imported, and validated.
+   * Returns `"declined"` if the user said no (marked as declined).
+   * Returns `"skip"` if no eligible files, trust gate fails, or any error.
+   */
+  /**
+   * Build a trusted import plan from non-project-local .sentryclirc files,
+   * or return null if no eligible import is available.
+   */
+  async function buildEligibleImportPlan() {
+    const { discoverRcFiles, buildImportPlan, isImportNeededAsync } =
+      await import("./lib/sentryclirc-import.js");
+
+    if (!(await isImportNeededAsync())) {
+      return null;
+    }
+    const files = await discoverRcFiles(process.cwd());
+    const eligible = files.filter((f) => f.location !== "project-local");
+    if (eligible.length === 0 || !eligible.some((f) => f.token)) {
+      return null;
+    }
+    const plan = buildImportPlan(eligible);
+    if (
+      !(
+        plan.trusted &&
+        plan.effective.token &&
+        plan.newFields.includes("token")
+      )
+    ) {
+      return null;
+    }
+    return plan;
+  }
+
+  async function tryRcImport(): Promise<"imported" | "declined" | "skip"> {
+    const plan = await buildEligibleImportPlan();
+    if (!plan) {
+      return "skip";
+    }
+
+    const source = plan.sources.find((s) => s.token)?.path ?? "~/.sentryclirc";
+    process.stderr.write(
+      `\nFound auth token in ${source}\n` +
+        "Import settings to the new CLI? This stores your token with proper host scoping.\n\n"
+    );
+
+    const consent = await promptImportConsent();
+    if (consent === "declined") {
+      const { markImportDeclined } = await import(
+        "./lib/sentryclirc-import.js"
+      );
+      markImportDeclined(plan.sources);
+      return "declined";
+    }
+    if (consent !== "accepted") {
+      return "skip";
+    }
+
+    const { executeImport } = await import("./lib/sentryclirc-import.js");
+    const result = await executeImport(plan, { validateToken: true });
+    return result.imported && result.tokenValid !== false ? "imported" : "skip";
+  }
+
+  /**
+   * Prompt the user to accept/decline the import.
+   * Returns "accepted", "declined" (explicit no), or "cancelled" (Ctrl+C).
+   * Only "declined" permanently suppresses future prompts.
+   */
+  async function promptImportConsent(): Promise<
+    "accepted" | "declined" | "cancelled"
+  > {
+    const { logger: logModule } = await import("./lib/logger.js");
+    const confirmed = await logModule
+      .withTag("import")
+      .prompt("Import from .sentryclirc?", { type: "confirm", initial: true });
+    if (confirmed === true) {
+      return "accepted";
+    }
+    // false = explicit "no"; Symbol(clack:cancel) = Ctrl+C
+    return confirmed === false ? "declined" : "cancelled";
+  }
+
+  /** Log import middleware errors at an appropriate level */
+  async function logImportError(importErr: unknown): Promise<void> {
+    const { logger: logModule } = await import("./lib/logger.js");
+    const { HostScopeError: HSE } = await import("./lib/errors.js");
+    const importLog = logModule.withTag("import");
+    if (importErr instanceof HSE) {
+      importLog.warn("Import middleware error", importErr);
+    } else {
+      importLog.debug("Import middleware error", importErr);
+    }
+  }
+
+  /**
+   * `.sentryclirc` import middleware.
+   *
+   * When a command fails with `not_authenticated` and a non-project-local
+   * `.sentryclirc` file has a token that passes the same-file trust gate,
+   * offers to import it into the new CLI's SQLite store. On success, retries
+   * the command. On decline, marks as declined (never asks again) and
+   * re-throws so the auto-auth middleware can offer OAuth login instead.
+   *
+   * Only fires in interactive TTYs (disabled in CI). Project-local files
+   * are excluded to avoid prompting in every cloned repo.
+   */
+  const rcImportMiddleware: ErrorMiddleware = async (next, argv) => {
+    try {
+      await next(argv);
+    } catch (err) {
+      let imported = false;
+      if (
+        err instanceof AuthError &&
+        err.reason === "not_authenticated" &&
+        !err.skipAutoAuth &&
+        isatty(0)
+      ) {
+        try {
+          imported = (await tryRcImport()) === "imported";
+        } catch (importErr) {
+          await logImportError(importErr);
+        }
+      }
+      if (imported) {
+        // Retry outside the import try/catch so retry errors propagate
+        // naturally instead of being swallowed and re-throwing the
+        // original AuthError.
+        process.stderr.write("Import successful! Retrying command...\n\n");
+        await next(argv);
+        return;
       }
       throw err;
     }
@@ -262,6 +408,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
    */
   const errorMiddlewares: ErrorMiddleware[] = [
     seerTrialMiddleware,
+    rcImportMiddleware,
     autoAuthMiddleware,
   ];
 
@@ -433,6 +580,10 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     }
     process.stderr.write(`${error("Error:")} ${formatError(err)}\n`);
     process.exitCode = getExitCode(err);
+    const notification = getErrorUpdateNotification(err, hoistedArgs);
+    if (notification) {
+      process.stderr.write(notification);
+    }
     return;
   } finally {
     // Abort any pending version check to allow clean exit
@@ -467,11 +618,18 @@ export async function startCli(): Promise<void> {
 
   // Walk up from CWD once to find project root AND .sentryclirc config.
   // Caches both so later findProjectRoot / loadSentryCliRc calls are hits.
-  // Non-fatal — the CLI can still work via env vars and DSN detection.
+  // Most failures here are non-fatal (unreadable rc file, missing project
+  // markers), but `CliError` from the rc shim's host-scoping check is an
+  // actionable rejection that must surface to the user.
   try {
     await preloadProjectContext(process.cwd());
-  } catch {
-    // Gracefully degrade: project context is optional for CLI operation.
+  } catch (err) {
+    if (err instanceof CliError) {
+      process.stderr.write(`${err.format()}\n`);
+      process.exitCode = err.exitCode;
+      return;
+    }
+    // Gracefully degrade: project context is optional.
   }
 
   return runCli(args).catch((err) => {

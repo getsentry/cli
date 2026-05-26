@@ -76,7 +76,9 @@ Credentials are stored in `~/.sentry/` with restricted permissions (mode 600).
 
 ## Library Usage
 
-Use Sentry CLI programmatically in Node.js (≥22) or Bun without spawning a subprocess:
+<!-- GENERATED:START library-prereq -->
+Use Sentry CLI programmatically in Node.js (≥22.15) without spawning a subprocess:
+<!-- GENERATED:END library-prereq -->
 
 ```typescript
 import createSentrySDK from "sentry";
@@ -115,35 +117,41 @@ Errors are thrown as `SentryError` with `.exitCode` and `.stderr`.
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) v1.0+
+<!-- GENERATED:START dev-prereq -->
+- [Node.js](https://nodejs.org) v22.15+ and [pnpm](https://pnpm.io) v10.11+
+<!-- GENERATED:END dev-prereq -->
 
 ### Setup
 
 ```bash
 git clone https://github.com/getsentry/cli.git
 cd cli
-bun install
+pnpm install
 ```
 
 ### Running Locally
 
 ```bash
 # Run CLI in development mode
-bun run dev --help
+pnpm run cli -- --help
 
-# With environment variables
-bun run --env-file=.env.local src/bin.ts --help
+# With environment variables (create .env.local first, see DEVELOPMENT.md)
+pnpm run cli -- --help
 ```
 
 ### Scripts
 
+<!-- GENERATED:START dev-scripts -->
 ```bash
-bun run build        # Build for current platform
-bun run typecheck    # Type checking
-bun run lint         # Check for issues
-bun run lint:fix     # Auto-fix issues
-bun test             # Run tests
+pnpm run build         # Build for current platform
+pnpm run typecheck     # Type checking
+pnpm run lint          # Check for issues
+pnpm run lint:fix      # Auto-fix issues
+pnpm run test:unit     # Run unit tests
+pnpm run test:e2e      # Run end-to-end tests
+pnpm run generate:docs # Regenerate command docs and skills
 ```
+<!-- GENERATED:END dev-scripts -->
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed setup and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 

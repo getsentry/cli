@@ -12,7 +12,7 @@
  * `collectGrep` (drained + sorted). Both share `setupGrepPipeline`
  * so defaults/compilation/matching are configured in one place.
  *
- * File reads use `Bun.file(path).text()`; the walker's `maxFileSize`
+ * File reads use `readFile(path, "utf-8")`; the walker's `maxFileSize`
  * (default 256 KB) caps the blast radius. CRLF is preserved verbatim.
  *
  * Matching uses whole-buffer `regex.exec` iteration with the per-file
@@ -28,6 +28,7 @@
  * debugging via `SENTRY_SCAN_DISABLE_WORKERS=1`.
  */
 
+import { readFile } from "node:fs/promises";
 import { handleFileError } from "../dsn/fs-utils.js";
 import {
   type ConcurrentOptions,
@@ -148,7 +149,7 @@ async function readAndGrep(
 ): Promise<GrepMatch[] | null> {
   let content: string;
   try {
-    content = await Bun.file(entry.absolutePath).text();
+    content = await readFile(entry.absolutePath, "utf-8");
   } catch (error) {
     handleFileError(error, {
       operation: "scan.grep.readFile",

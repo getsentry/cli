@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-release
-version: 0.29.0-dev.0
+version: 0.35.0-dev.0
 description: Work with Sentry releases
 requires:
   bins: ["sentry"]
@@ -120,6 +120,15 @@ sentry release deploy 1.0.0 staging "Deploy #42"
 
 # Propose a version from git HEAD
 sentry release create $(sentry release propose-version)
+
+# List deploys for a release
+sentry release deploys 1.0.0
+sentry release deploys my-org/1.0.0
+
+# Delete a release
+sentry release delete my-org/1.0.0
+sentry release delete my-org/1.0.0 --yes        # Skip confirmation
+sentry release delete my-org/1.0.0 --dry-run    # Preview without deleting
 
 # Output as JSON
 sentry release list --json

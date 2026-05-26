@@ -1,3 +1,6 @@
+import { spawn } from "node:child_process";
+import { addBreadcrumb } from "@sentry/node-core/light";
+import { whichSync } from "../../which.js";
 import { DEFAULT_COMMAND_TIMEOUT_MS } from "../constants.js";
 import type { RunCommandsPayload, ToolResult } from "../types.js";
 import {
@@ -46,6 +49,16 @@ export async function runCommands(
     const result = await runSingleCommand(command, payload.cwd, timeoutMs);
     results.push(result);
     if (result.exitCode !== 0) {
+      addBreadcrumb({
+        level: "error",
+        message: `Command failed: ${command.original}`,
+        data: {
+          exitCode: result.exitCode,
+          stdout: result.stdout.slice(0, 500),
+          stderr: result.stderr.slice(0, 500),
+          cwd: payload.cwd,
+        },
+      });
       return {
         ok: false,
         error: `Command "${command.original}" failed with exit code ${result.exitCode}: ${result.stderr}`,
@@ -67,23 +80,25 @@ async function runSingleCommand(
   stdout: string;
   stderr: string;
 }> {
-  const executable = Bun.which(command.executable) ?? command.executable;
+  const executable = whichSync(command.executable) ?? command.executable;
 
   try {
-    const child = Bun.spawn([executable, ...command.args], {
+    const child = spawn(executable, command.args, {
       cwd,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const exited = new Promise<number>((resolve) => {
+      child.on("close", (code) => resolve(code ?? 1));
+      child.on("error", () => resolve(1));
     });
     let timedOut = false;
-    const timer = setTimeout(() => {
+    const timer = globalThis.setTimeout(() => {
       timedOut = true;
       child.kill();
     }, timeoutMs);
 
     const [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
+      exited,
       readSpawnOutput(child.stdout),
       readSpawnOutput(child.stderr),
     ]);

@@ -1,5 +1,5 @@
-#!/usr/bin/env bun
-import { unlink } from "node:fs/promises";
+#!/usr/bin/env tsx
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import { build, type Plugin } from "esbuild";
 import pkg from "../package.json";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
@@ -15,37 +15,9 @@ console.log("=".repeat(40));
 if (!SENTRY_CLIENT_ID) {
   console.error("\nError: SENTRY_CLIENT_ID environment variable is required.");
   console.error("   The CLI requires OAuth to function.");
-  console.error("   Set it via: SENTRY_CLIENT_ID=xxx bun run bundle\n");
+  console.error("   Set it via: SENTRY_CLIENT_ID=xxx pnpm run bundle\n");
   process.exit(1);
 }
-
-// Regex patterns for esbuild plugin (must be top-level for performance)
-const BUN_SQLITE_FILTER = /^bun:sqlite$/;
-const ANY_FILTER = /.*/;
-
-/** Plugin to replace bun:sqlite with our node:sqlite polyfill. */
-const bunSqlitePlugin: Plugin = {
-  name: "bun-sqlite-polyfill",
-  setup(pluginBuild) {
-    pluginBuild.onResolve({ filter: BUN_SQLITE_FILTER }, () => ({
-      path: "bun:sqlite",
-      namespace: "bun-sqlite-polyfill",
-    }));
-
-    pluginBuild.onLoad(
-      { filter: ANY_FILTER, namespace: "bun-sqlite-polyfill" },
-      () => ({
-        contents: `
-          // Use the polyfill injected by node-polyfills.ts
-          const polyfill = globalThis.__bun_sqlite_polyfill;
-          export const Database = polyfill.Database;
-          export default polyfill;
-        `,
-        loader: "js",
-      })
-    );
-  },
-};
 
 type InjectedFile = { jsPath: string; mapPath: string; debugId: string };
 
@@ -157,8 +129,8 @@ const sentrySourcemapPlugin: Plugin = {
       // Replace the placeholder UUID with the real debug ID in each JS output.
       // Both are 36-char UUIDs so sourcemap character positions stay valid.
       for (const { jsPath, debugId } of injected) {
-        const content = await Bun.file(jsPath).text();
-        await Bun.write(
+        const content = await readFile(jsPath, "utf-8");
+        await writeFile(
           jsPath,
           content.split(PLACEHOLDER_DEBUG_ID).join(debugId)
         );
@@ -180,10 +152,29 @@ const sentrySourcemapPlugin: Plugin = {
 };
 
 // Always inject debug IDs (even without auth token); upload is gated inside the plugin
+/** Files that use _require() for lazy relative imports (circular dep breaking). */
+const REQUIRE_ALIAS_FILTER =
+  /(?:db[\\/](?:index|schema)|list-command|telemetry)\.ts$/;
+const REQUIRE_ALIAS_RE = /\b_require\(/g;
+
+/** Transform _require() → require() so esbuild resolves lazy relative requires. */
+const requireAliasPlugin: Plugin = {
+  name: "require-alias",
+  setup(b) {
+    b.onLoad({ filter: REQUIRE_ALIAS_FILTER }, async (args) => {
+      const source = await readFile(args.path, "utf-8");
+      return {
+        contents: source.replace(REQUIRE_ALIAS_RE, "require("),
+        loader: args.path.endsWith(".tsx") ? "tsx" : "ts",
+      };
+    });
+  },
+};
+
 const plugins: Plugin[] = [
-  bunSqlitePlugin,
   sentrySourcemapPlugin,
   textImportPlugin,
+  requireAliasPlugin,
 ];
 
 if (process.env.SENTRY_AUTH_TOKEN) {
@@ -198,11 +189,12 @@ const result = await build({
   entryPoints: ["./src/index.ts"],
   bundle: true,
   minify: true,
+  treeShaking: true,
   // No banner — warning suppression moved to dist/bin.cjs (CLI-only).
   // The library bundle must not suppress the host application's warnings.
   sourcemap: true,
   platform: "node",
-  target: "node22",
+  target: "node24",
   format: "cjs",
   outfile: "./dist/index.cjs",
   // Inject Bun polyfills and import.meta.url shim for CJS compatibility
@@ -215,8 +207,30 @@ const result = await build({
     // Replace import.meta.url with the injected shim variable for CJS
     "import.meta.url": "import_meta_url",
   },
-  // Only externalize Node.js built-ins - bundle all npm packages
-  external: ["node:*"],
+  // Externalize Node.js built-ins, plus Ink + React + companions.
+  // These packages are NOT bundled into the main CJS output because
+  // they use top-level await (esbuild can't emit that in CJS).
+  // Instead, the Ink UI lives in a separate self-contained ESM
+  // sidecar (`dist/ink-app.js`) that the text-import-plugin
+  // pre-bundles with all deps inlined. The main bundle references
+  // the sidecar via a path string and loads it lazily via dynamic
+  // `import()` at runtime. The external list here prevents esbuild
+  // from trying to resolve these packages in the main bundle graph.
+  external: [
+    "node:*",
+    // bun:sqlite is referenced as a fallback in src/lib/db/sqlite.ts (never
+    // reached on Node 22+ where node:sqlite is available). Mark external so
+    // esbuild doesn't fail trying to resolve a Bun-only module.
+    "bun:sqlite",
+    "ink",
+    "ink-spinner",
+    "react",
+    "react/*",
+    "react-reconciler",
+    "react-reconciler/*",
+    "react-devtools-core",
+    "yoga-layout",
+  ],
   metafile: true,
   plugins,
 });
@@ -224,11 +238,11 @@ const result = await build({
 // Write the CLI bin wrapper (tiny — shebang + version check + dispatch).
 // Version floor must track `engines.node` in package.json.
 const BIN_WRAPPER = `#!/usr/bin/env node
-{let v=process.versions.node.split(".").map(Number);if(v[0]<22||(v[0]===22&&v[1]<12)){console.error("Error: sentry requires Node.js 22.12 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}}
+{let v=process.versions.node.split(".").map(Number);if(v[0]<22||(v[0]===22&&v[1]<15)){console.error("Error: sentry requires Node.js 22.15 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}}
 {let e=process.emit;process.emit=function(n,...a){return n==="warning"?!1:e.apply(this,[n,...a])}}
 require('./index.cjs')._cli().catch(()=>{process.exitCode=1});
 `;
-await Bun.write("./dist/bin.cjs", BIN_WRAPPER);
+await writeFile("./dist/bin.cjs", BIN_WRAPPER);
 
 // Write TypeScript declarations for the library API.
 // The SentrySDK type is read from sdk.generated.d.cts (produced by generate-sdk.ts).
@@ -270,13 +284,19 @@ export default createSentrySDK;
 `;
 
 // Read pre-built SDK type declarations (generated by generate-sdk.ts)
-const sdkTypes = await Bun.file("./src/sdk.generated.d.cts").text();
+const sdkTypes = await readFile("./src/sdk.generated.d.cts", "utf-8");
 
 const TYPE_DECLARATIONS = `${CORE_DECLARATIONS}\n${sdkTypes}\n`;
-await Bun.write("./dist/index.d.cts", TYPE_DECLARATIONS);
+await writeFile("./dist/index.d.cts", TYPE_DECLARATIONS);
 
 console.log("  -> dist/bin.cjs (CLI wrapper)");
 console.log("  -> dist/index.d.cts (type declarations)");
+
+// The `ink-app.js` sidecar (pre-bundled by text-import-plugin) ships
+// with the npm package so `npx sentry@latest init` can load the
+// interactive Ink UI on Node via dynamic import(). The sidecar is
+// self-contained ESM with all deps inlined — no runtime dependencies
+// needed.
 
 // Calculate bundle size (only the main bundle, not source maps)
 const bundleOutput = result.metafile?.outputs["dist/index.cjs"];

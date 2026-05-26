@@ -4,12 +4,18 @@
  * Tests that multiple CLI processes can safely access the SQLite database
  * simultaneously without SQLITE_BUSY errors or data corruption.
  *
- * These tests spawn actual Bun subprocesses to simulate real concurrent
+ * These tests spawn tsx subprocesses to simulate real concurrent
  * CLI usage (e.g., multiple terminals, CI jobs, editor integrations).
  */
 
-import { beforeEach, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { beforeEach, describe, expect, test } from "vitest";
+
+function noop(): void {
+  // Intentionally empty — absorbs async spawn errors
+}
+
 import { getCachedDsn } from "../../../src/lib/db/dsn-cache.js";
 import {
   CONFIG_DIR_ENV_VAR,
@@ -18,7 +24,7 @@ import {
 import { getCachedProject } from "../../../src/lib/db/project-cache.js";
 import { useTestConfigDir } from "../../helpers.js";
 
-const WORKER_SCRIPT = join(import.meta.dir, "concurrent-worker.ts");
+const WORKER_SCRIPT = join(import.meta.dirname, "concurrent-worker.ts");
 
 type WorkerResult = {
   workerId: string;
@@ -36,17 +42,38 @@ async function spawnWorker(
   workerId: string,
   operation: string
 ): Promise<WorkerResult> {
-  const proc = Bun.spawn(
-    [process.execPath, WORKER_SCRIPT, configDir, workerId, operation],
-    {
-      stdout: "pipe",
-      stderr: "pipe",
-    }
+  const requireShim = join(
+    import.meta.dirname,
+    "../../../script/require-shim.mjs"
   );
+  const proc = spawn(
+    process.execPath,
+    [
+      "--import",
+      "tsx/esm",
+      "--import",
+      requireShim,
+      WORKER_SCRIPT,
+      configDir,
+      workerId,
+      operation,
+    ],
+    { stdio: ["pipe", "pipe", "pipe"] }
+  );
+  proc.on("error", noop);
 
-  const exitCode = await proc.exited;
-  const stdout = await new Response(proc.stdout).text();
-  const stderr = await new Response(proc.stderr).text();
+  let stdout = "";
+  let stderr = "";
+  proc.stdout.on("data", (d: Buffer) => {
+    stdout += d;
+  });
+  proc.stderr.on("data", (d: Buffer) => {
+    stderr += d;
+  });
+
+  const exitCode = await new Promise<number>((done) =>
+    proc.on("close", (code) => done(code ?? 1))
+  );
 
   if (exitCode !== 0) {
     return {

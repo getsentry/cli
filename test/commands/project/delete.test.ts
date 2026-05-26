@@ -2,27 +2,115 @@
  * Project Delete Command Tests
  *
  * Tests for the project delete command in src/commands/project/delete.ts.
- * Uses spyOn to mock api-client and resolve-target to test
- * the func() body without real HTTP calls or database access.
- *
- * Note: Interactive prompt (type-out confirmation) tests live in
- * test/isolated/project-delete-confirm.test.ts because they require
- * mock.module() to override node:tty and the logger module.
+ * Uses spyOn to mock api-client and resolve-target for the func() body
+ * without real HTTP calls or database access. The interactive type-out
+ * confirmation tests use vi.mock() on node:tty and the logger module
+ * to control the prompt.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
-import { deleteCommand } from "../../../src/commands/project/delete.js";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+// Mock isatty so deleteCommand's non-interactive guard passes.
+// Bun's ESM wrapper for CJS built-ins exposes `default` + `ReadStream` +
+// `WriteStream` — all must be present.
+const { mockIsatty, ttyExports, noop, mockPrompt, fakeLog } = vi.hoisted(() => {
+  const _mockIsatty = vi.fn(() => false);
+  class _FakeReadStream {}
+  class _FakeWriteStream {}
+  const _ttyExports = {
+    isatty: _mockIsatty,
+    ReadStream: _FakeReadStream,
+    WriteStream: _FakeWriteStream,
+  };
+
+  /** No-op placeholder for unused logger methods. */
+  function _noop() {
+    // intentional no-op
+  }
+
+  // Mock the logger to intercept the .prompt() call made by the module-scoped
+  // `log = logger.withTag("project.delete")` inside delete.ts.
+  const _mockPrompt = vi.fn(
+    (): Promise<string | symbol> => Promise.resolve("acme-corp/my-app")
+  );
+  const _fakeLog: {
+    prompt: typeof _mockPrompt;
+    info: ReturnType<typeof vi.fn>;
+    warn: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+    debug: ReturnType<typeof vi.fn>;
+    success: ReturnType<typeof vi.fn>;
+    withTag: () => typeof _fakeLog;
+  } = {
+    prompt: _mockPrompt,
+    info: vi.fn(_noop),
+    warn: vi.fn(_noop),
+    error: vi.fn(_noop),
+    debug: vi.fn(_noop),
+    success: vi.fn(_noop),
+    withTag: () => _fakeLog,
+  };
+
+  return {
+    mockIsatty: _mockIsatty,
+    ttyExports: _ttyExports,
+    noop: _noop,
+    mockPrompt: _mockPrompt,
+    fakeLog: _fakeLog,
+  };
+});
+
+vi.mock("node:tty", () => ({
+  ...ttyExports,
+  default: ttyExports,
+}));
+
+vi.mock("../../../src/lib/logger.js", () => ({
+  logger: fakeLog,
+  setLogLevel: vi.fn(noop),
+  attachSentryReporter: vi.fn(noop),
+  LOG_LEVEL_NAMES: ["error", "warn", "log", "info", "debug", "trace"],
+  LOG_LEVEL_ENV_VAR: "SENTRY_LOG_LEVEL",
+  parseLogLevel: (name: string) => {
+    const levels = ["error", "warn", "log", "info", "debug", "trace"];
+    const idx = levels.indexOf(name.toLowerCase().trim());
+    return idx === -1 ? 3 : idx;
+  },
+  getEnvLogLevel: () => null,
+}));
+
+// Dynamic import: must run AFTER vi.mock() so the module-scoped logger
+// binding inside delete.ts picks up fakeLog.
+const { deleteCommand } = await import(
+  "../../../src/commands/project/delete.js"
+);
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ApiError, ContextError } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryProject } from "../../../src/types/index.js";
@@ -39,8 +127,8 @@ const sampleProject: SentryProject = {
 const defaultFlags = { yes: true, force: false, "dry-run": false };
 
 function createMockContext() {
-  const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
+  const stderrWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
@@ -59,10 +147,10 @@ describe("project delete", () => {
   let resolveOrgProjectTargetSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    getProjectSpy = spyOn(apiClient, "getProject");
-    deleteProjectSpy = spyOn(apiClient, "deleteProject");
-    getOrganizationSpy = spyOn(apiClient, "getOrganization");
-    resolveOrgProjectTargetSpy = spyOn(
+    getProjectSpy = vi.spyOn(apiClient, "getProject");
+    deleteProjectSpy = vi.spyOn(apiClient, "deleteProject");
+    getOrganizationSpy = vi.spyOn(apiClient, "getOrganization");
+    resolveOrgProjectTargetSpy = vi.spyOn(
       resolveTarget,
       "resolveOrgProjectTarget"
     );
@@ -316,5 +404,135 @@ describe("project delete", () => {
     );
 
     expect(deleteProjectSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Tests for the interactive type-out confirmation prompt.
+ *
+ * These rely on `vi.mock()` at the top of this file to stub `node:tty`
+ * (so `isatty(0)` returns true) and the logger (so `.prompt()` returns a
+ * controllable value).
+ */
+describe("project delete — interactive confirmation", () => {
+  let getProjectSpy: ReturnType<typeof spyOn>;
+  let deleteProjectSpy: ReturnType<typeof spyOn>;
+  let resolveOrgProjectTargetSpy: ReturnType<typeof spyOn>;
+
+  function createPromptMockContext() {
+    const stdoutWrite = vi.fn(() => true);
+    return {
+      context: {
+        stdout: { write: stdoutWrite },
+        stderr: { write: vi.fn(() => true) },
+        cwd: "/tmp",
+      },
+      stdoutWrite,
+    };
+  }
+
+  beforeEach(() => {
+    mockIsatty.mockReturnValue(true);
+    getProjectSpy = vi.spyOn(apiClient, "getProject");
+    deleteProjectSpy = vi.spyOn(apiClient, "deleteProject");
+    resolveOrgProjectTargetSpy = vi.spyOn(
+      resolveTarget,
+      "resolveOrgProjectTarget"
+    );
+
+    getProjectSpy.mockResolvedValue(sampleProject);
+    deleteProjectSpy.mockResolvedValue(undefined);
+    resolveOrgProjectTargetSpy.mockResolvedValue({
+      org: "acme-corp",
+      project: "my-app",
+    });
+
+    mockPrompt.mockClear();
+    fakeLog.info.mockClear();
+  });
+
+  afterEach(() => {
+    getProjectSpy.mockRestore();
+    deleteProjectSpy.mockRestore();
+    resolveOrgProjectTargetSpy.mockRestore();
+    mockIsatty.mockReturnValue(false);
+  });
+
+  test("proceeds when user types exact org/project", async () => {
+    mockPrompt.mockResolvedValue("acme-corp/my-app");
+
+    const { context, stdoutWrite } = createPromptMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(
+      context,
+      { yes: false, "dry-run": false },
+      "acme-corp/my-app"
+    );
+
+    expect(deleteProjectSpy).toHaveBeenCalledWith("acme-corp", "my-app");
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("Deleted project");
+  });
+
+  test("cancels when user types wrong value", async () => {
+    mockPrompt.mockResolvedValue("wrong-org/wrong-project");
+
+    const { context } = createPromptMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(
+      context,
+      { yes: false, "dry-run": false },
+      "acme-corp/my-app"
+    );
+
+    expect(deleteProjectSpy).not.toHaveBeenCalled();
+    expect(fakeLog.info).toHaveBeenCalledWith("Cancelled.");
+  });
+
+  test("cancels when user presses Ctrl+C (Symbol)", async () => {
+    // consola returns Symbol(clack:cancel) on Ctrl+C — truthy but not a string.
+    mockPrompt.mockResolvedValue(Symbol("clack:cancel"));
+
+    const { context } = createPromptMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(
+      context,
+      { yes: false, "dry-run": false },
+      "acme-corp/my-app"
+    );
+
+    expect(deleteProjectSpy).not.toHaveBeenCalled();
+    expect(fakeLog.info).toHaveBeenCalledWith("Cancelled.");
+  });
+
+  test("cancels when user submits empty string", async () => {
+    mockPrompt.mockResolvedValue("");
+
+    const { context } = createPromptMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(
+      context,
+      { yes: false, "dry-run": false },
+      "acme-corp/my-app"
+    );
+
+    expect(deleteProjectSpy).not.toHaveBeenCalled();
+  });
+
+  test("prompt message includes project name and expected input", async () => {
+    mockPrompt.mockResolvedValue("acme-corp/my-app");
+
+    const { context } = createPromptMockContext();
+    const func = await deleteCommand.loader();
+    await func.call(
+      context,
+      { yes: false, "dry-run": false },
+      "acme-corp/my-app"
+    );
+
+    expect(mockPrompt).toHaveBeenCalledWith(
+      expect.stringContaining("acme-corp/my-app"),
+      expect.objectContaining({ type: "text" })
+    );
   });
 });

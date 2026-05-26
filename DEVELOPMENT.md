@@ -2,7 +2,10 @@
 
 ## Prerequisites
 
-- [Bun](https://bun.sh/) installed
+<!-- GENERATED:START dev-prereq -->
+- [Node.js](https://nodejs.org/) v22.15+ installed
+- [pnpm](https://pnpm.io/) v10.11+ installed
+<!-- GENERATED:END dev-prereq -->
 - A Sentry OAuth application (create one at https://sentry.io/settings/account/api/applications/)
 
 ## Setup
@@ -10,7 +13,7 @@
 1. Install dependencies:
 
 ```bash
-bun install
+pnpm install
 ```
 
 2. Create a `.env.local` file in the project root:
@@ -25,8 +28,10 @@ Get the client ID from your Sentry OAuth application settings.
 
 ## Running Locally
 
+Load environment variables from `.env.local` (e.g. via `dotenv` or `export $(cat .env.local | xargs)`), then:
+
 ```bash
-bun run --env-file=.env.local src/bin.ts auth login
+pnpm run cli -- auth login
 ```
 
 ## Testing the Device Flow
@@ -34,7 +39,7 @@ bun run --env-file=.env.local src/bin.ts auth login
 1. Run the CLI login command:
 
 ```bash
-bun run --env-file=.env.local src/bin.ts auth login
+pnpm run cli -- auth login
 ```
 
 2. You'll see output like:
@@ -69,21 +74,30 @@ When creating your Sentry OAuth application:
 
 ## Environment Variables
 
-| Variable                | Description                                                      | Default              |
-| ----------------------- | ---------------------------------------------------------------- | -------------------- |
-| `SENTRY_CLIENT_ID`      | Sentry OAuth app client ID                                       | (required for build) |
-| `SENTRY_HOST`           | Sentry instance URL (for self-hosted, takes precedence)          | `https://sentry.io`  |
-| `SENTRY_URL`            | Alias for `SENTRY_HOST`                                          | `https://sentry.io`  |
-| `SENTRY_AUTH_TOKEN`     | API token for non-interactive use (lower priority than stored OAuth by default) | —     |
-| `SENTRY_FORCE_ENV_TOKEN`| Force env token to take priority over stored OAuth token         | —                    |
-| `SENTRY_CLI_NO_TELEMETRY`| Disable CLI telemetry (error tracking)                          | —                    |
-| `SENTRY_LOG_LEVEL`      | Diagnostic log level (`error`, `warn`, `log`, `info`, `debug`, `trace`) | `info`        |
+The table below lists the most common development variables. For the complete reference, see the generated [Configuration](https://cli.sentry.dev/configuration/) page.
+
+<!-- GENERATED:START dev-env-vars -->
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SENTRY_AUTH_TOKEN` | API token for non-interactive use (lower priority than stored OAuth by default) | — |
+| `SENTRY_FORCE_ENV_TOKEN` | Force env token to take priority over stored OAuth token | — |
+| `SENTRY_HOST` | Sentry instance URL (for self-hosted, takes precedence) | `https://sentry.io` |
+| `SENTRY_URL` | Alias for `SENTRY_HOST` | `https://sentry.io` |
+| `SENTRY_CLIENT_ID` | Sentry OAuth app client ID | (required for build) |
+| `SENTRY_CONFIG_DIR` | Override credentials/cache directory | `~/.sentry/` |
+| `SENTRY_LOG_LEVEL` | Diagnostic log level (`error`, `warn`, `log`, `info`, `debug`, `trace`) | `info` |
+| `SENTRY_CLI_NO_TELEMETRY` | Disable CLI telemetry (error tracking) | — |
+<!-- GENERATED:END dev-env-vars -->
 
 ## Building
 
+<!-- GENERATED:START build-toolchain -->
+Build the native binary (uses esbuild for bundling and fossilize for Node SEA packaging):
+
 ```bash
-bun run build
+pnpm run build
 ```
+<!-- GENERATED:END build-toolchain -->
 
 ## Architecture
 

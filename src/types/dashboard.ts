@@ -1002,7 +1002,7 @@ const WIDGET_TYPE_TO_DATASET: Record<string, string> = {
   "error-events": "errors",
   "transaction-like": "transactions",
   logs: "logs",
-  tracemetrics: "metricsEnhanced",
+  tracemetrics: "tracemetrics",
 };
 
 /**
@@ -1031,3 +1031,31 @@ export const TIMESERIES_DISPLAY_TYPES = new Set([
 
 /** Display types that use tabular data (events endpoint) */
 export const TABLE_DISPLAY_TYPES = new Set(["table", "top_n"]);
+
+// ---------------------------------------------------------------------------
+// Dashboard revision types
+// ---------------------------------------------------------------------------
+
+/** Schema for the createdBy field in a dashboard revision */
+const DashboardRevisionCreatedBySchema = z
+  .object({
+    id: z.string().optional(),
+    name: z.string().nullish(),
+    email: z.string().nullish(),
+    avatarType: z.string().nullish(),
+    avatarUrl: z.string().nullish(),
+  })
+  .passthrough();
+
+/** Schema for a dashboard revision (from GET /dashboards/{id}/revisions/) */
+export const DashboardRevisionSchema = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    dateCreated: z.string(),
+    createdBy: DashboardRevisionCreatedBySchema.nullable(),
+    source: z.string(),
+  })
+  .passthrough();
+
+export type DashboardRevision = z.infer<typeof DashboardRevisionSchema>;

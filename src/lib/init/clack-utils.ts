@@ -1,12 +1,15 @@
 /**
- * Clack Utilities
+ * Wizard Utilities
  *
- * Shared helpers for the clack-based init wizard UI.
+ * Shared cancellation helpers and feature labels for the init wizard.
+ *
+ * The file name is preserved (vs. renaming to `wizard-utils.ts`) to
+ * keep the diff in PR 4 focused on the clack removal — the next
+ * cleanup PR can do the rename. Despite the historical name nothing
+ * here references clack any more.
  */
 
-import { cancel, isCancel } from "@clack/prompts";
-import { terminalLink } from "../formatters/colors.js";
-import { SENTRY_DOCS_URL } from "./constants.js";
+import { isCancelled } from "./ui/types.js";
 
 export class WizardCancelledError extends Error {
   constructor() {
@@ -15,54 +18,60 @@ export class WizardCancelledError extends Error {
   }
 }
 
-export function abortIfCancelled<T>(value: T | symbol): T {
-  if (isCancel(value)) {
-    cancel(
-      `Setup cancelled. You can visit ${terminalLink(SENTRY_DOCS_URL)} to set up manually.`
-    );
+/**
+ * Coerce a possibly-cancelled prompt result into the resolved value, or
+ * throw `WizardCancelledError` on cancellation.
+ *
+ * The return type uses `Exclude<T, symbol>` so callers passing a union
+ * that includes a symbol member (e.g. `string[] | typeof CANCELLED`)
+ * receive the narrowed non-symbol type back — TypeScript otherwise
+ * widens `T` to the full union and refuses to call array methods on it.
+ */
+export function abortIfCancelled<T>(value: T): Exclude<T, symbol> {
+  if (isCancelled(value)) {
     throw new WizardCancelledError();
   }
-  return value as T;
+  return value as Exclude<T, symbol>;
 }
 
 const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
   errorMonitoring: {
     label: "Error Monitoring",
-    hint: "Error and crash reporting",
+    hint: "Group exceptions into issues with context",
   },
   performanceMonitoring: {
-    label: "Performance Monitoring (Tracing)",
-    hint: "Transaction and span tracing",
+    label: "Tracing",
+    hint: "See request paths, spans, and bottlenecks",
   },
   sessionReplay: {
     label: "Session Replay",
-    hint: "Visual replay of user sessions",
+    hint: "Replay sessions linked to errors",
   },
   profiling: {
     label: "Profiling",
-    hint: "Code-level performance insights",
+    hint: "Find CPU-heavy functions in production",
   },
-  logs: { label: "Logging", hint: "Structured log ingestion" },
-  metrics: { label: "Metrics", hint: "Track business metrics" },
+  logs: { label: "Logging", hint: "Search logs beside errors and traces" },
+  metrics: { label: "Metrics", hint: "Track custom measurements over time" },
   sourceMaps: {
     label: "Source Maps",
-    hint: "See original source code in production errors",
+    hint: "Turn minified stacks into your source",
   },
   crons: {
     label: "Crons",
-    hint: "Monitor scheduled and recurring jobs",
+    hint: "Alert on failed or missed scheduled jobs",
   },
   aiMonitoring: {
     label: "AI Monitoring",
-    hint: "Track AI model calls, latency, and failures",
+    hint: "Track AI calls, latency, cost, and failures",
   },
   userFeedback: {
     label: "User Feedback",
-    hint: "Collect in-app user feedback and reports",
+    hint: "Collect user reports with issue context",
   },
   reactFeatures: {
     label: "React Features",
-    hint: "Redux, component tracking, source maps, and integrations",
+    hint: "Add React-specific context and integrations",
   },
 };
 
@@ -114,3 +123,98 @@ export const STEP_LABELS: Record<string, string> = {
   "verify-changes": "Verifying changes",
   "open-sentry-ui": "Finishing up",
 };
+
+/**
+ * Canonical execution order of the wizard's workflow steps.
+ *
+ * Used by the Ink sidebar's progress checklist as the static
+ * pre-rendered list. The wizard advertises step transitions via
+ * `WizardUI.setStep(...)`; the store back-fills any earlier
+ * `pending` rows as `skipped` when a later step starts (the workflow
+ * can only move forward, so a later transition implies any earlier
+ * pending step was bypassed by an `if`-branch in the workflow).
+ *
+ * Order must match the actual Mastra workflow order or the back-fill
+ * logic will mis-mark steps as skipped.
+ */
+export const CANONICAL_STEP_ORDER: readonly string[] = [
+  "discover-context",
+  "select-target-app",
+  "resolve-dir",
+  "check-existing-sentry",
+  "detect-platform",
+  "ensure-sentry-project",
+  "select-features",
+  "plan-codemods",
+  "apply-codemods",
+  "install-deps",
+  "verify-changes",
+  "open-sentry-ui",
+];
+
+/**
+ * Subset of {@link CANONICAL_STEP_ORDER} surfaced in the progress
+ * checklist. The Ink sidebar is 36 cols wide and shares vertical
+ * space with the tip card and the files-read panel, so showing all
+ * 12 step rows would push the files panel off-screen on shorter
+ * terminals.
+ *
+ * The hidden steps (`select-target-app`, `resolve-dir`,
+ * `check-existing-sentry`) are plumbing — users care that "Setting up
+ * Sentry project" happened, not that we resolved their working
+ * directory along the way.
+ */
+export const CHECKLIST_VISIBLE_STEPS: readonly string[] = [
+  "discover-context",
+  "detect-platform",
+  "ensure-sentry-project",
+  "select-features",
+  "plan-codemods",
+  "apply-codemods",
+  "install-deps",
+  "verify-changes",
+  "open-sentry-ui",
+];
+
+/**
+ * Active-voice step descriptions shown as spinner messages while
+ * each step runs. More descriptive than the sidebar labels.
+ */
+export const STEP_ACTIVE_LABELS: Record<string, string> = {
+  "discover-context": "Scanning project structure...",
+  "select-target-app": "Selecting target application...",
+  "resolve-dir": "Resolving project directory...",
+  "check-existing-sentry": "Checking for existing Sentry setup...",
+  "detect-platform": "Detecting framework and platform...",
+  "ensure-sentry-project": "Configuring Sentry project...",
+  "select-features": "Preparing feature selection...",
+  "install-deps": "Installing Sentry SDK and dependencies...",
+  "plan-codemods": "Planning code changes...",
+  "apply-codemods": "Applying code modifications...",
+  "verify-changes": "Verifying setup...",
+  "open-sentry-ui": "Finishing up...",
+};
+
+/**
+ * Sidebar-friendly abbreviations of {@link STEP_LABELS}. The full
+ * labels stay the source-of-truth for the spinner message in the main
+ * column; only the 36-col sidebar checklist uses these.
+ *
+ * Falls back to the full label if a step isn't listed here.
+ */
+export const STEP_LABELS_SHORT: Record<string, string> = {
+  "discover-context": "Analyzing project",
+  "detect-platform": "Detecting platform",
+  "ensure-sentry-project": "Setting up project",
+  "select-features": "Selecting features",
+  "install-deps": "Installing deps",
+  "plan-codemods": "Planning changes",
+  "apply-codemods": "Applying changes",
+  "verify-changes": "Verifying changes",
+  "open-sentry-ui": "Finishing up",
+};
+
+/** Resolve a step id to its sidebar checklist label. */
+export function shortStepLabel(stepId: string): string {
+  return STEP_LABELS_SHORT[stepId] ?? STEP_LABELS[stepId] ?? stepId;
+}

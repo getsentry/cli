@@ -6,7 +6,7 @@
  * focus on specific scenarios and edge cases.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { hoistGlobalFlags } from "../../src/lib/argv-hoist.js";
 
 describe("hoistGlobalFlags", () => {
@@ -174,6 +174,58 @@ describe("hoistGlobalFlags", () => {
       "list",
       "--fields=id,title",
     ]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Value flag: --org (compat)
+  // -------------------------------------------------------------------------
+
+  test("hoists --org with separate value", () => {
+    expect(hoistGlobalFlags(["--org", "sentry", "issue", "list"])).toEqual([
+      "issue",
+      "list",
+      "--org",
+      "sentry",
+    ]);
+  });
+
+  test("hoists --org=sentry as single token", () => {
+    expect(hoistGlobalFlags(["--org=sentry", "issue", "list"])).toEqual([
+      "issue",
+      "list",
+      "--org=sentry",
+    ]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Value flag: --project (compat)
+  // -------------------------------------------------------------------------
+
+  test("hoists --project with separate value", () => {
+    expect(hoistGlobalFlags(["--project", "cli", "issue", "list"])).toEqual([
+      "issue",
+      "list",
+      "--project",
+      "cli",
+    ]);
+  });
+
+  test("hoists --project=cli as single token", () => {
+    expect(hoistGlobalFlags(["--project=cli", "issue", "list"])).toEqual([
+      "issue",
+      "list",
+      "--project=cli",
+    ]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Combined: --org + --project (compat)
+  // -------------------------------------------------------------------------
+
+  test("hoists --org and --project together", () => {
+    expect(
+      hoistGlobalFlags(["--org", "sentry", "--project", "cli", "issue", "list"])
+    ).toEqual(["issue", "list", "--org", "sentry", "--project", "cli"]);
   });
 
   // -------------------------------------------------------------------------

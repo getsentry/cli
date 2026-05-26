@@ -389,6 +389,7 @@ async function handleTraceMode(
         cursor,
         ...timeRangeToApiParams(timeRange),
         extraFields: extraApiFields,
+        allProjects: true,
       })
   );
 

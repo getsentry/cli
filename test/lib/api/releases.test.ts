@@ -4,19 +4,46 @@
  * Tests the real API function bodies by mocking globalThis.fetch.
  * This ensures the functions correctly call the SDK, pass parameters,
  * and transform responses.
+ *
+ * The `setCommitsAuto` tests additionally use `vi.mock()` to stub the
+ * git helpers (`getRepositoryName`, etc.) because `setCommitsAuto` reads
+ * them at runtime. `getRepositoryName` is a controllable `vi.fn()` so
+ * individual tests can change its return value (e.g. null for the
+ * "no git remote" path).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+// Controllable git-helper mocks. `setCommitsAuto` calls these at runtime to
+// build the `refs` array sent to Sentry.
+const { mockGetRepositoryName } = vi.hoisted(() => ({
+  mockGetRepositoryName: vi.fn((): string | null => "getsentry/cli"),
+}));
+
+vi.mock("../../../src/lib/git.js", () => ({
+  getRepositoryName: mockGetRepositoryName,
+  getHeadCommit: () => "abc123def456789012345678901234567890abcd",
+  isInsideGitWorkTree: () => true,
+  isShallowRepository: () => false,
+  getCommitLog: () => [],
+  getUncommittedFiles: () => [],
+  parseRemoteUrl: (url: string) => url,
+}));
+
+// Dynamic import: must run AFTER vi.mock() so setCommitsAuto picks up
+// the mocked git helpers.
+const {
   createRelease,
   createReleaseDeploy,
   deleteRelease,
   getRelease,
   listReleaseDeploys,
   listReleasesPaginated,
+  setCommitsAuto,
   setCommitsLocal,
   updateRelease,
-} from "../../../src/lib/api/releases.js";
+} = await import("../../../src/lib/api/releases.js");
+
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import type { SentryDeploy, SentryRelease } from "../../../src/types/index.js";
@@ -233,8 +260,163 @@ describe("createReleaseDeploy", () => {
 // setCommitsAuto
 // =============================================================================
 
-// setCommitsAuto tests are in test/isolated/set-commits-auto.test.ts
-// because they require mock.module() for git helpers.
+describe("setCommitsAuto", () => {
+  const SAMPLE_REPO = {
+    id: "1",
+    name: "getsentry/cli",
+    url: "https://github.com/getsentry/cli",
+    provider: { id: "integrations:github", name: "GitHub" },
+    status: "active",
+  };
+
+  beforeEach(() => {
+    // Reset the git-helper mock to the default (cli repo). Individual tests
+    // can override via mockGetRepositoryName.mockReturnValueOnce(null) or
+    // mockReturnValue("...").
+    mockGetRepositoryName.mockReturnValue("getsentry/cli");
+  });
+
+  test("lists repos, discovers HEAD, fetches previous commit, and sends refs", async () => {
+    const withCommits = { ...SAMPLE_RELEASE, commitCount: 5 };
+    const requests: { method: string; url: string }[] = [];
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input!, init);
+      requests.push({ method: req.method, url: req.url });
+
+      // List org repositories (SDK uses /repos/ endpoint)
+      if (req.url.includes("/repos/")) {
+        expect(req.method).toBe("GET");
+        return new Response(JSON.stringify([SAMPLE_REPO]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Previous release commit lookup
+      if (req.url.includes("/previous-with-commits/")) {
+        expect(req.method).toBe("GET");
+        return new Response(
+          JSON.stringify({
+            lastCommit: { id: "prev000000000000000000000000000000000000" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // PUT refs on the release
+      expect(req.method).toBe("PUT");
+      expect(req.url).toContain("/releases/1.0.0/");
+      const body = (await req.json()) as {
+        refs: Array<{
+          repository: string;
+          commit: string;
+          previousCommit?: string;
+        }>;
+      };
+      expect(body.refs).toEqual([
+        {
+          repository: "getsentry/cli",
+          commit: "abc123def456789012345678901234567890abcd",
+          previousCommit: "prev000000000000000000000000000000000000",
+        },
+      ]);
+      return new Response(JSON.stringify(withCommits), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const release = await setCommitsAuto("test-org", "1.0.0", "/tmp");
+
+    expect(release.commitCount).toBe(5);
+  });
+
+  test("throws ApiError when org has no repositories", async () => {
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    await expect(setCommitsAuto("test-org", "1.0.0", "/tmp")).rejects.toThrow(
+      /No repository integrations/
+    );
+  });
+
+  test("throws ValidationError when no repo matches local remote", async () => {
+    const otherRepo = { ...SAMPLE_REPO, name: "getsentry/sentry" };
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify([otherRepo]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    await expect(setCommitsAuto("test-org", "1.0.0", "/tmp")).rejects.toThrow(
+      /No Sentry repository matching/
+    );
+  });
+
+  test("paginates through multiple pages to find matching repo", async () => {
+    const withCommits = { ...SAMPLE_RELEASE, commitCount: 3 };
+    const otherRepo = { ...SAMPLE_REPO, id: "2", name: "getsentry/sentry" };
+    let repoRequestCount = 0;
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input!, init);
+
+      if (req.url.includes("/repos/")) {
+        repoRequestCount += 1;
+        if (repoRequestCount === 1) {
+          // First page: different repo, with a next cursor
+          return new Response(JSON.stringify([otherRepo]), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              Link: '<https://us.sentry.io/api/0/next/>; rel="next"; results="true"; cursor="page2:0:0"',
+            },
+          });
+        }
+        // Second page: the matching repo, no next cursor
+        return new Response(JSON.stringify([SAMPLE_REPO]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Previous release commit lookup (no previous release)
+      if (req.url.includes("/previous-with-commits/")) {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // PUT refs on the release
+      return new Response(JSON.stringify(withCommits), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const release = await setCommitsAuto("test-org", "1.0.0", "/tmp");
+
+    expect(release.commitCount).toBe(3);
+    expect(repoRequestCount).toBe(2);
+  });
+
+  test("throws ValidationError when local git remote is not available", async () => {
+    mockGetRepositoryName.mockReturnValue(null);
+
+    await expect(setCommitsAuto("test-org", "1.0.0", "/tmp")).rejects.toThrow(
+      /Could not determine repository name/
+    );
+  });
+});
 
 // =============================================================================
 // setCommitsLocal

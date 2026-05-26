@@ -16,9 +16,9 @@
  *   adapter's job is to strip it before returning.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { executeTool } from "../../../../src/lib/init/tools/registry.js";
 import type {
   ResolvedInitContext,

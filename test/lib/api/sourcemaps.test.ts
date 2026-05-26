@@ -1,6 +1,10 @@
-import { describe, expect, test } from "bun:test";
-import { gunzipSync } from "node:zlib";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { gunzipSync, zstdDecompressSync } from "node:zlib";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
+  buildArtifactBundle,
   ChunkServerOptionsSchema,
   encodeChunk,
   pickUploadEncoding,
@@ -46,7 +50,7 @@ describe("encodeChunk", () => {
     expect(encoded[1]).toBe(0xb5);
     expect(encoded[2]).toBe(0x2f);
     expect(encoded[3]).toBe(0xfd);
-    const decoded = Bun.zstdDecompressSync(encoded);
+    const decoded = zstdDecompressSync(encoded);
     expect(Buffer.from(decoded).equals(payload)).toBe(true);
   });
 
@@ -54,6 +58,97 @@ describe("encodeChunk", () => {
     const encoded = await encodeChunk(payload, undefined);
     // Plain path returns the same buffer, not a copy.
     expect(encoded).toBe(payload);
+  });
+});
+
+describe("buildArtifactBundle", () => {
+  // ZIP local file header format: at offset 8 (LE u16) is the
+  // compression method (0 = STORED, 8 = DEFLATE). The CLI prefixes
+  // every artifact bundle with an 8-byte SYSB SourceBundle header.
+  const SYSB_HEADER_BYTES = 8;
+  const LOCAL_HEADER_METHOD_OFFSET = SYSB_HEADER_BYTES + 8;
+
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "bundle-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  async function makePair(): Promise<
+    {
+      path: string;
+      debugId: string;
+      type: "minified_source" | "source_map";
+      url: string;
+      sourcemapFilename?: string;
+    }[]
+  > {
+    const jsPath = join(tmpDir, "app.js");
+    const mapPath = join(tmpDir, "app.js.map");
+    // Highly redundant content so DEFLATE has work to do — the size
+    // assertions below depend on this.
+    await writeFile(jsPath, "console.log('hello');\n".repeat(500));
+    await writeFile(mapPath, JSON.stringify({ version: 3, sources: [] }));
+    return [
+      {
+        path: jsPath,
+        debugId: "00000000-0000-0000-0000-000000000001",
+        type: "minified_source" as const,
+        url: "~/app.js",
+        sourcemapFilename: "app.js.map",
+      },
+      {
+        path: mapPath,
+        debugId: "00000000-0000-0000-0000-000000000001",
+        type: "source_map" as const,
+        url: "~/app.js.map",
+      },
+    ];
+  }
+
+  test("default compression is DEFLATE", async () => {
+    const files = await makePair();
+    const out = join(tmpDir, "bundle-default.zip");
+    await buildArtifactBundle(out, files, { org: "o", project: "p" });
+
+    const bytes = await readFile(out);
+    expect(bytes.readUInt16LE(LOCAL_HEADER_METHOD_OFFSET)).toBe(8);
+  });
+
+  test("compression: 'stored' writes entries uncompressed", async () => {
+    const files = await makePair();
+    const out = join(tmpDir, "bundle-stored.zip");
+    await buildArtifactBundle(out, files, {
+      org: "o",
+      project: "p",
+      compression: "stored",
+    });
+
+    const bytes = await readFile(out);
+    expect(bytes.readUInt16LE(LOCAL_HEADER_METHOD_OFFSET)).toBe(0);
+  });
+
+  test("STORED archive is larger than DEFLATE for the same redundant input", async () => {
+    const files = await makePair();
+    const deflateOut = join(tmpDir, "bundle-deflate.zip");
+    const storedOut = join(tmpDir, "bundle-stored-size.zip");
+    await buildArtifactBundle(deflateOut, files, { org: "o", project: "p" });
+    await buildArtifactBundle(storedOut, files, {
+      org: "o",
+      project: "p",
+      compression: "stored",
+    });
+
+    const deflateSize = (await readFile(deflateOut)).length;
+    const storedSize = (await readFile(storedOut)).length;
+    // Sanity: redundant input should DEFLATE meaningfully smaller than
+    // STORED. If this ever fails, either the ZIP layout changed or the
+    // payload stopped being compressible.
+    expect(storedSize).toBeGreaterThan(deflateSize * 2);
   });
 });
 

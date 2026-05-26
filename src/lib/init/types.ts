@@ -10,6 +10,7 @@ export type ExistingProjectData = {
   projectId: string;
   dsn: string;
   url: string;
+  platform?: string;
 };
 
 export type WizardOptions = {
@@ -20,6 +21,19 @@ export type WizardOptions = {
   team?: string;
   org?: string;
   project?: string;
+  /** Pre-selected app name for monorepo runs. When set, skips the interactive
+   * app-selection prompt and uses this value directly. Required when `--yes`
+   * is passed against a monorepo with more than one detected app. */
+  app?: string;
+  /**
+   * Force the non-Ink fallback (`LoggingUI`). Mapped from
+   * `--no-tui`. Acts as an escape hatch when the Ink TUI
+   * misbehaves; in an interactive run this effectively disables
+   * prompts (any prompt path will throw a `LoggingUIPromptError`),
+   * so users hitting this flag should also pass `--yes` or set
+   * every choice via flags.
+   */
+  forceLegacyUi?: boolean;
 };
 
 export type ResolvedInitContext = {
@@ -34,11 +48,16 @@ export type ResolvedInitContext = {
    */
   team?: string;
   project?: string;
+  /** Pre-selected app name for monorepo runs. Passed through from `--app`. */
+  app?: string;
   authToken?: string;
   existingProject?: ExistingProjectData;
 };
 
-export type InteractiveContext = Pick<ResolvedInitContext, "yes" | "dryRun">;
+export type InteractiveContext = Pick<
+  ResolvedInitContext,
+  "yes" | "dryRun" | "app"
+>;
 
 // Tool suspend payloads
 export type ToolPayload =
@@ -210,6 +229,7 @@ export type WizardOutput = {
   docsUrl?: string;
   sentryProjectUrl?: string;
   message?: string;
+  featureBlurbs?: Array<{ feature: string; blurb: string }>;
 };
 
 // Interactive payloads

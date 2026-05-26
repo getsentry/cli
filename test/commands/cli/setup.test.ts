@@ -7,10 +7,11 @@
  * via a spy on process.stderr.write and assert on the collected output.
  */
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { run } from "@stricli/core";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { app } from "../../../src/app.js";
 import type { SentryContext } from "../../../src/context.js";
 import { getReleaseChannel } from "../../../src/lib/db/release-channel.js";
@@ -62,19 +63,19 @@ function createMockContext(
   const context = {
     process: {
       stdout: {
-        write: mock((s: string) => {
+        write: vi.fn((s: string) => {
           stdoutChunks.push(String(s));
           return true;
         }),
       },
       stderr: {
-        write: mock((_s: string) => true),
+        write: vi.fn((_s: string) => true),
       },
       stdin: process.stdin,
       env,
       cwd: () => "/tmp",
       execPath: overrides.execPath ?? "/usr/local/bin/sentry",
-      exit: mock(() => {
+      exit: vi.fn(() => {
         // no-op for tests
       }),
       exitCode: 0,
@@ -84,13 +85,13 @@ function createMockContext(
     configDir: "/tmp/test-config",
     env,
     stdout: {
-      write: mock((s: string) => {
+      write: vi.fn((s: string) => {
         stdoutChunks.push(String(s));
         return true;
       }),
     },
     stderr: {
-      write: mock((_s: string) => true),
+      write: vi.fn((_s: string) => true),
     },
     stdin: process.stdin,
     setFlags: () => {
@@ -312,7 +313,7 @@ describe("sentry cli setup", () => {
     expect(getOutput()).toContain("Completions:");
 
     // Verify .zshrc was actually modified
-    const content = await Bun.file(zshrc).text();
+    const content = await readFile(zshrc, "utf-8");
     expect(content).toContain("fpath=");
     expect(content).toContain("site-functions");
   });
@@ -862,9 +863,10 @@ describe("sentry cli setup", () => {
       expect(getOutput()).toContain("Agent skills:");
     });
 
-    test("bestEffort catches errors from steps and setup still completes", async () => {
-      // Make the completions dir unwritable so installCompletions() fails.
-      // bestEffort() must catch the error and continue — setup still completes.
+    test("setup completes gracefully when completion directory is not writable", async () => {
+      // Make the completions dir unwritable so write() can't write the
+      // completion script. installCompletions() catches the permission error
+      // and returns null — setup completes without error or warning.
       const { chmodSync: chmod } = await import("node:fs");
       const homeDir = join(testDir, "home");
       const xdgData = join(homeDir, ".local", "share");
@@ -891,9 +893,13 @@ describe("sentry cli setup", () => {
       );
 
       const combined = getOutput();
-      // Setup must complete even though the completions step threw —
-      // the warning appears in the formatted output
-      expect(combined).toContain("Shell completions failed");
+      // installCompletions handles permission errors gracefully and returns
+      // null, so bestEffort never sees an error — no failure message appears
+      expect(combined).not.toContain("Shell completions failed");
+      // No misleading fallback message for a supported shell (zsh)
+      expect(combined).not.toContain("not directly supported");
+      // Setup still completes successfully
+      expect(combined).not.toContain("error");
 
       chmod(zshDir, 0o755);
     });

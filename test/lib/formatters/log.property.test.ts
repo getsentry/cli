@@ -5,7 +5,6 @@
  * that should hold for any valid input.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   constant,
   assert as fcAssert,
@@ -15,6 +14,7 @@ import {
   record,
   stringMatching,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { formatLogDetails } from "../../../src/lib/formatters/log.js";
 import type { DetailedSentryLog } from "../../../src/types/index.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";

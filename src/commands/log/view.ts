@@ -6,16 +6,24 @@
 
 import { isatty } from "node:tty";
 
+import pLimit from "p-limit";
+
 import type { SentryContext } from "../../context.js";
-import { getLogs } from "../../lib/api-client.js";
+import { getLogItemDetail, getLogs } from "../../lib/api-client.js";
 import {
+  detectSwappedViewArgs,
   looksLikeIssueShortId,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
+  splitNewlineArg,
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError, ValidationError } from "../../lib/errors.js";
+import {
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../lib/errors.js";
 import { formatLogDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
@@ -38,9 +46,12 @@ import { RETENTION_DAYS } from "../../lib/retention.js";
 import { buildLogsUrl } from "../../lib/sentry-urls.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
-import type { DetailedSentryLog } from "../../types/index.js";
+import type { DetailedSentryLog, TraceItemDetail } from "../../types/index.js";
 
 const log = logger.withTag("log-view");
+
+/** Matches SPAN_DETAIL_CONCURRENCY in traces.ts */
+const LOG_DETAIL_CONCURRENCY = 15;
 
 type ViewFlags = {
   readonly json: boolean;
@@ -51,21 +62,6 @@ type ViewFlags = {
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry log view <org>/<project> <log-id> [<log-id>...]";
-
-/**
- * Split a raw argument into individual log IDs.
- * Handles newline-separated IDs within a single argument (common when
- * piping or pasting from other tools).
- *
- * @param arg - Raw positional argument
- * @returns Array of non-empty trimmed strings
- */
-function splitLogIds(arg: string): string[] {
-  return arg
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
 
 /**
  * Parse positional arguments for log view.
@@ -110,7 +106,7 @@ export function parsePositionalArgs(args: string[]): {
       "Log ID",
       USAGE_HINT
     );
-    const rawLogIds = splitLogIds(id);
+    const rawLogIds = splitNewlineArg(id);
     if (rawLogIds.length === 0) {
       throw new ContextError("Log ID", USAGE_HINT, []);
     }
@@ -119,19 +115,46 @@ export function parsePositionalArgs(args: string[]): {
 
   // Two or more args — first is target, rest are log IDs.
   // Each arg may contain newlines (split them).
-  const rawLogIds = args.slice(1).flatMap(splitLogIds);
+
+  // Check issue short ID first — it takes precedence over swap detection
+  // because `detectSwappedViewArgs` also fires for `CAM-82X my-org/project`
+  // (first has no "/", second has "/"), but the user's intent is clearly
+  // to view an issue, not to swap log-view arguments.
+  if (looksLikeIssueShortId(first)) {
+    const rawLogIds = args.slice(1).flatMap(splitNewlineArg);
+    if (rawLogIds.length === 0) {
+      throw new ContextError("Log ID", USAGE_HINT, []);
+    }
+    return {
+      rawLogIds,
+      targetArg: first,
+      suggestion: `Did you mean: sentry issue view ${first}`,
+    };
+  }
+
+  // biome-ignore lint/style/noNonNullAssertion: length >= 2 guarantees index 1 exists
+  const second = args[1]!;
+
+  // Detect swapped args: exactly two args where first has no "/" and second
+  // does (e.g., `sentry log view ace106b2 myorg/myproject`). Only fires for
+  // the two-arg case to avoid silently dropping extra args in multi-arg use.
+  if (args.length === 2) {
+    const swapWarning = detectSwappedViewArgs(first, second);
+    if (swapWarning) {
+      return {
+        rawLogIds: splitNewlineArg(first),
+        targetArg: second,
+        suggestion: swapWarning,
+      };
+    }
+  }
+
+  const rawLogIds = args.slice(1).flatMap(splitNewlineArg);
   if (rawLogIds.length === 0) {
     throw new ContextError("Log ID", USAGE_HINT, []);
   }
-  // Swap detection is not useful here: log IDs cannot contain "/", so
-  // detectSwappedViewArgs (which checks for "/" in the second arg) can
-  // never trigger. We still check for issue short IDs in the first (target)
-  // position.
-  const suggestion = looksLikeIssueShortId(first)
-    ? `Did you mean: sentry issue view ${first}`
-    : undefined;
 
-  return { rawLogIds, targetArg: first, suggestion };
+  return { rawLogIds, targetArg: first };
 }
 
 /**
@@ -317,7 +340,7 @@ function retentionSuffix(logId: string): string {
  * @param logIds - Requested IDs
  * @param org - Organization slug
  * @param project - Project slug
- * @throws {ValidationError} Always
+ * @throws {ResolutionError} Always
  */
 function throwNotFoundError(
   logIds: string[],
@@ -328,33 +351,47 @@ function throwNotFoundError(
   // edit in `retention.ts` keeps this message in sync with the
   // deterministic retention-aware path.
   const retentionDays = RETENTION_DAYS.log;
-  const genericHint = retentionDays
-    ? `Make sure the log IDs are correct and were sent within the last ${retentionDays} days.`
-    : "Make sure the log IDs are correct.";
 
   if (logIds.length === 1) {
     const id = logIds[0] ?? "";
     const suffix = retentionSuffix(id);
-    const hint = suffix
-      ? `This log is no longer retrievable.${suffix}`
-      : genericHint.replace("log IDs are correct", "log ID is correct");
-    throw new ValidationError(
-      `No log found with ID "${id}" in ${org}/${project}.\n\n${hint}`
+    let suggestions: string[];
+    if (suffix) {
+      suggestions = [`This log is no longer retrievable.${suffix}`];
+    } else if (retentionDays) {
+      suggestions = [
+        `Make sure the log ID is correct and was sent within the last ${retentionDays} days`,
+      ];
+    } else {
+      suggestions = ["Make sure the log ID is correct"];
+    }
+    throw new ResolutionError(
+      `Log '${id}'`,
+      `not found in ${org}/${project}`,
+      `sentry log view ${org}/${project}/${id}`,
+      suggestions
     );
   }
 
   // Multiple IDs — compute the retention suffix once per ID so both the
-  // inline annotation and the "any expired?" check reuse the same decode.
+  // ID list and the "any expired?" check reuse the same decode.
   const suffixed = logIds.map((id) => ({ id, suffix: retentionSuffix(id) }));
-  const annotated = suffixed
-    .map(({ id, suffix }) => ` - \`${id}\`${suffix}`)
-    .join("\n");
   const anyExpired = suffixed.some(({ suffix }) => suffix !== "");
-  const hint = anyExpired
-    ? "Expired log IDs are no longer retrievable. Check non-expired IDs and re-run."
-    : genericHint;
-  throw new ValidationError(
-    `No logs found with any of the following IDs in ${org}/${project}:\n${annotated}\n\n${hint}`
+  const idList = suffixed.map(({ id, suffix }) => `${id}${suffix}`);
+  let hint: string;
+  if (anyExpired) {
+    hint =
+      "Expired log IDs are no longer retrievable — check non-expired IDs and re-run";
+  } else if (retentionDays) {
+    hint = `Make sure the log IDs are correct and were sent within the last ${retentionDays} days`;
+  } else {
+    hint = "Make sure the log IDs are correct";
+  }
+  throw new ResolutionError(
+    `${idList.length} log(s)`,
+    `not found in ${org}/${project}`,
+    hint,
+    idList.map((id) => `ID: ${id}`)
   );
 }
 
@@ -367,6 +404,10 @@ type LogViewData = {
   logs: DetailedSentryLog[];
   /** Org slug — needed by human formatter for trace URLs, also useful context in JSON */
   orgSlug: string;
+  /** Full attribute sets from the trace-items detail endpoint (index matches logs) */
+  details?: (TraceItemDetail | undefined)[];
+  /** --fields filter: limits which custom attributes are shown in human output */
+  extraFields?: string[];
 };
 
 /**
@@ -380,11 +421,19 @@ type LogViewData = {
  */
 function formatLogViewHuman(data: LogViewData): string {
   const parts: string[] = [];
-  for (const entry of data.logs) {
+  for (let i = 0; i < data.logs.length; i++) {
     if (parts.length > 0) {
       parts.push("\n---\n");
     }
-    parts.push(formatLogDetails(entry, data.orgSlug));
+    parts.push(
+      formatLogDetails(
+        // biome-ignore lint/style/noNonNullAssertion: index is bounded by data.logs.length
+        data.logs[i]!,
+        data.orgSlug,
+        data.details?.[i]?.attributes,
+        data.extraFields
+      )
+    );
   }
   return parts.join("\n");
 }
@@ -464,7 +513,12 @@ export const viewCommand = buildCommand({
     }
 
     // Fetch all requested log entries
-    const logs = await getLogs(target.org, target.project, logIds);
+    const logs = await getLogs(
+      target.org,
+      target.project,
+      logIds,
+      flags.fields
+    );
 
     if (logs.length === 0) {
       throwNotFoundError(logIds, target.org, target.project);
@@ -472,11 +526,38 @@ export const viewCommand = buildCommand({
 
     warnMissingIds(logIds, logs);
 
+    // Skip detail fetching in JSON mode — jsonTransform only uses data.logs,
+    // not data.details, so the extra round-trips would be wasted.
+    // Mirrors the shouldFetchDetails pattern in trace/view.ts.
+    const detailLimit = pLimit(LOG_DETAIL_CONCURRENCY);
+    const details = flags.json
+      ? undefined
+      : await detailLimit.map(logs, async (entry) => {
+          if (!entry.trace) {
+            return;
+          }
+          try {
+            return await getLogItemDetail(
+              target.org,
+              target.project,
+              entry["sentry.item_id"],
+              entry.trace
+            );
+          } catch {
+            return;
+          }
+        });
+
     const hint = target.detectedFrom
       ? `Detected from ${target.detectedFrom}`
       : undefined;
 
-    yield new CommandOutput({ logs, orgSlug: target.org });
+    yield new CommandOutput({
+      logs,
+      orgSlug: target.org,
+      details,
+      extraFields: flags.fields,
+    });
     return { hint };
   },
 });

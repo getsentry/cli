@@ -6,7 +6,7 @@
  * error messages and edge cases.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   detectSwappedTrialArgs,
   detectSwappedViewArgs,
@@ -15,6 +15,7 @@ import {
   parseIssueArg,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
+  splitNewlineArg,
 } from "../../src/lib/arg-parsing.js";
 import { stripDsnOrgPrefix } from "../../src/lib/dsn/index.js";
 import { ValidationError } from "../../src/lib/errors.js";
@@ -110,19 +111,26 @@ describe("parseOrgProjectArg", () => {
     });
   });
 
-  // URL integration tests — applySentryUrlContext may set SENTRY_HOST/SENTRY_URL as a side effect
+  // URL integration tests — applySentryUrlContext may set SENTRY_HOST/SENTRY_URL as a side effect.
+  // Host-scoping: non-SaaS URLs now require the token to be scoped to the
+  // same host. Tests that pass self-hosted URLs must set SENTRY_HOST before
+  // running so the env-token-host snapshot matches.
   describe("Sentry URL inputs", () => {
     let savedSentryUrl: string | undefined;
     let savedSentryHost: string | undefined;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       savedSentryUrl = process.env.SENTRY_URL;
       savedSentryHost = process.env.SENTRY_HOST;
       delete process.env.SENTRY_URL;
       delete process.env.SENTRY_HOST;
+      const { resetEnvTokenHostForTesting } = await import(
+        "../../src/lib/env-token-host.js"
+      );
+      resetEnvTokenHostForTesting();
     });
 
-    afterEach(() => {
+    afterEach(async () => {
       if (savedSentryUrl !== undefined) {
         process.env.SENTRY_URL = savedSentryUrl;
       } else {
@@ -133,6 +141,10 @@ describe("parseOrgProjectArg", () => {
       } else {
         delete process.env.SENTRY_HOST;
       }
+      const { resetEnvTokenHostForTesting } = await import(
+        "../../src/lib/env-token-host.js"
+      );
+      resetEnvTokenHostForTesting();
     });
 
     test("issue URL returns org-all", () => {
@@ -167,7 +179,9 @@ describe("parseOrgProjectArg", () => {
       });
     });
 
-    test("self-hosted URL extracts org", () => {
+    test("self-hosted URL extracts org when token is scoped to that host", () => {
+      // Pin env-token to sentry.example.com so the URL-arg's host matches.
+      process.env.SENTRY_HOST = "https://sentry.example.com";
       expect(
         parseOrgProjectArg(
           "https://sentry.example.com/organizations/acme-corp/issues/99/"
@@ -176,6 +190,15 @@ describe("parseOrgProjectArg", () => {
         type: "org-all",
         org: "acme-corp",
       });
+    });
+
+    test("self-hosted URL throws when token is scoped to a different host", () => {
+      // No SENTRY_HOST set → env-token defaults to SaaS → mismatch on self-hosted URL.
+      expect(() =>
+        parseOrgProjectArg(
+          "https://sentry.example.com/organizations/acme-corp/issues/99/"
+        )
+      ).toThrow(/does not match|sentry auth login --url/);
     });
   });
 
@@ -422,7 +445,8 @@ describe("parseIssueArg", () => {
       });
     });
 
-    test("self-hosted issue URL with query params", () => {
+    test("self-hosted issue URL with query params (requires matching token host)", () => {
+      process.env.SENTRY_HOST = "https://sentry.example.com";
       expect(
         parseIssueArg(
           "https://sentry.example.com/organizations/acme/issues/32886/?project=2"
@@ -503,7 +527,8 @@ describe("parseIssueArg", () => {
       });
     });
 
-    test("self-hosted share URL returns share type", () => {
+    test("self-hosted share URL returns share type (requires matching token host)", () => {
+      process.env.SENTRY_HOST = "https://sentry.example.com";
       expect(
         parseIssueArg(
           "https://sentry.example.com/share/issue/aabbccdd11223344aabbccdd11223344/"
@@ -665,6 +690,84 @@ describe("parseIssueArg", () => {
         type: "project-search",
         projectSlug: "spotlight-electron",
         suffix: "4Y",
+      });
+    });
+  });
+
+  // Colon-separated issue args — users type PROJECT:SHORTID or PROJECT:NUMERICID
+  describe("colon-separated issue args (CLI-PH)", () => {
+    test("PROJECT:SUFFIX returns project-search", () => {
+      expect(parseIssueArg("CHATEX:W9")).toEqual({
+        type: "project-search",
+        projectSlug: "chatex",
+        suffix: "W9",
+      });
+    });
+
+    test("PROJECT:PROJECT-SUFFIX extracts suffix from last dash", () => {
+      expect(parseIssueArg("CHATEX:CHATEX-W9")).toEqual({
+        type: "project-search",
+        projectSlug: "chatex",
+        suffix: "W9",
+      });
+    });
+
+    test("PROJECT:PROJECT-SUFFIX with multi-hyphen project", () => {
+      expect(parseIssueArg("CHATEX:CHATEX-12A")).toEqual({
+        type: "project-search",
+        projectSlug: "chatex",
+        suffix: "12A",
+      });
+    });
+
+    test("MULTI-PROJECT:NUMERICID returns numeric", () => {
+      expect(parseIssueArg("MYAH-FRONTEND:115562020")).toEqual({
+        type: "numeric",
+        id: "115562020",
+      });
+    });
+
+    test("PROJECT:NUMERICID returns numeric", () => {
+      expect(parseIssueArg("CLI:123456789")).toEqual({
+        type: "numeric",
+        id: "123456789",
+      });
+    });
+
+    test("colon with empty project falls through to normal parsing", () => {
+      // ":W9" has empty project part — parseWithColon returns null,
+      // falls through to normal parsing (no slash, no dash → suffix-only)
+      expect(parseIssueArg(":W9")).toEqual({
+        type: "suffix-only",
+        suffix: ":W9",
+      });
+    });
+
+    test("colon with empty suffix falls through to normal parsing", () => {
+      // "CLI:" has empty id part — parseWithColon returns null,
+      // falls through to normal parsing (no slash, no dash → suffix-only)
+      expect(parseIssueArg("CLI:")).toEqual({
+        type: "suffix-only",
+        suffix: "CLI:",
+      });
+    });
+
+    test("multi-hyphen project with colon-separated short ID", () => {
+      expect(parseIssueArg("ARES-BACKEND:4P")).toEqual({
+        type: "project-search",
+        projectSlug: "ares-backend",
+        suffix: "4P",
+      });
+    });
+
+    test("org/project:suffix falls through to slash parsing", () => {
+      // When input has both slash and colon, slash parsing takes precedence
+      // because parseWithColon returns null for slash-containing project parts.
+      // "CLI:W9" has no dash, so parseAfterSlash returns explicit-org-suffix.
+      expect(parseIssueArg("sentry/CLI:W9")).toEqual({
+        type: "explicit-org-suffix",
+        org: "sentry",
+        suffix: "CLI:W9",
       });
     });
   });
@@ -1193,5 +1296,38 @@ describe("parseSlashSeparatedArg: whitespace trimming", () => {
       "sentry event view <id>"
     );
     expect(result).toEqual({ id: "a9b4ad2c", targetArg: undefined });
+  });
+
+  test("preserves newlines in no-slash path (log view splits downstream)", () => {
+    const result = parseSlashSeparatedArg(
+      "abc123\ndef456",
+      "Log ID",
+      "sentry log view <id>"
+    );
+    // No-slash path must NOT strip newlines — log view splits them downstream
+    expect(result.id).toBe("abc123\ndef456");
+    expect(result.targetArg).toBeUndefined();
+  });
+});
+
+describe("splitNewlineArg", () => {
+  test("splits on newlines and trims each part", () => {
+    expect(splitNewlineArg("abc\n def \nghi")).toEqual(["abc", "def", "ghi"]);
+  });
+
+  test("filters out empty lines", () => {
+    expect(splitNewlineArg("abc\n\n\ndef")).toEqual(["abc", "def"]);
+  });
+
+  test("handles CRLF", () => {
+    expect(splitNewlineArg("abc\r\ndef")).toEqual(["abc", "def"]);
+  });
+
+  test("returns single element for no newlines", () => {
+    expect(splitNewlineArg("abc123")).toEqual(["abc123"]);
+  });
+
+  test("returns empty array for whitespace-only input", () => {
+    expect(splitNewlineArg("  \n  \n  ")).toEqual([]);
   });
 });

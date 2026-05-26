@@ -1,16 +1,13 @@
 /**
  * Node.js polyfills for Bun APIs. Injected at bundle time via esbuild.
  */
-import {
-  execSync,
-  spawn as nodeSpawn,
-  spawnSync as nodeSpawnSync,
-} from "node:child_process";
+import { execFileSync, spawnSync as nodeSpawnSync } from "node:child_process";
 import { statSync } from "node:fs";
-import { access, readFile, writeFile } from "node:fs/promises";
-// node:sqlite is imported lazily inside NodeDatabasePolyfill to avoid
-// crashing on Node.js versions without node:sqlite support when the
-// bundle is loaded as a library (the consumer may never use SQLite).
+import { access, readFile, stat, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
+// biome-ignore lint/performance/noNamespaceImport: runtime access to optional `zstdCompress`/`zstdDecompress` exports
+import * as zlibModule from "node:zlib";
+import { constants as zlibConstants } from "node:zlib";
 
 import picomatch from "picomatch";
 import { compare as semverCompare } from "semver";
@@ -20,85 +17,6 @@ import { uuidv7 } from "uuidv7";
 declare global {
   var Bun: typeof BunPolyfill;
 }
-
-type SqliteValue = string | number | bigint | null | Uint8Array;
-
-/** Lazy-loaded node:sqlite DatabaseSync constructor. */
-function getNodeSqlite(): typeof import("node:sqlite").DatabaseSync {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require("node:sqlite").DatabaseSync;
-}
-
-/** Wraps node:sqlite StatementSync to match bun:sqlite query() API. */
-class NodeStatementPolyfill {
-  // biome-ignore lint/suspicious/noExplicitAny: node:sqlite types loaded lazily
-  private readonly stmt: any;
-
-  // biome-ignore lint/suspicious/noExplicitAny: node:sqlite types loaded lazily
-  constructor(stmt: any) {
-    this.stmt = stmt;
-  }
-
-  get(...params: SqliteValue[]): Record<string, SqliteValue> | undefined {
-    return this.stmt.get(...params) as Record<string, SqliteValue> | undefined;
-  }
-
-  all(...params: SqliteValue[]): Record<string, SqliteValue>[] {
-    return this.stmt.all(...params) as Record<string, SqliteValue>[];
-  }
-
-  run(...params: SqliteValue[]): void {
-    this.stmt.run(...params);
-  }
-}
-
-/** Wraps node:sqlite DatabaseSync to match bun:sqlite Database API. */
-class NodeDatabasePolyfill {
-  // biome-ignore lint/suspicious/noExplicitAny: node:sqlite types loaded lazily
-  private readonly db: any;
-
-  constructor(path: string) {
-    // SQLite configuration (busy_timeout, foreign_keys, WAL mode) is applied
-    // via PRAGMA statements in src/lib/db/index.ts after construction
-    const DatabaseSync = getNodeSqlite();
-    this.db = new DatabaseSync(path);
-  }
-
-  exec(sql: string): void {
-    this.db.exec(sql);
-  }
-
-  query(sql: string): NodeStatementPolyfill {
-    return new NodeStatementPolyfill(this.db.prepare(sql));
-  }
-
-  close(): void {
-    this.db.close();
-  }
-
-  /**
-   * Wraps a function in a transaction. Returns a callable that executes
-   * the function within BEGIN/COMMIT, with ROLLBACK on error.
-   * Matches Bun's db.transaction() API.
-   */
-  transaction<T>(fn: () => T): () => T {
-    return () => {
-      this.db.exec("BEGIN");
-      try {
-        const result = fn();
-        this.db.exec("COMMIT");
-        return result;
-      } catch (error) {
-        this.db.exec("ROLLBACK");
-        throw error;
-      }
-    };
-  }
-}
-
-const bunSqlitePolyfill = { Database: NodeDatabasePolyfill };
-(globalThis as Record<string, unknown>).__bun_sqlite_polyfill =
-  bunSqlitePolyfill;
 
 const BunPolyfill = {
   file(path: string) {
@@ -127,6 +45,8 @@ const BunPolyfill = {
           return false;
         }
       },
+      // Follows symlinks (stat, not lstat) — matches Bun.file().stat() semantics.
+      stat: stat.bind(null, path),
       text(): Promise<string> {
         return readFile(path, "utf-8");
       },
@@ -156,22 +76,39 @@ const BunPolyfill = {
   which(command: string, opts?: { PATH?: string }): string | null {
     try {
       const isWindows = process.platform === "win32";
-      const cmd = isWindows ? `where ${command}` : `which ${command}`;
       // If a custom PATH is provided, override it in the subprocess env.
       // Use !== undefined (not truthy) so empty-string PATH is respected.
       const env =
         opts?.PATH !== undefined
           ? { ...process.env, PATH: opts.PATH }
           : undefined;
-      return (
-        execSync(cmd, {
+
+      let stdout: string;
+      if (isWindows) {
+        // execFileSync bypasses the shell entirely — no injection risk
+        stdout = execFileSync("where.exe", [command], {
           encoding: "utf-8",
           stdio: ["pipe", "pipe", "ignore"],
           env,
-        })
-          .trim()
-          .split("\n")[0] || null
-      );
+          timeout: 5000,
+        });
+      } else {
+        // Pass command as a positional arg ($1) so it's never interpolated
+        // into the shell string. `command -v` is a POSIX builtin — works
+        // even when PATH is overridden to a restricted set of directories.
+        stdout = execFileSync(
+          "/bin/sh",
+          ["-c", 'command -v "$1"', "--", command],
+          {
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "ignore"],
+            env,
+            timeout: 5000,
+          }
+        );
+      }
+
+      return stdout.trim().split("\n")[0] || null;
     } catch {
       return null;
     }
@@ -200,46 +137,6 @@ const BunPolyfill = {
       stdout: result.stdout,
       stderr: result.stderr,
     };
-  },
-
-  spawn(
-    cmd: string[],
-    opts?: {
-      stdin?: "pipe" | "ignore" | "inherit";
-      stdout?: "pipe" | "ignore" | "inherit";
-      stderr?: "pipe" | "ignore" | "inherit";
-      env?: Record<string, string | undefined>;
-    }
-  ) {
-    const [command, ...args] = cmd;
-    const proc = nodeSpawn(command, args, {
-      stdio: [
-        opts?.stdin ?? "ignore",
-        opts?.stdout ?? "ignore",
-        opts?.stderr ?? "ignore",
-      ],
-      env: opts?.env,
-    });
-
-    // Promise that resolves with the exit code when the process exits.
-    // Bun's proc.exited resolves to the numeric exit code; we match that
-    // contract, falling back to 1 on signal-only termination.
-    const exited = new Promise<number>((resolve) => {
-      proc.on("close", (code) => resolve(code ?? 1));
-      proc.on("error", () => resolve(1));
-    });
-
-    return {
-      stdin: proc.stdin,
-      exited,
-      unref() {
-        proc.unref();
-      },
-    };
-  },
-
-  sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   },
 
   Glob: class BunGlobPolyfill {
@@ -281,5 +178,67 @@ const BunPolyfill = {
     order: semverCompare,
   },
 };
+
+/**
+ * Coerce arbitrary compression input (string, ArrayBuffer, TypedArray)
+ * into a contiguous Buffer without copying where possible.
+ */
+function toBufferForCompression(
+  data: NodeJS.TypedArray | Buffer | string | ArrayBuffer
+): Buffer {
+  if (typeof data === "string") {
+    return Buffer.from(data, "utf-8");
+  }
+  if (data instanceof ArrayBuffer) {
+    return Buffer.from(data);
+  }
+  return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+}
+
+// Feature-detected zstd polyfill. `node:zlib.zstdCompress` lands in Node
+// 22.15; we do NOT install the polyfill below on older Node because
+// Bun.zstdCompress's absence lets the telemetry transport's runtime
+// probe fall back to gzip cleanly (see src/lib/telemetry/zstd-transport.ts).
+//
+// Kept out of the BunPolyfill literal so the `typeof Bun.zstdCompress`
+// probe genuinely returns `"undefined"` on older runtimes — assigning
+// a noop stub would defeat the feature-detect.
+const zlibOptionalZstdCompress = (zlibModule as { zstdCompress?: unknown })
+  .zstdCompress;
+const zlibOptionalZstdDecompress = (zlibModule as { zstdDecompress?: unknown })
+  .zstdDecompress;
+
+if (
+  typeof zlibOptionalZstdCompress === "function" &&
+  typeof zlibOptionalZstdDecompress === "function"
+) {
+  const nodeZstdCompress = promisify(
+    zlibOptionalZstdCompress as (
+      buf: Buffer,
+      options: { params?: Record<number, number> },
+      cb: (err: Error | null, result: Buffer) => void
+    ) => void
+  );
+  const nodeZstdDecompress = promisify(
+    zlibOptionalZstdDecompress as (
+      buf: Buffer,
+      cb: (err: Error | null, result: Buffer) => void
+    ) => void
+  );
+
+  (BunPolyfill as unknown as { zstdCompress: unknown }).zstdCompress = (
+    data: NodeJS.TypedArray | Buffer | string | ArrayBuffer,
+    opts?: { level?: number }
+  ): Promise<Buffer> =>
+    nodeZstdCompress(toBufferForCompression(data), {
+      params: {
+        [zlibConstants.ZSTD_c_compressionLevel]: opts?.level ?? 3,
+      },
+    });
+
+  (BunPolyfill as unknown as { zstdDecompress: unknown }).zstdDecompress = (
+    data: NodeJS.TypedArray | Buffer | string | ArrayBuffer
+  ): Promise<Buffer> => nodeZstdDecompress(toBufferForCompression(data));
+}
 
 globalThis.Bun = BunPolyfill as typeof Bun;

@@ -13,10 +13,11 @@
  * Stops at: home directory or filesystem root
  */
 
-import { opendir, stat } from "node:fs/promises";
+import { opendir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import pLimit from "p-limit";
+import picomatch from "picomatch";
 import { anyTrue } from "../promises.js";
 import {
   applyGlobalFallbacks,
@@ -223,7 +224,7 @@ function anyExists(dir: string, names: readonly string[]): Promise<boolean> {
  * Check if any files matching glob patterns exist in a directory.
  * Uses `opendir` to lazily stream directory entries and exits on first match
  * without reading the entire directory. Matches via synchronous
- * `Bun.Glob.match()` (no async I/O, event-loop safe).
+ * `picomatch` (no async I/O, event-loop safe).
  *
  * @param dir - Directory to check
  * @param patterns - Glob patterns to match
@@ -238,11 +239,10 @@ async function anyGlobMatches(
   // No explicit handle.close() needed: for-await-of auto-closes the Dir
   // handle when the loop exits (including early return or break).
   try {
+    // Pre-compile matchers outside the loop to avoid recompiling per entry.
+    const matchers = patterns.map((p) => picomatch(p, { dot: true }));
     for await (const entry of await opendir(dir)) {
-      if (
-        entry.isFile() &&
-        patterns.some((p) => new Bun.Glob(p).match(entry.name))
-      ) {
+      if (entry.isFile() && matchers.some((m) => m(entry.name))) {
         return true;
       }
     }
@@ -268,7 +268,7 @@ async function checkEditorConfigRoot(dir: string): Promise<boolean> {
     ) {
       return false;
     }
-    const content = await Bun.file(editorConfigPath).text();
+    const content = await readFile(editorConfigPath, "utf-8");
     return EDITORCONFIG_ROOT_REGEX.test(content);
   } catch (error) {
     handleFileError(error, {
@@ -373,7 +373,7 @@ function checkEnvForDsn(dir: string): Promise<DetectedDsn | null> {
         if (!(await isRegularFile(filePath, "checkEnvForDsn.stat"))) {
           continue;
         }
-        const content = await Bun.file(filePath).text();
+        const content = await readFile(filePath, "utf-8");
         const dsn = extractDsnFromEnvContent(content);
         if (dsn) {
           return createDetectedDsn(dsn, "env_file", filename);

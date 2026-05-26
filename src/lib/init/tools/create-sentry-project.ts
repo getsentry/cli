@@ -1,4 +1,5 @@
 import { createProjectWithDsn } from "../../api-client.js";
+import { ApiError } from "../../errors.js";
 import { resolveOrCreateTeam } from "../../resolve-team.js";
 import { slugify } from "../../utils.js";
 import { tryGetExistingProjectData } from "../existing-project.js";
@@ -14,6 +15,13 @@ import type { InitToolDefinition, ToolContext } from "./types.js";
  * Create a new Sentry project using the org that preflight already resolved.
  * Team creation is deferred here for empty-org init flows so the final project
  * slug can be reused as the team slug.
+ *
+ * New Sentry orgs have member project creation disabled by default
+ * (Organization.flags.disable_member_project_creation = true). When the org
+ * restricts project creation for members, we surface a clear error with an
+ * escape hatch: the user can pass `sentry init <org>/<project-slug>` once an
+ * admin creates the project, which resolves to an existing project and skips
+ * creation entirely (preflight.ts:261).
  */
 export async function createSentryProject(
   payload: CreateSentryProjectPayload | EnsureSentryProjectPayload,
@@ -92,6 +100,25 @@ export async function createSentryProject(
       },
     };
   } catch (error) {
+    // Org-level policy: members cannot create projects. The generic 403
+    // enrichment would suggest re-authentication, which is wrong here.
+    // Surface a clear message with the escape hatch: once an admin creates
+    // the project, `sentry init <org>/<slug>` resolves to the existing
+    // project and skips creation entirely.
+    if (
+      error instanceof ApiError &&
+      error.status === 403 &&
+      error.detail?.includes("disabled this feature")
+    ) {
+      return {
+        ok: false,
+        error:
+          `Project creation is disabled for members in "${context.org}".\n` +
+          "Ask an org owner to either enable project creation for members\n" +
+          "or create the project for you. Once the project exists, run:\n" +
+          `  sentry init ${context.org}/<project-slug>`,
+      };
+    }
     return { ok: false, error: formatToolError(error) };
   }
 }

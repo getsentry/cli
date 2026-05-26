@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-issue
-version: 0.29.0-dev.0
+version: 0.35.0-dev.0
 description: Manage Sentry issues
 requires:
   bins: ["sentry"]
@@ -19,7 +19,7 @@ List issues in a project
 - `-q, --query <value> - Search query (Sentry syntax, implicit AND, no OR operator)`
 - `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
-- `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "90d")`
+- `-t, --period <value> - Time range: "7d", "2026-04-01..2026-05-01", ">=2026-04-01" - (default: "90d")`
 - `-c, --cursor <value> - Pagination cursor (use "next" for next page, "prev" for previous)`
 - `--compact - Single-line rows for compact output (auto-detects if omitted)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
@@ -34,16 +34,16 @@ List issues in a project
 | `culprit` | string | Culprit string |
 | `count` | string | Total event count |
 | `userCount` | number | Number of affected users |
-| `firstSeen` | string \| null | First occurrence (ISO 8601) |
-| `lastSeen` | string \| null | Most recent occurrence (ISO 8601) |
+| `firstSeen` | string | First occurrence (ISO 8601) |
+| `lastSeen` | string | Most recent occurrence (ISO 8601) |
 | `level` | string | Severity level |
 | `status` | string | Issue status |
-| `priority` | string | Triage priority |
-| `platform` | string | Platform |
 | `permalink` | string | URL to the issue in Sentry |
 | `project` | object | Project info |
 | `metadata` | object | Issue metadata |
-| `assignedTo` | unknown \| null | Assigned user or team |
+| `assignedTo` | object \| null | Assigned user or team |
+| `priority` | string | Triage priority |
+| `platform` | string | Platform |
 | `substatus` | string \| null | Issue substatus |
 | `isUnhandled` | boolean | Whether the issue is unhandled |
 | `seerFixabilityScore` | number \| null | Seer AI fixability score (0-1) |
@@ -87,7 +87,7 @@ List events for a specific issue
 - `-n, --limit <value> - Number of events (1-1000) - (default: "25")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `--full - Include full event body (stacktraces)`
-- `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "7d")`
+- `-t, --period <value> - Time range: "7d", "2026-04-01..2026-05-01", ">=2026-04-01" - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
@@ -109,7 +109,26 @@ List events for a specific issue
 | `platform` | string \| null | Platform (python, javascript, etc.) |
 | `dateCreated` | string | ISO 8601 creation timestamp |
 | `crashFile` | string \| null | Crash file URL |
-| `metadata` | unknown \| null | Event metadata |
+| `metadata` | object \| null | Event metadata |
+
+**Examples:**
+
+```bash
+# List recent events for an issue
+sentry issue events FRONT-ABC
+
+# Filter events by search query
+sentry issue events FRONT-ABC --query "browser:Chrome"
+
+# Show full event details
+sentry issue events FRONT-ABC --full
+
+# Limit results and filter by time period
+sentry issue events FRONT-ABC --limit 50 --period 24h
+
+# Paginate through results
+sentry issue events FRONT-ABC -c next
+```
 
 ### `sentry issue explain <issue>`
 
@@ -122,6 +141,15 @@ Analyze an issue's root cause using Seer AI
 **Examples:**
 
 ```bash
+# View the most recent issue
+sentry issue view @latest
+
+# Explain the most frequently occurring issue
+sentry issue explain @most_frequent
+
+# Generate a fix plan for the latest issue
+sentry issue plan @latest
+
 # Analyze root cause (may take a few minutes for new issues)
 sentry issue explain 123456789
 
@@ -143,7 +171,6 @@ sentry issue plan 123456789 --cause 0
 Generate a solution plan using Seer AI
 
 **Flags:**
-- `--cause <value> - Root cause ID to plan (required if multiple causes exist)`
 - `--force - Force new plan even if one exists`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
@@ -204,6 +231,44 @@ sentry issue reopen CLI-G5   # alias
 ### `sentry issue unresolve <issue>`
 
 Reopen a resolved issue
+
+### `sentry issue archive <issue>`
+
+Archive (ignore) an issue
+
+**Flags:**
+- `-u, --until <value> - Condition for unarchival: forever, auto, 30m, 10x, 10u, 10x/5m, etc.`
+
+**Examples:**
+
+```bash
+# Archive forever (fully silenced)
+sentry issue archive CLI-G5
+
+# Smart detection — unarchives when Sentry detects a spike in event frequency
+sentry issue archive CLI-G5 --until auto
+
+# Duration-based
+sentry issue archive CLI-G5 --until 1h    # 1 hour
+sentry issue archive CLI-G5 --until 7d    # 7 days
+sentry issue archive CLI-G5 --until 2026-12-31  # specific date
+
+# Count-based — unarchive after N more events
+sentry issue archive CLI-G5 --until 100x
+
+# User-based — unarchive after N more users affected
+sentry issue archive CLI-G5 --until 10u
+
+# Compound — count within a time window
+sentry issue archive CLI-G5 --until 100x/1h   # 100 events within 1 hour
+sentry issue archive CLI-G5 --until 10u/1d    # 10 users within 1 day
+
+# Verbose forms also work
+sentry issue archive CLI-G5 --until 10events/2hours
+
+# 'ignore' is an alias for 'archive'
+sentry issue ignore CLI-G5 --until auto
+```
 
 ### `sentry issue merge <issue...>`
 

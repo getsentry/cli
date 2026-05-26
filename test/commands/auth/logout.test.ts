@@ -8,15 +8,7 @@
  * rendering pipeline, and error cases throw typed errors (AuthError).
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { logoutCommand } from "../../../src/commands/auth/logout.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbAuth from "../../../src/lib/db/auth.js";
@@ -34,12 +26,12 @@ function createContext() {
   return {
     context: {
       stdout: {
-        write: mock((s: string) => {
+        write: vi.fn((s: string) => {
           stdoutChunks.push(s);
         }),
       },
       stderr: {
-        write: mock((_s: string) => {
+        write: vi.fn((_s: string) => {
           /* captured by mock */
         }),
       },
@@ -58,11 +50,11 @@ describe("logoutCommand.func", () => {
   let func: LogoutFunc;
 
   beforeEach(async () => {
-    isAuthenticatedSpy = spyOn(dbAuth, "isAuthenticated");
-    isEnvTokenActiveSpy = spyOn(dbAuth, "isEnvTokenActive");
-    getAuthConfigSpy = spyOn(dbAuth, "getAuthConfig");
-    clearAuthSpy = spyOn(dbAuth, "clearAuth");
-    getDbPathSpy = spyOn(dbIndex, "getDbPath");
+    isAuthenticatedSpy = vi.spyOn(dbAuth, "isAuthenticated");
+    isEnvTokenActiveSpy = vi.spyOn(dbAuth, "isEnvTokenActive");
+    getAuthConfigSpy = vi.spyOn(dbAuth, "getAuthConfig");
+    clearAuthSpy = vi.spyOn(dbAuth, "clearAuth");
+    getDbPathSpy = vi.spyOn(dbIndex, "getDbPath");
 
     clearAuthSpy.mockResolvedValue(undefined);
     getDbPathSpy.mockReturnValue("/fake/db/path");

@@ -7,8 +7,8 @@
  * 3. Idempotency — hoisting twice gives the same result as hoisting once
  */
 
-import { describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { hoistGlobalFlags } from "../../src/lib/argv-hoist.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
@@ -21,6 +21,8 @@ const GLOBAL_FLAG_TOKENS = [
   "-v",
   "--log-level",
   "--fields",
+  "--org",
+  "--project",
 ] as const;
 
 /** Tokens that should never be hoisted */
@@ -62,6 +64,8 @@ const HOISTABLE_SET = new Set([
   "-v",
   "--log-level",
   "--fields",
+  "--org",
+  "--project",
 ]);
 
 function isHoistableToken(token: string): boolean {
@@ -120,7 +124,12 @@ describe("property: hoistGlobalFlags", () => {
 
   test("hoisted tokens appear after all non-hoisted tokens", () => {
     /** Value-taking flags whose next token also gets hoisted */
-    const VALUE_TAKING = new Set(["--log-level", "--fields"]);
+    const VALUE_TAKING = new Set([
+      "--log-level",
+      "--fields",
+      "--org",
+      "--project",
+    ]);
 
     fcAssert(
       property(argvArb, (argv) => {

@@ -16,13 +16,17 @@
  * `resolve-target.ts`.
  */
 
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { normalizeUrl } from "./constants.js";
 import { getConfigDir } from "./db/index.js";
 import { getEnv } from "./env.js";
+import { HostScopeError } from "./errors.js";
 import { parseIni } from "./ini.js";
 import { logger } from "./logger.js";
+import { isSaaSTrustOrigin } from "./sentry-urls.js";
+import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 import { walkUpFrom } from "./walk-up.js";
 
 const log = logger.withTag("sentryclirc");
@@ -143,7 +147,9 @@ function isNarrowAbsenceError(error: unknown): boolean {
  * That broader policy is correct for opportunistic DSN scans; not
  * for this committed config load.
  */
-async function tryReadSentryCliRc(filePath: string): Promise<string | null> {
+export async function tryReadSentryCliRc(
+  filePath: string
+): Promise<string | null> {
   let statResult: Awaited<ReturnType<typeof stat>>;
   try {
     statResult = await stat(filePath);
@@ -159,7 +165,7 @@ async function tryReadSentryCliRc(filePath: string): Promise<string | null> {
     return null;
   }
   try {
-    return await Bun.file(filePath).text();
+    return await readFile(filePath, "utf-8");
   } catch (error) {
     if (isNarrowAbsenceError(error)) {
       return null;
@@ -189,8 +195,13 @@ async function tryApplyFile(
 /** Lazy-cached set of global `.sentryclirc` paths (stable for the process lifetime) */
 let globalPaths: Set<string> | null = null;
 
-/** Global paths checked as fallback after the walk-up */
-function getGlobalPaths(): Set<string> {
+/**
+ * Global paths checked as fallback after the walk-up.
+ *
+ * Returns `$SENTRY_CONFIG_DIR/.sentryclirc` and `~/.sentryclirc`.
+ * Used by the import engine to classify files by location.
+ */
+export function getGlobalPaths(): Set<string> {
   if (!globalPaths) {
     globalPaths = new Set([
       join(getConfigDir(), CONFIG_FILENAME),
@@ -320,16 +331,16 @@ export function loadSentryCliRc(cwd: string): Promise<SentryCliRcConfig> {
  * - `[auth] token` → `SENTRY_AUTH_TOKEN` (if neither `SENTRY_AUTH_TOKEN` nor `SENTRY_TOKEN` is set)
  * - `[defaults] url` → `SENTRY_URL` (if both `SENTRY_HOST` and `SENTRY_URL` are unset)
  *
- * Call this once, early in the CLI boot process (before any auth or API calls).
+ * The URL is applied unconditionally at boot — the trust check is deferred
+ * to {@link assertRcUrlTrusted}, which `buildCommand` calls after Stricli
+ * identifies the command (so the command can opt out via `skipRcUrlCheck`).
  *
- * @param cwd - Current working directory for config file lookup
+ * Call this once, early in the CLI boot process (before any auth or API calls).
  */
 export async function applySentryCliRcEnvShim(cwd: string): Promise<void> {
   const config = await loadSentryCliRc(cwd);
   const env = getEnv();
 
-  // Only set token if neither SENTRY_AUTH_TOKEN nor SENTRY_TOKEN is set,
-  // since both env vars rank above .sentryclirc in the auth chain.
   if (
     config.token &&
     !env.SENTRY_AUTH_TOKEN?.trim() &&
@@ -341,12 +352,43 @@ export async function applySentryCliRcEnvShim(cwd: string): Promise<void> {
     env.SENTRY_AUTH_TOKEN = config.token;
   }
 
-  if (config.url && !env.SENTRY_HOST?.trim() && !env.SENTRY_URL?.trim()) {
+  const normalizedRcUrl = config.url ? normalizeUrl(config.url) : undefined;
+  if (normalizedRcUrl && !env.SENTRY_HOST?.trim() && !env.SENTRY_URL?.trim()) {
     log.debug(
       `Setting SENTRY_URL from ${CONFIG_FILENAME} (${config.sources.url})`
     );
-    env.SENTRY_URL = config.url;
+    env.SENTRY_URL = normalizedRcUrl;
   }
+}
+
+/**
+ * Validate that the rc-sourced URL (if any) matches the active token's
+ * scoped host. Called by `buildCommand` after Stricli identifies the
+ * command — commands that establish or tear down trust (`auth login`,
+ * `auth logout`) opt out via `skipRcUrlCheck: true`.
+ *
+ * No-op when: no rc URL was loaded, the rc URL is SaaS, or the rc URL
+ * matches the active token's host.
+ *
+ * @throws {HostScopeError} On non-SaaS URL that doesn't match the token
+ */
+export async function assertRcUrlTrusted(cwd: string): Promise<void> {
+  const config = await loadSentryCliRc(cwd);
+  const normalizedRcUrl = config.url ? normalizeUrl(config.url) : undefined;
+  // No rc URL or SaaS rc URL → always trusted (no credential leak risk).
+  if (!normalizedRcUrl || isSaaSTrustOrigin(normalizedRcUrl)) {
+    return;
+  }
+  // Non-SaaS rc URL: must match active token's host. No token at all is
+  // also a refusal — the rc URL by itself isn't a trust source.
+  const tokenHost = getActiveTokenHost();
+  if (tokenHost && isHostTrusted(normalizedRcUrl, tokenHost)) {
+    return;
+  }
+  const source = config.sources.url
+    ? `Config at ${config.sources.url}`
+    : `${CONFIG_FILENAME} [defaults] url`;
+  throw new HostScopeError(source, normalizedRcUrl, tokenHost);
 }
 
 /**

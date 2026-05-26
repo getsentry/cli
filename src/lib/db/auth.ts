@@ -3,10 +3,15 @@
  */
 
 import { createHash } from "node:crypto";
+import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "../constants.js";
 import { getEnv } from "../env.js";
+import { getEnvTokenHost } from "../env-token-host.js";
+import { logger } from "../logger.js";
+import { normalizeOrigin } from "../sentry-urls.js";
 import { withDbSpan } from "../telemetry.js";
 import { getDatabase } from "./index.js";
 import { clearAllIssueOrgCache } from "./issue-org-cache.js";
+import { clearTrustedHostState } from "./regions.js";
 import { runUpsert } from "./utils.js";
 
 /** Refresh when less than 10% of token lifetime remains */
@@ -21,7 +26,54 @@ type AuthRow = {
   expires_at: number | null;
   issued_at: number | null;
   updated_at: number;
+  /**
+   * Origin URL the token was issued against (e.g., `https://sentry.io` or
+   * `https://sentry.example.com`). NULL for rows written before schema v16;
+   * lazily migrated by `migrateNullHostIfPresent` on first access.
+   */
+  host: string | null;
 };
+
+const log = logger.withTag("auth");
+
+/** Read the single auth row. Returns `undefined` when no row exists. */
+function getAuthRow(): AuthRow | undefined {
+  const db = getDatabase();
+  return db.query("SELECT * FROM auth WHERE id = 1").get() as
+    | AuthRow
+    | undefined;
+}
+
+/**
+ * Lazy migration for rows created before schema v16 (NULL `host`).
+ *
+ * Uses the BOOT-TIME env snapshot (`getEnvTokenHost`), captured before the
+ * `.sentryclirc` shim could mutate env. Reading the current env directly
+ * would either default self-hosted users to SaaS (when the shim hasn't run
+ * yet) or migrate to a poisoned rc URL (when it has).
+ *
+ * Users whose shell env was wrong at upgrade time can recover with
+ * `sentry auth logout && sentry auth login`. Returns the migrated host
+ * (never NULL on return).
+ */
+function migrateNullHost(row: AuthRow): string {
+  const bootHost = getEnvTokenHost();
+  const migratedHost = normalizeOrigin(bootHost);
+  const host = migratedHost ?? DEFAULT_SENTRY_URL;
+  try {
+    withDbSpan("migrateAuthHost", () => {
+      const db = getDatabase();
+      db.query("UPDATE auth SET host = ? WHERE id = 1").run(host);
+    });
+    log.info(`Migrated stored credentials to host-scoped model: ${host}`);
+  } catch {
+    // Non-fatal: if the migration write fails, callers still get a
+    // well-formed host from this function. The migration will retry
+    // on the next access.
+  }
+  row.host = host;
+  return host;
+}
 
 /** Prefix for environment variable auth sources in {@link AuthSource} */
 export const ENV_SOURCE_PREFIX = "env:";
@@ -117,10 +169,7 @@ export function getAuthConfig(): AuthConfig | undefined {
   }
 
   const dbConfig = withDbSpan("getAuthConfig", () => {
-    const db = getDatabase();
-    const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-      | AuthRow
-      | undefined;
+    const row = getAuthRow();
 
     if (!row?.token) {
       return;
@@ -153,6 +202,93 @@ export function getAuthConfig(): AuthConfig | undefined {
   return;
 }
 
+/**
+ * Read the host the stored OAuth token is scoped to.
+ *
+ * Lazy-migrates NULL hosts (rows from before schema v16) to the currently-
+ * configured host on first access. Returns `undefined` when no stored token
+ * exists — callers should fall through to the env-token host snapshot.
+ *
+ * This function is intentionally tolerant of "no DB" errors (tests that
+ * bypass DB init). On DB failure, returns `undefined` and trust-scoping
+ * falls back to the caller's default behavior.
+ */
+export function getStoredAuthHost(): string | undefined {
+  try {
+    return withDbSpan("getStoredAuthHost", () => {
+      const row = getAuthRow();
+      if (!row?.token) {
+        return;
+      }
+      if (row.host) {
+        return row.host;
+      }
+      // Lazy migration for pre-v16 rows
+      return migrateNullHost(row);
+    });
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Check whether a usable stored token exists in the auth row.
+ *
+ * Mirrors the "usable" criteria in `getAuthConfig`: a token is usable if it
+ * has a bearer value AND (no expiry, OR not expired, OR expired-with-refresh).
+ *
+ * Used by {@link getActiveTokenHost} to decide whether to prefer stored
+ * OAuth's host over the env-token snapshot.
+ */
+export function hasUsableStoredToken(): boolean {
+  try {
+    return withDbSpan("hasUsableStoredToken", () => {
+      const row = getAuthRow();
+      if (!row?.token) {
+        return false;
+      }
+      // Match getAuthConfig's filter: expired-no-refresh rows are unusable
+      if (row.expires_at && Date.now() > row.expires_at && !row.refresh_token) {
+        return false;
+      }
+      return true;
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Atomically check usability AND retrieve the stored host, in a single
+ * DB read. Used by `getActiveTokenHost` so that a concurrent
+ * `clearAuth()` (library mode) can't interleave between a
+ * `hasUsableStoredToken()` check and a `getStoredAuthHost()` read,
+ * producing an inconsistent "usable but undefined host" fallback.
+ *
+ * Returns `undefined` when no usable stored token exists. When present,
+ * returns the normalized host string (migrating pre-v16 NULL rows on
+ * first access, same as {@link getStoredAuthHost}).
+ */
+export function getUsableStoredTokenHost(): string | undefined {
+  try {
+    return withDbSpan("getUsableStoredTokenHost", () => {
+      const row = getAuthRow();
+      if (!row?.token) {
+        return;
+      }
+      if (row.expires_at && Date.now() > row.expires_at && !row.refresh_token) {
+        return;
+      }
+      if (row.host) {
+        return row.host;
+      }
+      return migrateNullHost(row);
+    });
+  } catch {
+    return;
+  }
+}
+
 /** Memoized token. Wrapper distinguishes "not cached" from "cached as undefined". */
 let cachedAuthToken: { value: string | undefined } | undefined;
 
@@ -181,10 +317,7 @@ function computeAuthToken(): string | undefined {
   }
 
   const dbToken = withDbSpan("getAuthToken", () => {
-    const db = getDatabase();
-    const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-      | AuthRow
-      | undefined;
+    const row = getAuthRow();
 
     if (!row?.token) {
       return;
@@ -213,6 +346,9 @@ export function resetAuthTokenCache(): void {
   cachedAuthToken = undefined;
 }
 
+/** Memoized result for {@link hasStoredAuthCredentials}. Same wrapper contract as {@link cachedAuthToken}. */
+let cachedHasStoredCreds: { value: boolean } | undefined;
+
 /** Memoized full auth row for {@link refreshToken}. Same wrapper contract as {@link cachedAuthToken}. */
 let cachedAuthRow: { value: AuthRow | undefined } | undefined;
 
@@ -220,10 +356,7 @@ function getCachedAuthRow(): AuthRow | undefined {
   if (cachedAuthRow !== undefined) {
     return cachedAuthRow.value;
   }
-  const db = getDatabase();
-  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-    | AuthRow
-    | undefined;
+  const row = getAuthRow();
   cachedAuthRow = { value: row };
   return row;
 }
@@ -233,16 +366,52 @@ export function resetAuthRowCache(): void {
   cachedAuthRow = undefined;
 }
 
+/** Reset the memoized stored-credentials flag. Tests only — call between auth-state mutations. */
+export function resetHasStoredCredsCache(): void {
+  cachedHasStoredCreds = undefined;
+}
+
+/**
+ * Options for persisting a token.
+ *
+ * @property host - Origin URL the token was issued against. When omitted on
+ *   an update (e.g., access-token refresh), the existing row's host is
+ *   preserved. When omitted on a fresh write, defaults to the
+ *   currently-configured host (`SENTRY_HOST`/`SENTRY_URL`) or `DEFAULT_SENTRY_URL`.
+ */
+export type SetAuthTokenOptions = {
+  host?: string;
+};
+
 export function setAuthToken(
   token: string,
   expiresIn?: number,
-  newRefreshToken?: string
+  newRefreshToken?: string,
+  options?: SetAuthTokenOptions
 ): void {
   withDbSpan("setAuthToken", () => {
     const db = getDatabase();
     const now = Date.now();
     const expiresAt = expiresIn ? now + expiresIn * 1000 : null;
     const issuedAt = expiresIn ? now : null;
+
+    // Host resolution precedence:
+    //   1. Explicit `options.host` (login command, tests)
+    //   2. Existing row's `host` (refresh flow preserves the original scope)
+    //   3. Currently-configured host (getConfiguredSentryUrl)
+    //   4. SaaS default
+    // Always normalized to scheme+host[+port] via normalizeOrigin.
+    const existingHost = (
+      db.query("SELECT host FROM auth WHERE id = 1").get() as
+        | { host: string | null }
+        | undefined
+    )?.host;
+    const rawHost =
+      options?.host ??
+      existingHost ??
+      getConfiguredSentryUrl() ??
+      DEFAULT_SENTRY_URL;
+    const host = normalizeOrigin(rawHost) ?? DEFAULT_SENTRY_URL;
 
     runUpsert(
       db,
@@ -254,15 +423,17 @@ export function setAuthToken(
         expires_at: expiresAt,
         issued_at: issuedAt,
         updated_at: now,
+        host,
       },
       ["id"]
     );
   });
-  // Auth row changed — drop memoized fingerprint, token, and row so the next
-  // read reflects the new row.
+  // Auth row changed — drop memoized fingerprint, token, row, and
+  // stored-credentials flag so the next read reflects the new row.
   resetIdentityFingerprintCache();
   resetAuthTokenCache();
   resetAuthRowCache();
+  resetHasStoredCredsCache();
 }
 
 export async function clearAuth(): Promise<void> {
@@ -280,6 +451,9 @@ export async function clearAuth(): Promise<void> {
   resetIdentityFingerprintCache();
   resetAuthTokenCache();
   resetAuthRowCache();
+  resetHasStoredCredsCache();
+  // Evict in-process trust extensions tied to the now-cleared identity.
+  clearTrustedHostState();
 
   // Dynamic import avoids the auth→response-cache→auth cycle.
   try {
@@ -384,23 +558,30 @@ function hashIdentity(kind: string, secret: string): string {
  * - A non-expired token, or
  * - An expired token with a refresh token (will be refreshed on next use)
  *
+ * Memoized within the process. Reset on {@link setAuthToken} and
+ * {@link clearAuth} mutations. Tests call {@link resetHasStoredCredsCache}
+ * between cases.
+ *
  * Used by the login command to decide whether to prompt for re-authentication
  * when an env token is present.
  */
 export function hasStoredAuthCredentials(): boolean {
-  const db = getDatabase();
-  const row = db.query("SELECT * FROM auth WHERE id = 1").get() as
-    | AuthRow
-    | undefined;
-  if (!row?.token) {
-    return false;
+  if (cachedHasStoredCreds !== undefined) {
+    return cachedHasStoredCreds.value;
   }
-  // Non-expired token
-  if (!row.expires_at || Date.now() <= row.expires_at) {
-    return true;
+  const row = getAuthRow();
+  let result = false;
+  if (row?.token) {
+    // Non-expired token
+    if (!row.expires_at || Date.now() <= row.expires_at) {
+      result = true;
+    } else {
+      // Expired but has refresh token — will be refreshed on next use
+      result = !!row.refresh_token;
+    }
   }
-  // Expired but has refresh token — will be refreshed on next use
-  return !!row.refresh_token;
+  cachedHasStoredCreds = { value: result };
+  return result;
 }
 
 export type RefreshTokenOptions = {

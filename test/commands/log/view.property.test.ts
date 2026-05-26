@@ -5,7 +5,6 @@
  * that should hold for any valid input.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   assert as fcAssert,
@@ -13,6 +12,7 @@ import {
   stringMatching,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { parsePositionalArgs } from "../../../src/commands/log/view.js";
 import { ContextError } from "../../../src/lib/errors.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";

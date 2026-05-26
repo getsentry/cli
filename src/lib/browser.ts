@@ -2,10 +2,18 @@
  * Browser utilities
  *
  * Cross-platform utilities for interacting with the user's browser.
- * Uses Bun.spawn and Bun.which for process management.
+ * Uses child_process.spawn and whichSync for process management.
  */
 
+import { spawn } from "node:child_process";
+import { setTimeout } from "node:timers/promises";
 import { generateQRCode } from "./qrcode.js";
+import { whichSync } from "./which.js";
+
+/** No-op error handler to prevent unhandled error crashes from spawn. */
+function noop(): void {
+  // Intentionally empty — absorbs async spawn errors (e.g., ENOENT)
+}
 
 /**
  * Open a URL in the user's default browser.
@@ -20,10 +28,10 @@ export async function openBrowser(url: string): Promise<boolean> {
   let args: string[];
 
   if (platform === "darwin") {
-    command = Bun.which("open");
+    command = whichSync("open");
     args = [url];
   } else if (platform === "win32") {
-    command = Bun.which("cmd");
+    command = whichSync("cmd");
     args = ["/c", "start", "", url];
   } else {
     // Linux and other Unix-like systems - try multiple openers
@@ -35,7 +43,7 @@ export async function openBrowser(url: string): Promise<boolean> {
       "kde-open",
     ];
     for (const opener of linuxOpeners) {
-      command = Bun.which(opener);
+      command = whichSync(opener);
       if (command) {
         break;
       }
@@ -48,13 +56,15 @@ export async function openBrowser(url: string): Promise<boolean> {
   }
 
   try {
-    const proc = Bun.spawn([command, ...args], {
-      stdout: "ignore",
-      stderr: "ignore",
+    const proc = spawn(command, args, {
+      stdio: ["ignore", "ignore", "ignore"],
     });
+    // Prevent unhandled error crash if the binary disappears between
+    // whichSync() and spawn() (TOCTOU window).
+    proc.on("error", noop);
 
     // Give browser time to open, then detach
-    await Bun.sleep(500);
+    await setTimeout(500);
     proc.unref();
     return true;
   } catch {

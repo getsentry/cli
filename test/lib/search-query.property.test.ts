@@ -9,8 +9,8 @@
  * - Safe queries pass through unchanged
  */
 
-import { describe, expect, test } from "bun:test";
 import { constantFrom, assert as fcAssert, property, tuple } from "fast-check";
+import { describe, expect, test } from "vitest";
 import { ValidationError } from "../../src/lib/errors.js";
 import { sanitizeQuery } from "../../src/lib/search-query.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";

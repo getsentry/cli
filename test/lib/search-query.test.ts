@@ -10,9 +10,11 @@
  * and error messages.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { ValidationError } from "../../src/lib/errors.js";
-import { sanitizeQuery } from "../../src/lib/search-query.js";
+import { __testing, sanitizeQuery } from "../../src/lib/search-query.js";
+
+const { normalizeQuery, transformUnquoted } = __testing;
 
 // ---------------------------------------------------------------------------
 // Passthrough (no operators)
@@ -327,5 +329,153 @@ describe("sanitizeQuery: edge cases", () => {
     expect(() => sanitizeQuery("key:[*err*] OR key:val")).toThrow(
       ValidationError
     );
+  });
+});
+
+describe("normalizeQuery: pre-parse text normalization", () => {
+  describe("mismatched brackets", () => {
+    test("fixes wrong closing delimiter ) → ]", () => {
+      expect(normalizeQuery("status_code:[401,403,429,500,)")).toBe(
+        "status_code:[401,403,429,500]"
+      );
+    });
+
+    test("fixes trailing comma + wrong delimiter combined", () => {
+      expect(normalizeQuery("error.http.status_code:[401,403,429,500,)")).toBe(
+        "error.http.status_code:[401,403,429,500]"
+      );
+    });
+
+    test("repairs within a longer query", () => {
+      expect(
+        normalizeQuery(
+          "is:unresolved error.http.status_code:[401,403,429,500,)"
+        )
+      ).toBe("is:unresolved error.http.status_code:[401,403,429,500]");
+    });
+  });
+
+  describe("trailing list commas", () => {
+    test("strips trailing comma in in-list filter", () => {
+      expect(normalizeQuery("level:[error,warning,]")).toBe(
+        "level:[error,warning]"
+      );
+    });
+
+    test("strips trailing comma with spaces", () => {
+      expect(normalizeQuery("level:[error, warning, ]")).toBe(
+        "level:[error, warning]"
+      );
+    });
+  });
+
+  describe("passthrough", () => {
+    test("leaves valid queries unchanged", () => {
+      expect(normalizeQuery("level:[error,warning]")).toBe(
+        "level:[error,warning]"
+      );
+    });
+
+    test("leaves non-list queries unchanged", () => {
+      expect(normalizeQuery("is:unresolved level:error")).toBe(
+        "is:unresolved level:error"
+      );
+    });
+
+    test("leaves empty query unchanged", () => {
+      expect(normalizeQuery("")).toBe("");
+    });
+
+    test("does not cross filter boundaries", () => {
+      // Two filters — each should be repaired independently
+      expect(normalizeQuery("a:[1,) b:[2,)")).toBe("a:[1] b:[2]");
+    });
+  });
+
+  describe("quote awareness", () => {
+    test("does not modify bracket content inside double quotes", () => {
+      expect(normalizeQuery('message:"error [500,] found"')).toBe(
+        'message:"error [500,] found"'
+      );
+    });
+
+    test("does not modify mismatched brackets inside quotes", () => {
+      expect(normalizeQuery('message:"codes [401,403,)"')).toBe(
+        'message:"codes [401,403,)"'
+      );
+    });
+
+    test("repairs unquoted filter but preserves quoted content", () => {
+      expect(
+        normalizeQuery('level:[error,warning,) message:"[trailing,]"')
+      ).toBe('level:[error,warning] message:"[trailing,]"');
+    });
+
+    test("handles multiple quoted regions", () => {
+      expect(normalizeQuery('a:"[1,]" level:[x,) b:"[2,]"')).toBe(
+        'a:"[1,]" level:[x] b:"[2,]"'
+      );
+    });
+
+    test("handles escaped quotes inside quoted strings", () => {
+      // The input has backslash-escaped quotes inside the quoted value:
+      // message:"say \"hello [500,]\"" level:[a,]
+      const input = 'message:"say \\"hello [500,]\\"" level:[a,]';
+      const expected = 'message:"say \\"hello [500,]\\"" level:[a]';
+      expect(normalizeQuery(input)).toBe(expected);
+    });
+  });
+});
+
+describe("transformUnquoted", () => {
+  const upper = (s: string) => s.toUpperCase();
+
+  test("transforms entire string when no quotes present", () => {
+    expect(transformUnquoted("hello world", upper)).toBe("HELLO WORLD");
+  });
+
+  test("preserves quoted segments", () => {
+    expect(transformUnquoted('hello "world" foo', upper)).toBe(
+      'HELLO "world" FOO'
+    );
+  });
+
+  test("handles string that is entirely quoted", () => {
+    expect(transformUnquoted('"hello world"', upper)).toBe('"hello world"');
+  });
+
+  test("handles adjacent quoted segments", () => {
+    expect(transformUnquoted('"a""b"', upper)).toBe('"a""b"');
+  });
+
+  test("handles empty string", () => {
+    expect(transformUnquoted("", upper)).toBe("");
+  });
+});
+
+describe("sanitizeQuery: normalization integration", () => {
+  test("normalizes trailing comma before ] (pre-parse)", () => {
+    // Trailing comma is stripped before PEG parsing
+    const result = sanitizeQuery("level:[error,warning,]");
+    expect(result).toBe("level:[error,warning]");
+  });
+
+  test("normalizes wrong closing delimiter ) (pre-parse)", () => {
+    const result = sanitizeQuery("level:[error,warning,)");
+    expect(result).toBe("level:[error,warning]");
+  });
+
+  test("normalizes complex filter in longer query", () => {
+    const result = sanitizeQuery(
+      "is:unresolved error.http.status_code:[401,403,429,500,)"
+    );
+    expect(result).toBe(
+      "is:unresolved error.http.status_code:[401,403,429,500]"
+    );
+  });
+
+  test("unfixable malformed query passes through to API", () => {
+    const result = sanitizeQuery("((( broken");
+    expect(result).toBe("((( broken");
   });
 });

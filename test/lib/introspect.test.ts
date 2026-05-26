@@ -5,7 +5,7 @@
  * and `script/generate-skill.ts`.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type {
   Command,
   FlagDef,

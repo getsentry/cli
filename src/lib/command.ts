@@ -37,7 +37,9 @@ import {
   numberParser as stricliNumberParser,
 } from "@stricli/core";
 import type { Writer } from "../types/index.js";
+import { appendCacheHint } from "./cache-hint.js";
 import { getAuthConfig } from "./db/auth.js";
+import { getEnv } from "./env.js";
 import { AuthError, CliError, OutputError } from "./errors.js";
 import { warning } from "./formatters/colors.js";
 import { parseFieldsList } from "./formatters/json.js";
@@ -58,6 +60,7 @@ import { GLOBAL_FLAGS } from "./global-flags.js";
 import {
   LOG_LEVEL_NAMES,
   type LogLevelName,
+  logger,
   parseLogLevel,
   setLogLevel,
 } from "./logger.js";
@@ -165,6 +168,14 @@ type LocalCommandBuilderArguments<
    * (e.g. `auth login`, `auth logout`, `auth status`, `help`, `cli upgrade`).
    */
   readonly auth?: boolean;
+  /**
+   * Skip the `.sentryclirc` URL trust check. Defaults to `false`.
+   *
+   * Set to `true` for commands that establish or tear down host trust
+   * (`auth login`, `auth logout`) — they must run even when a
+   * repo-local `.sentryclirc` URL mismatches the current token.
+   */
+  readonly skipRcUrlCheck?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -230,6 +241,40 @@ export const FIELDS_FLAG = {
   optional: true as const,
 } as const;
 
+// ---------------------------------------------------------------------------
+// Hidden org/project compat flags (LLM error recovery)
+// ---------------------------------------------------------------------------
+
+/**
+ * Hidden `--org` flag injected into every command by {@link buildCommand}.
+ *
+ * Backward-compatibility shim for the older `sentry-cli` that accepted
+ * `--org` on every command. LLMs trained on the old CLI generate this flag.
+ * The value is written to `SENTRY_ORG` so the existing resolution chain
+ * in `resolve-target.ts` picks it up at priority #2 (env vars).
+ */
+const ORG_FLAG = {
+  kind: "parsed" as const,
+  parse: String,
+  brief: "Organization slug",
+  optional: true as const,
+  hidden: true as const,
+} as const;
+
+/**
+ * Hidden `--project` flag injected into every command by {@link buildCommand}.
+ *
+ * Same backward-compatibility shim as `--org`. Written to `SENTRY_PROJECT`
+ * before the command's `func` runs.
+ */
+const PROJECT_FLAG = {
+  kind: "parsed" as const,
+  parse: String,
+  brief: "Project slug",
+  optional: true as const,
+  hidden: true as const,
+} as const;
+
 /** The flag key for the injected --log-level flag (always stripped) */
 const LOG_LEVEL_KEY = "log-level";
 
@@ -250,6 +295,44 @@ export function applyLoggingFlags(
     setLogLevel(parseLogLevel(logLevel));
   } else if (verbose) {
     setLogLevel(parseLogLevel("debug"));
+  }
+}
+
+const orgProjectLog = logger.withTag("compat-flags");
+
+/**
+ * Write `--org` / `--project` flag values to environment variables.
+ *
+ * Called by the {@link buildCommand} wrapper before the command's `func()`
+ * runs. The values are written to `SENTRY_ORG` and `SENTRY_PROJECT` so
+ * the existing resolution chain in `resolve-target.ts` picks them up at
+ * priority #2 (env vars). Overwrites existing env vars because explicit
+ * CLI flags are highest-priority user intent.
+ *
+ * Empty and whitespace-only values are treated as "not provided" — they
+ * fall through to the rest of the resolution chain rather than overwriting
+ * a real pre-existing env var with garbage. This matters for LLM-generated
+ * commands that occasionally emit `--org ""` or stray whitespace.
+ *
+ * Skipped when the command defines its own `--org` / `--project` flag
+ * (e.g., `release create --project`) — those are passed through to `func()`.
+ */
+export function applyOrgProjectFlags(
+  org: string | undefined,
+  project: string | undefined,
+  commandOwnsOrg: boolean,
+  commandOwnsProject: boolean
+): void {
+  const env = getEnv();
+  const orgTrimmed = org?.trim();
+  const projectTrimmed = project?.trim();
+  if (orgTrimmed && !commandOwnsOrg) {
+    orgProjectLog.debug(`--org flag → SENTRY_ORG=${orgTrimmed}`);
+    env.SENTRY_ORG = orgTrimmed;
+  }
+  if (projectTrimmed && !commandOwnsProject) {
+    orgProjectLog.debug(`--project flag → SENTRY_PROJECT=${projectTrimmed}`);
+    env.SENTRY_PROJECT = projectTrimmed;
   }
 }
 
@@ -334,6 +417,70 @@ function enrichDocsWithSchema(
   };
 }
 
+/**
+ * Global flag defaults keyed by flag name.
+ * Used by {@link mergeGlobalFlags} to inject flags when the command
+ * doesn't define its own.
+ */
+const GLOBAL_FLAG_DEFAULTS: Record<string, unknown> = {
+  [LOG_LEVEL_KEY]: LOG_LEVEL_FLAG,
+  verbose: VERBOSE_FLAG,
+  org: ORG_FLAG,
+  project: PROJECT_FLAG,
+};
+
+/** Flags that are always stripped (command never sees them). */
+const ALWAYS_STRIP = new Set([LOG_LEVEL_KEY]);
+
+/**
+ * Merge global flags into a command's existing flags.
+ *
+ * For each global flag, if the command doesn't already define it, the
+ * default shape is injected and its key is added to the returned
+ * `stripKeys` set (so the wrapper strips it before calling `func`).
+ *
+ * @returns The merged flags, ownership booleans, and keys to strip.
+ */
+function mergeGlobalFlags(
+  existingFlags: Record<string, unknown>,
+  // biome-ignore lint/suspicious/noExplicitAny: OutputConfig type is erased at the builder level
+  outputConfig?: OutputConfig<any>
+): {
+  mergedFlags: Record<string, unknown>;
+  commandOwnsOrg: boolean;
+  commandOwnsProject: boolean;
+  stripKeys: Set<string>;
+} {
+  const commandOwnsJson = "json" in existingFlags;
+  const commandOwnsOrg = "org" in existingFlags;
+  const commandOwnsProject = "project" in existingFlags;
+
+  const mergedFlags: Record<string, unknown> = { ...existingFlags };
+  const stripKeys = new Set<string>(ALWAYS_STRIP);
+
+  for (const [name, shape] of Object.entries(GLOBAL_FLAG_DEFAULTS)) {
+    if (!(name in existingFlags)) {
+      mergedFlags[name] = shape;
+      stripKeys.add(name);
+    }
+  }
+
+  // Inject --json and --fields when output config is set
+  if (outputConfig) {
+    if (!commandOwnsJson) {
+      mergedFlags.json = JSON_FLAG;
+    }
+    mergedFlags.fields = buildFieldsFlag(outputConfig);
+  }
+
+  return {
+    mergedFlags,
+    commandOwnsOrg,
+    commandOwnsProject,
+    stripKeys,
+  };
+}
+
 export function buildCommand<
   const FLAGS extends BaseFlags = NonNullable<unknown>,
   const ARGS extends BaseArgs = [],
@@ -344,35 +491,17 @@ export function buildCommand<
   const originalFunc = builderArgs.func;
   const outputConfig = builderArgs.output;
   const requiresAuth = builderArgs.auth !== false;
+  const skipRcUrlCheck = builderArgs.skipRcUrlCheck === true;
 
-  // Merge logging flags into the command's flag definitions.
-  // Quoted keys produce kebab-case CLI flags: "log-level" → --log-level
+  // Merge global flags into the command's flag definitions.
   const existingParams = (builderArgs.parameters ?? {}) as Record<
     string,
     unknown
   >;
   const existingFlags = (existingParams.flags ?? {}) as Record<string, unknown>;
 
-  // If the command already defines --verbose (e.g. api command), don't override it.
-  const commandOwnsVerbose = "verbose" in existingFlags;
-  // If the command already defines --json (e.g. custom brief), don't override it.
-  const commandOwnsJson = "json" in existingFlags;
-
-  const mergedFlags: Record<string, unknown> = {
-    ...existingFlags,
-    [LOG_LEVEL_KEY]: LOG_LEVEL_FLAG,
-  };
-  if (!commandOwnsVerbose) {
-    mergedFlags.verbose = VERBOSE_FLAG;
-  }
-
-  // Inject --json and --fields when output config is set
-  if (outputConfig) {
-    if (!commandOwnsJson) {
-      mergedFlags.json = JSON_FLAG;
-    }
-    mergedFlags.fields = buildFieldsFlag(outputConfig);
-  }
+  const { mergedFlags, commandOwnsOrg, commandOwnsProject, stripKeys } =
+    mergeGlobalFlags(existingFlags, outputConfig);
 
   // Enrich fullDescription with JSON fields when schema is registered.
   // This makes field info visible in Stricli's --help output.
@@ -434,19 +563,16 @@ export function buildCommand<
 
   /**
    * Strip injected flags from the raw Stricli-parsed flags object.
-   * --log-level is always stripped. --verbose is stripped only when we
-   * injected it (not when the command defines its own). --fields is
-   * pre-parsed from comma-string to string[] when output: { human: ... }.
+   * Global flags we injected (tracked in `stripKeys` from
+   * {@link mergeGlobalFlags}) are removed. --fields is pre-parsed from
+   * comma-string to string[] when output: { human: ... }.
    */
   function cleanRawFlags(
     raw: Record<string, unknown>
   ): Record<string, unknown> {
     const clean: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(raw)) {
-      if (key === LOG_LEVEL_KEY) {
-        continue;
-      }
-      if (key === "verbose" && !commandOwnsVerbose) {
+      if (stripKeys.has(key)) {
         continue;
       }
       clean[key] = value;
@@ -549,6 +675,15 @@ export function buildCommand<
       flags.verbose as boolean
     );
 
+    // Map --org / --project compat flags to env vars before anything
+    // else reads them (auth guard, org/project resolution, etc.)
+    applyOrgProjectFlags(
+      flags.org as string | undefined,
+      flags.project as string | undefined,
+      commandOwnsOrg,
+      commandOwnsProject
+    );
+
     const cleanFlags = cleanRawFlags(flags as Record<string, unknown>);
     setFlagContext(cleanFlags);
     if (args.length > 0) {
@@ -608,6 +743,13 @@ export function buildCommand<
         throw new AuthError("not_authenticated");
       }
 
+      // Validate rc-sourced URL against the active token's host. Deferred
+      // to here (instead of boot) so commands can opt out via skipRcUrlCheck.
+      if (!skipRcUrlCheck && "cwd" in this) {
+        const { assertRcUrlTrusted } = await import("./sentryclirc.js");
+        await assertRcUrlTrusted(this.cwd as string);
+      }
+
       // Execution phase: core command logic, API calls, org/project resolution
       const returned = await withTracing(
         "exec",
@@ -627,9 +769,14 @@ export function buildCommand<
         }
       );
 
-      // Render phase: output finalization
+      // Render phase: output finalization.
+      // Append cache-age hint automatically so every command gets
+      // "cached · 3m ago · use -f to refresh" when data was cached.
+      // Skip bare `return;` paths (e.g. `--web` which opens a browser
+      // without yielding) — no rendered output should mean no footer.
+      const finalHint = returned ? appendCacheHint(returned.hint) : undefined;
       await withTracing("render", "cli.command.render", () => {
-        writeFinalization(stdout, returned?.hint, cleanFlags.json, renderer);
+        writeFinalization(stdout, finalHint, cleanFlags.json, renderer);
       });
     } catch (err) {
       // Finalize before error handling to close streaming state

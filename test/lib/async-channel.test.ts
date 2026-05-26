@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { createAsyncChannel } from "../../src/lib/async-channel.js";
 
 describe("createAsyncChannel", () => {
@@ -190,7 +190,7 @@ describe("createAsyncChannel", () => {
           ch.error(new Error("stream failed"));
         }
       }
-    }).toThrow("stream failed");
+    }).rejects.toThrow("stream failed");
 
     expect(results).toEqual([1]);
   });

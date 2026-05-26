@@ -6,8 +6,8 @@
  * specific token coloring, edge cases, and formatSqlBlock structure.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import chalk from "chalk";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { stripAnsi } from "../../../src/lib/formatters/plain-detect.js";
 import {
   colorizeSql,

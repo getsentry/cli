@@ -4,9 +4,9 @@
  * Tests for the new cached DSN detection with conflict detection.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { clearDsnCache, getCachedDsn } from "../../../src/lib/db/dsn-cache.js";
 import {
   detectAllDsns,
@@ -387,6 +387,23 @@ describe("DSN Detector (New Module)", () => {
       );
     });
 
+    test("describes env source with framework-prefixed var name", () => {
+      const dsn = {
+        raw: "https://key@o1.ingest.sentry.io/1",
+        source: "env" as const,
+        sourcePath: "NEXT_PUBLIC_SENTRY_DSN",
+        protocol: "https",
+        publicKey: "key",
+        host: "o1.ingest.sentry.io",
+        projectId: "1",
+        orgId: "1",
+      };
+
+      expect(getDsnSourceDescription(dsn)).toBe(
+        "NEXT_PUBLIC_SENTRY_DSN environment variable"
+      );
+    });
+
     test("describes env_file source with path", () => {
       const dsn = {
         raw: "https://key@o1.ingest.sentry.io/1",
@@ -415,6 +432,20 @@ describe("DSN Detector (New Module)", () => {
       };
 
       expect(getDsnSourceDescription(dsn)).toBe("src/instrumentation.ts");
+    });
+
+    test("describes inferred source", () => {
+      const dsn = {
+        raw: "https://key@o1.ingest.sentry.io/1",
+        source: "inferred" as const,
+        protocol: "https",
+        publicKey: "key",
+        host: "o1.ingest.sentry.io",
+        projectId: "1",
+        orgId: "1",
+      };
+
+      expect(getDsnSourceDescription(dsn)).toBe("directory name inference");
     });
   });
 });

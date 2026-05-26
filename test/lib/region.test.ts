@@ -4,7 +4,8 @@
  * Tests for resolving organization regions in multi-region Sentry support.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { setTimeout as sleep } from "node:timers/promises";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
 import {
@@ -219,7 +220,13 @@ describe("resolveOrgRegion", () => {
   });
 
   test("uses SENTRY_URL as fallback for self-hosted", async () => {
+    // The test's beforeEach stored an OAuth row with host = SaaS (since
+    // SENTRY_URL was unset at store time). Re-scope the stored token to
+    // the self-hosted host so the fetch-layer guard admits the request.
     process.env.SENTRY_URL = "https://sentry.mycompany.com";
+    await setAuthToken("test-token", undefined, undefined, {
+      host: "https://sentry.mycompany.com",
+    });
 
     // Mock fetch to fail (no multi-region on self-hosted)
     const originalFetch = globalThis.fetch;
@@ -269,7 +276,7 @@ describe("resolveOrgRegion", () => {
       if (req.url.includes("/organizations/dedup-org/")) {
         fetchCount += 1;
         // Small delay to ensure concurrency overlap
-        await Bun.sleep(50);
+        await sleep(50);
         return new Response(
           JSON.stringify({
             id: "789",

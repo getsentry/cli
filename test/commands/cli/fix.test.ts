@@ -10,10 +10,10 @@
  * and code spans have backticks stripped.
  */
 
-import { Database } from "bun:sqlite";
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { chmodSync, statSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { fixCommand } from "../../../src/commands/cli/fix.js";
 import { closeDatabase, getDatabase } from "../../../src/lib/db/index.js";
 import {
@@ -21,7 +21,8 @@ import {
   generatePreMigrationTableDDL,
   initSchema,
 } from "../../../src/lib/db/schema.js";
-import { OutputError } from "../../../src/lib/errors.js";
+import { Database } from "../../../src/lib/db/sqlite.js";
+import { EXIT, OutputError } from "../../../src/lib/errors.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 /**
@@ -81,12 +82,12 @@ function createContext() {
 
   const context = {
     stdout: {
-      write: mock((s: string) => {
+      write: vi.fn((s: string) => {
         stdoutChunks.push(s);
       }),
     },
     stderr: {
-      write: mock((_s: string) => {
+      write: vi.fn((_s: string) => {
         /* consola routes here — not used for structured output */
       }),
     },
@@ -337,7 +338,7 @@ describe("sentry cli fix", () => {
     // Write garbage so SQLite cannot parse it — getRawDatabase will throw.
     const dbPath = join(getTestDir(), "cli.db");
     closeDatabase();
-    await Bun.write(dbPath, "not a sqlite database");
+    await writeFile(dbPath, "not a sqlite database");
     chmodSync(dbPath, 0o600);
     chmodSync(getTestDir(), 0o700);
 
@@ -346,7 +347,7 @@ describe("sentry cli fix", () => {
     // Schema failure is rendered as an issue with repair details
     expect(output).toContain("Schema");
     expect(output).toContain("Try deleting the database");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(EXIT.OUTPUT_ERROR);
     // Should NOT say "No issues found"
     expect(output).not.toContain("No issues found");
   });
@@ -355,7 +356,7 @@ describe("sentry cli fix", () => {
     // Same corrupt DB scenario, but in dry-run mode
     const dbPath = join(getTestDir(), "cli.db");
     closeDatabase();
-    await Bun.write(dbPath, "not a sqlite database");
+    await writeFile(dbPath, "not a sqlite database");
     chmodSync(dbPath, 0o600);
     chmodSync(getTestDir(), 0o700);
 
@@ -363,7 +364,7 @@ describe("sentry cli fix", () => {
 
     expect(output).toContain("Schema");
     expect(output).toContain("Try deleting the database");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(EXIT.OUTPUT_ERROR);
   });
 
   test("schema check failure with permission issues does not print schema error", async () => {
@@ -476,7 +477,7 @@ describe("sentry cli fix — ownership detection", () => {
    */
   async function runFixWithUid(dryRun: boolean, getuid: () => number) {
     const { context, getOutput } = createContext();
-    const getuidSpy = spyOn(process, "getuid").mockImplementation(getuid);
+    const getuidSpy = vi.spyOn(process, "getuid").mockImplementation(getuid);
 
     let exitCode = 0;
 
@@ -520,7 +521,7 @@ describe("sentry cli fix — ownership detection", () => {
     // Not uid 0, so we can't chown — expect instructions
     expect(output).toContain("sudo chown");
     expect(output).toContain("sudo sentry cli fix");
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(EXIT.OUTPUT_ERROR);
   });
 
   test("dry-run reports ownership issues with chown instructions", async () => {
@@ -614,7 +615,7 @@ describe("sentry cli fix — ownership detection", () => {
     chmodSync(join(getOwnershipTestDir(), "cli.db"), 0o600);
 
     const { exitCode: code } = await runFixWithUid(false, () => 9999);
-    expect(code).toBe(1);
+    expect(code).toBe(EXIT.OUTPUT_ERROR);
   });
 
   test("skips permission check when ownership repair fails", async () => {
@@ -662,7 +663,7 @@ describe("sentry cli fix — ownership detection", () => {
 
     try {
       const { output, exitCode } = await runFixWithUid(false, () => 0);
-      expect(exitCode).toBe(1);
+      expect(exitCode).toBe(EXIT.OUTPUT_ERROR);
       // The instructions mention the inability to determine UID
       expect(output).toContain("Could not determine a non-root UID");
     } finally {

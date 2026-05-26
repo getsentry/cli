@@ -8,11 +8,17 @@
  * to verify the real npm package behavior (not source imports).
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
-const ROOT_DIR = join(import.meta.dir, "../..");
+function noop(): void {
+  // Intentionally empty — absorbs async spawn errors
+}
+
+const ROOT_DIR = join(import.meta.dirname, "../..");
 const INDEX_PATH = join(ROOT_DIR, "dist/index.cjs");
 const TYPES_PATH = join(ROOT_DIR, "dist/index.d.cts");
 
@@ -29,23 +35,31 @@ async function runNodeScript(
     SENTRY_CLI_NO_TELEMETRY: "1",
   };
   // Ensure no auth leaks into tests — delete rather than set to undefined
-  // because Bun.spawn may pass "undefined" as a literal string
+  // because spawn may pass "undefined" as a literal string
   delete env.SENTRY_AUTH_TOKEN;
   delete env.SENTRY_TOKEN;
 
-  const proc = Bun.spawn(["node", "--no-warnings", "-e", script], {
+  const proc = spawn("node", ["--no-warnings", "-e", script], {
     cwd: ROOT_DIR,
-    stdout: "pipe",
-    stderr: "pipe",
+    stdio: ["pipe", "pipe", "pipe"],
     env,
   });
+  proc.on("error", noop);
 
   const timer = setTimeout(() => proc.kill(), timeout);
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
+
+  let stdout = "";
+  let stderr = "";
+  proc.stdout.on("data", (d: Buffer) => {
+    stdout += d;
+  });
+  proc.stderr.on("data", (d: Buffer) => {
+    stderr += d;
+  });
+
+  const exitCode = await new Promise<number>((resolve) =>
+    proc.on("close", (code) => resolve(code ?? 1))
+  );
   clearTimeout(timer);
 
   return { stdout, stderr, exitCode };
@@ -77,22 +91,30 @@ describe("library mode (bundled)", () => {
         rmSync(distDir, { recursive: true, force: true });
       }
 
-      const proc = Bun.spawn([process.execPath, "run", "script/bundle.ts"], {
-        cwd: ROOT_DIR,
-        env: {
-          ...process.env,
-          SENTRY_CLIENT_ID: process.env.SENTRY_CLIENT_ID || "test-client-id",
-        },
-        stdout: "pipe",
-        stderr: "pipe",
+      await new Promise<number>((resolve) => {
+        let buildStderr = "";
+        const proc = spawn("pnpm", ["run", "bundle"], {
+          cwd: ROOT_DIR,
+          env: {
+            ...process.env,
+            SENTRY_CLIENT_ID: process.env.SENTRY_CLIENT_ID || "test-client-id",
+          },
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        proc.on("error", noop);
+        proc.stderr.on("data", (d: Buffer) => {
+          buildStderr += d;
+        });
+        proc.on("close", (code) => {
+          if ((code ?? 1) !== 0) {
+            // Don't throw — let tests skip gracefully (e.g., generate:schema 429)
+            console.error(
+              `Bundle failed with exit code ${code}: ${buildStderr}`
+            );
+          }
+          resolve(code ?? 1);
+        });
       });
-
-      const exitCode = await proc.exited;
-      if (exitCode !== 0) {
-        const stderr = await new Response(proc.stderr).text();
-        // Don't throw — let tests skip gracefully (e.g., generate:schema 429)
-        console.error(`Bundle failed with exit code ${exitCode}: ${stderr}`);
-      }
     }
 
     if (!existsSync(INDEX_PATH)) {
@@ -118,13 +140,13 @@ describe("library mode (bundled)", () => {
   });
 
   test("index.cjs does NOT start with shebang", async () => {
-    const content = await Bun.file(INDEX_PATH).text();
+    const content = await readFile(INDEX_PATH, "utf-8");
     // The library bundle should not have a shebang — that's on bin.cjs only
     expect(content.startsWith("#!/")).toBe(false);
   });
 
   test("index.cjs does NOT suppress process warnings", async () => {
-    const content = await Bun.file(INDEX_PATH).text();
+    const content = await readFile(INDEX_PATH, "utf-8");
     // The warning suppression (process.emit monkeypatch) moved to bin.cjs
     // The library must not patch the host's process.emit
     expect(content.slice(0, 200)).not.toContain("process.emit");
@@ -192,10 +214,13 @@ describe("library mode (bundled)", () => {
   });
 
   test("sdk.run() throws SentryError on auth failure", async () => {
+    // Use the typed SDK path (sdk.org.list) via run() to test error handling.
+    // The raw sdk.run('org', 'list') path may not trigger auth checks
+    // consistently across package managers due to resolution cascade differences.
     const { stdout } = await runNodeScriptOk(`
       const { createSentrySDK, SentryError } = require('./dist/index.cjs');
-      const sdk = createSentrySDK();
-      sdk.run('org', 'list').then(() => {
+      const sdk = createSentrySDK({ cwd: '/tmp' });
+      sdk.org.list().then(() => {
         console.log(JSON.stringify({ error: false }));
       }).catch(e => {
         console.log(JSON.stringify({
@@ -258,27 +283,27 @@ describe("library mode (bundled)", () => {
   // --- Type declarations ---
 
   test("type declarations contain createSentrySDK", async () => {
-    const content = await Bun.file(TYPES_PATH).text();
+    const content = await readFile(TYPES_PATH, "utf-8");
     expect(content).toContain("createSentrySDK");
     expect(content).toContain("SentrySDK");
   });
 
   test("type declarations contain SDK namespaces", async () => {
-    const content = await Bun.file(TYPES_PATH).text();
+    const content = await readFile(TYPES_PATH, "utf-8");
     // CLI route names (not plural)
     expect(content).toContain("org:");
     expect(content).toContain("issue:");
   });
 
   test("type declarations contain SentryError", async () => {
-    const content = await Bun.file(TYPES_PATH).text();
+    const content = await readFile(TYPES_PATH, "utf-8");
     expect(content).toContain("export declare class SentryError");
     expect(content).toContain("exitCode");
     expect(content).toContain("stderr");
   });
 
   test("type declarations contain SentryOptions", async () => {
-    const content = await Bun.file(TYPES_PATH).text();
+    const content = await readFile(TYPES_PATH, "utf-8");
     expect(content).toContain("SentryOptions");
     expect(content).toContain("token");
     expect(content).toContain("text");

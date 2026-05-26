@@ -9,7 +9,10 @@ We welcome contributions to the Sentry CLI! This guide will help you get started
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) runtime (v1.0 or later)
+<!-- GENERATED:START dev-prereq -->
+- [Node.js](https://nodejs.org) (v22.15 or later)
+- [pnpm](https://pnpm.io) (v10.11 or later)
+<!-- GENERATED:END dev-prereq -->
 - Git
 
 ### Getting Started
@@ -20,13 +23,13 @@ git clone https://github.com/getsentry/cli.git
 cd cli
 
 # Install dependencies
-bun install
+pnpm install
 
 # Run CLI in development mode
-bun run --env-file=.env.local src/bin.ts --help
+pnpm run cli -- --help
 
 # Run tests
-bun test
+pnpm run test
 ```
 
 ### Environment Variables
@@ -51,14 +54,16 @@ cli/
 │   ├── commands/       # CLI commands
 │   │   ├── alert/       # create, delete, edit, list, view
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
-│   │   ├── cli/         # defaults, feedback, fix, setup, upgrade
-│   │   ├── dashboard/   # add, create, delete, edit, list, view
-│   │   ├── event/       # list, view
-│   │   ├── issue/       # events, explain, list, merge, plan, resolve, unresolve, view
+│   │   ├── cli/         # defaults, feedback, fix, import, setup, upgrade
+│   │   ├── dashboard/   # list, view, create, add, edit, delete, revisions, restore
+│   │   ├── event/       # view, list
+│   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, archive, merge
+│   │   ├── local/       # serve, run
 │   │   ├── log/         # list, view
 │   │   ├── org/         # list, view
 │   │   ├── project/     # create, delete, list, view
-│   │   ├── release/     # create, delete, deploy, deploys, finalize, list, propose-version, set-commits, view
+│   │   ├── release/     # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
+│   │   ├── replay/      # list, view
 │   │   ├── repo/        # list
 │   │   ├── sourcemap/   # inject, upload
 │   │   ├── span/        # list, view
@@ -66,6 +71,7 @@ cli/
 │   │   ├── trace/       # list, logs, view
 │   │   ├── trial/       # list, start
 │   │   ├── api.ts       # Make an authenticated API request
+│   │   ├── explore.ts   # Query aggregate event data (Explore)
 │   │   ├── help.ts      # Help command
 │   │   ├── init.ts      # Initialize Sentry in your project (experimental)
 │   │   └── schema.ts    # Browse the Sentry API schema
@@ -80,31 +86,33 @@ cli/
 
 ## Building
 
+<!-- GENERATED:START build-commands -->
 ```bash
-# Build for current platform
-bun run build
+# Build for current platform (uses esbuild + fossilize for Node SEA packaging)
+pnpm run build
 
 # Build for all platforms
-bun run build:all
+pnpm run build:all
 
 # Create npm bundle
-bun run bundle
+pnpm run bundle
 ```
+<!-- GENERATED:END build-commands -->
 
 ## Testing
 
 ```bash
 # Run all tests
-bun test
+pnpm run test
 
 # Run specific test file
-bun test test/path/to/test.ts
+pnpm run test -- test/path/to/test.ts
 
 # Run with watch mode
-bun test --watch
+pnpm run test -- --watch
 
 # Run with coverage
-bun test --coverage
+pnpm run test -- --coverage
 ```
 
 ## Code Style
@@ -113,13 +121,13 @@ The project uses [Ultracite](https://github.com/getsentry/ultracite) for linting
 
 ```bash
 # Check for issues
-bun run lint
+pnpm run lint
 
 # Auto-fix issues
-bun run lint:fix
+pnpm run lint:fix
 
 # Type checking
-bun run typecheck
+pnpm run typecheck
 ```
 
 ## Submitting Changes
@@ -127,7 +135,7 @@ bun run typecheck
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feat/my-feature`
 3. Make your changes
-4. Run tests and linting: `bun test && bun run lint`
+4. Run tests and linting: `pnpm run test && pnpm run lint`
 5. Commit with [conventional commits](https://www.conventionalcommits.org/): `git commit -m "feat: add new feature"`
 6. Push and create a pull request
 

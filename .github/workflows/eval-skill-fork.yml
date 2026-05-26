@@ -36,22 +36,22 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: pnpm/action-setup@v4
 
       - uses: actions/cache@v5
         id: cache
         with:
           path: node_modules
-          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Generate docs and skill files
-        run: bun run generate:schema && bun run generate:docs
+        run: pnpm run generate:schema && pnpm run generate:docs
 
       - name: Eval SKILL.md
         id: eval
-        run: bun run eval:skill
+        run: pnpm run eval:skill
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         continue-on-error: true

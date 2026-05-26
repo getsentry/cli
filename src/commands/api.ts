@@ -5,6 +5,7 @@
  * Similar to 'gh api' for GitHub.
  */
 
+import { access, readFile } from "node:fs/promises";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 import type { SentryContext } from "../context.js";
@@ -164,7 +165,7 @@ const BRACKET_CONTENTS_REGEX = /\[([^[\]]*)\]/g;
 export function parseFieldKey(key: string): string[] {
   const match = key.match(FIELD_KEY_REGEX);
   if (!match?.[1]) {
-    throw new Error(`Invalid field key format: ${key}`);
+    throw new ValidationError(`Invalid field key format: ${key}`, "field");
   }
 
   const baseKey = match[1];
@@ -190,14 +191,18 @@ function validatePathSegments(path: string[]): void {
 
     // Check for prototype pollution
     if (DANGEROUS_KEYS.has(segment)) {
-      throw new Error(`Invalid field key: "${segment}" is not allowed`);
+      throw new ValidationError(
+        `Invalid field key: "${segment}" is not allowed`,
+        "field"
+      );
     }
 
     // Empty brackets ("") are only valid at the end of the path (array push syntax)
     // Reject patterns like a[][b] which would silently lose data
     if (segment === "" && i < path.length - 1) {
-      throw new Error(
-        "Invalid field key: empty brackets [] can only appear at the end of a key"
+      throw new ValidationError(
+        "Invalid field key: empty brackets [] can only appear at the end of a key",
+        "field"
       );
     }
   }
@@ -249,14 +254,16 @@ function validateTypeCompatibility(
   const pathStr = formatPathForError(path, index);
 
   if (expectsArray && !Array.isArray(existing)) {
-    throw new Error(
-      `expected array type under "${pathStr}", got ${getTypeName(existing)}`
+    throw new ValidationError(
+      `expected array type under "${pathStr}", got ${getTypeName(existing)}`,
+      "field"
     );
   }
 
   if (!(expectsArray || isTraversableObject(existing))) {
-    throw new Error(
-      `expected map type under "${pathStr}", got ${getTypeName(existing)}`
+    throw new ValidationError(
+      `expected map type under "${pathStr}", got ${getTypeName(existing)}`,
+      "field"
     );
   }
 }
@@ -628,7 +635,10 @@ export function parseHeaders(headers: string[]): Record<string, string> {
   for (const header of headers) {
     const colonIndex = header.indexOf(":");
     if (colonIndex === -1) {
-      throw new Error(`Invalid header format: ${header}. Expected Key: Value`);
+      throw new ValidationError(
+        `Invalid header format: ${header}. Expected Key: Value`,
+        "header"
+      );
     }
 
     const key = header.substring(0, colonIndex).trim();
@@ -819,11 +829,14 @@ export async function buildBodyFromInput(
   if (inputPath === "-") {
     content = await readStdin(stdin);
   } else {
-    const file = Bun.file(inputPath);
-    if (!(await file.exists())) {
-      throw new Error(`File not found: ${inputPath}`);
+    const exists = await access(inputPath).then(
+      () => true,
+      () => false
+    );
+    if (!exists) {
+      throw new ValidationError(`File not found: ${inputPath}`, "input");
     }
-    content = await file.text();
+    content = await readFile(inputPath, "utf-8");
   }
 
   // Try to parse as JSON for the API client

@@ -5,7 +5,7 @@
  * in src/types/dashboard.ts.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { ValidationError } from "../../src/lib/errors.js";
 import {
   assignDefaultLayout,
@@ -950,7 +950,7 @@ describe("mapWidgetTypeToDataset", () => {
     expect(mapWidgetTypeToDataset("error-events")).toBe("errors");
     expect(mapWidgetTypeToDataset("transaction-like")).toBe("transactions");
     expect(mapWidgetTypeToDataset("logs")).toBe("logs");
-    expect(mapWidgetTypeToDataset("tracemetrics")).toBe("metricsEnhanced");
+    expect(mapWidgetTypeToDataset("tracemetrics")).toBe("tracemetrics");
   });
 
   test("returns null for unsupported widget types", () => {

@@ -5,7 +5,6 @@
  * for the alias generation functions, regardless of input.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   constantFrom,
@@ -14,6 +13,7 @@ import {
   tuple,
   uniqueArray,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import {
   buildOrgAwareAliases,
   findCommonWordPrefix,

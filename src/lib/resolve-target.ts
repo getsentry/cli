@@ -1937,3 +1937,82 @@ export async function resolveTargetsFromParsedArg(
     }
   }
 }
+
+/** Resolved org and optional project — used by commands that accept org-all mode. */
+export type ResolvedOrgOptionalProject = {
+  /** Organization slug */
+  org: string;
+  /** Project slug (absent in org-all and auto-detect modes) */
+  project?: string;
+  /** Full project data when resolved via project-search (avoids redundant re-fetch) */
+  projectData?: SentryProject;
+};
+
+/**
+ * Resolve an org/project target for commands that accept org-all mode
+ * (e.g., `sentry explore`). Unlike {@link resolveOrgProjectTarget}, this
+ * function allows `org-all` and `auto-detect` modes to resolve to an
+ * org-only result without requiring a project.
+ *
+ * Handles:
+ * - explicit `<org>/<project>` → delegate to {@link resolveOrgProjectTarget}
+ * - project-search `<project>` → delegate to {@link resolveOrgProjectTarget}
+ * - org-all `<org>/` → resolve the org slug only
+ * - auto-detect → resolve org only (no project required)
+ *
+ * @param parsed - Parsed org/project argument
+ * @param cwd - Current working directory for DSN auto-detection
+ * @param commandName - Command name used in error messages (e.g., "explore")
+ * @returns Resolved org and optional project slugs
+ * @throws {ContextError} When target cannot be resolved
+ */
+export async function resolveOrgOptionalProjectTarget(
+  parsed: ParsedOrgProject,
+  cwd: string,
+  commandName: string
+): Promise<ResolvedOrgOptionalProject> {
+  // org-all: resolve the org slug only
+  if (parsed.type === "org-all") {
+    const org = await resolveEffectiveOrg(parsed.org);
+    return withTelemetryContext({ org });
+  }
+
+  // auto-detect: resolve org only (no project required)
+  if (parsed.type === "auto-detect") {
+    const resolved = await resolveOrg({ cwd });
+    if (!resolved) {
+      throw new ContextError("Organization", `sentry ${commandName} <target>`, [
+        "SENTRY_ORG environment variable",
+        "sentry cli defaults",
+      ]);
+    }
+    return withTelemetryContext({ org: resolved.org });
+  }
+
+  // explicit and project-search: delegate to the project-required resolver
+  return resolveOrgProjectTarget(parsed, cwd, commandName);
+}
+
+/**
+ * Resolve an org/project target from a raw CLI argument string for commands
+ * that accept org-all mode (e.g., `sentry explore`).
+ *
+ * Convenience wrapper around `resolveOrgOptionalProjectTarget` that also calls
+ * `parseOrgProjectArg` on the raw string argument.
+ *
+ * @param target - Raw CLI argument string (or undefined for auto-detect)
+ * @param cwd - Current working directory for DSN auto-detection
+ * @param commandName - Command name used in error messages (e.g., "explore")
+ * @returns Resolved org and optional project slugs
+ */
+export function resolveOrgOptionalProjectFromArg(
+  target: string | undefined,
+  cwd: string,
+  commandName: string
+): Promise<ResolvedOrgOptionalProject> {
+  return resolveOrgOptionalProjectTarget(
+    parseOrgProjectArg(target),
+    cwd,
+    commandName
+  );
+}

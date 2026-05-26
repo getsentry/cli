@@ -5,7 +5,6 @@
  * route tree structure.
  */
 
-import { describe, expect, test } from "bun:test";
 import {
   array,
   boolean,
@@ -17,6 +16,7 @@ import {
   string,
   tuple,
 } from "fast-check";
+import { describe, expect, test } from "vitest";
 import type {
   Command,
   FlagDef,

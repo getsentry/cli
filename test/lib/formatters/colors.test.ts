@@ -5,8 +5,8 @@
  * and the base color functions.
  */
 
-import { describe, expect, test } from "bun:test";
 import chalk from "chalk";
+import { describe, expect, test } from "vitest";
 import {
   fixabilityColor,
   levelColor,

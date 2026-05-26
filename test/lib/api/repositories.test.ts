@@ -7,12 +7,13 @@
  * lore on cache-write resilience).
  */
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { listRepositoriesCached } from "../../../src/lib/api/repositories.js";
+import { setAuthToken } from "../../../src/lib/db/auth.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as repoCache from "../../../src/lib/db/repo-cache.js";
 import type { SentryRepository } from "../../../src/types/sentry.js";
-import { mockFetch } from "../../helpers.js";
+import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 function repoApiResponse(repos: { name: string }[]): Response {
   const body = repos.map((r) => ({
@@ -32,14 +33,16 @@ function repoApiResponse(repos: { name: string }[]): Response {
 }
 
 describe("listRepositoriesCached", () => {
+  useTestConfigDir("repo-cache-");
   let originalFetch: typeof globalThis.fetch;
   let getSpy: ReturnType<typeof spyOn>;
   let setSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
+    setAuthToken("test-token", 3600, "test-refresh");
     originalFetch = globalThis.fetch;
-    getSpy = spyOn(repoCache, "getCachedRepos");
-    setSpy = spyOn(repoCache, "setCachedRepos");
+    getSpy = vi.spyOn(repoCache, "getCachedRepos");
+    setSpy = vi.spyOn(repoCache, "setCachedRepos");
   });
 
   afterEach(() => {

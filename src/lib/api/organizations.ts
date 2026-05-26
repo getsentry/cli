@@ -16,8 +16,6 @@ import {
   UserRegionsResponseSchema,
 } from "../../types/index.js";
 
-import { extractRequiredScopes } from "../api-scope.js";
-import { getActiveEnvVarName, isEnvTokenActive } from "../db/auth.js";
 import { ApiError, withAuthGuard } from "../errors.js";
 import {
   getApiBaseUrl,
@@ -62,59 +60,18 @@ export async function listOrganizationsInRegion(
     ...config,
   });
 
-  try {
-    const data = unwrapResult(result, "Failed to list organizations");
-    return data as unknown as SentryOrganization[];
-  } catch (error) {
-    // Enrich 403 errors with contextual guidance (CLI-89, 24 users).
-    // Only mention token scopes when using a custom env-var token —
-    // the regular `sentry auth login` OAuth flow always grants org:read.
-    if (error instanceof ApiError && error.status === 403) {
-      throw enrichListOrgsForbidden(error);
-    }
-    throw error;
-  }
-}
-
-/**
- * Enrich a 403 from the list-organizations endpoint with actionable
- * hints. Prefers scope(s) named explicitly in the API response over
- * the hardcoded `'org:read'` fallback (getsentry/cli#785 item #9).
- */
-function enrichListOrgsForbidden(error: ApiError): ApiError {
-  const lines: string[] = [];
-  if (error.detail) {
-    lines.push(error.detail, "");
-  }
-  if (isEnvTokenActive()) {
-    lines.push(buildEnvTokenScopeHint(error.detail));
-    lines.push(
-      "Check token scopes at: https://sentry.io/settings/auth-tokens/"
-    );
-  } else {
-    lines.push(
-      "You may not have access to this organization.",
-      "Re-authenticate with: sentry auth login"
+  // 403 enrichment (CLI-89, 24 users) is now handled centrally by
+  // throwApiError() in infrastructure.ts — no per-endpoint catch needed.
+  const data = unwrapResult(result, "Failed to list organizations");
+  if (!Array.isArray(data)) {
+    throw new ApiError(
+      "Failed to list organizations: unexpected response format",
+      0,
+      `Expected an array from ${regionUrl}/api/0/organizations/ but received ${typeof data}. ` +
+        "This may indicate an incompatible self-hosted Sentry version or a proxy interfering with the response."
     );
   }
-  return new ApiError(
-    error.message,
-    error.status,
-    lines.join("\n  "),
-    error.endpoint
-  );
-}
-
-/**
- * Build a single-line hint mentioning the scope(s) the env-var token
- * is missing, preferring the API-provided list when available.
- */
-function buildEnvTokenScopeHint(detail: unknown): string {
-  const scopes = extractRequiredScopes(detail);
-  if (scopes.length > 0) {
-    return `Your ${getActiveEnvVarName()} token is missing the required scope(s) '${scopes.join("', '")}'.`;
-  }
-  return `Your ${getActiveEnvVarName()} token may lack the required scope 'org:read'.`;
+  return data as unknown as SentryOrganization[];
 }
 
 /**
@@ -157,7 +114,9 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
 export async function listOrganizationsUncached(): Promise<
   SentryOrganization[]
 > {
-  const { setOrgRegions } = await import("../db/regions.js");
+  const { registerTrustedRegionUrls, setOrgRegions } = await import(
+    "../db/regions.js"
+  );
 
   // Self-hosted instances may not have the regions endpoint (404)
   const regionsResult = await withAuthGuard(() => getUserRegions());
@@ -178,6 +137,11 @@ export async function listOrganizationsUncached(): Promise<
     );
     return orgs;
   }
+
+  // Extend the trust class BEFORE fan-out so the per-region requests
+  // pass the host-scoping guard. setOrgRegions later persists these
+  // (and re-registers them, idempotent) but only after fan-out completes.
+  registerTrustedRegionUrls(regions.map((r) => r.url));
 
   const settled = await Promise.allSettled(
     regions.map(async (region) => {
@@ -225,6 +189,9 @@ export async function listOrganizationsUncached(): Promise<
     orgName: r.org.name,
     orgRole: (r.org as Record<string, unknown>).orgRole as string | undefined,
   }));
+  // setOrgRegions persists AND extends the in-process trust class to
+  // include any per-org regionUrl from links (may differ from the
+  // /users/me/regions/ response when the SDK returns a more specific URL).
   setOrgRegions(regionEntries);
 
   return orgs;

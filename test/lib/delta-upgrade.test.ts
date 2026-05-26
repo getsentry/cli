@@ -6,10 +6,12 @@
  * async orchestration functions tested via fetch mocking.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { existsSync, unlinkSync } from "node:fs";
+import { access, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { getPlatformBinaryName } from "../../src/lib/binary.js";
 import {
   applyPatchChain,
@@ -1465,7 +1467,7 @@ describe("resolveNightlyChain", () => {
 // applyPatchChain (real filesystem + TRDIFF10 fixtures)
 
 describe("applyPatchChain", () => {
-  const fixturesDir = join(import.meta.dir, "../fixtures/patches");
+  const fixturesDir = join(import.meta.dirname, "../fixtures/patches");
 
   /** Generate a unique temp file path */
   function tempFile(name: string): string {
@@ -1475,14 +1477,10 @@ describe("applyPatchChain", () => {
   test("applies single-patch chain and verifies SHA-256", async () => {
     const oldPath = join(fixturesDir, "small-old.bin");
     const destPath = tempFile("single-chain-out.bin");
-    const patchData = await Bun.file(
-      join(fixturesDir, "small.trdiff10")
-    ).bytes();
-    const expectedNewData = await Bun.file(
-      join(fixturesDir, "small-new.bin")
-    ).bytes();
+    const patchData = await readFile(join(fixturesDir, "small.trdiff10"));
+    const expectedNewData = await readFile(join(fixturesDir, "small-new.bin"));
 
-    const expectedSha256 = new Bun.CryptoHasher("sha256")
+    const expectedSha256 = createHash("sha256")
       .update(expectedNewData)
       .digest("hex");
 
@@ -1502,7 +1500,7 @@ describe("applyPatchChain", () => {
       expect(sha256).toBe(expectedSha256);
 
       // Verify output matches expected
-      const outputData = await Bun.file(destPath).bytes();
+      const outputData = await readFile(destPath);
       expect(outputData).toEqual(expectedNewData);
     } finally {
       if (existsSync(destPath)) {
@@ -1514,9 +1512,7 @@ describe("applyPatchChain", () => {
   test("throws on SHA-256 mismatch", async () => {
     const oldPath = join(fixturesDir, "small-old.bin");
     const destPath = tempFile("mismatch-out.bin");
-    const patchData = await Bun.file(
-      join(fixturesDir, "small.trdiff10")
-    ).bytes();
+    const patchData = await readFile(join(fixturesDir, "small.trdiff10"));
 
     const chain: PatchChain = {
       patches: [
@@ -1551,9 +1547,7 @@ describe("applyPatchChain", () => {
     const destPath = tempFile("multi-chain-out.bin");
     const intermediateA = `${destPath}.patching.a`;
     const intermediateB = `${destPath}.patching.b`;
-    const patchData = await Bun.file(
-      join(fixturesDir, "small.trdiff10")
-    ).bytes();
+    const patchData = await readFile(join(fixturesDir, "small.trdiff10"));
 
     // Create a chain where the first step succeeds but the second will fail
     // (applying old→new patch to the "new" binary won't produce valid output,
@@ -1595,13 +1589,9 @@ describe("applyPatchChain", () => {
   test("creates output file that is readable", async () => {
     const oldPath = join(fixturesDir, "small-old.bin");
     const destPath = tempFile("output-readable.bin");
-    const patchData = await Bun.file(
-      join(fixturesDir, "small.trdiff10")
-    ).bytes();
-    const expectedNewData = await Bun.file(
-      join(fixturesDir, "small-new.bin")
-    ).bytes();
-    const expectedSha256 = new Bun.CryptoHasher("sha256")
+    const patchData = await readFile(join(fixturesDir, "small.trdiff10"));
+    const expectedNewData = await readFile(join(fixturesDir, "small-new.bin"));
+    const expectedSha256 = createHash("sha256")
       .update(expectedNewData)
       .digest("hex");
 
@@ -1619,8 +1609,12 @@ describe("applyPatchChain", () => {
     try {
       await applyPatchChain(chain, oldPath, destPath);
 
-      const stat = Bun.file(destPath);
-      expect(await stat.exists()).toBe(true);
+      expect(
+        await access(destPath).then(
+          () => true,
+          () => false
+        )
+      ).toBe(true);
     } finally {
       if (existsSync(destPath)) {
         unlinkSync(destPath);

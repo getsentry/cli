@@ -4,7 +4,7 @@
  * Tests for formatting functions in src/lib/formatters/seer.ts
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { SeerError } from "../../../src/lib/errors.js";
 import {
   createSeerError,
@@ -138,6 +138,77 @@ describe("getProgressMessage", () => {
 
     expect(getProgressMessage(completedState)).toContain("complete");
     expect(getProgressMessage(errorState)).toContain("fail");
+  });
+
+  test("ignores stale progress from earlier completed steps", () => {
+    // Reproduces #950: RCA step is COMPLETED with progress, solution step
+    // has no progress yet — should NOT show stale RCA messages.
+    const state: AutofixState = {
+      run_id: 456,
+      status: "PROCESSING",
+      steps: [
+        {
+          id: "step-rca",
+          key: "root_cause_analysis",
+          status: "COMPLETED",
+          title: "Root Cause Analysis",
+          progress: [
+            {
+              message: "Looking at `src/mdx.ts` in `getsentry/sentry-docs`...",
+              timestamp: "2025-01-01T00:00:00Z",
+            },
+          ],
+        },
+        {
+          id: "step-solution",
+          key: "solution",
+          status: "PROCESSING",
+          title: "Solution Planning",
+          progress: [],
+        },
+      ],
+    };
+
+    const message = getProgressMessage(state);
+    // Should NOT return the stale RCA message
+    expect(message).not.toContain("Looking at");
+    // Should return a status-based fallback
+    expect(message).toBe("Analyzing issue...");
+  });
+
+  test("returns progress from the current (last) step", () => {
+    const state: AutofixState = {
+      run_id: 789,
+      status: "PROCESSING",
+      steps: [
+        {
+          id: "step-rca",
+          key: "root_cause_analysis",
+          status: "COMPLETED",
+          title: "Root Cause Analysis",
+          progress: [
+            {
+              message: "Stale RCA message",
+              timestamp: "2025-01-01T00:00:00Z",
+            },
+          ],
+        },
+        {
+          id: "step-solution",
+          key: "solution",
+          status: "PROCESSING",
+          title: "Solution Planning",
+          progress: [
+            {
+              message: "Generating solution plan...",
+              timestamp: "2025-01-01T00:01:00Z",
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(getProgressMessage(state)).toBe("Generating solution plan...");
   });
 });
 

@@ -6,8 +6,9 @@
  * the complexity of mocking module dependencies in Bun's test environment.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { parseOrgProjectArg } from "../../src/lib/arg-parsing.js";
 import { DEFAULT_SENTRY_URL } from "../../src/lib/constants.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import {
@@ -16,13 +17,18 @@ import {
   getCachedProjectBySlug,
 } from "../../src/lib/db/project-cache.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
-import { AuthError, ResolutionError } from "../../src/lib/errors.js";
+import {
+  AuthError,
+  ContextError,
+  ResolutionError,
+} from "../../src/lib/errors.js";
 import {
   fetchProjectId,
   isValidDirNameForInference,
   resolveAllTargets,
   resolveOrg,
   resolveOrgAndProject,
+  resolveOrgOptionalProjectTarget,
   resolveOrgsForListing,
   toNumericId,
   tryFuzzyProjectRecovery,
@@ -384,7 +390,7 @@ describe("fetchProjectId", () => {
         })
     );
 
-    expect(fetchProjectId("test-org", "test-project")).rejects.toThrow(
+    await expect(fetchProjectId("test-org", "test-project")).rejects.toThrow(
       ResolutionError
     );
   });
@@ -741,6 +747,98 @@ describe("tryFuzzyProjectRecovery", () => {
     if (result.kind === "match") {
       expect(result.project).toBe("target-project");
       expect(result.org).toBe("good-org");
+    }
+  });
+});
+
+// ============================================================================
+// resolveOrgOptionalProjectTarget — org-optional resolution for commands
+// that accept org-all mode (e.g., sentry explore)
+// ============================================================================
+
+describe("resolveOrgOptionalProjectTarget", () => {
+  useTestConfigDir("test-resolve-optional-");
+
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    // Silence unmocked fetch calls — resolveEffectiveOrg catches errors and
+    // returns the original slug, so a 404 is sufficient.
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Not found" }), { status: 404 })
+    );
+    delete process.env.SENTRY_ORG;
+    delete process.env.SENTRY_PROJECT;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    delete process.env.SENTRY_ORG;
+    delete process.env.SENTRY_PROJECT;
+  });
+
+  test("org-all mode returns org without project", async () => {
+    const parsed = parseOrgProjectArg("myorg/");
+    expect(parsed.type).toBe("org-all");
+
+    const result = await resolveOrgOptionalProjectTarget(
+      parsed,
+      "/tmp",
+      "explore"
+    );
+    expect(result.org).toBe("myorg");
+    expect(result.project).toBeUndefined();
+  });
+
+  test("explicit mode returns both org and project", async () => {
+    const parsed = parseOrgProjectArg("myorg/myproject");
+    expect(parsed.type).toBe("explicit");
+
+    const result = await resolveOrgOptionalProjectTarget(
+      parsed,
+      "/tmp",
+      "explore"
+    );
+    expect(result.org).toBe("myorg");
+    expect(result.project).toBe("myproject");
+  });
+
+  test("auto-detect mode returns org only when SENTRY_ORG is set", async () => {
+    process.env.SENTRY_ORG = "env-org";
+    const parsed = parseOrgProjectArg(undefined);
+    expect(parsed.type).toBe("auto-detect");
+
+    const result = await resolveOrgOptionalProjectTarget(
+      parsed,
+      "/tmp",
+      "explore"
+    );
+    expect(result.org).toBe("env-org");
+    expect(result.project).toBeUndefined();
+  });
+
+  test("auto-detect mode throws ContextError when nothing resolves", async () => {
+    // No env vars, no defaults, no DSN — resolveOrg returns null
+    const parsed = parseOrgProjectArg(undefined);
+
+    await expect(
+      resolveOrgOptionalProjectTarget(parsed, "/tmp", "explore")
+    ).rejects.toThrow(ContextError);
+  });
+
+  test("auto-detect ContextError mentions the command name", async () => {
+    const parsed = parseOrgProjectArg(undefined);
+
+    try {
+      await resolveOrgOptionalProjectTarget(parsed, "/tmp", "explore");
+      // Should not reach here
+      expect(true).toBe(false);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ContextError);
+      expect((err as ContextError).message).toContain("Organization");
+      expect((err as ContextError).command).toContain("explore");
     }
   });
 });

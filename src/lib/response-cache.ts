@@ -315,6 +315,47 @@ function buildResponseHeaders(
 }
 
 // ---------------------------------------------------------------------------
+// Last cache-hit age — process-global signal for cache-age hints
+// ---------------------------------------------------------------------------
+
+/**
+ * Age of the most recent cache hit, in milliseconds.
+ *
+ * Set inside {@link getCachedResponse} on a hit, cleared at the start of each
+ * `authenticatedFetch` call in `sentry-client.ts`. Commands read it via
+ * {@link getLastCacheHitAge} to show "cached · 3m ago · use -f to refresh".
+ *
+ * Safe because the CLI is single-process, single-command — no races.
+ */
+let lastCacheHitAgeMs: number | undefined;
+
+/**
+ * Get the age (in ms) of the most recent cache hit, or `undefined` if the
+ * last request was not served from cache.
+ */
+export function getLastCacheHitAge(): number | undefined {
+  return lastCacheHitAgeMs;
+}
+
+/**
+ * Clear the last cache-hit age. Called at the top of each `authenticatedFetch`
+ * call so the signal reflects only the current request.
+ */
+export function clearLastCacheHitAge(): void {
+  lastCacheHitAgeMs = undefined;
+}
+
+/**
+ * Set the last cache-hit age directly. Test-only — production code paths
+ * set this implicitly via {@link getCachedResponse} on a real cache hit.
+ *
+ * @internal Exported for testing
+ */
+export function setLastCacheHitAgeForTesting(ageMs: number): void {
+  lastCacheHitAgeMs = ageMs;
+}
+
+// ---------------------------------------------------------------------------
 // Cache bypass control
 // ---------------------------------------------------------------------------
 
@@ -425,6 +466,9 @@ export async function getCachedResponse(
         span.setAttribute("cache.hit", true);
         recordCacheHit("http", true);
         span.setAttribute("cache.item_size", body.length);
+
+        // Surface cache age for command-level hints (getsentry/cli#785 #1)
+        lastCacheHitAgeMs = Date.now() - entry.createdAt;
 
         const responseHeaders = buildResponseHeaders(policy, entry);
         return new Response(body, {

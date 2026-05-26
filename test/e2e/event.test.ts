@@ -12,7 +12,8 @@ import {
   describe,
   expect,
   test,
-} from "bun:test";
+} from "vitest";
+import { EXIT } from "../../src/lib/errors.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {
@@ -55,7 +56,7 @@ describe("sentry event view", () => {
       "abc123def456abc123def456abc123de",
     ]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
@@ -68,7 +69,7 @@ describe("sentry event view", () => {
       "abc123def456abc123def456abc123de",
     ]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.CONTEXT_MISSING);
     expect(result.stderr + result.stdout).toMatch(/organization|project/i);
   });
 
@@ -77,7 +78,7 @@ describe("sentry event view", () => {
 
     const result = await ctx.run(["event", "view", "abc123"]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.VALIDATION);
     expect(result.stderr + result.stdout).toMatch(
       /invalid event id|32-character hexadecimal/i
     );
@@ -94,7 +95,7 @@ describe("sentry event view", () => {
       "abc123def456abc123def456abc123de",
     ]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.RESOLUTION);
     expect(result.stderr + result.stdout).toMatch(/not found|error|404/i);
   });
 });

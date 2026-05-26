@@ -8,7 +8,7 @@
  * writeJson/writeJsonList/formatJson APIs not covered by property tests.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   filterFields,
   formatJson,

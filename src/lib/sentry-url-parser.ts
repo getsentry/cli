@@ -1,7 +1,7 @@
 /**
  * Sentry URL Parser
  *
- * Extracts org, project, issue, event, and trace identifiers from Sentry web URLs.
+ * Extracts org, project, issue, event, replay, and trace identifiers from Sentry web URLs.
  * Supports both SaaS (*.sentry.io) and self-hosted instances.
  *
  * For self-hosted URLs, also configures the SENTRY_URL environment variable
@@ -10,7 +10,10 @@
 
 import { DEFAULT_SENTRY_HOST } from "./constants.js";
 import { getEnv } from "./env.js";
-import { isSentrySaasUrl } from "./sentry-urls.js";
+import { HostScopeError } from "./errors.js";
+import { tryNormalizeHexId } from "./hex-id.js";
+import { isSaaSTrustOrigin } from "./sentry-urls.js";
+import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 
 /**
  * Components extracted from a Sentry web URL.
@@ -33,8 +36,12 @@ export type ParsedSentryUrl = {
   project?: string;
   /** Trace ID from /organizations/{org}/traces/{traceId}/ paths */
   traceId?: string;
+  /** Replay ID from replay detail URLs */
+  replayId?: string;
   /** Share ID from /share/issue/{shareId}/ paths (32-char hex string) */
   shareId?: string;
+  /** Dashboard ID from /dashboard/{id}/ paths (numeric string) */
+  dashboardId?: string;
 };
 
 /**
@@ -64,6 +71,19 @@ function matchOrganizationsPath(
     return { baseUrl, org, traceId: segments[3] };
   }
 
+  const replayPath = matchReplayPath(segments, 2);
+  if (replayPath.status === "detail") {
+    return { baseUrl, org, replayId: replayPath.replayId };
+  }
+  if (replayPath.status === "invalid") {
+    return null;
+  }
+
+  // /organizations/{org}/dashboard/{id}/
+  if (segments[2] === "dashboard" && segments[3]) {
+    return { baseUrl, org, dashboardId: segments[3] };
+  }
+
   // /organizations/{org}/ (org only)
   return { baseUrl, org };
 }
@@ -87,6 +107,93 @@ function matchSettingsPath(
   }
 
   return { baseUrl, org: segments[1], project: segments[3] };
+}
+
+/**
+ * Match the path portion of a SaaS subdomain-style URL against known patterns.
+ *
+ * Extracts entity-specific fields (issueId, traceId, dashboardId, etc.)
+ * from the path segments. Returns a partial result to merge with org/baseUrl,
+ * or null if no pattern matches.
+ */
+function matchSubdomainPath(
+  segments: string[]
+): Omit<ParsedSentryUrl, "baseUrl" | "org"> | null {
+  // /issues/{id}/ (optionally with /events/{eventId}/)
+  if (segments[0] === "issues" && segments[1]) {
+    const eventId =
+      segments[2] === "events" && segments[3] ? segments[3] : undefined;
+    return { issueId: segments[1], eventId };
+  }
+  // /traces/{traceId}/
+  if (segments[0] === "traces" && segments[1]) {
+    return { traceId: segments[1] };
+  }
+
+  const replayPath = matchReplayPath(segments, 0);
+  if (replayPath.status === "detail") {
+    return { replayId: replayPath.replayId };
+  }
+  if (replayPath.status === "invalid") {
+    return null;
+  }
+  if (replayPath.status === "list") {
+    return {};
+  }
+  return matchSubdomainTailPath(segments);
+}
+
+function matchSubdomainTailPath(
+  segments: string[]
+): Omit<ParsedSentryUrl, "baseUrl" | "org"> | null {
+  // /settings/projects/{project}/ (org-scoped subdomain settings URL)
+  if (segments[0] === "settings" && segments[1] === "projects" && segments[2]) {
+    return { project: segments[2] };
+  }
+  // /dashboard/{id}/
+  if (segments[0] === "dashboard" && segments[1]) {
+    return { dashboardId: segments[1] };
+  }
+  // /share/issue/{shareId}/
+  if (segments[0] === "share" && segments[1] === "issue" && segments[2]) {
+    return { shareId: segments[2] };
+  }
+  // Bare org subdomain URL (no path segments)
+  if (segments.length === 0) {
+    return {};
+  }
+  return null;
+}
+
+function matchReplayPath(
+  segments: string[],
+  startIndex: number
+):
+  | { status: "absent" | "list" | "invalid" }
+  | { status: "detail"; replayId: string } {
+  let replayId: string | undefined;
+
+  if (
+    segments[startIndex] === "explore" &&
+    segments[startIndex + 1] === "replays"
+  ) {
+    replayId = segments[startIndex + 2];
+  } else if (segments[startIndex] === "replays") {
+    replayId = segments[startIndex + 1];
+  } else {
+    return { status: "absent" };
+  }
+
+  if (!replayId) {
+    return { status: "list" };
+  }
+
+  const normalizedReplayId = tryNormalizeHexId(replayId);
+  if (!normalizedReplayId) {
+    return { status: "invalid" };
+  }
+
+  return { status: "detail", replayId: normalizedReplayId };
 }
 
 /**
@@ -116,34 +223,11 @@ function matchSubdomainOrg(
     return null;
   }
 
-  // /issues/{id}/ (optionally with /events/{eventId}/)
-  if (segments[0] === "issues" && segments[1]) {
-    const eventId =
-      segments[2] === "events" && segments[3] ? segments[3] : undefined;
-    return { baseUrl, org, issueId: segments[1], eventId };
+  const pathResult = matchSubdomainPath(segments);
+  if (!pathResult) {
+    return null;
   }
-
-  // /traces/{traceId}/
-  if (segments[0] === "traces" && segments[1]) {
-    return { baseUrl, org, traceId: segments[1] };
-  }
-
-  // /settings/projects/{project}/ (org-scoped subdomain settings URL)
-  if (segments[0] === "settings" && segments[1] === "projects" && segments[2]) {
-    return { baseUrl, org, project: segments[2] };
-  }
-
-  // /share/issue/{shareId}/ — share URL with org from subdomain
-  if (segments[0] === "share" && segments[1] === "issue" && segments[2]) {
-    return { baseUrl, org, shareId: segments[2] };
-  }
-
-  // Bare org subdomain URL
-  if (segments.length === 0) {
-    return { baseUrl, org };
-  }
-
-  return null;
+  return { baseUrl, org, ...pathResult };
 }
 
 /**
@@ -173,13 +257,19 @@ function matchSharePath(
  * - `/organizations/{org}/issues/{id}/events/{eventId}/`
  * - `/settings/{org}/projects/{project}/`
  * - `/organizations/{org}/traces/{traceId}/`
+ * - `/organizations/{org}/explore/replays/{replayId}/`
+ * - `/organizations/{org}/replays/{replayId}/`
+ * - `/organizations/{org}/dashboard/{id}/`
  * - `/organizations/{org}/`
  * - `/share/issue/{shareId}/`
  *
  * Also recognizes SaaS subdomain-style URLs:
  * - `https://{org}.sentry.io/issues/{id}/`
  * - `https://{org}.sentry.io/traces/{traceId}/`
+ * - `https://{org}.sentry.io/explore/replays/{replayId}/`
+ * - `https://{org}.sentry.io/replays/{replayId}/`
  * - `https://{org}.sentry.io/issues/{id}/events/{eventId}/`
+ * - `https://{org}.sentry.io/dashboard/{id}/`
  * - `https://{org}.sentry.io/share/issue/{shareId}/`
  *
  * @param input - Raw string that may or may not be a URL
@@ -210,27 +300,36 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
 }
 
 /**
- * Configure `SENTRY_URL` for self-hosted instances detected from a parsed URL.
+ * Configure `SENTRY_URL` for self-hosted instances detected from a parsed
+ * URL, with a host-scoping trust check.
  *
- * Sets the env var when the URL is NOT a Sentry SaaS domain (*.sentry.io),
- * since SaaS uses multi-region routing instead.
+ * SaaS URLs proceed (credentials scoped to SaaS are valid for any sentry.io
+ * subdomain). Non-SaaS URLs require the active token's host to match —
+ * otherwise throws `HostScopeError`. Only `sentry auth login --url <url>`
+ * establishes trust for a new non-SaaS host.
  *
- * The parsed URL always takes precedence over any existing `SENTRY_URL` value
- * because an explicit URL argument is the strongest signal of user intent.
- *
- * @param baseUrl - The scheme + host extracted from the URL (e.g., "https://sentry.example.com")
+ * @param baseUrl - The scheme + host extracted from the URL
+ * @throws {HostScopeError} On non-SaaS URL that doesn't match the token
  */
 export function applySentryUrlContext(baseUrl: string): void {
   const env = getEnv();
-  if (isSentrySaasUrl(baseUrl)) {
+  // Strict SaaS check (https + default port) matches isHostTrusted
+  // semantics downstream — `http://sentry.io` and `:8443` must not bypass
+  // the trust check.
+  if (isSaaSTrustOrigin(baseUrl)) {
     // Clear any self-hosted URL so API calls fall back to default SaaS routing.
-    // Without this, a stale SENTRY_HOST/SENTRY_URL would route SaaS requests to the wrong host.
     // biome-ignore lint/performance/noDelete: env registry requires delete to truly unset; assignment coerces to string in Node.js
     delete env.SENTRY_HOST;
     // biome-ignore lint/performance/noDelete: env registry requires delete to truly unset; assignment coerces to string in Node.js
     delete env.SENTRY_URL;
     return;
   }
+
+  const tokenHost = getActiveTokenHost();
+  if (!(tokenHost && isHostTrusted(baseUrl, tokenHost))) {
+    throw new HostScopeError("URL argument", baseUrl, tokenHost);
+  }
+
   env.SENTRY_HOST = baseUrl;
   env.SENTRY_URL = baseUrl;
 }

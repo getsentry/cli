@@ -3,7 +3,7 @@
  * regression coverage.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import { TimeoutError } from "../../src/lib/errors.js";
 import {
@@ -35,50 +35,13 @@ function getAuthenticatedFetch(): typeof fetch {
   return getSdkConfig(REGION_URL).fetch as typeof fetch;
 }
 
-/**
- * Extract the URL string from any fetch input (Request, URL, or string).
- */
-function urlOf(input: Parameters<typeof fetch>[0]): string {
-  if (typeof input === "string") {
-    return input;
-  }
-  if (input instanceof URL) {
-    return input.href;
-  }
-  return input.url;
-}
-
-/**
- * Wrap a mock handler so it only counts / reacts to requests whose URL
- * contains `marker`. Any other `globalThis.fetch` call that happens to
- * fire during the test (e.g. async work leaked from a previous file)
- * is delegated to the caller-visible `originalFetch` (typically the
- * preload.ts blocker) so foreign calls don't pollute this test's
- * assertions. See CI run 24835339085 for the original flake.
- */
-function scopedFetchMock(
-  marker: string,
-  handler: (
-    input: Parameters<typeof fetch>[0],
-    init?: RequestInit
-  ) => Promise<Response>
-): typeof fetch {
-  const captured = originalFetch;
-  return mockFetch(async (input, init) => {
-    if (!urlOf(input).includes(marker)) {
-      return await captured(input, init);
-    }
-    return await handler(input, init);
-  });
-}
-
 describe("fetchWithRetry / buildAttemptFactory", () => {
   test("retries a POST with a string body without re-consuming the body", async () => {
     const marker = "__test_string_body__";
     const seen: string[] = [];
     let callCount = 0;
 
-    globalThis.fetch = scopedFetchMock(marker, async (_input, init) => {
+    globalThis.fetch = mockFetch(async (_input, init) => {
       callCount += 1;
       const body = init?.body;
       if (typeof body === "string") {
@@ -122,7 +85,7 @@ describe("fetchWithRetry / buildAttemptFactory", () => {
     let callCount = 0;
     const seen: string[] = [];
 
-    globalThis.fetch = scopedFetchMock(marker, async (input) => {
+    globalThis.fetch = mockFetch(async (input) => {
       callCount += 1;
       if (input instanceof Request) {
         seen.push(await input.clone().text());
@@ -160,7 +123,7 @@ describe("fetchWithRetry / buildAttemptFactory", () => {
     let callCount = 0;
     const seen: string[] = [];
 
-    globalThis.fetch = scopedFetchMock(marker, async (_input, init) => {
+    globalThis.fetch = mockFetch(async (_input, init) => {
       callCount += 1;
       const body = init?.body;
       if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
@@ -214,7 +177,7 @@ describe("fetchWithRetry / buildAttemptFactory", () => {
     const contentTypes: (string | null)[] = [];
     const bodies: string[] = [];
 
-    globalThis.fetch = scopedFetchMock(marker, async (input, init) => {
+    globalThis.fetch = mockFetch(async (input, init) => {
       callCount += 1;
       const req = new Request(input as string, init);
       contentTypes.push(req.headers.get("content-type"));
@@ -270,7 +233,7 @@ describe("fetchWithTimeout internal timeout classification", () => {
 
     try {
       let calls = 0;
-      globalThis.fetch = scopedFetchMock(marker, async (_input, init) => {
+      globalThis.fetch = mockFetch(async (_input, init) => {
         calls += 1;
         return await new Promise<Response>((_resolve, reject) => {
           const signal = init?.signal;
@@ -314,7 +277,7 @@ describe("user abort passthrough", () => {
   test("external AbortSignal.abort() propagates the original AbortError", async () => {
     const marker = "__test_user_abort__";
     let fetchCalled = false;
-    globalThis.fetch = scopedFetchMock(marker, async (_input, init) => {
+    globalThis.fetch = mockFetch(async (_input, init) => {
       fetchCalled = true;
       return await new Promise<Response>((_resolve, reject) => {
         const signal = init?.signal;

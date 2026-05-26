@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-event
-version: 0.29.0-dev.0
+version: 0.35.0-dev.0
 description: View and list Sentry events
 requires:
   bins: ["sentry"]
@@ -13,12 +13,21 @@ View and list Sentry events
 
 ### `sentry event view <org/project/event-id...>`
 
-View details of a specific event
+View details of one or more events
 
 **Flags:**
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+
+**Examples:**
+
+```bash
+sentry event view abc123def456abc123def456abc12345
+
+# Open in browser
+sentry event view abc123def456abc123def456abc12345 -w
+```
 
 ### `sentry event list <issue>`
 
@@ -28,7 +37,7 @@ List events for an issue
 - `-n, --limit <value> - Number of events (1-1000) - (default: "25")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `--full - Include full event body (stacktraces)`
-- `-t, --period <value> - Time range: "7d", "2026-03-01..2026-04-01", ">=2026-03-01" - (default: "7d")`
+- `-t, --period <value> - Time range: "7d", "2026-04-01..2026-05-01", ">=2026-04-01" - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
@@ -50,15 +59,32 @@ List events for an issue
 | `platform` | string \| null | Platform (python, javascript, etc.) |
 | `dateCreated` | string | ISO 8601 creation timestamp |
 | `crashFile` | string \| null | Crash file URL |
-| `metadata` | unknown \| null | Event metadata |
+| `metadata` | object \| null | Event metadata |
 
 **Examples:**
 
 ```bash
-sentry event view abc123def456abc123def456abc12345
+# List events for an issue (using short ID)
+sentry event list PROJ-ABC
 
-# Open in browser
-sentry event view abc123def456abc123def456abc12345 -w
+# List events for an issue (using numeric ID)
+sentry event list 123456789
+
+# Filter by search query
+sentry event list PROJ-ABC --query "browser:Chrome"
+
+# Include full event bodies (stacktraces)
+sentry event list PROJ-ABC --full
+
+# Limit results and time range
+sentry event list PROJ-ABC --limit 50 --period 24h
+
+# Paginate through results
+sentry event list PROJ-ABC -c next
+sentry event list PROJ-ABC -c prev
+
+# Output as JSON
+sentry event list PROJ-ABC --json
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

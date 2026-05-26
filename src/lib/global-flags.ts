@@ -40,4 +40,10 @@ export const GLOBAL_FLAGS: readonly GlobalFlagDef[] = [
   { name: "log-level", short: null, kind: "value" },
   { name: "json", short: null, kind: "boolean" },
   { name: "fields", short: null, kind: "value" },
+  // Hidden compat shims: LLMs trained on the older sentry-cli generate
+  // `--org` and `--project` flags. We silently accept them and map to
+  // SENTRY_ORG / SENTRY_PROJECT env vars so the resolution chain handles them.
+  // No short aliases: -p conflicts with release create's -p (--project).
+  { name: "org", short: null, kind: "value" },
+  { name: "project", short: null, kind: "value" },
 ];

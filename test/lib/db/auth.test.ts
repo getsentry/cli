@@ -7,7 +7,7 @@
  * by property tests (isAuthenticated, getActiveEnvVarName).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   ANON_IDENTITY,
   clearAuth,
@@ -16,11 +16,13 @@ import {
   getAuthToken,
   getIdentityFingerprint,
   getRawEnvToken,
+  hasStoredAuthCredentials,
   isAuthenticated,
   isEnvTokenActive,
   refreshToken,
   resetAuthRowCache,
   resetAuthTokenCache,
+  resetHasStoredCredsCache,
   resetIdentityFingerprintCache,
   setAuthToken,
 } from "../../../src/lib/db/auth.js";
@@ -412,5 +414,48 @@ describe("refreshToken row-read memoization", () => {
     await clearAuth();
     // With nothing stored and no env var, refreshToken throws not_authenticated
     await expect(refreshToken()).rejects.toThrow();
+  });
+});
+
+describe("hasStoredAuthCredentials memoization", () => {
+  test("returns false and caches when no stored token", () => {
+    expect(hasStoredAuthCredentials()).toBe(false);
+    // Second call hits cache — would be identical even without memoization,
+    // but we verify the function is stable across calls.
+    expect(hasStoredAuthCredentials()).toBe(false);
+  });
+
+  test("returns true after setAuthToken", () => {
+    expect(hasStoredAuthCredentials()).toBe(false);
+
+    setAuthToken("oauth_tok", 3600, "refresh_tok");
+    // setAuthToken invalidates the cache — next call sees the new row.
+    expect(hasStoredAuthCredentials()).toBe(true);
+  });
+
+  test("clearAuth invalidates the cached result", async () => {
+    setAuthToken("oauth_tok", 3600, "refresh_tok");
+    expect(hasStoredAuthCredentials()).toBe(true);
+
+    await clearAuth();
+    expect(hasStoredAuthCredentials()).toBe(false);
+  });
+
+  test("manual resetHasStoredCredsCache forces re-read", () => {
+    expect(hasStoredAuthCredentials()).toBe(false);
+
+    // Write directly to DB without going through setAuthToken
+    // (simulates a code path the cache doesn't know about).
+    const db = getDatabase();
+    db.query(
+      "INSERT OR REPLACE INTO auth (id, token) VALUES (1, 'sneaky')"
+    ).run();
+
+    // Cache still returns stale false
+    expect(hasStoredAuthCredentials()).toBe(false);
+
+    // Manual reset forces re-read
+    resetHasStoredCredsCache();
+    expect(hasStoredAuthCredentials()).toBe(true);
   });
 });

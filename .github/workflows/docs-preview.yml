@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: pnpm/action-setup@v4
 
       # Astro 6 requires Node >= 22.12. Pin an explicit version so the docs
       # build doesn't rely on whatever ships on the runner image.
@@ -45,17 +45,17 @@ jobs:
         id: cache
         with:
           path: node_modules
-          key: node-modules-${{ hashFiles('bun.lock', 'patches/**') }}
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
 
       - if: steps.cache.outputs.cache-hit != 'true'
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Get CLI version
         id: version
         run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
 
       - name: Generate docs content
-        run: bun run generate:schema && bun run generate:docs
+        run: pnpm run generate:schema && pnpm run generate:docs
 
       - name: Build Docs for Preview
         working-directory: docs
@@ -67,8 +67,8 @@ jobs:
           SENTRY_RELEASE: ${{ steps.version.outputs.version }}
           PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         run: |
-          bun install --frozen-lockfile
-          bun run build
+          pnpm install --frozen-lockfile
+          pnpm run build
 
       - name: Inject debug IDs and upload sourcemaps
         if: env.SENTRY_AUTH_TOKEN != ''
@@ -77,8 +77,8 @@ jobs:
           SENTRY_ORG: sentry
           SENTRY_PROJECT: cli-website
         run: |
-          bun run --bun src/bin.ts sourcemap inject docs/dist/
-          bun run --bun src/bin.ts sourcemap upload docs/dist/ \
+          pnpm run cli sourcemap inject docs/dist/
+          pnpm run cli sourcemap upload docs/dist/ \
             --release "${{ steps.version.outputs.version }}" \
             --url-prefix "~/"
 

@@ -5,7 +5,7 @@
  * Unit tests verify the ZIP structure is valid and extractable.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import {
   string,
   uint8Array,
 } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { ZipWriter } from "../../../src/lib/sourcemap/zip.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 
@@ -37,8 +38,10 @@ describe("ZipWriter", () => {
     await zip.finalize();
 
     // Verify with system unzip (available on Linux/macOS)
-    const proc = Bun.spawnSync(["unzip", "-t", zipPath]);
-    expect(proc.exitCode).toBe(0);
+    const proc = spawnSync("unzip", ["-t", zipPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    expect(proc.status).toBe(0);
   });
 
   test("preserves file content through compression", async () => {
@@ -50,8 +53,10 @@ describe("ZipWriter", () => {
     await zip.finalize();
 
     // Extract via unzip and verify content matches
-    const proc = Bun.spawnSync(["unzip", "-p", zipPath, "test.txt"]);
-    const extracted = new TextDecoder().decode(proc.stdout);
+    const proc = spawnSync("unzip", ["-p", zipPath, "test.txt"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const extracted = proc.stdout.toString();
     expect(extracted).toBe(content);
   });
 
@@ -61,8 +66,10 @@ describe("ZipWriter", () => {
     await zip.addEntry("empty.txt", Buffer.alloc(0));
     await zip.finalize();
 
-    const proc = Bun.spawnSync(["unzip", "-t", zipPath]);
-    expect(proc.exitCode).toBe(0);
+    const proc = spawnSync("unzip", ["-t", zipPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    expect(proc.status).toBe(0);
   });
 
   test("handles files with subdirectory paths", async () => {
@@ -73,8 +80,10 @@ describe("ZipWriter", () => {
     await zip.addEntry("manifest.json", Buffer.from("{}"));
     await zip.finalize();
 
-    const proc = Bun.spawnSync(["unzip", "-l", zipPath]);
-    const output = new TextDecoder().decode(proc.stdout);
+    const proc = spawnSync("unzip", ["-l", zipPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const output = proc.stdout.toString();
     expect(output).toContain("_/_/bundle.js");
     expect(output).toContain("_/_/bundle.js.map");
     expect(output).toContain("manifest.json");
@@ -93,35 +102,44 @@ describe("ZipWriter", () => {
     await zip.finalize();
 
     // Extract and verify content matches byte-for-byte
-    const proc = Bun.spawnSync(["unzip", "-p", zipPath, "large.bin"]);
+    const proc = spawnSync("unzip", ["-p", zipPath, "large.bin"], {
+      stdio: ["pipe", "pipe", "pipe"],
+      maxBuffer: 2 * 1024 * 1024,
+    });
     expect(Buffer.from(proc.stdout)).toEqual(content);
   });
 });
 
-describe("property: ZipWriter round-trip", () => {
-  test("arbitrary string content survives compress → extract", async () => {
+describe.each([
+  "deflate",
+  "stored",
+] as const)("property: ZipWriter round-trip (%s)", (compression) => {
+  test("arbitrary string content survives write → extract", async () => {
     await fcAssert(
       asyncProperty(
         string({ minLength: 0, maxLength: 10_000 }),
         async (input) => {
           const zipPath = join(
             tmpDir,
-            `prop-${Date.now()}-${Math.random()}.zip`
+            `prop-${compression}-${Date.now()}-${Math.random()}.zip`
           );
-          const zip = await ZipWriter.create(zipPath);
+          const zip = await ZipWriter.create(zipPath, { compression });
           await zip.addEntry("data.txt", Buffer.from(input, "utf-8"));
           await zip.finalize();
 
-          const proc = Bun.spawnSync(["unzip", "-p", zipPath, "data.txt"]);
-          expect(proc.exitCode).toBe(0);
-          expect(new TextDecoder().decode(proc.stdout)).toBe(input);
+          const proc = spawnSync("unzip", ["-p", zipPath, "data.txt"], {
+            stdio: ["pipe", "pipe", "pipe"],
+            maxBuffer: 50_000,
+          });
+          expect(proc.status).toBe(0);
+          expect(proc.stdout.toString()).toBe(input);
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
 
-  test("arbitrary binary content survives compress → extract", async () => {
+  test("arbitrary binary content survives write → extract", async () => {
     await fcAssert(
       asyncProperty(
         // minLength: 1 — empty files have a separate unit test;
@@ -130,19 +148,72 @@ describe("property: ZipWriter round-trip", () => {
         async (input) => {
           const zipPath = join(
             tmpDir,
-            `prop-bin-${Date.now()}-${Math.random()}.zip`
+            `prop-bin-${compression}-${Date.now()}-${Math.random()}.zip`
           );
-          const zip = await ZipWriter.create(zipPath);
+          const zip = await ZipWriter.create(zipPath, { compression });
           await zip.addEntry("data.bin", Buffer.from(input));
           await zip.finalize();
 
-          const proc = Bun.spawnSync(["unzip", "-p", zipPath, "data.bin"]);
-          expect(proc.exitCode).toBe(0);
+          const proc = spawnSync("unzip", ["-p", zipPath, "data.bin"], {
+            stdio: ["pipe", "pipe", "pipe"],
+            maxBuffer: 50_000,
+          });
+          expect(proc.status).toBe(0);
           expect(Buffer.from(proc.stdout)).toEqual(Buffer.from(input));
         }
       ),
       { numRuns: DEFAULT_NUM_RUNS }
     );
+  });
+});
+
+describe("ZipWriter compression mode", () => {
+  // The local file header records the entry's compression method at
+  // offset 8 (16-bit LE): 0 = STORED, 8 = DEFLATE. Drift between this
+  // and the central directory copy would surface as an `unzip -p`
+  // failure in the extraction tests below.
+  const SYSB_HEADER_BYTES = 8;
+  const LOCAL_HEADER_METHOD_OFFSET = SYSB_HEADER_BYTES + 8;
+
+  test("default is DEFLATE (back-compat)", async () => {
+    const zipPath = join(tmpDir, "default.zip");
+    const repeating = "abcdef".repeat(1000);
+    const zip = await ZipWriter.create(zipPath);
+    await zip.addEntry("data.txt", Buffer.from(repeating));
+    await zip.finalize();
+
+    const data = await readFile(zipPath);
+    expect(data.readUInt16LE(LOCAL_HEADER_METHOD_OFFSET)).toBe(8);
+    // Highly-redundant input should compress.
+    expect(data.length).toBeLessThan(repeating.length);
+  });
+
+  test("compression: 'stored' writes entries uncompressed", async () => {
+    const zipPath = join(tmpDir, "stored.zip");
+    const repeating = "abcdef".repeat(1000);
+    const zip = await ZipWriter.create(zipPath, { compression: "stored" });
+    await zip.addEntry("data.txt", Buffer.from(repeating));
+    await zip.finalize();
+
+    const data = await readFile(zipPath);
+    expect(data.readUInt16LE(LOCAL_HEADER_METHOD_OFFSET)).toBe(0);
+    // STORED archive contains the raw bytes verbatim plus headers,
+    // so it must be at least as large as the input.
+    expect(data.length).toBeGreaterThan(repeating.length);
+  });
+
+  test("compression: 'stored' produces an extractable archive", async () => {
+    const zipPath = join(tmpDir, "stored-extract.zip");
+    const content = "The quick brown fox\n".repeat(50);
+    const zip = await ZipWriter.create(zipPath, { compression: "stored" });
+    await zip.addEntry("text.txt", Buffer.from(content));
+    await zip.finalize();
+
+    const proc = spawnSync("unzip", ["-p", zipPath, "text.txt"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    expect(proc.status).toBe(0);
+    expect(proc.stdout.toString()).toBe(content);
   });
 });
 

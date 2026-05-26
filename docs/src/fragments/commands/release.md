@@ -31,6 +31,15 @@ sentry release deploy 1.0.0 staging "Deploy #42"
 # Propose a version from git HEAD
 sentry release create $(sentry release propose-version)
 
+# List deploys for a release
+sentry release deploys 1.0.0
+sentry release deploys my-org/1.0.0
+
+# Delete a release
+sentry release delete my-org/1.0.0
+sentry release delete my-org/1.0.0 --yes        # Skip confirmation
+sentry release delete my-org/1.0.0 --dry-run    # Preview without deleting
+
 # Output as JSON
 sentry release list --json
 sentry release view 1.0.0 --json

@@ -56,8 +56,12 @@
  * @module
  */
 
+import { createRequire } from "node:module";
 import type { ConsolaInstance } from "consola";
 import { createConsola } from "consola";
+
+const _require = createRequire(import.meta.url);
+
 import { getEnv } from "./env.js";
 
 /**
@@ -209,7 +213,7 @@ export function attachSentryReporter(): void {
     // Dynamic import to avoid pulling in Sentry at module load time.
     // The reporter is exported from @sentry/node-core/light (via @sentry/node → @sentry/core).
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Sentry = require("@sentry/node-core/light") as {
+    const Sentry = _require("@sentry/node-core/light") as {
       createConsolaReporter: (options?: Record<string, unknown>) => {
         log: (logObj: unknown) => void;
       };

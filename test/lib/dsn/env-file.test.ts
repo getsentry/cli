@@ -6,7 +6,6 @@
  * and integration tests for file-system based detection.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -16,6 +15,7 @@ import {
   property,
   string,
 } from "fast-check";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   detectFromAllEnvFiles,
   detectFromEnvFiles,
@@ -182,6 +182,71 @@ SENTRY_DSN=https://correct@sentry.io/456`;
   test("handles leading whitespace on line", () => {
     const content = "  SENTRY_DSN=https://key@sentry.io/123";
     expect(extractDsnFromEnvContent(content)).toBe("https://key@sentry.io/123");
+  });
+});
+
+// ============================================================================
+// Framework-Prefixed Env Var Tests
+// ============================================================================
+
+describe("extractDsnFromEnvContent framework-prefixed vars", () => {
+  test("extracts DSN from NEXT_PUBLIC_SENTRY_DSN", () => {
+    const content = "NEXT_PUBLIC_SENTRY_DSN=https://key@sentry.io/123";
+    expect(extractDsnFromEnvContent(content)).toBe("https://key@sentry.io/123");
+  });
+
+  test("extracts DSN from REACT_APP_SENTRY_DSN", () => {
+    const content = 'REACT_APP_SENTRY_DSN="https://key@sentry.io/123"';
+    expect(extractDsnFromEnvContent(content)).toBe("https://key@sentry.io/123");
+  });
+
+  test("extracts DSN from VITE_SENTRY_DSN", () => {
+    const content = "VITE_SENTRY_DSN=https://key@sentry.io/123";
+    expect(extractDsnFromEnvContent(content)).toBe("https://key@sentry.io/123");
+  });
+
+  test("extracts DSN from EXPO_PUBLIC_SENTRY_DSN", () => {
+    const content = "EXPO_PUBLIC_SENTRY_DSN=https://key@sentry.io/123";
+    expect(extractDsnFromEnvContent(content)).toBe("https://key@sentry.io/123");
+  });
+
+  test("extracts DSN from NUXT_PUBLIC_SENTRY_DSN", () => {
+    const content = "NUXT_PUBLIC_SENTRY_DSN=https://key@sentry.io/123";
+    expect(extractDsnFromEnvContent(content)).toBe("https://key@sentry.io/123");
+  });
+
+  test("canonical SENTRY_DSN is returned when it appears first", () => {
+    const content = `SENTRY_DSN=https://canonical@sentry.io/1
+NEXT_PUBLIC_SENTRY_DSN=https://next@sentry.io/2`;
+    expect(extractDsnFromEnvContent(content)).toBe(
+      "https://canonical@sentry.io/1"
+    );
+  });
+
+  test("framework-prefixed var returned when it appears before canonical", () => {
+    const content = `NEXT_PUBLIC_SENTRY_DSN=https://next@sentry.io/2
+SENTRY_DSN=https://canonical@sentry.io/1`;
+    expect(extractDsnFromEnvContent(content)).toBe("https://next@sentry.io/2");
+  });
+
+  test("rejects unknown prefix MY_CUSTOM_SENTRY_DSN", () => {
+    const content = "MY_CUSTOM_SENTRY_DSN=https://key@sentry.io/123";
+    expect(extractDsnFromEnvContent(content)).toBeNull();
+  });
+
+  test("rejects unknown prefix GATSBY_SENTRY_DSN", () => {
+    const content = "GATSBY_SENTRY_DSN=https://key@sentry.io/123";
+    expect(extractDsnFromEnvContent(content)).toBeNull();
+  });
+
+  test("rejects bare underscore prefix _SENTRY_DSN", () => {
+    const content = "_SENTRY_DSN=https://key@sentry.io/123";
+    expect(extractDsnFromEnvContent(content)).toBeNull();
+  });
+
+  test("rejects VUE_APP_SENTRY_DSN (not in allowlist)", () => {
+    const content = "VUE_APP_SENTRY_DSN=https://key@sentry.io/123";
+    expect(extractDsnFromEnvContent(content)).toBeNull();
   });
 });
 

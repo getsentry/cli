@@ -13,11 +13,19 @@
  *   buildOrgListCommand
  */
 
+import { createRequire } from "node:module";
 import type { Aliases, Command, CommandContext } from "@stricli/core";
 import type { SentryContext } from "../context.js";
+
+const _require = createRequire(import.meta.url);
+
 import { parseOrgProjectArg } from "./arg-parsing.js";
 import { buildCommand, numberParser } from "./command.js";
 import { disableOrgCache } from "./db/regions.js";
+import { logger } from "./logger.js";
+
+const log = logger.withTag("list-command");
+
 import { disableDsnCache } from "./dsn/index.js";
 import { warning } from "./formatters/colors.js";
 import {
@@ -264,6 +272,39 @@ export function paginationHint(opts: {
 }
 
 /**
+ * Append `-q "<query>"` to a hint-flag parts array when the user passed `--query`.
+ *
+ * Standard helper for pagination-hint builders that need to preserve the
+ * active search filter. Quotes are added unconditionally to handle queries
+ * containing spaces.
+ */
+export function appendQueryHint(
+  parts: string[],
+  query: string | undefined
+): void {
+  if (query) {
+    parts.push(`-q "${query}"`);
+  }
+}
+
+/**
+ * Append `--sort <value>` to a hint-flag parts array when the sort differs
+ * from the command's default.
+ *
+ * Stringly-typed to support both raw API sort strings (e.g. `"-count()"`)
+ * and command-specific enum values (e.g. `"date" | "duration"`).
+ */
+export function appendSortHint(
+  parts: string[],
+  sort: string | undefined,
+  defaultSort?: string
+): void {
+  if (sort && sort !== defaultSort) {
+    parts.push(`--sort "${sort}"`);
+  }
+}
+
+/**
  * Build the `--limit` / `-n` flag for a list command.
  *
  * @param entityPlural - Plural entity name used in the brief (e.g. "teams")
@@ -376,20 +417,28 @@ function getSubcommandsForRoute(routeName: string): Set<string> {
   if (!_subcommandsByRoute) {
     _subcommandsByRoute = new Map();
 
-    const { routes } = require("../app.js") as {
-      routes: { getAllEntries: () => readonly RouteEntry[] };
-    };
+    try {
+      const { routes } = _require("../app.js") as {
+        routes: { getAllEntries: () => readonly RouteEntry[] };
+      };
 
-    for (const entry of routes.getAllEntries()) {
-      const target = entry.target as unknown as Record<string, unknown>;
-      if (typeof target?.getAllEntries === "function") {
-        _subcommandsByRoute.set(
-          entry.name.original,
-          collectChildNames(
-            target as { getAllEntries: () => readonly RouteEntry[] }
-          )
-        );
+      for (const entry of routes.getAllEntries()) {
+        const target = entry.target as unknown as Record<string, unknown>;
+        if (typeof target?.getAllEntries === "function") {
+          _subcommandsByRoute.set(
+            entry.name.original,
+            collectChildNames(
+              target as { getAllEntries: () => readonly RouteEntry[] }
+            )
+          );
+        }
       }
+    } catch (error) {
+      // In test environments (vitest), require("../app.js") may fail because
+      // Node's ESM resolver can't resolve .js→.ts for transitive imports.
+      // Gracefully degrade: interceptSubcommand will treat all targets as
+      // plain values (no subcommand interception).
+      log.debug("Failed to load app routes for subcommand detection", error);
     }
   }
 

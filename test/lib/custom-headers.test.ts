@@ -9,7 +9,7 @@
  * error messages, and integration behavior not covered by property generators.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   _resetCustomHeadersCache,
   applyCustomHeaders,
@@ -251,13 +251,17 @@ describe("applyCustomHeaders", () => {
   let savedHeaders: string | undefined;
   let savedHost: string | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     savedHeaders = process.env.SENTRY_CUSTOM_HEADERS;
     savedHost = process.env.SENTRY_HOST;
     _resetCustomHeadersCache();
+    const { resetEnvTokenHostForTesting } = await import(
+      "../../src/lib/env-token-host.js"
+    );
+    resetEnvTokenHostForTesting();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (savedHeaders !== undefined) {
       process.env.SENTRY_CUSTOM_HEADERS = savedHeaders;
     } else {
@@ -269,14 +273,22 @@ describe("applyCustomHeaders", () => {
       delete process.env.SENTRY_HOST;
     }
     _resetCustomHeadersCache();
+    const { resetEnvTokenHostForTesting } = await import(
+      "../../src/lib/env-token-host.js"
+    );
+    resetEnvTokenHostForTesting();
   });
 
-  test("applies custom headers to Headers instance", () => {
+  test("applies custom headers to Headers instance when request host matches", () => {
     process.env.SENTRY_CUSTOM_HEADERS = "X-Test: hello; X-Other: world";
+    // Pin env-token scope to the self-hosted instance so headers apply.
     process.env.SENTRY_HOST = "https://sentry.example.com";
 
     const headers = new Headers({ Accept: "application/json" });
-    applyCustomHeaders(headers);
+    applyCustomHeaders(
+      headers,
+      "https://sentry.example.com/api/0/organizations/"
+    );
 
     expect(headers.get("X-Test")).toBe("hello");
     expect(headers.get("X-Other")).toBe("world");
@@ -287,7 +299,10 @@ describe("applyCustomHeaders", () => {
     process.env.SENTRY_HOST = "https://sentry.example.com";
 
     const headers = new Headers({ Accept: "application/json" });
-    applyCustomHeaders(headers);
+    applyCustomHeaders(
+      headers,
+      "https://sentry.example.com/api/0/organizations/"
+    );
 
     expect(headers.get("Accept")).toBe("application/json");
     expect(headers.get("X-Test")).toBe("hello");
@@ -298,10 +313,28 @@ describe("applyCustomHeaders", () => {
     delete process.env.SENTRY_HOST;
 
     const headers = new Headers({ Accept: "application/json" });
-    applyCustomHeaders(headers);
+    applyCustomHeaders(headers, "https://sentry.io/api/0/");
 
     // Only the original header
     const keys = [...headers.keys()];
     expect(keys).toEqual(["accept"]);
+  });
+
+  test("skips custom headers when request URL host does not match trusted host (CVE defense)", () => {
+    // Self-hosted user has IAP token configured for their proxy:
+    process.env.SENTRY_CUSTOM_HEADERS = "X-IAP-Token: secret";
+    process.env.SENTRY_HOST = "https://sentry.example.com";
+
+    // A share URL from an attacker resolves to evil.example.com. Even though
+    // applyCustomHeaders is on a non-SaaS codepath (isSelfHosted()==true for
+    // this host-config), the request's destination is the untrusted URL, so
+    // the IAP token must NOT attach.
+    const headers = new Headers({ Accept: "application/json" });
+    applyCustomHeaders(
+      headers,
+      "https://evil.example.com/api/0/shared/issues/deadbeef/"
+    );
+
+    expect(headers.get("X-IAP-Token")).toBeNull();
   });
 });

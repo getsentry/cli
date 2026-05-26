@@ -13,6 +13,7 @@ import {
   ENV_SOURCE_PREFIX,
   getActiveEnvVarName,
   getAuthConfig,
+  getAuthToken,
   getRawEnvToken,
   isAuthenticated,
 } from "../../lib/db/auth.js";
@@ -30,6 +31,7 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import { classifySentryToken } from "../../lib/token-type.js";
 
 type StatusFlags = {
   readonly "show-token": boolean;
@@ -216,8 +218,14 @@ export const statusCommand = buildCommand({
     yield new CommandOutput(data);
 
     if (fromEnv) {
+      const effectiveToken = getAuthToken();
+      const isOrgToken =
+        effectiveToken &&
+        classifySentryToken(effectiveToken) === "org-auth-token";
       return {
-        hint: "Run `sentry auth whoami` to see which user this token belongs to",
+        hint: isOrgToken
+          ? "Run `sentry auth whoami` to see which organization this token belongs to"
+          : "Run `sentry auth whoami` to see which user this token belongs to",
       };
     }
   },

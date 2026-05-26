@@ -12,7 +12,8 @@ import {
   describe,
   expect,
   test,
-} from "bun:test";
+} from "vitest";
+import { EXIT } from "../../src/lib/errors.js";
 import { createE2EContext, type E2EContext } from "../fixture.js";
 import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {
@@ -55,7 +56,7 @@ describe("sentry log list", () => {
       `${TEST_ORG}/${TEST_PROJECT}`,
     ]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
@@ -210,7 +211,7 @@ describe("sentry log view", () => {
       TEST_LOG_ID,
     ]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
     expect(result.stderr + result.stdout).toMatch(/not authenticated|login/i);
   });
 
@@ -219,7 +220,7 @@ describe("sentry log view", () => {
 
     const result = await ctx.run(["log", "view", TEST_LOG_ID]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.CONTEXT_MISSING);
     expect(result.stderr + result.stdout).toMatch(/organization|project/i);
   });
 
@@ -268,7 +269,7 @@ describe("sentry log view", () => {
       "deadbeefdeadbeefdeadbeefdeadbeef",
     ]);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(EXIT.RESOLUTION);
     expect(result.stderr + result.stdout).toMatch(/not found|no log/i);
   });
 });

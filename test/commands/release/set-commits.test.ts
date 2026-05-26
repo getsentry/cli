@@ -5,19 +5,35 @@
  * and mode mutual exclusivity.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { setCommitsCommand } from "../../../src/commands/release/set-commits.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
 import { ValidationError } from "../../../src/lib/errors.js";
+
+vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryRelease } from "../../../src/types/index.js";
@@ -42,8 +58,8 @@ const sampleRelease: SentryRelease = {
 };
 
 function createMockContext(cwd = "/tmp") {
-  const stdoutWrite = mock(() => true);
-  const stderrWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
+  const stderrWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
@@ -60,8 +76,8 @@ describe("release set-commits --commit", () => {
   let resolveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    setCommitsWithRefsSpy = spyOn(apiClient, "setCommitsWithRefs");
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    setCommitsWithRefsSpy = vi.spyOn(apiClient, "setCommitsWithRefs");
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
   });
 
   afterEach(() => {
@@ -196,8 +212,8 @@ describe("release set-commits --auto", () => {
   let resolveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    setCommitsAutoSpy = spyOn(apiClient, "setCommitsAuto");
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    setCommitsAutoSpy = vi.spyOn(apiClient, "setCommitsAuto");
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
   });
 
   afterEach(() => {
@@ -238,9 +254,9 @@ describe("release set-commits (default mode)", () => {
   let resolveOrgSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    setCommitsAutoSpy = spyOn(apiClient, "setCommitsAuto");
-    setCommitsLocalSpy = spyOn(apiClient, "setCommitsLocal");
-    resolveOrgSpy = spyOn(resolveTarget, "resolveOrg");
+    setCommitsAutoSpy = vi.spyOn(apiClient, "setCommitsAuto");
+    setCommitsLocalSpy = vi.spyOn(apiClient, "setCommitsLocal");
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
   });
 
   afterEach(() => {

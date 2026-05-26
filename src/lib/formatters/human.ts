@@ -29,6 +29,7 @@ import type {
   Writer,
 } from "../../types/index.js";
 import { resolveOrgDisplayName } from "../api-client.js";
+import { getReplayIdFromEvent } from "../replay-search.js";
 import { withSerializeSpan } from "../telemetry.js";
 import { type FixabilityTier, muted } from "./colors.js";
 import {
@@ -1319,20 +1320,20 @@ function buildReplayMarkdown(
   event: SentryEvent,
   issuePermalink?: string
 ): string {
-  const replayTag = event.tags?.find((t) => t.key === "replayId");
-  if (!replayTag?.value) {
+  const replayId = getReplayIdFromEvent(event);
+  if (!replayId) {
     return "";
   }
 
   const lines: string[] = [];
   lines.push("### Replay");
   lines.push("");
-  lines.push(`**ID:** \`${replayTag.value}\``);
+  lines.push(`**ID:** \`${replayId}\``);
 
   if (issuePermalink) {
     const match = BASE_URL_REGEX.exec(issuePermalink);
     if (match?.[1]) {
-      lines.push(`**Link:** ${match[1]}/replays/${replayTag.value}/`);
+      lines.push(`**Link:** ${match[1]}/explore/replays/${replayId}/`);
     }
   }
 
@@ -1608,6 +1609,31 @@ export function formatUserIdentity(user: UserIdentityInput): string {
   }
   // Fallback to user ID if no name/username/email
   return `user ${finalId}`;
+}
+
+/** Data shape yielded by `whoami` for `sntrys_` org auth tokens. */
+export type OrgTokenIdentity = {
+  type: "org-auth-token";
+  organization?: string;
+  url: string;
+  regionUrl?: string;
+};
+
+/**
+ * Format org-auth-token identity for `sentry auth whoami`.
+ * Renders "Organization: <slug> (<url>)" or just the URL when slug is unknown.
+ */
+export function formatOrgTokenIdentity(data: OrgTokenIdentity): string {
+  const rows: Array<readonly [string, string]> = [];
+  rows.push(["Token type", "Organization auth token"]);
+  if (data.organization) {
+    rows.push(["Organization", data.organization]);
+  }
+  rows.push(["Instance", data.url]);
+  if (data.regionUrl) {
+    rows.push(["Region", data.regionUrl]);
+  }
+  return renderMarkdown(mdKvTable(rows));
 }
 
 // Token Formatting
@@ -2448,6 +2474,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   telemetry: "Telemetry",
   url: "URL",
   headers: "Headers",
+  "ca-cert": "CA Certificate",
 };
 
 /**
@@ -2479,6 +2506,7 @@ function buildDefaultsShowRows(data: DefaultsResult): [string, string][] {
     ],
     ["URL", d.url ? safeCodeSpan(d.url) : notSet],
     ["Headers", d.headers ? safeCodeSpan(d.headers) : notSet],
+    ["CA Certificate", d["ca-cert"] ? safeCodeSpan(d["ca-cert"]) : notSet],
   ];
 }
 

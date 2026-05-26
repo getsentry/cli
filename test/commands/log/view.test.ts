@@ -5,22 +5,107 @@
  * and viewCommand func() body in src/commands/log/view.ts
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
-import {
-  parsePositionalArgs,
-  viewCommand,
-} from "../../../src/commands/log/view.js";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+// Mock isatty to simulate an interactive terminal for the --web prompt path.
+// Bun's ESM wrapper for CJS built-ins exposes a `default` re-export plus
+// `ReadStream` / `WriteStream` — all must be present or Bun throws
+// "Missing 'default' export in module 'node:tty'".
+const { mockIsatty, ttyExports, noop, mockPrompt, fakeLog } = vi.hoisted(() => {
+  const _mockIsatty = vi.fn(() => false);
+  class _FakeReadStream {}
+  class _FakeWriteStream {}
+  const _ttyExports = {
+    isatty: _mockIsatty,
+    ReadStream: _FakeReadStream,
+    WriteStream: _FakeWriteStream,
+  };
+
+  /** No-op placeholder for unused logger methods. */
+  function _noop() {
+    // intentional no-op
+  }
+
+  // Mock the logger module to intercept the .prompt() call made by the
+  // module-scoped `log = logger.withTag("log-view")` in view.ts.
+  const _mockPrompt = vi.fn(() => Promise.resolve(true));
+  const _fakeLog: {
+    prompt: typeof _mockPrompt;
+    warn: ReturnType<typeof vi.fn>;
+    info: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+    debug: ReturnType<typeof vi.fn>;
+    withTag: () => typeof _fakeLog;
+  } = {
+    prompt: _mockPrompt,
+    warn: vi.fn(_noop),
+    info: vi.fn(_noop),
+    error: vi.fn(_noop),
+    debug: vi.fn(_noop),
+    withTag: () => _fakeLog,
+  };
+
+  return {
+    mockIsatty: _mockIsatty,
+    ttyExports: _ttyExports,
+    noop: _noop,
+    mockPrompt: _mockPrompt,
+    fakeLog: _fakeLog,
+  };
+});
+
+vi.mock("node:tty", () => ({
+  ...ttyExports,
+  default: ttyExports,
+}));
+
+vi.mock("../../../src/lib/logger.js", () => ({
+  logger: fakeLog,
+  setLogLevel: vi.fn(noop),
+  attachSentryReporter: vi.fn(noop),
+  LOG_LEVEL_NAMES: ["error", "warn", "log", "info", "debug", "trace"],
+  LOG_LEVEL_ENV_VAR: "SENTRY_LOG_LEVEL",
+  parseLogLevel: (name: string) => {
+    const levels = ["error", "warn", "log", "info", "debug", "trace"];
+    const idx = levels.indexOf(name.toLowerCase().trim());
+    return idx === -1 ? 3 : idx;
+  },
+  getEnvLogLevel: () => null,
+}));
+
+// Dynamic import: must load AFTER vi.mock() registrations above so the
+// `log = logger.withTag(...)` binding inside view.ts picks up fakeLog.
+const { parsePositionalArgs, viewCommand } = await import(
+  "../../../src/commands/log/view.js"
+);
+
 import type { ProjectWithOrg } from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../src/lib/api-client.js";
+
+vi.mock("../../../src/lib/browser.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/lib/browser.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as browser from "../../../src/lib/browser.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
@@ -185,17 +270,15 @@ describe("parsePositionalArgs", () => {
   });
 
   describe("suggestions and error handling", () => {
-    test("swapped args (hex ID first, org/project second) returns raw IDs", () => {
-      // Validation is deferred: parsePositionalArgs now treats the first arg
-      // as the target and the second as a raw log ID. The command-level
-      // validateAndRecoverLogId catches the non-hex and either recovers or
-      // throws at that point.
+    test("auto-swaps args when hex ID is first and org/project is second", () => {
       const result = parsePositionalArgs([
         "968c763c740cfda8b6728f27fb9e9b01",
         "my-org/my-project",
       ]);
-      expect(result.targetArg).toBe("968c763c740cfda8b6728f27fb9e9b01");
-      expect(result.rawLogIds).toEqual(["my-org/my-project"]);
+      // Auto-swap: org/project becomes target, hex ID becomes the log ID
+      expect(result.targetArg).toBe("my-org/my-project");
+      expect(result.rawLogIds).toEqual(["968c763c740cfda8b6728f27fb9e9b01"]);
+      expect(result.suggestion).toContain("reversed");
     });
 
     test("returns suggestion when first arg looks like issue short ID", () => {
@@ -235,7 +318,7 @@ describe("resolveProjectBySlug", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
+    findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
   });
 
   afterEach(() => {
@@ -414,11 +497,11 @@ describe("viewCommand.func", () => {
   } as unknown as DetailedSentryLog;
 
   function createMockContext() {
-    const stdoutWrite = mock(() => true);
+    const stdoutWrite = vi.fn(() => true);
     return {
       context: {
         stdout: { write: stdoutWrite },
-        stderr: { write: mock(() => true) },
+        stderr: { write: vi.fn(() => true) },
         cwd: "/tmp",
       },
       stdoutWrite,
@@ -426,9 +509,9 @@ describe("viewCommand.func", () => {
   }
 
   beforeEach(async () => {
-    getLogsSpy = spyOn(apiClient, "getLogs");
-    findProjectsBySlugSpy = spyOn(apiClient, "findProjectsBySlug");
-    openInBrowserSpy = spyOn(browser, "openInBrowser");
+    getLogsSpy = vi.spyOn(apiClient, "getLogs");
+    findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
+    openInBrowserSpy = vi.spyOn(browser, "openInBrowser");
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
@@ -438,24 +521,24 @@ describe("viewCommand.func", () => {
     openInBrowserSpy.mockRestore();
   });
 
-  test("swapped args are handled downstream (validation deferred)", async () => {
-    // With validation deferred, `parsePositionalArgs` no longer throws on
-    // non-hex log IDs. The command now treats the first arg as the target
-    // and tries to resolve it as a project. Since the first arg is a hex
-    // string (looks like a project-search slug), `findProjectsBySlug` is
-    // called and returns empty → ResolutionError. The key behavior is that
-    // the invocation fails — the exact error class depends on the resolver.
-    findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
+  test("swapped args are auto-corrected and command succeeds", async () => {
+    // When hex ID is first and org/project is second, parsePositionalArgs
+    // auto-swaps them. The command then resolves "test-org/test-proj" as
+    // the target and uses the hex ID as the log ID.
+    getLogsSpy.mockResolvedValue([sampleLog]);
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+
     const { context } = createMockContext();
     const func = await viewCommand.loader();
-    await expect(
-      func.call(
-        context,
-        { json: true, web: false },
-        "968c763c740cfda8b6728f27fb9e9b01",
-        "test-org/test-proj"
-      )
-    ).rejects.toThrow();
+    await func.call(
+      context,
+      { json: true, web: false },
+      "968c763c740cfda8b6728f27fb9e9b01",
+      "test-org/test-proj"
+    );
+
+    // Should resolve correctly despite swapped args
+    expect(getLogsSpy).toHaveBeenCalled();
   });
 
   test("resolves project-search target via resolveProjectBySlug", async () => {
@@ -526,11 +609,108 @@ describe("viewCommand.func", () => {
       );
       expect.unreachable("Should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(ValidationError);
-      const msg = (err as ValidationError).message;
+      expect(err).toBeInstanceOf(ResolutionError);
+      const msg = (err as ResolutionError).message;
       // Retention-aware wording replaces the generic "was sent within 90 days"
       expect(msg).toContain("past the 90-day log retention");
       expect(msg).not.toContain("was sent within the last 90 days");
     }
+  });
+});
+
+/**
+ * Tests for the --web interactive prompt path.
+ *
+ * Uses the module-level `vi.mock()` on `node:tty` and the logger (set at
+ * the top of this file) to simulate an interactive terminal and control the
+ * prompt response.
+ */
+describe("log view --web interactive prompt", () => {
+  const PROMPT_ID1 = "aaaa1111bbbb2222cccc3333dddd4444";
+  const PROMPT_ID2 = "1111222233334444555566667777aaaa";
+  let openInBrowserSpy: ReturnType<typeof spyOn>;
+
+  function createPromptMockContext() {
+    const stdoutWrite = vi.fn(() => true);
+    return {
+      context: {
+        stdout: { write: stdoutWrite },
+        stderr: { write: vi.fn(() => true) },
+        cwd: "/tmp",
+      },
+      stdoutWrite,
+    };
+  }
+
+  beforeEach(() => {
+    openInBrowserSpy = vi.spyOn(browser, "openInBrowser");
+    mockIsatty.mockReturnValue(true);
+    mockPrompt.mockClear();
+  });
+
+  afterEach(() => {
+    openInBrowserSpy.mockRestore();
+    mockIsatty.mockReturnValue(false);
+  });
+
+  test("prompts and opens all tabs when user confirms", async () => {
+    mockPrompt.mockResolvedValue(true);
+    openInBrowserSpy.mockResolvedValue(undefined);
+
+    const { context } = createPromptMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, web: true },
+      "my-org/proj",
+      PROMPT_ID1,
+      PROMPT_ID2
+    );
+
+    expect(mockPrompt).toHaveBeenCalled();
+    expect(openInBrowserSpy).toHaveBeenCalledTimes(2);
+    const url1 = openInBrowserSpy.mock.calls[0][0] as string;
+    const url2 = openInBrowserSpy.mock.calls[1][0] as string;
+    expect(url1).toContain(PROMPT_ID1);
+    expect(url2).toContain(PROMPT_ID2);
+  });
+
+  test("prompts and aborts when user declines", async () => {
+    mockPrompt.mockResolvedValue(false);
+    openInBrowserSpy.mockResolvedValue(undefined);
+
+    const { context } = createPromptMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, web: true },
+      "my-org/proj",
+      PROMPT_ID1,
+      PROMPT_ID2
+    );
+
+    expect(mockPrompt).toHaveBeenCalled();
+    expect(openInBrowserSpy).not.toHaveBeenCalled();
+  });
+
+  test("aborts when user cancels prompt with Ctrl+C (truthy Symbol)", async () => {
+    // consola returns Symbol(clack:cancel) on Ctrl+C — truthy but not `true`.
+    // Cast needed because the mock is typed as boolean but consola actually
+    // returns a Symbol on cancel.
+    mockPrompt.mockResolvedValue(Symbol("clack:cancel") as unknown as boolean);
+    openInBrowserSpy.mockResolvedValue(undefined);
+
+    const { context } = createPromptMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, web: true },
+      "my-org/proj",
+      PROMPT_ID1,
+      PROMPT_ID2
+    );
+
+    expect(mockPrompt).toHaveBeenCalled();
+    expect(openInBrowserSpy).not.toHaveBeenCalled();
   });
 });

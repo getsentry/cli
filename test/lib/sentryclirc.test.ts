@@ -5,12 +5,17 @@
  * Uses real temp directories with actual .sentryclirc files.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { closeDatabase } from "../../src/lib/db/index.js";
 import {
+  captureEnvTokenHost,
+  resetEnvTokenHostForTesting,
+} from "../../src/lib/env-token-host.js";
+import {
   applySentryCliRcEnvShim,
+  assertRcUrlTrusted,
   CONFIG_FILENAME,
   clearSentryCliRcCache,
   loadSentryCliRc,
@@ -38,6 +43,7 @@ beforeEach(async () => {
   });
   // Point config dir at the test dir so getConfigDir() returns a predictable path
   process.env.SENTRY_CONFIG_DIR = testDir;
+  resetEnvTokenHostForTesting();
 });
 
 afterEach(async () => {
@@ -54,6 +60,7 @@ afterEach(async () => {
       delete process.env[key];
     }
   }
+  resetEnvTokenHostForTesting();
   await cleanupTestDir(testDir);
 });
 
@@ -260,13 +267,47 @@ describe("applySentryCliRcEnvShim", () => {
     expect(readEnv("SENTRY_TOKEN")).toBe("env-fallback-token");
   });
 
-  test("sets SENTRY_URL when neither SENTRY_HOST nor SENTRY_URL is set", async () => {
+  test("sets SENTRY_URL for SaaS rc url (no credential risk, no scoping check)", async () => {
     delete process.env.SENTRY_HOST;
     delete process.env.SENTRY_URL;
-    writeRcFile(testDir, "[defaults]\nurl = https://sentry.example.com\n");
+    writeRcFile(testDir, "[defaults]\nurl = https://sentry.io\n");
 
     await applySentryCliRcEnvShim(testDir);
-    expect(readEnv("SENTRY_URL")).toBe("https://sentry.example.com");
+    expect(readEnv("SENTRY_URL")).toBe("https://sentry.io");
+  });
+
+  test("normalizes bare-hostname rc url before SaaS / scope checks", async () => {
+    // Regression: `url = sentry.io` (no scheme) used to throw inside
+    // `new URL(...)` deep in the SaaS check. The shim now normalizes
+    // the rc url through `normalizeUrl` first so bare hostnames are
+    // accepted as the equivalent `https://sentry.io`.
+    delete process.env.SENTRY_HOST;
+    delete process.env.SENTRY_URL;
+    writeRcFile(testDir, "[defaults]\nurl = sentry.io\n");
+
+    await applySentryCliRcEnvShim(testDir);
+    expect(readEnv("SENTRY_URL")).toBe("https://sentry.io");
+  });
+
+  test("assertRcUrlTrusted throws when non-SaaS rc url does not match active token's scoped host", async () => {
+    // Env-token defaults to SaaS (no SENTRY_HOST set at capture time).
+    // Any non-SaaS rc url is therefore a mismatch → CliError. This closes
+    // the CVE where a committed .sentryclirc could redirect requests +
+    // token to an attacker host. The shim itself applies the URL
+    // unconditionally; the trust check lives in assertRcUrlTrusted, called
+    // by buildCommand's wrapper.
+    delete process.env.SENTRY_HOST;
+    delete process.env.SENTRY_URL;
+    // Capture env-token host BEFORE shim mutates env (mirrors boot order).
+    captureEnvTokenHost();
+    writeRcFile(testDir, "[defaults]\nurl = https://evil.example.com\n");
+
+    await applySentryCliRcEnvShim(testDir);
+    expect(readEnv("SENTRY_URL")).toBe("https://evil.example.com");
+
+    await expect(assertRcUrlTrusted(testDir)).rejects.toThrow(
+      /does not match|sentry auth login --url/
+    );
   });
 
   test("does not set SENTRY_URL when SENTRY_HOST is set", async () => {

@@ -21,10 +21,12 @@ import type {
   SentryProject,
 } from "../../types/index.js";
 
-import { cacheProjectsForOrg } from "../db/project-cache.js";
+import {
+  cacheProjectsForOrg,
+  setCachedProjectByDsnKey,
+} from "../db/project-cache.js";
 import { getCachedOrganizations } from "../db/regions.js";
 import { type AuthGuardSuccess, withAuthGuard } from "../errors.js";
-import { logger } from "../logger.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 import { buildProjectUrl } from "../sentry-urls.js";
 import { isAllDigits } from "../utils.js";
@@ -32,6 +34,7 @@ import { isAllDigits } from "../utils.js";
 import {
   API_MAX_PER_PAGE,
   apiRequestToRegion,
+  autoPaginate,
   getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
   ORG_FANOUT_CONCURRENCY,
@@ -51,38 +54,23 @@ import { getUserRegions, listOrganizations } from "./organizations.js";
  */
 export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
   const config = await getOrgSdkConfig(orgSlug);
-  const allResults: SentryProject[] = [];
-  let cursor: string | undefined;
 
-  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+  const { data: allResults } = await autoPaginate(async (cursor) => {
     const result = await listAnOrganization_sProjects({
       ...config,
       path: { organization_id_or_slug: orgSlug },
-      // per_page is supported by Sentry's pagination framework at runtime
-      // but not yet in the OpenAPI spec
-      query: { cursor, per_page: API_MAX_PER_PAGE } as { cursor?: string },
+      query: { cursor, per_page: API_MAX_PER_PAGE } as {
+        cursor?: string;
+        per_page?: number;
+      },
     });
-
-    const { data, nextCursor } = unwrapPaginatedResult<SentryProject[]>(
+    return unwrapPaginatedResult<SentryProject[]>(
       result as
         | { data: SentryProject[]; error: undefined }
         | { data: undefined; error: unknown },
       "Failed to list projects"
     );
-    allResults.push(...data);
-
-    if (!nextCursor) {
-      break;
-    }
-    cursor = nextCursor;
-
-    if (page === MAX_PAGINATION_PAGES - 1) {
-      logger.warn(
-        `Pagination limit reached (${MAX_PAGINATION_PAGES} pages, ${allResults.length} items). ` +
-          "Results may be incomplete for this organization."
-      );
-    }
-  }
+  }, MAX_PAGINATION_PAGES * API_MAX_PER_PAGE);
 
   // Populate project cache for shell completions (best-effort).
   // Mirrors how listOrganizations() calls setOrgRegions().
@@ -118,7 +106,7 @@ export async function listProjectsPaginated(
     query: {
       cursor: options.cursor,
       per_page: options.perPage ?? API_MAX_PER_PAGE,
-    } as { cursor?: string },
+    } as { cursor?: string; per_page?: number },
   });
 
   return unwrapPaginatedResult<SentryProject[]>(
@@ -177,10 +165,26 @@ export type CreatedProjectDetails = {
 };
 
 /**
+ * Extract the public key from a Sentry DSN URL.
+ * DSN format: https://<public_key>@<host>/<project_id>
+ */
+function extractPublicKeyFromDsn(dsn: string): string | null {
+  try {
+    const url = new URL(dsn);
+    return url.username || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Create a project, fetch its DSN, and build its dashboard URL.
  *
  * Shared core used by both `sentry project create` and `sentry init`.
  * Callers handle their own error wrapping and team resolution.
+ *
+ * After creation, seeds the project cache and DSN-based project cache
+ * so subsequent commands skip redundant API lookups.
  */
 export async function createProjectWithDsn(
   orgSlug: string,
@@ -190,6 +194,35 @@ export async function createProjectWithDsn(
   const project = await createProject(orgSlug, teamSlug, body);
   const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
   const url = buildProjectUrl(orgSlug, project.slug);
+
+  // Seed project cache so subsequent commands skip redundant API lookups
+  try {
+    const orgName = resolveOrgDisplayName(orgSlug, project.organization?.name);
+    cacheProjectsForOrg(orgSlug, orgName, [
+      { id: project.id, slug: project.slug, name: project.name },
+    ]);
+  } catch {
+    // Best-effort — don't let cache failures break project creation
+  }
+
+  // Also seed the DSN-based project cache for DSN resolution
+  if (dsn) {
+    try {
+      const publicKey = extractPublicKeyFromDsn(dsn);
+      if (publicKey) {
+        setCachedProjectByDsnKey(publicKey, {
+          orgSlug,
+          orgName: resolveOrgDisplayName(orgSlug, project.organization?.name),
+          projectSlug: project.slug,
+          projectName: project.name,
+          projectId: project.id,
+        });
+      }
+    } catch {
+      // Best-effort — don't let cache failures break project creation
+    }
+  }
+
   return { project, dsn, url };
 }
 
