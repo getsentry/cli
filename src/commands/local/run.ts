@@ -106,6 +106,7 @@ function buildChildEnv(
     SENTRY_SPOTLIGHT: spotlightUrl,
     NEXT_PUBLIC_SENTRY_SPOTLIGHT: spotlightUrl,
     SENTRY_TRACES_SAMPLE_RATE: "1",
+    SENTRY_RELEASE: process.env.SENTRY_RELEASE ?? "sentry-cli-local",
   };
   if (isPackageJsonSource(commandSource)) {
     env = augmentPathForNode(env, cwd);

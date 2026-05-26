@@ -1,4 +1,16 @@
-/** Post-init verification: run the dev server and check for SDK events. */
+/**
+ * Post-init verification: run the dev server and check for SDK events.
+ *
+ * Uses a two-signal approach:
+ * 1. **Stdout-based**: Pipe the child's stdout/stderr and watch for output.
+ *    If the process produces output without fatal error patterns, the app
+ *    started successfully.
+ * 2. **Envelope-based**: A Spotlight sidecar receives SDK envelopes. If one
+ *    arrives, the SDK is confirmed working (strongest signal).
+ *
+ * Either signal resolving first counts as success. A non-zero exit code
+ * or fatal error patterns in stderr indicate failure.
+ */
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { resolve } from "node:path";
@@ -12,7 +24,7 @@ import type { WorkflowRunResult } from "./types.js";
 import type { WizardUI } from "./ui/types.js";
 
 /** Verification timeout in seconds. */
-const VERIFY_TIMEOUT_S = 30;
+const VERIFY_TIMEOUT_S = 15;
 
 /**
  * Platforms whose SDKs lack Spotlight support. These run in non-Node runtimes
@@ -29,16 +41,131 @@ const SPOTLIGHT_UNSUPPORTED_PLATFORMS = new Set([
 ]);
 
 /**
+ * Patterns in stderr/stdout that indicate a fatal startup failure.
+ * Matched case-insensitively against each collected output line.
+ */
+const FATAL_ERROR_PATTERNS = [
+  /\bERR_MODULE_NOT_FOUND\b/,
+  /\bMODULE_NOT_FOUND\b/,
+  /\bCannot find module\b/i,
+  /\bEADDRINUSE\b/,
+  /\bSyntaxError\b/,
+  /\bReferenceError\b/,
+  /\bTypeError\b/,
+  /\bError \[ERR_/,
+  /\bFATAL ERROR\b/i,
+  /\bUnhandledPromiseRejection\b/,
+  /\bERR_PNPM_/,
+];
+
+/** Maximum number of output lines to keep for error reporting. */
+const MAX_OUTPUT_LINES = 50;
+
+/** Newline splitter — hoisted to top level per lint rule. */
+const NEWLINE_RE = /\r?\n/;
+
+/**
+ * Outcome of the stdout-based startup check.
+ *
+ * - `started`: The child produced output without fatal error patterns.
+ * - `errored`: A fatal error pattern was detected in the output.
+ * - `silent`:  No output was produced before the timeout.
+ */
+type StartupOutcome =
+  | { kind: "started" }
+  | { kind: "errored"; errorLine: string }
+  | { kind: "silent" };
+
+/** Check a single line against all fatal error patterns. */
+function findFatalError(line: string): boolean {
+  return FATAL_ERROR_PATTERNS.some((p) => p.test(line));
+}
+
+/** Scan collected lines for fatal errors, returning the first match. */
+function scanLinesForError(
+  lines: readonly string[]
+): StartupOutcome & { kind: "errored" | "started" } {
+  for (const line of lines) {
+    if (findFatalError(line)) {
+      return { kind: "errored", errorLine: line };
+    }
+  }
+  return { kind: "started" };
+}
+
+/**
+ * Collect lines from a child process's piped stdout and stderr.
+ * Returns a promise that resolves when either:
+ * - A fatal error pattern is detected (errored)
+ * - At least one non-empty line arrives without errors after the timeout (started)
+ * - The timeout expires with no output (silent)
+ */
+function watchChildOutput(
+  child: ChildProcess,
+  timeoutMs: number
+): { promise: Promise<StartupOutcome>; getLines: () => string[] } {
+  const lines: string[] = [];
+  let hasOutput = false;
+  let settled = false;
+
+  let settle: (outcome: StartupOutcome) => void;
+  const promise = new Promise<StartupOutcome>((r) => {
+    settle = (outcome) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      r(outcome);
+    };
+  });
+
+  const processChunk = (raw: Buffer) => {
+    if (settled) {
+      return;
+    }
+    const text = raw.toString("utf-8");
+    for (const segment of text.split(NEWLINE_RE)) {
+      const trimmed = segment.trim();
+      if (!trimmed) {
+        continue;
+      }
+      if (lines.length < MAX_OUTPUT_LINES) {
+        lines.push(trimmed);
+      }
+      if (findFatalError(trimmed)) {
+        settle({ kind: "errored", errorLine: trimmed });
+        return;
+      }
+      hasOutput = true;
+    }
+  };
+
+  child.stdout?.on("data", processChunk);
+  child.stderr?.on("data", processChunk);
+
+  const timer = setTimeout(() => {
+    settle(hasOutput ? { kind: "started" } : { kind: "silent" });
+  }, timeoutMs);
+
+  child.on("close", () => {
+    clearTimeout(timer);
+    if (hasOutput) {
+      settle(scanLinesForError(lines));
+    } else {
+      settle({ kind: "silent" });
+    }
+  });
+
+  return { promise, getLines: () => lines };
+}
+
+/**
  * Run the dev server, spawn the child process, and verify that the Sentry
- * SDK sends at least one envelope within {@link VERIFY_TIMEOUT_S} seconds.
+ * SDK is working or at minimum that the app starts without errors.
  *
  * Called after `formatResult` in the wizard success path. On failure this
  * logs a warning and reports to Sentry telemetry — it does NOT throw, since
  * the init itself succeeded and the user should not be blocked.
- *
- * @param result - The wizard run result (used for telemetry tags)
- * @param ui - Wizard UI for logging
- * @param cwd - Project directory to run the dev command in
  */
 export async function verifySetup(
   result: WorkflowRunResult,
@@ -93,6 +220,7 @@ export async function verifySetup(
     SENTRY_SPOTLIGHT: spotlightUrl,
     NEXT_PUBLIC_SENTRY_SPOTLIGHT: spotlightUrl,
     SENTRY_TRACES_SAMPLE_RATE: "1",
+    SENTRY_RELEASE: "sentry-cli-verify",
   };
 
   // Augment PATH for Node projects
@@ -111,7 +239,7 @@ export async function verifySetup(
     child = spawn(cmd, cmdArgs, {
       cwd,
       env: childEnv,
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (error) {
     logger.debug("Failed to spawn verification child", error);
@@ -125,16 +253,24 @@ export async function verifySetup(
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);
 
+  // Watch stdout/stderr for startup signals
+  const { promise: startupPromise, getLines } = watchChildOutput(
+    child,
+    VERIFY_TIMEOUT_S * 1000
+  );
+
   const childExited = new Promise<{ kind: "exited"; code: number }>((r) => {
     child.on("close", (code) =>
       r({ kind: "exited" as const, code: code ?? 1 })
     );
   });
 
+  // Race: envelope (best), startup detection (good), child exit, or timeout
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
   const outcome = await Promise.race([
     envelopeReceived.then(() => ({ kind: "envelope" as const })),
+    startupPromise,
     childExited,
     new Promise<{ kind: "timeout" }>((r) => {
       timeoutHandle = setTimeout(
@@ -170,6 +306,31 @@ export async function verifySetup(
   process.removeListener("SIGTERM", onSigterm);
   await shutdownServer(server);
 
+  reportOutcome(outcome, {
+    ui,
+    result,
+    detected,
+    getLines,
+  });
+}
+
+type VerifyOutcome =
+  | { kind: "envelope" }
+  | StartupOutcome
+  | { kind: "exited"; code: number }
+  | { kind: "timeout" };
+
+type ReportContext = {
+  ui: WizardUI;
+  result: WorkflowRunResult;
+  detected: { args: string[]; source: string };
+  getLines: () => string[];
+};
+
+/** Report the verification outcome to the user and telemetry. */
+// biome-ignore lint/nursery/useMaxParams: existing 4-param shape; cwd is a defaulted extension
+function reportOutcome(outcome: VerifyOutcome, ctx: ReportContext): void {
+  const { ui, result, detected, getLines } = ctx;
   const telemetryTags = {
     "wizard.platform": String(result.result?.platform ?? "unknown"),
   };
@@ -179,36 +340,61 @@ export async function verifySetup(
       .join(" ")
       .replace(/[A-Za-z_]\w*=\S+/g, (m) => `${m.split("=")[0]}=[REDACTED]`),
     detectedSource: detected.source,
+    outputLines: getLines().length,
   };
 
-  switch (outcome.kind) {
-    case "envelope": {
-      ui.log.success("Your app is sending events to Sentry");
-      return;
-    }
-    case "timeout": {
-      ui.log.warn(
-        `Could not verify — no events received within ${VERIFY_TIMEOUT_S}s`
-      );
-      captureException(new Error("init verification failed"), {
-        tags: { ...telemetryTags, "wizard.verify": "timeout" },
-        extra: telemetryExtra,
-      });
-      return;
-    }
-    case "exited": {
-      ui.log.warn(
-        `Could not verify — dev server exited with code ${outcome.code}`
-      );
-      captureException(new Error("init verification failed"), {
-        tags: { ...telemetryTags, "wizard.verify": "child_exited" },
-        extra: { ...telemetryExtra, exitCode: outcome.code },
-      });
-      return;
-    }
-    default: {
-      logger.debug("Unexpected verification outcome");
-      return;
-    }
+  if (outcome.kind === "envelope") {
+    ui.log.success("Your app is sending events to Sentry");
+    return;
   }
+
+  if (outcome.kind === "started") {
+    ui.log.success(
+      "Your app started successfully — events will appear in Sentry when requests come in."
+    );
+    return;
+  }
+
+  if (outcome.kind === "errored") {
+    const errorExcerpt = outcome.errorLine.slice(0, 200);
+    ui.log.warn(
+      `Dev server encountered an error during startup:\n  ${errorExcerpt}\n` +
+        "The SDK was installed but the dev server could not start cleanly.\n" +
+        "Please review the error above and check your configuration."
+    );
+    captureException(new Error("init verification: startup error"), {
+      tags: { ...telemetryTags, "wizard.verify": "startup_error" },
+      extra: { ...telemetryExtra, errorLine: outcome.errorLine },
+    });
+    return;
+  }
+
+  if (outcome.kind === "exited") {
+    if (outcome.code === 0) {
+      ui.log.success("Dev server exited cleanly");
+      return;
+    }
+    const lastLines = getLines().slice(-5).join("\n  ");
+    ui.log.warn(
+      `Dev server exited with code ${outcome.code}` +
+        (lastLines ? `:\n  ${lastLines}` : "") +
+        "\nThe SDK was installed but the dev server could not start.\n" +
+        "Please check your project configuration."
+    );
+    captureException(new Error("init verification failed"), {
+      tags: { ...telemetryTags, "wizard.verify": "child_exited" },
+      extra: { ...telemetryExtra, exitCode: outcome.code },
+    });
+    return;
+  }
+
+  // timeout or silent
+  ui.log.warn(
+    `Could not verify — no output received within ${VERIFY_TIMEOUT_S}s.\n` +
+      "Run your dev server manually and check for events in Sentry."
+  );
+  captureException(new Error("init verification failed"), {
+    tags: { ...telemetryTags, "wizard.verify": "timeout" },
+    extra: telemetryExtra,
+  });
 }
