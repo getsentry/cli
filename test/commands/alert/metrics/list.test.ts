@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "vitest";
 import { listCommand } from "../../../../src/commands/alert/metrics/list.js";
 import { DEFAULT_SENTRY_URL } from "../../../../src/lib/constants.js";
 import { setAuthToken } from "../../../../src/lib/db/auth.js";

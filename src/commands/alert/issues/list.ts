@@ -471,18 +471,6 @@ async function handleResolvedTargets(
 
   const allRules = displayRows.map((r) => r.rule);
 
-  if (displayRows.length === 0) {
-    const hint = footer
-      ? `No issue alert rules found.\n\n${footer}`
-      : "No issue alert rules found.";
-    return { items: [], hint, hasMore: hasMoreToShow, hasPrev };
-  }
-
-  const title =
-    isSingleProject && firstTarget
-      ? `Issue alert rules in ${firstTarget.orgDisplay}/${firstTarget.projectDisplay}`
-      : `Issue alert rules from ${validResults.length} projects`;
-
   let moreHint: string | undefined;
   if (hasMoreToShow) {
     const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
@@ -502,6 +490,27 @@ async function handleResolvedTargets(
     const prevPart = "Prev: -c prev";
     moreHint = moreHint ? `${moreHint}\n${prevPart}` : prevPart;
   }
+
+  if (displayRows.length === 0) {
+    const parts = ["No issue alert rules found."];
+    if (moreHint) {
+      parts.push(moreHint);
+    }
+    if (footer) {
+      parts.push(footer);
+    }
+    return {
+      items: [],
+      hint: parts.join("\n\n"),
+      hasMore: hasMoreToShow,
+      hasPrev,
+    };
+  }
+
+  const title =
+    isSingleProject && firstTarget
+      ? `Issue alert rules in ${firstTarget.orgDisplay}/${firstTarget.projectDisplay}`
+      : `Issue alert rules from ${validResults.length} projects`;
 
   return {
     items: allRules,

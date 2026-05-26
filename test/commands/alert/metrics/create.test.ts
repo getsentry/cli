@@ -1,12 +1,4 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createCommand } from "../../../../src/commands/alert/metrics/create.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../../src/lib/api-client.js";
@@ -40,19 +32,19 @@ type CreateFlags = {
 
 function createContext() {
   return {
-    stdout: { write: mock(() => true) },
-    stderr: { write: mock(() => true) },
+    stdout: { write: vi.fn(() => true) },
+    stderr: { write: vi.fn(() => true) },
     cwd: getConfigDir(),
   };
 }
 
 describe("alert metrics create", () => {
-  let resolveSpy: ReturnType<typeof spyOn>;
-  let createSpy: ReturnType<typeof spyOn>;
+  let resolveSpy: ReturnType<typeof vi.spyOn>;
+  let createSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    resolveSpy = spyOn(resolveTarget, "resolveTargetsFromParsedArg");
-    createSpy = spyOn(apiClient, "createMetricAlertRule");
+    resolveSpy = vi.spyOn(resolveTarget, "resolveTargetsFromParsedArg");
+    createSpy = vi.spyOn(apiClient, "createMetricAlertRule");
   });
 
   afterEach(() => {

@@ -1,12 +1,4 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { editCommand } from "../../../../src/commands/alert/metrics/edit.js";
 import type { MetricAlertRule } from "../../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -55,23 +47,23 @@ type EditFlags = {
 
 function createContext() {
   return {
-    stdout: { write: mock(() => true) },
-    stderr: { write: mock(() => true) },
+    stdout: { write: vi.fn(() => true) },
+    stderr: { write: vi.fn(() => true) },
     cwd: getConfigDir(),
   };
 }
 
 describe("alert metrics edit", () => {
-  let getRuleSpy: ReturnType<typeof spyOn>;
-  let getDocSpy: ReturnType<typeof spyOn>;
-  let putSpy: ReturnType<typeof spyOn>;
-  let resolveSpy: ReturnType<typeof spyOn>;
+  let getRuleSpy: ReturnType<typeof vi.spyOn>;
+  let getDocSpy: ReturnType<typeof vi.spyOn>;
+  let putSpy: ReturnType<typeof vi.spyOn>;
+  let resolveSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    getRuleSpy = spyOn(apiClient, "getMetricAlertRule");
-    getDocSpy = spyOn(apiClient, "getMetricAlertRuleDocument");
-    putSpy = spyOn(apiClient, "putMetricAlertRule");
-    resolveSpy = spyOn(resolveTarget, "resolveTargetsFromParsedArg");
+    getRuleSpy = vi.spyOn(apiClient, "getMetricAlertRule");
+    getDocSpy = vi.spyOn(apiClient, "getMetricAlertRuleDocument");
+    putSpy = vi.spyOn(apiClient, "putMetricAlertRule");
+    resolveSpy = vi.spyOn(resolveTarget, "resolveTargetsFromParsedArg");
   });
 
   afterEach(() => {

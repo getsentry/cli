@@ -150,7 +150,12 @@ async function fetchRulesForOrg(
       serverCursor = nextCursor;
     }
 
-    return { orgSlug, rules, hasMore: false };
+    return {
+      orgSlug,
+      rules,
+      hasMore: !!serverCursor,
+      nextCursor: serverCursor,
+    };
   });
 
   if (!result.ok) {
@@ -394,7 +399,10 @@ async function handleResolvedOrgs(
     if (result?.success) {
       return result.data.nextCursor ?? null;
     }
-    return startCursors.get(key) ?? null;
+    // Preserve the previous cursor so the org is retried on the next page.
+    // If no prior cursor exists (first-page failure), use the start-of-list
+    // cursor to prevent the org from being permanently excluded.
+    return startCursors.get(key) ?? "0:0:0";
   });
   const hasAnyCursor = cursorValues.some((c) => c !== null);
   const compoundNextCursor = hasAnyCursor
@@ -457,18 +465,6 @@ async function handleResolvedOrgs(
 
   const allRules = displayRows.map((r) => r.rule);
 
-  if (displayRows.length === 0) {
-    const hint = footer
-      ? `No metric alert rules found.\n\n${footer}`
-      : "No metric alert rules found.";
-    return { items: [], hint, hasMore: hasMoreToShow, hasPrev };
-  }
-
-  const title =
-    isSingleOrg && firstOrg
-      ? `Metric alert rules in ${firstOrg}`
-      : `Metric alert rules from ${validResults.length} organizations`;
-
   let moreHint: string | undefined;
   if (hasMoreToShow) {
     const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
@@ -488,6 +484,27 @@ async function handleResolvedOrgs(
     const prevPart = "Prev: -c prev";
     moreHint = moreHint ? `${moreHint}\n${prevPart}` : prevPart;
   }
+
+  if (displayRows.length === 0) {
+    const parts = ["No metric alert rules found."];
+    if (moreHint) {
+      parts.push(moreHint);
+    }
+    if (footer) {
+      parts.push(footer);
+    }
+    return {
+      items: [],
+      hint: parts.join("\n\n"),
+      hasMore: hasMoreToShow,
+      hasPrev,
+    };
+  }
+
+  const title =
+    isSingleOrg && firstOrg
+      ? `Metric alert rules in ${firstOrg}`
+      : `Metric alert rules from ${validResults.length} organizations`;
 
   return {
     items: allRules,

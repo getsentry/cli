@@ -51,7 +51,12 @@ export function parseMetricRuleArg(
       "rule"
     );
   }
-  return { ref, targetArg: targetPart || undefined };
+  // Metric alerts are org-scoped, so a bare org slug (no slash) must be
+  // treated as org-all by parseOrgProjectArg. Append a trailing slash to
+  // prevent it from being misrouted to project-search.
+  const orgTarget =
+    targetPart && !targetPart.includes("/") ? `${targetPart}/` : targetPart;
+  return { ref, targetArg: orgTarget || undefined };
 }
 
 export async function listAllMetricRulesForOrg(

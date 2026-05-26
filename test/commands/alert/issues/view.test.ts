@@ -2,15 +2,7 @@
  * Alert issues view — parsing, name resolution, and non-404 API error propagation.
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { viewCommand } from "../../../../src/commands/alert/issues/view.js";
 import type { IssueAlertRule } from "../../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
@@ -49,11 +41,11 @@ const baseRule: IssueAlertRule = {
 type ViewFlags = { readonly web: boolean; readonly json: boolean };
 
 function createContext() {
-  const stdoutWrite = mock(() => true);
+  const stdoutWrite = vi.fn(() => true);
   return {
     context: {
       stdout: { write: stdoutWrite },
-      stderr: { write: mock(() => true) },
+      stderr: { write: vi.fn(() => true) },
       cwd: getConfigDir(),
     },
     stdoutWrite,
@@ -61,14 +53,14 @@ function createContext() {
 }
 
 describe("alert issues view", () => {
-  let getRuleSpy: ReturnType<typeof spyOn>;
-  let listRulesSpy: ReturnType<typeof spyOn>;
-  let resolveSpy: ReturnType<typeof spyOn>;
+  let getRuleSpy: ReturnType<typeof vi.spyOn>;
+  let listRulesSpy: ReturnType<typeof vi.spyOn>;
+  let resolveSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    getRuleSpy = spyOn(apiClient, "getIssueAlertRule");
-    listRulesSpy = spyOn(apiClient, "listIssueAlertsPaginated");
-    resolveSpy = spyOn(resolveTarget, "resolveTargetsFromParsedArg");
+    getRuleSpy = vi.spyOn(apiClient, "getIssueAlertRule");
+    listRulesSpy = vi.spyOn(apiClient, "listIssueAlertsPaginated");
+    resolveSpy = vi.spyOn(resolveTarget, "resolveTargetsFromParsedArg");
   });
 
   afterEach(() => {

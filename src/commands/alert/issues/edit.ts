@@ -74,6 +74,7 @@ function validateIssueEditFlags(flags: EditFlags): void {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: per-flag merge with user-only validation
 function applyIssueEdits(
   body: Record<string, unknown>,
   flags: EditFlags
@@ -114,16 +115,12 @@ function applyIssueEdits(
     body.owner = flags.owner.trim() === "" ? null : flags.owner;
   }
 
-  validateIssueRuleArrays(
-    body.conditions as Record<string, unknown>[] | undefined,
-    body.actions as Record<string, unknown>[] | undefined,
-    "conditions"
-  );
-  validateIssueRuleArrays(
-    body.conditions as Record<string, unknown>[] | undefined,
-    body.actions as Record<string, unknown>[] | undefined,
-    "actions"
-  );
+  if (conditions !== undefined) {
+    validateIssueRuleArrays(conditions, actions, "conditions");
+  }
+  if (actions !== undefined) {
+    validateIssueRuleArrays(conditions, actions, "actions");
+  }
   return body;
 }
 
