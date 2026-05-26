@@ -252,9 +252,10 @@ export async function verifySetup(
   }
 
   const spotlightUrl = `http://localhost:${boundPort}/stream`;
-  const envelopeReceived = new Promise<void>((r) =>
-    buffer.subscribe(() => r())
-  );
+  let subscriptionId: string | undefined;
+  const envelopeReceived = new Promise<void>((r) => {
+    subscriptionId = buffer.subscribe(() => r());
+  });
   const childEnv = buildVerifyEnv(spotlightUrl, detected, cwd);
 
   let child: ChildProcess;
@@ -312,6 +313,9 @@ export async function verifySetup(
   }
 
   await cleanupChild(child);
+  if (subscriptionId) {
+    buffer.unsubscribe(subscriptionId);
+  }
   process.removeListener("SIGINT", onSigint);
   process.removeListener("SIGTERM", onSigterm);
   await shutdownServer(server);
@@ -388,10 +392,10 @@ function reportOutcome(outcome: VerifyOutcome, ctx: ReportContext): void {
     return;
   }
 
-  // timeout or silent
+  const verifyTag = outcome.kind === "silent" ? "silent" : "timeout";
   ui.log.warn(`Could not verify — no output within ${VERIFY_TIMEOUT_S}s`);
   captureException(new Error("init verification failed"), {
-    tags: { ...telemetryTags, "wizard.verify": "timeout" },
+    tags: { ...telemetryTags, "wizard.verify": verifyTag },
     extra: telemetryExtra,
   });
 }

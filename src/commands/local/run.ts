@@ -346,8 +346,9 @@ async function* runWithVerify(
 
   const spotlightUrl = `${url}/stream`;
 
+  let subscriptionId: string | undefined;
   const envelopeReceived = new Promise<void>((resolveEnvelope) => {
-    buffer.subscribe(() => {
+    subscriptionId = buffer.subscribe(() => {
       resolveEnvelope();
     });
   });
@@ -421,6 +422,9 @@ async function* runWithVerify(
   try {
     await gracefulKill(child);
   } finally {
+    if (subscriptionId) {
+      buffer.unsubscribe(subscriptionId);
+    }
     process.removeListener("SIGINT", onSigint);
     process.removeListener("SIGTERM", onSigterm);
     await shutdownServer(server);
