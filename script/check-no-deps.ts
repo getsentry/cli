@@ -4,7 +4,7 @@
  *
  * Ensures package.json has no `dependencies` field. All packages must be
  * listed under `devDependencies` and bundled at build time via esbuild
- * (npm bundle) or Bun.build (standalone binary). This keeps the published
+ * (npm bundle) or fossilize (standalone binary). This keeps the published
  * package at zero install-time dependencies.
  *
  * Usage:
@@ -38,7 +38,7 @@ console.error(
   "All packages must be in devDependencies and bundled at build time."
 );
 console.error(
-  "Move these to devDependencies: bun remove <pkg> && bun add -d <pkg>"
+  "Move these to devDependencies: pnpm remove <pkg> && pnpm add -D <pkg>"
 );
 
 process.exit(1);

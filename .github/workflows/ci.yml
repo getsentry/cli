@@ -197,6 +197,7 @@ jobs:
       - run: pnpm run check:deps
       - run: pnpm run check:errors
       - run: pnpm run check:patches
+      - run: pnpm run check:stale-refs
 
   test-unit:
     name: Unit Tests

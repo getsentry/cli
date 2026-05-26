@@ -53,6 +53,40 @@ Sentry search uses **implicit AND** — space-separated terms are all required.
 Full syntax reference: [Sentry Search Docs](https://docs.sentry.io/concepts/search/)
 :::
 
+### Magic selectors
+
+Use `@latest` and `@most_frequent` to target issues without knowing their ID:
+
+```bash
+# View the most recent issue
+sentry issue view @latest
+
+# Explain the most frequently occurring issue
+sentry issue explain @most_frequent
+
+# Generate a fix plan for the latest issue
+sentry issue plan @latest
+```
+
+### List events for an issue
+
+```bash
+# List recent events for an issue
+sentry issue events FRONT-ABC
+
+# Filter events by search query
+sentry issue events FRONT-ABC --query "browser:Chrome"
+
+# Show full event details
+sentry issue events FRONT-ABC --full
+
+# Limit results and filter by time period
+sentry issue events FRONT-ABC --limit 50 --period 24h
+
+# Paginate through results
+sentry issue events FRONT-ABC -c next
+```
+
 ### View an issue
 
 ```bash

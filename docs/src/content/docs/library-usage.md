@@ -1,6 +1,6 @@
 ---
 title: Library Usage
-description: Use the Sentry CLI programmatically in Node.js or Bun
+description: Use the Sentry CLI programmatically in Node.js
 ---
 
 The Sentry CLI can be used as a JavaScript/TypeScript library, running commands
@@ -216,7 +216,6 @@ Calls should be sequential (awaited one at a time).
 ## Requirements
 
 - **Node.js >= 22** (required for `node:sqlite`)
-- Or **Bun** (any recent version)
 
 ## Streaming Commands
 
