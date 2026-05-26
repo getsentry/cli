@@ -333,12 +333,12 @@ export async function verifySetup(
   process.removeListener("SIGTERM", onSigterm);
   await shutdownServer(server);
 
-  // If the child crashed (non-zero exit) but stdout had no fatal patterns,
-  // startupPromise wins the race as "started". Correct to "exited" so the
-  // crash is reported instead of a false success.
+  // If the child crashed (non-zero exit) but the startup watcher resolved
+  // first as "started" or "silent", correct to "exited" so the crash is
+  // reported instead of a false success or misleading timeout message.
   let effectiveOutcome: VerifyOutcome = outcome;
   if (
-    outcome.kind === "started" &&
+    (outcome.kind === "started" || outcome.kind === "silent") &&
     preCleanupExitCode !== null &&
     preCleanupExitCode !== 0
   ) {
