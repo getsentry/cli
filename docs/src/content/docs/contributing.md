@@ -55,14 +55,14 @@ cli/
 │   │   ├── alert/       # create, delete, edit, list, view
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
 │   │   ├── cli/         # defaults, feedback, fix, import, setup, upgrade
-│   │   ├── dashboard/   # list, view, create, add, edit, delete, revisions, restore
-│   │   ├── event/       # view, list
-│   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, archive, merge
-│   │   ├── local/       # serve, run
+│   │   ├── dashboard/   # add, create, delete, edit, list, restore, revisions, view
+│   │   ├── event/       # list, view
+│   │   ├── issue/       # archive, events, explain, list, merge, plan, resolve, unresolve, view
+│   │   ├── local/       # run, serve
 │   │   ├── log/         # list, view
 │   │   ├── org/         # list, view
 │   │   ├── project/     # create, delete, list, view
-│   │   ├── release/     # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
+│   │   ├── release/     # create, delete, deploy, deploys, finalize, list, propose-version, set-commits, view
 │   │   ├── replay/      # list, view
 │   │   ├── repo/        # list
 │   │   ├── sourcemap/   # inject, upload
