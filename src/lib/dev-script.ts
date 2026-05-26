@@ -57,12 +57,13 @@ export async function detectDevCommand(
 
 /** Split a script value into spawn args, wrapping in a shell if needed. */
 function parseScriptArgs(value: string): string[] {
-  if (SHELL_FEATURES_RE.test(value)) {
+  const trimmed = value.trim();
+  if (SHELL_FEATURES_RE.test(trimmed)) {
     return process.platform === "win32"
-      ? ["cmd", "/c", value]
-      : ["sh", "-c", value];
+      ? ["cmd", "/c", trimmed]
+      : ["sh", "-c", trimmed];
   }
-  return value.trim().split(WHITESPACE_RE);
+  return trimmed.split(WHITESPACE_RE);
 }
 
 /** Try to detect a dev command from package.json scripts. */

@@ -25,11 +25,11 @@ import { CLI_VERSION } from "../constants.js";
 import { customFetch } from "../custom-ca.js";
 import { detectAgent } from "../detect-agent.js";
 import { EXIT, WizardError } from "../errors.js";
-import { logger } from "../logger.js";
 import {
   renderInlineMarkdown,
   stripColorTags,
 } from "../formatters/markdown.js";
+import { logger } from "../logger.js";
 import {
   abortIfCancelled,
   STEP_ACTIVE_LABELS,

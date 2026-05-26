@@ -362,7 +362,6 @@ type ReportContext = {
 };
 
 /** Report the verification outcome to the user and telemetry. */
-// biome-ignore lint/nursery/useMaxParams: existing 4-param shape; cwd is a defaulted extension
 function reportOutcome(outcome: VerifyOutcome, ctx: ReportContext): void {
   const { ui, result, detected, getLines } = ctx;
   const telemetryTags = {
