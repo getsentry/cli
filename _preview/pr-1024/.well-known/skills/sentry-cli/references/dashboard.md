@@ -204,8 +204,8 @@ sentry dashboard restore 'Frontend Performance' --revision 3
 # Restore by dashboard ID
 sentry dashboard restore 12345 --revision 1
 
-# Preview without applying
-sentry dashboard restore 12345 --revision 1 --dry-run
+# With explicit org
+sentry dashboard restore my-org 12345 --revision 1
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
