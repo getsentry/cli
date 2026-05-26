@@ -321,6 +321,10 @@ export async function verifySetup(
     clearTimeout(timeoutHandle);
   }
 
+  // Capture the exit code before cleanup — cleanupChild sends SIGTERM/SIGKILL
+  // which would set exitCode to 143/137, masking a natural crash code.
+  const preCleanupExitCode = child.exitCode;
+
   await cleanupChild(child);
   if (subscriptionId) {
     buffer.unsubscribe(subscriptionId);
@@ -332,10 +336,13 @@ export async function verifySetup(
   // If the child crashed (non-zero exit) but stdout had no fatal patterns,
   // startupPromise wins the race as "started". Correct to "exited" so the
   // crash is reported instead of a false success.
-  const exitCode = child.exitCode;
   let effectiveOutcome: VerifyOutcome = outcome;
-  if (outcome.kind === "started" && exitCode !== null && exitCode !== 0) {
-    effectiveOutcome = { kind: "exited", code: exitCode };
+  if (
+    outcome.kind === "started" &&
+    preCleanupExitCode !== null &&
+    preCleanupExitCode !== 0
+  ) {
+    effectiveOutcome = { kind: "exited", code: preCleanupExitCode };
   }
 
   reportOutcome(effectiveOutcome, { ui, result, detected, getLines });

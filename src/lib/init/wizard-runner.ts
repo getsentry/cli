@@ -25,6 +25,7 @@ import { CLI_VERSION } from "../constants.js";
 import { customFetch } from "../custom-ca.js";
 import { detectAgent } from "../detect-agent.js";
 import { EXIT, WizardError } from "../errors.js";
+import { logger } from "../logger.js";
 import {
   renderInlineMarkdown,
   stripColorTags,
@@ -887,7 +888,11 @@ export async function handleFinalResult(
     if (spinState.running) {
       spin.message("Verifying setup...");
     }
-    await verifySetup(result, ui, cwd);
+    try {
+      await verifySetup(result, ui, cwd);
+    } catch (error) {
+      logger.debug("Verification threw unexpectedly", error);
+    }
   }
 
   if (spinState.running) {
