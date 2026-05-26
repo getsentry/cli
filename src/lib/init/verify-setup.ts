@@ -50,17 +50,17 @@ const MAX_OUTPUT_LINES = 50;
 /** Absolute-path pattern — scrub user-specific directory paths from telemetry. */
 const ABS_PATH_RE = /(?:\/[\w.@-]+){2,}/g;
 
-/** Env-var assignment pattern for redaction. */
-const ENV_VAR_RE = /[A-Za-z_]\w*=\S+/g;
+/** Key=value pattern for redaction (env vars and --flag=value args). */
+const KEY_VALUE_RE = /(?:--?)?[A-Za-z_][\w-]*=\S+/g;
 
-/** URI userinfo (user:password@) pattern for redaction. */
-const URI_USERINFO_RE = /\/\/[^@/\s]+:[^@/\s]+@/g;
+/** URI userinfo (user:password@ or :password@) pattern for redaction. */
+const URI_USERINFO_RE = /\/\/[^@/\s]*:[^@/\s]+@/g;
 
 /** Strip absolute paths, env-var values, and URI credentials from output. */
 function scrubOutputLine(line: string): string {
   return line
     .replace(URI_USERINFO_RE, "//[REDACTED]@")
-    .replace(ENV_VAR_RE, (m) => `${m.split("=")[0]}=[REDACTED]`)
+    .replace(KEY_VALUE_RE, (m) => `${m.split("=")[0]}=[REDACTED]`)
     .replace(ABS_PATH_RE, "[PATH]");
 }
 
@@ -111,6 +111,7 @@ function watchChildOutput(
   let hasOutput = false;
   let settled = false;
 
+  let timer: ReturnType<typeof setTimeout> | undefined;
   let settle: (outcome: StartupOutcome) => void;
   const promise = new Promise<StartupOutcome>((r) => {
     settle = (outcome) => {
@@ -118,6 +119,7 @@ function watchChildOutput(
         return;
       }
       settled = true;
+      clearTimeout(timer);
       r(outcome);
     };
   });
@@ -146,12 +148,11 @@ function watchChildOutput(
   child.stdout?.on("data", processChunk);
   child.stderr?.on("data", processChunk);
 
-  const timer = setTimeout(() => {
+  timer = setTimeout(() => {
     settle(hasOutput ? { kind: "started" } : { kind: "silent" });
   }, timeoutMs);
 
   child.on("close", () => {
-    clearTimeout(timer);
     if (hasOutput) {
       settle(scanLinesForError(lines));
     } else {
@@ -362,9 +363,7 @@ function reportOutcome(outcome: VerifyOutcome, ctx: ReportContext): void {
   };
   const telemetryExtra = {
     features: result.result?.features,
-    detectedCommand: detected.args
-      .join(" ")
-      .replace(/[A-Za-z_]\w*=\S+/g, (m) => `${m.split("=")[0]}=[REDACTED]`),
+    detectedCommand: scrubOutputLine(detected.args.join(" ")),
     detectedSource: detected.source,
     outputLines: getLines().length,
   };
