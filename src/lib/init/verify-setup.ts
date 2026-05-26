@@ -53,9 +53,13 @@ const ABS_PATH_RE = /(?:\/[\w.@-]+){2,}/g;
 /** Env-var assignment pattern for redaction. */
 const ENV_VAR_RE = /[A-Za-z_]\w*=\S+/g;
 
-/** Strip absolute paths and env-var values from a dev-server output line. */
+/** URI userinfo (user:password@) pattern for redaction. */
+const URI_USERINFO_RE = /\/\/[^@/\s]+:[^@/\s]+@/g;
+
+/** Strip absolute paths, env-var values, and URI credentials from output. */
 function scrubOutputLine(line: string): string {
   return line
+    .replace(URI_USERINFO_RE, "//[REDACTED]@")
     .replace(ENV_VAR_RE, (m) => `${m.split("=")[0]}=[REDACTED]`)
     .replace(ABS_PATH_RE, "[PATH]");
 }
@@ -320,7 +324,20 @@ export async function verifySetup(
   process.removeListener("SIGTERM", onSigterm);
   await shutdownServer(server);
 
-  reportOutcome(outcome, { ui, result, detected, getLines });
+  // If the child crashed (non-zero exit) but stdout had no fatal patterns,
+  // startupPromise wins the race as "started". Correct to "exited" so the
+  // crash is reported instead of a false success.
+  const exitCode = child.exitCode;
+  let effectiveOutcome: VerifyOutcome = outcome;
+  if (
+    outcome.kind === "started" &&
+    exitCode !== null &&
+    exitCode !== 0
+  ) {
+    effectiveOutcome = { kind: "exited", code: exitCode };
+  }
+
+  reportOutcome(effectiveOutcome, { ui, result, detected, getLines });
 }
 
 type VerifyOutcome =
