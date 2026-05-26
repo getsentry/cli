@@ -379,9 +379,8 @@ function reportOutcome(outcome: VerifyOutcome, ctx: ReportContext): void {
   }
 
   if (outcome.kind === "errored") {
-    ui.log.warn(
-      `Could not verify — startup error: ${outcome.errorLine.slice(0, 200)}`
-    );
+    const scrubbed = scrubOutputLine(outcome.errorLine).slice(0, 200);
+    ui.log.warn(`Could not verify — startup error: ${scrubbed}`);
     captureException(new Error("init verification: startup error"), {
       tags: { ...telemetryTags, "wizard.verify": "startup_error" },
       extra: {

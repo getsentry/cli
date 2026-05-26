@@ -312,14 +312,18 @@ async function gracefulKill(child: ChildProcess): Promise<void> {
     }),
   ]);
   clearTimeout(graceTimer);
-  if (!exited) {
+  if (!exited && child.exitCode === null) {
     try {
       child.kill("SIGKILL");
     } catch (error) {
       logger.debug("Child already exited during graceful kill", error);
       return;
     }
-    await new Promise<void>((r) => child.on("close", () => r()));
+    // Only await close if the child hasn't exited yet — avoids hanging
+    // if close fired between SIGKILL and listener attachment.
+    if (child.exitCode === null) {
+      await new Promise<void>((r) => child.on("close", () => r()));
+    }
   }
 }
 
