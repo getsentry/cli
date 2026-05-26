@@ -158,11 +158,62 @@ function watchChildOutput(
   return { promise, getLines: () => lines };
 }
 
+/** Build the child process environment for verification. */
+function buildVerifyEnv(
+  spotlightUrl: string,
+  detected: { source: string },
+  cwd: string
+): Record<string, string | undefined> {
+  let env: Record<string, string | undefined> = {
+    ...process.env,
+    SENTRY_SPOTLIGHT: spotlightUrl,
+    NEXT_PUBLIC_SENTRY_SPOTLIGHT: spotlightUrl,
+    SENTRY_TRACES_SAMPLE_RATE: process.env.SENTRY_TRACES_SAMPLE_RATE ?? "1",
+    SENTRY_RELEASE: "sentry-cli-verify",
+  };
+  if (detected.source.startsWith("package.json")) {
+    const binDir = resolve(cwd, "node_modules", ".bin");
+    const sep = process.platform === "win32" ? ";" : ":";
+    env = {
+      ...env,
+      PATH: env.PATH ? `${binDir}${sep}${env.PATH}` : binDir,
+    };
+  }
+  return env;
+}
+
+/** Gracefully kill a child process with SIGTERM → grace period → SIGKILL. */
+async function cleanupChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null) {
+    return;
+  }
+  try {
+    child.kill("SIGTERM");
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    const exited = await Promise.race([
+      new Promise<true>((r) => child.on("close", () => r(true))),
+      new Promise<false>((r) => {
+        graceTimer = setTimeout(() => r(false), 5000);
+      }),
+    ]);
+    clearTimeout(graceTimer);
+    if (!exited && child.exitCode === null) {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        logger.debug("Child exited before SIGKILL");
+      }
+    }
+  } catch (error) {
+    logger.debug("Failed to kill verification child", error);
+  }
+}
+
 /**
  * Run the dev server, spawn the child process, and verify that the Sentry
  * SDK is working or at minimum that the app starts without errors.
  *
- * Called after `formatResult` in the wizard success path. On failure this
+ * Called before `formatResult` in the wizard success path. On failure this
  * logs a warning and reports to Sentry telemetry — it does NOT throw, since
  * the init itself succeeded and the user should not be blocked.
  */
@@ -201,31 +252,10 @@ export async function verifySetup(
   }
 
   const spotlightUrl = `http://localhost:${boundPort}/stream`;
-
-  const envelopeReceived = new Promise<void>((resolveEnvelope) => {
-    buffer.subscribe(() => {
-      resolveEnvelope();
-    });
-  });
-
-  let childEnv: Record<string, string | undefined> = {
-    ...process.env,
-    SENTRY_SPOTLIGHT: spotlightUrl,
-    NEXT_PUBLIC_SENTRY_SPOTLIGHT: spotlightUrl,
-    SENTRY_TRACES_SAMPLE_RATE:
-      process.env.SENTRY_TRACES_SAMPLE_RATE ?? "1",
-    SENTRY_RELEASE: "sentry-cli-verify",
-  };
-
-  // Augment PATH for Node projects
-  if (detected.source.startsWith("package.json")) {
-    const binDir = resolve(cwd, "node_modules", ".bin");
-    const sep = process.platform === "win32" ? ";" : ":";
-    childEnv = {
-      ...childEnv,
-      PATH: childEnv.PATH ? `${binDir}${sep}${childEnv.PATH}` : binDir,
-    };
-  }
+  const envelopeReceived = new Promise<void>((r) =>
+    buffer.subscribe(() => r())
+  );
+  const childEnv = buildVerifyEnv(spotlightUrl, detected, cwd);
 
   let child: ChildProcess;
   try {
@@ -242,26 +272,29 @@ export async function verifySetup(
     return;
   }
 
-  const onSigint = () => child.kill("SIGINT");
-  const onSigterm = () => child.kill("SIGTERM");
+  const safeKill = (sig: NodeJS.Signals) => {
+    try {
+      child.kill(sig);
+    } catch {
+      logger.debug(`Child already exited when forwarding ${sig}`);
+    }
+  };
+  const onSigint = () => safeKill("SIGINT");
+  const onSigterm = () => safeKill("SIGTERM");
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);
 
-  // Watch stdout/stderr for startup signals
   const { promise: startupPromise, getLines } = watchChildOutput(
     child,
     VERIFY_TIMEOUT_S * 1000
   );
-
   const childExited = new Promise<{ kind: "exited"; code: number }>((r) => {
     child.on("close", (code) =>
       r({ kind: "exited" as const, code: code ?? 1 })
     );
   });
 
-  // Race: envelope (best), startup detection (good), child exit, or timeout
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-
   const outcome = await Promise.race([
     envelopeReceived.then(() => ({ kind: "envelope" as const })),
     startupPromise,
@@ -278,37 +311,12 @@ export async function verifySetup(
     clearTimeout(timeoutHandle);
   }
 
-  // Clean up — kill and wait for the child to release its port.
-  // Skip if the child already exited (avoids hanging on close listeners).
-  if (child.exitCode === null) {
-    try {
-      child.kill("SIGTERM");
-      let graceTimer: ReturnType<typeof setTimeout> | undefined;
-      const exited = await Promise.race([
-        new Promise<true>((r) => child.on("close", () => r(true))),
-        new Promise<false>((r) => {
-          graceTimer = setTimeout(() => r(false), 5000);
-        }),
-      ]);
-      clearTimeout(graceTimer);
-      if (!exited) {
-        child.kill("SIGKILL");
-        await new Promise<void>((r) => child.on("close", () => r()));
-      }
-    } catch (error) {
-      logger.debug("Failed to kill verification child", error);
-    }
-  }
+  await cleanupChild(child);
   process.removeListener("SIGINT", onSigint);
   process.removeListener("SIGTERM", onSigterm);
   await shutdownServer(server);
 
-  reportOutcome(outcome, {
-    ui,
-    result,
-    detected,
-    getLines,
-  });
+  reportOutcome(outcome, { ui, result, detected, getLines });
 }
 
 type VerifyOutcome =
@@ -352,9 +360,8 @@ function reportOutcome(outcome: VerifyOutcome, ctx: ReportContext): void {
 
   if (outcome.kind === "errored") {
     ui.log.warn(
-      "Sentry.init() call found in changed files — SDK may not initialize correctly"
+      `Could not verify — startup error: ${outcome.errorLine.slice(0, 200)}`
     );
-    logger.debug(`Startup error: ${outcome.errorLine}`);
     captureException(new Error("init verification: startup error"), {
       tags: { ...telemetryTags, "wizard.verify": "startup_error" },
       extra: {
