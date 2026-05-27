@@ -29,6 +29,7 @@ import {
 } from "../../lib/replay-search.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, SentryIssue } from "../../types/index.js";
+import { IssueViewOutputSchema } from "../../types/index.js";
 import { issueIdPositional, resolveIssue } from "./utils.js";
 
 type ViewFlags = {
@@ -199,6 +200,7 @@ export const viewCommand = buildCommand({
   output: {
     human: formatIssueView,
     jsonTransform: jsonTransformIssueView,
+    schema: IssueViewOutputSchema,
   },
   parameters: {
     positional: issueIdPositional,
