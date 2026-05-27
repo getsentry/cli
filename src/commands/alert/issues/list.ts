@@ -635,10 +635,18 @@ export const listCommand = buildListCommand("alert", {
     const { cwd } = this;
     const parsed = parseOrgProjectArg(target);
 
-    // --web: open browser when org and project are known from the target arg
-    if (flags.web && parsed.type === "explicit") {
+    // --web: open browser when the target arg provides an org directly.
+    // For auto-detect and project-search modes the org isn't known until
+    // after API resolution, so --web falls through to the normal list path.
+    if (
+      flags.web &&
+      (parsed.type === "explicit" || parsed.type === "org-all")
+    ) {
       await openInBrowser(
-        buildIssueAlertsUrl(parsed.org, parsed.project),
+        buildIssueAlertsUrl(
+          parsed.org,
+          parsed.type === "explicit" ? parsed.project : undefined
+        ),
         "issue alert rules"
       );
       return;

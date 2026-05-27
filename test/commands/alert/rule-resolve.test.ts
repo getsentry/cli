@@ -92,4 +92,10 @@ describe("parseMetricRuleArg", () => {
   test("bare org with slash but no ref throws", () => {
     expect(() => parseMetricRuleArg("my-org/", HINT)).toThrow(ValidationError);
   });
+
+  test("two slashes (org/project/rule) throws — metric alerts are org-scoped", () => {
+    expect(() => parseMetricRuleArg("org/project/42", HINT)).toThrow(
+      ValidationError
+    );
+  });
 });

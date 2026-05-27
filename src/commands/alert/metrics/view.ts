@@ -84,17 +84,13 @@ export const viewCommand = buildCommand({
       cwd,
       "alert metrics view"
     );
-    const orgSlugs = [org];
 
-    const result = await resolveMetricAlertRule(orgSlugs, ref, USAGE_HINT);
     if (flags.web) {
-      await openInBrowser(
-        buildMetricAlertsUrl(result.orgSlug),
-        "metric alert rules"
-      );
+      await openInBrowser(buildMetricAlertsUrl(org), "metric alert rules");
       return;
     }
 
+    const result = await resolveMetricAlertRule([org], ref, USAGE_HINT);
     yield new CommandOutput(result);
   },
 });

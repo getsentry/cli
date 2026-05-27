@@ -45,6 +45,14 @@ export function parseMetricRuleArg(
     return { ref: trimmed, targetArg: undefined };
   }
 
+  const slashCount = [...trimmed].filter((c) => c === "/").length;
+  if (slashCount > 1) {
+    throw new ValidationError(
+      `Metric alerts are org-scoped — use '<org>/<rule-id-or-name>', not '<org>/<project>/<rule>'.\nUse: ${usageHint}`,
+      "rule"
+    );
+  }
+
   const lastSlash = trimmed.lastIndexOf("/");
   const targetPart = trimmed.slice(0, lastSlash).trim();
   const ref = trimmed.slice(lastSlash + 1).trim();
@@ -54,12 +62,7 @@ export function parseMetricRuleArg(
       "rule"
     );
   }
-  // Metric alerts are org-scoped, so a bare org slug (no slash) must be
-  // treated as org-all by parseOrgProjectArg. Append a trailing slash to
-  // prevent it from being misrouted to project-search.
-  const orgTarget =
-    targetPart && !targetPart.includes("/") ? `${targetPart}/` : targetPart;
-  return { ref, targetArg: orgTarget || undefined };
+  return { ref, targetArg: targetPart ? `${targetPart}/` : undefined };
 }
 
 export async function listAllMetricRulesForOrg(

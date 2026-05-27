@@ -327,12 +327,13 @@ export function buildTraceUrl(orgSlug: string, traceId: string): string {
  */
 export function buildIssueAlertsUrl(
   orgSlug: string,
-  projectSlug: string
+  projectSlug?: string
 ): string {
+  const projectFilter = projectSlug ? `?project=${projectSlug}` : "";
   if (isSaaS()) {
-    return `${getOrgBaseUrl(orgSlug)}/alerts/rules/?project=${projectSlug}`;
+    return `${getOrgBaseUrl(orgSlug)}/alerts/rules/${projectFilter}`;
   }
-  return `${getSentryBaseUrl()}/organizations/${orgSlug}/alerts/rules/?project=${projectSlug}`;
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/alerts/rules/${projectFilter}`;
 }
 
 /**

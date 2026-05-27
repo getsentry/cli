@@ -90,16 +90,17 @@ export const viewCommand = buildCommand({
       throw new ContextError("Organization and project", USAGE_HINT);
     }
 
-    const result = await resolveIssueAlertRule(targets, ref, USAGE_HINT);
-
     if (flags.web) {
+      // biome-ignore lint/style/noNonNullAssertion: guarded by length check above
+      const t = targets[0]!;
       await openInBrowser(
-        buildIssueAlertsUrl(result.target.org, result.target.project),
+        buildIssueAlertsUrl(t.org, t.project),
         "issue alert rules"
       );
       return;
     }
 
+    const result = await resolveIssueAlertRule(targets, ref, USAGE_HINT);
     yield new CommandOutput(result);
   },
 });

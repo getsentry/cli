@@ -622,7 +622,9 @@ export const listCommand = buildListCommand("alert", {
     const { cwd } = this;
     const parsed = parseOrgProjectArg(target);
 
-    // --web: open browser when org is known from the target arg
+    // --web: open browser when the target arg provides an org directly.
+    // For auto-detect and project-search modes the org isn't known until
+    // after API resolution, so --web falls through to the normal list path.
     if (
       flags.web &&
       (parsed.type === "explicit" || parsed.type === "org-all")
