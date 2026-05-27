@@ -160,7 +160,12 @@ async function fetchRulesForTarget(
       serverCursor = nextCursor;
     }
 
-    return { target, rules, hasMore: false };
+    return {
+      target,
+      rules,
+      hasMore: !!serverCursor,
+      nextCursor: serverCursor ?? undefined,
+    };
   });
 
   if (!result.ok) {
@@ -394,7 +399,10 @@ async function handleResolvedTargets(
     if (result?.success) {
       return result.data.nextCursor ?? null;
     }
-    return startCursors.get(key) ?? null;
+    // Preserve the previous cursor so the target is retried on the next page.
+    // If no prior cursor exists (first-page failure), use the start-of-list
+    // cursor to prevent the target from being permanently excluded.
+    return startCursors.get(key) ?? "0:0:0";
   });
   const hasAnyCursor = cursorValues.some((c) => c !== null);
   const compoundNextCursor = hasAnyCursor

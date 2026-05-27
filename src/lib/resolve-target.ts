@@ -1806,7 +1806,11 @@ export async function resolveTargetsFromParsedArg(
               const info = await getProject(t.org, t.project);
               const id = toNumericId(info.id);
               return id !== undefined ? { ...t, projectId: id } : t;
-            } catch {
+            } catch (error) {
+              logger.debug(
+                `Failed to enrich project ID for ${t.org}/${t.project}`,
+                error
+              );
               return t;
             }
           })
