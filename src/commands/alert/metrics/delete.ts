@@ -6,8 +6,6 @@
 
 import type { SentryContext } from "../../../context.js";
 import { deleteMetricAlertRule } from "../../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
-import { ContextError } from "../../../lib/errors.js";
 import { CommandOutput } from "../../../lib/formatters/output.js";
 import { logger } from "../../../lib/logger.js";
 import {
@@ -15,7 +13,7 @@ import {
   confirmByTyping,
   isConfirmationBypassed,
 } from "../../../lib/mutate-command.js";
-import { resolveTargetsFromParsedArg } from "../../../lib/resolve-target.js";
+import { resolveOrgOptionalProjectFromArg } from "../../../lib/resolve-target.js";
 import { parseMetricRuleArg, resolveMetricAlertRule } from "./rule-resolve.js";
 
 const USAGE_HINT = "sentry alert metrics delete <org>/<rule-id-or-name>";
@@ -74,15 +72,12 @@ export const deleteCommand = buildDeleteCommand({
   async *func(this: SentryContext, flags: DeleteFlags, arg: string) {
     const { cwd } = this;
     const { ref, targetArg } = parseMetricRuleArg(arg, USAGE_HINT);
-    const parsed = parseOrgProjectArg(targetArg);
-    const { targets } = await resolveTargetsFromParsedArg(parsed, {
+    const { org } = await resolveOrgOptionalProjectFromArg(
+      targetArg,
       cwd,
-      usageHint: USAGE_HINT,
-    });
-    const orgSlugs = [...new Set(targets.map((t) => t.org))];
-    if (orgSlugs.length === 0) {
-      throw new ContextError("Organization", USAGE_HINT);
-    }
+      "alert metrics delete"
+    );
+    const orgSlugs = [org];
 
     const { orgSlug, rule } = await resolveMetricAlertRule(
       orgSlugs,

@@ -1,10 +1,8 @@
 import type { SentryContext } from "../../../context.js";
-import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { openInBrowser } from "../../../lib/browser.js";
 import { buildCommand } from "../../../lib/command.js";
-import { ContextError } from "../../../lib/errors.js";
 import { CommandOutput } from "../../../lib/formatters/output.js";
-import { resolveTargetsFromParsedArg } from "../../../lib/resolve-target.js";
+import { resolveOrgOptionalProjectFromArg } from "../../../lib/resolve-target.js";
 import { buildMetricAlertsUrl } from "../../../lib/sentry-urls.js";
 import {
   type MetricRuleResolution,
@@ -81,15 +79,12 @@ export const viewCommand = buildCommand({
   async *func(this: SentryContext, flags: ViewFlags, arg: string) {
     const { cwd } = this;
     const { ref, targetArg } = parseMetricRuleArg(arg, USAGE_HINT);
-    const parsed = parseOrgProjectArg(targetArg);
-    const { targets } = await resolveTargetsFromParsedArg(parsed, {
+    const { org } = await resolveOrgOptionalProjectFromArg(
+      targetArg,
       cwd,
-      usageHint: USAGE_HINT,
-    });
-    const orgSlugs = [...new Set(targets.map((target) => target.org))];
-    if (orgSlugs.length === 0) {
-      throw new ContextError("Organization", USAGE_HINT);
-    }
+      "alert metrics view"
+    );
+    const orgSlugs = [org];
 
     const result = await resolveMetricAlertRule(orgSlugs, ref, USAGE_HINT);
     if (flags.web) {

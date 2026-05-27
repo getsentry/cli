@@ -9,11 +9,10 @@ import {
   getMetricAlertRuleDocument,
   putMetricAlertRule,
 } from "../../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../../lib/command.js";
-import { ContextError, ValidationError } from "../../../lib/errors.js";
+import { ValidationError } from "../../../lib/errors.js";
 import { CommandOutput } from "../../../lib/formatters/output.js";
-import { resolveTargetsFromParsedArg } from "../../../lib/resolve-target.js";
+import { resolveOrgOptionalProjectFromArg } from "../../../lib/resolve-target.js";
 import {
   normalizeProjectList,
   parseJsonObjectList,
@@ -130,8 +129,12 @@ function validateMetricBody(body: Record<string, unknown>): void {
   validateMetricTriggers(
     body.triggers as Record<string, unknown>[] | undefined
   );
-  validateMetricDataset(String(body.dataset ?? ""));
-  validateMetricTimeWindow(Number(body.timeWindow ?? 0));
+  if (body.dataset !== undefined) {
+    validateMetricDataset(String(body.dataset));
+  }
+  if (body.timeWindow !== undefined) {
+    validateMetricTimeWindow(Number(body.timeWindow));
+  }
   if (typeof body.query !== "string" || body.query.trim() === "") {
     throw new ValidationError("query must be present and non-empty.", "query");
   }
@@ -247,15 +250,12 @@ export const editCommand = buildCommand({
     const { cwd } = this;
     validateMetricEditFlags(flags);
     const { ref, targetArg } = parseMetricRuleArg(arg, USAGE_HINT);
-    const parsed = parseOrgProjectArg(targetArg);
-    const { targets } = await resolveTargetsFromParsedArg(parsed, {
+    const { org } = await resolveOrgOptionalProjectFromArg(
+      targetArg,
       cwd,
-      usageHint: USAGE_HINT,
-    });
-    const orgSlugs = [...new Set(targets.map((t) => t.org))];
-    if (orgSlugs.length === 0) {
-      throw new ContextError("Organization", USAGE_HINT);
-    }
+      "alert metrics edit"
+    );
+    const orgSlugs = [org];
     const { orgSlug, rule } = await resolveMetricAlertRule(
       orgSlugs,
       ref,
@@ -273,7 +273,7 @@ export const editCommand = buildCommand({
       org: orgSlug,
       id: String(updated.id ?? rule.id),
       status:
-        updated.status === 0 || updated.status === "0" ? "active" : "disabled",
+        updated.status === 1 || updated.status === "1" ? "disabled" : "active",
     } satisfies EditResult);
   },
 });

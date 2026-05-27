@@ -146,6 +146,7 @@ export const createCommand = buildCommand({
     },
     aliases: { ...DRY_RUN_ALIASES, t: "trigger", p: "project" },
   },
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent per-flag validation and org resolution
   async *func(this: SentryContext, flags: CreateFlags, arg: string) {
     const { cwd } = this;
     if (!flags.name.trim()) {
@@ -166,7 +167,10 @@ export const createCommand = buildCommand({
     validateMetricTriggers(triggers);
     const projects = normalizeProjectList(flags.project);
 
-    const parsed = parseOrgProjectArg(arg);
+    // Metric alerts are org-scoped — treat a bare slug as org-all to avoid
+    // misrouting through project-search.
+    const normalizedArg = arg && !arg.includes("/") ? `${arg}/` : arg;
+    const parsed = parseOrgProjectArg(normalizedArg);
     const { targets } = await resolveTargetsFromParsedArg(parsed, {
       cwd,
       usageHint: USAGE_HINT,
@@ -213,7 +217,7 @@ export const createCommand = buildCommand({
 
     const created = await createMetricAlertRule(orgSlug, body);
     const status: "active" | "disabled" =
-      created.status === 0 || created.status === "0" ? "active" : "disabled";
+      created.status === 1 || created.status === "1" ? "disabled" : "active";
     yield new CommandOutput({
       org: orgSlug,
       id: String(created.id ?? ""),
