@@ -20,6 +20,15 @@ View details of one or more events
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+**Examples:**
+
+```bash
+sentry event view abc123def456abc123def456abc12345
+
+# Open in browser
+sentry event view abc123def456abc123def456abc12345 -w
+```
+
 ### `sentry event list <issue>`
 
 List events for an issue
@@ -51,5 +60,31 @@ List events for an issue
 | `dateCreated` | string | ISO 8601 creation timestamp |
 | `crashFile` | string \| null | Crash file URL |
 | `metadata` | object \| null | Event metadata |
+
+**Examples:**
+
+```bash
+# List events for an issue (using short ID)
+sentry event list PROJ-ABC
+
+# List events for an issue (using numeric ID)
+sentry event list 123456789
+
+# Filter by search query
+sentry event list PROJ-ABC --query "browser:Chrome"
+
+# Include full event bodies (stacktraces)
+sentry event list PROJ-ABC --full
+
+# Limit results and time range
+sentry event list PROJ-ABC --limit 50 --period 24h
+
+# Paginate through results
+sentry event list PROJ-ABC -c next
+sentry event list PROJ-ABC -c prev
+
+# Output as JSON
+sentry event list PROJ-ABC --json
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

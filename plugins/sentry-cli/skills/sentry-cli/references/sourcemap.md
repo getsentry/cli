@@ -22,6 +22,19 @@ Inject debug IDs into JavaScript files and sourcemaps
 - `--dry-run - Show what would be modified without writing`
 - `--allow-empty - Exit successfully when no JS + sourcemap pairs are found (default: error out to catch silent build misconfigurations)`
 
+**Examples:**
+
+```bash
+# Inject debug IDs into all JS files in dist/
+sentry sourcemap inject ./dist
+
+# Preview changes without writing
+sentry sourcemap inject ./dist --dry-run
+
+# Only process specific extensions
+sentry sourcemap inject ./build --ext .js,.mjs
+```
+
 ### `sentry sourcemap upload <directory>`
 
 Upload sourcemaps to Sentry
@@ -37,5 +50,20 @@ Upload sourcemaps to Sentry
 - `--strip-common-prefix - Automatically strip the longest common path prefix from all files`
 - `--no-rewrite - Upload files as-is without injecting debug IDs`
 - `--allow-empty - Exit successfully when no JS + sourcemap pairs are found (default: error out to catch silent build misconfigurations)`
+
+**Examples:**
+
+```bash
+# Upload sourcemaps from dist/
+sentry sourcemap upload ./dist
+
+# Associate with a release
+sentry sourcemap upload ./dist --release 1.0.0
+
+# Set a custom URL prefix
+sentry sourcemap upload ./dist --url-prefix '~/static/js/'
+
+sentry sourcemap upload ./dist --allow-empty
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

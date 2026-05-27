@@ -34,6 +34,33 @@ List logs from a project
 | `severity` | string \| null | Severity level (error, warning, info, debug) |
 | `trace` | string \| null | Trace ID for correlation |
 
+**Examples:**
+
+```bash
+# List last 100 logs (default)
+sentry log list
+
+# Show only error logs
+sentry log list -q 'level:error'
+
+# Filter by message content
+sentry log list -q 'database'
+
+# Limit results
+sentry log list --limit 50
+
+# Stream with default 2-second poll interval
+sentry log list -f
+
+# Stream with custom 5-second poll interval
+sentry log list -f 5
+
+# Stream error logs from a specific project
+sentry log list my-org/backend -f -q 'level:error'
+
+sentry log list --json | jq '.data[] | select(.severity == "error")'
+```
+
 ### `sentry log view <org/project/log-id...>`
 
 View details of one or more log entries
@@ -41,5 +68,17 @@ View details of one or more log entries
 **Flags:**
 - `-w, --web - Open in browser`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+
+**Examples:**
+
+```bash
+sentry log view 968c763c740cfda8b6728f27fb9e9b01
+
+# With explicit project
+sentry log view my-org/backend 968c763c740cfda8b6728f27fb9e9b01
+
+# Open in browser
+sentry log view 968c763c740cfda8b6728f27fb9e9b01 -w
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
