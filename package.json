@@ -90,8 +90,8 @@
   },
   "scripts": {
     "tsx": "tsx --import ./script/require-shim.mjs",
-    "cli": "pnpm tsx src/bin.ts",
-    "dev": "pnpm run generate:schema && pnpm run generate:docs && pnpm run generate:sdk && pnpm tsx src/bin.ts",
+    "cli": "tsx --import ./script/require-shim.mjs src/bin.ts",
+    "dev": "pnpm run generate:schema && pnpm run generate:docs && pnpm run generate:sdk && tsx --import ./script/require-shim.mjs src/bin.ts",
     "build": "pnpm run generate:schema && pnpm run generate:docs && pnpm run generate:sdk && pnpm tsx script/build.ts --single",
     "build:all": "pnpm run generate:schema && pnpm run generate:docs && pnpm run generate:sdk && pnpm tsx script/build.ts",
     "bundle": "pnpm run generate:schema && pnpm run generate:docs && pnpm run generate:sdk && pnpm tsx script/bundle.ts",
