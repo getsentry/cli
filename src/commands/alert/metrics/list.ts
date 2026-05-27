@@ -397,9 +397,9 @@ async function handleResolvedOrgs(
       return result.data.nextCursor ?? null;
     }
     // Preserve the previous cursor so the org is retried on the next page.
-    // If no prior cursor exists (first-page failure), use the start-of-list
-    // cursor to prevent the org from being permanently excluded.
-    return startCursors.get(key) ?? "0:0:0";
+    // First-page failures (no prior cursor) return null to mark the org
+    // as exhausted — retrying with a sentinel would loop infinitely.
+    return startCursors.get(key) ?? null;
   });
   const hasAnyCursor = cursorValues.some((c) => c !== null);
   const compoundNextCursor = hasAnyCursor

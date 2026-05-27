@@ -22,32 +22,12 @@ List issue alert rules
 - `-c, --cursor <value> - Pagination cursor (use "next" for next page, "prev" for previous)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
-**Examples:**
-
-```bash
-# List issue alert rules for a project
-sentry alert issues list my-org/my-project
-
-# Filter rules by name
-sentry alert issues list my-org/my-project --query "spike"
-```
-
 ### `sentry alert issues view <org/project/rule-id-or-name>`
 
 View an issue alert rule
 
 **Flags:**
 - `-w, --web - Open issue alert rules page in browser`
-
-**Examples:**
-
-```bash
-# View by ID
-sentry alert issues view my-org/my-project/12345
-
-# View by name
-sentry alert issues view my-org/my-project/"Error Spike"
-```
 
 ### `sentry alert issues create <org/project>`
 
@@ -65,17 +45,6 @@ Create an issue alert rule
 - `--owner <value> - Owner (team:user style value accepted by Sentry API)`
 - `-n, --dry-run - Show what would happen without making changes`
 
-**Examples:**
-
-```bash
-# Create an issue alert rule with inline JSON condition/action
-sentry alert issues create my-org/my-project \
-  --name "Error Spike" \
-  --condition '{"id":"sentry.rules.conditions.first_seen_event.FirstSeenEventCondition"}' \
-  --action '{"id":"sentry.mail.actions.NotifyEmailAction","targetType":"Team","targetIdentifier":1}' \
-  --action-match any
-```
-
 ### `sentry alert issues delete <org/project/rule-id-or-name>`
 
 Delete an issue alert rule
@@ -84,16 +53,6 @@ Delete an issue alert rule
 - `-y, --yes - Skip confirmation prompt`
 - `-f, --force - Force the operation without confirmation`
 - `-n, --dry-run - Show what would happen without making changes`
-
-**Examples:**
-
-```bash
-# Edit issue alert name/status
-sentry alert issues edit my-org/my-project/12345 --name "Prod Error Spike" --status disabled
-
-# Delete with preview
-sentry alert issues delete my-org/my-project/12345 --dry-run
-```
 
 ### `sentry alert issues edit <org/project/rule-id-or-name>`
 
@@ -122,29 +81,12 @@ List metric alert rules
 - `-c, --cursor <value> - Pagination cursor (use "next" for next page, "prev" for previous)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
-**Examples:**
-
-```bash
-# List metric alert rules for an organization
-sentry alert metrics list my-org/
-```
-
 ### `sentry alert metrics view <org/rule-id-or-name>`
 
 View a metric alert rule
 
 **Flags:**
 - `-w, --web - Open metric alert rules page in browser`
-
-**Examples:**
-
-```bash
-# View by ID
-sentry alert metrics view my-org/67890
-
-# View by name
-sentry alert metrics view my-org/"P95 latency alert"
-```
 
 ### `sentry alert metrics create <org>`
 
@@ -162,19 +104,6 @@ Create a metric alert rule
 - `--owner <value> - Owner value accepted by Sentry API`
 - `-n, --dry-run - Show what would happen without making changes`
 
-**Examples:**
-
-```bash
-# Create an organization metric alert rule
-sentry alert metrics create my-org \
-  --name "P95 Latency" \
-  --query "environment:prod" \
-  --aggregate "p95(transaction.duration)" \
-  --dataset transactions \
-  --time-window 5 \
-  --trigger '{"alertThreshold":500,"actions":[{"id":"sentry.mail.actions.NotifyEmailAction","targetType":"Team","targetIdentifier":1}]}'
-```
-
 ### `sentry alert metrics delete <org/rule-id-or-name>`
 
 Delete a metric alert rule
@@ -183,16 +112,6 @@ Delete a metric alert rule
 - `-y, --yes - Skip confirmation prompt`
 - `-f, --force - Force the operation without confirmation`
 - `-n, --dry-run - Show what would happen without making changes`
-
-**Examples:**
-
-```bash
-# Edit metric alert query/window
-sentry alert metrics edit my-org/67890 --query "environment:prod event.type:error" --time-window 15
-
-# Delete without prompt
-sentry alert metrics delete my-org/67890 --yes
-```
 
 ### `sentry alert metrics edit <org/rule-id-or-name>`
 

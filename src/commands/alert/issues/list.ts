@@ -397,9 +397,9 @@ async function handleResolvedTargets(
       return result.data.nextCursor ?? null;
     }
     // Preserve the previous cursor so the target is retried on the next page.
-    // If no prior cursor exists (first-page failure), use the start-of-list
-    // cursor to prevent the target from being permanently excluded.
-    return startCursors.get(key) ?? "0:0:0";
+    // First-page failures (no prior cursor) return null to mark the target
+    // as exhausted — retrying with a sentinel would loop infinitely.
+    return startCursors.get(key) ?? null;
   });
   const hasAnyCursor = cursorValues.some((c) => c !== null);
   const compoundNextCursor = hasAnyCursor

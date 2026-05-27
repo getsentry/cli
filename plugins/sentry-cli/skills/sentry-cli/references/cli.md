@@ -20,44 +20,9 @@ View and manage default settings
 - `-y, --yes - Skip confirmation prompt`
 - `-f, --force - Force the operation without confirmation`
 
-**Examples:**
-
-```bash
-# Show all current defaults
-sentry cli defaults
-
-# Set default organization
-sentry cli defaults org my-org
-
-# Set default project
-sentry cli defaults project my-project
-
-# Set default Sentry URL (self-hosted)
-sentry cli defaults url https://sentry.example.com
-
-# Disable telemetry
-sentry cli defaults telemetry off
-
-# Clear a single default
-sentry cli defaults org --clear
-
-# Clear all defaults
-sentry cli defaults --clear
-```
-
 ### `sentry cli feedback <message...>`
 
 Send feedback about the CLI
-
-**Examples:**
-
-```bash
-# Send positive feedback
-sentry cli feedback i love this tool
-
-# Report an issue
-sentry cli feedback the issue view is confusing
-```
 
 ### `sentry cli fix`
 
@@ -65,12 +30,6 @@ Diagnose and repair CLI database issues
 
 **Flags:**
 - `--dry-run - Show what would be fixed without making changes`
-
-**Examples:**
-
-```bash
-sentry cli fix
-```
 
 ### `sentry cli import`
 
@@ -81,25 +40,6 @@ Import settings from legacy .sentryclirc files
 - `-n, --dry-run - Show what would happen without making changes`
 - `--url <value> - Explicitly trust this URL (bypasses same-file trust check)`
 - `--skip-validation - Skip token validation against the Sentry API`
-
-**Examples:**
-
-```bash
-# Auto-detect and import .sentryclirc
-sentry cli import
-
-# Preview what would be imported
-sentry cli import --dry-run
-
-# Skip confirmation prompt
-sentry cli import --yes
-
-# Explicitly trust a self-hosted URL
-sentry cli import --url https://sentry.example.com
-
-# Skip API validation of the imported token
-sentry cli import --skip-validation
-```
 
 ### `sentry cli setup`
 
@@ -114,19 +54,6 @@ Configure shell integration
 - `--no-agent-skills - Skip agent skill installation for AI coding assistants`
 - `--quiet - Suppress output (for scripted usage)`
 
-**Examples:**
-
-```bash
-# Run full setup (PATH, completions, agent skills)
-sentry cli setup
-
-# Skip agent skill installation
-sentry cli setup --no-agent-skills
-
-# Skip PATH and completion modifications
-sentry cli setup --no-modify-path --no-completions
-```
-
 ### `sentry cli upgrade <version>`
 
 Update the Sentry CLI to the latest version
@@ -136,26 +63,5 @@ Update the Sentry CLI to the latest version
 - `--force - Force upgrade even if already on the latest version`
 - `--offline - Upgrade using only cached version info and patches (no network)`
 - `--method <value> - Installation method to use (curl, brew, npm, pnpm, bun, yarn)`
-
-**Examples:**
-
-```bash
-sentry cli upgrade --check
-
-# Upgrade to latest stable
-sentry cli upgrade
-
-# Upgrade to a specific version
-sentry cli upgrade 0.5.0
-
-# Force re-download
-sentry cli upgrade --force
-
-# Switch to nightly builds
-sentry cli upgrade nightly
-
-# Switch back to stable
-sentry cli upgrade stable
-```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
