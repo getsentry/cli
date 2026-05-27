@@ -155,6 +155,7 @@ export {
   ISSUE_LEVELS,
   ISSUE_STATUSES,
   IssueEventSchema,
+  IssueViewOutputSchema,
   LogsResponseSchema,
   ProductTrialSchema,
   RegionSchema,
