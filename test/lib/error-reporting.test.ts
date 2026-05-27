@@ -16,17 +16,21 @@ import {
   enrichEventWithGroupingTags,
   extractMessagePrefix,
   extractResourceKind,
+  normalizeEndpoint,
   reportCliError,
 } from "../../src/lib/error-reporting.js";
 import {
   ApiError,
   AuthError,
+  CliError,
   ConfigError,
   ContextError,
+  HostScopeError,
   OutputError,
   ResolutionError,
   SeerError,
   ValidationError,
+  WizardError,
 } from "../../src/lib/errors.js";
 
 // ---------------------------------------------------------------------------
@@ -37,12 +41,12 @@ describe("extractResourceKind", () => {
   test("strips single-quoted user data", () => {
     expect(
       extractResourceKind("Project 'api-track' not found in organization 'foo'")
-    ).toBe("Project not found in organization");
+    ).toBe("Project not found");
   });
 
   test("strips double-quoted user data", () => {
     expect(extractResourceKind('Event "abc123" not found in org "foo"')).toBe(
-      "Event not found in org"
+      "Event not found"
     );
   });
 
@@ -75,10 +79,23 @@ describe("extractResourceKind", () => {
     );
   });
 
-  test("does not strip 'in' without org/project path", () => {
-    expect(extractResourceKind("not found in organization")).toBe(
-      "not found in organization"
-    );
+  test("strips 'in <slug>' without org/project slash", () => {
+    expect(extractResourceKind("not found in organization")).toBe("not found");
+    expect(extractResourceKind("not found in my-org")).toBe("not found");
+  });
+
+  test("strips bare slugs after known entity names", () => {
+    expect(extractResourceKind("Organization my-company")).toBe("Organization");
+    expect(extractResourceKind("Dashboard my-dash-123")).toBe("Dashboard");
+    expect(extractResourceKind("Dashboards in my-org")).toBe("Dashboards");
+    expect(extractResourceKind("Team backend-team")).toBe("Team");
+  });
+
+  test("strips 'in <slug>' combined with entity names and numeric IDs", () => {
+    expect(extractResourceKind("Dashboard 42 in my-org")).toBe("Dashboard");
+    expect(
+      extractResourceKind("Organization my-org not found or has no dashboards")
+    ).toBe("Organization not found or has no dashboards");
   });
 
   test("handles empty input", () => {
@@ -127,6 +144,64 @@ describe("extractMessagePrefix", () => {
     expect(extractMessagePrefix('Invalid trace ID "abc"')).toBe(
       extractMessagePrefix('Invalid trace ID "def"')
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeEndpoint
+// ---------------------------------------------------------------------------
+
+describe("normalizeEndpoint", () => {
+  test("parameterizes org slug in organizations path", () => {
+    expect(normalizeEndpoint("/api/0/organizations/my-org/issues/")).toBe(
+      "/api/0/organizations/{org}/issues/"
+    );
+  });
+
+  test("parameterizes org and project in projects path", () => {
+    expect(
+      normalizeEndpoint("/api/0/projects/my-org/my-project/events/abc123/")
+    ).toBe("/api/0/projects/{org}/{project}/events/{id}/");
+  });
+
+  test("parameterizes issue, event, group, release IDs", () => {
+    expect(normalizeEndpoint("/api/0/issues/12345/")).toBe(
+      "/api/0/issues/{id}/"
+    );
+    expect(normalizeEndpoint("/api/0/groups/99/events/abc/")).toBe(
+      "/api/0/groups/{id}/events/{id}/"
+    );
+    expect(normalizeEndpoint("/api/0/releases/1.0.0/")).toBe(
+      "/api/0/releases/{version}/"
+    );
+  });
+
+  test("parameterizes teams path", () => {
+    expect(normalizeEndpoint("/api/0/teams/my-org/backend/")).toBe(
+      "/api/0/teams/{org}/{team}/"
+    );
+  });
+
+  test("parameterizes dashboards path", () => {
+    expect(normalizeEndpoint("/api/0/dashboards/42/")).toBe(
+      "/api/0/dashboards/{id}/"
+    );
+  });
+
+  test("parameterizes customers path", () => {
+    expect(normalizeEndpoint("/api/0/customers/my-org/")).toBe(
+      "/api/0/customers/{org}/"
+    );
+  });
+
+  test("parameterizes bare numeric segments", () => {
+    expect(normalizeEndpoint("/api/0/some/123/thing/456")).toBe(
+      "/api/0/some/{id}/thing/{id}"
+    );
+  });
+
+  test("leaves paths without variable segments unchanged", () => {
+    expect(normalizeEndpoint("/api/0/auth/")).toBe("/api/0/auth/");
   });
 });
 
@@ -226,6 +301,54 @@ describe("enrichEventWithGroupingTags", () => {
     } as Sentry.ErrorEvent;
     const result = enrichEventWithGroupingTags(event);
     expect(result.tags).toBeUndefined();
+  });
+
+  test("sets cli_error.kind from exception value", () => {
+    const event = makeEvent("TypeError");
+    event.exception!.values![0]!.value =
+      "Cannot read properties of undefined (reading 'replaceAll')";
+    const result = enrichEventWithGroupingTags(event);
+    expect(result.tags?.["cli_error.kind"]).toBe("Cannot read properties of");
+  });
+
+  test("sets cli_error.kind for fetch failed TypeError", () => {
+    const event = makeEvent("TypeError");
+    event.exception!.values![0]!.value = "fetch failed";
+    const result = enrichEventWithGroupingTags(event);
+    expect(result.tags?.["cli_error.kind"]).toBe("fetch failed");
+  });
+
+  test("sets cli_error.kind for Error with variable project count", () => {
+    const event1 = makeEvent("Error");
+    event1.exception!.values![0]!.value =
+      "Failed to fetch issues from 3 project(s): Failed to list issues: 400 Bad Request";
+    const event2 = makeEvent("Error");
+    event2.exception!.values![0]!.value =
+      "Failed to fetch issues from 1 project(s): Failed to list issues: 400 Bad Request";
+    const result1 = enrichEventWithGroupingTags(event1);
+    const result2 = enrichEventWithGroupingTags(event2);
+    expect(result1.tags?.["cli_error.kind"]).toBe(
+      result2.tags?.["cli_error.kind"]
+    );
+  });
+
+  test("does not set cli_error.kind when value is missing", () => {
+    const event = {
+      exception: { values: [{ type: "Error" }] },
+    } as Sentry.ErrorEvent;
+    const result = enrichEventWithGroupingTags(event);
+    expect(result.tags?.["cli_error.class"]).toBe("Error");
+    expect(result.tags?.["cli_error.kind"]).toBeUndefined();
+  });
+
+  test("does not override existing tags from reportCliError", () => {
+    const event = makeEvent("ContextError", {
+      "cli_error.class": "ContextError",
+      "cli_error.kind": "Organization",
+    });
+    event.exception!.values![0]!.value = "some different message";
+    const result = enrichEventWithGroupingTags(event);
+    expect(result.tags?.["cli_error.kind"]).toBe("Organization");
   });
 });
 
@@ -345,9 +468,59 @@ describe("reportCliError integration", () => {
     expect(captureSpy).toHaveBeenCalled();
   });
 
-  test("captures ApiError(400)", () => {
-    reportCliError(new ApiError("failed", 400, undefined, "/api/0/foo/"));
-    expect(captureSpy).toHaveBeenCalled();
+  test("captures ApiError(400) with normalized endpoint tag", () => {
+    const err = new ApiError(
+      "failed",
+      400,
+      undefined,
+      "/api/0/organizations/my-org/issues/"
+    );
+    const { tags } = capturedScopeTags(err);
+    expect(tags["cli_error.api_status"]).toBe("400");
+    expect(tags["cli_error.kind"]).toBe("400");
+    expect(tags["cli_error.api_endpoint"]).toBe(
+      "/api/0/organizations/{org}/issues/"
+    );
+  });
+
+  test("ApiError without endpoint does not set api_endpoint tag", () => {
+    const { tags } = capturedScopeTags(new ApiError("failed", 500));
+    expect(tags["cli_error.api_status"]).toBe("500");
+    expect(tags["cli_error.api_endpoint"]).toBeUndefined();
+  });
+
+  test("HostScopeError gets kind=host_scope", () => {
+    const { tags } = capturedScopeTags(
+      new HostScopeError("URL argument", "https://other.sentry.io", "sentry.io")
+    );
+    expect(tags["cli_error.class"]).toBe("HostScopeError");
+    expect(tags["cli_error.kind"]).toBe("host_scope");
+  });
+
+  test("WizardError gets kind=wizard", () => {
+    const { tags } = capturedScopeTags(
+      new WizardError("Workflow returned an error")
+    );
+    expect(tags["cli_error.class"]).toBe("WizardError");
+    expect(tags["cli_error.kind"]).toBe("wizard");
+  });
+
+  test("bare CliError gets kind from message prefix", () => {
+    const { tags } = capturedScopeTags(
+      new CliError("Failed to create project 'my-app' in my-org.")
+    );
+    expect(tags["cli_error.class"]).toBe("CliError");
+    expect(tags["cli_error.kind"]).toBe("Failed to create project");
+  });
+
+  test("bare CliError kind is stable across different user inputs", () => {
+    const a = capturedScopeTags(
+      new CliError("Failed to create project 'app-a' in org-a.")
+    ).tags;
+    const b = capturedScopeTags(
+      new CliError("Failed to create project 'app-b' in org-b.")
+    ).tags;
+    expect(a["cli_error.kind"]).toBe(b["cli_error.kind"]);
   });
 
   test.each([

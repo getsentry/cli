@@ -25,6 +25,9 @@ const slugArb = array(
   .map((chars) => chars.join(""))
   .filter((s) => !(s.startsWith("-") || s.endsWith("-")) && s.length > 0);
 
+/** Slug that contains at least one hyphen (matches the entity-name strip regex). */
+const hyphenatedSlugArb = slugArb.filter((s) => s.includes("-"));
+
 /** 32-character lowercase hex id (trace/event/log id). */
 const hexIdArb = stringMatching(/^[0-9a-f]{32}$/).filter(
   (s) => s.length === 32
@@ -127,6 +130,47 @@ describe("extractResourceKind — property tests", () => {
           extractResourceKind(`Issue ${large} not found.`)
         );
       }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("bare slug after 'in' (no slash) is stripped for any slug", () => {
+    fcAssert(
+      property(slugArb, slugArb, (a, b) => {
+        expect(extractResourceKind(`not found in ${a}`)).toBe(
+          extractResourceKind(`not found in ${b}`)
+        );
+        expect(extractResourceKind(`not found in ${a}`)).toBe("not found");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("hyphenated slug after entity name is stripped for any slug", () => {
+    fcAssert(
+      property(hyphenatedSlugArb, hyphenatedSlugArb, (a, b) => {
+        expect(extractResourceKind(`Organization ${a}`)).toBe(
+          extractResourceKind(`Organization ${b}`)
+        );
+        expect(extractResourceKind(`Organization ${a}`)).toBe("Organization");
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("Dashboard with numeric ID and slug produces same kind", () => {
+    fcAssert(
+      property(
+        numericIdArb,
+        slugArb,
+        numericIdArb,
+        slugArb,
+        (n1, s1, n2, s2) => {
+          expect(extractResourceKind(`Dashboard ${n1} in ${s1}`)).toBe(
+            extractResourceKind(`Dashboard ${n2} in ${s2}`)
+          );
+        }
+      ),
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
