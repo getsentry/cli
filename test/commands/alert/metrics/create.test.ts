@@ -3,7 +3,6 @@ import { createCommand } from "../../../../src/commands/alert/metrics/create.js"
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../../src/lib/api-client.js";
 import { ValidationError } from "../../../../src/lib/errors.js";
-import type { ResolvedTarget } from "../../../../src/lib/resolve-target.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../../src/lib/resolve-target.js";
 import { useTestConfigDir } from "../../../helpers.js";
@@ -11,13 +10,6 @@ import { useTestConfigDir } from "../../../helpers.js";
 const getConfigDir = useTestConfigDir("test-alert-metrics-create-", {
   isolateProjectRoot: true,
 });
-
-const sampleTarget: ResolvedTarget = {
-  org: "test-org",
-  project: "ignored",
-  orgDisplay: "test-org",
-  projectDisplay: "ignored",
-};
 
 type CreateFlags = {
   readonly name: string;
@@ -43,7 +35,7 @@ describe("alert metrics create", () => {
   let createSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    resolveSpy = vi.spyOn(resolveTarget, "resolveTargetsFromParsedArg");
+    resolveSpy = vi.spyOn(resolveTarget, "resolveOrgOptionalProjectFromArg");
     createSpy = vi.spyOn(apiClient, "createMetricAlertRule");
   });
 
@@ -80,7 +72,7 @@ describe("alert metrics create", () => {
 
   test("dry run does not call create API", async () => {
     const context = createContext();
-    resolveSpy.mockResolvedValue({ targets: [sampleTarget] });
+    resolveSpy.mockResolvedValue({ org: "test-org" });
     const func = (await createCommand.loader()) as unknown as (
       this: unknown,
       flags: CreateFlags,
@@ -107,7 +99,7 @@ describe("alert metrics create", () => {
 
   test("calls create API with parsed trigger payload", async () => {
     const context = createContext();
-    resolveSpy.mockResolvedValue({ targets: [sampleTarget] });
+    resolveSpy.mockResolvedValue({ org: "test-org" });
     createSpy.mockResolvedValue({
       id: "77",
       name: "Metric Rule",

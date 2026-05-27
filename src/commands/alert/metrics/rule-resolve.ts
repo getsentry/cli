@@ -12,7 +12,10 @@ import {
 } from "../../../lib/api-client.js";
 import { ResolutionError, ValidationError } from "../../../lib/errors.js";
 import { fuzzyMatch } from "../../../lib/fuzzy.js";
+import { logger } from "../../../lib/logger.js";
 import { isAllDigits } from "../../../lib/utils.js";
+
+const log = logger.withTag("alert.metrics");
 
 export type MetricRuleResolution = {
   orgSlug: string;
@@ -74,6 +77,11 @@ export async function listAllMetricRulesForOrg(
       break;
     }
     cursor = nextCursor;
+  }
+  if (cursor) {
+    log.warn(
+      `Pagination limit reached for metric alert rules in ${orgSlug}. Results may be incomplete.`
+    );
   }
   return all;
 }

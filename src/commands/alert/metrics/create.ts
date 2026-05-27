@@ -6,12 +6,11 @@
 
 import type { SentryContext } from "../../../context.js";
 import { createMetricAlertRule } from "../../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../../lib/command.js";
-import { ContextError, ValidationError } from "../../../lib/errors.js";
+import { ValidationError } from "../../../lib/errors.js";
 import { CommandOutput } from "../../../lib/formatters/output.js";
 import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../../lib/mutate-command.js";
-import { resolveTargetsFromParsedArg } from "../../../lib/resolve-target.js";
+import { resolveOrgOptionalProjectFromArg } from "../../../lib/resolve-target.js";
 import {
   normalizeProjectList,
   parseJsonObjectList,
@@ -19,9 +18,6 @@ import {
   validateMetricTimeWindow,
   validateMetricTriggers,
 } from "../mutation-utils.js";
-
-const USAGE_HINT =
-  "sentry alert metrics create <org> --name <name> --query <query> --aggregate <aggregate> --dataset <dataset> --time-window <minutes> --trigger <json>";
 
 type CreateFlags = {
   readonly name: string;
@@ -146,7 +142,6 @@ export const createCommand = buildCommand({
     },
     aliases: { ...DRY_RUN_ALIASES, t: "trigger", p: "project" },
   },
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent per-flag validation and org resolution
   async *func(this: SentryContext, flags: CreateFlags, arg: string) {
     const { cwd } = this;
     if (!flags.name.trim()) {
@@ -167,25 +162,11 @@ export const createCommand = buildCommand({
     validateMetricTriggers(triggers);
     const projects = normalizeProjectList(flags.project);
 
-    // Metric alerts are org-scoped — treat a bare slug as org-all to avoid
-    // misrouting through project-search.
-    const normalizedArg = arg && !arg.includes("/") ? `${arg}/` : arg;
-    const parsed = parseOrgProjectArg(normalizedArg);
-    const { targets } = await resolveTargetsFromParsedArg(parsed, {
+    const { org: orgSlug } = await resolveOrgOptionalProjectFromArg(
+      arg,
       cwd,
-      usageHint: USAGE_HINT,
-    });
-    const orgSlugs = [...new Set(targets.map((target) => target.org))];
-    if (orgSlugs.length === 0) {
-      throw new ContextError("Organization", USAGE_HINT);
-    }
-    if (orgSlugs.length !== 1) {
-      throw new ValidationError(
-        "Provide a single explicit organization target for create.",
-        "target"
-      );
-    }
-    const orgSlug = orgSlugs[0] as string;
+      "alert metrics create"
+    );
 
     const body: Record<string, unknown> = {
       name: flags.name,

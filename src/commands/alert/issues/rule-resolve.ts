@@ -12,8 +12,11 @@ import {
 } from "../../../lib/api-client.js";
 import { ResolutionError, ValidationError } from "../../../lib/errors.js";
 import { fuzzyMatch } from "../../../lib/fuzzy.js";
+import { logger } from "../../../lib/logger.js";
 import type { ResolvedTarget } from "../../../lib/resolve-target.js";
 import { isAllDigits } from "../../../lib/utils.js";
+
+const log = logger.withTag("alert.issues");
 
 export type IssueRuleResolution = {
   target: ResolvedTarget;
@@ -81,6 +84,11 @@ export async function listAllIssueRulesForTarget(
       break;
     }
     cursor = nextCursor;
+  }
+  if (cursor) {
+    log.warn(
+      `Pagination limit reached for issue alert rules in ${target.org}/${target.project}. Results may be incomplete.`
+    );
   }
   return all;
 }
