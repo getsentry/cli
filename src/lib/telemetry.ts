@@ -314,6 +314,35 @@ export function isEpipeError(event: Sentry.ErrorEvent): boolean {
 }
 
 /**
+ * Detect EBADF (bad file descriptor) errors in Sentry events.
+ *
+ * These occur when the init wizard's stdin reopen (`stdin-reopen.ts`) queues
+ * reads on a destroyed file descriptor. Same class of OS-level noise as EPIPE
+ * — not actionable, just different fd numbers producing duplicate issues.
+ *
+ * @internal Exported for testing
+ */
+export function isEbadfError(event: Sentry.ErrorEvent): boolean {
+  const exceptions = event.exception?.values;
+  if (exceptions) {
+    for (const ex of exceptions) {
+      if (ex.value?.includes("EBADF")) {
+        return true;
+      }
+    }
+  }
+
+  const systemError = event.contexts?.node_system_error as
+    | { code?: string }
+    | undefined;
+  if (systemError?.code === "EBADF") {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Check if an error is a user-caused (401–499) API error.
  *
  * 401–499 errors are user errors — wrong issue IDs, no access, rate limited —
@@ -609,6 +638,13 @@ export function initSentry(
       // EPIPE errors are expected when stdout is piped and the consumer closes
       // early (e.g., `sentry issue list | head`). Not actionable — drop them.
       if (isEpipeError(event)) {
+        return null;
+      }
+
+      // EBADF errors come from the init wizard's stdin reopen queuing reads
+      // on a destroyed fd. Same class of OS-level noise as EPIPE — different
+      // fd numbers just produce duplicate issues. Not actionable — drop them.
+      if (isEbadfError(event)) {
         return null;
       }
 
