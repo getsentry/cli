@@ -14,9 +14,7 @@ import {
   parseLinkHeader,
 } from "./infrastructure.js";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 /** A single issue alert rule (event-based, project-scoped) */
 export type IssueAlertRule = {
@@ -50,9 +48,7 @@ export type MetricAlertRule = {
   dateCreated: string;
 };
 
-// ---------------------------------------------------------------------------
 // Issue alerts
-// ---------------------------------------------------------------------------
 
 /**
  * List issue alert rules for a project with cursor-based pagination.
@@ -86,7 +82,7 @@ async function fetchIssueAlertRuleJson(
   const regionUrl = await resolveOrgRegion(orgSlug);
   const { data } = await apiRequestToRegion<Record<string, unknown>>(
     regionUrl,
-    `projects/${orgSlug}/${projectSlug}/rules/${encodeURIComponent(ruleId)}/`
+    `/projects/${orgSlug}/${projectSlug}/rules/${encodeURIComponent(ruleId)}/`
   );
   return data;
 }
@@ -108,9 +104,7 @@ export async function getIssueAlertRule(
   return data as IssueAlertRule;
 }
 
-// ---------------------------------------------------------------------------
 // Metric alerts
-// ---------------------------------------------------------------------------
 
 /**
  * List metric alert rules for an organization with cursor-based pagination.
@@ -141,7 +135,7 @@ async function fetchMetricAlertRuleJson(
   const regionUrl = await resolveOrgRegion(orgSlug);
   const { data } = await apiRequestToRegion<Record<string, unknown>>(
     regionUrl,
-    `organizations/${orgSlug}/alert-rules/${encodeURIComponent(ruleId)}/`
+    `/organizations/${orgSlug}/alert-rules/${encodeURIComponent(ruleId)}/`
   );
   return data;
 }
@@ -161,9 +155,7 @@ export async function getMetricAlertRule(
   return data as MetricAlertRule;
 }
 
-// ---------------------------------------------------------------------------
 // Issue alert write operations
-// ---------------------------------------------------------------------------
 
 /**
  * Delete an issue (project) alert rule.
@@ -178,7 +170,7 @@ export async function deleteIssueAlertRule(
   const regionUrl = await resolveOrgRegion(orgSlug);
   await apiRequestToRegionNoContent(
     regionUrl,
-    `projects/${orgSlug}/${projectSlug}/rules/${encodeURIComponent(ruleId)}/`,
+    `/projects/${orgSlug}/${projectSlug}/rules/${encodeURIComponent(ruleId)}/`,
     { method: "DELETE" }
   );
 }
@@ -206,7 +198,7 @@ export async function putIssueAlertRule(
   const regionUrl = await resolveOrgRegion(orgSlug);
   const { data } = await apiRequestToRegion<Record<string, unknown>>(
     regionUrl,
-    `projects/${orgSlug}/${projectSlug}/rules/${encodeURIComponent(ruleId)}/`,
+    `/projects/${orgSlug}/${projectSlug}/rules/${encodeURIComponent(ruleId)}/`,
     { method: "PUT", body }
   );
   return data;
@@ -223,15 +215,13 @@ export async function createIssueAlertRule(
   const regionUrl = await resolveOrgRegion(orgSlug);
   const { data } = await apiRequestToRegion<Record<string, unknown>>(
     regionUrl,
-    `projects/${orgSlug}/${projectSlug}/rules/`,
+    `/projects/${orgSlug}/${projectSlug}/rules/`,
     { method: "POST", body }
   );
   return data;
 }
 
-// ---------------------------------------------------------------------------
 // Metric alert (org) write operations
-// ---------------------------------------------------------------------------
 
 /**
  * Delete a metric (organization) alert rule. May return 202 with no body.
@@ -243,7 +233,7 @@ export async function deleteMetricAlertRule(
   const regionUrl = await resolveOrgRegion(orgSlug);
   await apiRequestToRegionNoContent(
     regionUrl,
-    `organizations/${orgSlug}/alert-rules/${encodeURIComponent(ruleId)}/`,
+    `/organizations/${orgSlug}/alert-rules/${encodeURIComponent(ruleId)}/`,
     { method: "DELETE" }
   );
 }
@@ -263,7 +253,7 @@ export async function putMetricAlertRule(
   const regionUrl = await resolveOrgRegion(orgSlug);
   const { data } = await apiRequestToRegion<Record<string, unknown>>(
     regionUrl,
-    `organizations/${orgSlug}/alert-rules/${encodeURIComponent(ruleId)}/`,
+    `/organizations/${orgSlug}/alert-rules/${encodeURIComponent(ruleId)}/`,
     { method: "PUT", body }
   );
   return data;
@@ -279,7 +269,7 @@ export async function createMetricAlertRule(
   const regionUrl = await resolveOrgRegion(orgSlug);
   const { data } = await apiRequestToRegion<Record<string, unknown>>(
     regionUrl,
-    `organizations/${orgSlug}/alert-rules/`,
+    `/organizations/${orgSlug}/alert-rules/`,
     { method: "POST", body }
   );
   return data;

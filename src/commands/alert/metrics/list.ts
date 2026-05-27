@@ -40,6 +40,7 @@ import {
   buildListLimitFlag,
   LIST_BASE_ALIASES,
   LIST_TARGET_POSITIONAL,
+  paginationHint,
   parseCursorFlag,
   targetPatternExplanation,
 } from "../../../lib/list-command.js";
@@ -110,9 +111,7 @@ const metricAlertListMeta: ListCommandMeta = {
   commandPrefix: "sentry alert metrics list",
 };
 
-// ---------------------------------------------------------------------------
 // Fetch helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Fetch metric alert rules for one org with auth guard.
@@ -289,9 +288,7 @@ function trimWithOrgGuarantee(
   return trimWithGroupGuarantee(rows, limit, (r) => r.orgSlug);
 }
 
-// ---------------------------------------------------------------------------
 // Mode handlers
-// ---------------------------------------------------------------------------
 
 type ResolvedOrgsOptions = {
   parsed: ReturnType<typeof parseOrgProjectArg>;
@@ -465,25 +462,18 @@ async function handleResolvedOrgs(
 
   const allRules = displayRows.map((r) => r.rule);
 
-  let moreHint: string | undefined;
-  if (hasMoreToShow) {
-    const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
-    const canIncreaseLimit = higherLimit > flags.limit;
-    const actionParts: string[] = [];
-    if (canIncreaseLimit) {
-      actionParts.push(`-n ${higherLimit}`);
-    }
-    if (canPaginate) {
-      actionParts.push("-c next");
-    }
-    if (actionParts.length > 0) {
-      moreHint = `More alert rules available — use ${actionParts.join(" or ")} for more.`;
-    }
-  }
-  if (hasPrev) {
-    const prevPart = "Prev: -c prev";
-    moreHint = moreHint ? `${moreHint}\n${prevPart}` : prevPart;
-  }
+  const nav = paginationHint({
+    hasPrev,
+    hasMore: hasMoreToShow && canPaginate,
+    prevHint: "-c prev",
+    nextHint: "-c next",
+  });
+  const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
+  const limitHint =
+    hasMoreToShow && higherLimit > flags.limit
+      ? `Use -n ${higherLimit} for more.`
+      : undefined;
+  const moreHint = [nav, limitHint].filter(Boolean).join("\n") || undefined;
 
   if (displayRows.length === 0) {
     const parts = ["No metric alert rules found."];
@@ -517,9 +507,7 @@ async function handleResolvedOrgs(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Human output
-// ---------------------------------------------------------------------------
 
 /** Format metric alert status: 0 = active, 1 = disabled */
 function formatMetricStatus(status: number): string {
@@ -584,9 +572,7 @@ function formatMetricAlertListHuman(result: MetricAlertListResult): string {
 
 const jsonTransformMetricAlertList = jsonTransformListResult;
 
-// ---------------------------------------------------------------------------
 // Command
-// ---------------------------------------------------------------------------
 
 export const listCommand = buildListCommand("alert", {
   docs: {

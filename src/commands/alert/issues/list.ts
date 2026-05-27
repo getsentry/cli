@@ -46,6 +46,7 @@ import {
   buildListLimitFlag,
   LIST_BASE_ALIASES,
   LIST_TARGET_POSITIONAL,
+  paginationHint,
   parseCursorFlag,
   targetPatternExplanation,
 } from "../../../lib/list-command.js";
@@ -116,9 +117,7 @@ const issueAlertListMeta: ListCommandMeta = {
   commandPrefix: "sentry alert issues list",
 };
 
-// ---------------------------------------------------------------------------
 // Fetch helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Fetch issue alert rules for a single target project with auth guard.
@@ -310,9 +309,7 @@ function trimWithProjectGuarantee(
   );
 }
 
-// ---------------------------------------------------------------------------
 // Mode handler
-// ---------------------------------------------------------------------------
 
 type ResolvedTargetsOptions = {
   parsed: ReturnType<typeof parseOrgProjectArg>;
@@ -479,25 +476,18 @@ async function handleResolvedTargets(
 
   const allRules = displayRows.map((r) => r.rule);
 
-  let moreHint: string | undefined;
-  if (hasMoreToShow) {
-    const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
-    const canIncreaseLimit = higherLimit > flags.limit;
-    const actionParts: string[] = [];
-    if (canIncreaseLimit) {
-      actionParts.push(`-n ${higherLimit}`);
-    }
-    if (canPaginate) {
-      actionParts.push("-c next");
-    }
-    if (actionParts.length > 0) {
-      moreHint = `More alert rules available — use ${actionParts.join(" or ")} for more.`;
-    }
-  }
-  if (hasPrev) {
-    const prevPart = "Prev: -c prev";
-    moreHint = moreHint ? `${moreHint}\n${prevPart}` : prevPart;
-  }
+  const nav = paginationHint({
+    hasPrev,
+    hasMore: hasMoreToShow && canPaginate,
+    prevHint: "-c prev",
+    nextHint: "-c next",
+  });
+  const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
+  const limitHint =
+    hasMoreToShow && higherLimit > flags.limit
+      ? `Use -n ${higherLimit} for more.`
+      : undefined;
+  const moreHint = [nav, limitHint].filter(Boolean).join("\n") || undefined;
 
   if (displayRows.length === 0) {
     const parts = ["No issue alert rules found."];
@@ -531,9 +521,7 @@ async function handleResolvedTargets(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Human output
-// ---------------------------------------------------------------------------
 
 function formatIssueAlertListHuman(result: IssueAlertListResult): string {
   if (result.items.length === 0) {
@@ -597,9 +585,7 @@ function formatIssueAlertListHuman(result: IssueAlertListResult): string {
 
 const jsonTransformIssueAlertList = jsonTransformListResult;
 
-// ---------------------------------------------------------------------------
 // Command
-// ---------------------------------------------------------------------------
 
 export const listCommand = buildListCommand("alert", {
   docs: {
