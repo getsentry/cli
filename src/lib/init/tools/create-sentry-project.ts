@@ -33,7 +33,9 @@ async function resolveProjectCreation(opts: {
   explicitTeam: string | undefined;
   slugHint: string;
 }): Promise<ProjectData> {
-  const { org, name, platform, explicitTeam, slugHint } = opts;
+  const { org, name, explicitTeam, slugHint } = opts;
+  // Coerce null → undefined: CreateProjectBody.platform is string | undefined.
+  const platform = opts.platform ?? undefined;
   try {
     const teamSlug = explicitTeam
       ? explicitTeam
