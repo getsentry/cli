@@ -1,6 +1,7 @@
 import {
   createProjectWithAutoTeam,
   createProjectWithDsn,
+  tryGetPrimaryDsn,
 } from "../../api-client.js";
 import { ApiError } from "../../errors.js";
 import { resolveOrCreateTeam } from "../../resolve-team.js";
@@ -69,7 +70,7 @@ async function resolveProjectCreation(opts: {
       projectSlug: autoTeam.slug,
       projectId: autoTeam.id,
       url: buildProjectUrl(org, autoTeam.slug),
-      dsn: "", // init callers use the URL; DSN is fetched separately when needed
+      dsn: (await tryGetPrimaryDsn(org, autoTeam.slug)) ?? "",
     };
   }
 }
