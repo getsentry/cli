@@ -19,8 +19,10 @@
 import type { SentryContext } from "../../context.js";
 import {
   type CreatedProjectDetails,
+  createProjectWithAutoTeam,
   createProjectWithDsn,
   listTeams,
+  tryGetPrimaryDsn,
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
@@ -52,6 +54,7 @@ import {
   type ResolvedConcreteTeam,
   resolveOrCreateTeam,
 } from "../../lib/resolve-team.js";
+import { buildProjectUrl } from "../../lib/sentry-urls.js";
 import { slugify } from "../../lib/utils.js";
 
 const log = logger.withTag("project.create");
@@ -225,6 +228,58 @@ async function handleCreateProject404(opts: {
 }
 
 /**
+ * Fallback project creation via POST /organizations/{org}/projects/.
+ *
+ * Used when the team-scoped flow 403s (member lacks project:write or can't
+ * create teams). Returns the created project details plus the team slug the
+ * server auto-created. Surfaces a clear policy error if the org has disabled
+ * member project creation entirely.
+ */
+async function createProjectWithAutoTeamFallback(opts: {
+  orgSlug: string;
+  name: string;
+  platform: string;
+}): Promise<
+  CreatedProjectDetails & {
+    teamSlug: string;
+    teamSource: ResolvedConcreteTeam["source"];
+  }
+> {
+  const { orgSlug, name, platform } = opts;
+  let autoTeamProject: Awaited<ReturnType<typeof createProjectWithAutoTeam>>;
+  try {
+    autoTeamProject = await createProjectWithAutoTeam(orgSlug, {
+      name,
+      platform,
+    });
+  } catch (expError) {
+    if (
+      expError instanceof ApiError &&
+      expError.status === 403 &&
+      expError.detail?.includes("disabled this feature")
+    ) {
+      throw new ApiError(
+        `Failed to create project '${name}' in ${orgSlug} (HTTP 403).\n\n` +
+          "Your organization has disabled project creation for members.\n" +
+          "Ask an org owner or manager to enable it in Organization Settings → Member Roles,\n" +
+          "or ask them to create the project and add you to it.",
+        403,
+        expError.detail,
+        expError.endpoint
+      );
+    }
+    throw expError;
+  }
+  return {
+    project: autoTeamProject,
+    dsn: await tryGetPrimaryDsn(orgSlug, autoTeamProject.slug),
+    url: buildProjectUrl(orgSlug, autoTeamProject.slug),
+    teamSlug: autoTeamProject.team_slug,
+    teamSource: "auto-created",
+  };
+}
+
+/**
  * Create a project (with DSN + URL) with user-friendly error handling.
  * Wraps API errors with actionable messages instead of raw HTTP status codes.
  */
@@ -389,19 +444,17 @@ export const createCommand = buildCommand({
     }
     const orgSlug = resolved.org;
 
-    // Resolve team — auto-creates a team if the org has none
-    const team: ResolvedConcreteTeam = await resolveOrCreateTeam(orgSlug, {
-      team: flags.team,
-      detectedFrom: resolved.detectedFrom,
-      usageHint: USAGE_HINT,
-      autoCreateSlug: slugify(name),
-      dryRun: flags["dry-run"],
-    });
-
     const expectedSlug = slugify(name);
 
-    // Dry-run mode: show what would be created without creating it
+    // Dry-run mode: resolve team (or preview auto-create) without hitting create APIs
     if (flags["dry-run"]) {
+      const team: ResolvedConcreteTeam = await resolveOrCreateTeam(orgSlug, {
+        team: flags.team,
+        detectedFrom: resolved.detectedFrom,
+        usageHint: USAGE_HINT,
+        autoCreateSlug: expectedSlug,
+        dryRun: true,
+      });
       const result: ProjectCreatedResult = {
         project: { id: "", slug: expectedSlug, name, platform },
         orgSlug,
@@ -417,20 +470,55 @@ export const createCommand = buildCommand({
       return yield new CommandOutput(result);
     }
 
-    // Create the project, fetch DSN, and build URL
-    const { project, dsn, url } = await createProjectWithErrors({
-      orgSlug,
-      teamSlug: team.slug,
-      name,
-      platform,
-      detectedFrom: resolved.detectedFrom,
-    });
+    // Attempt the normal team-based flow.
+    // If either step 403s (member can't create/see teams, or lacks project:write on
+    // the team), fall back to POST /organizations/{org}/projects/ which mirrors
+    // what the Sentry onboarding UI uses: auto-creates a personal team for the
+    // caller and only requires project:read scope.
+    let teamSlug: string;
+    let teamSource: ResolvedConcreteTeam["source"];
+    let projectDetails: CreatedProjectDetails;
 
+    try {
+      const team: ResolvedConcreteTeam = await resolveOrCreateTeam(orgSlug, {
+        team: flags.team,
+        detectedFrom: resolved.detectedFrom,
+        usageHint: USAGE_HINT,
+        autoCreateSlug: expectedSlug,
+      });
+      teamSlug = team.slug;
+      teamSource = team.source;
+      projectDetails = await createProjectWithErrors({
+        orgSlug,
+        teamSlug,
+        name,
+        platform,
+        detectedFrom: resolved.detectedFrom,
+      });
+    } catch (error) {
+      // 403 means the user lacks permission to create or access teams, or to
+      // create projects on the resolved team. Fall back to the org-scoped endpoint
+      // which requires only project:read and auto-creates a personal team.
+      // Skip the fallback when --team was explicit: the 403 is meaningful there.
+      if (!(error instanceof ApiError && error.status === 403) || flags.team) {
+        throw error;
+      }
+      const fallback = await createProjectWithAutoTeamFallback({
+        orgSlug,
+        name,
+        platform,
+      });
+      teamSlug = fallback.teamSlug;
+      teamSource = fallback.teamSource;
+      projectDetails = fallback;
+    }
+
+    const { project, dsn, url } = projectDetails;
     const result: ProjectCreatedResult = {
       project,
       orgSlug,
-      teamSlug: team.slug,
-      teamSource: team.source,
+      teamSlug,
+      teamSource,
       requestedPlatform: platform,
       dsn,
       url,

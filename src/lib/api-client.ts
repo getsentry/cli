@@ -93,6 +93,7 @@ export {
 export {
   type CreatedProjectDetails,
   createProject,
+  createProjectWithAutoTeam,
   createProjectWithDsn,
   deleteProject,
   findProjectByDsnKey,
@@ -104,6 +105,7 @@ export {
   listProjectsPaginated,
   matchesWordBoundary,
   type ProjectSearchResult,
+  type ProjectWithAutoTeam,
   type ProjectWithOrg,
   resolveOrgDisplayName,
   tryGetPrimaryDsn,

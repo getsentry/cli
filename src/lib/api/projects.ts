@@ -27,6 +27,7 @@ import {
 } from "../db/project-cache.js";
 import { getCachedOrganizations } from "../db/regions.js";
 import { type AuthGuardSuccess, withAuthGuard } from "../errors.js";
+import { resolveOrgRegion } from "../region.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 import { buildProjectUrl } from "../sentry-urls.js";
 import { isAllDigits } from "../utils.js";
@@ -224,6 +225,48 @@ export async function createProjectWithDsn(
   }
 
   return { project, dsn, url };
+}
+
+/** Result of creating a project via the org-scoped member-accessible endpoint. */
+export type ProjectWithAutoTeam = SentryProject & {
+  /** The personal team that was auto-created for the requesting user. */
+  team_slug: string;
+};
+
+/**
+ * Create a new project via the org-scoped member-accessible endpoint.
+ *
+ * Unlike `createProject` (which posts to `/teams/{org}/{team}/projects/` and
+ * requires `project:write`), this endpoint only requires `project:read` scope
+ * and is accessible to org members. The server auto-creates a personal team
+ * named `team-{username}` for the caller with Team Admin role, then creates
+ * the project under it.
+ *
+ * The org must have `allowMemberProjectCreation = true` (i.e. the org flag
+ * `disable_member_project_creation` must be false). A 403 is returned
+ * otherwise — callers should surface that as an org policy error, not an
+ * auth issue.
+ *
+ * This mirrors the endpoint called by the Sentry onboarding UI when a member
+ * selects a platform for the first time.
+ *
+ * @param orgSlug - The organization slug
+ * @param body - Project creation parameters (name required, platform optional)
+ * @returns The created project with the auto-created team slug
+ * @throws {ApiError} 403 if member project creation is disabled for the org
+ * @throws {ApiError} 409 if a project with the same slug already exists
+ */
+export async function createProjectWithAutoTeam(
+  orgSlug: string,
+  body: CreateProjectBody
+): Promise<ProjectWithAutoTeam> {
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<ProjectWithAutoTeam>(
+    regionUrl,
+    `/organizations/${orgSlug}/projects/`,
+    { method: "POST", body }
+  );
+  return data;
 }
 
 /**

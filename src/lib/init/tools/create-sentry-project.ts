@@ -1,6 +1,10 @@
-import { createProjectWithDsn } from "../../api-client.js";
+import {
+  createProjectWithAutoTeam,
+  createProjectWithDsn,
+} from "../../api-client.js";
 import { ApiError } from "../../errors.js";
 import { resolveOrCreateTeam } from "../../resolve-team.js";
+import { buildProjectUrl } from "../../sentry-urls.js";
 import { slugify } from "../../utils.js";
 import { tryGetExistingProjectData } from "../existing-project.js";
 import type {
@@ -10,6 +14,63 @@ import type {
 } from "../types.js";
 import { formatToolError } from "./shared.js";
 import type { InitToolDefinition, ToolContext } from "./types.js";
+
+type ProjectData = {
+  projectSlug: string;
+  projectId: string;
+  dsn: string;
+  url: string;
+};
+
+/**
+ * Resolve project creation using the team-based flow, falling back to the
+ * org-scoped endpoint on 403 (member lacks team creation permission).
+ */
+async function resolveProjectCreation(opts: {
+  org: string;
+  name: string;
+  platform: string | null | undefined;
+  explicitTeam: string | undefined;
+  slugHint: string;
+}): Promise<ProjectData> {
+  const { org, name, platform, explicitTeam, slugHint } = opts;
+  try {
+    const teamSlug = explicitTeam
+      ? explicitTeam
+      : (
+          await resolveOrCreateTeam(org, {
+            autoCreateSlug: slugHint,
+            usageHint: "sentry init",
+          })
+        ).slug;
+    const result = await createProjectWithDsn(org, teamSlug, {
+      name,
+      platform,
+    });
+    return {
+      projectSlug: result.project.slug,
+      projectId: result.project.id,
+      dsn: result.dsn ?? "",
+      url: result.url,
+    };
+  } catch (innerError) {
+    // Fall back to org-scoped endpoint on 403, unless an explicit team was
+    // given (in which case the 403 is meaningful feedback, not a permissions gap).
+    if (
+      !(innerError instanceof ApiError && innerError.status === 403) ||
+      explicitTeam
+    ) {
+      throw innerError;
+    }
+    const autoTeam = await createProjectWithAutoTeam(org, { name, platform });
+    return {
+      projectSlug: autoTeam.slug,
+      projectId: autoTeam.id,
+      url: buildProjectUrl(org, autoTeam.slug),
+      dsn: "", // init callers use the URL; DSN is fetched separately when needed
+    };
+  }
+}
 
 /**
  * Create a new Sentry project using the org that preflight already resolved.
@@ -57,16 +118,6 @@ export async function createSentryProject(
       };
     }
 
-    const teamSlug = context.team
-      ? context.team
-      : (
-          await resolveOrCreateTeam(context.org, {
-            autoCreateSlug: slug,
-            usageHint: "sentry init",
-            dryRun: context.dryRun,
-          })
-        ).slug;
-
     if (context.dryRun) {
       return {
         ok: true,
@@ -80,31 +131,30 @@ export async function createSentryProject(
       };
     }
 
-    const { project, dsn, url } = await createProjectWithDsn(
-      context.org,
-      teamSlug,
-      {
-        name,
-        platform: payload.params.platform,
-      }
-    );
+    // Try the normal team-based flow. If the user is an org member who can't
+    // create or see teams (403), fall back to POST /organizations/{org}/projects/
+    // which requires only project:read scope and auto-creates a personal team.
+    const projectData = await resolveProjectCreation({
+      org: context.org,
+      name,
+      platform: payload.params.platform,
+      explicitTeam: context.team,
+      slugHint: slug,
+    });
 
     return {
       ok: true,
       data: {
         orgSlug: context.org,
-        projectSlug: project.slug,
-        projectId: project.id,
-        dsn: dsn ?? "",
-        url,
+        projectSlug: projectData.projectSlug,
+        projectId: projectData.projectId,
+        dsn: projectData.dsn,
+        url: projectData.url,
       },
     };
   } catch (error) {
-    // Org-level policy: members cannot create projects. The generic 403
-    // enrichment would suggest re-authentication, which is wrong here.
-    // Surface a clear message with the escape hatch: once an admin creates
-    // the project, `sentry init <org>/<slug>` resolves to the existing
-    // project and skips creation entirely.
+    // Org-level policy: member project creation is disabled on this org.
+    // Surface a clear message with the escape hatch.
     if (
       error instanceof ApiError &&
       error.status === 403 &&
