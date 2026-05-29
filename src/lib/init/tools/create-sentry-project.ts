@@ -114,6 +114,9 @@ async function resolveProjectCreation(opts: {
   } catch (innerError) {
     // Fall back to org-scoped endpoint on 403, unless the fallback is suppressed
     // (explicit --team means the 403 is meaningful feedback, not a permission gap).
+    // Note: a 403 can originate from either the initial createProjectWithDsn call
+    // or from the platform-less retry inside withPlatformFallback — both mean the
+    // caller lacks team:write, so the org-scoped fallback is correct in either case.
     if (
       !(innerError instanceof ApiError && innerError.status === 403) ||
       suppressFallback
