@@ -38,25 +38,29 @@ type ProjectData = {
  * @param opts.org - Organization slug
  * @param opts.name - Project display name
  * @param opts.platform - Platform identifier (null/undefined → omitted from request)
- * @param opts.explicitTeam - Team slug from `--team` flag; suppresses fallback when set
+ * @param opts.team - Pre-resolved team slug (explicit or auto-selected by preflight).
+ *   When undefined the team is resolved fresh via resolveOrCreateTeam.
+ * @param opts.suppressFallback - When true, a 403 from the team-scoped flow is
+ *   surfaced directly rather than triggering the org-scoped fallback. Set only
+ *   when the team was explicitly named via `--team` — a 403 there is meaningful
+ *   user feedback, not a permission gap.
  * @param opts.slugHint - Slug used for auto-creating a team when org has none
  * @returns Resolved project identifiers and DSN
- * @throws When the team-scoped flow fails for any reason other than a member
- *   permission 403, or when an explicit team was given and it 403s.
  */
 async function resolveProjectCreation(opts: {
   org: string;
   name: string;
   platform: string | null | undefined;
-  explicitTeam: string | undefined;
+  team: string | undefined;
+  suppressFallback: boolean;
   slugHint: string;
 }): Promise<ProjectData> {
-  const { org, name, explicitTeam, slugHint } = opts;
+  const { org, name, team, suppressFallback, slugHint } = opts;
   // Coerce null → undefined: CreateProjectBody.platform is string | undefined.
   const platform = opts.platform ?? undefined;
   try {
-    const teamSlug = explicitTeam
-      ? explicitTeam
+    const teamSlug = team
+      ? team
       : (
           await resolveOrCreateTeam(org, {
             autoCreateSlug: slugHint,
@@ -74,11 +78,11 @@ async function resolveProjectCreation(opts: {
       url: result.url,
     };
   } catch (innerError) {
-    // Fall back to org-scoped endpoint on 403, unless an explicit team was
-    // given (in which case the 403 is meaningful feedback, not a permissions gap).
+    // Fall back to org-scoped endpoint on 403, unless the fallback is suppressed
+    // (explicit --team means the 403 is meaningful feedback, not a permission gap).
     if (
       !(innerError instanceof ApiError && innerError.status === 403) ||
-      explicitTeam
+      suppressFallback
     ) {
       throw innerError;
     }
@@ -196,7 +200,8 @@ export async function createSentryProject(
       org: context.org,
       name,
       platform: payload.params.platform,
-      explicitTeam: context.isExplicitTeam ? context.team : undefined,
+      team: context.team,
+      suppressFallback: Boolean(context.isExplicitTeam),
       slugHint: slug,
     });
 

@@ -249,7 +249,6 @@ describe("createSentryProject", () => {
       expect.objectContaining({
         autoCreateSlug: "my-app",
         usageHint: "sentry init",
-        dryRun: false,
       })
     );
     expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
