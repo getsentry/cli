@@ -227,9 +227,18 @@ export async function createProjectWithDsn(
   return { project, dsn, url };
 }
 
-/** Result of creating a project via the org-scoped member-accessible endpoint. */
+/** Raw response shape from the org-scoped project creation endpoint. */
 type ProjectWithAutoTeam = SentryProject & {
-  /** The personal team that was auto-created for the requesting user. */
+  /** The personal team auto-created by the server for the requesting user. */
+  team_slug: string;
+};
+
+/**
+ * Result of creating a project via the org-scoped member-accessible endpoint.
+ * Parallel to {@link CreatedProjectDetails} for the team-scoped endpoint.
+ */
+export type CreatedAutoTeamProjectDetails = CreatedProjectDetails & {
+  /** The personal team auto-created by the server for the requesting user. */
   team_slug: string;
 };
 
@@ -267,13 +276,15 @@ export const MEMBER_PROJECT_CREATION_DISABLED_DETAIL = "disabled this feature";
 export async function createProjectWithAutoTeam(
   orgSlug: string,
   body: CreateProjectBody
-): Promise<ProjectWithAutoTeam> {
+): Promise<CreatedAutoTeamProjectDetails> {
   const regionUrl = await resolveOrgRegion(orgSlug);
   const { data } = await apiRequestToRegion<ProjectWithAutoTeam>(
     regionUrl,
     `/organizations/${orgSlug}/projects/`,
     { method: "POST", body }
   );
+  const dsn = await tryGetPrimaryDsn(orgSlug, data.slug);
+  const url = buildProjectUrl(orgSlug, data.slug);
 
   // Seed project cache so subsequent commands skip redundant API lookups.
   // Mirrors what createProjectWithDsn does for the team-scoped endpoint.
@@ -287,7 +298,6 @@ export async function createProjectWithAutoTeam(
   }
 
   // Also seed the DSN-based project cache for DSN resolution
-  const dsn = await tryGetPrimaryDsn(orgSlug, data.slug);
   if (dsn) {
     try {
       const publicKey = extractPublicKeyFromDsn(dsn);
@@ -305,7 +315,7 @@ export async function createProjectWithAutoTeam(
     }
   }
 
-  return data;
+  return { project: data, dsn, url, team_slug: data.team_slug };
 }
 
 /**

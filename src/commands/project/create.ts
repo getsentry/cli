@@ -23,7 +23,6 @@ import {
   createProjectWithDsn,
   listTeams,
   MEMBER_PROJECT_CREATION_DISABLED_DETAIL,
-  tryGetPrimaryDsn,
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
@@ -55,7 +54,6 @@ import {
   type ResolvedConcreteTeam,
   resolveOrCreateTeam,
 } from "../../lib/resolve-team.js";
-import { buildProjectUrl } from "../../lib/sentry-urls.js";
 import { slugify } from "../../lib/utils.js";
 
 const log = logger.withTag("project.create");
@@ -283,12 +281,9 @@ async function createProjectWithAutoTeamFallback(opts: {
   }
 > {
   const { orgSlug, name, platform } = opts;
-  let autoTeamProject: Awaited<ReturnType<typeof createProjectWithAutoTeam>>;
+  let result: Awaited<ReturnType<typeof createProjectWithAutoTeam>>;
   try {
-    autoTeamProject = await createProjectWithAutoTeam(orgSlug, {
-      name,
-      platform,
-    });
+    result = await createProjectWithAutoTeam(orgSlug, { name, platform });
   } catch (expError) {
     if (expError instanceof ApiError) {
       if (
@@ -316,10 +311,10 @@ async function createProjectWithAutoTeamFallback(opts: {
     throw expError;
   }
   return {
-    project: autoTeamProject,
-    dsn: await tryGetPrimaryDsn(orgSlug, autoTeamProject.slug),
-    url: buildProjectUrl(orgSlug, autoTeamProject.slug),
-    teamSlug: autoTeamProject.team_slug,
+    project: result.project,
+    dsn: result.dsn,
+    url: result.url,
+    teamSlug: result.team_slug,
     teamSource: "auto-created",
   };
 }

@@ -11,11 +11,9 @@ import {
   createProjectWithAutoTeam,
   createProjectWithDsn,
   MEMBER_PROJECT_CREATION_DISABLED_DETAIL,
-  tryGetPrimaryDsn,
 } from "../../api-client.js";
 import { ApiError } from "../../errors.js";
 import { resolveOrCreateTeam } from "../../resolve-team.js";
-import { buildProjectUrl } from "../../sentry-urls.js";
 import { slugify } from "../../utils.js";
 import { tryGetExistingProjectData } from "../existing-project.js";
 import type {
@@ -90,12 +88,12 @@ async function resolveProjectCreation(opts: {
     if (innerError.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)) {
       throw innerError;
     }
-    const autoTeam = await createProjectWithAutoTeam(org, { name, platform });
+    const result = await createProjectWithAutoTeam(org, { name, platform });
     return {
-      projectSlug: autoTeam.slug,
-      projectId: autoTeam.id,
-      url: buildProjectUrl(org, autoTeam.slug),
-      dsn: (await tryGetPrimaryDsn(org, autoTeam.slug)) ?? "",
+      projectSlug: result.project.slug,
+      projectId: result.project.id,
+      url: result.url,
+      dsn: result.dsn ?? "",
     };
   }
 }
@@ -145,7 +143,7 @@ export async function createSentryProject(
   payload: CreateSentryProjectPayload | EnsureSentryProjectPayload,
   context: Pick<
     ToolContext,
-    "dryRun" | "existingProject" | "org" | "team" | "project"
+    "dryRun" | "existingProject" | "isExplicitTeam" | "org" | "team" | "project"
   >
 ): Promise<ToolResult> {
   const name = context.project ?? payload.params.name;
@@ -175,11 +173,10 @@ export async function createSentryProject(
       };
     }
 
-    // Validate team access before the dry-run early return — mirrors
-    // preflight.ts:resolveTeam which calls resolveOrCreateTeam unconditionally.
-    await validateTeamForDryRun(context.org, context.team, slug);
-
     if (context.dryRun) {
+      // Validate team access in dry-run — mirrors preflight.ts:resolveTeam.
+      // Not needed in real runs: resolveProjectCreation handles its own resolution.
+      await validateTeamForDryRun(context.org, context.team, slug);
       return {
         ok: true,
         data: {
@@ -199,7 +196,7 @@ export async function createSentryProject(
       org: context.org,
       name,
       platform: payload.params.platform,
-      explicitTeam: context.team,
+      explicitTeam: context.isExplicitTeam ? context.team : undefined,
       slugHint: slug,
     });
 

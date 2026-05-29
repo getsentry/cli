@@ -98,6 +98,7 @@ function buildResolvedInitContext(
     features: initial.features,
     org,
     team,
+    isExplicitTeam: Boolean(initial.team),
     project: selection.project,
     app: initial.app,
     authToken: getAuthToken(),

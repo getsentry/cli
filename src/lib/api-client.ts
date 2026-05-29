@@ -91,6 +91,7 @@ export {
   listOrganizationsUncached,
 } from "./api/organizations.js";
 export {
+  type CreatedAutoTeamProjectDetails,
   type CreatedProjectDetails,
   createProject,
   createProjectWithAutoTeam,
