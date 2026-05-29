@@ -7,6 +7,7 @@
  * lack team:write.
  */
 
+import { captureException } from "@sentry/node-core/light";
 import {
   createProjectWithAutoTeam,
   createProjectWithDsn,
@@ -58,6 +59,37 @@ async function resolveProjectCreation(opts: {
   const { org, name, team, suppressFallback, slugHint } = opts;
   // Coerce null → undefined: CreateProjectBody.platform is string | undefined.
   const platform = opts.platform ?? undefined;
+
+  const withPlatformFallback = async (
+    fn: (p: string | undefined) => Promise<ProjectData>
+  ): Promise<ProjectData> => {
+    try {
+      return await fn(platform);
+    } catch (err) {
+      // The registry may include SDK keys whose derived platform slug (e.g.
+      // "javascript-hono") is not yet in the Sentry API's allowed platform
+      // list. Retry without a platform so the project is still created, and
+      // capture to track which slugs need to be added to the API allowlist.
+      if (
+        err instanceof ApiError &&
+        err.status === 400 &&
+        platform &&
+        err.detail?.includes("Invalid platform")
+      ) {
+        captureException(err, {
+          extra: {
+            attemptedPlatform: platform,
+            projectName: name,
+            apiResponseDetail: err.detail,
+            apiStatus: err.status,
+          },
+        });
+        return await fn(undefined);
+      }
+      throw err;
+    }
+  };
+
   try {
     const teamSlug = team
       ? team
@@ -67,19 +99,24 @@ async function resolveProjectCreation(opts: {
             usageHint: "sentry init",
           })
         ).slug;
-    const result = await createProjectWithDsn(org, teamSlug, {
-      name,
-      platform,
+    return await withPlatformFallback(async (p) => {
+      const result = await createProjectWithDsn(org, teamSlug, {
+        name,
+        platform: p,
+      });
+      return {
+        projectSlug: result.project.slug,
+        projectId: result.project.id,
+        dsn: result.dsn ?? "",
+        url: result.url,
+      };
     });
-    return {
-      projectSlug: result.project.slug,
-      projectId: result.project.id,
-      dsn: result.dsn ?? "",
-      url: result.url,
-    };
   } catch (innerError) {
     // Fall back to org-scoped endpoint on 403, unless the fallback is suppressed
     // (explicit --team means the 403 is meaningful feedback, not a permission gap).
+    // Note: a 403 can originate from either the initial createProjectWithDsn call
+    // or from the platform-less retry inside withPlatformFallback — both mean the
+    // caller lacks team:write, so the org-scoped fallback is correct in either case.
     if (
       !(innerError instanceof ApiError && innerError.status === 403) ||
       suppressFallback
@@ -92,13 +129,18 @@ async function resolveProjectCreation(opts: {
     if (innerError.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)) {
       throw innerError;
     }
-    const result = await createProjectWithAutoTeam(org, { name, platform });
-    return {
-      projectSlug: result.project.slug,
-      projectId: result.project.id,
-      url: result.url,
-      dsn: result.dsn ?? "",
-    };
+    return await withPlatformFallback(async (p) => {
+      const result = await createProjectWithAutoTeam(org, {
+        name,
+        platform: p,
+      });
+      return {
+        projectSlug: result.project.slug,
+        projectId: result.project.id,
+        url: result.url,
+        dsn: result.dsn ?? "",
+      };
+    });
   }
 }
 
