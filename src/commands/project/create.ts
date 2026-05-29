@@ -540,6 +540,11 @@ export const createCommand = buildCommand({
       if (!(error instanceof ApiError && error.status === 403) || flags.team) {
         throw error;
       }
+      // Policy 403: org has disabled member project creation. The org-scoped
+      // endpoint enforces the same flag — re-throw to avoid a wasted round-trip.
+      if (error.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)) {
+        throw error;
+      }
       log.debug("403 on team-based flow — falling back to org-scoped endpoint");
       const fallback = await createProjectWithAutoTeamFallback({
         orgSlug,

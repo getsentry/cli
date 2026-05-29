@@ -484,7 +484,9 @@ describe("project create", () => {
       new ApiError("Forbidden", 403, "You do not have permission")
     );
     createProjectWithAutoTeamSpy.mockResolvedValue({
-      ...sampleProject,
+      project: sampleProject,
+      dsn: "https://abc@o123.ingest.us.sentry.io/999",
+      url: "https://sentry.io/organizations/acme-corp/projects/my-app/",
       team_slug: "team-testuser",
     });
 
