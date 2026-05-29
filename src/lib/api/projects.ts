@@ -286,6 +286,25 @@ export async function createProjectWithAutoTeam(
     // Best-effort — don't let cache failures break project creation
   }
 
+  // Also seed the DSN-based project cache for DSN resolution
+  const dsn = await tryGetPrimaryDsn(orgSlug, data.slug);
+  if (dsn) {
+    try {
+      const publicKey = extractPublicKeyFromDsn(dsn);
+      if (publicKey) {
+        setCachedProjectByDsnKey(publicKey, {
+          orgSlug,
+          orgName: resolveOrgDisplayName(orgSlug, data.organization?.name),
+          projectSlug: data.slug,
+          projectName: data.name,
+          projectId: data.id,
+        });
+      }
+    } catch {
+      // Best-effort — don't let cache failures break project creation
+    }
+  }
+
   return data;
 }
 

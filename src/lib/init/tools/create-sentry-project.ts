@@ -84,6 +84,12 @@ async function resolveProjectCreation(opts: {
     ) {
       throw innerError;
     }
+    // Policy 403: org has disabled member project creation. The org-scoped
+    // endpoint enforces the same flag — re-throw immediately so the outer
+    // catch surfaces the friendly disabled-policy message without a wasted round-trip.
+    if (innerError.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)) {
+      throw innerError;
+    }
     const autoTeam = await createProjectWithAutoTeam(org, { name, platform });
     return {
       projectSlug: autoTeam.slug,
@@ -91,6 +97,35 @@ async function resolveProjectCreation(opts: {
       url: buildProjectUrl(org, autoTeam.slug),
       dsn: (await tryGetPrimaryDsn(org, autoTeam.slug)) ?? "",
     };
+  }
+}
+
+/**
+ * Validate team access for a dry-run, mirroring preflight.ts:resolveTeam.
+ *
+ * Calls resolveOrCreateTeam with dryRun=true and deferAutoCreateOnEmptyOrg=true
+ * so no real teams are created. A 403 is swallowed — the real run falls back
+ * to the org-scoped endpoint.
+ *
+ * @throws Non-403 errors from resolveOrCreateTeam (org not found, network, etc.)
+ */
+async function validateTeamForDryRun(
+  org: string,
+  team: string | undefined,
+  autoCreateSlug: string
+): Promise<void> {
+  try {
+    await resolveOrCreateTeam(org, {
+      team,
+      autoCreateSlug,
+      usageHint: "sentry init",
+      dryRun: true,
+      deferAutoCreateOnEmptyOrg: true,
+    });
+  } catch (teamErr) {
+    if (!(teamErr instanceof ApiError && teamErr.status === 403)) {
+      throw teamErr;
+    }
   }
 }
 
@@ -139,6 +174,10 @@ export async function createSentryProject(
         data: existingProject,
       };
     }
+
+    // Validate team access before the dry-run early return — mirrors
+    // preflight.ts:resolveTeam which calls resolveOrCreateTeam unconditionally.
+    await validateTeamForDryRun(context.org, context.team, slug);
 
     if (context.dryRun) {
       return {
