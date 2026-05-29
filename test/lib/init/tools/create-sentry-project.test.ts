@@ -297,6 +297,114 @@ describe("createSentryProject", () => {
     expect(createSentryProjectTool.describe(makePayload())).toContain("my-app");
   });
 
+  // ── org-scoped fallback (createProjectWithAutoTeam) ─────────────────────
+
+  test("falls back to org-scoped endpoint on 403 from team-based creation", async () => {
+    const createProjectWithAutoTeamSpy = vi
+      .spyOn(apiClient, "createProjectWithAutoTeam")
+      .mockResolvedValue({
+        project: {
+          id: "42",
+          slug: "my-app",
+          name: "my-app",
+          platform: "javascript-react",
+          dateCreated: "2026-04-16T00:00:00Z",
+        } as any,
+        dsn: "https://abc@o1.ingest.sentry.io/42",
+        url: "https://sentry.io/settings/acme/projects/my-app/",
+        team_slug: "team-testuser",
+      });
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError("Forbidden", 403, "No project:write access")
+    );
+
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(createProjectWithAutoTeamSpy).toHaveBeenCalledWith("acme", {
+      name: "my-app",
+      platform: "javascript-react",
+    });
+    createProjectWithAutoTeamSpy.mockRestore();
+  });
+
+  test("suppresses fallback when team was set via --team (isExplicitTeam)", async () => {
+    const createProjectWithAutoTeamSpy = vi
+      .spyOn(apiClient, "createProjectWithAutoTeam")
+      .mockResolvedValue({} as any);
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError("Forbidden", 403, "No project:write access")
+    );
+
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: "backend",
+      isExplicitTeam: true,
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(createProjectWithAutoTeamSpy).not.toHaveBeenCalled();
+    createProjectWithAutoTeamSpy.mockRestore();
+  });
+
+  test("does not fall back on policy 403 (disabled this feature) — avoids wasted round-trip", async () => {
+    const createProjectWithAutoTeamSpy = vi
+      .spyOn(apiClient, "createProjectWithAutoTeam")
+      .mockResolvedValue({} as any);
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Forbidden",
+        403,
+        "Your organization has disabled this feature for members."
+      )
+    );
+
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(createProjectWithAutoTeamSpy).not.toHaveBeenCalled();
+    expect(result.error).toContain("disabled for members");
+    createProjectWithAutoTeamSpy.mockRestore();
+  });
+
+  test("surfaces friendly 409 error when fallback project already exists", async () => {
+    const createProjectWithAutoTeamSpy = vi
+      .spyOn(apiClient, "createProjectWithAutoTeam")
+      .mockRejectedValue(new ApiError("Conflict", 409, "Slug already in use"));
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError("Forbidden", 403, "No project:write access")
+    );
+
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: undefined,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("already exists");
+    createProjectWithAutoTeamSpy.mockRestore();
+  });
+
+  // ── dry-run ──────────────────────────────────────────────────────────────
+
   test("uses the final project slug for deferred team resolution in dry-run mode", async () => {
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
 
