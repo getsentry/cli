@@ -64,7 +64,21 @@ function makeEnsurePayload(
   };
 }
 
+const sampleAutoTeamResult = {
+  project: {
+    id: "42",
+    slug: "my-app",
+    name: "my-app",
+    platform: "javascript-react",
+    dateCreated: "2026-04-16T00:00:00Z",
+  } as any,
+  dsn: "https://abc@o1.ingest.sentry.io/42",
+  url: "https://sentry.io/settings/acme/projects/my-app/",
+  team_slug: "team-testuser",
+};
+
 let createProjectWithDsnSpy: ReturnType<typeof spyOn>;
+let createProjectWithAutoTeamSpy: ReturnType<typeof spyOn>;
 let getProjectSpy: ReturnType<typeof spyOn>;
 let tryGetPrimaryDsnSpy: ReturnType<typeof spyOn>;
 let resolveOrCreateTeamSpy: ReturnType<typeof spyOn>;
@@ -83,6 +97,9 @@ beforeEach(() => {
       dsn: "https://abc@o1.ingest.sentry.io/42",
       url: "https://sentry.io/settings/acme/projects/my-app/",
     });
+  createProjectWithAutoTeamSpy = vi
+    .spyOn(apiClient, "createProjectWithAutoTeam")
+    .mockResolvedValue(sampleAutoTeamResult);
   getProjectSpy = vi.spyOn(apiClient, "getProject").mockResolvedValue({
     id: "42",
     slug: "my-app",
@@ -103,6 +120,7 @@ beforeEach(() => {
 
 afterEach(() => {
   createProjectWithDsnSpy.mockRestore();
+  createProjectWithAutoTeamSpy.mockRestore();
   getProjectSpy.mockRestore();
   tryGetPrimaryDsnSpy.mockRestore();
   resolveOrCreateTeamSpy.mockRestore();
@@ -297,23 +315,7 @@ describe("createSentryProject", () => {
     expect(createSentryProjectTool.describe(makePayload())).toContain("my-app");
   });
 
-  // ── org-scoped fallback (createProjectWithAutoTeam) ─────────────────────
-
   test("falls back to org-scoped endpoint on 403 from team-based creation", async () => {
-    const createProjectWithAutoTeamSpy = vi
-      .spyOn(apiClient, "createProjectWithAutoTeam")
-      .mockResolvedValue({
-        project: {
-          id: "42",
-          slug: "my-app",
-          name: "my-app",
-          platform: "javascript-react",
-          dateCreated: "2026-04-16T00:00:00Z",
-        } as any,
-        dsn: "https://abc@o1.ingest.sentry.io/42",
-        url: "https://sentry.io/settings/acme/projects/my-app/",
-        team_slug: "team-testuser",
-      });
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
     createProjectWithDsnSpy.mockRejectedValueOnce(
       new ApiError("Forbidden", 403, "No project:write access")
@@ -331,13 +333,9 @@ describe("createSentryProject", () => {
       name: "my-app",
       platform: "javascript-react",
     });
-    createProjectWithAutoTeamSpy.mockRestore();
   });
 
   test("suppresses fallback when team was set via --team (isExplicitTeam)", async () => {
-    const createProjectWithAutoTeamSpy = vi
-      .spyOn(apiClient, "createProjectWithAutoTeam")
-      .mockResolvedValue({} as any);
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
     createProjectWithDsnSpy.mockRejectedValueOnce(
       new ApiError("Forbidden", 403, "No project:write access")
@@ -353,13 +351,9 @@ describe("createSentryProject", () => {
 
     expect(result.ok).toBe(false);
     expect(createProjectWithAutoTeamSpy).not.toHaveBeenCalled();
-    createProjectWithAutoTeamSpy.mockRestore();
   });
 
-  test("does not fall back on policy 403 (disabled this feature) — avoids wasted round-trip", async () => {
-    const createProjectWithAutoTeamSpy = vi
-      .spyOn(apiClient, "createProjectWithAutoTeam")
-      .mockResolvedValue({} as any);
+  test("does not fall back on policy 403 — avoids wasted round-trip to org-scoped endpoint", async () => {
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
     createProjectWithDsnSpy.mockRejectedValueOnce(
       new ApiError(
@@ -379,13 +373,12 @@ describe("createSentryProject", () => {
     expect(result.ok).toBe(false);
     expect(createProjectWithAutoTeamSpy).not.toHaveBeenCalled();
     expect(result.error).toContain("disabled for members");
-    createProjectWithAutoTeamSpy.mockRestore();
   });
 
   test("surfaces friendly 409 error when fallback project already exists", async () => {
-    const createProjectWithAutoTeamSpy = vi
-      .spyOn(apiClient, "createProjectWithAutoTeam")
-      .mockRejectedValue(new ApiError("Conflict", 409, "Slug already in use"));
+    createProjectWithAutoTeamSpy.mockRejectedValueOnce(
+      new ApiError("Conflict", 409, "Slug already in use")
+    );
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
     createProjectWithDsnSpy.mockRejectedValueOnce(
       new ApiError("Forbidden", 403, "No project:write access")

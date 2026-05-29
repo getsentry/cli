@@ -237,7 +237,7 @@ type ProjectWithAutoTeam = SentryProject & {
  * Result of creating a project via the org-scoped member-accessible endpoint.
  * Parallel to {@link CreatedProjectDetails} for the team-scoped endpoint.
  */
-export type CreatedAutoTeamProjectDetails = CreatedProjectDetails & {
+type CreatedAutoTeamProjectDetails = CreatedProjectDetails & {
   /** The personal team auto-created by the server for the requesting user. */
   team_slug: string;
 };
