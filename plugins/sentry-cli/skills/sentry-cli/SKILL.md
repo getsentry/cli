@@ -106,6 +106,23 @@ sentry log list --follow
 sentry log list --query "severity:error"
 ```
 
+#### Capture Events Locally (Spotlight)
+
+```bash
+# Run the app with the local server auto-enabled; tail errors/traces/logs.
+# No DSN needed — with no DSN, events go ONLY to the local server (nothing
+# reaches the user's Sentry org, no production quota). With a DSN set, the
+# SDK sends to both.
+sentry local run -- npm run dev          # or: python manage.py runserver, etc.
+
+# Watch only AI/agent (gen_ai, mcp) spans while iterating on an agent.
+sentry local serve -f ai
+
+# Server-side SDKs read SENTRY_SPOTLIGHT automatically. For BROWSER/client
+# events (e.g. Next.js), the SDK does NOT read the env var — reference it in
+# the client config: Sentry.init({ spotlight: process.env.NEXT_PUBLIC_SENTRY_SPOTLIGHT ?? false })
+```
+
 #### Explore the API Schema
 
 ```bash

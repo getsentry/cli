@@ -2,6 +2,8 @@
 
 `sentry local` runs a local development server that captures Sentry SDK envelopes from your dev stack and surfaces errors, traces, and logs in real time — right in your terminal. No authentication required.
 
+No DSN is required either. If your app has no DSN configured, events flow **only** to the local server — nothing reaches your Sentry organization and no production quota is used. If a DSN *is* set, the SDK sends to both Sentry and the local server.
+
 If a server is already running on the port, the command attaches as an SSE consumer instead of starting a duplicate.
 
 ## Examples
@@ -35,6 +37,14 @@ Env vars injected into the child process:
 | `SENTRY_SPOTLIGHT` | `http://localhost:<port>/stream` |
 | `NEXT_PUBLIC_SENTRY_SPOTLIGHT` | `http://localhost:<port>/stream` |
 | `SENTRY_TRACES_SAMPLE_RATE` | `1` (unless already set) |
+
+**Server vs. client.** Server-side SDKs (`@sentry/node`, Python, and friends) read `SENTRY_SPOTLIGHT` automatically — no code changes needed. Browser/client SDKs can't read process env, so the CLI also injects `NEXT_PUBLIC_SENTRY_SPOTLIGHT` to expose the URL to Next.js client bundles. The SDK does **not** read that variable on its own, though — to capture client-side events you must reference it in your client config:
+
+```ts
+Sentry.init({ spotlight: process.env.NEXT_PUBLIC_SENTRY_SPOTLIGHT ?? false });
+```
+
+Other frameworks expose client env vars under different prefixes (Vite `VITE_`, CRA `REACT_APP_`) — set the equivalent yourself.
 
 ## Endpoints
 
@@ -77,6 +87,13 @@ Use `--quiet` to suppress tail output entirely if you only need the SSE stream.
 ```
 
 GenAI operations show the model name, MCP tool calls show the tool being invoked, and database queries show the system and query summary. This works automatically when your Sentry SDK is configured with AI/LLM integrations.
+
+To watch only agent activity, filter to the `ai` item type:
+
+```bash
+sentry local -f ai          # only AI/agent spans
+sentry local -f ai -f error # agent spans and errors
+```
 
 ## JSON output
 

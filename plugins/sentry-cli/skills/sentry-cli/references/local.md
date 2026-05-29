@@ -51,6 +51,9 @@ sentry local --quiet
 
 sentry local -f error -f log    # only errors and logs
 
+sentry local -f ai          # only AI/agent spans
+sentry local -f ai -f error # agent spans and errors
+
 sentry local --format json
 ```
 
