@@ -191,6 +191,17 @@ export async function createSentryProject(
           `  sentry init ${context.org}/<project-slug>`,
       };
     }
+    // 409: project already exists (from either the team-scoped or org-scoped
+    // endpoint — both propagate here). Surface a friendly message with a view
+    // hint rather than the raw API error text.
+    if (error instanceof ApiError && error.status === 409) {
+      return {
+        ok: false,
+        error:
+          `A project named "${name}" already exists in "${context.org}".\n` +
+          `View it: sentry project view ${context.org}/${slugify(name)}`,
+      };
+    }
     return { ok: false, error: formatToolError(error) };
   }
 }
