@@ -105,7 +105,6 @@ export {
   listProjectsPaginated,
   matchesWordBoundary,
   type ProjectSearchResult,
-  type ProjectWithAutoTeam,
   type ProjectWithOrg,
   resolveOrgDisplayName,
   tryGetPrimaryDsn,

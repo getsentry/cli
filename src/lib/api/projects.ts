@@ -228,7 +228,7 @@ export async function createProjectWithDsn(
 }
 
 /** Result of creating a project via the org-scoped member-accessible endpoint. */
-export type ProjectWithAutoTeam = SentryProject & {
+type ProjectWithAutoTeam = SentryProject & {
   /** The personal team that was auto-created for the requesting user. */
   team_slug: string;
 };
