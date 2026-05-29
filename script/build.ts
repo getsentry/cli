@@ -33,7 +33,6 @@ import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
-import { processBinary } from "binpunch";
 import { build as esbuild } from "esbuild";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
 import { injectDebugId, PLACEHOLDER_DEBUG_ID } from "./debug-id.js";
@@ -321,6 +320,7 @@ async function compileAllTargets(
       [
         fossilizeBin,
         "--no-bundle",
+        "--hole-punch",
         "--output-name",
         "sentry",
         "--platforms",
@@ -342,7 +342,7 @@ async function compileAllTargets(
     return { successes: 0, failures: targets.length };
   }
 
-  // Post-process each target: rename Windows binary, hole-punch ICU, gzip
+  // Post-process each target: rename Windows binary, gzip
   let successes = 0;
   let failures = 0;
   for (const target of targets) {
@@ -361,10 +361,13 @@ async function compileAllTargets(
 
 /**
  * Post-process a single compiled binary: rename from fossilize's output
- * naming to our expected naming, hole-punch ICU data, and optionally gzip.
+ * naming to our expected naming, and optionally gzip.
  *
  * Fossilize outputs `sentry-{os}-{arch}[.exe]` where os is "win" for Windows.
  * We rename "win" → "windows" to match our release naming convention.
+ *
+ * Note: ICU hole-punch now runs inside fossilize (--hole-punch flag) before
+ * code signing, so it's no longer done here.
  */
 async function postProcessTarget(target: BuildTarget): Promise<void> {
   const packageName = getPackageName(target);
@@ -382,15 +385,6 @@ async function postProcessTarget(target: BuildTarget): Promise<void> {
   }
 
   console.log(`    -> ${outfile}`);
-
-  // Hole-punch: zero unused ICU data entries so they compress to nearly nothing.
-  // Always runs so the smoke test exercises the same binary as the release.
-  const hpStats = processBinary(outfile);
-  if (hpStats && hpStats.removedEntries > 0) {
-    console.log(
-      `    -> hole-punched ${hpStats.removedEntries}/${hpStats.totalEntries} ICU entries`
-    );
-  }
 
   // On main and release branches (RELEASE_BUILD=1), create gzip-compressed
   // copies for release downloads / GHCR nightly (~70% smaller with hole-punch).

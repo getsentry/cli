@@ -432,7 +432,23 @@ async function spawnWithRetry(
         env,
       });
       return await new Promise<number>((resolve, reject) => {
-        proc.on("close", (code) => resolve(code ?? 1));
+        proc.on("close", (code, signal) => {
+          // SIGKILL on macOS typically means AMFI killed the binary due to
+          // an invalid code signature (the downloaded binary has quarantine
+          // xattr). Surface this clearly instead of an opaque exit code.
+          if (signal === "SIGKILL") {
+            reject(
+              new UpgradeError(
+                "execution_failed",
+                "Downloaded binary was killed by the operating system (SIGKILL). " +
+                  "This usually means the binary has an invalid code signature. " +
+                  "Try reinstalling: curl -sL https://sentry.io/get-cli/ | bash"
+              )
+            );
+            return;
+          }
+          resolve(code ?? 1);
+        });
         proc.on("error", (err) => reject(err));
       });
     } catch (error) {
