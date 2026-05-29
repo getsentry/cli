@@ -228,6 +228,39 @@ async function handleCreateProject404(opts: {
 }
 
 /**
+ * Resolve the team to show in a --dry-run preview.
+ *
+ * Mirrors the non-dry-run fallback: if resolveOrCreateTeam 403s (member lacks
+ * team:read), the real run would use POST /organizations/{org}/projects/ which
+ * auto-creates a personal team. Show a placeholder instead of failing.
+ */
+async function resolveDryRunTeam(
+  orgSlug: string,
+  opts: {
+    team?: string;
+    detectedFrom?: string;
+    autoCreateSlug: string;
+  }
+): Promise<ResolvedConcreteTeam> {
+  try {
+    return await resolveOrCreateTeam(orgSlug, {
+      team: opts.team,
+      detectedFrom: opts.detectedFrom,
+      usageHint: USAGE_HINT,
+      autoCreateSlug: opts.autoCreateSlug,
+      dryRun: true,
+    });
+  } catch (error) {
+    // 403 from listTeams: member lacks team:read. The real run falls back to the
+    // org-scoped endpoint which auto-creates a personal team. Preview that outcome.
+    if (!(error instanceof ApiError && error.status === 403) || opts.team) {
+      throw error;
+    }
+    return { slug: "team-<username>", source: "auto-created" };
+  }
+}
+
+/**
  * Fallback project creation via POST /organizations/{org}/projects/.
  *
  * Used when the team-scoped flow 403s (member lacks project:write or can't
@@ -456,12 +489,10 @@ export const createCommand = buildCommand({
 
     // Dry-run mode: resolve team (or preview auto-create) without hitting create APIs
     if (flags["dry-run"]) {
-      const team: ResolvedConcreteTeam = await resolveOrCreateTeam(orgSlug, {
+      const team = await resolveDryRunTeam(orgSlug, {
         team: flags.team,
         detectedFrom: resolved.detectedFrom,
-        usageHint: USAGE_HINT,
         autoCreateSlug: expectedSlug,
-        dryRun: true,
       });
       const result: ProjectCreatedResult = {
         project: { id: "", slug: expectedSlug, name, platform },
