@@ -670,8 +670,11 @@ describe("project create", () => {
     expect(err.message).toContain("Your organizations");
   });
 
-  test("resolveOrCreateTeam with non-404 listTeams failure shows generic error", async () => {
-    // listTeams returns 403 — org may exist, but user lacks access
+  test("listTeams 403 triggers org-scoped fallback, surfaces policy error if fallback also blocked", async () => {
+    // listTeams returns 403 (member lacks team:read). handleListTeamsError re-throws
+    // the raw ApiError so the outer catch can route to the org-scoped fallback.
+    // The default beforeEach mock has createProjectWithAutoTeam reject with
+    // "disabled this feature", so the final error is the policy-disabled message.
     listTeamsSpy.mockRejectedValue(
       new ApiError("API request failed: 403 Forbidden", 403)
     );
@@ -679,15 +682,12 @@ describe("project create", () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
 
-    const err = await func
+    const err = (await func
       .call(context, { json: false }, "my-app", "node")
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(CliError);
-    expect(err.message).toContain("could not be accessed");
-    expect(err.message).toContain("403");
-    expect(err.message).toContain("may not exist, or you may lack access");
-    // Should NOT say "Organization is required" — we don't know that
-    expect(err.message).not.toContain("is required");
+      .catch((e: Error) => e)) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(403);
+    expect(err.message).toContain("disabled project creation for members");
   });
 
   test("auto-corrects dot-separated platform to hyphen-separated", async () => {
