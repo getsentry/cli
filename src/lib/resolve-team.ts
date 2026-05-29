@@ -255,8 +255,8 @@ async function autoCreateTeam(
       throw error;
     }
     // 403 means the user lacks permission to create teams (e.g., org member role).
-    // Re-throw as ApiError so callers can fall back to the experimental
-    // member-accessible project creation endpoint instead of showing a dead-end error.
+    // Re-throw as ApiError so callers can fall back to the org-scoped endpoint
+    // (POST /organizations/{org}/projects/) instead of showing a dead-end error.
     if (error instanceof ApiError && error.status === 403) {
       throw error;
     }

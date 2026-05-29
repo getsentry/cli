@@ -234,6 +234,14 @@ type ProjectWithAutoTeam = SentryProject & {
 };
 
 /**
+ * Substring present in the 403 detail when the org has disabled member project
+ * creation. Callers match against this to distinguish a policy 403 from an auth
+ * 403, so they can surface a clear "ask your admin" message instead of a generic
+ * permission error or a re-auth prompt.
+ */
+export const MEMBER_PROJECT_CREATION_DISABLED_DETAIL = "disabled this feature";
+
+/**
  * Create a new project via the org-scoped member-accessible endpoint.
  *
  * Unlike `createProject` (which posts to `/teams/{org}/{team}/projects/` and
@@ -266,6 +274,18 @@ export async function createProjectWithAutoTeam(
     `/organizations/${orgSlug}/projects/`,
     { method: "POST", body }
   );
+
+  // Seed project cache so subsequent commands skip redundant API lookups.
+  // Mirrors what createProjectWithDsn does for the team-scoped endpoint.
+  try {
+    const orgName = resolveOrgDisplayName(orgSlug, data.organization?.name);
+    cacheProjectsForOrg(orgSlug, orgName, [
+      { id: data.id, slug: data.slug, name: data.name },
+    ]);
+  } catch {
+    // Best-effort — don't let cache failures break project creation
+  }
+
   return data;
 }
 

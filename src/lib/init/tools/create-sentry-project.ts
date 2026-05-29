@@ -1,6 +1,16 @@
+/**
+ * Sentry project creation tool for the init wizard.
+ *
+ * Implements the `create-sentry-project` and `ensure-sentry-project` wizard
+ * operations. Uses the team-scoped endpoint when the caller has team access,
+ * falling back to POST /organizations/{org}/projects/ for org members who
+ * lack team:write.
+ */
+
 import {
   createProjectWithAutoTeam,
   createProjectWithDsn,
+  MEMBER_PROJECT_CREATION_DISABLED_DETAIL,
   tryGetPrimaryDsn,
 } from "../../api-client.js";
 import { ApiError } from "../../errors.js";
@@ -26,6 +36,15 @@ type ProjectData = {
 /**
  * Resolve project creation using the team-based flow, falling back to the
  * org-scoped endpoint on 403 (member lacks team creation permission).
+ *
+ * @param opts.org - Organization slug
+ * @param opts.name - Project display name
+ * @param opts.platform - Platform identifier (null/undefined → omitted from request)
+ * @param opts.explicitTeam - Team slug from `--team` flag; suppresses fallback when set
+ * @param opts.slugHint - Slug used for auto-creating a team when org has none
+ * @returns Resolved project identifiers and DSN
+ * @throws When the team-scoped flow fails for any reason other than a member
+ *   permission 403, or when an explicit team was given and it 403s.
  */
 async function resolveProjectCreation(opts: {
   org: string;
@@ -161,7 +180,7 @@ export async function createSentryProject(
     if (
       error instanceof ApiError &&
       error.status === 403 &&
-      error.detail?.includes("disabled this feature")
+      error.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)
     ) {
       return {
         ok: false,

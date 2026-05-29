@@ -22,6 +22,7 @@ import {
   createProjectWithAutoTeam,
   createProjectWithDsn,
   listTeams,
+  MEMBER_PROJECT_CREATION_DISABLED_DETAIL,
   tryGetPrimaryDsn,
 } from "../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
@@ -59,7 +60,7 @@ import { slugify } from "../../lib/utils.js";
 
 const log = logger.withTag("project.create");
 
-/** Usage hint template — base command without positionals */
+/** Full usage hint shown in errors and help text. */
 const USAGE_HINT = "sentry project create <org>/<name> <platform>";
 
 type CreateFlags = {
@@ -256,6 +257,9 @@ async function resolveDryRunTeam(
     if (!(error instanceof ApiError && error.status === 403) || opts.team) {
       throw error;
     }
+    log.debug(
+      "403 on listTeams in dry-run — previewing org-scoped fallback outcome"
+    );
     return { slug: "team-<username>", source: "auto-created" };
   }
 }
@@ -289,7 +293,7 @@ async function createProjectWithAutoTeamFallback(opts: {
     if (expError instanceof ApiError) {
       if (
         expError.status === 403 &&
-        expError.detail?.includes("disabled this feature")
+        expError.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)
       ) {
         throw new ApiError(
           `Failed to create project '${name}' in ${orgSlug} (HTTP 403).\n\n` +
@@ -509,7 +513,6 @@ export const createCommand = buildCommand({
       return yield new CommandOutput(result);
     }
 
-    // Attempt the normal team-based flow.
     // If either step 403s (member can't create/see teams, or lacks project:write on
     // the team), fall back to POST /organizations/{org}/projects/ which mirrors
     // what the Sentry onboarding UI uses: auto-creates a personal team for the
@@ -542,6 +545,7 @@ export const createCommand = buildCommand({
       if (!(error instanceof ApiError && error.status === 403) || flags.team) {
         throw error;
       }
+      log.debug("403 on team-based flow — falling back to org-scoped endpoint");
       const fallback = await createProjectWithAutoTeamFallback({
         orgSlug,
         name,
