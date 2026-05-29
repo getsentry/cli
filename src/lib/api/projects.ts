@@ -166,6 +166,45 @@ export type CreatedProjectDetails = {
 };
 
 /**
+ * Seed both project caches after a successful creation.
+ *
+ * Best-effort: cache failures are silently swallowed so they never break
+ * project creation. Called by both `createProjectWithDsn` (team-scoped)
+ * and `createProjectWithAutoTeam` (org-scoped) to keep cache behaviour
+ * consistent across both creation paths.
+ */
+function seedProjectCaches(
+  orgSlug: string,
+  project: SentryProject,
+  dsn: string | null
+): void {
+  try {
+    const orgName = resolveOrgDisplayName(orgSlug, project.organization?.name);
+    cacheProjectsForOrg(orgSlug, orgName, [
+      { id: project.id, slug: project.slug, name: project.name },
+    ]);
+  } catch {
+    // Best-effort — don't let cache failures break project creation
+  }
+  if (dsn) {
+    try {
+      const publicKey = extractPublicKeyFromDsn(dsn);
+      if (publicKey) {
+        setCachedProjectByDsnKey(publicKey, {
+          orgSlug,
+          orgName: resolveOrgDisplayName(orgSlug, project.organization?.name),
+          projectSlug: project.slug,
+          projectName: project.name,
+          projectId: project.id,
+        });
+      }
+    } catch {
+      // Best-effort — don't let cache failures break project creation
+    }
+  }
+}
+
+/**
  * Extract the public key from a Sentry DSN URL.
  * DSN format: https://<public_key>@<host>/<project_id>
  */
@@ -196,34 +235,7 @@ export async function createProjectWithDsn(
   const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
   const url = buildProjectUrl(orgSlug, project.slug);
 
-  // Seed project cache so subsequent commands skip redundant API lookups
-  try {
-    const orgName = resolveOrgDisplayName(orgSlug, project.organization?.name);
-    cacheProjectsForOrg(orgSlug, orgName, [
-      { id: project.id, slug: project.slug, name: project.name },
-    ]);
-  } catch {
-    // Best-effort — don't let cache failures break project creation
-  }
-
-  // Also seed the DSN-based project cache for DSN resolution
-  if (dsn) {
-    try {
-      const publicKey = extractPublicKeyFromDsn(dsn);
-      if (publicKey) {
-        setCachedProjectByDsnKey(publicKey, {
-          orgSlug,
-          orgName: resolveOrgDisplayName(orgSlug, project.organization?.name),
-          projectSlug: project.slug,
-          projectName: project.name,
-          projectId: project.id,
-        });
-      }
-    } catch {
-      // Best-effort — don't let cache failures break project creation
-    }
-  }
-
+  seedProjectCaches(orgSlug, project, dsn);
   return { project, dsn, url };
 }
 
@@ -286,35 +298,7 @@ export async function createProjectWithAutoTeam(
   const dsn = await tryGetPrimaryDsn(orgSlug, data.slug);
   const url = buildProjectUrl(orgSlug, data.slug);
 
-  // Seed project cache so subsequent commands skip redundant API lookups.
-  // Mirrors what createProjectWithDsn does for the team-scoped endpoint.
-  try {
-    const orgName = resolveOrgDisplayName(orgSlug, data.organization?.name);
-    cacheProjectsForOrg(orgSlug, orgName, [
-      { id: data.id, slug: data.slug, name: data.name },
-    ]);
-  } catch {
-    // Best-effort — don't let cache failures break project creation
-  }
-
-  // Also seed the DSN-based project cache for DSN resolution
-  if (dsn) {
-    try {
-      const publicKey = extractPublicKeyFromDsn(dsn);
-      if (publicKey) {
-        setCachedProjectByDsnKey(publicKey, {
-          orgSlug,
-          orgName: resolveOrgDisplayName(orgSlug, data.organization?.name),
-          projectSlug: data.slug,
-          projectName: data.name,
-          projectId: data.id,
-        });
-      }
-    } catch {
-      // Best-effort — don't let cache failures break project creation
-    }
-  }
-
+  seedProjectCaches(orgSlug, data, dsn);
   return { project: data, dsn, url, team_slug: data.team_slug };
 }
 
