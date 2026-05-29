@@ -253,20 +253,28 @@ async function createProjectWithAutoTeamFallback(opts: {
       platform,
     });
   } catch (expError) {
-    if (
-      expError instanceof ApiError &&
-      expError.status === 403 &&
-      expError.detail?.includes("disabled this feature")
-    ) {
-      throw new ApiError(
-        `Failed to create project '${name}' in ${orgSlug} (HTTP 403).\n\n` +
-          "Your organization has disabled project creation for members.\n" +
-          "Ask an org owner or manager to enable it in Organization Settings → Member Roles,\n" +
-          "or ask them to create the project and add you to it.",
-        403,
-        expError.detail,
-        expError.endpoint
-      );
+    if (expError instanceof ApiError) {
+      if (
+        expError.status === 403 &&
+        expError.detail?.includes("disabled this feature")
+      ) {
+        throw new ApiError(
+          `Failed to create project '${name}' in ${orgSlug} (HTTP 403).\n\n` +
+            "Your organization has disabled project creation for members.\n" +
+            "Ask an org owner or manager to enable it in Organization Settings → Member Roles,\n" +
+            "or ask them to create the project and add you to it.",
+          403,
+          expError.detail,
+          expError.endpoint
+        );
+      }
+      if (expError.status === 409) {
+        const slug = slugify(name);
+        throw new CliError(
+          `A project named '${name}' already exists in ${orgSlug}.\n\n` +
+            `View it: sentry project view ${orgSlug}/${slug}`
+        );
+      }
     }
     throw expError;
   }
