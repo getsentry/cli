@@ -81,11 +81,11 @@ jobs:
               ]}'
             else
               # main, release/**, workflow_call: full cross-platform matrix.
-              # macOS targets build natively for V8 code cache (~15% faster startup).
-              # Other targets cross-compile from ubuntu-latest via fossilize.
+              # darwin-arm64 builds natively on macOS for V8 code cache (~15% faster startup).
+              # All other targets cross-compile from ubuntu-latest via fossilize.
               echo '{"include":[
                 {"target":"darwin-arm64",  "os":"macos-latest",  "can-test":true},
-                {"target":"darwin-x64",    "os":"macos-13",      "can-test":false},
+                {"target":"darwin-x64",    "os":"ubuntu-latest", "can-test":false},
                 {"target":"linux-x64",     "os":"ubuntu-latest", "can-test":true},
                 {"target":"linux-arm64",   "os":"ubuntu-latest", "can-test":false},
                 {"target":"windows-x64",   "os":"ubuntu-latest", "can-test":false}
