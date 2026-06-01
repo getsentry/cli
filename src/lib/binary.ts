@@ -464,7 +464,9 @@ export async function installBinary(
       try {
         await unlink(tempPath);
       } catch (error) {
-        logger.debug("Failed to clean up temp file", error);
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          logger.debug("Failed to clean up temp file", error);
+        }
       }
 
       // Copy source binary to temp path next to install location
