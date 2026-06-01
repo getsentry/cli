@@ -24,6 +24,7 @@ import {
   isTlsCertError,
 } from "./custom-ca.js";
 import { stringifyUnknown, UpgradeError } from "./errors.js";
+import { logger } from "./logger.js";
 
 /** Known directories where the curl installer may place the binary */
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
@@ -453,9 +454,17 @@ export async function installBinary(
     // path to exist, so fall back to resolve() for the normal case where
     // tempPath hasn't been created yet.
     const canonical = (p: string): string => {
+      // realpathSync throws when the path does not exist yet — the normal
+      // case for tempPath before the download lands — so short-circuit that
+      // without logging. A throw for any other reason (e.g. permissions) is
+      // unexpected and worth surfacing in debug logs.
+      if (!existsSync(p)) {
+        return resolve(p);
+      }
       try {
         return realpathSync(p);
-      } catch {
+      } catch (error) {
+        logger.debug("realpathSync failed, falling back to resolve()", error);
         return resolve(p);
       }
     };
