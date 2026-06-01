@@ -17,7 +17,7 @@ function isWindowsBatchShim(executable: string): boolean {
 }
 
 function quoteWindowsCommandArg(value: string): string {
-  return `"${value.replace(/\^/g, "^^").replace(/"/g, '""')}"`;
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 function buildWindowsBatchCommand(executable: string, args: string[]): string {

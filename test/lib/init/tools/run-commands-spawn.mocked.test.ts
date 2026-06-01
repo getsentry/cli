@@ -112,7 +112,7 @@ describe("runCommands spawn options", () => {
         "/d",
         "/s",
         "/c",
-        '""C:\\Tools\\pnpm.CMD" "--filter" "./apps/web app" "add" "@sentry/nextjs@^^8.0.0""',
+        '""C:\\Tools\\pnpm.CMD" "--filter" "./apps/web app" "add" "@sentry/nextjs@^8.0.0""',
       ],
       options: { shell: false },
     });

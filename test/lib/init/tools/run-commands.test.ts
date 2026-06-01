@@ -37,6 +37,9 @@ describe("validateCommand", () => {
     ).toBeUndefined();
     expect(validateCommand("dotnet list package")).toBeUndefined();
     expect(validateCommand("futurepm explain sentry-sdk")).toBeUndefined();
+    expect(validateCommand("futurepm explain sentry-wizard")).toBeUndefined();
+    expect(validateCommand("npm uninstall sentry-wizard")).toBeUndefined();
+    expect(validateCommand("npm uninstall @sentry/wizard")).toBeUndefined();
   });
 
   test("allows path-prefixed package managers but blocks dangerous ones", () => {
@@ -106,6 +109,12 @@ describe("validateCommand", () => {
       "invokes Sentry setup recursively"
     );
     expect(validateCommand("npx sentry-wizard@latest -i nextjs")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npm exec @sentry/wizard -i nextjs")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("pnpm dlx sentry-wizard -i nextjs")).toContain(
       "invokes Sentry setup recursively"
     );
     expect(validateCommand("C:\\Tools\\sentry-wizard.cmd -i nextjs")).toContain(

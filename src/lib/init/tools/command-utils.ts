@@ -119,23 +119,77 @@ function isSentryCliPackageSpec(token: string): boolean {
   return lower === "@sentry/cli" || lower.startsWith("@sentry/cli@");
 }
 
+function isSentryWizardPackageSpec(token: string): boolean {
+  const lower = token.toLowerCase();
+  return lower === "@sentry/wizard" || lower.startsWith("@sentry/wizard@");
+}
+
 function isExecutablePackageSpec(executable: string, name: string): boolean {
   return executable === name || executable.startsWith(`${name}@`);
 }
 
-function isRecursiveSentrySetup(tokens: string[]): boolean {
-  if (tokens.some((token) => token.toLowerCase().includes("@sentry/wizard"))) {
-    return true;
+function findFirstNonOptionIndex(
+  tokens: string[],
+  startIndex: number
+): number | undefined {
+  for (let index = startIndex; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token) {
+      continue;
+    }
+    if (token === "--") {
+      return index + 1 < tokens.length ? index + 1 : undefined;
+    }
+    if (token.startsWith("-")) {
+      continue;
+    }
+    return index;
   }
 
+  return;
+}
+
+function findPackageExecutionTokenIndex(tokens: string[]): number | undefined {
+  const firstExecutable = normalizeExecutableName(tokens[0] ?? "");
+  if (
+    isExecutablePackageSpec(firstExecutable, "npx") ||
+    isExecutablePackageSpec(firstExecutable, "bunx")
+  ) {
+    return findFirstNonOptionIndex(tokens, 1);
+  }
+
+  const subcommandIndex = findFirstNonOptionIndex(tokens, 1);
+  if (subcommandIndex === undefined) {
+    return;
+  }
+
+  const subcommand = normalizeExecutableName(tokens[subcommandIndex] ?? "");
+  if (subcommand !== "exec" && subcommand !== "dlx") {
+    return;
+  }
+
+  return findFirstNonOptionIndex(tokens, subcommandIndex + 1);
+}
+
+function canExecuteToken(tokens: string[], index: number): boolean {
+  return index === 0 || index === findPackageExecutionTokenIndex(tokens);
+}
+
+function isRecursiveSentrySetup(tokens: string[]): boolean {
   return tokens.some((token, index) => {
-    if (isSentryCliPackageSpec(token)) {
-      return hasInitArgAfter(tokens, index);
+    if (!canExecuteToken(tokens, index)) {
+      return false;
     }
 
     const executable = normalizeExecutableName(token);
-    if (isExecutablePackageSpec(executable, "sentry-wizard")) {
+    if (
+      isSentryWizardPackageSpec(token) ||
+      isExecutablePackageSpec(executable, "sentry-wizard")
+    ) {
       return true;
+    }
+    if (isSentryCliPackageSpec(token)) {
+      return hasInitArgAfter(tokens, index);
     }
     if (
       !(
