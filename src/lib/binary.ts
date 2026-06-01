@@ -9,6 +9,7 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync,
   readFileSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync,
@@ -443,7 +444,23 @@ export async function installBinary(
     // When upgrade spawns setup --install, the child's execPath IS the
     // .download file (sourcePath === tempPath). In that case skip the
     // unlink+copy — the file is already where we need it.
-    if (resolve(sourcePath) !== resolve(tempPath)) {
+    //
+    // Compare canonical (symlink-resolved) paths, not just absolute ones:
+    // process.execPath is canonicalized by the OS, while installDir may
+    // reach the same location through a symlink (e.g. macOS /tmp ->
+    // /private/tmp). Plain resolve() would see these as different and we'd
+    // unlink the very file we're about to copy. realpathSync requires the
+    // path to exist, so fall back to resolve() for the normal case where
+    // tempPath hasn't been created yet.
+    const canonical = (p: string): string => {
+      try {
+        return realpathSync(p);
+      } catch {
+        return resolve(p);
+      }
+    };
+
+    if (canonical(sourcePath) !== canonical(tempPath)) {
       // Clean up any leftover temp file from interrupted operation
       try {
         await unlink(tempPath);
