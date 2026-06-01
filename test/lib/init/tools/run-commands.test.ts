@@ -27,6 +27,8 @@ function makePayload(commands: string[]): RunCommandsPayload {
 describe("validateCommand", () => {
   test("allows quoted package specifiers", () => {
     expect(validateCommand('pip install "sentry-sdk[django]"')).toBeUndefined();
+    expect(validateCommand("npm install @sentry/node@^9.0.0")).toBeUndefined();
+    expect(validateCommand("pnpm add @sentry/nextjs@^8.0.0")).toBeUndefined();
   });
 
   test("allows dependency diagnostics without a package-manager allowlist", () => {
@@ -58,9 +60,6 @@ describe("validateCommand", () => {
       "Blocked command"
     );
     expect(validateCommand("futurepm explain !PATH!")).toContain(
-      "Blocked command"
-    );
-    expect(validateCommand("futurepm explain ^PATH")).toContain(
       "Blocked command"
     );
   });

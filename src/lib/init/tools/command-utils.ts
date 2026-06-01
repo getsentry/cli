@@ -25,7 +25,6 @@ const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
     { pattern: ">", label: "redirection (>)" },
     { pattern: "<", label: "redirection (<)" },
     { pattern: "%", label: "Windows environment variable expansion (%)" },
-    { pattern: "^", label: "Windows command escaping (^)" },
     { pattern: "!", label: "Windows delayed environment expansion (!)" },
   ];
 

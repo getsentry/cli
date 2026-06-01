@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { RunCommandsPayload } from "../../../../src/lib/init/types.js";
 
+const originalComSpec = process.env.ComSpec;
 const { spawnCalls } = vi.hoisted(() => ({
   spawnCalls: [] as Array<{
     command: string;
@@ -68,14 +69,20 @@ function makePayload(command: string): RunCommandsPayload {
 
 beforeEach(() => {
   spawnCalls.splice(0);
+  delete process.env.ComSpec;
 });
 
 afterEach(() => {
   setPlatform(originalPlatform);
+  if (originalComSpec === undefined) {
+    delete process.env.ComSpec;
+  } else {
+    process.env.ComSpec = originalComSpec;
+  }
 });
 
 describe("runCommands spawn options", () => {
-  test("uses the Windows shell for package-manager .cmd shims", async () => {
+  test("uses cmd.exe for package-manager .cmd shims", async () => {
     setPlatform("win32");
 
     const result = await runCommands(makePayload("pnpm --version"), {
@@ -84,9 +91,30 @@ describe("runCommands spawn options", () => {
 
     expect(result.ok).toBe(true);
     expect(spawnCalls[0]).toMatchObject({
-      command: "C:\\Tools\\pnpm.CMD",
-      args: ["--version"],
-      options: { shell: true },
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c", '""C:\\Tools\\pnpm.CMD" "--version""'],
+      options: { shell: false },
+    });
+  });
+
+  test("quotes Windows .cmd shim arguments with spaces", async () => {
+    setPlatform("win32");
+
+    const result = await runCommands(
+      makePayload('pnpm --filter "./apps/web app" add @sentry/nextjs@^8.0.0'),
+      { dryRun: false }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(spawnCalls[0]).toMatchObject({
+      command: "cmd.exe",
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        '""C:\\Tools\\pnpm.CMD" "--filter" "./apps/web app" "add" "@sentry/nextjs@^^8.0.0""',
+      ],
+      options: { shell: false },
     });
   });
 

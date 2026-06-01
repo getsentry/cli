@@ -12,8 +12,21 @@ import type { InitToolDefinition, ToolContext } from "./types.js";
 
 const WINDOWS_BATCH_SHIM_RE = /\.(?:cmd|bat)$/iu;
 
-function needsWindowsShell(executable: string): boolean {
+function isWindowsBatchShim(executable: string): boolean {
   return process.platform === "win32" && WINDOWS_BATCH_SHIM_RE.test(executable);
+}
+
+function quoteWindowsCommandArg(value: string): string {
+  return `"${value.replace(/\^/g, "^^").replace(/"/g, '""')}"`;
+}
+
+function buildWindowsBatchCommand(executable: string, args: string[]): string {
+  const commandLine = [executable, ...args]
+    .map(quoteWindowsCommandArg)
+    .join(" ");
+
+  // cmd.exe /s strips the outer quote pair, leaving a quoted exe + argv.
+  return `"${commandLine}"`;
 }
 
 /**
@@ -87,11 +100,22 @@ async function runSingleCommand(
   stderr: string;
 }> {
   const executable = whichSync(command.executable) ?? command.executable;
+  const spawnCommand = isWindowsBatchShim(executable)
+    ? {
+        executable: process.env.ComSpec ?? "cmd.exe",
+        args: [
+          "/d",
+          "/s",
+          "/c",
+          buildWindowsBatchCommand(executable, command.args),
+        ],
+      }
+    : { executable, args: command.args };
 
   try {
-    const child = spawn(executable, command.args, {
+    const child = spawn(spawnCommand.executable, spawnCommand.args, {
       cwd,
-      shell: needsWindowsShell(executable),
+      shell: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
     const exited = new Promise<number>((resolve) => {
