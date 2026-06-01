@@ -114,12 +114,16 @@ describe("fixabilityColor", () => {
 });
 
 describe("terminalLink", () => {
-  /** Save/restore isTTY and env around TTY-specific tests */
+  /** Save/restore isTTY and all plain-output env vars around TTY-specific tests */
   function withTTY(fn: () => void): void {
     const savedTTY = process.stdout.isTTY;
     const savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    const savedNoColor = process.env.NO_COLOR;
+    const savedForceColor = process.env.FORCE_COLOR;
     process.stdout.isTTY = true;
     delete process.env.SENTRY_PLAIN_OUTPUT;
+    delete process.env.NO_COLOR;
+    delete process.env.FORCE_COLOR;
     try {
       fn();
     } finally {
@@ -128,6 +132,16 @@ describe("terminalLink", () => {
         process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
       } else {
         delete process.env.SENTRY_PLAIN_OUTPUT;
+      }
+      if (savedNoColor !== undefined) {
+        process.env.NO_COLOR = savedNoColor;
+      } else {
+        delete process.env.NO_COLOR;
+      }
+      if (savedForceColor !== undefined) {
+        process.env.FORCE_COLOR = savedForceColor;
+      } else {
+        delete process.env.FORCE_COLOR;
       }
     }
   }
