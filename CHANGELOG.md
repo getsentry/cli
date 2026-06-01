@@ -1,6 +1,88 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.35.0
+
+### New Features ✨
+
+#### Local
+
+- Render OTel semantic attributes in transaction output by @BYK in [#1015](https://github.com/getsentry/cli/pull/1015)
+- Add local dev server for capturing SDK events by @MathurAditya724 in [#888](https://github.com/getsentry/cli/pull/888)
+
+#### Other
+
+- (cli) Add `sentry cli import` for .sentryclirc migration by @BYK in [#987](https://github.com/getsentry/cli/pull/987)
+- (init) Show AI-generated feature blurbs in setup summary by @betegon in [#982](https://github.com/getsentry/cli/pull/982)
+- (project) Fall back to org-scoped endpoint for member project creation by @betegon in [#1030](https://github.com/getsentry/cli/pull/1030)
+- Build macOS binaries natively for V8 code cache by @BYK in [#1014](https://github.com/getsentry/cli/pull/1014)
+
+### Bug Fixes 🐛
+
+#### Ci
+
+- Replace deprecated macos-13 runner with ubuntu-latest for darwin-x64 by @BYK in [#1039](https://github.com/getsentry/cli/pull/1039)
+- Use correct Apple signing secret names by @BYK in [#1006](https://github.com/getsentry/cli/pull/1006)
+
+#### Dashboard
+
+- Escape author field in revision table by @MathurAditya724 in [#1001](https://github.com/getsentry/cli/pull/1001)
+- Align revision schema with actual API response by @sentry-junior in [#1000](https://github.com/getsentry/cli/pull/1000)
+
+#### Init
+
+- Fall back to no-platform on 400 invalid platform from registry by @betegon in [#1036](https://github.com/getsentry/cli/pull/1036)
+- Recover run-level stale resume errors by @betegon in [#1025](https://github.com/getsentry/cli/pull/1025)
+- Tag wizard.outcome on all early-exit paths by @betegon in [#1005](https://github.com/getsentry/cli/pull/1005)
+- Match formatError priority order for WizardError message by @betegon in [#981](https://github.com/getsentry/cli/pull/981)
+- Surface wizard exit code and command stderr in Sentry events (CLI-1JA) by @betegon in [#980](https://github.com/getsentry/cli/pull/980)
+- Replace confusing classifyArgs errors with specific ValidationError messages by @betegon in [#979](https://github.com/getsentry/cli/pull/979)
+- Add --app flag and actionable errors for non-interactive monorepo runs by @betegon in [#977](https://github.com/getsentry/cli/pull/977)
+- Improve multi-org error message for agentic use by @betegon in [#974](https://github.com/getsentry/cli/pull/974)
+- Enrich 401 Unauthorized errors with actionable guidance by @betegon in [#971](https://github.com/getsentry/cli/pull/971)
+
+#### Issue
+
+- Add JSON fields schema to issue view command by @BYK in [#1029](https://github.com/getsentry/cli/pull/1029)
+- Conditionally collapse lifetime to preserve count/userCount/firstSeen/lastSeen by @BYK in [#985](https://github.com/getsentry/cli/pull/985)
+
+#### Other
+
+- (auth) Surface .sentryclirc source in self-hosted login errors by @betegon in [#976](https://github.com/getsentry/cli/pull/976)
+- (build) Run hole-punch before signing to preserve code signature by @BYK in [#1037](https://github.com/getsentry/cli/pull/1037)
+- (explore) Use tracemetrics dataset instead of metricsEnhanced by @MathurAditya724 in [#995](https://github.com/getsentry/cli/pull/995)
+- (sdk) Apply Stricli flag defaults in SDK invoke path by @BYK in [#1027](https://github.com/getsentry/cli/pull/1027)
+- Improve Sentry issue grouping to eliminate duplicate issues by @BYK in [#1028](https://github.com/getsentry/cli/pull/1028)
+- Use file-local createRequire for relative lazy requires in src/ by @betegon in [#1008](https://github.com/getsentry/cli/pull/1008)
+- Address low-priority review items from Bun→Node migration by @BYK in [#991](https://github.com/getsentry/cli/pull/991)
+- Address review comments from Bun→Node migration PRs by @BYK in [#989](https://github.com/getsentry/cli/pull/989)
+
+### Documentation 📚
+
+- Fix stale Bun references and add systemic doc drift checks by @BYK in [#1024](https://github.com/getsentry/cli/pull/1024)
+- Add esbuild bundling rules for require() in AGENTS.md by @BYK in [#1011](https://github.com/getsentry/cli/pull/1011)
+- Migrate to @sentry/starlight-theme by @sentry-junior in [#996](https://github.com/getsentry/cli/pull/996)
+
+### Internal Changes 🔧
+
+- (init) Regression test for only-Tracing blurb bug by @betegon in [#983](https://github.com/getsentry/cli/pull/983)
+- Update fossilize to 0.8.1 (fix cross-compile strip crash) by @BYK in [#1038](https://github.com/getsentry/cli/pull/1038)
+- Update fossilize to 0.7.0 (built-in strip) by @BYK in [#1021](https://github.com/getsentry/cli/pull/1021)
+- Strip debug symbols from Node binaries (-17 MiB) by @BYK in [#1019](https://github.com/getsentry/cli/pull/1019)
+- Use Node 24 LTS for binary builds + explicit tree shaking by @BYK in [#1018](https://github.com/getsentry/cli/pull/1018)
+- Defer heavy imports for ~6x faster shell completions by @BYK in [#1017](https://github.com/getsentry/cli/pull/1017)
+- Add deeper smoke tests for binary and npm bundle by @BYK in [#1013](https://github.com/getsentry/cli/pull/1013)
+- Update fossilize to 0.6.0 (V8 code cache support) by @BYK in [#1012](https://github.com/getsentry/cli/pull/1012)
+- Replace Bun.build with fossilize for Node SEA binaries by @BYK in [#1003](https://github.com/getsentry/cli/pull/1003)
+- Remove Bun artifacts and convert remaining Bun APIs by @BYK in [#1002](https://github.com/getsentry/cli/pull/1002)
+- Replace bun run with tsx/pnpm across scripts and CI by @BYK in [#999](https://github.com/getsentry/cli/pull/999)
+- Migrate test runner from bun:test to vitest by @BYK in [#997](https://github.com/getsentry/cli/pull/997)
+- Replace remaining Bun APIs (zstd, mmap, CryptoHasher, file writer) by @BYK in [#986](https://github.com/getsentry/cli/pull/986)
+- Replace Bun APIs with Node.js equivalents by @BYK in [#984](https://github.com/getsentry/cli/pull/984)
+- Add SQLite adapter to decouple from bun:sqlite by @BYK in [#970](https://github.com/getsentry/cli/pull/970)
+- Switch package manager from bun to pnpm by @BYK in [#967](https://github.com/getsentry/cli/pull/967)
+- Regenerate docs by @github-actions[bot] in [419373cf](https://github.com/getsentry/cli/commit/419373cf0f8bbe1d3eaac7ee3306d6d0ff639bcf)
+
 ## 0.34.0
 
 ### New Features ✨
