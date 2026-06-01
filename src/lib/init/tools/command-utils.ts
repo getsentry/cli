@@ -68,6 +68,9 @@ const BLOCKED_EXECUTABLES = new Set([
   "cd",
   "pushd",
   "popd",
+  "cmd",
+  "powershell",
+  "pwsh",
   "bash",
   "sh",
   "zsh",
@@ -108,17 +111,33 @@ function normalizeExecutableName(executable: string): string {
     .replace(WINDOWS_EXECUTABLE_EXTENSION_RE, "");
 }
 
+function hasInitArgAfter(tokens: string[], index: number): boolean {
+  return tokens.slice(index + 1).some((arg) => arg.toLowerCase() === "init");
+}
+
+function isSentryCliPackageSpec(token: string): boolean {
+  const lower = token.toLowerCase();
+  return lower === "@sentry/cli" || lower.startsWith("@sentry/cli@");
+}
+
 function isRecursiveSentrySetup(tokens: string[]): boolean {
   if (tokens.some((token) => token.toLowerCase().includes("@sentry/wizard"))) {
     return true;
   }
 
   return tokens.some((token, index) => {
+    if (isSentryCliPackageSpec(token)) {
+      return hasInitArgAfter(tokens, index);
+    }
+
     const executable = normalizeExecutableName(token);
+    if (executable === "sentry-wizard") {
+      return true;
+    }
     if (executable !== "sentry" && executable !== "sentry-cli") {
       return false;
     }
-    return tokens.slice(index + 1).some((arg) => arg.toLowerCase() === "init");
+    return hasInitArgAfter(tokens, index);
   });
 }
 
