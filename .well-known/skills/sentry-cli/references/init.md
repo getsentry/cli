@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-init
-version: 0.34.0
+version: 0.35.0
 description: Initialize Sentry in your project (experimental)
 requires:
   bins: ["sentry"]
@@ -20,6 +20,7 @@ Initialize Sentry in your project (experimental)
 - `-n, --dry-run - Show what would happen without making changes`
 - `--features <value>... - Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback`
 - `-t, --team <value> - Team slug to create the project under`
+- `--app <value> - App to initialize in a monorepo (required with --yes when multiple apps are detected)`
 - `--tui - Use the Ink-based interactive UI (default). Pass --no-tui to fall back to plain log output.`
 
 **Examples:**
