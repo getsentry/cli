@@ -1,0 +1,630 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-hqgo6mad"> <head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>dashboard | Sentry CLI</title><link rel="canonical" href="https://cli.sentry.dev/_preview/pr-1045/commands/dashboard/"/><link rel="sitemap" href="/_preview/pr-1045/sitemap-index.xml"/><script>
+            (function() {
+              let overscrollEl;
+              let pullDistance = 0;
+              let touchStartY = 0;
+              let isAtBottom = false;
+              
+              function isLandingPage() {
+                const path = window.location.pathname;
+                // Works with both / (prod) and /pr-preview/pr-XX (preview)
+                return path === '/' || 
+                       /^\/\_preview\/pr-(\d+|main)\/?$/.test(path);
+              }
+              
+              function checkAtBottom() {
+                const scrollTop = window.scrollY || document.documentElement.scrollTop;
+                const scrollHeight = document.documentElement.scrollHeight;
+                const clientHeight = document.documentElement.clientHeight;
+                return scrollTop + clientHeight >= scrollHeight - 5;
+              }
+              
+              function createOverscrollMessage() {
+                if (!isLandingPage()) return;
+                var command = 'curl https://cli.sentry.dev/install -fsS | bash';
+                overscrollEl = document.createElement('div');
+                overscrollEl.className = 'overscroll-message';
+                overscrollEl.innerHTML = '<span>You made it to the end. Might as well give it a try → <code class="overscroll-copy-cmd" title="Click to copy">' + command + '</code></span>';
+                document.body.appendChild(overscrollEl);
+                var codeEl = overscrollEl.querySelector('.overscroll-copy-cmd');
+                codeEl.addEventListener('click', function() {
+                  if (!navigator.clipboard) return;
+                  navigator.clipboard.writeText(command).then(function() {
+                    codeEl.textContent = 'copied!';
+                    setTimeout(function() { codeEl.textContent = command; }, 1500);
+                  }).catch(function() {});
+                });
+              }
+              
+              function updateOverscroll(distance) {
+                if (!overscrollEl) return;
+                const clampedDistance = Math.min(Math.max(distance, 0), 50);
+                const opacity = Math.min(clampedDistance / 15, 1);
+                const translateY = Math.min(clampedDistance * 2.5, 120);
+                overscrollEl.style.opacity = opacity;
+                overscrollEl.style.transform = 'translateX(-50%) translateY(-' + translateY + 'px)';
+              }
+              
+              function handleTouchStart(e) {
+                if (!isLandingPage()) return;
+                touchStartY = e.touches[0].clientY;
+                isAtBottom = checkAtBottom();
+              }
+              
+              function handleTouchMove(e) {
+                if (!isLandingPage() || !isAtBottom) return;
+                const touchY = e.touches[0].clientY;
+                pullDistance = touchStartY - touchY;
+                if (pullDistance > 0 && checkAtBottom()) {
+                  updateOverscroll(pullDistance);
+                }
+              }
+              
+              function handleTouchEnd() {
+                pullDistance = 0;
+                updateOverscroll(0);
+              }
+              
+              function handleWheel(e) {
+                if (!isLandingPage()) return;
+                if (checkAtBottom() && e.deltaY > 0) {
+                  pullDistance = Math.min(pullDistance + e.deltaY * 0.8, 50);
+                  updateOverscroll(pullDistance);
+                  clearTimeout(window.overscrollTimeout);
+                  window.overscrollTimeout = setTimeout(function() {
+                    pullDistance = 0;
+                    updateOverscroll(0);
+                  }, 5000);
+                } else if (e.deltaY < 0) {
+                  clearTimeout(window.overscrollTimeout);
+                  pullDistance = 0;
+                  updateOverscroll(0);
+                }
+              }
+              
+              document.addEventListener('DOMContentLoaded', function() {
+                createOverscrollMessage();
+                document.addEventListener('touchstart', handleTouchStart, { passive: true });
+                document.addEventListener('touchmove', handleTouchMove, { passive: true });
+                document.addEventListener('touchend', handleTouchEnd, { passive: true });
+                document.addEventListener('wheel', handleWheel, { passive: true });
+              });
+            })();
+          </script><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="true"/><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap"/><script defer data-domain="cli.sentry.dev" src="https://plausible.io/js/script.js"></script><style>html{background:#0a0a0f}</style><link rel="shortcut icon" href="/_preview/pr-1045/favicon.png" type="image/png"/><meta name="generator" content="Astro v6.3.7"/><meta name="generator" content="Starlight v0.39.2"/><meta property="og:title" content="dashboard"/><meta property="og:type" content="article"/><meta property="og:url" content="https://cli.sentry.dev/_preview/pr-1045/commands/dashboard/"/><meta property="og:locale" content="en"/><meta property="og:description" content="Dashboard commands for the Sentry CLI"/><meta property="og:site_name" content="Sentry CLI"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="Dashboard commands for the Sentry CLI"/><meta property="og:image" content="https://cli.sentry.dev/og-image.png"/><meta name="twitter:image" content="https://cli.sentry.dev/og-image-twitter.png"/><meta name="color-scheme" content="dark"/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/_preview/pr-1045/_astro/print.DNXP8c50.css" media="print"><link rel="stylesheet" href="/_preview/pr-1045/_astro/common.I-NKiS9C.css">
+<link rel="stylesheet" href="/_preview/pr-1045/_astro/_astro_assets.CPmm56rh.css"><script type="module" src="/_preview/pr-1045/_astro/page.CF3dHhNP.js"></script></head> <body class="astro-hqgo6mad"> <a href="#_top" class="astro-bo3nbr4t">Skip to content</a> <div class="page sl-flex astro-lhcvxpyl"> <header class="header astro-lhcvxpyl"><div class="header sl-flex astro-3ef6ksr2"> <div class="sl-flex header-left astro-3ef6ksr2"> <a href="/_preview/pr-1045/" class="site-title sl-flex astro-nj5cauuq">  <img class="astro-nj5cauuq" alt src="/_preview/pr-1045/_astro/logo.BfKlEpbf.svg" width="1235" height="367">  <span class="sr-only astro-nj5cauuq" translate="no"> Sentry CLI </span> </a> </div> <div class="sl-flex header-right astro-3ef6ksr2"> <site-search class="astro-3ef6ksr2 astro-fjpsfc7l" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"> <button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-fjpsfc7l"> <svg aria-hidden="true" class="astro-fjpsfc7l astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg> <span class="sl-hidden md:sl-block astro-fjpsfc7l" aria-hidden="true">Search</span> <kbd class="sl-hidden md:sl-flex astro-fjpsfc7l" style="display: none;"> <kbd class="astro-fjpsfc7l">Ctrl</kbd><kbd class="astro-fjpsfc7l">K</kbd> </kbd> </button> <dialog style="padding:0" aria-label="Search" class="astro-fjpsfc7l"> <div class="dialog-frame sl-flex astro-fjpsfc7l">  <button data-close-modal class="sl-flex md:sl-hidden astro-fjpsfc7l"> Cancel </button> <div class="search-container astro-fjpsfc7l"> <div id="starlight__search" class="astro-fjpsfc7l"></div> </div> </div> </dialog> </site-search>  <script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script> <script type="module" src="/_preview/pr-1045/_astro/Search.astro_astro_type_script_index_0_lang.ctG43Kxd.js"></script>   <span class="header-nav-link header-nav-active astro-3ef6ksr2">Docs</span> <a href="https://github.com/getsentry/cli" rel="me" class="sl-flex astro-c477ecpy"><span class="sr-only astro-c477ecpy">GitHub</span><svg aria-hidden="true" class="astro-c477ecpy astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a> </div> </div></header> <nav class="sidebar print:hidden astro-lhcvxpyl" aria-label="Main"> <starlight-menu-button class="print:hidden astro-nf7iybs6"> <button aria-expanded="false" aria-label="Menu" aria-controls="starlight__sidebar" class="sl-flex md:sl-hidden astro-nf7iybs6"> <svg aria-hidden="true" class="open-menu astro-nf7iybs6 astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg> <svg aria-hidden="true" class="close-menu astro-nf7iybs6 astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg> </button> </starlight-menu-button> <script type="module">class s extends HTMLElement{constructor(){super(),this.btn=this.querySelector("button"),this.btn.addEventListener("click",()=>this.toggleExpanded());const t=this.closest("nav");t&&t.addEventListener("keyup",e=>this.closeOnEscape(e))}setExpanded(t){this.setAttribute("aria-expanded",String(t)),document.body.toggleAttribute("data-mobile-menu-expanded",t)}toggleExpanded(){this.setExpanded(this.getAttribute("aria-expanded")!=="true")}closeOnEscape(t){t.code==="Escape"&&(this.setExpanded(!1),this.btn.focus())}}customElements.define("starlight-menu-button",s);</script>  <div id="starlight__sidebar" class="sidebar-pane astro-lhcvxpyl"> <div class="sidebar-content sl-flex astro-lhcvxpyl"> <sl-sidebar-state-persist data-hash="0ehxn8a" class="astro-zpiaugp4"> <script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script>  <ul class="top-level astro-cokmqbo5"> <li class="astro-cokmqbo5"> <details open class="astro-cokmqbo5"> <summary class="astro-cokmqbo5"> <span class="group-label astro-cokmqbo5"> <span class="large astro-cokmqbo5">Getting Started</span>  </span> <svg aria-hidden="true" class="caret astro-cokmqbo5 astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="0"></sl-sidebar-restore> <ul class="astro-cokmqbo5"> <li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">Introduction</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/getting-started/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">Installation</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/self-hosted/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">Self-Hosted</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/configuration/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">Configuration</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/library-usage/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">Library Usage</span>  </a> </li> </ul> </details> </li><li class="astro-cokmqbo5"> <details open class="astro-cokmqbo5"> <summary class="astro-cokmqbo5"> <span class="group-label astro-cokmqbo5"> <span class="large astro-cokmqbo5">Commands</span>  </span> <svg aria-hidden="true" class="caret astro-cokmqbo5 astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="1"></sl-sidebar-restore> <ul class="astro-cokmqbo5"> <li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">Commands</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/api/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">api</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/auth/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">auth</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/cli/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">cli</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/dashboard/" aria-current="page" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">dashboard</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/event/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">event</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/explore/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">explore</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/init/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">init</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/issue/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">issue</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/local/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">local</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/log/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">log</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/org/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">org</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/project/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">project</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/release/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">release</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/replay/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">replay</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/repo/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">repo</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/schema/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">schema</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/sourcemap/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">sourcemap</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/span/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">span</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/team/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">team</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/trace/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">trace</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/commands/trial/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">trial</span>  </a> </li> </ul> </details> </li><li class="astro-cokmqbo5"> <details open class="astro-cokmqbo5"> <summary class="astro-cokmqbo5"> <span class="group-label astro-cokmqbo5"> <span class="large astro-cokmqbo5">Resources</span>  </span> <svg aria-hidden="true" class="caret astro-cokmqbo5 astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="2"></sl-sidebar-restore> <ul class="astro-cokmqbo5"> <li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/agentic-usage/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">Agentic Usage</span>  </a> </li><li class="astro-cokmqbo5"> <a href="/_preview/pr-1045/contributing/" class="astro-cokmqbo5"> <span class="astro-cokmqbo5">Contributing</span>  </a> </li> </ul> </details> </li> </ul>  <script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script> </sl-sidebar-state-persist> <div class="md:sl-hidden"> <div class="mobile-preferences sl-flex">  <script type="module">class s extends HTMLElement{constructor(){super();const e=this.querySelector("select");e&&(e.addEventListener("change",t=>{t.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=t.currentTarget.value)}),window.addEventListener("pageshow",t=>{if(!t.persisted)return;const n=e.querySelector("option[selected]")?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}}customElements.define("starlight-lang-select",s);</script> </div> </div> </div> </div> </nav> <div class="main-frame astro-lhcvxpyl">  <script type="module">const a=document.getElementById("starlight__sidebar"),n=a?.querySelector("sl-sidebar-state-persist"),o="sl-sidebar-state",i=()=>{let t=[];const e=n?.dataset.hash||"";try{const s=sessionStorage.getItem(o),r=JSON.parse(s||"{}");Array.isArray(r.open)&&r.hash===e&&(t=r.open)}catch{}return{hash:e,open:t,scroll:a?.scrollTop||0}},c=t=>{try{sessionStorage.setItem(o,JSON.stringify(t))}catch{}},d=()=>c(i()),l=(t,e)=>{const s=i();s.open[e]=t,c(s)};n?.addEventListener("click",t=>{if(!(t.target instanceof Element))return;const e=t.target.closest("summary")?.closest("details");if(!e)return;const s=e.querySelector("sl-sidebar-restore"),r=parseInt(s?.dataset.index||"");isNaN(r)||l(!e.open,r)});addEventListener("visibilitychange",()=>{document.visibilityState==="hidden"&&d()});addEventListener("pageHide",d);</script> <div class="lg:sl-flex astro-bb5zvzm5"> <aside class="right-sidebar-container print:hidden astro-bb5zvzm5"> <div class="right-sidebar astro-bb5zvzm5"> <div class="lg:sl-hidden astro-hcjlx7o5"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-pt45uua3"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-pt45uua3"><details id="starlight__mobile-toc" class="astro-pt45uua3"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-pt45uua3"><span class="toggle sl-flex astro-pt45uua3">On this page<svg aria-hidden="true" class="caret astro-pt45uua3 astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-pt45uua3"></span></summary><div class="dropdown astro-pt45uua3"><ul class="isMobile astro-hlhchjqv" style="--depth: 0;"> <li class="astro-hlhchjqv" style="--depth: 0;"> <a href="#_top" class="astro-hlhchjqv" style="--depth: 0;"> <span class="astro-hlhchjqv" style="--depth: 0;">Overview</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 0;"> <a href="#commands" class="astro-hlhchjqv" style="--depth: 0;"> <span class="astro-hlhchjqv" style="--depth: 0;">Commands</span> </a> <ul class="isMobile astro-hlhchjqv" style="--depth: 1;"> <li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-list-orgtitle-filter" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard list &lt;org/title-filter...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-view-orgprojectdashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard view &lt;org/project/dashboard...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-create-orgprojecttitle" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard create &lt;org/project/title...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-widget-add-orgprojectdashboardtitle" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard widget add &lt;org/project/dashboard/title...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-widget-edit-orgprojectdashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard widget edit &lt;org/project/dashboard...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-widget-delete-orgprojectdashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard widget delete &lt;org/project/dashboard...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-revisions-orgdashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard revisions &lt;org/dashboard...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-restore-orgdashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard restore &lt;org/dashboard...&gt;</span> </a>  </li> </ul> </li><li class="astro-hlhchjqv" style="--depth: 0;"> <a href="#examples" class="astro-hlhchjqv" style="--depth: 0;"> <span class="astro-hlhchjqv" style="--depth: 0;">Examples</span> </a> <ul class="isMobile astro-hlhchjqv" style="--depth: 1;"> <li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#list-dashboards" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">List dashboards</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#view-a-dashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">View a dashboard</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#create-a-dashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">Create a dashboard</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#add-widgets" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">Add widgets</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#edit-widgets" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">Edit widgets</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#delete-widgets" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">Delete widgets</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#view-revision-history" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">View revision history</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#restore-a-previous-revision" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">Restore a previous revision</span> </a>  </li> </ul> </li><li class="astro-hlhchjqv" style="--depth: 0;"> <a href="#query-shorthand" class="astro-hlhchjqv" style="--depth: 0;"> <span class="astro-hlhchjqv" style="--depth: 0;">Query Shorthand</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 0;"> <a href="#sort-shorthand" class="astro-hlhchjqv" style="--depth: 0;"> <span class="astro-hlhchjqv" style="--depth: 0;">Sort Shorthand</span> </a>  </li> </ul></div></details></nav></mobile-starlight-toc><script type="module" src="/_preview/pr-1045/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.hwBsy0Mo.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-hcjlx7o5"><div class="sl-container astro-hcjlx7o5"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-hlhchjqv" style="--depth: 0;"> <li class="astro-hlhchjqv" style="--depth: 0;"> <a href="#_top" class="astro-hlhchjqv" style="--depth: 0;"> <span class="astro-hlhchjqv" style="--depth: 0;">Overview</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 0;"> <a href="#commands" class="astro-hlhchjqv" style="--depth: 0;"> <span class="astro-hlhchjqv" style="--depth: 0;">Commands</span> </a> <ul class="astro-hlhchjqv" style="--depth: 1;"> <li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-list-orgtitle-filter" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard list &lt;org/title-filter...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-view-orgprojectdashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard view &lt;org/project/dashboard...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-create-orgprojecttitle" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard create &lt;org/project/title...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-widget-add-orgprojectdashboardtitle" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard widget add &lt;org/project/dashboard/title...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-widget-edit-orgprojectdashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard widget edit &lt;org/project/dashboard...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-widget-delete-orgprojectdashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard widget delete &lt;org/project/dashboard...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-revisions-orgdashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard revisions &lt;org/dashboard...&gt;</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#sentry-dashboard-restore-orgdashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">sentry dashboard restore &lt;org/dashboard...&gt;</span> </a>  </li> </ul> </li><li class="astro-hlhchjqv" style="--depth: 0;"> <a href="#examples" class="astro-hlhchjqv" style="--depth: 0;"> <span class="astro-hlhchjqv" style="--depth: 0;">Examples</span> </a> <ul class="astro-hlhchjqv" style="--depth: 1;"> <li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#list-dashboards" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">List dashboards</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#view-a-dashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">View a dashboard</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#create-a-dashboard" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">Create a dashboard</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#add-widgets" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">Add widgets</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#edit-widgets" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">Edit widgets</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#delete-widgets" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">Delete widgets</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#view-revision-history" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">View revision history</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 1;"> <a href="#restore-a-previous-revision" class="astro-hlhchjqv" style="--depth: 1;"> <span class="astro-hlhchjqv" style="--depth: 1;">Restore a previous revision</span> </a>  </li> </ul> </li><li class="astro-hlhchjqv" style="--depth: 0;"> <a href="#query-shorthand" class="astro-hlhchjqv" style="--depth: 0;"> <span class="astro-hlhchjqv" style="--depth: 0;">Query Shorthand</span> </a>  </li><li class="astro-hlhchjqv" style="--depth: 0;"> <a href="#sort-shorthand" class="astro-hlhchjqv" style="--depth: 0;"> <span class="astro-hlhchjqv" style="--depth: 0;">Sort Shorthand</span> </a>  </li> </ul></nav></starlight-toc><script type="module" src="/_preview/pr-1045/_astro/TableOfContents.astro_astro_type_script_index_0_lang.FuRcXuRY.js"></script></div></div> </div> </aside> <div class="main-pane astro-bb5zvzm5">  <main data-pagefind-body class="astro-hqgo6mad" lang="en" dir="ltr">    <div class="content-panel astro-j3oioreh"> <div class="sl-container astro-j3oioreh"> <div class="page-title-wrapper astro-guvttfii"> <span class="section-label astro-guvttfii">Commands</span> <h1 id="_top" class="astro-guvttfii">dashboard</h1> </div> </div> </div> <div class="content-panel astro-j3oioreh"> <div class="sl-container astro-j3oioreh"> <div class="sl-markdown-content"> <p>Manage Sentry dashboards</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="commands">Commands</h2><a class="sl-anchor-link" href="#commands"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Commands”</span></a></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="sentry-dashboard-list-orgtitle-filter"><code dir="auto">sentry dashboard list &#x3C;org/title-filter...></code></h3><a class="sl-anchor-link" href="#sentry-dashboard-list-orgtitle-filter"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “sentry dashboard list &#x3C;org/title-filter...>”</span></a></div>
+<p>List dashboards</p>
+<p><strong>Arguments:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Argument</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">&#x3C;org/title-filter...></code></td><td>[&#x3C;org/project>] [&#x3C;name-glob>]</td></tr></tbody></table>
+<p><strong>Options:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">-w, --web</code></td><td>Open in browser</td></tr><tr><td><code dir="auto">-n, --limit &#x3C;limit></code></td><td>Maximum number of dashboards to list (default: "25")</td></tr><tr><td><code dir="auto">-f, --fresh</code></td><td>Bypass cache, re-detect projects, and fetch fresh data</td></tr><tr><td><code dir="auto">-c, --cursor &#x3C;cursor></code></td><td>Navigate pages: "next", "prev", "first" (or raw cursor string)</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h3"><h3 id="sentry-dashboard-view-orgprojectdashboard"><code dir="auto">sentry dashboard view &#x3C;org/project/dashboard...></code></h3><a class="sl-anchor-link" href="#sentry-dashboard-view-orgprojectdashboard"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “sentry dashboard view &#x3C;org/project/dashboard...>”</span></a></div>
+<p>View a dashboard</p>
+<p><strong>Arguments:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Argument</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">&#x3C;org/project/dashboard...></code></td><td>[&#x3C;org/project>] &#x3C;dashboard-id-or-title></td></tr></tbody></table>
+<p><strong>Options:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">-w, --web</code></td><td>Open in browser</td></tr><tr><td><code dir="auto">-f, --fresh</code></td><td>Bypass cache, re-detect projects, and fetch fresh data</td></tr><tr><td><code dir="auto">-r, --refresh &#x3C;refresh></code></td><td>Auto-refresh interval in seconds (default: 60, min: 10)</td></tr><tr><td><code dir="auto">-t, --period &#x3C;period></code></td><td>Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01"</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h3"><h3 id="sentry-dashboard-create-orgprojecttitle"><code dir="auto">sentry dashboard create &#x3C;org/project/title...></code></h3><a class="sl-anchor-link" href="#sentry-dashboard-create-orgprojecttitle"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “sentry dashboard create &#x3C;org/project/title...>”</span></a></div>
+<p>Create a dashboard</p>
+<p><strong>Arguments:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Argument</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">&#x3C;org/project/title...></code></td><td>[&#x3C;org/project>] &#x3C;title></td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h3"><h3 id="sentry-dashboard-widget-add-orgprojectdashboardtitle"><code dir="auto">sentry dashboard widget add &#x3C;org/project/dashboard/title...></code></h3><a class="sl-anchor-link" href="#sentry-dashboard-widget-add-orgprojectdashboardtitle"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “sentry dashboard widget add &#x3C;org/project/dashboard/title...>”</span></a></div>
+<p>Add a widget to a dashboard</p>
+<p><strong>Arguments:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Argument</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">&#x3C;org/project/dashboard/title...></code></td><td>[&#x3C;org/project>] &#x3C;dashboard> &#x3C;title></td></tr></tbody></table>
+<p><strong>Options:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">-d, --display &#x3C;display></code></td><td>Display type (big_number, line, area, bar, table, stacked_area, top_n, text, categorical_bar, details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table)</td></tr><tr><td><code dir="auto">--dataset &#x3C;dataset></code></td><td>Widget dataset (default: spans). Accepts canonical names and API synonyms: spans, error-events/errors, transaction-like/transactions, tracemetrics/metrics, logs, issue, discover</td></tr><tr><td><code dir="auto">-q, --query &#x3C;query>...</code></td><td>Aggregate expression (e.g. count, p95:span.duration)</td></tr><tr><td><code dir="auto">-w, --where &#x3C;where></code></td><td>Search conditions filter (e.g. is:unresolved)</td></tr><tr><td><code dir="auto">-g, --group-by &#x3C;group-by>...</code></td><td>Group-by column (repeatable)</td></tr><tr><td><code dir="auto">-s, --sort &#x3C;sort></code></td><td>Order by (prefix - for desc, e.g. -count)</td></tr><tr><td><code dir="auto">-n, --limit &#x3C;limit></code></td><td>Result limit</td></tr><tr><td><code dir="auto">-x, --col &#x3C;col></code></td><td>Grid column position (0-based, 0–5)</td></tr><tr><td><code dir="auto">-y, --row &#x3C;row></code></td><td>Grid row position (0-based)</td></tr><tr><td><code dir="auto">--width &#x3C;width></code></td><td>Widget width in grid columns (1–6)</td></tr><tr><td><code dir="auto">--height &#x3C;height></code></td><td>Widget height in grid rows (min 1)</td></tr><tr><td><code dir="auto">-l, --layout &#x3C;layout></code></td><td>Layout mode: sequential (append in order) or dense (fill gaps) (default: "sequential")</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h3"><h3 id="sentry-dashboard-widget-edit-orgprojectdashboard"><code dir="auto">sentry dashboard widget edit &#x3C;org/project/dashboard...></code></h3><a class="sl-anchor-link" href="#sentry-dashboard-widget-edit-orgprojectdashboard"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “sentry dashboard widget edit &#x3C;org/project/dashboard...>”</span></a></div>
+<p>Edit a widget in a dashboard</p>
+<p><strong>Arguments:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Argument</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">&#x3C;org/project/dashboard...></code></td><td>[&#x3C;org/project>] &#x3C;dashboard-id-or-title></td></tr></tbody></table>
+<p><strong>Options:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">-i, --index &#x3C;index></code></td><td>Widget index (0-based)</td></tr><tr><td><code dir="auto">-t, --title &#x3C;title></code></td><td>Widget title to match</td></tr><tr><td><code dir="auto">--new-title &#x3C;new-title></code></td><td>New widget title</td></tr><tr><td><code dir="auto">-d, --display &#x3C;display></code></td><td>Display type (big_number, line, area, bar, table, stacked_area, top_n, text, categorical_bar, details, wheel, rage_and_dead_clicks, server_tree, agents_traces_table)</td></tr><tr><td><code dir="auto">--dataset &#x3C;dataset></code></td><td>Widget dataset (default: spans). Accepts canonical names and API synonyms: spans, error-events/errors, transaction-like/transactions, tracemetrics/metrics, logs, issue, discover</td></tr><tr><td><code dir="auto">-q, --query &#x3C;query>...</code></td><td>Aggregate expression (e.g. count, p95:span.duration)</td></tr><tr><td><code dir="auto">-w, --where &#x3C;where></code></td><td>Search conditions filter (e.g. is:unresolved)</td></tr><tr><td><code dir="auto">-g, --group-by &#x3C;group-by>...</code></td><td>Group-by column (repeatable)</td></tr><tr><td><code dir="auto">-s, --sort &#x3C;sort></code></td><td>Order by (prefix - for desc, e.g. -count)</td></tr><tr><td><code dir="auto">-n, --limit &#x3C;limit></code></td><td>Result limit</td></tr><tr><td><code dir="auto">-x, --col &#x3C;col></code></td><td>Grid column position (0-based, 0–5)</td></tr><tr><td><code dir="auto">-y, --row &#x3C;row></code></td><td>Grid row position (0-based)</td></tr><tr><td><code dir="auto">--width &#x3C;width></code></td><td>Widget width in grid columns (1–6)</td></tr><tr><td><code dir="auto">--height &#x3C;height></code></td><td>Widget height in grid rows (min 1)</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h3"><h3 id="sentry-dashboard-widget-delete-orgprojectdashboard"><code dir="auto">sentry dashboard widget delete &#x3C;org/project/dashboard...></code></h3><a class="sl-anchor-link" href="#sentry-dashboard-widget-delete-orgprojectdashboard"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “sentry dashboard widget delete &#x3C;org/project/dashboard...>”</span></a></div>
+<p>Delete a widget from a dashboard</p>
+<p><strong>Arguments:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Argument</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">&#x3C;org/project/dashboard...></code></td><td>[&#x3C;org/project>] &#x3C;dashboard-id-or-title></td></tr></tbody></table>
+<p><strong>Options:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">-i, --index &#x3C;index></code></td><td>Widget index (0-based)</td></tr><tr><td><code dir="auto">-t, --title &#x3C;title></code></td><td>Widget title to match</td></tr><tr><td><code dir="auto">-y, --yes</code></td><td>Skip confirmation prompt</td></tr><tr><td><code dir="auto">-f, --force</code></td><td>Force the operation without confirmation</td></tr><tr><td><code dir="auto">-n, --dry-run</code></td><td>Show what would happen without making changes</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h3"><h3 id="sentry-dashboard-revisions-orgdashboard"><code dir="auto">sentry dashboard revisions &#x3C;org/dashboard...></code></h3><a class="sl-anchor-link" href="#sentry-dashboard-revisions-orgdashboard"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “sentry dashboard revisions &#x3C;org/dashboard...>”</span></a></div>
+<p>List dashboard revisions</p>
+<p><strong>Arguments:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Argument</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">&#x3C;org/dashboard...></code></td><td>[&#x3C;org/project>] &#x3C;dashboard-id-or-title></td></tr></tbody></table>
+<p><strong>Options:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">-n, --limit &#x3C;limit></code></td><td>Maximum number of revisions to list (default: "25")</td></tr><tr><td><code dir="auto">-c, --cursor &#x3C;cursor></code></td><td>Navigate pages: "next", "prev", "first" (or raw cursor string)</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h3"><h3 id="sentry-dashboard-restore-orgdashboard"><code dir="auto">sentry dashboard restore &#x3C;org/dashboard...></code></h3><a class="sl-anchor-link" href="#sentry-dashboard-restore-orgdashboard"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “sentry dashboard restore &#x3C;org/dashboard...>”</span></a></div>
+<p>Restore a dashboard revision</p>
+<p><strong>Arguments:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Argument</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">&#x3C;org/dashboard...></code></td><td>[&#x3C;org/project>] &#x3C;dashboard-id-or-title></td></tr></tbody></table>
+<p><strong>Options:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">-r, --revision &#x3C;revision></code></td><td>Revision ID to restore</td></tr></tbody></table>
+<p>All commands support <code dir="auto">--json</code> for machine-readable output and <code dir="auto">--fields</code> to select specific JSON fields.</p>
+<!-- GENERATED:END -->
+<div class="sl-heading-wrapper level-h2"><h2 id="examples">Examples</h2><a class="sl-anchor-link" href="#examples"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Examples”</span></a></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="list-dashboards">List dashboards</h3><a class="sl-anchor-link" href="#list-dashboards"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “List dashboards”</span></a></div>
+<div class="expressive-code"><style>@layer starlight.components{.expressive-code{font-family:var(--ec-uiFontFml);font-size:var(--ec-uiFontSize);font-weight:var(--ec-uiFontWg);line-height:var(--ec-uiLineHt);text-size-adjust:none;-webkit-text-size-adjust:none}.expressive-code *:not(:is(svg, svg *)){all:revert;box-sizing:border-box}.expressive-code pre{display:flex;margin:0;padding:0;border:var(--ec-brdWd) solid var(--ec-brdCol);border-radius:calc(var(--ec-brdRad) + var(--ec-brdWd));background:var(--ec-codeBg)}.expressive-code pre:focus-visible{outline:3px solid var(--ec-focusBrd);outline-offset:-3px}.expressive-code pre > code{all:unset;display:block;flex:1 0 100%;padding:var(--ec-codePadBlk) 0;color:var(--ec-codeFg);font-family:var(--ec-codeFontFml);font-size:var(--ec-codeFontSize);font-weight:var(--ec-codeFontWg);line-height:var(--ec-codeLineHt)}.expressive-code pre{overflow-x:auto}.expressive-code pre.wrap .ec-line .code{white-space:pre-wrap;overflow-wrap:break-word;min-width:min(20ch, var(--ecMaxLine, 20ch))}.expressive-code pre.wrap .ec-line .code span.indent{white-space:pre}.expressive-code .ec-line{direction:ltr;unicode-bidi:isolate;display:grid;grid-template-areas:'gutter code';grid-template-columns:auto 1fr;position:relative}.expressive-code .ec-line .gutter{grid-area:gutter;color:var(--ec-gtrFg)}.expressive-code .ec-line .gutter > *{pointer-events:none;user-select:none;-webkit-user-select:none}.expressive-code .ec-line .gutter ~ .code{--ecLineBrdCol:var(--ec-gtrBrdCol)}.expressive-code .ec-line.highlight .gutter{color:var(--ec-gtrHlFg)}.expressive-code .ec-line .code{grid-area:code;position:relative;box-sizing:content-box;padding-inline-start:calc(var(--ecIndent, 0ch) + var(--ec-codePadInl) - var(--ecGtrBrdWd));padding-inline-end:var(--ec-codePadInl);text-indent:calc(var(--ecIndent, 0ch) * -1)}.expressive-code .ec-line .code::before,.expressive-code .ec-line .code::after,.expressive-code .ec-line .code :where(*){text-indent:0}.expressive-code .ec-line .code{--ecGtrBrdWd:var(--ec-gtrBrdWd);border-inline-start:var(--ecGtrBrdWd) solid var(--ecLineBrdCol, transparent)}.expressive-code .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0, 0, 0, 0);white-space:nowrap;border-width:0}.expressive-code .ec-line.mark{--tmLineBgCol:var(--ec-tm-markBg)}.expressive-code .ec-line.mark .code{--ecLineBrdCol:var(--ec-tm-markBrdCol)}.expressive-code .ec-line.ins{--tmLineBgCol:var(--ec-tm-insBg);--tmLabel:var(--ec-tm-insDiffIndContent)}.expressive-code .ec-line.ins .code{--ecLineBrdCol:var(--ec-tm-insBrdCol)}.expressive-code .ec-line.ins .code::before{color:var(--ec-tm-insDiffIndCol)}.expressive-code .ec-line.del{--tmLineBgCol:var(--ec-tm-delBg);--tmLabel:var(--ec-tm-delDiffIndContent)}.expressive-code .ec-line.del .code{--ecLineBrdCol:var(--ec-tm-delBrdCol)}.expressive-code .ec-line.del .code::before{color:var(--ec-tm-delDiffIndCol)}.expressive-code .ec-line.mark,.expressive-code .ec-line.ins,.expressive-code .ec-line.del{background:var(--tmLineBgCol)}.expressive-code .ec-line.mark .code,.expressive-code .ec-line.ins .code,.expressive-code .ec-line.del .code{--ecGtrBrdWd:var(--ec-tm-lineMarkerAccentWd)}.expressive-code .ec-line.mark .code::before,.expressive-code .ec-line.ins .code::before,.expressive-code .ec-line.del .code::before{display:block;position:absolute;left:0;box-sizing:border-box;content:var(--tmLabel, ' ');padding-inline-start:var(--ec-tm-lineDiffIndMargLeft);text-align:center;white-space:pre}.expressive-code .ec-line.mark.tm-label .code::before,.expressive-code .ec-line.ins.tm-label .code::before,.expressive-code .ec-line.del.tm-label .code::before{background:var(--ecLineBrdCol);padding:0 calc(var(--ec-tm-lineMarkerLabelPadInl) + var(--ec-tm-lineMarkerAccentWd)) 0 var(--ec-tm-lineMarkerLabelPadInl);color:var(--ec-tm-lineMarkerLabelCol)}.expressive-code .ec-line mark{--tmInlineBgCol:var(--ec-tm-markBg);--tmInlineBrdCol:var(--ec-tm-markBrdCol)}.expressive-code .ec-line ins{--tmInlineBgCol:var(--ec-tm-insBg);--tmInlineBrdCol:var(--ec-tm-insBrdCol)}.expressive-code .ec-line del{--tmInlineBgCol:var(--ec-tm-delBg);--tmInlineBrdCol:var(--ec-tm-delBrdCol)}.expressive-code .ec-line mark,.expressive-code .ec-line ins,.expressive-code .ec-line del{all:unset;display:inline-block;position:relative;--tmBrdL:var(--ec-tm-inlMarkerBrdWd);--tmBrdR:var(--ec-tm-inlMarkerBrdWd);--tmRadL:var(--ec-tm-inlMarkerBrdRad);--tmRadR:var(--ec-tm-inlMarkerBrdRad);margin-inline:0.025rem;padding-inline:var(--ec-tm-inlMarkerPad);border-radius:var(--tmRadL) var(--tmRadR) var(--tmRadR) var(--tmRadL);background:var(--tmInlineBgCol);background-clip:padding-box}.expressive-code .ec-line mark.open-start,.expressive-code .ec-line ins.open-start,.expressive-code .ec-line del.open-start{margin-inline-start:0;padding-inline-start:0;--tmBrdL:0px;--tmRadL:0}.expressive-code .ec-line mark.open-end,.expressive-code .ec-line ins.open-end,.expressive-code .ec-line del.open-end{margin-inline-end:0;padding-inline-end:0;--tmBrdR:0px;--tmRadR:0}.expressive-code .ec-line mark::before,.expressive-code .ec-line ins::before,.expressive-code .ec-line del::before{content:'';position:absolute;pointer-events:none;display:inline-block;inset:0;border-radius:var(--tmRadL) var(--tmRadR) var(--tmRadR) var(--tmRadL);border:var(--ec-tm-inlMarkerBrdWd) solid var(--tmInlineBrdCol);border-inline-width:var(--tmBrdL) var(--tmBrdR)}.expressive-code .frame{all:unset;position:relative;display:block;--header-border-radius:calc(var(--ec-brdRad) + var(--ec-brdWd));--tab-border-radius:calc(var(--ec-frm-edTabBrdRad) + var(--ec-brdWd));--button-spacing:0.4rem;--code-background:var(--ec-frm-edBg);border-radius:var(--header-border-radius);box-shadow:var(--ec-frm-frameBoxShdCssVal)}.expressive-code .frame .header{display:none;z-index:1;position:relative;border-radius:var(--header-border-radius) var(--header-border-radius) 0 0}.expressive-code .frame.has-title pre,.expressive-code .frame.has-title code,.expressive-code .frame.is-terminal pre,.expressive-code .frame.is-terminal code{border-top:none;border-top-left-radius:0;border-top-right-radius:0}.expressive-code .frame .title:empty:before{content:'\a0'}.expressive-code .frame.has-title:not(.is-terminal){--button-spacing:calc(1.9rem + 2 * (var(--ec-uiPadBlk) + var(--ec-frm-edActTabIndHt)))}.expressive-code .frame.has-title:not(.is-terminal) .title{position:relative;color:var(--ec-frm-edActTabFg);background:var(--ec-frm-edActTabBg);background-clip:padding-box;margin-block-start:var(--ec-frm-edTabsMargBlkStart);padding:calc(var(--ec-uiPadBlk) + var(--ec-frm-edActTabIndHt)) var(--ec-uiPadInl);border:var(--ec-brdWd) solid var(--ec-frm-edActTabBrdCol);border-radius:var(--tab-border-radius) var(--tab-border-radius) 0 0;border-bottom:none;overflow:hidden}.expressive-code .frame.has-title:not(.is-terminal) .title::after{content:'';position:absolute;pointer-events:none;inset:0;border-top:var(--ec-frm-edActTabIndHt) solid var(--ec-frm-edActTabIndTopCol);border-bottom:var(--ec-frm-edActTabIndHt) solid var(--ec-frm-edActTabIndBtmCol)}.expressive-code .frame.has-title:not(.is-terminal) .header{display:flex;background:linear-gradient(to top, var(--ec-frm-edTabBarBrdBtmCol) var(--ec-brdWd), transparent var(--ec-brdWd)),linear-gradient(var(--ec-frm-edTabBarBg), var(--ec-frm-edTabBarBg));background-repeat:no-repeat;padding-inline-start:var(--ec-frm-edTabsMargInlStart)}.expressive-code .frame.has-title:not(.is-terminal) .header::before{content:'';position:absolute;pointer-events:none;inset:0;border:var(--ec-brdWd) solid var(--ec-frm-edTabBarBrdCol);border-radius:inherit;border-bottom:none}.expressive-code .frame.is-terminal{--button-spacing:calc(1.9rem + var(--ec-brdWd) + 2 * var(--ec-uiPadBlk));--code-background:var(--ec-frm-trmBg)}.expressive-code .frame.is-terminal .header{display:flex;align-items:center;justify-content:center;padding-block:var(--ec-uiPadBlk);padding-block-end:calc(var(--ec-uiPadBlk) + var(--ec-brdWd));position:relative;font-weight:500;letter-spacing:0.025ch;color:var(--ec-frm-trmTtbFg);background:var(--ec-frm-trmTtbBg);border:var(--ec-brdWd) solid var(--ec-brdCol);border-bottom:none}.expressive-code .frame.is-terminal .header::before{content:'';position:absolute;pointer-events:none;left:var(--ec-uiPadInl);width:2.1rem;height:0.56rem;line-height:0;background-color:var(--ec-frm-trmTtbDotsFg);opacity:var(--ec-frm-trmTtbDotsOpa);-webkit-mask-image:var(--ec-frm-trmIcon);-webkit-mask-repeat:no-repeat;mask-image:var(--ec-frm-trmIcon);mask-repeat:no-repeat}.expressive-code .frame.is-terminal .header::after{content:'';position:absolute;pointer-events:none;inset:0;border-bottom:var(--ec-brdWd) solid var(--ec-frm-trmTtbBrdBtmCol)}.expressive-code .frame pre{background:var(--code-background)}.expressive-code .copy{display:flex;gap:0.25rem;flex-direction:row;position:absolute;inset-block-start:calc(var(--ec-brdWd) + var(--button-spacing));inset-inline-end:calc(var(--ec-brdWd) + var(--ec-uiPadInl) / 2)}@media (scripting: none){.expressive-code .copy{display:none}}.expressive-code .copy{direction:ltr;unicode-bidi:isolate}.expressive-code .copy button{position:relative;align-self:flex-end;margin:0;padding:0;border:none;border-radius:0.2rem;z-index:1;cursor:pointer;transition-property:opacity, background, border-color;transition-duration:0.2s;transition-timing-function:cubic-bezier(0.25, 0.46, 0.45, 0.94);width:2.5rem;height:2.5rem;background:var(--code-background);opacity:0.75}.expressive-code .copy button div{position:absolute;inset:0;border-radius:inherit;background:var(--ec-frm-inlBtnBg);opacity:var(--ec-frm-inlBtnBgIdleOpa);transition-property:inherit;transition-duration:inherit;transition-timing-function:inherit}.expressive-code .copy button::before{content:'';position:absolute;pointer-events:none;inset:0;border-radius:inherit;border:var(--ec-brdWd) solid var(--ec-frm-inlBtnBrd);opacity:var(--ec-frm-inlBtnBrdOpa)}.expressive-code .copy button::after{content:'';position:absolute;pointer-events:none;inset:0;background-color:var(--ec-frm-inlBtnFg);-webkit-mask-image:var(--ec-frm-copyIcon);-webkit-mask-repeat:no-repeat;mask-image:var(--ec-frm-copyIcon);mask-repeat:no-repeat;margin:0.475rem;line-height:0}.expressive-code .copy button:hover,.expressive-code .copy button:focus:focus-visible{opacity:1}.expressive-code .copy button:hover div,.expressive-code .copy button:focus:focus-visible div{opacity:var(--ec-frm-inlBtnBgHoverOrFocusOpa)}.expressive-code .copy button:active{opacity:1}.expressive-code .copy button:active div{opacity:var(--ec-frm-inlBtnBgActOpa)}.expressive-code .copy .feedback{--tooltip-arrow-size:0.35rem;--tooltip-bg:var(--ec-frm-tooltipSuccessBg);color:var(--ec-frm-tooltipSuccessFg);pointer-events:none;user-select:none;-webkit-user-select:none;position:relative;align-self:center;background-color:var(--tooltip-bg);z-index:99;padding:0.125rem 0.75rem;border-radius:0.2rem;margin-inline-end:var(--tooltip-arrow-size);opacity:0;transition-property:opacity, transform;transition-duration:0.2s;transition-timing-function:ease-in-out;transform:translate3d(0, 0.25rem, 0)}.expressive-code .copy .feedback::after{content:'';position:absolute;pointer-events:none;top:calc(50% - var(--tooltip-arrow-size));inset-inline-end:calc(-2 * (var(--tooltip-arrow-size) - 0.5px));border:var(--tooltip-arrow-size) solid transparent;border-inline-start-color:var(--tooltip-bg)}.expressive-code .copy .feedback.show{opacity:1;transform:translate3d(0, 0, 0)}@media (hover: hover){.expressive-code{}.expressive-code .copy button{opacity:0;width:2rem;height:2rem}.expressive-code .frame:hover .copy button:not(:hover),.expressive-code .frame:focus-within :focus-visible ~ .copy button:not(:hover),.expressive-code .frame .copy .feedback.show ~ button:not(:hover){opacity:0.75}}.expressive-code :nth-child(1 of .ec-line) .code{padding-inline-end:calc(2rem + var(--ec-codePadInl))}}@layer starlight.components{:root,:root:not([data-theme='sentry-monochrome']) .expressive-code[data-theme='sentry-monochrome']{--ec-brdRad:8px;--ec-brdWd:0px;--ec-brdCol:transparent;--ec-codeFontFml:var(--__sl-font-mono);--ec-codeFontSize:var(--sl-text-code);--ec-codeFontWg:400;--ec-codeLineHt:1.65;--ec-codePadBlk:0.9rem;--ec-codePadInl:1rem;--ec-codeBg:#111111;--ec-codeFg:#f5f5f5;--ec-codeSelBg:#303030;--ec-gtrBrdCol:var(--ve-line);--ec-gtrBrdWd:1.5px;--ec-gtrFg:var(--ve-text-tertiary);--ec-gtrHlFg:var(--ve-text);--ec-uiFontFml:var(--__sl-font);--ec-uiFontSize:0.82rem;--ec-uiFontWg:400;--ec-uiLineHt:1.4;--ec-uiPadBlk:0.35rem;--ec-uiPadInl:0.75rem;--ec-uiSelBg:#222222;--ec-uiSelFg:#ffffff;--ec-focusBrd:#ffffff;--ec-sbThumbCol:#3a3a3a;--ec-sbThumbHoverCol:#626262;--ec-tm-lineMarkerAccentMarg:0rem;--ec-tm-lineMarkerAccentWd:0.15rem;--ec-tm-lineMarkerLabelPadInl:0.2rem;--ec-tm-lineMarkerLabelCol:white;--ec-tm-lineDiffIndMargLeft:0.25rem;--ec-tm-inlMarkerBrdWd:1.5px;--ec-tm-inlMarkerBrdRad:0.2rem;--ec-tm-inlMarkerPad:0.15rem;--ec-tm-insDiffIndContent:'+';--ec-tm-delDiffIndContent:'-';--ec-tm-markBg:#174a9099;--ec-tm-markBrdCol:#4d70bcd0;--ec-tm-insBg:#1e571599;--ec-tm-insBrdCol:#487f3bd0;--ec-tm-insDiffIndCol:#79b169d0;--ec-tm-delBg:#862d2799;--ec-tm-delBrdCol:#b4554bd0;--ec-tm-delDiffIndCol:#ed8779d0;--ec-frm-shdCol:#0000005b;--ec-frm-frameBoxShdCssVal:none;--ec-frm-edActTabBg:#000000;--ec-frm-edActTabFg:#fafafa;--ec-frm-edActTabBrdCol:transparent;--ec-frm-edActTabIndHt:0px;--ec-frm-edActTabIndTopCol:transparent;--ec-frm-edActTabIndBtmCol:transparent;--ec-frm-edTabsMargInlStart:0;--ec-frm-edTabsMargBlkStart:0;--ec-frm-edTabBrdRad:8px;--ec-frm-edTabBarBg:#000000;--ec-frm-edTabBarBrdCol:transparent;--ec-frm-edTabBarBrdBtmCol:transparent;--ec-frm-edBg:#111111;--ec-frm-trmTtbFg:#fafafa;--ec-frm-trmTtbDotsFg:#fafafa;--ec-frm-trmTtbDotsOpa:0.15;--ec-frm-trmTtbBg:#111111;--ec-frm-trmTtbBrdBtmCol:transparent;--ec-frm-trmBg:#111111;--ec-frm-inlBtnBg:transparent;--ec-frm-inlBtnBgIdleOpa:0;--ec-frm-inlBtnBgHoverOrFocusOpa:0.2;--ec-frm-inlBtnBgActOpa:0.3;--ec-frm-inlBtnFg:var(--ve-text-secondary);--ec-frm-inlBtnBrd:transparent;--ec-frm-inlBtnBrdOpa:0.4;--ec-frm-tooltipSuccessBg:#098656;--ec-frm-tooltipSuccessFg:white;--ec-frm-copyIcon:url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%20fill%3D'none'%20stroke%3D'black'%20stroke-width%3D'1.75'%3E%3Cpath%20d%3D'M3%2019a2%202%200%200%201-1-2V2a2%202%200%200%201%201-1h13a2%202%200%200%201%202%201'%2F%3E%3Crect%20x%3D'6'%20y%3D'5'%20width%3D'16'%20height%3D'18'%20rx%3D'1.5'%20ry%3D'1.5'%2F%3E%3C%2Fsvg%3E");--ec-frm-trmIcon:url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2060%2016'%20preserveAspectRatio%3D'xMidYMid%20meet'%3E%3Ccircle%20cx%3D'8'%20cy%3D'8'%20r%3D'8'%2F%3E%3Ccircle%20cx%3D'30'%20cy%3D'8'%20r%3D'8'%2F%3E%3Ccircle%20cx%3D'52'%20cy%3D'8'%20r%3D'8'%2F%3E%3C%2Fsvg%3E")}.expressive-code .ec-line :where(span[style^='--']:not([class])),:root:not([data-theme='sentry-monochrome']) .expressive-code[data-theme='sentry-monochrome'] .ec-line :where(span[style^='--']:not([class])){color:var(--0, inherit);background-color:var(--0bg, transparent);font-style:var(--0fs, inherit);font-weight:var(--0fw, inherit);text-decoration:var(--0td, inherit)}}</style><script type="module" src="/_preview/pr-1045/_astro/ec.0vx5m.js"></script><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># List all dashboards</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">list</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Filter by name pattern</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">list</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">"</span><span style="--0:#FFD166">Backend*</span><span style="--0:#CFCFCF">"</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Open dashboard list in browser</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">list</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">-w</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="sentry dashboard listsentry dashboard list &#x22;Backend*&#x22;sentry dashboard list -w"><div></div></button></div></figure></div>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="plaintext"><code><div class="ec-line"><div class="code"><span style="--0:#f5f5f5">ID      TITLE                   WIDGETS  CREATED</span></div></div><div class="ec-line"><div class="code"><span style="--0:#f5f5f5">12345   General                 4        2024-01-15</span></div></div><div class="ec-line"><div class="code"><span style="--0:#f5f5f5">12346   Frontend Performance    6        2024-02-20</span></div></div><div class="ec-line"><div class="code"><span style="--0:#f5f5f5">12347   Backend Errors          3        2024-03-10</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="ID      TITLE                   WIDGETS  CREATED12345   General                 4        2024-01-1512346   Frontend Performance    6        2024-02-2012347   Backend Errors          3        2024-03-10"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="view-a-dashboard">View a dashboard</h3><a class="sl-anchor-link" href="#view-a-dashboard"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “View a dashboard”</span></a></div>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># View by title</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">view</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">Frontend Performance</span><span style="--0:#CFCFCF">'</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># View by ID</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">view</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">12345</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Auto-refresh every 30 seconds</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">view</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">"</span><span style="--0:#FFD166">Backend Performance</span><span style="--0:#CFCFCF">"</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--refresh</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">30</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Open in browser</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">view</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">12345</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">-w</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="sentry dashboard view &#x27;Frontend Performance&#x27;sentry dashboard view 12345sentry dashboard view &#x22;Backend Performance&#x22; --refresh 30sentry dashboard view 12345 -w"><div></div></button></div></figure></div>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="plaintext"><code><div class="ec-line"><div class="code"><span style="--0:#f5f5f5">Dashboard: Frontend Performance (ID: 12345)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#f5f5f5">URL: https://my-org.sentry.io/dashboard/12345/</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#f5f5f5">Widgets:</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#f5f5f5">  </span></span><span style="--0:#f5f5f5">#0  Error Count          big_number   count()</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#f5f5f5">  </span></span><span style="--0:#f5f5f5">#1  Errors Over Time     line         count()</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#f5f5f5">  </span></span><span style="--0:#f5f5f5">#2  Errors by Browser    bar          count() group by browser.name</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#f5f5f5">  </span></span><span style="--0:#f5f5f5">#3  Top Endpoints        table        count(), p95(span.duration) group by transaction</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="Dashboard: Frontend Performance (ID: 12345)URL: https://my-org.sentry.io/dashboard/12345/Widgets:  #0  Error Count          big_number   count()  #1  Errors Over Time     line         count()  #2  Errors by Browser    bar          count() group by browser.name  #3  Top Endpoints        table        count(), p95(span.duration) group by transaction"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="create-a-dashboard">Create a dashboard</h3><a class="sl-anchor-link" href="#create-a-dashboard"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Create a dashboard”</span></a></div>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">create</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">Frontend Performance</span><span style="--0:#CFCFCF">'</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="sentry dashboard create &#x27;Frontend Performance&#x27;"><div></div></button></div></figure></div>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="plaintext"><code><div class="ec-line"><div class="code"><span style="--0:#f5f5f5">Created dashboard: Frontend Performance (ID: 12348)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#f5f5f5">URL: https://my-org.sentry.io/dashboard/12348/</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="Created dashboard: Frontend Performance (ID: 12348)URL: https://my-org.sentry.io/dashboard/12348/"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="add-widgets">Add widgets</h3><a class="sl-anchor-link" href="#add-widgets"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Add widgets”</span></a></div>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Simple counter widget</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">widget</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">add</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">My Dashboard</span><span style="--0:#CFCFCF">'</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">"</span><span style="--0:#FFD166">Error Count</span><span style="--0:#CFCFCF">"</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">\</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#FFD166">--display</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">big_number</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--query</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">count</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Line chart with group-by</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">widget</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">add</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">My Dashboard</span><span style="--0:#CFCFCF">'</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">"</span><span style="--0:#FFD166">Errors by Browser</span><span style="--0:#CFCFCF">"</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">\</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#FFD166">--display</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">line</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--query</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">count</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--group-by</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">browser.name</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Table with multiple aggregates, sorted descending</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">widget</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">add</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">My Dashboard</span><span style="--0:#CFCFCF">'</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">"</span><span style="--0:#FFD166">Top Endpoints</span><span style="--0:#CFCFCF">"</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">\</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#FFD166">--display</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">table</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">\</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#FFD166">--query</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">count</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--query</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">p95:span.duration</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">\</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#FFD166">--group-by</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">transaction</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">\</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#FFD166">--sort</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">-count</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--limit</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">10</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># With search filter</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">widget</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">add</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">My Dashboard</span><span style="--0:#CFCFCF">'</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">"</span><span style="--0:#FFD166">Slow Requests</span><span style="--0:#CFCFCF">"</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">\</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#FFD166">--display</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">bar</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--query</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">p95:span.duration</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">\</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#FFD166">--where</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">"</span><span style="--0:#FFD166">span.op:http.client</span><span style="--0:#CFCFCF">"</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">\</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#FFD166">--group-by</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">span.description</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="sentry dashboard widget add &#x27;My Dashboard&#x27; &#x22;Error Count&#x22; \  --display big_number --query countsentry dashboard widget add &#x27;My Dashboard&#x27; &#x22;Errors by Browser&#x22; \  --display line --query count --group-by browser.namesentry dashboard widget add &#x27;My Dashboard&#x27; &#x22;Top Endpoints&#x22; \  --display table \  --query count --query p95:span.duration \  --group-by transaction \  --sort -count --limit 10sentry dashboard widget add &#x27;My Dashboard&#x27; &#x22;Slow Requests&#x22; \  --display bar --query p95:span.duration \  --where &#x22;span.op:http.client&#x22; \  --group-by span.description"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="edit-widgets">Edit widgets</h3><a class="sl-anchor-link" href="#edit-widgets"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Edit widgets”</span></a></div>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Change display type</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">widget</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">edit</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">12345</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--title</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">Error Count</span><span style="--0:#CFCFCF">'</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--display</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">bar</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Rename a widget</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">widget</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">edit</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">My Dashboard</span><span style="--0:#CFCFCF">'</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--index</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">0</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--new-title</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">Total Errors</span><span style="--0:#CFCFCF">'</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Change the query</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">widget</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">edit</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">12345</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--title</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">Error Rate</span><span style="--0:#CFCFCF">'</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--query</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">p95:span.duration</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="sentry dashboard widget edit 12345 --title &#x27;Error Count&#x27; --display barsentry dashboard widget edit &#x27;My Dashboard&#x27; --index 0 --new-title &#x27;Total Errors&#x27;sentry dashboard widget edit 12345 --title &#x27;Error Rate&#x27; --query p95:span.duration"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="delete-widgets">Delete widgets</h3><a class="sl-anchor-link" href="#delete-widgets"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Delete widgets”</span></a></div>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Delete by title</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">widget</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">delete</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">My Dashboard</span><span style="--0:#CFCFCF">'</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--title</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">Error Count</span><span style="--0:#CFCFCF">'</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Delete by index</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">widget</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">delete</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">12345</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--index</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">2</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="sentry dashboard widget delete &#x27;My Dashboard&#x27; --title &#x27;Error Count&#x27;sentry dashboard widget delete 12345 --index 2"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="view-revision-history">View revision history</h3><a class="sl-anchor-link" href="#view-revision-history"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “View revision history”</span></a></div>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># List revisions by dashboard title</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">revisions</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">Frontend Performance</span><span style="--0:#CFCFCF">'</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># List revisions by dashboard ID</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">revisions</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">12345</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># With explicit org</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">revisions</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">my-org</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">12345</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="sentry dashboard revisions &#x27;Frontend Performance&#x27;sentry dashboard revisions 12345sentry dashboard revisions my-org 12345"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="restore-a-previous-revision">Restore a previous revision</h3><a class="sl-anchor-link" href="#restore-a-previous-revision"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Restore a previous revision”</span></a></div>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Restore by dashboard title and revision number</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">restore</span><span style="--0:#F5F5F5"> </span><span style="--0:#CFCFCF">'</span><span style="--0:#FFD166">Frontend Performance</span><span style="--0:#CFCFCF">'</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--revision</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">3</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># Restore by dashboard ID</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">restore</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">12345</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--revision</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">1</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#9E9E9E;--0fs:italic"># With explicit org</span></div></div><div class="ec-line"><div class="code"><span style="--0:#9AE6B4">sentry</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">dashboard</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">restore</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">my-org</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">12345</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFD166">--revision</span><span style="--0:#F5F5F5"> </span><span style="--0:#FFB86C">1</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="sentry dashboard restore &#x27;Frontend Performance&#x27; --revision 3sentry dashboard restore 12345 --revision 1sentry dashboard restore my-org 12345 --revision 1"><div></div></button></div></figure></div>
+<aside aria-label="Tip" class="starlight-aside starlight-aside--tip"><p class="starlight-aside__title" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="starlight-aside__icon"><path fill-rule="evenodd" clip-rule="evenodd" d="M1.43909 8.85483L1.44039 8.85354L4.96668 5.33815C5.30653 4.99386 5.7685 4.79662 6.2524 4.78972L6.26553 4.78963L12.9014 4.78962L13.8479 3.84308C16.9187 0.772319 20.0546 0.770617 21.4678 0.975145C21.8617 1.02914 22.2271 1.21053 22.5083 1.4917C22.7894 1.77284 22.9708 2.13821 23.0248 2.53199C23.2294 3.94517 23.2278 7.08119 20.1569 10.1521L19.2107 11.0983V17.7338L19.2106 17.7469C19.2037 18.2308 19.0067 18.6933 18.6624 19.0331L15.1456 22.5608C14.9095 22.7966 14.6137 22.964 14.29 23.0449C13.9663 23.1259 13.6267 23.1174 13.3074 23.0204C12.9881 22.9235 12.7011 22.7417 12.4771 22.4944C12.2533 22.2473 12.1006 21.9441 12.0355 21.6171L11.1783 17.3417L6.65869 12.822L4.34847 12.3589L2.38351 11.965C2.05664 11.8998 1.75272 11.747 1.50564 11.5232C1.25835 11.2992 1.07653 11.0122 0.979561 10.6929C0.882595 10.3736 0.874125 10.034 0.955057 9.7103C1.03599 9.38659 1.20328 9.09092 1.43909 8.85483ZM6.8186 10.8724L2.94619 10.096L6.32006 6.73268H10.9583L6.8186 10.8724ZM15.2219 5.21703C17.681 2.75787 20.0783 2.75376 21.1124 2.8876C21.2462 3.92172 21.2421 6.31895 18.783 8.77812L12.0728 15.4883L8.51172 11.9272L15.2219 5.21703ZM13.9042 21.0538L13.1279 17.1811L17.2676 13.0414V17.68L13.9042 21.0538Z"></path><path d="M9.31827 18.3446C9.45046 17.8529 9.17864 17.3369 8.68945 17.1724C8.56178 17.1294 8.43145 17.1145 8.30512 17.1243C8.10513 17.1398 7.91519 17.2172 7.76181 17.3434C7.62613 17.455 7.51905 17.6048 7.45893 17.7835C6.97634 19.2186 5.77062 19.9878 4.52406 20.4029C4.08525 20.549 3.6605 20.644 3.29471 20.7053C3.35607 20.3395 3.45098 19.9148 3.59711 19.476C4.01221 18.2294 4.78141 17.0237 6.21648 16.5411C6.39528 16.481 6.54504 16.3739 6.65665 16.2382C6.85126 16.0016 6.92988 15.678 6.84417 15.3647C6.83922 15.3466 6.83373 15.3286 6.82767 15.3106C6.74106 15.053 6.55701 14.8557 6.33037 14.7459C6.10949 14.6389 5.84816 14.615 5.59715 14.6994C5.47743 14.7397 5.36103 14.7831 5.24786 14.8294C3.22626 15.6569 2.2347 17.4173 1.75357 18.8621C1.49662 19.6337 1.36993 20.3554 1.30679 20.8818C1.27505 21.1464 1.25893 21.3654 1.25072 21.5213C1.24662 21.5993 1.24448 21.6618 1.24337 21.7066L1.243 21.7226L1.24235 21.7605L1.2422 21.7771L1.24217 21.7827L1.24217 21.7856C1.24217 22.3221 1.67703 22.7579 2.2137 22.7579L2.2155 22.7579L2.22337 22.7578L2.23956 22.7577C2.25293 22.7575 2.27096 22.7572 2.29338 22.7567C2.33821 22.7555 2.40073 22.7534 2.47876 22.7493C2.63466 22.7411 2.85361 22.725 3.11822 22.6932C3.64462 22.6301 4.36636 22.5034 5.13797 22.2464C6.58274 21.7653 8.3431 20.7738 9.17063 18.7522C9.21696 18.639 9.26037 18.5226 9.30064 18.4029C9.30716 18.3835 9.31304 18.364 9.31827 18.3446Z"></path></svg>Tip</p><div class="starlight-aside__content"><p>Use <code dir="auto">sentry dashboard revisions</code> to find the revision number before restoring.</p></div></aside>
+<div class="sl-heading-wrapper level-h2"><h2 id="query-shorthand">Query Shorthand</h2><a class="sl-anchor-link" href="#query-shorthand"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Query Shorthand”</span></a></div>
+<p>The <code dir="auto">--query</code> flag supports shorthand for aggregate functions:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Input</th><th>Expands to</th></tr></thead><tbody><tr><td><code dir="auto">count</code></td><td><code dir="auto">count()</code></td></tr><tr><td><code dir="auto">p95:span.duration</code></td><td><code dir="auto">p95(span.duration)</code></td></tr><tr><td><code dir="auto">avg:span.duration</code></td><td><code dir="auto">avg(span.duration)</code></td></tr><tr><td><code dir="auto">count()</code></td><td><code dir="auto">count()</code> (passthrough)</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h2"><h2 id="sort-shorthand">Sort Shorthand</h2><a class="sl-anchor-link" href="#sort-shorthand"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Sort Shorthand”</span></a></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Input</th><th>Meaning</th></tr></thead><tbody><tr><td><code dir="auto">count</code></td><td>Sort by <code dir="auto">count()</code> ascending</td></tr><tr><td><code dir="auto">-count</code></td><td>Sort by <code dir="auto">count()</code> descending</td></tr></tbody></table> </div> <footer> <table role="presentation" width="100%" height="32" cellspacing="0" cellpadding="0"> <tbody> <tr> <td></td> </tr> </tbody> </table> <div class="pagination-links sentry-pagination-links print:hidden" dir="ltr"> <a href="/_preview/pr-1045/commands/cli/" rel="prev"> <svg aria-hidden="true" class=" astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg> <span> Previous <br> <span class="link-title">cli</span> </span> </a> <a href="/_preview/pr-1045/commands/event/" rel="next"> <svg aria-hidden="true" class=" astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg> <span> Next <br> <span class="link-title">event</span> </span> </a> </div> <table role="presentation" width="100%" height="72" cellspacing="0" cellpadding="0"> <tbody> <tr> <td align="center" valign="bottom"> <nav aria-label="Project links"> <a href="https://github.com/getsentry/cli" rel="me" aria-label="GitHub" title="GitHub"> <font color="#888888"> <svg aria-hidden="true" class=" astro-jm74elfm" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg> </font> </a> </nav> </td> </tr> </tbody> </table> </footer> </div> </div>  </main> </div> </div> </div> </div> </body></html>
