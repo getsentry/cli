@@ -139,8 +139,10 @@ function isRecursiveSentrySetup(tokens: string[]): boolean {
       return true;
     }
     if (
-      !isExecutablePackageSpec(executable, "sentry") &&
-      !isExecutablePackageSpec(executable, "sentry-cli")
+      !(
+        isExecutablePackageSpec(executable, "sentry") ||
+        isExecutablePackageSpec(executable, "sentry-cli")
+      )
     ) {
       return false;
     }
