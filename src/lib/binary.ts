@@ -13,7 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { chmod, copyFile, mkdir, unlink } from "node:fs/promises";
+import { chmod, copyFile, mkdir, realpath, unlink } from "node:fs/promises";
 import { delimiter, join, resolve } from "node:path";
 import { compare as semverCompare } from "semver";
 import { getUserAgent } from "./constants.js";
@@ -23,6 +23,7 @@ import {
   isTlsCertError,
 } from "./custom-ca.js";
 import { stringifyUnknown, UpgradeError } from "./errors.js";
+import { logger } from "./logger.js";
 
 /** Known directories where the curl installer may place the binary */
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
@@ -443,12 +444,29 @@ export async function installBinary(
     // When upgrade spawns setup --install, the child's execPath IS the
     // .download file (sourcePath === tempPath). In that case skip the
     // unlink+copy — the file is already where we need it.
-    if (resolve(sourcePath) !== resolve(tempPath)) {
+    // Compare symlink-resolved paths: process.execPath is canonicalized by
+    // the OS, but installDir may go through a symlink (e.g. macOS /tmp →
+    // /private/tmp). Falls back to resolve() when the path doesn't exist yet.
+    const canonical = async (p: string): Promise<string> => {
+      try {
+        return await realpath(p);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return resolve(p);
+        }
+        logger.debug("realpath failed, falling back to resolve()", error);
+        return resolve(p);
+      }
+    };
+
+    if ((await canonical(sourcePath)) !== (await canonical(tempPath))) {
       // Clean up any leftover temp file from interrupted operation
       try {
         await unlink(tempPath);
-      } catch {
-        // Ignore if doesn't exist
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          logger.debug("Failed to clean up temp file", error);
+        }
       }
 
       // Copy source binary to temp path next to install location
