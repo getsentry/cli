@@ -94,10 +94,19 @@ describe("validateCommand", () => {
     expect(validateCommand("npx sentry-cli init")).toContain(
       "invokes Sentry setup recursively"
     );
+    expect(validateCommand("sentry-cli@latest init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx sentry-cli@latest init")).toContain(
+      "invokes Sentry setup recursively"
+    );
     expect(validateCommand("sentry-wizard init")).toContain(
       "invokes Sentry setup recursively"
     );
     expect(validateCommand("npx sentry-wizard -i nextjs")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx sentry-wizard@latest -i nextjs")).toContain(
       "invokes Sentry setup recursively"
     );
     expect(validateCommand("C:\\Tools\\sentry-wizard.cmd -i nextjs")).toContain(

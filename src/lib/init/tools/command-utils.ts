@@ -120,6 +120,10 @@ function isSentryCliPackageSpec(token: string): boolean {
   return lower === "@sentry/cli" || lower.startsWith("@sentry/cli@");
 }
 
+function isExecutablePackageSpec(executable: string, name: string): boolean {
+  return executable === name || executable.startsWith(`${name}@`);
+}
+
 function isRecursiveSentrySetup(tokens: string[]): boolean {
   if (tokens.some((token) => token.toLowerCase().includes("@sentry/wizard"))) {
     return true;
@@ -131,10 +135,13 @@ function isRecursiveSentrySetup(tokens: string[]): boolean {
     }
 
     const executable = normalizeExecutableName(token);
-    if (executable === "sentry-wizard") {
+    if (isExecutablePackageSpec(executable, "sentry-wizard")) {
       return true;
     }
-    if (executable !== "sentry" && executable !== "sentry-cli") {
+    if (
+      !isExecutablePackageSpec(executable, "sentry") &&
+      !isExecutablePackageSpec(executable, "sentry-cli")
+    ) {
       return false;
     }
     return hasInitArgAfter(tokens, index);
