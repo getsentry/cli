@@ -4,11 +4,12 @@ import { MAX_OUTPUT_BYTES } from "../constants.js";
 
 /** Characters treated as command token separators. */
 const WHITESPACE_CHAR_RE = /\s/u;
+const WINDOWS_EXECUTABLE_EXTENSION_RE = /\.(?:cmd|exe|bat|ps1)$/u;
+const PATH_SEPARATOR_RE = /\\/g;
 
 /**
- * Patterns that indicate shell injection. Commands run via `child_process.spawn`
- * without a shell, so these patterns are defense-in-depth for chaining,
- * piping, redirection, and command substitution.
+ * Patterns that indicate shell injection. Windows package-manager shims require
+ * shell execution, so workflow commands must reject shell syntax before spawn.
  */
 const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
   [
@@ -23,6 +24,9 @@ const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
     { pattern: "\r", label: "carriage return" },
     { pattern: ">", label: "redirection (>)" },
     { pattern: "<", label: "redirection (<)" },
+    { pattern: "%", label: "Windows environment variable expansion (%)" },
+    { pattern: "^", label: "Windows command escaping (^)" },
+    { pattern: "!", label: "Windows delayed environment expansion (!)" },
   ];
 
 /**
@@ -61,6 +65,9 @@ const BLOCKED_EXECUTABLES = new Set([
   "ssh",
   "scp",
   "sftp",
+  "cd",
+  "pushd",
+  "popd",
   "bash",
   "sh",
   "zsh",
@@ -93,6 +100,27 @@ export type ParsedCommand = {
   executable: string;
   args: string[];
 };
+
+function normalizeExecutableName(executable: string): string {
+  return path.posix
+    .basename(executable.replace(PATH_SEPARATOR_RE, "/"))
+    .toLowerCase()
+    .replace(WINDOWS_EXECUTABLE_EXTENSION_RE, "");
+}
+
+function isRecursiveSentrySetup(tokens: string[]): boolean {
+  if (tokens.some((token) => token.toLowerCase().includes("@sentry/wizard"))) {
+    return true;
+  }
+
+  return tokens.some((token, index) => {
+    const executable = normalizeExecutableName(token);
+    if (executable !== "sentry" && executable !== "sentry-cli") {
+      return false;
+    }
+    return tokens.slice(index + 1).some((arg) => arg.toLowerCase() === "init");
+  });
+}
 
 function isCommandWhitespace(char: string): boolean {
   return WHITESPACE_CHAR_RE.test(char);
@@ -256,13 +284,14 @@ export function validateCommand(command: string): string | undefined {
     }
   }
 
-  let firstToken: string;
+  let tokens: string[];
   try {
-    [firstToken = ""] = tokenizeCommand(command);
+    tokens = tokenizeCommand(command);
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
 
+  const [firstToken = ""] = tokens;
   if (!firstToken) {
     return "Blocked command: empty command";
   }
@@ -271,7 +300,11 @@ export function validateCommand(command: string): string | undefined {
     return `Blocked command: contains environment variable assignment — "${command}"`;
   }
 
-  const executable = path.basename(firstToken);
+  if (isRecursiveSentrySetup(tokens)) {
+    return `Blocked command: invokes Sentry setup recursively — "${command}"`;
+  }
+
+  const executable = normalizeExecutableName(firstToken);
   if (BLOCKED_EXECUTABLES.has(executable)) {
     return `Blocked command: disallowed executable "${executable}" — "${command}"`;
   }

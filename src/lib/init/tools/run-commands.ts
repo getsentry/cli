@@ -10,8 +10,14 @@ import {
 } from "./command-utils.js";
 import type { InitToolDefinition, ToolContext } from "./types.js";
 
+const WINDOWS_BATCH_SHIM_RE = /\.(?:cmd|bat)$/iu;
+
+function needsWindowsShell(executable: string): boolean {
+  return process.platform === "win32" && WINDOWS_BATCH_SHIM_RE.test(executable);
+}
+
 /**
- * Validate and execute a batch of shell-free commands.
+ * Validate and execute a batch of commands.
  */
 export async function runCommands(
   payload: RunCommandsPayload,
@@ -85,6 +91,7 @@ async function runSingleCommand(
   try {
     const child = spawn(executable, command.args, {
       cwd,
+      shell: needsWindowsShell(executable),
       stdio: ["ignore", "pipe", "pipe"],
     });
     const exited = new Promise<number>((resolve) => {
