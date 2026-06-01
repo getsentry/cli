@@ -9,12 +9,11 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync,
   readFileSync,
-  realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { chmod, copyFile, mkdir, unlink } from "node:fs/promises";
+import { chmod, copyFile, mkdir, realpath, unlink } from "node:fs/promises";
 import { delimiter, join, resolve } from "node:path";
 import { compare as semverCompare } from "semver";
 import { getUserAgent } from "./constants.js";
@@ -445,36 +444,27 @@ export async function installBinary(
     // When upgrade spawns setup --install, the child's execPath IS the
     // .download file (sourcePath === tempPath). In that case skip the
     // unlink+copy — the file is already where we need it.
-    //
-    // Compare canonical (symlink-resolved) paths, not just absolute ones:
-    // process.execPath is canonicalized by the OS, while installDir may
-    // reach the same location through a symlink (e.g. macOS /tmp ->
-    // /private/tmp). Plain resolve() would see these as different and we'd
-    // unlink the very file we're about to copy. realpathSync requires the
-    // path to exist, so fall back to resolve() for the normal case where
-    // tempPath hasn't been created yet.
-    const canonical = (p: string): string => {
-      // realpathSync throws when the path does not exist yet — the normal
-      // case for tempPath before the download lands — so short-circuit that
-      // without logging. A throw for any other reason (e.g. permissions) is
-      // unexpected and worth surfacing in debug logs.
-      if (!existsSync(p)) {
-        return resolve(p);
-      }
+    // Compare symlink-resolved paths: process.execPath is canonicalized by
+    // the OS, but installDir may go through a symlink (e.g. macOS /tmp →
+    // /private/tmp). Falls back to resolve() when the path doesn't exist yet.
+    const canonical = async (p: string): Promise<string> => {
       try {
-        return realpathSync(p);
+        return await realpath(p);
       } catch (error) {
-        logger.debug("realpathSync failed, falling back to resolve()", error);
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return resolve(p);
+        }
+        logger.debug("realpath failed, falling back to resolve()", error);
         return resolve(p);
       }
     };
 
-    if (canonical(sourcePath) !== canonical(tempPath)) {
+    if ((await canonical(sourcePath)) !== (await canonical(tempPath))) {
       // Clean up any leftover temp file from interrupted operation
       try {
         await unlink(tempPath);
-      } catch {
-        // Ignore if doesn't exist
+      } catch (error) {
+        logger.debug("Failed to clean up temp file", error);
       }
 
       // Copy source binary to temp path next to install location
