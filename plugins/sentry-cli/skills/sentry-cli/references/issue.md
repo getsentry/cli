@@ -159,11 +159,11 @@ sentry issue explain my-org/MYPROJECT-ABC
 # Force a fresh analysis
 sentry issue explain 123456789 --force
 
-# Generate a fix plan (requires explain to be run first)
+# Generate a fix plan (automatically runs explain if needed)
 sentry issue plan 123456789
 
-# Specify which root cause to plan for
-sentry issue plan 123456789 --cause 0
+# Force a fresh plan even if one already exists
+sentry issue plan 123456789 --force
 ```
 
 ### `sentry issue plan <issue>`
