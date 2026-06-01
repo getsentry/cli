@@ -13,7 +13,7 @@ const { spawnCalls } = vi.hoisted(() => ({
   spawnCalls: [] as Array<{
     command: string;
     args: string[];
-    options: { shell?: boolean };
+    options: { shell?: boolean; windowsVerbatimArguments?: boolean };
   }>,
 }));
 
@@ -31,7 +31,11 @@ vi.mock("node:child_process", async () => {
         ? "C:\\Tools\\pnpm.CMD\r\n"
         : `C:\\Tools\\${command}.exe\r\n`;
     },
-    spawn: (command: string, args: string[], options: { shell?: boolean }) => {
+    spawn: (
+      command: string,
+      args: string[],
+      options: { shell?: boolean; windowsVerbatimArguments?: boolean }
+    ) => {
       spawnCalls.push({ command, args, options });
       const child = new EventEmitter() as any;
       child.stdout = Readable.from(["10.0.0\n"]);
@@ -93,7 +97,7 @@ describe("runCommands spawn options", () => {
     expect(spawnCalls[0]).toMatchObject({
       command: "cmd.exe",
       args: ["/d", "/s", "/c", '""C:\\Tools\\pnpm.CMD" "--version""'],
-      options: { shell: false },
+      options: { shell: false, windowsVerbatimArguments: true },
     });
   });
 
@@ -114,7 +118,7 @@ describe("runCommands spawn options", () => {
         "/c",
         '""C:\\Tools\\pnpm.CMD" "--filter" "./apps/web app" "add" "@sentry/nextjs@^8.0.0""',
       ],
-      options: { shell: false },
+      options: { shell: false, windowsVerbatimArguments: true },
     });
   });
 
@@ -131,6 +135,7 @@ describe("runCommands spawn options", () => {
       args: ["--info"],
       options: { shell: false },
     });
+    expect(spawnCalls[0]?.options.windowsVerbatimArguments).toBeUndefined();
   });
 
   test("keeps POSIX command execution shell-free", async () => {
@@ -146,5 +151,6 @@ describe("runCommands spawn options", () => {
       args: ["--version"],
       options: { shell: false },
     });
+    expect(spawnCalls[0]?.options.windowsVerbatimArguments).toBeUndefined();
   });
 });

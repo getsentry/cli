@@ -12,6 +12,12 @@ import type { InitToolDefinition, ToolContext } from "./types.js";
 
 const WINDOWS_BATCH_SHIM_RE = /\.(?:cmd|bat)$/iu;
 
+type SpawnCommand = {
+  executable: string;
+  args: string[];
+  windowsVerbatimArguments?: true;
+};
+
 function isWindowsBatchShim(executable: string): boolean {
   return process.platform === "win32" && WINDOWS_BATCH_SHIM_RE.test(executable);
 }
@@ -100,7 +106,7 @@ async function runSingleCommand(
   stderr: string;
 }> {
   const executable = whichSync(command.executable) ?? command.executable;
-  const spawnCommand = isWindowsBatchShim(executable)
+  const spawnCommand: SpawnCommand = isWindowsBatchShim(executable)
     ? {
         executable: process.env.ComSpec ?? "cmd.exe",
         args: [
@@ -109,6 +115,7 @@ async function runSingleCommand(
           "/c",
           buildWindowsBatchCommand(executable, command.args),
         ],
+        windowsVerbatimArguments: true,
       }
     : { executable, args: command.args };
 
@@ -117,6 +124,9 @@ async function runSingleCommand(
       cwd,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
+      ...(spawnCommand.windowsVerbatimArguments
+        ? { windowsVerbatimArguments: true }
+        : {}),
     });
     const exited = new Promise<number>((resolve) => {
       child.on("close", (code) => resolve(code ?? 1));
