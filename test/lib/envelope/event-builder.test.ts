@@ -5,13 +5,14 @@
  * tested below. Unit tests here focus on specific edge cases and output shape.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { SendEventFlags } from "../../../src/lib/envelope/event-builder.js";
 import {
   buildEventFromFlags,
   parseKeyValue,
   parseUserFields,
 } from "../../../src/lib/envelope/event-builder.js";
+import { ValidationError } from "../../../src/lib/errors.js";
 
 // ── parseKeyValue ──────────────────────────────────────────────────
 
@@ -28,12 +29,10 @@ describe("parseKeyValue", () => {
   });
 
   test("no colon → throws ValidationError", () => {
-    const { ValidationError } = require("../../../src/lib/errors.js");
     expect(() => parseKeyValue("nocohere")).toThrow(ValidationError);
   });
 
   test("empty key → throws ValidationError", () => {
-    const { ValidationError } = require("../../../src/lib/errors.js");
     expect(() => parseKeyValue(":value")).toThrow(ValidationError);
   });
 });

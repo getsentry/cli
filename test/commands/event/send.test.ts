@@ -2,18 +2,11 @@
  * Tests for `sentry event send` command func().
  */
 
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { sendCommand } from "../../../src/commands/event/send.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn
 import * as transport from "../../../src/lib/envelope/transport.js";
+import { ValidationError } from "../../../src/lib/errors.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 useTestConfigDir("send-event-");
@@ -30,7 +23,7 @@ function makeContext() {
           return true;
         },
       },
-      stderr: { write: mock(() => true) },
+      stderr: { write: vi.fn(() => true) },
       cwd: "/tmp",
     },
     writes,
@@ -39,13 +32,13 @@ function makeContext() {
 
 describe("sendCommand.func()", () => {
   let func: Awaited<ReturnType<typeof sendCommand.loader>>;
-  let sendSpy: ReturnType<typeof spyOn>;
+  let sendSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     func = await sendCommand.loader();
-    sendSpy = spyOn(transport, "sendEnvelopeRequest").mockResolvedValue(
-      undefined
-    );
+    sendSpy = vi
+      .spyOn(transport, "sendEnvelopeRequest")
+      .mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -126,7 +119,7 @@ describe("sendCommand.func()", () => {
 
   test("nonexistent file throws ValidationError (not raw stack trace)", async () => {
     const { ctx } = makeContext();
-    const { ValidationError } = await import("../../../src/lib/errors.js");
+
     await expect(
       func.call(
         ctx,
@@ -138,7 +131,7 @@ describe("sendCommand.func()", () => {
 
   test("--raw requires file arguments", async () => {
     const { ctx } = makeContext();
-    const { ValidationError } = await import("../../../src/lib/errors.js");
+
     await expect(
       func.call(ctx, { dsn: SAAS_DSN, raw: true, "no-environ": true })
     ).rejects.toBeInstanceOf(ValidationError);

@@ -2,7 +2,7 @@
  * Tests for `sentry send-envelope` deprecation shim.
  */
 
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { sendEnvelopeCommand } from "../../src/commands/send-envelope.js";
 import { CliError } from "../../src/lib/errors.js";
 import { useTestConfigDir } from "../helpers.js";
@@ -11,8 +11,8 @@ useTestConfigDir("send-envelope-");
 
 function makeContext() {
   return {
-    stdout: { write: mock(() => true) },
-    stderr: { write: mock(() => true) },
+    stdout: { write: vi.fn(() => true) },
+    stderr: { write: vi.fn(() => true) },
     cwd: "/tmp",
   };
 }

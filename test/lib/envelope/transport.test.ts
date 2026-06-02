@@ -9,7 +9,7 @@
  * - Both string and Uint8Array bodies are supported
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   buildEnvelopeUrl,
   resolveDsn,

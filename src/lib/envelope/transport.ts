@@ -86,8 +86,9 @@ export function requireDsn(flags: DsnFlags, cwd: string): string {
  * `event send` (and previously by `send-envelope`).
  */
 export async function readFileBytes(file: string): Promise<Uint8Array> {
+  const { readFile } = await import("node:fs/promises");
   try {
-    return new Uint8Array(await Bun.file(file).arrayBuffer());
+    return await readFile(file);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
