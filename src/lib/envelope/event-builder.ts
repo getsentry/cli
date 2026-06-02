@@ -148,11 +148,11 @@ export async function parseBreadcrumbsFromLogfile(
   const breadcrumbs: Breadcrumb[] = lines.map((line) => {
     if (withCategories) {
       const match = CATEGORY_RE.exec(line);
-      if (match?.[1] && match[2]) {
+      if (match) {
         return {
           timestamp: mtimeSeconds,
-          category: match[1].trim(),
-          message: match[2].trim(),
+          category: (match[1] ?? "log").trim(),
+          message: (match[2] ?? "").trim(),
         };
       }
     }
