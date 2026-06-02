@@ -13,6 +13,9 @@
 
 import { getEnvelopeEndpointWithUrlEncodedAuth, makeDsn } from "@sentry/core";
 import { ApiError, ConfigError, ValidationError } from "../errors.js";
+import { logger } from "../logger.js";
+
+const log = logger.withTag("envelope.transport");
 
 /** Client name passed to getEnvelopeEndpointWithUrlEncodedAuth, which appends /<version> internally. */
 const SENTRY_CLIENT = "sentry-cli";
@@ -32,8 +35,8 @@ export function buildEnvelopeUrl(dsn: string): string {
   let dsnComponents: ReturnType<typeof makeDsn>;
   try {
     dsnComponents = makeDsn(dsn);
-  } catch {
-    // makeDsn may throw a SentryError on malformed input
+  } catch (err) {
+    log.debug("makeDsn threw for DSN input", err);
     dsnComponents = undefined;
   }
   if (!dsnComponents) {
@@ -51,7 +54,7 @@ export function buildEnvelopeUrl(dsn: string): string {
  *   2. `SENTRY_DSN` environment variable
  *   3. Returns `undefined` (caller decides whether to auto-detect or error)
  */
-export function resolveDsn(flags: DsnFlags, _cwd: string): string | undefined {
+export function resolveDsn(flags: DsnFlags): string | undefined {
   if (flags.dsn) {
     return flags.dsn.trim();
   }
@@ -68,8 +71,8 @@ export function resolveDsn(flags: DsnFlags, _cwd: string): string | undefined {
  * Auto-detection via project scanning is intentionally deferred — callers
  * that want it can call the DSN detector before this.
  */
-export function requireDsn(flags: DsnFlags, cwd: string): string {
-  const dsn = resolveDsn(flags, cwd);
+export function requireDsn(flags: DsnFlags): string {
+  const dsn = resolveDsn(flags);
   if (dsn) {
     return dsn;
   }
@@ -128,8 +131,8 @@ export async function sendEnvelopeRequest(
       if (typeof json.detail === "string") {
         detail = json.detail;
       }
-    } catch {
-      // Non-JSON error body — keep the HTTP status message
+    } catch (err) {
+      log.debug("Non-JSON error body, using HTTP status message", err);
     }
     throw new ApiError(detail, response.status, detail, url);
   }

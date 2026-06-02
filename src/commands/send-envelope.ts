@@ -7,7 +7,7 @@
 
 import type { SentryContext } from "../context.js";
 import { buildCommand } from "../lib/command.js";
-import { CliError } from "../lib/errors.js";
+import { CliError, EXIT } from "../lib/errors.js";
 
 export const sendEnvelopeCommand = buildCommand({
   docs: {
@@ -55,7 +55,7 @@ export const sendEnvelopeCommand = buildCommand({
     throw new CliError(
       "`sentry send-envelope` has been removed.\n" +
         `Use: sentry event send --raw${fileArgs}`,
-      1
+      EXIT.GENERAL
     );
   },
 });

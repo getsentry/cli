@@ -22,6 +22,9 @@ import {
 } from "../../lib/envelope/transport.js";
 import { ConfigError, ValidationError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { logger } from "../../lib/logger.js";
+
+const log = logger.withTag("event.send");
 
 /** Shape of the data yielded to the output layer. */
 type SendEventResult = {
@@ -56,8 +59,8 @@ async function buildFilePayload(
       const firstLine = new TextDecoder().decode(bytes).split("\n")[0] ?? "{}";
       const header = JSON.parse(firstLine) as Record<string, unknown>;
       eventId = (header.event_id as string) ?? "";
-    } catch {
-      // Non-critical — event_id is informational only
+    } catch (err) {
+      log.debug("Could not extract event_id from envelope header", err);
     }
     return { body: bytes, eventId };
   }
@@ -279,11 +282,12 @@ built entirely from the file contents.
     },
     ...files: string[]
   ) {
-    const dsn = requireDsn(flags, this.cwd);
+    const dsn = requireDsn(flags);
     let dsnComponents: ReturnType<typeof makeDsn>;
     try {
       dsnComponents = makeDsn(dsn);
-    } catch {
+    } catch (err) {
+      log.debug("makeDsn threw for DSN input", err);
       dsnComponents = undefined;
     }
     if (!dsnComponents) {

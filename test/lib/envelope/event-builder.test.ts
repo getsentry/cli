@@ -102,6 +102,38 @@ describe("buildEventFromFlags", () => {
     expect(event.timestamp).toBeGreaterThan(0);
   });
 
+  test("--timestamp with Unix epoch integer", async () => {
+    const event = await buildEventFromFlags(flags({ timestamp: "1700000000" }));
+    expect(event.timestamp).toBe(1_700_000_000);
+  });
+
+  test("--timestamp with Unix epoch float", async () => {
+    const event = await buildEventFromFlags(
+      flags({ timestamp: "1700000000.123" })
+    );
+    expect(event.timestamp).toBe(1_700_000_000.123);
+  });
+
+  test("--timestamp with ISO 8601 string", async () => {
+    const event = await buildEventFromFlags(
+      flags({ timestamp: "2024-01-15T12:00:00Z" })
+    );
+    // ISO 8601 → parsed via Date.parse, converted to seconds
+    expect(event.timestamp).toBe(Date.parse("2024-01-15T12:00:00Z") / 1000);
+  });
+
+  test("--timestamp with invalid string throws ValidationError", async () => {
+    await expect(
+      buildEventFromFlags(flags({ timestamp: "not-a-date" }))
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("--timestamp with whitespace-only returns default (not epoch zero)", async () => {
+    const event = await buildEventFromFlags(flags({ timestamp: "  " }));
+    // Should fall back to Date.now(), not epoch 0
+    expect(event.timestamp).toBeGreaterThan(1_700_000_000);
+  });
+
   test("--level sets level", async () => {
     expect((await buildEventFromFlags(flags({ level: "warning" }))).level).toBe(
       "warning"
