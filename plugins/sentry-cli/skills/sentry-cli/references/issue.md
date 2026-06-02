@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-issue
-version: 0.35.0-dev.0
+version: 0.36.0-dev.0
 description: Manage Sentry issues
 requires:
   bins: ["sentry"]
@@ -19,7 +19,7 @@ List issues in a project
 - `-q, --query <value> - Search query (Sentry syntax, implicit AND, no OR operator)`
 - `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
-- `-t, --period <value> - Time range: "7d", "2026-04-01..2026-05-01", ">=2026-04-01" - (default: "90d")`
+- `-t, --period <value> - Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01" - (default: "90d")`
 - `-c, --cursor <value> - Pagination cursor (use "next" for next page, "prev" for previous)`
 - `--compact - Single-line rows for compact output (auto-detects if omitted)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
@@ -87,7 +87,7 @@ List events for a specific issue
 - `-n, --limit <value> - Number of events (1-1000) - (default: "25")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `--full - Include full event body (stacktraces)`
-- `-t, --period <value> - Time range: "7d", "2026-04-01..2026-05-01", ">=2026-04-01" - (default: "7d")`
+- `-t, --period <value> - Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01" - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
@@ -111,6 +111,25 @@ List events for a specific issue
 | `crashFile` | string \| null | Crash file URL |
 | `metadata` | object \| null | Event metadata |
 
+**Examples:**
+
+```bash
+# List recent events for an issue
+sentry issue events FRONT-ABC
+
+# Filter events by search query
+sentry issue events FRONT-ABC --query "browser:Chrome"
+
+# Show full event details
+sentry issue events FRONT-ABC --full
+
+# Limit results and filter by time period
+sentry issue events FRONT-ABC --limit 50 --period 24h
+
+# Paginate through results
+sentry issue events FRONT-ABC -c next
+```
+
 ### `sentry issue explain <issue>`
 
 Analyze an issue's root cause using Seer AI
@@ -122,6 +141,15 @@ Analyze an issue's root cause using Seer AI
 **Examples:**
 
 ```bash
+# View the most recent issue
+sentry issue view @latest
+
+# Explain the most frequently occurring issue
+sentry issue explain @most_frequent
+
+# Generate a fix plan for the latest issue
+sentry issue plan @latest
+
 # Analyze root cause (may take a few minutes for new issues)
 sentry issue explain 123456789
 
@@ -154,6 +182,34 @@ View details of a specific issue
 - `-w, --web - Open in browser`
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
+
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Numeric issue ID |
+| `shortId` | string | Human-readable short ID (e.g. PROJ-ABC) |
+| `title` | string | Issue title |
+| `culprit` | string | Culprit string |
+| `count` | string | Total event count |
+| `userCount` | number | Number of affected users |
+| `firstSeen` | string | First occurrence (ISO 8601) |
+| `lastSeen` | string | Most recent occurrence (ISO 8601) |
+| `level` | string | Severity level |
+| `status` | string | Issue status |
+| `permalink` | string | URL to the issue in Sentry |
+| `project` | object | Project info |
+| `metadata` | object | Issue metadata |
+| `assignedTo` | object \| null | Assigned user or team |
+| `priority` | string | Triage priority |
+| `platform` | string | Platform |
+| `substatus` | string \| null | Issue substatus |
+| `isUnhandled` | boolean | Whether the issue is unhandled |
+| `seerFixabilityScore` | number \| null | Seer AI fixability score (0-1) |
+| `event` | unknown \| null | Latest event for the issue (full detail) |
+| `org` | string \| null | Organization slug |
+| `replayIds` | array | Related Session Replay IDs |
+| `trace` | object \| null | Trace context from the latest event's span tree |
 
 **Examples:**
 

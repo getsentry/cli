@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-cli
-version: 0.35.0-dev.0
+version: 0.36.0-dev.0
 description: CLI-related commands
 requires:
   bins: ["sentry"]
@@ -19,6 +19,31 @@ View and manage default settings
 - `--clear - Clear the specified default, or all defaults if no key is given`
 - `-y, --yes - Skip confirmation prompt`
 - `-f, --force - Force the operation without confirmation`
+
+**Examples:**
+
+```bash
+# Show all current defaults
+sentry cli defaults
+
+# Set default organization
+sentry cli defaults org my-org
+
+# Set default project
+sentry cli defaults project my-project
+
+# Set default Sentry URL (self-hosted)
+sentry cli defaults url https://sentry.example.com
+
+# Disable telemetry
+sentry cli defaults telemetry off
+
+# Clear a single default
+sentry cli defaults org --clear
+
+# Clear all defaults
+sentry cli defaults --clear
+```
 
 ### `sentry cli feedback <message...>`
 
@@ -56,6 +81,25 @@ Import settings from legacy .sentryclirc files
 - `-n, --dry-run - Show what would happen without making changes`
 - `--url <value> - Explicitly trust this URL (bypasses same-file trust check)`
 - `--skip-validation - Skip token validation against the Sentry API`
+
+**Examples:**
+
+```bash
+# Auto-detect and import .sentryclirc
+sentry cli import
+
+# Preview what would be imported
+sentry cli import --dry-run
+
+# Skip confirmation prompt
+sentry cli import --yes
+
+# Explicitly trust a self-hosted URL
+sentry cli import --url https://sentry.example.com
+
+# Skip API validation of the imported token
+sentry cli import --skip-validation
+```
 
 ### `sentry cli setup`
 

@@ -54,6 +54,7 @@ export async function runCommands(
         message: `Command failed: ${command.original}`,
         data: {
           exitCode: result.exitCode,
+          stdout: result.stdout.slice(0, 500),
           stderr: result.stderr.slice(0, 500),
           cwd: payload.cwd,
         },

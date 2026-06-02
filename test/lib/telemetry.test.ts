@@ -23,6 +23,8 @@ import {
   createTracedDatabase,
   getSentryTracePropagationTargets,
   initSentry,
+  isEbadfError,
+  isEpipeError,
   isUserApiError,
   recordApiErrorOnSpan,
   resetReadonlyWarning,
@@ -361,6 +363,69 @@ describe("isUserApiError", () => {
   test("returns false for non-Error objects", () => {
     expect(isUserApiError({ status: 404 })).toBe(false);
     expect(isUserApiError("404")).toBe(false);
+  });
+});
+
+describe("isEpipeError", () => {
+  test("detects EPIPE in exception message", () => {
+    const event = {
+      exception: { values: [{ value: "write EPIPE" }] },
+    } as Sentry.ErrorEvent;
+    expect(isEpipeError(event)).toBe(true);
+  });
+
+  test("detects EPIPE in node_system_error context", () => {
+    const event = {
+      contexts: { node_system_error: { code: "EPIPE" } },
+    } as Sentry.ErrorEvent;
+    expect(isEpipeError(event)).toBe(true);
+  });
+
+  test("returns false for non-EPIPE errors", () => {
+    const event = {
+      exception: { values: [{ value: "something else" }] },
+    } as Sentry.ErrorEvent;
+    expect(isEpipeError(event)).toBe(false);
+  });
+});
+
+describe("isEbadfError", () => {
+  test("detects EBADF in exception message", () => {
+    const event = {
+      exception: {
+        values: [
+          { value: "EBADF: bad file descriptor, scandir '//dev/fd/22'" },
+        ],
+      },
+    } as Sentry.ErrorEvent;
+    expect(isEbadfError(event)).toBe(true);
+  });
+
+  test("detects EBADF in Bun-style message", () => {
+    const event = {
+      exception: {
+        values: [{ value: "EBADF: bad file descriptor, stat '//dev/fd/10'" }],
+      },
+    } as Sentry.ErrorEvent;
+    expect(isEbadfError(event)).toBe(true);
+  });
+
+  test("detects EBADF in node_system_error context", () => {
+    const event = {
+      contexts: { node_system_error: { code: "EBADF" } },
+    } as Sentry.ErrorEvent;
+    expect(isEbadfError(event)).toBe(true);
+  });
+
+  test("returns false for non-EBADF errors", () => {
+    const event = {
+      exception: { values: [{ value: "EPIPE: broken pipe" }] },
+    } as Sentry.ErrorEvent;
+    expect(isEbadfError(event)).toBe(false);
+  });
+
+  test("returns false for events without exceptions or contexts", () => {
+    expect(isEbadfError({} as Sentry.ErrorEvent)).toBe(false);
   });
 });
 

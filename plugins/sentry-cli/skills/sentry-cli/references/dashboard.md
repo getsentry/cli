@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-dashboard
-version: 0.35.0-dev.0
+version: 0.36.0-dev.0
 description: Manage Sentry dashboards
 requires:
   bins: ["sentry"]
@@ -42,7 +42,7 @@ View a dashboard
 - `-w, --web - Open in browser`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-r, --refresh <value> - Auto-refresh interval in seconds (default: 60, min: 10)`
-- `-t, --period <value> - Time range: "7d", "2026-04-01..2026-05-01", ">=2026-04-01"`
+- `-t, --period <value> - Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01"`
 
 **Examples:**
 
@@ -175,11 +175,37 @@ List dashboard revisions
 - `-n, --limit <value> - Maximum number of revisions to list - (default: "25")`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
+**Examples:**
+
+```bash
+# List revisions by dashboard title
+sentry dashboard revisions 'Frontend Performance'
+
+# List revisions by dashboard ID
+sentry dashboard revisions 12345
+
+# With explicit org
+sentry dashboard revisions my-org 12345
+```
+
 ### `sentry dashboard restore <org/dashboard...>`
 
 Restore a dashboard revision
 
 **Flags:**
 - `-r, --revision <value> - Revision ID to restore`
+
+**Examples:**
+
+```bash
+# Restore by dashboard title and revision number
+sentry dashboard restore 'Frontend Performance' --revision 3
+
+# Restore by dashboard ID
+sentry dashboard restore 12345 --revision 1
+
+# With explicit org
+sentry dashboard restore my-org 12345 --revision 1
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

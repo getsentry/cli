@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-local
-version: 0.35.0-dev.0
+version: 0.36.0-dev.0
 description: Sentry for local development
 requires:
   bins: ["sentry"]
@@ -19,7 +19,8 @@ Start the local dev server and tail events
 - `-p, --port <value> - Port to listen on (default 8969) - (default: "8969")`
 - `-H, --host <value> - Hostname to bind to (default localhost) - (default: "localhost")`
 - `-q, --quiet - Suppress per-envelope tail output`
-- `-f, --filter <value>... - Only show items of this type (repeatable: error, transaction, log)`
+- `-f, --filter <value>... - Only show items of this type (repeatable: error, transaction, log, ai)`
+- `-F, --format <value> - Output format: human (default) or json (NDJSON) - (default: "human")`
 
 ### `sentry local run <command...>`
 
@@ -49,6 +50,8 @@ sentry local -f error -f log
 sentry local --quiet
 
 sentry local -f error -f log    # only errors and logs
+
+sentry local --format json
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

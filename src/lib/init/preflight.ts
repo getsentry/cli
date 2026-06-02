@@ -98,6 +98,7 @@ function buildResolvedInitContext(
     features: initial.features,
     org,
     team,
+    isExplicitTeam: Boolean(initial.team),
     project: selection.project,
     app: initial.app,
     authToken: getAuthToken(),
@@ -336,6 +337,12 @@ async function resolveTeam(
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       throw error;
+    }
+    // 403 from listTeams: member lacks team:read. Return undefined (same as the
+    // "deferred" path) so the wizard continues to the project creation tool,
+    // where resolveProjectCreation has the createProjectWithAutoTeam fallback.
+    if (error instanceof ApiError && error.status === 403) {
+      return;
     }
     throw error instanceof WizardError
       ? error

@@ -111,6 +111,42 @@ export type ResolvedTeam = ResolvedConcreteTeam | DeferredResolvedTeam;
  * @throws {ContextError} When team cannot be resolved
  * @throws {ResolutionError} When org slug returns 404
  */
+
+/**
+ * Handle errors from `listTeams` during team resolution.
+ *
+ * - 404 → org not found (builds a rich error with org list)
+ * - 403 → member lacks team:read; re-thrown as `ApiError` so callers that
+ *   implement a member-accessible fallback can detect it and use
+ *   POST /organizations/{org}/projects/ instead.
+ * - other → generic ResolutionError (5xx, network, etc.)
+ */
+async function handleListTeamsError(
+  error: unknown,
+  orgSlug: string,
+  options: ResolveTeamOptions
+): Promise<never> {
+  if (error instanceof ApiError) {
+    if (error.status === 404) {
+      return await buildOrgNotFoundError(
+        orgSlug,
+        options.usageHint,
+        options.detectedFrom
+      );
+    }
+    if (error.status === 403) {
+      throw error;
+    }
+    throw new ResolutionError(
+      `Organization '${orgSlug}'`,
+      `could not be accessed (${error.status})`,
+      `${options.usageHint} --team <team-slug>`,
+      ["The organization may not exist, or you may lack access"]
+    );
+  }
+  throw error;
+}
+
 export async function resolveOrCreateTeam(
   orgSlug: string,
   options: ResolveTeamOptions & {
@@ -133,23 +169,7 @@ export async function resolveOrCreateTeam(
   try {
     teams = await listTeams(orgSlug);
   } catch (error) {
-    if (error instanceof ApiError) {
-      if (error.status === 404) {
-        return await buildOrgNotFoundError(
-          orgSlug,
-          options.usageHint,
-          options.detectedFrom
-        );
-      }
-      // 403, 5xx, etc. — can't determine if org is wrong or something else
-      throw new ResolutionError(
-        `Organization '${orgSlug}'`,
-        `could not be accessed (${error.status})`,
-        `${options.usageHint} --team <team-slug>`,
-        ["The organization may not exist, or you may lack access"]
-      );
-    }
-    throw error;
+    return await handleListTeamsError(error, orgSlug, options);
   }
 
   // No teams — auto-create one if a slug was provided
@@ -232,6 +252,12 @@ async function autoCreateTeam(
   } catch (error) {
     // Let auth errors propagate so the central handler can trigger auto-login
     if (error instanceof AuthError) {
+      throw error;
+    }
+    // 403 means the user lacks permission to create teams (e.g., org member role).
+    // Re-throw as ApiError so callers can fall back to the org-scoped endpoint
+    // (POST /organizations/{org}/projects/) instead of showing a dead-end error.
+    if (error instanceof ApiError && error.status === 403) {
       throw error;
     }
     // Other failures (permissions, network, etc.) — surface with manual fallback

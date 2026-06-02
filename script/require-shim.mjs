@@ -1,24 +1,14 @@
 /**
- * ESM preload shim that provides `require` in ESM modules and handles
- * `with { type: "file" }` import attributes in tsx dev mode.
+ * ESM preload shim for tsx dev mode.
  *
- * The source code uses bare `require()` for lazy loading (circular dependency
- * breaking, optional features). This works natively in Bun and in the CJS
- * bundle, but fails under tsx/Node ESM. This shim bridges the gap by making
- * `require` globally available via `createRequire`.
+ * 1. Provides a global `require()` for ESM modules in `"type": "module"`
+ *    packages. Anchored at the project root — works for `node:*` builtins
+ *    and npm packages. Files that need relative `require()` must use a
+ *    file-local `createRequire(import.meta.url)` instead.
  *
- * The `require` function is anchored at the project root (package.json) so
- * that `node:*` builtins and npm package requires resolve correctly. Note
- * that relative `require("./foo.js")` calls resolve from the project root,
- * not from the calling file. Files in `src/` that use lazy relative requires
- * must use a file-local `createRequire(import.meta.url)` instead of relying
- * on this global shim.
- *
- * `with { type: "file" }` import attributes are used to embed sidecar files
- * (e.g. the Ink UI app). Bun supports this natively; esbuild's
- * text-import-plugin handles it at build time. In tsx dev mode neither
- * applies, so we register a loader hook that returns the file path as a
- * string — matching Bun's native behaviour.
+ * 2. Handles `with { type: "file" }` import attributes that Node.js doesn't
+ *    support natively. Registers a loader hook that returns the file path
+ *    as a string — matching Bun's native behaviour.
  *
  * Usage: NODE_OPTIONS="--import ./script/require-shim.mjs" tsx script/...
  * Or in package.json scripts via the `pnpm tsx` alias.

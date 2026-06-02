@@ -2,6 +2,33 @@
 
 import { blue, bold, cyan, green, muted, red, yellow } from "./colors.js";
 import { stripAnsi } from "./plain-detect.js";
+import {
+  formatSemanticSpanDisplay,
+  inferSemanticOp,
+  mergeTransactionAttributes,
+} from "./semantic-display.js";
+
+/**
+ * Characters unsafe for JSON terminal display: C1 control characters
+ * (U+0080–U+009F, e.g. CSI=U+009B) and Unicode bidirectional overrides.
+ * `JSON.stringify` only escapes C0 (U+0000–U+001F) per RFC 8259;
+ * C1 and BiDi pass through unescaped.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping C1 control chars from untrusted data
+const JSON_UNSAFE_RE = /[\x80-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+/** BiDi-only regex for the full `sanitize()` function. */
+const BIDI_RE = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+/**
+ * Strip C1 control characters and Unicode BiDi overrides from a string.
+ * Used for JSON output where `JSON.stringify` escapes C0 controls but
+ * leaves C1 (U+0080–U+009F) and BiDi chars intact — both can cause
+ * terminal injection when JSON output is displayed in a terminal.
+ */
+export function stripBidi(text: string): string {
+  return text.replace(JSON_UNSAFE_RE, "");
+}
 
 /**
  * Strip ANSI escapes, collapse newlines, and remove C0/C1 control characters
@@ -17,14 +44,18 @@ export function sanitize(text: string): string {
     ""
   );
   // Strip Unicode bidirectional override/isolate characters that can reorder terminal output.
-  return noCtrl.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
+  return noCtrl.replace(BIDI_RE, "");
 }
 
 /** Canonical content type for Sentry envelopes. */
 export const SENTRY_CONTENT_TYPE = "application/x-sentry-envelope";
 
+/** Output format options for `--format`. */
+export const FORMAT_VALUES = ["human", "json"] as const;
+export type FormatValue = (typeof FORMAT_VALUES)[number];
+
 /** Envelope item categories that can be filtered via `--filter`. */
-export const FILTER_VALUES = ["error", "transaction", "log"] as const;
+export const FILTER_VALUES = ["error", "transaction", "log", "ai"] as const;
 export type FilterValue = (typeof FILTER_VALUES)[number];
 
 /** Format a local timestamp as HH:MM:SS from a Sentry timestamp. */
@@ -179,7 +210,13 @@ export function formatErrorItem(
 /**
  * Format a transaction event item into a colored one-liner.
  *
- * Output: `HH:MM:SS [TRACE]   [BROWSER] [http.client] GET /api/users [245ms] [3 spans]`
+ * When OTel semantic attributes are present (e.g. `gen_ai.*`, `mcp.*`,
+ * `db.*`), the label is derived from those attributes for richer output.
+ * Falls back to the raw transaction name + trace.op otherwise.
+ *
+ * Output examples:
+ * - `HH:MM:SS [TRACE]   [BROWSER] [http.client] GET /api/users [245ms] [3 spans]`
+ * - `HH:MM:SS [TRACE]   [SERVER]  [gen_ai] chat anthropic/claude-4-sonnet [1.2s] [5 spans]`
  */
 export function formatTransactionItem(
   event: Record<string, unknown>,
@@ -193,9 +230,21 @@ export function formatTransactionItem(
     typeof event.transaction === "string"
       ? event.transaction
       : (trace?.description ?? "Transaction");
-  let msg = sanitize(txnName);
 
-  const op = trace?.op;
+  // Try semantic display from OTel attributes first
+  const attrs = mergeTransactionAttributes(event);
+  const semantic = formatSemanticSpanDisplay(attrs, sanitize(txnName));
+
+  let msg = sanitize(semantic.label);
+
+  // Append semantic metadata (e.g. model name, status code, error type)
+  if (semantic.metadata.length > 0) {
+    msg += ` ${semantic.metadata.map((m) => muted(`[${sanitize(m)}]`)).join(" ")}`;
+  }
+
+  // Show op tag — prefer semantic category if detected
+  const semanticOp = inferSemanticOp(attrs);
+  const op = semanticOp ?? trace?.op;
   if (op && op !== "default" && op !== "unknown") {
     msg = `[${sanitize(op)}] ${msg}`;
   }
@@ -312,6 +361,165 @@ export function resolveUnparseableLabel(container: {
   return ct === "application/x-sentry-envelope" ? "envelope" : ct;
 }
 
+/** Strip BiDi from a string value, returning undefined for non-strings. */
+function jsonSafe(value: unknown): string | undefined {
+  return typeof value === "string" ? stripBidi(value) : undefined;
+}
+
+/** Format an error item as a JSON object, including the best stack frame. */
+function formatErrorJson(
+  payload: Record<string, unknown>,
+  header: Record<string, unknown>
+): string {
+  const exception = payload.exception as
+    | {
+        values?: {
+          type?: string;
+          value?: string;
+          stacktrace?: { frames?: StackFrame[] };
+        }[];
+      }
+    | undefined;
+  const first = exception?.values?.at(-1);
+  const frame =
+    first?.stacktrace?.frames?.find((f) => f.in_app) ??
+    first?.stacktrace?.frames?.at(-1);
+  return JSON.stringify({
+    type: "error",
+    timestamp: payload.timestamp,
+    error_type: jsonSafe(first?.type) ?? "Error",
+    message:
+      jsonSafe(first?.value) ?? jsonSafe(payload.message) ?? "Unknown error",
+    filename: jsonSafe(frame?.filename),
+    lineno: frame?.lineno,
+    colno: frame?.colno,
+    function: jsonSafe(frame?.function),
+    source: inferSourceName(header),
+  });
+}
+
+/** Format a transaction item as a JSON object. */
+function formatTransactionJson(
+  payload: Record<string, unknown>,
+  header: Record<string, unknown>
+): string {
+  const trace = (payload.contexts as Record<string, unknown> | undefined)
+    ?.trace as Record<string, unknown> | undefined;
+  const attrs = mergeTransactionAttributes(payload);
+  const semantic = formatSemanticSpanDisplay(
+    attrs,
+    String(payload.transaction ?? trace?.description ?? "Transaction")
+  );
+  const start = payload.start_timestamp as number | undefined;
+  const end = payload.timestamp as number | undefined;
+  const durationMs =
+    start !== undefined && end !== undefined
+      ? Math.round((end - start) * 1000)
+      : undefined;
+  return JSON.stringify({
+    type: "transaction",
+    timestamp: payload.timestamp,
+    op: inferSemanticOp(attrs) ?? trace?.op,
+    label: stripBidi(semantic.label),
+    metadata:
+      semantic.metadata.length > 0
+        ? semantic.metadata.map(stripBidi)
+        : undefined,
+    duration_ms: durationMs,
+    status: trace?.status,
+    span_count: (payload.spans as unknown[] | undefined)?.length,
+    source: inferSourceName(header),
+  });
+}
+
+/** Format a log item as JSON objects (one per entry). */
+function formatLogJson(
+  payload: Record<string, unknown>,
+  header: Record<string, unknown>
+): string[] {
+  const items = payload.items as LogEntry[] | undefined;
+  if (!items?.length) {
+    return [];
+  }
+  const source = inferSourceName(header);
+  return items.map((entry) =>
+    JSON.stringify({
+      type: "log",
+      timestamp: entry.timestamp,
+      level: entry.level ?? "log",
+      message: stripBidi(entry.body ?? ""),
+      attributes: entry.attributes
+        ? Object.fromEntries(
+            Object.entries(entry.attributes)
+              .filter(
+                ([k, v]) =>
+                  !k.startsWith("sentry.") &&
+                  v?.value !== null &&
+                  v?.value !== undefined
+              )
+              .map(([k, v]) => [
+                k,
+                typeof v.value === "string" ? stripBidi(v.value) : v.value,
+              ])
+          )
+        : undefined,
+      source,
+    })
+  );
+}
+
+/**
+ * Format a single envelope item as a JSON line (NDJSON).
+ *
+ * Produces a compact JSON object per item with `type`, `timestamp`,
+ * and item-specific fields. Designed for machine consumption by AI
+ * coding agents and automation tools.
+ *
+ * Unlike the human formatters, JSON output uses `stripBidi()` instead of
+ * the full `sanitize()`. `JSON.stringify()` escapes C0 control characters
+ * (U+0000–U+001F) but leaves C1 controls (U+0080–U+009F) and BiDi overrides
+ * intact. `stripBidi()` strips both, preventing terminal injection when
+ * JSON output is viewed in a terminal, while preserving the original data
+ * structure for downstream consumers.
+ */
+export function formatItemJson(
+  itemType: string | undefined,
+  payload: Record<string, unknown>,
+  header: Record<string, unknown>
+): string[] {
+  if (itemType && ERROR_TYPES.has(itemType)) {
+    return [formatErrorJson(payload, header)];
+  }
+  if (itemType === "transaction") {
+    return [formatTransactionJson(payload, header)];
+  }
+  if (itemType === "log") {
+    return formatLogJson(payload, header);
+  }
+  return [
+    JSON.stringify({
+      type: itemType ?? "unknown",
+      timestamp: payload.timestamp,
+    }),
+  ];
+}
+
+/** Infer the source platform name from the SDK header (for JSON output). */
+function inferSourceName(header: Record<string, unknown>): string {
+  const sdk = header.sdk as { name?: string } | undefined;
+  const name = sdk?.name ?? "";
+  if (MOBILE_MARKERS.some((m) => name.includes(m))) {
+    return "mobile";
+  }
+  if (
+    name.startsWith("sentry.javascript.") &&
+    !SERVER_JS_MARKERS.some((m) => name.includes(m))
+  ) {
+    return "browser";
+  }
+  return "server";
+}
+
 /** Format a single envelope item into one or more output lines. */
 export function formatItem(
   itemType: string | undefined,
@@ -331,16 +539,64 @@ export function formatItem(
   return [formatFallbackLine(fallbackLabel)];
 }
 
-/** Check whether an item should be shown given active filters. */
+/**
+ * Check whether an item should be shown given active filters.
+ *
+ * When `payload` is provided and the `ai` filter is active, transactions
+ * are checked for GenAI/MCP OTel attributes.
+ */
 export function isItemIncluded(
   itemType: string | undefined,
-  activeFilters: ReadonlySet<FilterValue>
+  activeFilters: ReadonlySet<FilterValue>,
+  payload?: Record<string, unknown>
 ): boolean {
   if (activeFilters.size === 0) {
     return true;
   }
   const category = itemTypeToFilterCategory(itemType);
-  return category !== undefined && activeFilters.has(category);
+  if (category !== undefined && activeFilters.has(category)) {
+    return true;
+  }
+  // The "ai" filter matches transactions with GenAI or MCP attributes.
+  if (activeFilters.has("ai") && itemType === "transaction" && payload) {
+    const attrs = mergeTransactionAttributes(payload);
+    const op = inferSemanticOp(attrs);
+    return op === "gen_ai" || op === "mcp";
+  }
+  return false;
+}
+
+/**
+ * Format a freshly received envelope as NDJSON lines.
+ *
+ * Each item produces one JSON line. Filtering works identically to
+ * the human formatter.
+ */
+export function formatEnvelopeLinesJson(
+  container: {
+    getParsedEnvelope: () => {
+      envelope: [Record<string, unknown>, [{ type?: string }, unknown][]];
+    } | null;
+    getContentType: () => string;
+    getEventTypes: () => string[] | null;
+  },
+  activeFilters: ReadonlySet<FilterValue>
+): string[] {
+  const parsed = container.getParsedEnvelope();
+  if (!parsed) {
+    return [];
+  }
+
+  const [header, items] = parsed.envelope;
+  const lines: string[] = [];
+  for (const [itemHeader, itemPayload] of items) {
+    const payload = itemPayload as Record<string, unknown>;
+    if (!isItemIncluded(itemHeader.type, activeFilters, payload)) {
+      continue;
+    }
+    lines.push(...formatItemJson(itemHeader.type, payload, header));
+  }
+  return lines;
 }
 
 /**
@@ -371,13 +627,14 @@ export function formatEnvelopeLines(
   const [header, items] = parsed.envelope;
   const lines: string[] = [];
   for (const [itemHeader, itemPayload] of items) {
-    if (!isItemIncluded(itemHeader.type, activeFilters)) {
+    const payload = itemPayload as Record<string, unknown>;
+    if (!isItemIncluded(itemHeader.type, activeFilters, payload)) {
       continue;
     }
     lines.push(
       ...formatItem(
         itemHeader.type,
-        itemPayload as Record<string, unknown>,
+        payload,
         header,
         itemHeader.type ?? container.getContentType()
       )

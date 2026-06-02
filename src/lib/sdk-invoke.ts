@@ -59,17 +59,43 @@ function buildIsolatedEnv(
 /** Type alias for command handler functions loaded from Stricli's route tree. */
 type CommandHandler = (...args: unknown[]) => unknown;
 
-/** Cached command loaders, keyed by joined path (e.g., "org.list") */
-const commandCache = new Map<string, () => Promise<CommandHandler>>();
+/**
+ * Stricli flag definition shape — subset needed for default application.
+ *
+ * The SDK invoke path bypasses Stricli's `buildArgumentScanner`, so parsed
+ * flags with defaults never have their `parse` function called on the default
+ * string. We capture the flag definitions here so {@link applyFlagDefaults}
+ * can replicate that behavior at invocation time.
+ */
+export type FlagDef = {
+  kind: string;
+  default?: unknown;
+  optional?: boolean;
+  parse?: (value: string) => unknown;
+  variadic?: boolean;
+};
+
+/** Resolved command: handler function + flag definitions for default application. */
+type ResolvedCommand = {
+  handler: CommandHandler;
+  flagDefs: Record<string, FlagDef>;
+};
+
+/** Cached command entries, keyed by joined path (e.g., "org.list"). */
+const commandCache = new Map<
+  string,
+  { loader: () => Promise<CommandHandler>; flagDefs: Record<string, FlagDef> }
+>();
 
 /**
  * Resolve a command from the route tree by path segments.
+ * Returns both the handler function and the command's flag definitions.
  * Result is cached — route tree is only walked once per command.
  */
-async function resolveCommand(path: string[]): Promise<CommandHandler> {
+async function resolveCommand(path: string[]): Promise<ResolvedCommand> {
   const key = path.join(".");
-  let loaderFn = commandCache.get(key);
-  if (!loaderFn) {
+  let cached = commandCache.get(key);
+  if (!cached) {
     const { routes } = await import("../app.js");
     // Walk route tree: routes → sub-route → command
     // biome-ignore lint/suspicious/noExplicitAny: Stricli's RoutingTarget union requires runtime duck-typing
@@ -80,16 +106,87 @@ async function resolveCommand(path: string[]): Promise<CommandHandler> {
         throw new Error(`SDK: command not found: ${path.join(" ")}`);
       }
     }
-    // target is now a Command — cache its loader
+    // target is now a Command — extract flag definitions and cache loader
     const command = target;
-    loaderFn = () =>
-      command.loader().then(
-        // biome-ignore lint/suspicious/noExplicitAny: Stricli CommandModule shape has a default export
-        (m: any) => (typeof m === "function" ? m : m.default)
-      );
-    commandCache.set(key, loaderFn);
+    const flagDefs: Record<string, FlagDef> = command.parameters?.flags ?? {};
+    cached = {
+      loader: () =>
+        command.loader().then(
+          // biome-ignore lint/suspicious/noExplicitAny: Stricli CommandModule shape has a default export
+          (m: any) => (typeof m === "function" ? m : m.default)
+        ),
+      flagDefs,
+    };
+    commandCache.set(key, cached);
   }
-  return loaderFn();
+  return { handler: await cached.loader(), flagDefs: cached.flagDefs };
+}
+
+/**
+ * Resolve the default value for a single flag definition.
+ *
+ * For `kind: "parsed"` flags with a string default, calls `flag.parse(flag.default)`
+ * to replicate Stricli's `parseInput` behavior. For all other flag kinds (boolean,
+ * enum, counter), returns the raw default value.
+ *
+ * @returns The resolved default, or `undefined` if no default is defined.
+ * @throws Re-throws if `flag.parse(flag.default)` fails — a parse function
+ *   that rejects its own default is a command definition bug, not a runtime error.
+ */
+function resolveFlagDefault(def: FlagDef): unknown {
+  if (!("default" in def) || def.default === undefined) {
+    return;
+  }
+  if (
+    def.kind === "parsed" &&
+    typeof def.default === "string" &&
+    typeof def.parse === "function"
+  ) {
+    return def.parse(def.default);
+  }
+  return def.default;
+}
+
+/**
+ * Apply Stricli flag defaults for any missing or undefined flag values.
+ *
+ * The SDK invoke path bypasses Stricli's `buildArgumentScanner`, so parsed
+ * flags with defaults (e.g., `period: { kind: "parsed", parse: parsePeriod,
+ * default: "7d" }`) never have their `parse` function called on the default
+ * string. This function replicates that behavior:
+ *
+ * - For `kind: "parsed"` flags with a string `default`, calls `flag.parse(flag.default)`
+ *   (same as Stricli's `parseInput` path in `parseInputsForFlag`).
+ * - For `kind: "boolean"` / `kind: "enum"` flags with a `default`, uses the raw value.
+ * - Skips flags already set (non-`undefined`) by the caller.
+ *
+ * @param flags - The flags object from the SDK caller (may have `undefined` values).
+ * @param flagDefs - The command's Stricli flag definitions.
+ * @returns A new flags object with defaults applied.
+ */
+export function applyFlagDefaults(
+  flags: Record<string, unknown>,
+  flagDefs: Record<string, FlagDef>
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  // Copy caller-provided flags, skipping undefined values so they
+  // don't shadow the defaults we're about to apply.
+  for (const [key, value] of Object.entries(flags)) {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  // Apply defaults for any flag not already set by the caller
+  for (const [name, def] of Object.entries(flagDefs)) {
+    if (name in result) {
+      continue;
+    }
+    const resolved = resolveFlagDefault(def);
+    if (resolved !== undefined) {
+      result[name] = resolved;
+    }
+  }
+  return result;
 }
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences use ESC (0x1b)
@@ -412,26 +509,32 @@ export function buildInvoker(options?: SentryOptions) {
   ): Promise<T> | AsyncIterable<T> {
     if (meta?.streaming) {
       return executeWithStream<T>(options, async (ctx, span) => {
-        const func = await resolveCommand(commandPath);
+        const { handler, flagDefs } = await resolveCommand(commandPath);
         if (span) {
           const { setCommandSpanName } = await import("./telemetry.js");
           setCommandSpanName(span, commandPath.join("."));
         }
-        await func.call(
+        const resolvedFlags = applyFlagDefaults(flags, flagDefs);
+        await handler.call(
           ctx.context,
-          { ...flags, json: true },
+          { ...resolvedFlags, json: true },
           ...positionalArgs
         );
       });
     }
 
     return executeWithCapture<T>(options, async (ctx, span) => {
-      const func = await resolveCommand(commandPath);
+      const { handler, flagDefs } = await resolveCommand(commandPath);
       if (span) {
         const { setCommandSpanName } = await import("./telemetry.js");
         setCommandSpanName(span, commandPath.join("."));
       }
-      await func.call(ctx.context, { ...flags, json: true }, ...positionalArgs);
+      const resolvedFlags = applyFlagDefaults(flags, flagDefs);
+      await handler.call(
+        ctx.context,
+        { ...resolvedFlags, json: true },
+        ...positionalArgs
+      );
     });
   };
 }

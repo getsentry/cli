@@ -128,6 +128,98 @@ describe("filesystem tools", () => {
     ).toContain("sntrys_test_token_123");
   });
 
+  test("rejects unsafe apply-patchset paths before writing", async () => {
+    const unsafePaths: unknown[] = [
+      null,
+      "../../outside.txt",
+      "/tmp/outside.txt",
+      "C:/repo/package.json",
+      "C:\\repo\\package.json",
+      "apps/../package.json",
+      "./package.json",
+      "apps//package.json",
+    ];
+
+    for (const unsafePath of unsafePaths) {
+      const result = await executeTool(
+        {
+          type: "tool",
+          operation: "apply-patchset",
+          cwd: testDir,
+          params: {
+            patches: [
+              {
+                path: unsafePath as never,
+                action: "create",
+                patch: "should not be written\n",
+              },
+            ],
+          },
+        },
+        makeContext(testDir)
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("Invalid patch path");
+    }
+  });
+
+  test("applies patchsets to nested project-relative files", async () => {
+    fs.mkdirSync(path.join(testDir, "Cary.ConversionFunnels.API"));
+    fs.writeFileSync(
+      path.join(
+        testDir,
+        "Cary.ConversionFunnels.API",
+        "Cary.ConversionFunnels.API.csproj"
+      ),
+      "<Project></Project>\n"
+    );
+
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "Directory.Packages.props",
+              action: "create",
+              patch: "<Project></Project>\n",
+            },
+            {
+              path: "Cary.ConversionFunnels.API/Cary.ConversionFunnels.API.csproj",
+              action: "modify",
+              edits: [
+                {
+                  oldString: "<Project></Project>",
+                  newString:
+                    '<Project><ItemGroup><PackageReference Include="Sentry.AspNetCore" /></ItemGroup></Project>',
+                },
+              ],
+            },
+          ],
+        },
+      },
+      makeContext(testDir)
+    );
+
+    expect(result.ok).toBe(true);
+    expect(
+      fs.readFileSync(path.join(testDir, "Directory.Packages.props"), "utf-8")
+    ).toContain("<Project>");
+    expect(
+      fs.readFileSync(
+        path.join(
+          testDir,
+          "Cary.ConversionFunnels.API",
+          "Cary.ConversionFunnels.API.csproj"
+        ),
+        "utf-8"
+      )
+    ).toContain("Sentry.AspNetCore");
+  });
+
   test("greps and globs files inside the project", async () => {
     fs.mkdirSync(path.join(testDir, "src"));
     fs.writeFileSync(

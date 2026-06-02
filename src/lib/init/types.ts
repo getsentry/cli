@@ -47,6 +47,13 @@ export type ResolvedInitContext = {
    * Omitted when init defers empty-org auto-creation until project creation.
    */
   team?: string;
+  /**
+   * True only when `team` was supplied via the `--team` CLI flag.
+   * False/absent when the team was auto-selected by preflight.
+   * Used by project creation tools to decide whether to suppress the
+   * org-scoped fallback on 403 (only suppress for explicitly named teams).
+   */
+  isExplicitTeam?: boolean;
   project?: string;
   /** Pre-selected app name for monorepo runs. Passed through from `--app`. */
   app?: string;

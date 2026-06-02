@@ -33,7 +33,6 @@ import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
-import { processBinary } from "binpunch";
 import { build as esbuild } from "esbuild";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
 import { injectDebugId, PLACEHOLDER_DEBUG_ID } from "./debug-id.js";
@@ -45,7 +44,13 @@ const pkg = JSON.parse(await readFile("package.json", "utf-8"));
 const VERSION: string = pkg.version;
 
 /** Pin to Node 22 LTS for SEA binaries */
-const NODE_VERSION = "22";
+/** Node version for SEA binaries. "lts" resolves to the latest LTS via fossilize. */
+const NODE_VERSION = "lts";
+
+/** Files that use _require() for lazy relative imports (circular dep breaking). */
+const REQUIRE_ALIAS_FILTER =
+  /(?:db[\\/](?:index|schema)|list-command|telemetry)\.ts$/;
+const REQUIRE_ALIAS_RE = /\b_require\(/g;
 
 /** Build-time constants injected into the binary */
 const SENTRY_CLIENT_ID = process.env.SENTRY_CLIENT_ID ?? "";
@@ -111,10 +116,11 @@ async function bundleJs(): Promise<boolean> {
       bundle: true,
       outfile: BUNDLE_JS,
       platform: "node",
-      // Target Node 22 to downlevel `using` declarations (not supported
-      // in CJS). Node SEA runs embedded JS as CJS.
-      target: "node22",
+      // Target Node 24 LTS. Downlevels `using` declarations (not
+      // supported in CJS). Node SEA runs embedded JS as CJS.
+      target: "node24",
       format: "cjs",
+      treeShaking: true,
       // Externalize the Ink + React stack from the esbuild bundling
       // step. The main bundle never calls `import("ink")` at runtime —
       // the sidecar is pre-bundled by text-import-plugin as a
@@ -140,7 +146,26 @@ async function bundleJs(): Promise<boolean> {
         "process.env.NODE_ENV": JSON.stringify("production"),
         __SENTRY_DEBUG_ID__: JSON.stringify(PLACEHOLDER_DEBUG_ID),
       },
-      plugins: [textImportPlugin],
+      plugins: [
+        textImportPlugin,
+        // Transform _require() → require() so esbuild resolves lazy relative
+        // requires at bundle time. In tsx dev mode, _require is a file-local
+        // createRequire(import.meta.url) that resolves relative to the file.
+        // esbuild only statically resolves bare require() calls.
+        // Only targets the specific files that use _require with relative paths.
+        {
+          name: "require-alias",
+          setup(b) {
+            b.onLoad({ filter: REQUIRE_ALIAS_FILTER }, async (args) => {
+              const source = await readFile(args.path, "utf-8");
+              return {
+                contents: source.replace(REQUIRE_ALIAS_RE, "require("),
+                loader: args.path.endsWith(".tsx") ? "tsx" : "ts",
+              };
+            });
+          },
+        },
+      ],
     });
 
     const output = result.metafile?.outputs[BUNDLE_JS];
@@ -295,6 +320,7 @@ async function compileAllTargets(
       [
         fossilizeBin,
         "--no-bundle",
+        "--hole-punch",
         "--output-name",
         "sentry",
         "--platforms",
@@ -316,7 +342,7 @@ async function compileAllTargets(
     return { successes: 0, failures: targets.length };
   }
 
-  // Post-process each target: rename Windows binary, hole-punch ICU, gzip
+  // Post-process each target: rename Windows binary, gzip
   let successes = 0;
   let failures = 0;
   for (const target of targets) {
@@ -335,10 +361,13 @@ async function compileAllTargets(
 
 /**
  * Post-process a single compiled binary: rename from fossilize's output
- * naming to our expected naming, hole-punch ICU data, and optionally gzip.
+ * naming to our expected naming, and optionally gzip.
  *
  * Fossilize outputs `sentry-{os}-{arch}[.exe]` where os is "win" for Windows.
  * We rename "win" → "windows" to match our release naming convention.
+ *
+ * Note: ICU hole-punch now runs inside fossilize (--hole-punch flag) before
+ * code signing, so it's no longer done here.
  */
 async function postProcessTarget(target: BuildTarget): Promise<void> {
   const packageName = getPackageName(target);
@@ -356,15 +385,6 @@ async function postProcessTarget(target: BuildTarget): Promise<void> {
   }
 
   console.log(`    -> ${outfile}`);
-
-  // Hole-punch: zero unused ICU data entries so they compress to nearly nothing.
-  // Always runs so the smoke test exercises the same binary as the release.
-  const hpStats = processBinary(outfile);
-  if (hpStats && hpStats.removedEntries > 0) {
-    console.log(
-      `    -> hole-punched ${hpStats.removedEntries}/${hpStats.totalEntries} ICU entries`
-    );
-  }
 
   // On main and release branches (RELEASE_BUILD=1), create gzip-compressed
   // copies for release downloads / GHCR nightly (~70% smaller with hole-punch).

@@ -11,6 +11,7 @@ import type { FilterValue } from "../../../src/lib/formatters/local.js";
 import {
   formatErrorItem,
   formatItem,
+  formatItemJson,
   formatSingleLog,
   formatTime,
   formatTransactionItem,
@@ -206,6 +207,136 @@ describe("formatTransactionItem", () => {
     };
     const result = stripAnsi(formatTransactionItem(event, browserHeader));
     expect(result).toContain("Transaction");
+  });
+
+  describe("semantic display from OTel attributes", () => {
+    const serverHeader = { sdk: { name: "sentry.python" } };
+
+    test("renders GenAI operation with model from trace data", () => {
+      const event = {
+        timestamp: 1_700_000_002,
+        start_timestamp: 1_700_000_000,
+        transaction: "process_user_request",
+        contexts: {
+          trace: {
+            op: "ai.pipeline",
+            data: {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.request.model": "claude-4-sonnet",
+              "gen_ai.provider.name": "anthropic",
+            },
+          },
+        },
+        spans: [{}, {}, {}, {}, {}],
+      };
+      const result = stripAnsi(formatTransactionItem(event, serverHeader));
+      expect(result).toContain("[gen_ai]");
+      expect(result).toContain("chat anthropic/claude-4-sonnet");
+      expect(result).toContain("[2000ms]");
+      expect(result).toContain("[5 spans]");
+    });
+
+    test("renders MCP tool call from trace data", () => {
+      const event = {
+        timestamp: 1_700_000_001,
+        start_timestamp: 1_700_000_000,
+        transaction: "mcp-request",
+        contexts: {
+          trace: {
+            op: "http.client",
+            data: {
+              "mcp.method.name": "tools/call",
+              "gen_ai.tool.name": "search_files",
+            },
+          },
+        },
+      };
+      const result = stripAnsi(formatTransactionItem(event, serverHeader));
+      expect(result).toContain("[mcp]");
+      expect(result).toContain("tools/call search_files");
+    });
+
+    test("renders HTTP with server address from OTel attributes", () => {
+      const event = {
+        timestamp: 1_700_000_002,
+        start_timestamp: 1_700_000_000,
+        transaction: "POST",
+        contexts: {
+          trace: {
+            op: "http.client",
+            data: {
+              "http.request.method": "POST",
+              "server.address": "api.anthropic.com",
+              "http.response.status_code": "200",
+            },
+          },
+        },
+      };
+      const result = stripAnsi(formatTransactionItem(event, serverHeader));
+      expect(result).toContain("[http.client]");
+      expect(result).toContain("POST api.anthropic.com");
+      expect(result).toContain("[200]");
+    });
+
+    test("renders database query from OTel attributes", () => {
+      const event = {
+        timestamp: 1_700_000_001,
+        start_timestamp: 1_700_000_000,
+        transaction: "db-query",
+        contexts: {
+          trace: {
+            op: "db",
+            data: {
+              "db.system.name": "postgresql",
+              "db.query.summary": "SELECT users",
+            },
+          },
+        },
+      };
+      const result = stripAnsi(formatTransactionItem(event, serverHeader));
+      expect(result).toContain("[db]");
+      expect(result).toContain("SELECT users");
+      expect(result).toContain("[postgresql]");
+    });
+
+    test("falls back to transaction name when no semantic attributes", () => {
+      const event = {
+        timestamp: 1_700_000_001,
+        start_timestamp: 1_700_000_000,
+        transaction: "GET /api/users",
+        contexts: {
+          trace: {
+            op: "http.server",
+            data: {},
+          },
+        },
+      };
+      const result = stripAnsi(formatTransactionItem(event, serverHeader));
+      expect(result).toContain("[http.server]");
+      expect(result).toContain("GET /api/users");
+    });
+
+    test("renders GenAI error with error type metadata", () => {
+      const event = {
+        timestamp: 1_700_000_001,
+        start_timestamp: 1_700_000_000,
+        transaction: "ai-chat",
+        contexts: {
+          trace: {
+            op: "ai.pipeline",
+            data: {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.request.model": "gpt-4o",
+              "error.type": "RateLimitError",
+            },
+          },
+        },
+      };
+      const result = stripAnsi(formatTransactionItem(event, serverHeader));
+      expect(result).toContain("[gen_ai]");
+      expect(result).toContain("chat gpt-4o");
+      expect(result).toContain("[RateLimitError]");
+    });
   });
 });
 
@@ -413,5 +544,155 @@ describe("inferSource", () => {
   test("defaults to server when no SDK", () => {
     const result = stripAnsi(inferSource({}));
     expect(result).toContain("[SERVER]");
+  });
+});
+
+describe("formatItemJson", () => {
+  const serverHeader = { sdk: { name: "sentry.node" } };
+  const browserHeader = { sdk: { name: "sentry.javascript.browser" } };
+
+  test("formats error with exception and stack frame", () => {
+    const event = {
+      timestamp: 1_700_000_000,
+      exception: {
+        values: [
+          {
+            type: "TypeError",
+            value: "x is not a function",
+            stacktrace: {
+              frames: [
+                {
+                  filename: "src/handler.ts",
+                  lineno: 42,
+                  colno: 5,
+                  function: "handleRequest",
+                  in_app: true,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+    const lines = formatItemJson("error", event, serverHeader);
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.type).toBe("error");
+    expect(parsed.error_type).toBe("TypeError");
+    expect(parsed.message).toBe("x is not a function");
+    expect(parsed.filename).toBe("src/handler.ts");
+    expect(parsed.lineno).toBe(42);
+    expect(parsed.colno).toBe(5);
+    expect(parsed.function).toBe("handleRequest");
+    expect(parsed.source).toBe("server");
+  });
+
+  test("formats error without stack frame", () => {
+    const event = {
+      timestamp: 1_700_000_000,
+      message: "Something went wrong",
+    };
+    const lines = formatItemJson("error", event, serverHeader);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.error_type).toBe("Error");
+    expect(parsed.message).toBe("Something went wrong");
+    expect(parsed.filename).toBeUndefined();
+  });
+
+  test("formats event type as error", () => {
+    const event = { timestamp: 1_700_000_000, message: "boom" };
+    const lines = formatItemJson("event", event, serverHeader);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.type).toBe("error");
+  });
+
+  test("formats transaction with semantic attributes", () => {
+    const event = {
+      timestamp: 1_700_000_002,
+      start_timestamp: 1_700_000_000,
+      transaction: "process_request",
+      contexts: {
+        trace: {
+          op: "ai.pipeline",
+          data: {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.request.model": "gpt-4o",
+          },
+        },
+      },
+      spans: [{}, {}, {}],
+    };
+    const lines = formatItemJson("transaction", event, serverHeader);
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.type).toBe("transaction");
+    expect(parsed.op).toBe("gen_ai");
+    expect(parsed.label).toBe("chat gpt-4o");
+    expect(parsed.duration_ms).toBe(2000);
+    expect(parsed.span_count).toBe(3);
+    expect(parsed.source).toBe("server");
+  });
+
+  test("formats transaction without semantic attributes", () => {
+    const event = {
+      timestamp: 1_700_000_001,
+      start_timestamp: 1_700_000_000,
+      transaction: "GET /api/users",
+      contexts: { trace: { op: "http.server" } },
+    };
+    const lines = formatItemJson("transaction", event, serverHeader);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.label).toBe("GET /api/users");
+    expect(parsed.op).toBe("http.server");
+  });
+
+  test("formats log entries", () => {
+    const event = {
+      items: [
+        {
+          level: "info",
+          body: "User logged in",
+          timestamp: 1_700_000_000,
+          attributes: {
+            "sentry.sdk.name": { value: "node" },
+            user_id: { value: 42 },
+          },
+        },
+        { level: "debug", body: "Cache hit" },
+      ],
+    };
+    const lines = formatItemJson("log", event, serverHeader);
+    expect(lines).toHaveLength(2);
+
+    const first = JSON.parse(lines[0]);
+    expect(first.type).toBe("log");
+    expect(first.level).toBe("info");
+    expect(first.message).toBe("User logged in");
+    expect(first.attributes).toEqual({ user_id: 42 });
+    expect(first.attributes["sentry.sdk.name"]).toBeUndefined();
+
+    const second = JSON.parse(lines[1]);
+    expect(second.level).toBe("debug");
+    expect(second.message).toBe("Cache hit");
+  });
+
+  test("returns empty for log with no items", () => {
+    const lines = formatItemJson("log", { items: [] }, serverHeader);
+    expect(lines).toHaveLength(0);
+  });
+
+  test("formats unknown item types", () => {
+    const event = { timestamp: 1_700_000_000 };
+    const lines = formatItemJson("attachment", event, serverHeader);
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.type).toBe("attachment");
+  });
+
+  test("detects browser source in JSON", () => {
+    const event = { timestamp: 1_700_000_000, message: "error" };
+    const lines = formatItemJson("error", event, browserHeader);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.source).toBe("browser");
   });
 });

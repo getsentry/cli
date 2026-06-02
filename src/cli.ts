@@ -11,9 +11,7 @@
  */
 
 import { getEnv } from "./lib/env.js";
-import { captureEnvTokenHost } from "./lib/env-token-host.js";
 import { CliError } from "./lib/errors.js";
-import { applySentryCliRcEnvShim } from "./lib/sentryclirc.js";
 
 /**
  * Preload project context: walk up from `cwd` once, finding both the
@@ -25,6 +23,8 @@ async function preloadProjectContext(cwd: string): Promise<void> {
   // Snapshot env-token host BEFORE anything mutates env.SENTRY_HOST/URL
   // (the .sentryclirc shim or the default-URL fallback below). Pins the
   // env-token's trust scope to the user's shell, not a repo-local file.
+  // Dynamic import: env-token-host chains into db/auth → telemetry → @sentry/node-core
+  const { captureEnvTokenHost } = await import("./lib/env-token-host.js");
   captureEnvTokenHost();
 
   // Dynamic import keeps the heavy DSN/DB modules out of the completion fast-path
@@ -42,6 +42,8 @@ async function preloadProjectContext(cwd: string): Promise<void> {
   // Apply .sentryclirc env shim (token + URL). The URL trust check is
   // deferred to buildCommand's wrapper where commands can opt out via
   // skipRcUrlCheck (used by auth login/logout).
+  // Dynamic import: sentryclirc chains into db/index → sqlite, logger → consola
+  const { applySentryCliRcEnvShim } = await import("./lib/sentryclirc.js");
   await applySentryCliRcEnvShim(cwd);
 
   // Apply persistent URL default (lower priority than env vars and .sentryclirc).
