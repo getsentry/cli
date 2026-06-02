@@ -9,9 +9,16 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { refreshCommand } from "../../../src/commands/auth/refresh.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbAuth from "../../../src/lib/db/auth.js";
-import { AuthError } from "../../../src/lib/errors.js";
+import { AuthError, ValidationError } from "../../../src/lib/errors.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as interactiveLogin from "../../../src/lib/interactive-login.js";
 
-type RefreshFlags = { readonly json: boolean; readonly force: boolean };
+type RefreshFlags = {
+  readonly json: boolean;
+  readonly force: boolean;
+  readonly "read-only"?: boolean;
+  readonly scope?: readonly string[];
+};
 type RefreshFunc = (this: unknown, flags: RefreshFlags) => Promise<void>;
 
 function createContext() {
@@ -182,5 +189,163 @@ describe("refreshCommand.func", () => {
     expect(parsed.success).toBe(true);
     expect(parsed.refreshed).toBe(true);
     expect(parsed.expiresIn).toBe(3600);
+  });
+});
+
+describe("refreshCommand.func scope re-authentication (--scope / --read-only)", () => {
+  let isEnvTokenActiveSpy: ReturnType<typeof spyOn>;
+  let getAuthConfigSpy: ReturnType<typeof spyOn>;
+  let refreshTokenSpy: ReturnType<typeof spyOn>;
+  let runInteractiveLoginSpy: ReturnType<typeof spyOn>;
+  let func: RefreshFunc;
+
+  beforeEach(async () => {
+    isEnvTokenActiveSpy = vi.spyOn(dbAuth, "isEnvTokenActive");
+    getAuthConfigSpy = vi.spyOn(dbAuth, "getAuthConfig");
+    refreshTokenSpy = vi.spyOn(dbAuth, "refreshToken");
+    runInteractiveLoginSpy = vi.spyOn(interactiveLogin, "runInteractiveLogin");
+    isEnvTokenActiveSpy.mockReturnValue(false);
+    getAuthConfigSpy.mockReturnValue({
+      token: "old_token",
+      source: "oauth",
+      refreshToken: "refresh_abc",
+    });
+    func = (await refreshCommand.loader()) as unknown as RefreshFunc;
+  });
+
+  afterEach(() => {
+    isEnvTokenActiveSpy.mockRestore();
+    getAuthConfigSpy.mockRestore();
+    refreshTokenSpy.mockRestore();
+    runInteractiveLoginSpy.mockRestore();
+  });
+
+  test("--scope triggers device flow with resolved scope string", async () => {
+    runInteractiveLoginSpy.mockResolvedValue({
+      method: "oauth",
+      configPath: "/fake",
+      expiresIn: 3600,
+    });
+
+    const { context, getStdout } = createContext();
+    await func.call(context, {
+      json: false,
+      force: false,
+      scope: ["project:read", "org:read"],
+    });
+
+    expect(runInteractiveLoginSpy).toHaveBeenCalledTimes(1);
+    const opts = runInteractiveLoginSpy.mock.calls[0]?.[0] as {
+      scope?: string;
+    };
+    expect(opts.scope).toBe("project:read org:read");
+
+    // Should NOT call the standard token refresh path
+    expect(refreshTokenSpy).not.toHaveBeenCalled();
+
+    expect(getStdout()).toContain("Re-authenticated with updated scopes");
+  });
+
+  test("--read-only triggers device flow with read-only scopes", async () => {
+    runInteractiveLoginSpy.mockResolvedValue({
+      method: "oauth",
+      configPath: "/fake",
+      expiresIn: 3600,
+    });
+
+    const { context } = createContext();
+    await func.call(context, {
+      json: false,
+      force: false,
+      "read-only": true,
+    });
+
+    expect(runInteractiveLoginSpy).toHaveBeenCalledTimes(1);
+    const opts = runInteractiveLoginSpy.mock.calls[0]?.[0] as {
+      scope?: string;
+    };
+    expect(opts.scope).toBeDefined();
+    for (const scope of opts.scope!.split(" ")) {
+      expect(scope.endsWith(":read")).toBe(true);
+    }
+    expect(refreshTokenSpy).not.toHaveBeenCalled();
+  });
+
+  test("--read-only + --scope throws ValidationError", async () => {
+    const { context } = createContext();
+    await expect(
+      func.call(context, {
+        json: false,
+        force: false,
+        "read-only": true,
+        scope: ["project:read"],
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(runInteractiveLoginSpy).not.toHaveBeenCalled();
+    expect(refreshTokenSpy).not.toHaveBeenCalled();
+  });
+
+  test("invalid --scope value throws ValidationError", async () => {
+    const { context } = createContext();
+    await expect(
+      func.call(context, {
+        json: false,
+        force: false,
+        scope: ["not:valid"],
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(runInteractiveLoginSpy).not.toHaveBeenCalled();
+  });
+
+  test("env token + --scope still throws AuthError (can't re-scope env tokens)", async () => {
+    isEnvTokenActiveSpy.mockReturnValue(true);
+    getAuthConfigSpy.mockReturnValue({
+      token: "env_token",
+      source: "env:SENTRY_AUTH_TOKEN",
+    });
+
+    const { context } = createContext();
+    await expect(
+      func.call(context, {
+        json: false,
+        force: false,
+        scope: ["project:read"],
+      })
+    ).rejects.toBeInstanceOf(AuthError);
+    expect(runInteractiveLoginSpy).not.toHaveBeenCalled();
+  });
+
+  test("comma-separated --scope is split correctly", async () => {
+    runInteractiveLoginSpy.mockResolvedValue({
+      method: "oauth",
+      configPath: "/fake",
+    });
+
+    const { context } = createContext();
+    await func.call(context, {
+      json: false,
+      force: false,
+      scope: ["project:read,org:read"],
+    });
+
+    const opts = runInteractiveLoginSpy.mock.calls[0]?.[0] as {
+      scope?: string;
+    };
+    expect(opts.scope).toBe("project:read org:read");
+  });
+
+  test("no scope flags uses standard token refresh path", async () => {
+    refreshTokenSpy.mockResolvedValue({
+      token: "new_token",
+      refreshed: true,
+      expiresIn: 3600,
+      expiresAt: Date.now() + 3_600_000,
+    });
+
+    const { context } = createContext();
+    await func.call(context, { json: false, force: false });
+
+    expect(refreshTokenSpy).toHaveBeenCalled();
+    expect(runInteractiveLoginSpy).not.toHaveBeenCalled();
   });
 });

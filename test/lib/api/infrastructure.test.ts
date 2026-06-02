@@ -334,6 +334,36 @@ describe("throwApiError", () => {
           expect(apiError.detail).not.toContain("SENTRY_AUTH_TOKEN");
         }
       });
+
+      test("suggests --scope when specific scopes are detected in 403 detail", () => {
+        const mockResponse = new Response("", {
+          status: 403,
+          statusText: "Forbidden",
+        });
+
+        try {
+          throwApiError(
+            {
+              detail:
+                "You do not have permission. Required scope: event:read, project:read",
+            },
+            mockResponse,
+            "Failed to list issues"
+          );
+        } catch (error) {
+          const apiError = error as ApiError;
+          expect(apiError.enriched403).toBe(true);
+          expect(apiError.detail).toContain(
+            "missing the required scope(s) 'event:read', 'project:read'"
+          );
+          expect(apiError.detail).toContain(
+            "sentry auth refresh --scope event:read --scope project:read"
+          );
+          // Should NOT mention env var or web UI
+          expect(apiError.detail).not.toContain("SENTRY_AUTH_TOKEN");
+          expect(apiError.detail).not.toContain("auth-tokens/");
+        }
+      });
     });
   });
 

@@ -11,6 +11,7 @@ import {
   TokenErrorResponseSchema,
   TokenResponseSchema,
 } from "../types/index.js";
+import { SENTRY_SCOPES } from "./api-scope.js";
 import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "./constants.js";
 import {
   buildTlsErrorDetail,
@@ -26,6 +27,7 @@ import {
   AuthError,
   DeviceFlowError,
   HostScopeError,
+  ValidationError,
 } from "./errors.js";
 import { normalizeOrigin } from "./sentry-urls.js";
 import { withHttpSpan } from "./telemetry.js";
@@ -88,8 +90,87 @@ export const OAUTH_SCOPES: readonly string[] = [
   "team:write",
 ];
 
-/** Space-joined scope string for OAuth requests */
+/** Space-joined scope string for OAuth requests (full default set). */
 const SCOPES = OAUTH_SCOPES.join(" ");
+
+/**
+ * Read-only subset of {@link OAUTH_SCOPES}.
+ *
+ * Derived by keeping only scopes whose action is `:read`. This assumes every
+ * read-granting scope the CLI requests carries the `:read` suffix — true for
+ * the current list. If a future read-ish scope without that suffix is added to
+ * `OAUTH_SCOPES` (e.g. `org:integrations`), update this filter explicitly.
+ */
+const OAUTH_SCOPES_READ_ONLY: readonly string[] = OAUTH_SCOPES.filter((scope) =>
+  scope.endsWith(":read")
+);
+
+/** Lookup set of all canonical Sentry scopes for `--scope` validation. */
+const KNOWN_SCOPE_SET = new Set<string>(SENTRY_SCOPES);
+
+/**
+ * Options for {@link resolveOAuthScopeString}. At most one of `readOnly` /
+ * `scopes` should be set by callers; the command layer enforces mutual
+ * exclusivity before calling this.
+ */
+export type OAuthScopeSelection = {
+  /** Request only the read-only subset of {@link OAUTH_SCOPES}. */
+  readOnly?: boolean;
+  /** Explicit list of scopes to request. Validated against {@link SENTRY_SCOPES}. */
+  scopes?: readonly string[];
+};
+
+/**
+ * Resolve the space-joined OAuth scope string for a device-flow request.
+ *
+ * Precedence: explicit `scopes` → `readOnly` subset → full default
+ * ({@link SCOPES}). Explicit scopes are validated against the canonical
+ * {@link SENTRY_SCOPES} set and normalized to lowercase; duplicates are
+ * collapsed while preserving first-seen order.
+ *
+ * @throws {ValidationError} when `scopes` is empty after normalization, or
+ *   contains a value that is not a known Sentry scope.
+ */
+export function resolveOAuthScopeString(
+  selection: OAuthScopeSelection = {}
+): string {
+  if (selection.scopes !== undefined) {
+    return normalizeExplicitScopes(selection.scopes);
+  }
+  if (selection.readOnly) {
+    return OAUTH_SCOPES_READ_ONLY.join(" ");
+  }
+  return SCOPES;
+}
+
+/**
+ * Validate, lowercase, and de-duplicate an explicit scope list into a
+ * space-joined string. Order of first appearance is preserved.
+ */
+function normalizeExplicitScopes(scopes: readonly string[]): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of scopes) {
+    const scope = raw.trim().toLowerCase();
+    if (!scope) {
+      continue;
+    }
+    if (!KNOWN_SCOPE_SET.has(scope)) {
+      throw new ValidationError(
+        `Invalid scope "${raw}". Must be one of: ${SENTRY_SCOPES.join(", ")}`,
+        "scope"
+      );
+    }
+    if (!seen.has(scope)) {
+      seen.add(scope);
+      out.push(scope);
+    }
+  }
+  if (out.length === 0) {
+    throw new ValidationError("No scopes provided to --scope", "scope");
+  }
+  return out.join(" ");
+}
 
 type DeviceFlowCallbacks = {
   onUserCode: (
@@ -170,8 +251,13 @@ function assertRefreshHostTrusted(): void {
   }
 }
 
-/** Request a device code from Sentry's device authorization endpoint */
-function requestDeviceCode() {
+/**
+ * Request a device code from Sentry's device authorization endpoint.
+ *
+ * @param scope - Space-joined scope string to request. Defaults to the full
+ *   {@link SCOPES} set. Use {@link resolveOAuthScopeString} to build it.
+ */
+function requestDeviceCode(scope: string = SCOPES) {
   const clientId = getClientId();
   return withHttpSpan("POST", "/oauth/device/code/", async () => {
     const response = await fetchWithConnectionError(
@@ -181,7 +267,7 @@ function requestDeviceCode() {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
           client_id: clientId,
-          scope: SCOPES,
+          scope,
         }),
       }
     );
@@ -304,13 +390,16 @@ async function attemptPoll(deviceCode: string): Promise<PollResult> {
  *
  * @param callbacks - Callbacks for UI updates during the flow
  * @param timeout - Maximum time to wait for authorization in ms (default: 10 minutes)
+ * @param scope - Space-joined scope string to request. Defaults to the full
+ *   {@link SCOPES} set. Build it via {@link resolveOAuthScopeString}.
  * @returns The token response containing access_token and metadata
  * @throws {ApiError} When unable to connect to Sentry or API returns an error
  * @throws {DeviceFlowError} When authorization fails, is denied, or times out
  */
 export async function performDeviceFlow(
   callbacks: DeviceFlowCallbacks,
-  timeout = 600_000 // 10 minutes default (matches Sentry's expires_in)
+  timeout = 600_000, // 10 minutes default (matches Sentry's expires_in)
+  scope: string = SCOPES
 ): Promise<TokenResponse> {
   // Step 1: Request device code
   const {
@@ -320,7 +409,7 @@ export async function performDeviceFlow(
     verification_uri_complete,
     interval,
     expires_in,
-  } = await requestDeviceCode();
+  } = await requestDeviceCode(scope);
 
   // Notify caller of the user code
   await callbacks.onUserCode(
