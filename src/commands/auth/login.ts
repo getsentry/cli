@@ -36,6 +36,7 @@ import {
   toLoginUser,
 } from "../../lib/interactive-login.js";
 import { logger } from "../../lib/logger.js";
+import { resolveOAuthScopeString } from "../../lib/oauth.js";
 import { clearResponseCache } from "../../lib/response-cache.js";
 import {
   isSaaSTrustOrigin,
@@ -77,7 +78,60 @@ type LoginFlags = {
   readonly timeout: number;
   readonly force: boolean;
   readonly url?: string;
+  readonly "read-only": boolean;
+  readonly scope?: readonly string[];
 };
+
+/**
+ * Resolve the OAuth scope string from the login flags, enforcing mutual
+ * exclusivity between `--token`, `--read-only`, and `--scope`.
+ *
+ * OAuth scope is fixed when a token is issued, so `--read-only` / `--scope`
+ * cannot narrow an existing `--token`. `--read-only` and `--scope` are also
+ * mutually exclusive — `--read-only` is a shorthand for a specific subset.
+ *
+ * @returns The resolved scope string for the device flow, or `undefined` to
+ *   use the device flow's full default scope set.
+ * @throws {ValidationError} on any conflicting flag combination or invalid
+ *   scope value.
+ */
+function resolveLoginScope(flags: LoginFlags): string | undefined {
+  const hasScope = flags.scope !== undefined && flags.scope.length > 0;
+  const readOnly = flags["read-only"];
+
+  if (flags.token && (readOnly || hasScope)) {
+    const conflicting = readOnly ? "--read-only" : "--scope";
+    throw new ValidationError(
+      [
+        `${conflicting} cannot be used with --token — OAuth scope is fixed when the token is issued, so the CLI cannot narrow an existing token's permissions.`,
+        "",
+        "To restrict OAuth scopes, drop --token and use the device flow:",
+        "  sentry auth login --read-only",
+        "  sentry auth login --scope project:read --scope org:read",
+        "",
+        "Or create a scoped User Auth Token in Sentry (Account → Auth Tokens) and pass it without --read-only/--scope.",
+      ].join("\n"),
+      readOnly ? "read-only" : "scope"
+    );
+  }
+
+  if (readOnly && hasScope) {
+    throw new ValidationError(
+      "--read-only and --scope cannot be used together. Use --read-only for the read-only subset, or --scope to list exact scopes.",
+      "scope"
+    );
+  }
+
+  if (hasScope) {
+    // Flatten comma-separated values so `-s a,b` and `-s a -s b` both work.
+    const scopes = (flags.scope ?? []).flatMap((value) => value.split(","));
+    return resolveOAuthScopeString({ scopes });
+  }
+  if (readOnly) {
+    return resolveOAuthScopeString({ readOnly: true });
+  }
+  return;
+}
 
 /**
  * Normalize and validate the `--url` flag value. Accepts bare hostnames
@@ -356,10 +410,32 @@ export const loginCommand = buildCommand({
           "Required for self-hosted; defaults to SaaS (https://sentry.io).",
         optional: true,
       },
+      "read-only": {
+        kind: "boolean",
+        brief:
+          "Request only read-only OAuth scopes (project:read, org:read, event:read, member:read, team:read). " +
+          "Useful for handing tokens to AI agents or CI jobs that should not be able to mutate Sentry state.",
+        default: false,
+      },
+      scope: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Request specific OAuth scopes (repeatable, comma-separated). " +
+          "E.g. --scope project:read --scope org:read. Overrides the default scope set.",
+        variadic: true,
+        optional: true,
+      },
     },
+    aliases: { s: "scope" },
   },
   output: { human: formatLoginResult },
   async *func(this: SentryContext, flags: LoginFlags) {
+    // Resolve OAuth scopes up front so conflicting flag combinations
+    // (--token + --read-only/--scope, --read-only + --scope) and invalid
+    // scope values fail fast before any network or DB work.
+    const oauthScope = resolveLoginScope(flags);
+
     // Apply --url first so the device flow / token refresh target the
     // requested instance. Default URL persistence is deferred until login
     // succeeds — see persistLoginUrlAsDefault calls below.
@@ -435,6 +511,7 @@ export const loginCommand = buildCommand({
     // OAuth device flow (host scope recorded via completeOAuthFlow → setAuthToken)
     const result = await runInteractiveLogin({
       timeout: flags.timeout * 1000,
+      scope: oauthScope,
     });
 
     if (result) {
