@@ -91,7 +91,7 @@ export function parseUserFields(pairs: string[]): User {
  */
 function parseTimestamp(ts: string | undefined): number | undefined {
   if (!ts || ts.trim().length === 0) {
-    return undefined;
+    return;
   }
   // Unix numeric
   const num = Number(ts);
