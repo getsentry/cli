@@ -670,6 +670,7 @@ export type ParsedIssueArg =
  *
  * Flow:
  * 1. Pure numeric → { type: "numeric" }
+ * 1b. Contains "#" → GitHub-style separator (org/project#SHORTID) → parseWithHash
  * 2. Has dash → split on last "-", parse left with parseOrgProjectArg
  *    - "explicit" → { type: "explicit", org, project, suffix }
  *    - "project-search" → { type: "project-search", projectSlug, suffix }
@@ -687,6 +688,9 @@ export type ParsedIssueArg =
  * parseIssueArg("cli-G")              // { type: "project-search", projectSlug: "cli", suffix: "G" }
  * parseIssueArg("sentry/G")           // { type: "explicit-org-suffix", org: "sentry", suffix: "G" }
  * parseIssueArg("G")                  // { type: "suffix-only", suffix: "G" }
+ * parseIssueArg("sentry/cli#CLI-G")   // { type: "explicit", org: "sentry", project: "cli", suffix: "G" }
+ * parseIssueArg("cli#CLI-G")          // { type: "project-search", projectSlug: "cli", suffix: "G" }
+ * parseIssueArg("#CLI-G")             // { type: "project-search", projectSlug: "cli", suffix: "G" }
  */
 /**
  * Handle multi-slash issue args like "org/project/suffix" or "org/project/123".
@@ -836,6 +840,43 @@ function parseWithSlash(arg: string): ParsedIssueArg {
 }
 
 /**
+ * Resolve a `project` + `identifier` pair into a project-scoped issue lookup.
+ *
+ * Shared by the colon (`PROJECT:SHORTID`) and GitHub-style hash
+ * (`project#SHORTID`) parsers. The caller is responsible for validating the
+ * project slug and identifier against injection characters first.
+ *
+ * Handles the identifier in three forms:
+ * - Pure digits → numeric lookup (project context is redundant)
+ * - Full short ID (`PROJECT-SUFFIX`) → extract just the suffix from the last dash
+ * - Anything else → treat the whole identifier as the suffix
+ *
+ * @param project - Project slug (will be lowercased)
+ * @param id - Issue identifier portion
+ * @returns Parsed issue argument (`numeric` or `project-search`)
+ */
+function parseProjectIdentifier(project: string, id: string): ParsedIssueArg {
+  const projectSlug = project.toLowerCase();
+
+  // Numeric ID part → direct numeric lookup (project context not needed)
+  if (isAllDigits(id)) {
+    return { type: "numeric", id };
+  }
+
+  // ID part contains a dash → likely a full short ID like "PROJECT-SUFFIX".
+  // Extract just the suffix from the last dash.
+  if (id.includes("-")) {
+    const suffix = id.slice(id.lastIndexOf("-") + 1).toUpperCase();
+    if (suffix) {
+      return { type: "project-search", projectSlug, suffix };
+    }
+  }
+
+  // Plain suffix (no dash, or empty trailing suffix) → use as-is.
+  return { type: "project-search", projectSlug, suffix: id.toUpperCase() };
+}
+
+/**
  * Parse issue arg containing a colon as a project:identifier separator.
  *
  * Handles formats like:
@@ -860,31 +901,71 @@ function parseWithColon(arg: string): ParsedIssueArg | null {
     return null;
   }
 
-  // Numeric ID part → direct numeric lookup (project context not needed)
-  if (isAllDigits(idPart)) {
-    return { type: "numeric", id: idPart };
+  return parseProjectIdentifier(projectPart, idPart);
+}
+
+/**
+ * Parse a GitHub-style `#`-separated issue identifier (CLI-1G1).
+ *
+ * AI agents (claude-code, codex) frequently pass GitHub-style references where
+ * `#` separates the project from the issue short ID. Supported forms:
+ * - `org/project#SHORTID` → explicit (delegates to the slash path, reusing the
+ *   full-short-ID prefix-match logic in {@link parseMultiSlashIssueArg})
+ * - `project#SHORTID`     → project-search (project context, org auto-detected)
+ * - `#SHORTID`            → bare identifier (numeric / project-search / suffix-only)
+ *
+ * IMPORTANT: this runs BEFORE parseIssueArg's main `validateResourceId` guard
+ * (which rejects `#`), so it must validate BOTH the project prefix and the
+ * fragment itself. `validateResourceId` permits `:`, so a `:` mixed with `#`
+ * is rejected explicitly to avoid silently swallowing the colon into a suffix
+ * (cf. the `sentry/CLI:W9` precedent).
+ *
+ * @param arg - Raw issue argument containing at least one `#`
+ * @returns Parsed issue argument
+ * @throws {ValidationError} If the fragment is empty, contains a second `#`, a
+ *   `:`, or any forbidden character, or if the project prefix is invalid.
+ */
+function parseWithHash(arg: string): ParsedIssueArg {
+  const firstHash = arg.indexOf("#");
+  const prefix = arg.slice(0, firstHash);
+  const fragment = arg.slice(firstHash + 1);
+
+  if (fragment.includes("#") || fragment === "") {
+    throw new ValidationError(
+      `Invalid issue identifier: "${arg}".\n` +
+        "  Use a single '#' separating the project from the short ID, e.g. `org/project#PROJ-123`.\n" +
+        "  Or use a slash: `org/project/PROJ-123`.",
+      "issue identifier"
+    );
+  }
+  if (fragment.includes(":")) {
+    throw new ValidationError(
+      `Invalid issue identifier: "${arg}". Do not mix '#' and ':' separators.\n` +
+        "  Use `org/project#PROJ-123` or `project:PROJ-123`.",
+      "issue identifier"
+    );
+  }
+  // Validate the fragment on its own — it must not contain forbidden characters
+  // (?, %, whitespace, control chars). The main guard at the call site is
+  // skipped for `#` inputs, so this validation happens here instead.
+  validateResourceId(fragment, "issue identifier");
+
+  // Bare `#SHORTID` → parse the fragment exactly like a standalone identifier.
+  if (prefix === "") {
+    return parseBareIssueIdentifier(fragment);
   }
 
-  // ID part contains a dash → likely a full short ID like "PROJECT-SUFFIX"
-  // Extract just the suffix from the last dash
-  if (idPart.includes("-")) {
-    const lastDash = idPart.lastIndexOf("-");
-    const suffix = idPart.slice(lastDash + 1).toUpperCase();
-    if (suffix) {
-      return {
-        type: "project-search",
-        projectSlug: projectPart.toLowerCase(),
-        suffix,
-      };
-    }
+  // `org/project#SHORTID` → equivalent to `org/project/SHORTID`. Reconstruct the
+  // slash form so parseWithSlash/parseMultiSlashIssueArg handle org/project
+  // validation and the short-ID prefix-match logic.
+  if (prefix.includes("/")) {
+    return parseWithSlash(`${prefix}/${fragment}`);
   }
 
-  // Plain suffix (no dash) → use as-is
-  return {
-    type: "project-search",
-    projectSlug: projectPart.toLowerCase(),
-    suffix: idPart.toUpperCase(),
-  };
+  // `project#SHORTID` → project-scoped lookup. The `#` path skips the main
+  // validateResourceId guard, so validate the project slug here.
+  validateResourceId(prefix, "project slug");
+  return parseProjectIdentifier(prefix, fragment);
 }
 
 /**
@@ -983,7 +1064,6 @@ export function parseSlashSeparatedArg(
   return { id, targetArg };
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: issue ID parsing has many format branches by design
 export function parseIssueArg(arg: string): ParsedIssueArg {
   // Trim whitespace — agents may pass trailing newlines (CLI-16M)
   const input = arg.trim();
@@ -1028,11 +1108,39 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
     // The @ character will be caught by validateResourceId below.
   }
 
+  // 1b. GitHub-style "#" separator (CLI-1G1): org/project#SHORTID, project#SHORTID,
+  // or bare #SHORTID. AI agents frequently pass this form. Handle it before the
+  // validateResourceId guard below rejects "#" as a forbidden URL fragment.
+  if (input.includes("#")) {
+    return parseWithHash(input);
+  }
+
   // Validate raw input against injection characters before parsing.
   // Slashes are allowed (they're structural separators), but ?, #, %, whitespace,
   // and control characters are never valid in issue identifiers.
   validateResourceId(input.replace(/\//g, ""), "issue identifier");
 
+  return parseBareIssueIdentifier(input);
+}
+
+/**
+ * Parse a bare issue identifier (no Sentry URL, `@` selector, or `#` fragment)
+ * into its component parts. This is steps 2–5 of {@link parseIssueArg}.
+ *
+ * Callers MUST validate the input against injection characters before calling
+ * this function — it performs no validation of its own.
+ *
+ * Flow:
+ * - Pure numeric → `numeric`
+ * - Colon separator → `parseWithColon` (project:identifier)
+ * - Slash → `parseWithSlash` (org/...)
+ * - Dash → `parseWithDash` (project-suffix)
+ * - Otherwise → `suffix-only`
+ *
+ * @param input - Trimmed, validated issue identifier
+ * @returns Parsed issue argument with type discrimination
+ */
+function parseBareIssueIdentifier(input: string): ParsedIssueArg {
   // 2. Pure numeric → direct fetch by ID
   if (isAllDigits(input)) {
     return { type: "numeric", id: input };

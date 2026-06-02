@@ -61,7 +61,7 @@ export const issueIdPositional = {
     {
       placeholder: "issue",
       brief:
-        "Issue: @latest, @most_frequent, <org>/ID, <project>-suffix, ID, or suffix",
+        "Issue: @latest, @most_frequent, <org>/ID, <org>/<project>#ID, <project>-suffix, ID, or suffix",
       parse: String,
     },
   ],
