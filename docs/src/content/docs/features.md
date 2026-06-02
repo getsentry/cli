@@ -161,6 +161,19 @@ Just the suffix portion when project context is provided via the `<org>/` prefix
 sentry issue view my-org/myproject-ABC
 ```
 
+### GitHub-Style (`#` separator)
+
+A `#` may be used in place of the final slash, matching how issues are referenced
+on GitHub. This is handy for AI agents and tooling that emit `org/project#SHORTID`:
+
+```bash
+# Equivalent to my-org/my-project/PROJ-123
+sentry issue view my-org/my-project#PROJ-123
+
+# Project context only (org auto-detected)
+sentry issue view my-project#PROJ-123
+```
+
 ### Alias-Suffix
 
 The short alias plus suffix, available after running `issue list`:

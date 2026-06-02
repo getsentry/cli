@@ -216,6 +216,52 @@ describe("parseIssueArg properties", () => {
   });
 });
 
+describe("parseIssueArg: GitHub-style # separator properties (CLI-1G1)", () => {
+  /** Forbidden characters (besides the structural #) that must always be rejected. */
+  const forbiddenCharArb = constantFrom("?", "%", " ", "\t");
+
+  test("org/project#FULL-SHORTID is equivalent to org/project/FULL-SHORTID", async () => {
+    await fcAssert(
+      property(
+        tuple(orgSlugArb, projectSlugArb, suffixArb),
+        ([org, project, suffix]) => {
+          const shortId = `${project}-${suffix}`;
+          const hashForm = parseIssueArg(`${org}/${project}#${shortId}`);
+          const slashForm = parseIssueArg(`${org}/${project}/${shortId}`);
+          expect(hashForm).toEqual(slashForm);
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("project#FULL-SHORTID always yields project-search with extracted suffix", async () => {
+    await fcAssert(
+      property(tuple(projectSlugArb, suffixArb), ([project, suffix]) => {
+        const result = parseIssueArg(`${project}#${project}-${suffix}`);
+        expect(result).toEqual({
+          type: "project-search",
+          projectSlug: project,
+          suffix: suffix.toUpperCase(),
+        });
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("forbidden character in fragment always throws", async () => {
+    await fcAssert(
+      property(
+        tuple(projectSlugArb, suffixArb, forbiddenCharArb),
+        ([project, suffix, bad]) => {
+          expect(() => parseIssueArg(`${project}#${suffix}${bad}x`)).toThrow();
+        }
+      ),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+});
+
 describe("parseOrgProjectArg properties", () => {
   test("undefined or empty string returns type 'auto-detect'", async () => {
     const emptyInputArb = constantFrom(undefined, "", "  ", "\t", "\n");

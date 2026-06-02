@@ -1197,8 +1197,12 @@ describe("parseIssueArg: injection hardening", () => {
     expect(() => parseIssueArg("CLI-G?query=foo")).toThrow(ValidationError);
   });
 
-  test("rejects fragment injection in issue arg", () => {
-    expect(() => parseIssueArg("CLI-G#anchor")).toThrow(ValidationError);
+  test("rejects forbidden characters inside a # fragment", () => {
+    // A bare "#" is now a valid GitHub-style separator (CLI-1G1), but the
+    // fragment after it is still validated against injection characters.
+    expect(() => parseIssueArg("cli#an chor")).toThrow(ValidationError);
+    expect(() => parseIssueArg("cli#an%20chor")).toThrow(ValidationError);
+    expect(() => parseIssueArg("cli#G?extra")).toThrow(ValidationError);
   });
 
   test("rejects pre-encoded space in issue arg", () => {
@@ -1217,6 +1221,144 @@ describe("parseIssueArg: injection hardening", () => {
 
   test("rejects query string in org/issue format", () => {
     expect(() => parseIssueArg("sentry/CLI-G?extra")).toThrow(ValidationError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GitHub-style "#" separator: org/project#SHORTID (CLI-1G1)
+// ---------------------------------------------------------------------------
+
+describe("parseIssueArg: GitHub-style # separator (CLI-1G1)", () => {
+  describe("org/project#SHORTID", () => {
+    test("full short ID whose prefix matches the project → explicit suffix", () => {
+      expect(parseIssueArg("sentry/cli#CLI-G")).toEqual({
+        type: "explicit",
+        org: "sentry",
+        project: "cli",
+        suffix: "G",
+      });
+    });
+
+    test("numeric fragment → explicit-org-numeric", () => {
+      expect(parseIssueArg("sentry/cli#123")).toEqual({
+        type: "explicit-org-numeric",
+        org: "sentry",
+        numericId: "123",
+      });
+    });
+
+    test("non-matching prefix → entire fragment becomes the suffix", () => {
+      expect(parseIssueArg("sentry/cli#SUBPROJ-G")).toEqual({
+        type: "explicit",
+        org: "sentry",
+        project: "cli",
+        suffix: "SUBPROJ-G",
+      });
+    });
+
+    test("bare suffix fragment → explicit suffix", () => {
+      expect(parseIssueArg("my-org/my-project#G")).toEqual({
+        type: "explicit",
+        org: "my-org",
+        project: "my-project",
+        suffix: "G",
+      });
+    });
+  });
+
+  describe("project#SHORTID", () => {
+    test("full short ID fragment → project-search with extracted suffix", () => {
+      expect(parseIssueArg("cli#CLI-G")).toEqual({
+        type: "project-search",
+        projectSlug: "cli",
+        suffix: "G",
+      });
+    });
+
+    test("bare suffix fragment → project-search", () => {
+      expect(parseIssueArg("cli#G")).toEqual({
+        type: "project-search",
+        projectSlug: "cli",
+        suffix: "G",
+      });
+    });
+
+    test("numeric fragment → numeric (project context redundant)", () => {
+      expect(parseIssueArg("cli#123")).toEqual({
+        type: "numeric",
+        id: "123",
+      });
+    });
+
+    test("lowercase fragment is uppercased into the suffix", () => {
+      expect(parseIssueArg("cli#g")).toEqual({
+        type: "project-search",
+        projectSlug: "cli",
+        suffix: "G",
+      });
+    });
+
+    test("multi-hyphen project slug is preserved and lowercased", () => {
+      expect(parseIssueArg("CLI-G#anchor")).toEqual({
+        type: "project-search",
+        projectSlug: "cli-g",
+        suffix: "ANCHOR",
+      });
+    });
+  });
+
+  describe("bare #SHORTID", () => {
+    test("full short ID → project-search", () => {
+      expect(parseIssueArg("#CLI-G")).toEqual({
+        type: "project-search",
+        projectSlug: "cli",
+        suffix: "G",
+      });
+    });
+
+    test("numeric → numeric", () => {
+      expect(parseIssueArg("#123")).toEqual({
+        type: "numeric",
+        id: "123",
+      });
+    });
+
+    test("bare suffix → suffix-only", () => {
+      expect(parseIssueArg("#G")).toEqual({
+        type: "suffix-only",
+        suffix: "G",
+      });
+    });
+  });
+
+  describe("error cases", () => {
+    test("multiple # separators throw", () => {
+      expect(() => parseIssueArg("a#b#c")).toThrow(ValidationError);
+    });
+
+    test("empty fragment throws", () => {
+      expect(() => parseIssueArg("org/project#")).toThrow(ValidationError);
+      expect(() => parseIssueArg("cli#")).toThrow(ValidationError);
+      expect(() => parseIssueArg("#")).toThrow(ValidationError);
+    });
+
+    test("forbidden characters in fragment throw", () => {
+      expect(() => parseIssueArg("cli#?bad")).toThrow(ValidationError);
+      expect(() => parseIssueArg("cli#an chor")).toThrow(ValidationError);
+      expect(() => parseIssueArg("cli#an%20chor")).toThrow(ValidationError);
+    });
+
+    test("colon mixed with # is rejected with a clear message", () => {
+      expect(() => parseIssueArg("cli#frag:more")).toThrow(/'#' and ':'/);
+    });
+
+    test("forbidden characters in project prefix throw", () => {
+      expect(() => parseIssueArg("bad%proj#G")).toThrow(ValidationError);
+    });
+
+    test("multiple # error message suggests the correct format", () => {
+      expect(() => parseIssueArg("a#b#c")).toThrow(/org\/project#PROJ-123/);
+    });
   });
 });
 
