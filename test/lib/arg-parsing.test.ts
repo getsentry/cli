@@ -1356,6 +1356,11 @@ describe("parseIssueArg: GitHub-style # separator (CLI-1G1)", () => {
       expect(() => parseIssueArg("bad%proj#G")).toThrow(ValidationError);
     });
 
+    test("forbidden characters in org/project prefix throw", () => {
+      expect(() => parseIssueArg("bad%org/project#G")).toThrow(ValidationError);
+      expect(() => parseIssueArg("org/bad%proj#G")).toThrow(ValidationError);
+    });
+
     test("multiple # error message suggests the correct format", () => {
       expect(() => parseIssueArg("a#b#c")).toThrow(/org\/project#PROJ-123/);
     });
