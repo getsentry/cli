@@ -218,6 +218,10 @@ sentry issue view FRONT-ABC
 
 # Open in browser
 sentry issue view FRONT-ABC -w
+
+# GitHub-style identifiers work too (the "#" replaces the final slash)
+sentry issue view my-org/my-project#FRONT-ABC
+sentry issue view my-project#FRONT-ABC
 ```
 
 ### `sentry issue resolve <issue>`
