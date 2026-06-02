@@ -955,10 +955,11 @@ function parseWithHash(arg: string): ParsedIssueArg {
     return parseBareIssueIdentifier(fragment);
   }
 
-  // `org/project#SHORTID` → equivalent to `org/project/SHORTID`. Reconstruct the
-  // slash form so parseWithSlash/parseMultiSlashIssueArg handle org/project
-  // validation and the short-ID prefix-match logic.
+  // `org/project#SHORTID` → equivalent to `org/project/SHORTID`. Validate the
+  // org/project prefix components first — the `#` path skips the main
+  // validateResourceId guard, and parseWithSlash doesn't re-validate.
   if (prefix.includes("/")) {
+    validateResourceId(prefix.replace(/\//g, ""), "issue identifier");
     return parseWithSlash(`${prefix}/${fragment}`);
   }
 
