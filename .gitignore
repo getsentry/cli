@@ -72,3 +72,8 @@ docs/public/.well-known/skills/index.json
 # OpenCode
 .opencode/
 opencode.json*
+
+# Throwaway documentation audit reports (bot-generated, not real docs)
+DOCUMENTATION_GAPS.md
+docs/DOCUMENTATION_GAPS.md
+DOCUMENTATION_GAP_REPORT.md
