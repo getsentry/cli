@@ -7,7 +7,8 @@
  * environment variables optionally included as `extra.environ`.
  */
 
-import type { Event, SeverityLevel, User } from "@sentry/core";
+import { readFile, stat } from "node:fs/promises";
+import type { Breadcrumb, Event, SeverityLevel, User } from "@sentry/core";
 import { uuid4 } from "@sentry/core";
 import { ValidationError } from "../errors.js";
 
@@ -25,6 +26,8 @@ export type SendEventFlags = {
   user?: string[];
   fingerprint?: string[];
   timestamp?: string;
+  logfile?: string;
+  "with-categories"?: boolean;
   "no-environ"?: boolean;
 };
 
@@ -106,13 +109,76 @@ function parseTimestamp(ts: string | undefined): number | undefined {
   );
 }
 
+/** Maximum number of breadcrumbs to attach from a logfile. */
+const MAX_BREADCRUMBS = 100;
+
+/** Regex to split a log line into `CATEGORY: message` when --with-categories is set. */
+const CATEGORY_RE = /^([^:]+):\s*(.*)$/;
+
+/**
+ * Parse a logfile into an array of breadcrumbs.
+ *
+ * Reads the file line by line, optionally parsing `CATEGORY: message`
+ * prefixes. Uses the file's mtime as the breadcrumb timestamp (matching
+ * the old sentry-cli behaviour). Keeps the last {@link MAX_BREADCRUMBS}
+ * entries.
+ */
+export async function parseBreadcrumbsFromLogfile(
+  logfilePath: string,
+  withCategories: boolean
+): Promise<Breadcrumb[]> {
+  let content: string;
+  let mtimeSeconds: number;
+  try {
+    content = await readFile(logfilePath, "utf-8");
+    const fileStat = await stat(logfilePath);
+    mtimeSeconds = fileStat.mtimeMs / 1000;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      throw new ValidationError(`Logfile not found: ${logfilePath}`, "logfile");
+    }
+    throw new ValidationError(
+      `Cannot read logfile ${logfilePath}: ${(err as Error).message}`,
+      "logfile"
+    );
+  }
+
+  const lines = content.split("\n").filter((l) => l.length > 0);
+  const breadcrumbs: Breadcrumb[] = lines.map((line) => {
+    if (withCategories) {
+      const match = CATEGORY_RE.exec(line);
+      if (match?.[1] && match[2]) {
+        return {
+          timestamp: mtimeSeconds,
+          category: match[1].trim(),
+          message: match[2].trim(),
+        };
+      }
+    }
+    return {
+      timestamp: mtimeSeconds,
+      category: "log",
+      message: line,
+    };
+  });
+
+  // Keep only the last MAX_BREADCRUMBS entries
+  if (breadcrumbs.length > MAX_BREADCRUMBS) {
+    return breadcrumbs.slice(-MAX_BREADCRUMBS);
+  }
+  return breadcrumbs;
+}
+
 /**
  * Build a Sentry Event from CLI flag values.
  *
  * The returned object is ready to be wrapped in an EventEnvelope and
  * serialized for posting to the ingest endpoint.
  */
-export function buildEventFromFlags(flags: SendEventFlags): Event {
+export async function buildEventFromFlags(
+  flags: SendEventFlags
+): Promise<Event> {
   const tags = parseKeyValuePairs(flags.tag);
   // environ goes first so explicit --extra environ:val overrides it
   const extra: Record<string, unknown> = {
@@ -141,5 +207,11 @@ export function buildEventFromFlags(flags: SendEventFlags): Event {
     extra: Object.keys(extra).length > 0 ? extra : undefined,
     user: flags.user?.length ? parseUserFields(flags.user) : undefined,
     fingerprint: flags.fingerprint,
+    breadcrumbs: flags.logfile
+      ? await parseBreadcrumbsFromLogfile(
+          flags.logfile,
+          flags["with-categories"] ?? false
+        )
+      : undefined,
   };
 }

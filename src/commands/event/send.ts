@@ -126,6 +126,8 @@ built entirely from the file contents.
 | \`-e\` / \`--extra\` | Extra data as KEY:VALUE |
 | \`-u\` / \`--user\` | User info as KEY:VALUE (id, email, username, ip_address) |
 | \`-f\` / \`--fingerprint\` | Custom fingerprint parts (repeat) |
+| \`--logfile\` | Attach last 100 log lines as breadcrumbs |
+| \`--with-categories\` | Parse 'CATEGORY: message' from logfile lines |
 `,
   },
   auth: "dsn",
@@ -234,6 +236,19 @@ built entirely from the file contents.
         default: false,
         optional: true,
       },
+      logfile: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Path to a log file — last 100 lines are attached as breadcrumbs",
+        optional: true,
+      },
+      "with-categories": {
+        kind: "boolean",
+        brief: "Parse 'CATEGORY: message' prefixes from logfile breadcrumbs",
+        default: false,
+        optional: true,
+      },
       raw: {
         kind: "boolean",
         brief: "Send file contents as-is without parsing",
@@ -298,7 +313,7 @@ built entirely from the file contents.
           "sentry event send -m 'My message'"
         );
       }
-      const event = buildEventFromFlags(flags);
+      const event = await buildEventFromFlags(flags);
       let body: string | Uint8Array;
       try {
         const envelope = createEventEnvelope(event, dsnComponents);
