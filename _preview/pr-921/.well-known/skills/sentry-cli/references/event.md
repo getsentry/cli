@@ -106,6 +106,8 @@ Send a Sentry event
 - `-f, --fingerprint <value>... - Custom fingerprint part (repeat for multiple)`
 - `--timestamp <value> - Event timestamp (Unix epoch, ISO 8601, or RFC 2822)`
 - `--no-environ - Do not include environment variables in the event`
+- `--logfile <value> - Path to a log file — last 100 lines are attached as breadcrumbs`
+- `--with-categories - Parse 'CATEGORY: message' prefixes from logfile breadcrumbs`
 - `--raw - Send file contents as-is without parsing`
 
 **Examples:**
