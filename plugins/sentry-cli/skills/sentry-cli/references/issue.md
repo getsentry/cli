@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-issue
-version: 0.35.0-dev.0
+version: 0.36.0-dev.0
 description: Manage Sentry issues
 requires:
   bins: ["sentry"]
@@ -183,6 +183,34 @@ View details of a specific issue
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+**JSON Fields** (use `--json --fields` to select specific fields):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Numeric issue ID |
+| `shortId` | string | Human-readable short ID (e.g. PROJ-ABC) |
+| `title` | string | Issue title |
+| `culprit` | string | Culprit string |
+| `count` | string | Total event count |
+| `userCount` | number | Number of affected users |
+| `firstSeen` | string | First occurrence (ISO 8601) |
+| `lastSeen` | string | Most recent occurrence (ISO 8601) |
+| `level` | string | Severity level |
+| `status` | string | Issue status |
+| `permalink` | string | URL to the issue in Sentry |
+| `project` | object | Project info |
+| `metadata` | object | Issue metadata |
+| `assignedTo` | object \| null | Assigned user or team |
+| `priority` | string | Triage priority |
+| `platform` | string | Platform |
+| `substatus` | string \| null | Issue substatus |
+| `isUnhandled` | boolean | Whether the issue is unhandled |
+| `seerFixabilityScore` | number \| null | Seer AI fixability score (0-1) |
+| `event` | unknown \| null | Latest event for the issue (full detail) |
+| `org` | string \| null | Organization slug |
+| `replayIds` | array | Related Session Replay IDs |
+| `trace` | object \| null | Trace context from the latest event's span tree |
+
 **Examples:**
 
 ```bash
@@ -190,6 +218,10 @@ sentry issue view FRONT-ABC
 
 # Open in browser
 sentry issue view FRONT-ABC -w
+
+# GitHub-style identifiers work too (the "#" replaces the final slash)
+sentry issue view my-org/my-project#FRONT-ABC
+sentry issue view my-project#FRONT-ABC
 ```
 
 ### `sentry issue resolve <issue>`

@@ -113,6 +113,12 @@ Latest event:
 sentry issue view FRONT-ABC -w
 ```
 
+```bash
+# GitHub-style identifiers work too (the "#" replaces the final slash)
+sentry issue view my-org/my-project#FRONT-ABC
+sentry issue view my-project#FRONT-ABC
+```
+
 ### Explain and plan with Seer AI
 
 ```bash

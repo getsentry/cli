@@ -111,6 +111,7 @@ export {
 export {
   type CreatedProjectDetails,
   createProject,
+  createProjectWithAutoTeam,
   createProjectWithDsn,
   deleteProject,
   findProjectByDsnKey,
@@ -120,6 +121,7 @@ export {
   getProjectKeys,
   listProjects,
   listProjectsPaginated,
+  MEMBER_PROJECT_CREATION_DISABLED_DETAIL,
   matchesWordBoundary,
   type ProjectSearchResult,
   type ProjectWithOrg,

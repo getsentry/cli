@@ -29,6 +29,7 @@ import {
 } from "../../lib/replay-search.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, SentryIssue } from "../../types/index.js";
+import { IssueViewOutputSchema } from "../../types/index.js";
 import { issueIdPositional, resolveIssue } from "./utils.js";
 
 type ViewFlags = {
@@ -192,13 +193,15 @@ export const viewCommand = buildCommand({
       "  <project>-suffix - Project + suffix: cli-G, spotlight-electron-4Y\n" +
       "  ID              - Short ID: CLI-G (searches across orgs)\n" +
       "  suffix          - Suffix only: G (requires DSN context)\n" +
-      "  numeric         - Numeric ID: 123456789\n\n" +
+      "  numeric         - Numeric ID: 123456789\n" +
+      "  org/project#ID  - GitHub-style: my-org/my-project#PROJ-123\n\n" +
       "In multi-project mode (after 'issue list'), use alias-suffix format (e.g., 'f-g' " +
       "where 'f' is the project alias shown in the list).",
   },
   output: {
     human: formatIssueView,
     jsonTransform: jsonTransformIssueView,
+    schema: IssueViewOutputSchema,
   },
   parameters: {
     positional: issueIdPositional,

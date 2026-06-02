@@ -52,6 +52,11 @@ export function toLoginUser(user: {
 export type InteractiveLoginOptions = {
   /** Timeout for OAuth flow in milliseconds (default: 900000 = 15 minutes) */
   timeout?: number;
+  /**
+   * Space-joined OAuth scope string to request. When omitted, the device flow
+   * requests the full default scope set. Build via `resolveOAuthScopeString`.
+   */
+  scope?: string;
 };
 
 /**
@@ -113,6 +118,7 @@ export async function runInteractiveLogin(
   options?: InteractiveLoginOptions
 ): Promise<LoginResult | null> {
   const timeout = options?.timeout ?? 900_000; // 15 minutes default
+  const scope = options?.scope;
 
   log.info("Starting authentication...");
 
@@ -165,7 +171,8 @@ export async function runInteractiveLogin(
           }
         },
       },
-      timeout
+      timeout,
+      scope
     );
 
     // Stop the spinner

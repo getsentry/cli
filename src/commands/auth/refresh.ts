@@ -1,7 +1,13 @@
 /**
  * sentry auth refresh
  *
- * Manually refresh the authentication token.
+ * Manually refresh the authentication token, or re-authenticate with
+ * different scopes via the OAuth device flow (like `gh auth refresh -s`).
+ *
+ * When `--scope` or `--read-only` is passed, the command runs a new device
+ * flow with the requested scopes instead of refreshing the existing token.
+ * This bypasses the "already authenticated" gate in `auth login`, making
+ * scope changes frictionless.
  */
 
 import type { SentryContext } from "../../context.js";
@@ -12,14 +18,18 @@ import {
   getAuthConfig,
   refreshToken,
 } from "../../lib/db/auth.js";
-import { AuthError } from "../../lib/errors.js";
+import { AuthError, ValidationError } from "../../lib/errors.js";
 import { success } from "../../lib/formatters/colors.js";
 import { formatDuration } from "../../lib/formatters/human.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { runInteractiveLogin } from "../../lib/interactive-login.js";
+import { resolveOAuthScopeString } from "../../lib/oauth.js";
 
 type RefreshFlags = {
   readonly json: boolean;
   readonly force: boolean;
+  readonly "read-only": boolean;
+  readonly scope?: readonly string[];
   readonly fields?: string[];
 };
 
@@ -31,10 +41,37 @@ type RefreshOutput = {
   expiresAt?: string;
 };
 
+/** Whether the user asked for a scope change (--scope or --read-only). */
+function hasScopeRequest(flags: RefreshFlags): boolean {
+  return (
+    flags["read-only"] || (flags.scope !== undefined && flags.scope.length > 0)
+  );
+}
+
+/**
+ * Resolve the OAuth scope string from the refresh flags.
+ *
+ * @throws {ValidationError} when `--read-only` and `--scope` are both set,
+ *   or when `--scope` contains an invalid value.
+ */
+function resolveRefreshScope(flags: RefreshFlags): string {
+  if (flags["read-only"] && flags.scope?.length) {
+    throw new ValidationError(
+      "--read-only and --scope cannot be used together. Use --read-only for the read-only subset, or --scope to list exact scopes.",
+      "scope"
+    );
+  }
+  if (flags.scope?.length) {
+    const scopes = [...flags.scope].flatMap((v) => v.split(","));
+    return resolveOAuthScopeString({ scopes });
+  }
+  return resolveOAuthScopeString({ readOnly: true });
+}
+
 /** Format refresh result for terminal output */
 function formatRefreshResult(data: RefreshOutput): string {
   return data.refreshed
-    ? `${success("✓")} Token refreshed successfully. Expires in ${formatDuration(data.expiresIn ?? 0)}.`
+    ? `${success("✓")} ${data.message}. Expires in ${formatDuration(data.expiresIn ?? 0)}.`
     : `Token still valid (expires in ${formatDuration(data.expiresIn ?? 0)}).\nUse --force to refresh anyway.`;
 }
 
@@ -49,12 +86,23 @@ Token refresh normally happens automatically when making API requests.
 Use this command to force an immediate refresh or to verify the refresh
 mechanism is working correctly.
 
+When --scope or --read-only is passed, re-authenticates via the OAuth
+device flow with the requested scopes instead of refreshing the existing
+token. This is the preferred way to add or change scopes on an existing
+session (similar to \`gh auth refresh -s <scope>\`).
+
 Examples:
   $ sentry auth refresh
   Token refreshed successfully. Expires in 59 minutes.
 
   $ sentry auth refresh --force
   Token refreshed successfully. Expires in 60 minutes.
+
+  $ sentry auth refresh --scope event:read --scope org:read
+  Re-authenticating with scopes: event:read, org:read...
+
+  $ sentry auth refresh --read-only
+  Re-authenticating with read-only scopes...
 
   $ sentry auth refresh --json
   {"success":true,"refreshed":true,"expiresIn":3600,"expiresAt":"..."}
@@ -68,10 +116,26 @@ Examples:
         brief: "Force refresh even if token is still valid",
         default: false,
       },
+      "read-only": {
+        kind: "boolean",
+        brief:
+          "Re-authenticate with read-only OAuth scopes (project:read, org:read, event:read, member:read, team:read)",
+        default: false,
+      },
+      scope: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Re-authenticate with specific OAuth scopes (repeatable, comma-separated). " +
+          "E.g. --scope project:read --scope org:read",
+        variadic: true,
+        optional: true,
+      },
     },
+    aliases: { s: "scope" },
   },
   async *func(this: SentryContext, flags: RefreshFlags) {
-    // Env var tokens can't be refreshed — only block if env is the effective source
+    // Env var tokens can't be refreshed or re-scoped via the CLI.
     const currentAuth = getAuthConfig();
     if (currentAuth?.source.startsWith(ENV_SOURCE_PREFIX)) {
       const envVar = getActiveEnvVarName();
@@ -83,7 +147,29 @@ Examples:
       );
     }
 
-    // Pre-check for refresh token availability (better error message)
+    // --scope / --read-only: re-run the device flow with new scopes.
+    if (hasScopeRequest(flags)) {
+      const scope = resolveRefreshScope(flags);
+
+      const result = await runInteractiveLogin({ scope });
+      if (!result) {
+        process.exitCode = 1;
+        return;
+      }
+
+      const payload: RefreshOutput = {
+        success: true,
+        refreshed: true,
+        message: "Re-authenticated with updated scopes",
+        expiresIn: result.expiresIn,
+        expiresAt: result.expiresIn
+          ? new Date(Date.now() + result.expiresIn * 1000).toISOString()
+          : undefined,
+      };
+      return yield new CommandOutput(payload);
+    }
+
+    // Standard token refresh path (no scope change).
     const auth = await getAuthConfig();
     if (!auth?.refreshToken && auth?.token) {
       throw new AuthError(

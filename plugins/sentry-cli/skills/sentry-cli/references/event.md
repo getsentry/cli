@@ -1,7 +1,7 @@
 ---
 name: sentry-cli-event
-version: 0.35.0-dev.0
-description: View and list Sentry events
+version: 0.36.0-dev.0
+description: View, list, and send Sentry events
 requires:
   bins: ["sentry"]
   auth: true
@@ -9,7 +9,7 @@ requires:
 
 # Event Commands
 
-View and list Sentry events
+View, list, and send Sentry events
 
 ### `sentry event view <org/project/event-id...>`
 
@@ -85,6 +85,64 @@ sentry event list PROJ-ABC -c prev
 
 # Output as JSON
 sentry event list PROJ-ABC --json
+```
+
+### `sentry event send <args...>`
+
+Send a Sentry event
+
+**Flags:**
+- `--dsn <value> - DSN to send events to (overrides SENTRY_DSN env var)`
+- `-m, --message <value>... - Event message (repeat for multi-line)`
+- `-a, --message-arg <value>... - Arguments for message template (repeat for multiple)`
+- `-l, --level <value> - Event severity level - (default: "error")`
+- `-r, --release <value> - Release version`
+- `-d, --dist <value> - Distribution identifier`
+- `-E, --env <value> - Environment name (e.g. production, staging)`
+- `-p, --platform <value> - Platform identifier (default: other)`
+- `-t, --tag <value>... - Tag as KEY:VALUE (repeat for multiple)`
+- `-e, --extra <value>... - Extra data as KEY:VALUE (repeat for multiple)`
+- `-u, --user <value>... - User info as KEY:VALUE — id, email, username, ip_address, or custom`
+- `-f, --fingerprint <value>... - Custom fingerprint part (repeat for multiple)`
+- `--timestamp <value> - Event timestamp (Unix epoch, ISO 8601, or RFC 2822)`
+- `--no-environ - Do not include environment variables in the event`
+- `--logfile <value> - Path to a log file — last 100 lines are attached as breadcrumbs`
+- `--with-categories - Parse 'CATEGORY: message' prefixes from logfile breadcrumbs`
+- `--raw - Send file contents as-is without parsing`
+
+**Examples:**
+
+```bash
+# Send an error event (default level)
+sentry event send -m "Something went wrong"
+
+# Specify level, release, and environment
+sentry event send -m "Deploy check" -l info -r 1.0.0 -E production
+
+# Add tags and extra data
+sentry event send -m "Payment failed" --tag env:prod --tag region:us-east --extra amount:99.99
+
+# Set user context
+sentry event send -m "Login error" --user id:42 --user email:alice@example.com
+
+# Custom fingerprint to group related events together
+sentry event send -m "DB timeout" --fingerprint db-timeout --fingerprint {{ default }}
+
+# Send a serialized Sentry Event object
+sentry event send ./crash.json
+
+# Send without re-parsing (raw mode — also supports pre-built envelopes)
+sentry event send --raw ./crash.json
+sentry event send --raw ./captured.envelope
+
+# Explicit DSN
+sentry event send -m "Test" --dsn "https://key@o123.ingest.us.sentry.io/456"
+
+# Via environment variable
+export SENTRY_DSN="https://key@o123.ingest.us.sentry.io/456"
+sentry event send -m "Test"
+
+sentry send-event    # same as: sentry event send
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

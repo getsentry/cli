@@ -242,4 +242,49 @@ describe("runInteractiveLogin", () => {
     expect(result!.user).toBeUndefined();
     expect(setUserInfoSpy).not.toHaveBeenCalled();
   });
+
+  test("forwards an explicit scope string to performDeviceFlow", async () => {
+    performDeviceFlowSpy = vi
+      .spyOn(oauth, "performDeviceFlow")
+      .mockImplementation(async (callbacks) => {
+        await callbacks.onUserCode(
+          "SCOP",
+          "https://sentry.io/auth/device/",
+          "https://sentry.io/auth/device/?user_code=SCOP"
+        );
+        return makeTokenResponse();
+      });
+
+    await runInteractiveLogin({
+      timeout: 1000,
+      scope: "project:read org:read",
+    });
+
+    expect(performDeviceFlowSpy).toHaveBeenCalledWith(
+      expect.any(Object),
+      1000,
+      "project:read org:read"
+    );
+  });
+
+  test("forwards undefined scope when none is provided", async () => {
+    performDeviceFlowSpy = vi
+      .spyOn(oauth, "performDeviceFlow")
+      .mockImplementation(async (callbacks) => {
+        await callbacks.onUserCode(
+          "NONE",
+          "https://sentry.io/auth/device/",
+          "https://sentry.io/auth/device/?user_code=NONE"
+        );
+        return makeTokenResponse();
+      });
+
+    await runInteractiveLogin({ timeout: 1000 });
+
+    expect(performDeviceFlowSpy).toHaveBeenCalledWith(
+      expect.any(Object),
+      1000,
+      undefined
+    );
+  });
 });

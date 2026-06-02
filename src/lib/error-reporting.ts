@@ -21,14 +21,17 @@ import * as Sentry from "@sentry/node-core/light";
 import {
   ApiError,
   AuthError,
+  CliError,
   ContextError,
   DeviceFlowError,
+  HostScopeError,
   OutputError,
   ResolutionError,
   SeerError,
   TimeoutError,
   UpgradeError,
   ValidationError,
+  WizardError,
 } from "./errors.js";
 
 // ---------------------------------------------------------------------------
@@ -101,6 +104,43 @@ function recordSilencedError(error: unknown, reason: SilenceReason): void {
 // Grouping tags
 // ---------------------------------------------------------------------------
 
+/** Endpoint normalization patterns — compiled once at module scope. */
+const ENDPOINT_PATTERNS: [RegExp, string][] = [
+  [/\/organizations\/[^/]+/, "/organizations/{org}"],
+  [/\/projects\/[^/]+\/[^/]+/, "/projects/{org}/{project}"],
+  [/\/issues\/[^/]+/, "/issues/{id}"],
+  [/\/events\/[^/]+/, "/events/{id}"],
+  [/\/groups\/[^/]+/, "/groups/{id}"],
+  [/\/releases\/[^/]+/, "/releases/{version}"],
+  [/\/teams\/[^/]+\/[^/]+/, "/teams/{org}/{team}"],
+  [/\/dashboards\/[^/]+/, "/dashboards/{id}"],
+  [/\/customers\/[^/]+/, "/customers/{org}"],
+];
+
+/**
+ * Strip remaining bare numeric segments (e.g. /12345/) but preserve
+ * the API version prefix /0/ which is always the second segment.
+ */
+const BARE_NUMERIC_SEGMENT_RE = /(?<=\/api\/0\/.*)\/\d+(?=\/|$)/g;
+
+/**
+ * Normalize an API endpoint path by parameterizing variable segments.
+ *
+ * Replaces org slugs, project slugs, issue IDs, event IDs, and other
+ * entity identifiers with placeholders so that server-side fingerprint
+ * rules can sub-group `ApiError` by endpoint shape rather than exact path.
+ *
+ * `"/api/0/projects/my-org/my-project/events/abc123/"` →
+ * `"/api/0/projects/{org}/{project}/events/{id}/"`
+ */
+export function normalizeEndpoint(endpoint: string): string {
+  let result = endpoint;
+  for (const [pattern, replacement] of ENDPOINT_PATTERNS) {
+    result = result.replace(pattern, replacement);
+  }
+  return result.replace(BARE_NUMERIC_SEGMENT_RE, "/{id}");
+}
+
 /**
  * Strip quoted substrings, numeric/hex IDs, and org/project paths from a
  * resource string to produce a stable "kind" for grouping.
@@ -111,14 +151,24 @@ function recordSilencedError(error: unknown, reason: SilenceReason): void {
  * `"not found in neurio/installer-app"` → `"not found"`
  */
 export function extractResourceKind(resource: string): string {
-  return resource
-    .replace(/'[^']*'/g, "")
-    .replace(/"[^"]*"/g, "")
-    .replace(/\b[0-9a-f]{16,32}\b/gi, "")
-    .replace(/\bin\s+[\w-]+\/[\w-]+/g, "")
-    .replace(/\b\d+\b/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    resource
+      .replace(/'[^']*'/g, "")
+      .replace(/"[^"]*"/g, "")
+      .replace(/\b[0-9a-f]{16,32}\b/gi, "")
+      .replace(/\bin\s+[\w-]+(?:\/[\w-]+)*/g, "")
+      // Strip hyphenated slugs after known entity names (e.g., "Organization my-company").
+      // Requires at least one hyphen to avoid stripping English words ("Project not found").
+      // Safe for current callers: resource values with slugs use quotes (stripped above),
+      // and headline values don't start with entity names.
+      .replace(
+        /\b(Organization|Dashboard|Dashboards|Project|Team)\s+[\w][\w-]*-[\w-]*/gi,
+        "$1"
+      )
+      .replace(/\b\d+\b/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 /**
@@ -141,6 +191,64 @@ export function extractMessagePrefix(message: string, maxWords = 3): string {
 }
 
 /**
+ * Derive a stable `cli_error.kind` grouping key from an error instance.
+ *
+ * Returns `undefined` when the error is not a recognized CLI error class
+ * (the caller should still set `cli_error.class` for basic grouping).
+ */
+function deriveErrorKind(error: Error): string | undefined {
+  if (error instanceof ContextError) {
+    return error.resource;
+  }
+  if (error instanceof ResolutionError) {
+    return (
+      extractResourceKind(error.resource) +
+      " " +
+      extractResourceKind(error.headline)
+    );
+  }
+  // Fall back to the first few words of the message when no field is set
+  // (e.g. validateHexId throws with no `field`, so using field would
+  // collapse every unfielded ValidationError into one group).
+  if (error instanceof ValidationError) {
+    return error.field ?? extractMessagePrefix(error.message);
+  }
+  if (error instanceof ApiError) {
+    return String(error.status);
+  }
+  if (error instanceof SeerError) {
+    return error.reason;
+  }
+  if (error instanceof AuthError) {
+    return error.reason;
+  }
+  if (error instanceof UpgradeError) {
+    return error.reason;
+  }
+  if (error instanceof DeviceFlowError) {
+    return error.code;
+  }
+  if (error instanceof TimeoutError) {
+    return "timeout";
+  }
+  if (error instanceof HostScopeError) {
+    return "host_scope";
+  }
+  if (error instanceof WizardError) {
+    return "wizard";
+  }
+  // Catch-all for bare CliError — must be checked AFTER all subclasses
+  // because instanceof matches the entire prototype chain.
+  // ConfigError and OutputError intentionally fall through here:
+  // ConfigError has no structured field beyond message; OutputError is
+  // silenced by classifySilenced() before reaching deriveErrorKind().
+  if (error instanceof CliError) {
+    return extractMessagePrefix(error.message, 4);
+  }
+  return;
+}
+
+/**
  * Set `cli_error.*` tags on a Sentry scope for an error that will be
  * captured. These tags are matched by server-side fingerprint rules to
  * achieve stable grouping without SDK-side fingerprint logic.
@@ -149,6 +257,7 @@ export function extractMessagePrefix(message: string, maxWords = 3): string {
  * - `cli_error.class` — error class name (e.g. `"ContextError"`)
  * - `cli_error.kind`  — stable grouping key derived from structured fields
  * - `cli_error.api_status` — HTTP status (ApiError only)
+ * - `cli_error.api_endpoint` — normalized API path (ApiError only)
  */
 function setGroupingTags(scope: Sentry.Scope, error: unknown): void {
   if (!(error instanceof Error)) {
@@ -157,36 +266,16 @@ function setGroupingTags(scope: Sentry.Scope, error: unknown): void {
 
   scope.setTag("cli_error.class", error.name);
 
-  if (error instanceof ContextError) {
-    scope.setTag("cli_error.kind", error.resource);
-  } else if (error instanceof ResolutionError) {
-    scope.setTag(
-      "cli_error.kind",
-      extractResourceKind(error.resource) +
-        " " +
-        extractResourceKind(error.headline)
-    );
-  } else if (error instanceof ValidationError) {
-    // Fall back to the first few words of the message when no field is set
-    // (e.g. validateHexId throws with no `field`, so using field would
-    // collapse every unfielded ValidationError into one group).
-    scope.setTag(
-      "cli_error.kind",
-      error.field ?? extractMessagePrefix(error.message)
-    );
-  } else if (error instanceof ApiError) {
+  const kind = deriveErrorKind(error);
+  if (kind !== undefined) {
+    scope.setTag("cli_error.kind", kind);
+  }
+
+  if (error instanceof ApiError) {
     scope.setTag("cli_error.api_status", String(error.status));
-    scope.setTag("cli_error.kind", String(error.status));
-  } else if (error instanceof SeerError) {
-    scope.setTag("cli_error.kind", error.reason);
-  } else if (error instanceof AuthError) {
-    scope.setTag("cli_error.kind", error.reason);
-  } else if (error instanceof UpgradeError) {
-    scope.setTag("cli_error.kind", error.reason);
-  } else if (error instanceof DeviceFlowError) {
-    scope.setTag("cli_error.kind", error.code);
-  } else if (error instanceof TimeoutError) {
-    scope.setTag("cli_error.kind", "timeout");
+    if (error.endpoint) {
+      scope.setTag("cli_error.api_endpoint", normalizeEndpoint(error.endpoint));
+    }
   }
 }
 
@@ -272,6 +361,13 @@ export function enrichEventWithGroupingTags(
 
   event.tags = event.tags ?? {};
   event.tags["cli_error.class"] = exc.type;
+
+  // Set kind from exception message prefix so server-side rules can group
+  // non-CliError exceptions (TypeError, Error, WizardCancelledError, etc.)
+  // that bypass reportCliError (uncaught exceptions, unhandled rejections).
+  if (exc.value) {
+    event.tags["cli_error.kind"] = extractMessagePrefix(exc.value, 4);
+  }
 
   return event;
 }

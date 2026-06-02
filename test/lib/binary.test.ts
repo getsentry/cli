@@ -9,7 +9,9 @@ import {
   chmodSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
@@ -421,6 +423,33 @@ describe("installBinary", () => {
     const result = await installBinary(tempPath, installDir);
 
     expect(result).toBe(join(installDir, getBinaryFilename()));
+    const content = await readFile(result, "utf-8");
+    expect(content).toBe("upgraded binary");
+  });
+
+  test("handles sourcePath === tempPath reached through a symlinked install dir", async () => {
+    if (process.platform === "win32") return;
+
+    // Reproduces the macOS /tmp -> /private/tmp case: installDir is given via a
+    // symlink, but the source binary's path is canonicalized (as process.execPath
+    // would be). The two paths point at the same file but differ as strings, so a
+    // naive resolve() comparison would unlink the source before copying it.
+    const realDir = join(testDir, "real-install");
+    mkdirSync(realDir, { recursive: true });
+    const symlinkedDir = join(testDir, "symlinked-install");
+    symlinkSync(realDir, symlinkedDir);
+
+    // The .download file lives in the real dir; sourcePath uses the canonical path.
+    const tempName = `${getBinaryFilename()}.download`;
+    const sourcePath = join(realpathSync(realDir), tempName);
+    await writeFile(sourcePath, "upgraded binary");
+    chmodSync(sourcePath, 0o755);
+
+    // installBinary is called with the symlinked dir, so tempPath resolves to the
+    // same file as sourcePath via the symlink.
+    const result = await installBinary(sourcePath, symlinkedDir);
+
+    expect(result).toBe(join(symlinkedDir, getBinaryFilename()));
     const content = await readFile(result, "utf-8");
     expect(content).toBe("upgraded binary");
   });

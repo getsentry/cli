@@ -81,11 +81,11 @@ jobs:
               ]}'
             else
               # main, release/**, workflow_call: full cross-platform matrix.
-              # macOS targets build natively for V8 code cache (~15% faster startup).
-              # Other targets cross-compile from ubuntu-latest via fossilize.
+              # darwin-arm64 builds natively on macOS for V8 code cache (~15% faster startup).
+              # All other targets cross-compile from ubuntu-latest via fossilize.
               echo '{"include":[
                 {"target":"darwin-arm64",  "os":"macos-latest",  "can-test":true},
-                {"target":"darwin-x64",    "os":"macos-13",      "can-test":false},
+                {"target":"darwin-x64",    "os":"ubuntu-latest", "can-test":false},
                 {"target":"linux-x64",     "os":"ubuntu-latest", "can-test":true},
                 {"target":"linux-arm64",   "os":"ubuntu-latest", "can-test":false},
                 {"target":"windows-x64",   "os":"ubuntu-latest", "can-test":false}
@@ -308,7 +308,7 @@ jobs:
           # resolve correctly; workflow-level env evaluates before the job's
           # environment: is applied.
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          # Set on main/release branches so build.ts runs binpunch + creates .gz
+          # Set on main/release branches so build.ts creates .gz archives
           RELEASE_BUILD: ${{ github.event_name != 'pull_request' && '1' || '' }}
           # Codesigning: only on main/release pushes (fork PRs lack secrets)
           FOSSILIZE_SIGN: ${{ github.event_name == 'push' && (github.ref_name == 'main' || startsWith(github.ref_name, 'release/')) && 'y' || 'n' }}
@@ -350,6 +350,19 @@ jobs:
             echo "$OUTPUT"
             exit 1
           fi
+      - name: Verify code signature (darwin)
+        # Only runs when signing was active (main/release pushes) and target is darwin.
+        # The smoke test alone does NOT catch invalid signatures — AMFI only SIGKILLs
+        # quarantined (downloaded) binaries, not freshly-built ones on the build machine.
+        if: >-
+          startsWith(matrix.target, 'darwin') &&
+          github.event_name == 'push' &&
+          (github.ref_name == 'main' || startsWith(github.ref_name, 'release/'))
+        shell: bash
+        run: |
+          BIN=./dist-bin/sentry-${{ matrix.target }}
+          echo "Verifying code signature on $BIN..."
+          rcodesign verify "$BIN"
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7
         with:

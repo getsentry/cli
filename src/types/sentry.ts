@@ -270,6 +270,35 @@ export const SentryIssueSchema = zRetrieveAnIssueResponse
   .passthrough()
   .describe("Sentry issue");
 
+/**
+ * Documentation-oriented schema for `issue view` JSON output.
+ *
+ * The view command's jsonTransform spreads all issue fields at the top level
+ * and adds enrichment fields (`event`, `org`, `replayIds`, `trace`). This
+ * schema describes that flattened shape for `--help`, `sentry help issue view`,
+ * and SKILL.md field table generation.
+ */
+export const IssueViewOutputSchema = SentryIssueSchema.extend({
+  event: z
+    .unknown()
+    .nullable()
+    .optional()
+    .describe("Latest event for the issue (full detail)"),
+  org: z.string().nullable().optional().describe("Organization slug"),
+  replayIds: z
+    .array(z.string())
+    .optional()
+    .describe("Related Session Replay IDs"),
+  trace: z
+    .object({
+      traceId: z.string().describe("Trace ID from the latest event"),
+      spans: z.array(z.unknown()).describe("Span tree data"),
+    })
+    .nullable()
+    .optional()
+    .describe("Trace context from the latest event's span tree"),
+}).describe("Issue view output");
+
 // Event
 
 /**

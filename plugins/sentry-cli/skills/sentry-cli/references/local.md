@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-local
-version: 0.35.0-dev.0
+version: 0.36.0-dev.0
 description: Sentry for local development
 requires:
   bins: ["sentry"]

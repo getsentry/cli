@@ -52,8 +52,9 @@ function enrich403Detail(rawDetail: string | undefined): string {
     lines.push(rawDetail, "");
   }
 
+  const scopes = extractRequiredScopes(rawDetail);
+
   if (isEnvTokenActive()) {
-    const scopes = extractRequiredScopes(rawDetail);
     if (scopes.length > 0) {
       lines.push(
         `Your ${getActiveEnvVarName()} token is missing the required scope(s) '${scopes.join("', '")}'.`
@@ -65,6 +66,12 @@ function enrich403Detail(rawDetail: string | undefined): string {
     }
     lines.push(
       "Check token scopes at: https://sentry.io/settings/account/api/auth-tokens/"
+    );
+  } else if (scopes.length > 0) {
+    const scopeArgs = scopes.map((s) => `--scope ${s}`).join(" ");
+    lines.push(
+      `Your token is missing the required scope(s) '${scopes.join("', '")}'.`,
+      `Re-authenticate with: sentry auth refresh ${scopeArgs}`
     );
   } else {
     lines.push(

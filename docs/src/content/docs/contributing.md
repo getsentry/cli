@@ -56,7 +56,7 @@ cli/
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
 │   │   ├── cli/         # defaults, feedback, fix, import, setup, upgrade
 │   │   ├── dashboard/   # add, create, delete, edit, list, restore, revisions, view
-│   │   ├── event/       # list, view
+│   │   ├── event/       # list, send, view
 │   │   ├── issue/       # archive, events, explain, list, merge, plan, resolve, unresolve, view
 │   │   ├── local/       # run, serve
 │   │   ├── log/         # list, view
