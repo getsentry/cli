@@ -77,15 +77,13 @@ export async function listAllMetricRulesForOrg(
     });
     all.push(...data);
     if (!nextCursor) {
-      break;
+      return all;
     }
     cursor = nextCursor;
   }
-  if (cursor) {
-    log.warn(
-      `Pagination limit reached for metric alert rules in ${orgSlug}. Results may be incomplete.`
-    );
-  }
+  log.warn(
+    `Pagination limit reached for metric alert rules in ${orgSlug}. Results may be incomplete.`
+  );
   return all;
 }
 

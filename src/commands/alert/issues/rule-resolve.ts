@@ -81,15 +81,13 @@ export async function listAllIssueRulesForTarget(
     );
     all.push(...data);
     if (!nextCursor) {
-      break;
+      return all;
     }
     cursor = nextCursor;
   }
-  if (cursor) {
-    log.warn(
-      `Pagination limit reached for issue alert rules in ${target.org}/${target.project}. Results may be incomplete.`
-    );
-  }
+  log.warn(
+    `Pagination limit reached for issue alert rules in ${target.org}/${target.project}. Results may be incomplete.`
+  );
   return all;
 }
 
