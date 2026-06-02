@@ -151,6 +151,34 @@ export type FetchResult<T> =
   | { success: false; error: Error };
 
 /**
+ * Distribute a global fetch budget across groups in deterministic order.
+ *
+ * By default, the returned quotas sum exactly to `limit`. When
+ * `minimumPerGroup` is true, every group receives at least one slot, so the
+ * sum can exceed `limit` if there are more groups than display slots. Use that
+ * mode only for first-page fan-out where display trimming can suppress unsafe
+ * cursor pagination.
+ */
+export function distributeFetchBudget(
+  limit: number,
+  groupCount: number,
+  options: { minimumPerGroup?: boolean } = {}
+): number[] {
+  if (groupCount <= 0) {
+    return [];
+  }
+
+  const total = Math.max(0, Math.floor(limit));
+  const base = Math.floor(total / groupCount);
+  const remainder = total % groupCount;
+  const minimum = options.minimumPerGroup ? 1 : 0;
+
+  return Array.from({ length: groupCount }, (_, i) =>
+    Math.max(minimum, base + (i < remainder ? 1 : 0))
+  );
+}
+
+/**
  * Trim an array to `limit` entries while guaranteeing at least one entry
  * per group (when possible).
  *

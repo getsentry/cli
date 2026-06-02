@@ -6,12 +6,14 @@
 
 import type { SentryContext } from "../../../context.js";
 import { deleteMetricAlertRule } from "../../../lib/api-client.js";
+import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { CommandOutput } from "../../../lib/formatters/output.js";
 import { logger } from "../../../lib/logger.js";
 import {
   buildDeleteCommand,
   confirmByTyping,
   isConfirmationBypassed,
+  requireExplicitTarget,
 } from "../../../lib/mutate-command.js";
 import { resolveOrgOptionalProjectFromArg } from "../../../lib/resolve-target.js";
 import { parseMetricRuleArg, resolveMetricAlertRule } from "./rule-resolve.js";
@@ -72,6 +74,11 @@ export const deleteCommand = buildDeleteCommand({
   async *func(this: SentryContext, flags: DeleteFlags, arg: string) {
     const { cwd } = this;
     const { ref, targetArg } = parseMetricRuleArg(arg, USAGE_HINT);
+    requireExplicitTarget(
+      parseOrgProjectArg(targetArg),
+      "Metric alert target",
+      USAGE_HINT
+    );
     const { org } = await resolveOrgOptionalProjectFromArg(
       targetArg,
       cwd,

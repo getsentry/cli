@@ -14,6 +14,7 @@ import {
   buildDeleteCommand,
   confirmByTyping,
   isConfirmationBypassed,
+  requireExplicitTarget,
 } from "../../../lib/mutate-command.js";
 import { resolveTargetsFromParsedArg } from "../../../lib/resolve-target.js";
 import { parseIssueRuleArg, resolveIssueAlertRule } from "./rule-resolve.js";
@@ -91,6 +92,7 @@ export const deleteCommand = buildDeleteCommand({
     const { cwd } = this;
     const { ref, targetArg } = parseIssueRuleArg(arg, USAGE_HINT);
     const parsed = parseOrgProjectArg(targetArg);
+    requireExplicitTarget(parsed, "Issue alert target", USAGE_HINT);
 
     const { targets } = await resolveTargetsFromParsedArg(parsed, {
       cwd,

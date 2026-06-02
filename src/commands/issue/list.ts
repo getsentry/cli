@@ -66,6 +66,7 @@ import {
 import { logger } from "../../lib/logger.js";
 import {
   dispatchOrgScopedList,
+  distributeFetchBudget,
   type FetchResult as FetchResultOf,
   jsonTransformListResult,
   type ListCommandMeta,
@@ -405,27 +406,40 @@ async function runPhase2(
   }
 ): Promise<void> {
   const { surplus, options } = context;
-  const extraQuota = Math.max(1, Math.ceil(surplus / expandableIndices.length));
+  const extraQuotas = distributeFetchBudget(surplus, expandableIndices.length);
+  const requests = expandableIndices
+    .map((targetIndex, allocationIndex) => ({
+      targetIndex,
+      limit: extraQuotas[allocationIndex] ?? 0,
+    }))
+    .filter((request) => request.limit > 0);
+
+  if (requests.length === 0) {
+    return;
+  }
 
   const phase2 = await Promise.all(
-    expandableIndices.map((i) => {
+    requests.map(({ targetIndex, limit }) => {
       // expandableIndices only contains indices where r.success && r.data.nextCursor
       // biome-ignore lint/style/noNonNullAssertion: guaranteed by expandableIndices filter
-      const target = targets[i]!;
-      const r = phase1[i] as { success: true; data: IssueListFetchResult };
+      const target = targets[targetIndex]!;
+      const r = phase1[targetIndex] as {
+        success: true;
+        data: IssueListFetchResult;
+      };
       // biome-ignore lint/style/noNonNullAssertion: same guarantee
       const cursor = r.data.nextCursor!;
       return fetchIssuesForTarget(target, {
         ...options,
-        limit: extraQuota,
+        limit,
         startCursor: cursor,
       });
     })
   );
 
-  for (let j = 0; j < expandableIndices.length; j++) {
-    // biome-ignore lint/style/noNonNullAssertion: j is within expandableIndices bounds
-    const i = expandableIndices[j]!;
+  for (let j = 0; j < requests.length; j++) {
+    // biome-ignore lint/style/noNonNullAssertion: j is within requests bounds
+    const i = requests[j]!.targetIndex;
     const p2 = phase2[j];
     const p1 = phase1[i];
     if (p1?.success && p2?.success) {
@@ -460,7 +474,7 @@ type BudgetFetchOptions = {
  * Fetch issues from multiple targets within a global limit budget.
  *
  * Uses a two-phase strategy:
- * 1. Phase 1: distribute `ceil(limit / numTargets)` quota per target, fetch in parallel.
+ * 1. Phase 1: distribute the global limit across targets and fetch in parallel.
  * 2. Phase 2: if total fetched < limit and some targets have more, redistribute
  *    the surplus among those expandable targets and fetch one more page each.
  *
@@ -478,14 +492,16 @@ async function fetchWithBudget(
   onProgress: (fetched: number) => void
 ): Promise<{ results: FetchResult[]; hasMore: boolean }> {
   const { limit, startCursors } = options;
-  const quota = Math.max(1, Math.ceil(limit / targets.length));
+  const quotas = distributeFetchBudget(limit, targets.length, {
+    minimumPerGroup: true,
+  });
 
   // Phase 1: fetch quota from each target in parallel
   const phase1 = await Promise.all(
-    targets.map((t) =>
+    targets.map((t, i) =>
       fetchIssuesForTarget(t, {
         ...options,
-        limit: quota,
+        limit: quotas[i] ?? 1,
         startCursor: startCursors?.get(`${t.org}/${t.project}`),
       })
     )
@@ -511,13 +527,20 @@ async function fetchWithBudget(
   const expandableIndices: number[] = [];
   for (let i = 0; i < phase1.length; i++) {
     const r = phase1[i];
-    if (r?.success && r.data.issues.length >= quota && r.data.nextCursor) {
+    if (
+      r?.success &&
+      r.data.issues.length >= (quotas[i] ?? 1) &&
+      r.data.nextCursor
+    ) {
       expandableIndices.push(i);
     }
   }
 
   if (expandableIndices.length === 0) {
-    return { results: phase1, hasMore: false };
+    return {
+      results: phase1,
+      hasMore: phase1.some((r) => r.success && r.data.hasMore),
+    };
   }
 
   await runPhase2(targets, phase1, expandableIndices, { surplus, options });
@@ -1001,41 +1024,6 @@ async function handleResolvedTargets(
       )
   );
 
-  // Store compound cursor so `-c next` can resume from each project's position.
-  // Cursors are stored in the same sorted order as buildMultiTargetContextKey.
-  const cursorValues: (string | null)[] = sortedTargetKeys.map((key) => {
-    // Exhausted targets from previous page stay exhausted
-    if (exhaustedTargets.has(key)) {
-      return null;
-    }
-    const result = results.find((r) => {
-      if (!r.success) {
-        return false;
-      }
-      return `${r.data.target.org}/${r.data.target.project}` === key;
-    });
-    if (result?.success) {
-      // Successful fetch: null = exhausted (no more pages), string = has more
-      return result.data.nextCursor ?? null;
-    }
-    // Target failed this fetch — preserve the cursor it was given so the next
-    // `-c next` retries from the same position rather than skipping it entirely.
-    // If no start cursor was given (first-page failure), null means not retried
-    // via cursor; the user can run without -c next to restart all projects.
-    return startCursors.get(key) ?? null;
-  });
-  const hasAnyCursor = cursorValues.some((c) => c !== null);
-  const compoundNextCursor = hasAnyCursor
-    ? encodeCompoundCursor(cursorValues)
-    : undefined;
-  advancePaginationState(
-    PAGINATION_KEY,
-    contextKey,
-    direction,
-    compoundNextCursor
-  );
-  const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
-
   const validResults: IssueListFetchResult[] = [];
   const failures: { target: ResolvedTarget; error: Error }[] = [];
 
@@ -1111,8 +1099,42 @@ async function handleResolvedTargets(
     flags.limit
   );
   const trimmed = issuesWithOptions.length < allIssuesWithOptions.length;
+  // Store compound cursor only after display trimming is known. If rows were
+  // fetched but not displayed, a stored next cursor would skip those rows.
+  const cursorValues: (string | null)[] = sortedTargetKeys.map((key) => {
+    // Exhausted targets from previous page stay exhausted
+    if (exhaustedTargets.has(key)) {
+      return null;
+    }
+    const result = results.find((r) => {
+      if (!r.success) {
+        return false;
+      }
+      return `${r.data.target.org}/${r.data.target.project}` === key;
+    });
+    if (result?.success) {
+      // Successful fetch: null = exhausted (no more pages), string = has more
+      return result.data.nextCursor ?? null;
+    }
+    // Target failed this fetch — preserve the cursor it was given so the next
+    // `-c next` retries from the same position rather than skipping it entirely.
+    // If no start cursor was given (first-page failure), null means not retried
+    // via cursor; the user can run without -c next to restart all projects.
+    return startCursors.get(key) ?? null;
+  });
+  const hasAnyCursor = cursorValues.some((c) => c !== null);
   const hasMoreToShow = hasMore || hasAnyCursor || trimmed;
-  const canPaginate = hasAnyCursor;
+  const canPaginate = hasAnyCursor && !trimmed;
+  const compoundNextCursor = canPaginate
+    ? encodeCompoundCursor(cursorValues)
+    : undefined;
+  advancePaginationState(
+    PAGINATION_KEY,
+    contextKey,
+    direction,
+    compoundNextCursor
+  );
+  const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
   const allIssues = issuesWithOptions.map((i) => i.issue);
 

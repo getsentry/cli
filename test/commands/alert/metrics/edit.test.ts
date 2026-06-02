@@ -133,4 +133,103 @@ describe("alert metrics edit", () => {
       triggers: [{ alertThreshold: 200, actions: [{ id: "notify" }] }],
     });
   });
+
+  test("does not validate unedited API fields when renaming existing rule", async () => {
+    const context = createContext();
+    resolveSpy.mockResolvedValue({ org: "test-org" });
+    getRuleSpy.mockResolvedValue({
+      ...sampleRule,
+      query: "",
+    });
+    getDocSpy.mockResolvedValue({
+      id: "9",
+      name: "Metric Rule",
+      status: 0,
+      query: "",
+      aggregate: "count()",
+      dataset: "errors",
+      timeWindow: 5,
+      triggers: [{ alertThreshold: 100 }],
+    });
+    putSpy.mockResolvedValue({
+      id: "9",
+      name: "Metric Rule Renamed",
+      status: 0,
+      query: "",
+      aggregate: "count()",
+      dataset: "errors",
+      timeWindow: 5,
+      triggers: [{ alertThreshold: 100 }],
+    });
+    const func = (await editCommand.loader()) as unknown as (
+      this: unknown,
+      flags: EditFlags,
+      arg: string
+    ) => Promise<void>;
+
+    await func.call(
+      context,
+      {
+        name: "Metric Rule Renamed",
+        json: true,
+      },
+      "test-org/9"
+    );
+
+    expect(putSpy).toHaveBeenCalledWith(
+      "test-org",
+      "9",
+      expect.objectContaining({
+        name: "Metric Rule Renamed",
+        query: "",
+        triggers: [{ alertThreshold: 100 }],
+      })
+    );
+  });
+
+  test("allows explicitly clearing query to match all events", async () => {
+    const context = createContext();
+    resolveSpy.mockResolvedValue({ org: "test-org" });
+    getRuleSpy.mockResolvedValue(sampleRule);
+    getDocSpy.mockResolvedValue({
+      id: "9",
+      name: "Metric Rule",
+      status: 0,
+      query: "event.type:error",
+      aggregate: "count()",
+      dataset: "errors",
+      timeWindow: 5,
+      triggers: [{ alertThreshold: 100, actions: [{ id: "notify" }] }],
+    });
+    putSpy.mockResolvedValue({
+      id: "9",
+      name: "Metric Rule",
+      status: 0,
+      query: "",
+      aggregate: "count()",
+      dataset: "errors",
+      timeWindow: 5,
+      triggers: [{ alertThreshold: 100, actions: [{ id: "notify" }] }],
+    });
+    const func = (await editCommand.loader()) as unknown as (
+      this: unknown,
+      flags: EditFlags,
+      arg: string
+    ) => Promise<void>;
+
+    await func.call(
+      context,
+      {
+        query: "",
+        json: true,
+      },
+      "test-org/9"
+    );
+
+    expect(putSpy).toHaveBeenCalledWith(
+      "test-org",
+      "9",
+      expect.objectContaining({ query: "" })
+    );
+  });
 });

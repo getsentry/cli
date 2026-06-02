@@ -99,4 +99,20 @@ describe("alert metrics delete", () => {
       "Deleted metric alert rule"
     );
   });
+
+  test.each([
+    ["--yes", { ...defaultFlags, yes: true }],
+    ["--dry-run", { ...defaultFlags, "dry-run": true }],
+  ])("rejects bare rule id with %s before resolving target", async (_, flags) => {
+    const { context } = createContext();
+    const func = await deleteCommand.loader();
+
+    await expect(func.call(context, flags, "9")).rejects.toThrow(
+      "Auto-detection is disabled for destructive operations"
+    );
+
+    expect(resolveSpy).not.toHaveBeenCalled();
+    expect(getRuleSpy).not.toHaveBeenCalled();
+    expect(deleteRuleSpy).not.toHaveBeenCalled();
+  });
 });

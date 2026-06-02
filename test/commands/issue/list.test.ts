@@ -1319,6 +1319,105 @@ describe("issue list: collapse parameter optimization", () => {
   });
 });
 
+describe("issue list: multi-target cursor-safe budget", () => {
+  const findProjectsBySlugMock = vi.mocked(projectsApi.findProjectsBySlug);
+
+  function mockThreeProjectSearch() {
+    findProjectsBySlugMock.mockResolvedValue({
+      projects: [
+        { id: "1", slug: "myproj", name: "My Project", orgSlug: "org-one" },
+        { id: "2", slug: "myproj", name: "My Project", orgSlug: "org-two" },
+        {
+          id: "3",
+          slug: "myproj",
+          name: "My Project",
+          orgSlug: "org-three",
+        },
+      ],
+      orgs: [],
+    });
+  }
+
+  function issue(org: string, index: number) {
+    return mockIssue({
+      id: `${org}-${index}`,
+      shortId: `${org.toUpperCase()}-${index}`,
+      project: { slug: "myproj" },
+    });
+  }
+
+  beforeEach(() => {
+    listIssuesAllPagesMock.mockReset();
+    resolveCursorMock.mockReset();
+    advancePaginationStateMock.mockReset();
+    findProjectsBySlugMock.mockReset();
+    resolveCursorMock.mockReturnValue({
+      cursor: undefined,
+      direction: "first",
+    });
+  });
+
+  test("distributes multi-project budget exactly without over-fetching", async () => {
+    mockThreeProjectSearch();
+    const limitByOrg = new Map<string, number>();
+    listIssuesAllPagesMock.mockImplementation(
+      async (org, _project, options) => {
+        const limit = Number(options.limit);
+        limitByOrg.set(org, limit);
+        return {
+          issues: Array.from({ length: limit }, (_, i) => issue(org, i + 1)),
+          nextCursor: `${org}-next:0:0`,
+        };
+      }
+    );
+
+    const { context, stdout } = createContext();
+    await func.call(
+      context,
+      { limit: 10, sort: "date", period: parsePeriod("90d"), json: true },
+      "myproj"
+    );
+
+    const output = JSON.parse(stdout.output);
+    expect(output.data).toHaveLength(10);
+    expect(Object.fromEntries(limitByOrg)).toEqual({
+      "org-one": 4,
+      "org-two": 3,
+      "org-three": 3,
+    });
+  });
+
+  test("does not save a next cursor when fetched rows were trimmed", async () => {
+    mockThreeProjectSearch();
+    listIssuesAllPagesMock.mockImplementation(
+      async (org, _project, options) => {
+        const limit = Number(options.limit);
+        return {
+          issues: Array.from({ length: limit }, (_, i) => issue(org, i + 1)),
+          nextCursor: `${org}-next:0:0`,
+        };
+      }
+    );
+
+    const { context, stdout } = createContext();
+    await func.call(
+      context,
+      { limit: 2, sort: "date", period: parsePeriod("90d"), json: true },
+      "myproj"
+    );
+
+    const output = JSON.parse(stdout.output);
+    expect(output.data).toHaveLength(2);
+    expect(output.hasMore).toBe(true);
+    expect(advancePaginationStateMock).toHaveBeenCalledWith(
+      "issue-list",
+      expect.any(String),
+      "first",
+      undefined
+    );
+  });
+});
+
 // ---------------------------------------------------------------------------
 // sanitizeQuery — tests moved to test/lib/search-query.test.ts
 // ---------------------------------------------------------------------------

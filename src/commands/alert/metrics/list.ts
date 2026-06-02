@@ -46,6 +46,7 @@ import {
 import { logger } from "../../../lib/logger.js";
 import {
   dispatchOrgScopedList,
+  distributeFetchBudget,
   type FetchResult as FetchResultOf,
   jsonTransformListResult,
   type ListCommandMeta,
@@ -188,22 +189,35 @@ async function runPhase2(
   expandableIndices: number[],
   surplus: number
 ): Promise<void> {
-  const extraQuota = Math.max(1, Math.ceil(surplus / expandableIndices.length));
+  const extraQuotas = distributeFetchBudget(surplus, expandableIndices.length);
+  const requests = expandableIndices
+    .map((orgIndex, allocationIndex) => ({
+      orgIndex,
+      limit: extraQuotas[allocationIndex] ?? 0,
+    }))
+    .filter((request) => request.limit > 0);
+
+  if (requests.length === 0) {
+    return;
+  }
 
   const phase2 = await Promise.all(
-    expandableIndices.map((i) => {
+    requests.map(({ orgIndex, limit }) => {
       // biome-ignore lint/style/noNonNullAssertion: guaranteed by expandableIndices filter
-      const org = orgs[i]!;
-      const r = phase1[i] as { success: true; data: MetricRuleFetchResult };
+      const org = orgs[orgIndex]!;
+      const r = phase1[orgIndex] as {
+        success: true;
+        data: MetricRuleFetchResult;
+      };
       // biome-ignore lint/style/noNonNullAssertion: same guarantee
       const cursor = r.data.nextCursor!;
-      return fetchRulesForOrg(org, { limit: extraQuota, startCursor: cursor });
+      return fetchRulesForOrg(org, { limit, startCursor: cursor });
     })
   );
 
-  for (let j = 0; j < expandableIndices.length; j++) {
-    // biome-ignore lint/style/noNonNullAssertion: j is within expandableIndices bounds
-    const i = expandableIndices[j]!;
+  for (let j = 0; j < requests.length; j++) {
+    // biome-ignore lint/style/noNonNullAssertion: j is within requests bounds
+    const i = requests[j]!.orgIndex;
     const p2 = phase2[j];
     const p1 = phase1[i];
     if (p1?.success && p2?.success) {
@@ -231,12 +245,14 @@ async function fetchWithBudget(
   onProgress: (fetched: number) => void
 ): Promise<{ results: FetchResult[]; hasMore: boolean }> {
   const { limit, startCursors } = options;
-  const quota = Math.max(1, Math.ceil(limit / orgs.length));
+  const quotas = distributeFetchBudget(limit, orgs.length, {
+    minimumPerGroup: true,
+  });
 
   const phase1 = await Promise.all(
-    orgs.map((org) =>
+    orgs.map((org, i) =>
       fetchRulesForOrg(org, {
-        limit: quota,
+        limit: quotas[i] ?? 1,
         startCursor: startCursors?.get(org),
       })
     )
@@ -261,7 +277,11 @@ async function fetchWithBudget(
   const expandableIndices: number[] = [];
   for (let i = 0; i < phase1.length; i++) {
     const r = phase1[i];
-    if (r?.success && r.data.rules.length >= quota && r.data.nextCursor) {
+    if (
+      r?.success &&
+      r.data.rules.length >= (quotas[i] ?? 1) &&
+      r.data.nextCursor
+    ) {
       expandableIndices.push(i);
     }
   }
@@ -400,31 +420,6 @@ async function handleResolvedOrgs(
       )
   );
 
-  const cursorValues: (string | null)[] = sortedOrgKeys.map((key) => {
-    if (exhaustedOrgs.has(key)) {
-      return null;
-    }
-    const result = results.find((r) => r.success && r.data.orgSlug === key);
-    if (result?.success) {
-      return result.data.nextCursor ?? null;
-    }
-    // Preserve the previous cursor so the org is retried on the next page.
-    // First-page failures (no prior cursor) return null to mark the org
-    // as exhausted — retrying with a sentinel would loop infinitely.
-    return startCursors.get(key) ?? null;
-  });
-  const hasAnyCursor = cursorValues.some((c) => c !== null);
-  const compoundNextCursor = hasAnyCursor
-    ? encodeCompoundCursor(cursorValues)
-    : undefined;
-  advancePaginationState(
-    PAGINATION_KEY,
-    contextKey,
-    direction,
-    compoundNextCursor
-  );
-  const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
-
   const validResults: MetricRuleFetchResult[] = [];
   const failures: { orgSlug: string; error: Error }[] = [];
 
@@ -469,8 +464,32 @@ async function handleResolvedOrgs(
 
   const displayRows = trimWithOrgGuarantee(filteredRows, flags.limit);
   const trimmed = displayRows.length < filteredRows.length;
+  const cursorValues: (string | null)[] = sortedOrgKeys.map((key) => {
+    if (exhaustedOrgs.has(key)) {
+      return null;
+    }
+    const result = results.find((r) => r.success && r.data.orgSlug === key);
+    if (result?.success) {
+      return result.data.nextCursor ?? null;
+    }
+    // Preserve the previous cursor so the org is retried on the next page.
+    // First-page failures (no prior cursor) return null to mark the org
+    // as exhausted — retrying with a sentinel would loop infinitely.
+    return startCursors.get(key) ?? null;
+  });
+  const hasAnyCursor = cursorValues.some((c) => c !== null);
   const hasMoreToShow = hasMore || hasAnyCursor || trimmed;
-  const canPaginate = hasAnyCursor;
+  const canPaginate = hasAnyCursor && !trimmed;
+  const compoundNextCursor = canPaginate
+    ? encodeCompoundCursor(cursorValues)
+    : undefined;
+  advancePaginationState(
+    PAGINATION_KEY,
+    contextKey,
+    direction,
+    compoundNextCursor
+  );
+  const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
   const allRules = displayRows.map((r) => r.rule);
 

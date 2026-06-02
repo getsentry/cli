@@ -83,9 +83,6 @@ function applyMetricCoreFields(
     body.status = statusToMetricValue(flags.status);
   }
   if (flags.query !== undefined) {
-    if (!flags.query.trim()) {
-      throw new ValidationError("query cannot be empty.", "query");
-    }
     body.query = flags.query;
   }
   if (flags.aggregate !== undefined) {
@@ -126,20 +123,28 @@ function applyMetricOptionalFields(
   return body;
 }
 
-function validateMetricBody(body: Record<string, unknown>): void {
-  validateMetricTriggers(
-    body.triggers as Record<string, unknown>[] | undefined
-  );
-  if (body.dataset !== undefined) {
+function validateMetricBody(
+  body: Record<string, unknown>,
+  flags: EditFlags
+): void {
+  if (flags.trigger !== undefined) {
+    validateMetricTriggers(
+      body.triggers as Record<string, unknown>[] | undefined
+    );
+  }
+  if (flags.dataset !== undefined) {
     validateMetricDataset(String(body.dataset));
   }
-  if (body.timeWindow !== undefined) {
+  if (flags["time-window"] !== undefined) {
     validateMetricTimeWindow(Number(body.timeWindow));
   }
-  if (typeof body.query !== "string" || body.query.trim() === "") {
-    throw new ValidationError("query must be present and non-empty.", "query");
+  if (flags.query !== undefined && typeof body.query !== "string") {
+    throw new ValidationError("query must be a string.", "query");
   }
-  if (typeof body.aggregate !== "string" || body.aggregate.trim() === "") {
+  if (
+    flags.aggregate !== undefined &&
+    (typeof body.aggregate !== "string" || body.aggregate.trim() === "")
+  ) {
     throw new ValidationError(
       "aggregate must be present and non-empty.",
       "aggregate"
@@ -267,7 +272,7 @@ export const editCommand = buildCommand({
     } as Record<string, unknown>;
     applyMetricCoreFields(body, flags);
     applyMetricOptionalFields(body, flags);
-    validateMetricBody(body);
+    validateMetricBody(body, flags);
     const updated = await putMetricAlertRule(orgSlug, rule.id, body);
     yield new CommandOutput({
       ...updated,
