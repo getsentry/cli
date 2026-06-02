@@ -9,6 +9,7 @@ import {
   parseMetricRuleArg,
   resolveMetricAlertRule,
 } from "./rule-resolve.js";
+import { metricAlertStatusLabel } from "./status.js";
 
 const USAGE_HINT = "sentry alert metrics view <org>/<rule-id-or-name>";
 
@@ -22,7 +23,7 @@ type MetricAlertViewResult = MetricRuleResolution;
 
 function formatMetricAlertView(data: MetricRuleResolution): string {
   const { orgSlug, rule } = data;
-  const status = rule.status === 0 ? "active" : "disabled";
+  const status = metricAlertStatusLabel(rule.status);
   return [
     `Metric alert rule in ${orgSlug}:`,
     "",

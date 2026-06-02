@@ -344,10 +344,10 @@ Manage Sentry alert rules
 
 - `sentry alert issues list <org/project>` — List issue alert rules
 - `sentry alert issues view <org/project/rule-id-or-name>` — View an issue alert rule
-- `sentry alert issues create <org/project>` — Create an issue alert rule
+- `sentry alert issues create <target>` — Create an issue alert rule
 - `sentry alert issues delete <org/project/rule-id-or-name>` — Delete an issue alert rule
 - `sentry alert issues edit <org/project/rule-id-or-name>` — Edit an issue alert rule
-- `sentry alert metrics list <org/project>` — List metric alert rules
+- `sentry alert metrics list <target>` — List metric alert rules
 - `sentry alert metrics view <org/rule-id-or-name>` — View a metric alert rule
 - `sentry alert metrics create <org>` — Create a metric alert rule
 - `sentry alert metrics delete <org/rule-id-or-name>` — Delete a metric alert rule

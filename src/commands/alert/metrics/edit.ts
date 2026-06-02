@@ -23,6 +23,7 @@ import {
   validateMetricTriggers,
 } from "../mutation-utils.js";
 import { parseMetricRuleArg, resolveMetricAlertRule } from "./rule-resolve.js";
+import { metricAlertStatusLabel } from "./status.js";
 
 const USAGE_HINT =
   "sentry alert metrics edit <org>/<rule-id-or-name> --name <n> | --status active|disabled";
@@ -272,8 +273,7 @@ export const editCommand = buildCommand({
       ...updated,
       org: orgSlug,
       id: String(updated.id ?? rule.id),
-      status:
-        updated.status === 1 || updated.status === "1" ? "disabled" : "active",
+      status: metricAlertStatusLabel(updated.status),
     } satisfies EditResult);
   },
 });

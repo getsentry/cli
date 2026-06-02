@@ -36,8 +36,8 @@ export type IssueAlertRule = {
 export type MetricAlertRule = {
   id: string;
   name: string;
-  /** 0 = active, 1 = disabled */
-  status: number;
+  /** 0/"0"/absent = active, 1/"1" = disabled */
+  status?: number | string;
   query: string;
   aggregate: string;
   dataset: string;

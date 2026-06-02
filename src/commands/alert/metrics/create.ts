@@ -18,6 +18,7 @@ import {
   validateMetricTimeWindow,
   validateMetricTriggers,
 } from "../mutation-utils.js";
+import { metricAlertStatusLabel } from "./status.js";
 
 type CreateFlags = {
   readonly name: string;
@@ -197,13 +198,11 @@ export const createCommand = buildCommand({
     }
 
     const created = await createMetricAlertRule(orgSlug, body);
-    const status: "active" | "disabled" =
-      created.status === 1 || created.status === "1" ? "disabled" : "active";
     yield new CommandOutput({
       org: orgSlug,
       id: String(created.id ?? ""),
       name: String(created.name ?? flags.name),
-      status,
+      status: metricAlertStatusLabel(created.status),
     } satisfies CreateResult);
   },
 });

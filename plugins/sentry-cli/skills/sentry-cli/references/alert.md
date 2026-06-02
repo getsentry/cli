@@ -49,7 +49,7 @@ sentry alert issues view my-org/my-project/12345
 sentry alert issues view my-org/my-project/"Error Spike"
 ```
 
-### `sentry alert issues create <org/project>`
+### `sentry alert issues create <target>`
 
 Create an issue alert rule
 
@@ -88,9 +88,6 @@ Delete an issue alert rule
 **Examples:**
 
 ```bash
-# Edit issue alert name/status
-sentry alert issues edit my-org/my-project/12345 --name "Prod Error Spike" --status disabled
-
 # Delete with preview
 sentry alert issues delete my-org/my-project/12345 --dry-run
 ```
@@ -111,7 +108,14 @@ Edit an issue alert rule
 - `--filter-match <value> - Filter match mode: all or any`
 - `--owner <value> - Owner value (pass empty string to clear)`
 
-### `sentry alert metrics list <org/project>`
+**Examples:**
+
+```bash
+# Edit issue alert name/status
+sentry alert issues edit my-org/my-project/12345 --name "Prod Error Spike" --status disabled
+```
+
+### `sentry alert metrics list <target>`
 
 List metric alert rules
 
@@ -187,9 +191,6 @@ Delete a metric alert rule
 **Examples:**
 
 ```bash
-# Edit metric alert query/window
-sentry alert metrics edit my-org/67890 --query "environment:prod event.type:error" --time-window 15
-
 # Delete without prompt
 sentry alert metrics delete my-org/67890 --yes
 ```
@@ -209,5 +210,12 @@ Edit a metric alert rule
 - `-p, --project <value>... - Project slug filter (repeatable or comma-separated)`
 - `--environment <value> - Environment value (pass empty string to clear)`
 - `--owner <value> - Owner value (pass empty string to clear)`
+
+**Examples:**
+
+```bash
+# Edit metric alert query/window
+sentry alert metrics edit my-org/67890 --query "environment:prod event.type:error" --time-window 15
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

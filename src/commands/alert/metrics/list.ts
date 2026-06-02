@@ -39,7 +39,6 @@ import {
   buildListCommand,
   buildListLimitFlag,
   LIST_BASE_ALIASES,
-  LIST_TARGET_POSITIONAL,
   paginationHint,
   parseCursorFlag,
   targetPatternExplanation,
@@ -61,6 +60,7 @@ import {
 } from "../../../lib/resolve-target.js";
 import { buildMetricAlertsUrl } from "../../../lib/sentry-urls.js";
 import type { Writer } from "../../../types/index.js";
+import { metricAlertStatusLabel } from "./status.js";
 
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "alert-metrics-list";
@@ -68,6 +68,18 @@ export const PAGINATION_KEY = "alert-metrics-list";
 const USAGE_HINT = "sentry alert metrics list <org>/";
 
 const MAX_LIMIT = 1000;
+
+const METRIC_ALERT_TARGET_POSITIONAL = {
+  kind: "tuple" as const,
+  parameters: [
+    {
+      placeholder: "target",
+      brief: "<org>/, <org>/<project> (project ignored), or <project> (search)",
+      parse: String,
+      optional: true as const,
+    },
+  ],
+};
 
 type ListFlags = {
   readonly web: boolean;
@@ -509,11 +521,11 @@ async function handleResolvedOrgs(
 
 // Human output
 
-/** Format metric alert status: 0 = active, 1 = disabled */
-function formatMetricStatus(status: number): string {
-  return status === 0
-    ? colorTag("green", "active")
-    : colorTag("muted", "disabled");
+function formatMetricStatus(status: unknown): string {
+  const label = metricAlertStatusLabel(status);
+  return label === "active"
+    ? colorTag("green", label)
+    : colorTag("muted", label);
 }
 
 function formatMetricAlertListHuman(result: MetricAlertListResult): string {
@@ -594,7 +606,7 @@ export const listCommand = buildListCommand("alert", {
     jsonTransform: jsonTransformMetricAlertList,
   },
   parameters: {
-    positional: LIST_TARGET_POSITIONAL,
+    positional: METRIC_ALERT_TARGET_POSITIONAL,
     flags: {
       web: {
         kind: "boolean",

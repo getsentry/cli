@@ -33,12 +33,16 @@ sentry alert issues view my-org/my-project/12345
 sentry alert issues view my-org/my-project/"Error Spike"
 ```
 
-### Edit and delete an issue alert rule
+### Edit an issue alert rule
 
 ```bash
 # Edit issue alert name/status
 sentry alert issues edit my-org/my-project/12345 --name "Prod Error Spike" --status disabled
+```
 
+### Delete an issue alert rule
+
+```bash
 # Delete with preview
 sentry alert issues delete my-org/my-project/12345 --dry-run
 ```
@@ -73,12 +77,16 @@ sentry alert metrics view my-org/67890
 sentry alert metrics view my-org/"P95 latency alert"
 ```
 
-### Edit and delete a metric alert rule
+### Edit a metric alert rule
 
 ```bash
 # Edit metric alert query/window
 sentry alert metrics edit my-org/67890 --query "environment:prod event.type:error" --time-window 15
+```
 
+### Delete a metric alert rule
+
+```bash
 # Delete without prompt
 sentry alert metrics delete my-org/67890 --yes
 ```

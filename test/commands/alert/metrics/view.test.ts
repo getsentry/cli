@@ -8,7 +8,6 @@ import type { MetricAlertRule } from "../../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../../src/lib/api-client.js";
 import { ApiError, ValidationError } from "../../../../src/lib/errors.js";
-import type { ResolvedTarget } from "../../../../src/lib/resolve-target.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../../src/lib/resolve-target.js";
 import { useTestConfigDir } from "../../../helpers.js";
@@ -16,13 +15,6 @@ import { useTestConfigDir } from "../../../helpers.js";
 const getConfigDir = useTestConfigDir("test-alert-metrics-view-", {
   isolateProjectRoot: true,
 });
-
-const sampleTarget: ResolvedTarget = {
-  org: "test-org",
-  project: "ignored",
-  orgDisplay: "test-org",
-  projectDisplay: "ignored",
-};
 
 const baseRule: MetricAlertRule = {
   id: "1",
@@ -60,7 +52,7 @@ describe("alert metrics view", () => {
   beforeEach(() => {
     getRuleSpy = vi.spyOn(apiClient, "getMetricAlertRule");
     listRulesSpy = vi.spyOn(apiClient, "listMetricAlertsPaginated");
-    resolveSpy = vi.spyOn(resolveTarget, "resolveTargetsFromParsedArg");
+    resolveSpy = vi.spyOn(resolveTarget, "resolveOrgOptionalProjectFromArg");
   });
 
   afterEach(() => {
@@ -85,7 +77,7 @@ describe("alert metrics view", () => {
 
   test("numeric id: propagates non-404 API errors (e.g. 500)", async () => {
     const { context } = createContext();
-    resolveSpy.mockResolvedValue({ targets: [sampleTarget] });
+    resolveSpy.mockResolvedValue({ org: "test-org" });
     getRuleSpy.mockRejectedValue(new ApiError("Server error", 500, "nope"));
     const func = (await viewCommand.loader()) as unknown as (
       this: unknown,
@@ -100,7 +92,7 @@ describe("alert metrics view", () => {
 
   test("name: no exact match with suggestions returns ValidationError with Did you mean", async () => {
     const { context, stdoutWrite } = createContext();
-    resolveSpy.mockResolvedValue({ targets: [sampleTarget] });
+    resolveSpy.mockResolvedValue({ org: "test-org" });
     listRulesSpy.mockResolvedValue({
       data: [baseRule],
       nextCursor: undefined,

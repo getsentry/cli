@@ -19,7 +19,7 @@ import {
 } from "../mutation-utils.js";
 
 const USAGE_HINT =
-  "sentry alert issues create <org>/<project> --name <name> --condition <json> --action <json> --action-match all|any";
+  "sentry alert issues create <target> --name <name> --condition <json> --action <json> --action-match all|any";
 
 type CreateFlags = {
   readonly name: string;
@@ -57,7 +57,9 @@ export const createCommand = buildCommand({
   docs: {
     brief: "Create an issue alert rule",
     fullDescription:
-      "Create a project-scoped issue alert rule.\n\n" +
+      "Create a project-scoped issue alert rule. The target may be an explicit " +
+      "<org>/<project>, an auto-detected project, or a bare project search when " +
+      "it resolves to exactly one project.\n\n" +
       "Required fields:\n" +
       "  --name, --condition (>=1), --action (>=1), --action-match all|any\n\n" +
       "Optional fields:\n" +
@@ -81,9 +83,11 @@ export const createCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "org/project",
-          brief: "Target organization/project",
+          placeholder: "target",
+          brief:
+            "<org>/<project>, auto-detected project, or <project> (search)",
           parse: String,
+          optional: true as const,
         },
       ],
     },
@@ -153,7 +157,11 @@ export const createCommand = buildCommand({
       m: "action-match",
     },
   },
-  async *func(this: SentryContext, flags: CreateFlags, arg: string) {
+  async *func(
+    this: SentryContext,
+    flags: CreateFlags,
+    arg: string | undefined
+  ) {
     const { cwd } = this;
     if (!flags.name.trim()) {
       throw new ValidationError("Rule name cannot be empty.", "name");
@@ -187,7 +195,7 @@ export const createCommand = buildCommand({
     }
     if (targets.length !== 1) {
       throw new ValidationError(
-        "Provide a single explicit org/project target for create.",
+        "Provide a target that resolves to exactly one project for create.",
         "target"
       );
     }

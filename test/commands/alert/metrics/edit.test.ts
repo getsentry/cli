@@ -4,7 +4,6 @@ import type { MetricAlertRule } from "../../../../src/lib/api-client.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../../../src/lib/api-client.js";
 import { ValidationError } from "../../../../src/lib/errors.js";
-import type { ResolvedTarget } from "../../../../src/lib/resolve-target.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../../src/lib/resolve-target.js";
 import { useTestConfigDir } from "../../../helpers.js";
@@ -12,13 +11,6 @@ import { useTestConfigDir } from "../../../helpers.js";
 const getConfigDir = useTestConfigDir("test-alert-metrics-edit-", {
   isolateProjectRoot: true,
 });
-
-const sampleTarget: ResolvedTarget = {
-  org: "test-org",
-  project: "ignored",
-  orgDisplay: "test-org",
-  projectDisplay: "ignored",
-};
 
 const sampleRule: MetricAlertRule = {
   id: "9",
@@ -63,7 +55,7 @@ describe("alert metrics edit", () => {
     getRuleSpy = vi.spyOn(apiClient, "getMetricAlertRule");
     getDocSpy = vi.spyOn(apiClient, "getMetricAlertRuleDocument");
     putSpy = vi.spyOn(apiClient, "putMetricAlertRule");
-    resolveSpy = vi.spyOn(resolveTarget, "resolveTargetsFromParsedArg");
+    resolveSpy = vi.spyOn(resolveTarget, "resolveOrgOptionalProjectFromArg");
   });
 
   afterEach(() => {
@@ -88,7 +80,7 @@ describe("alert metrics edit", () => {
 
   test("merges advanced fields and validates trigger payload", async () => {
     const context = createContext();
-    resolveSpy.mockResolvedValue({ targets: [sampleTarget] });
+    resolveSpy.mockResolvedValue({ org: "test-org" });
     getRuleSpy.mockResolvedValue(sampleRule);
     getDocSpy.mockResolvedValue({
       id: "9",
