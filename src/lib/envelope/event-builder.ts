@@ -90,8 +90,8 @@ export function parseUserFields(pairs: string[]): User {
  * Throws ValidationError for non-empty strings that cannot be parsed.
  */
 function parseTimestamp(ts: string | undefined): number | undefined {
-  if (!ts) {
-    return;
+  if (!ts || ts.trim().length === 0) {
+    return undefined;
   }
   // Unix numeric
   const num = Number(ts);
