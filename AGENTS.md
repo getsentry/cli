@@ -105,132 +105,30 @@ const result = execSync("id -u username", { encoding: "utf-8", stdio: ["pipe", "
 
 ## Architecture
 
-```
-cli/
-├── src/
-│   ├── bin.ts              # Entry point
-│   ├── app.ts              # Stricli application setup
-│   ├── context.ts          # Dependency injection context
-│   ├── commands/           # CLI commands
-│   │   ├── auth/           # login, logout, refresh, status, token, whoami
-│   │   ├── cli/            # defaults, feedback, fix, setup, upgrade
-│   │   ├── dashboard/      # list, view, create, widget (add, edit, delete)
-│   │   ├── event/          # list, view
-│   │   ├── issue/          # list, view, events, explain, plan, resolve, unresolve, merge
-│   │   ├── log/            # list, view
-│   │   ├── org/            # list, view
-│   │   ├── project/        # list, view, create, delete
-│   │   ├── release/        # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
-│   │   ├── repo/           # list
-│   │   ├── sourcemap/      # inject, upload
-│   │   ├── span/           # list, view
-│   │   ├── team/           # list
-│   │   ├── trace/          # list, view, logs
-│   │   ├── trial/          # list, start
-│   │   ├── api.ts          # Direct API access command
-│   │   ├── help.ts         # Help command
-│   │   ├── init.ts         # Initialize Sentry in your project (experimental)
-│   │   └── schema.ts       # Browse the Sentry API schema
-│   ├── lib/                # Shared utilities
-│   │   ├── command.ts      # buildCommand wrapper (telemetry + output)
-│   │   ├── api-client.ts   # Barrel re-export for API modules
-│   │   ├── api/            # Domain API modules
-│   │   │   ├── infrastructure.ts # Shared helpers, types, raw requests
-│   │   │   ├── organizations.ts
-│   │   │   ├── projects.ts
-│   │   │   ├── issues.ts
-│   │   │   ├── events.ts
-│   │   │   ├── traces.ts      # Trace + span listing
-│   │   │   ├── logs.ts
-│   │   │   ├── seer.ts
-│   │   │   └── trials.ts
-│   │   ├── region.ts       # Multi-region resolution
-│   │   ├── telemetry.ts    # Sentry SDK instrumentation
-│   │   ├── sentry-urls.ts  # URL builders for Sentry
-│   │   ├── hex-id.ts       # Hex ID validation (32-char + 16-char span)
-│   │   ├── trace-id.ts     # Trace ID validation wrapper
-│   │   ├── db/             # SQLite database layer
-│   │   │   ├── instance.ts     # Database singleton
-│   │   │   ├── schema.ts       # Table definitions
-│   │   │   ├── migration.ts    # Schema migrations
-│   │   │   ├── utils.ts        # SQL helpers (upsert)
-│   │   │   ├── auth.ts         # Token storage
-│   │   │   ├── user.ts         # User info cache
-│   │   │   ├── regions.ts      # Org→region URL cache
-│   │   │   ├── defaults.ts     # Default org/project
-│   │   │   ├── pagination.ts   # Cursor pagination storage
-│   │   │   ├── dsn-cache.ts    # DSN resolution cache
-│   │   │   ├── project-cache.ts    # Project data cache
-│   │   │   ├── project-root-cache.ts # Project root cache
-│   │   │   ├── project-aliases.ts  # Monorepo alias mappings
-│   │   │   └── version-check.ts    # Version check cache
-│   │   ├── dsn/            # DSN detection system
-│   │   │   ├── detector.ts     # High-level detection API
-│   │   │   ├── scanner.ts      # File scanning logic
-│   │   │   ├── code-scanner.ts # Code file DSN extraction
-│   │   │   ├── project-root.ts # Project root detection
-│   │   │   ├── parser.ts       # DSN parsing utilities
-│   │   │   ├── resolver.ts     # DSN to org/project resolution
-│   │   │   ├── fs-utils.ts     # File system helpers
-│   │   │   ├── env.ts          # Environment variable detection
-│   │   │   ├── env-file.ts     # .env file parsing
-│   │   │   ├── errors.ts       # DSN-specific errors
-│   │   │   ├── types.ts        # Type definitions
-│   │   │   └── languages/      # Per-language DSN extractors
-│   │   │       ├── javascript.ts
-│   │   │       ├── python.ts
-│   │   │       ├── go.ts
-│   │   │       ├── java.ts
-│   │   │       ├── ruby.ts
-│   │   │       └── php.ts
-│   │   ├── formatters/     # Output formatting
-│   │   │   ├── human.ts    # Human-readable output
-│   │   │   ├── json.ts     # JSON output
-│   │   │   ├── output.ts   # Output utilities
-│   │   │   ├── seer.ts     # Seer AI response formatting
-│   │   │   ├── colors.ts   # Terminal colors
-│   │   │   ├── markdown.ts # Markdown → ANSI renderer
-│   │   │   ├── trace.ts    # Trace/span formatters
-│   │   │   ├── time-utils.ts # Shared time/duration utils
-│   │   │   ├── table.ts    # Table rendering
-│   │   │   └── log.ts      # Log entry formatting
-│   │   ├── oauth.ts            # OAuth device flow
-│   │   ├── errors.ts           # Error classes
-│   │   ├── resolve-target.ts   # Org/project resolution
-│   │   ├── resolve-issue.ts    # Issue ID resolution
-│   │   ├── issue-id.ts         # Issue ID parsing utilities
-│   │   ├── arg-parsing.ts      # Argument parsing helpers
-│   │   ├── alias.ts            # Alias generation
-│   │   ├── promises.ts         # Promise utilities
-│   │   ├── polling.ts          # Polling utilities
-│   │   ├── upgrade.ts          # CLI upgrade functionality
-│   │   ├── version-check.ts    # Version checking
-│   │   ├── browser.ts          # Open URLs in browser
-│   │   ├── clipboard.ts        # Clipboard access
-│   │   └── qrcode.ts           # QR code generation
-│   └── types/              # TypeScript types and Zod schemas
-│       ├── sentry.ts       # Sentry API types
-│       ├── config.ts       # Configuration types
-│       ├── oauth.ts        # OAuth types
-│       └── seer.ts         # Seer AI types
-├── test/                   # Test files (mirrors src/ structure)
-│   ├── lib/                # Unit tests for lib/
-│   │   ├── *.test.ts           # Standard unit tests
-│   │   ├── *.property.test.ts  # Property-based tests
-│   │   └── db/
-│   │       ├── *.test.ts           # DB unit tests
-│   │       └── *.model-based.test.ts # Model-based tests
-│   ├── model-based/        # Model-based testing helpers
-│   │   └── helpers.ts      # Isolated DB context, constants
-│   ├── commands/           # Unit tests for commands/
-│   ├── e2e/                # End-to-end tests
-│   ├── fixtures/           # Test fixtures
-│   └── mocks/              # Test mocks
-├── docs/                   # Documentation site (Astro + Starlight)
-├── script/                 # Build and utility scripts
-├── .cursor/rules/          # Cursor AI rules (read these!)
-└── biome.jsonc             # Linting config (extends ultracite)
-```
+The full project-structure tree — including the live command/subcommand list and the
+domain API modules — is generated from the route tree and lives in
+[`docs/src/content/docs/contributing.md`](docs/src/content/docs/contributing.md)
+(the `project-structure` block produced by `script/generate-docs-sections.ts`). It is
+kept in sync automatically, so it is **not** duplicated here to avoid drift. For the
+current command list run `ls src/commands/` or `sentry --help`.
+
+Top-level layout:
+
+- **`src/bin.ts`** — entry point; **`src/app.ts`** — Stricli application setup;
+  **`src/context.ts`** — dependency-injection context.
+- **`src/commands/`** — one directory per command group (`auth`, `cli`, `dashboard`,
+  `event`, `issue`, `log`, `org`, `project`, `release`, `replay`, `repo`, `sourcemap`,
+  `span`, `team`, `trace`, `trial`, `local`, …) plus standalone command files
+  (`api.ts`, `explore.ts`, `help.ts`, `init.ts`, `schema.ts`).
+- **`src/lib/`** — shared utilities. Key subtrees: `api/` (domain API modules),
+  `db/` (SQLite layer), `dsn/` (DSN detection, with per-language extractors under
+  `dsn/languages/`), and `formatters/` (output formatting). See the file-locations
+  table below and the JSDoc in each module for details.
+- **`src/types/`** — TypeScript types and Zod schemas.
+- **`test/`** — tests mirroring `src/` (unit, `*.property.test.ts`,
+  `*.model-based.test.ts`, `e2e/`, `fixtures/`, `mocks/`).
+- **`docs/`** — documentation site (Astro + Starlight); **`script/`** — build/utility
+  scripts; **`.cursor/rules/`** — Cursor AI rules; **`biome.jsonc`** — lint config.
 
 ## Key Patterns
 
