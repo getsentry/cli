@@ -84,7 +84,7 @@ jobs:
               # darwin-arm64 builds natively on macOS for V8 code cache (~15% faster startup).
               # All other targets cross-compile from ubuntu-latest via fossilize.
               echo '{"include":[
-                {"target":"darwin-arm64",  "os":"macos-latest",  "can-test":true},
+                {"target":"darwin-arm64",  "os":"macos-15",  "can-test":true},
                 {"target":"darwin-x64",    "os":"ubuntu-latest", "can-test":false},
                 {"target":"linux-x64",     "os":"ubuntu-latest", "can-test":true},
                 {"target":"linux-arm64",   "os":"ubuntu-latest", "can-test":false},
