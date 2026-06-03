@@ -23,6 +23,7 @@ import { logRoute } from "./commands/log/index.js";
 import { listCommand as logListCommand } from "./commands/log/list.js";
 import { orgRoute } from "./commands/org/index.js";
 import { listCommand as orgListCommand } from "./commands/org/list.js";
+import { proguardRoute } from "./commands/proguard/index.js";
 import { projectRoute } from "./commands/project/index.js";
 import { listCommand as projectListCommand } from "./commands/project/list.js";
 import { releaseRoute } from "./commands/release/index.js";
@@ -91,6 +92,7 @@ export const routes = buildRouteMap({
     dashboard: dashboardRoute,
     org: orgRoute,
     project: projectRoute,
+    proguard: proguardRoute,
     replay: replayRoute,
     release: releaseRoute,
     repo: repoRoute,
