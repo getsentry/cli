@@ -18,7 +18,6 @@ import { ApiError, AuthError } from "../errors.js";
 
 import {
   API_MAX_PER_PAGE,
-  autoPaginate,
   getOrgSdkConfig,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
@@ -198,10 +197,17 @@ export type ListIssueEventsOptions = {
  * List events for a specific issue.
  *
  * Uses the SDK's `listAnIssue_sEvents` endpoint with region-aware routing.
- * When `limit` exceeds {@link API_MAX_PER_PAGE} (100), {@link autoPaginate}
- * fetches multiple API pages to fill the requested limit. Because the endpoint
- * has no per-page parameter, a page may overshoot `limit`; the result is trimmed
- * and `nextCursor` dropped so cursor navigation never skips events.
+ *
+ * Page size is capped at `min(limit, {@link API_MAX_PER_PAGE})` via `per_page`,
+ * which Sentry accepts on this route at runtime even though it is absent from
+ * the OpenAPI spec. Capping page size means the server-issued `nextCursor` is
+ * aligned to a page boundary, so cursor navigation never skips events.
+ *
+ * As defense-in-depth (in case the server ignores `per_page`), the result is
+ * trimmed to `limit` but `nextCursor` is PRESERVED: the events cursor is
+ * offset-based, so resuming from it re-includes any trimmed tail rather than
+ * skipping it. Preserving the cursor is also what lets `-c next` advance at all
+ * when a page is larger than `limit` — dropping it would strand later events.
  *
  * @param orgSlug - Organization slug for region routing
  * @param issueId - Numeric issue ID
@@ -216,44 +222,36 @@ export async function listIssueEvents(
   const { limit = 25, query, full, cursor, statsPeriod, start, end } = options;
 
   const config = await getOrgSdkConfig(orgSlug);
+  const perPage = Math.min(limit, API_MAX_PER_PAGE);
 
-  const fetchPage = async (
-    pageCursor: string | undefined
-  ): Promise<PaginatedResponse<IssueEvent[]>> => {
-    const result = await listAnIssue_sEvents({
-      ...config,
-      path: {
-        organization_id_or_slug: orgSlug,
-        issue_id: Number(issueId),
-      },
-      query: {
-        query: query || undefined,
-        full,
-        cursor: pageCursor,
-        statsPeriod,
-        start,
-        end,
-      },
-    });
+  const result = await listAnIssue_sEvents({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      issue_id: Number(issueId),
+    },
+    query: {
+      query: query || undefined,
+      full,
+      cursor,
+      statsPeriod,
+      start,
+      end,
+      // `per_page` is accepted at runtime but absent from the generated query
+      // type, so widen via cast.
+      per_page: perPage,
+    } as Parameters<typeof listAnIssue_sEvents>[0]["query"],
+  });
 
-    const paginated = unwrapPaginatedResult(
-      result,
-      "Failed to list issue events"
-    );
-    return {
-      data: paginated.data as IssueEvent[],
-      nextCursor: paginated.nextCursor,
-    };
-  };
+  const paginated = unwrapPaginatedResult(
+    result,
+    "Failed to list issue events"
+  );
+  const events = paginated.data as IssueEvent[];
 
-  const result = await autoPaginate(fetchPage, limit, cursor);
-
-  // The issue events endpoint has no per-page parameter, so a single page can
-  // already overshoot `limit` (autoPaginate's fast path returns it untrimmed).
-  // When trimming we MUST drop nextCursor — it points past the trimmed tail and
-  // would make `-c next` skip the events between the trim point and that cursor.
-  if (result.data.length > limit) {
-    return { data: result.data.slice(0, limit) };
-  }
-  return result;
+  // Trim to limit but keep nextCursor (see JSDoc): the offset-based events
+  // cursor re-includes any trimmed tail on the next page, so navigation neither
+  // skips nor stalls.
+  const data = events.length > limit ? events.slice(0, limit) : events;
+  return { data, nextCursor: paginated.nextCursor };
 }
