@@ -131,6 +131,8 @@ export const ORG_ONLY_COMMANDS = new Set([
   "release create",
   "release finalize",
   "release delete",
+  "release archive",
+  "release restore",
   "release deploy",
   "release deploys",
   "release set-commits",

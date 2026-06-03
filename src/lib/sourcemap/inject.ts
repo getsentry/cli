@@ -404,6 +404,108 @@ export async function diagnoseEmptyDiscovery(
 }
 
 /**
+ * Read-only resolution result for a single JavaScript file, produced by
+ * {@link resolveDirectorySourcemaps}. Mirrors the legacy `sentry-cli
+ * sourcemaps resolve` diagnostic output without mutating any files.
+ */
+export type SourcemapResolution = {
+  /** Absolute path to the JavaScript file. */
+  jsPath: string;
+  /**
+   * Absolute path to the resolved companion sourcemap, or `undefined`
+   * when no external `.map` file could be located on disk.
+   */
+  mapPath?: string;
+  /**
+   * Raw value of the last `//# sourceMappingURL=` directive in the file,
+   * or `undefined` when no directive is present.
+   */
+  sourceMappingUrl?: string;
+  /**
+   * True when the `sourceMappingURL` is an inline `data:` URL (embedded
+   * base64 sourcemap) rather than an external file reference.
+   */
+  inline: boolean;
+  /**
+   * True when the `sourceMappingURL` is a remote `http(s)://` reference.
+   */
+  remote: boolean;
+  /**
+   * The embedded `//# debugId=<uuid>` value, or `undefined` when the
+   * file has not been injected yet.
+   */
+  debugId?: string;
+};
+
+/**
+ * Read-only diagnostic pass over a build directory.
+ *
+ * For every discovered JavaScript file this reports how its sourcemap
+ * resolves (convention `<name>.map`, an external `sourceMappingURL`
+ * directive, an inline `data:` URL, or none) and whether a Sentry debug
+ * ID has been injected. Unlike {@link discoverFilePairs}, files **without**
+ * a companion map are still included so the user can see what is missing.
+ *
+ * Never mutates files — this powers `sentry sourcemap resolve`.
+ *
+ * @param dir - Directory to scan (resolved to an absolute path internally)
+ * @param extensions - JS extensions to consider
+ * @param ignoreMatcher - Optional gitignore-style matcher
+ * @returns One {@link SourcemapResolution} per JS file, sorted by path
+ */
+export async function resolveDirectorySourcemaps(
+  dir: string,
+  extensions: Set<string> = DEFAULT_EXTENSIONS,
+  ignoreMatcher?: ReturnType<typeof ignore>
+): Promise<SourcemapResolution[]> {
+  const absDir = resolvePath(dir);
+  const results: SourcemapResolution[] = [];
+  for await (const entry of walkFiles({
+    cwd: absDir,
+    extensions,
+    alwaysSkipDirs: SOURCEMAP_SKIP_DIRS,
+    hidden: false,
+    respectGitignore: false,
+    maxFileSize: Number.POSITIVE_INFINITY,
+  })) {
+    const jsPath = entry.absolutePath;
+    if (ignoreMatcher) {
+      const rel = relative(absDir, jsPath).replaceAll("\\", "/");
+      if (ignoreMatcher.ignores(rel)) {
+        continue;
+      }
+    }
+
+    const sourceMappingUrl = await extractSourceMappingUrl(jsPath);
+    const inline = sourceMappingUrl?.startsWith("data:") ?? false;
+    const remote =
+      (sourceMappingUrl?.startsWith("http://") ?? false) ||
+      (sourceMappingUrl?.startsWith("https://") ?? false);
+    const mapPath = await findCompanionMap(jsPath);
+
+    let debugId: string | undefined;
+    try {
+      const js = await readFile(jsPath, "utf-8");
+      debugId = js.match(EXISTING_DEBUGID_RE)?.[1];
+    } catch (err) {
+      log.debug(`failed to read JS file for debug ID: ${jsPath}`, err);
+    }
+
+    results.push({
+      jsPath,
+      mapPath,
+      sourceMappingUrl,
+      inline,
+      remote,
+      debugId,
+    });
+  }
+
+  results.sort((a, b) => a.jsPath.localeCompare(b.jsPath));
+  return results;
+}
+
+/**
  * Build an actionable error for the zero-pairs case, tailored to
  * which side of the JS/map pairing is missing.
  */
