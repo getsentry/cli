@@ -252,7 +252,7 @@ export async function updateRelease(
     url?: string;
     dateReleased?: string;
     /** Release lifecycle status: "open" (active) or "archived". */
-    status?: string;
+    status?: "open" | "archived";
     commits?: Array<{
       id: string;
       repository?: string;

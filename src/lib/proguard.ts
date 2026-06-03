@@ -61,6 +61,7 @@ function uuidV5(name: Buffer, namespace: string): string {
 
   // Version nibble (5) at hex position 12; variant nibble at position 16,
   // chosen deterministically from the original digit so the result is stable.
+  // ?? "0" satisfies noUncheckedIndexedAccess — hex[16] is always present (32 chars).
   const variant = VARIANT_NIBBLE[Number.parseInt(hex[16] ?? "0", 16) % 4];
   return (
     `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-` +
