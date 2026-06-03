@@ -16,6 +16,7 @@ import { ValidationError } from "../errors.js";
 import { CURSOR_KEYWORDS } from "../list-command.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 import { getDatabase } from "./index.js";
+import { safeParseJson } from "./json.js";
 import { runUpsert } from "./utils.js";
 
 /** Default TTL for stored cursors: 5 minutes */
@@ -84,7 +85,20 @@ export function getPaginationState(
     return;
   }
 
-  const stack = JSON.parse(row.cursor_stack) as string[];
+  // Corrupt cursor stacks (partial writes, manual edits, migration drift) must
+  // not crash paginated commands. Treat any parse/validation failure as a fresh
+  // first page by deleting the bad row and returning a cache miss.
+  const stack = safeParseJson<string[]>(
+    row.cursor_stack,
+    (value): value is string[] => Array.isArray(value)
+  );
+  if (!stack) {
+    db.query(
+      "DELETE FROM pagination_cursors WHERE command_key = ? AND context = ?"
+    ).run(commandKey, contextKey);
+    return;
+  }
+
   return { stack, index: row.page_index };
 }
 
