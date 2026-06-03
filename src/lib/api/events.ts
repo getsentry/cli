@@ -18,8 +18,8 @@ import { ApiError, AuthError } from "../errors.js";
 
 import {
   API_MAX_PER_PAGE,
+  autoPaginate,
   getOrgSdkConfig,
-  MAX_PAGINATION_PAGES,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
   unwrapPaginatedResult,
@@ -198,8 +198,10 @@ export type ListIssueEventsOptions = {
  * List events for a specific issue.
  *
  * Uses the SDK's `listAnIssue_sEvents` endpoint with region-aware routing.
- * When `limit` exceeds {@link API_MAX_PER_PAGE} (100), auto-paginates through
- * multiple API calls to fill the requested limit, bounded by {@link MAX_PAGINATION_PAGES}.
+ * When `limit` exceeds {@link API_MAX_PER_PAGE} (100), {@link autoPaginate}
+ * fetches multiple API pages to fill the requested limit. Because the endpoint
+ * has no per-page parameter, a page may overshoot `limit`; the result is trimmed
+ * and `nextCursor` dropped so cursor navigation never skips events.
  *
  * @param orgSlug - Organization slug for region routing
  * @param issueId - Numeric issue ID
@@ -215,11 +217,9 @@ export async function listIssueEvents(
 
   const config = await getOrgSdkConfig(orgSlug);
 
-  const allEvents: IssueEvent[] = [];
-  let currentCursor = cursor;
-  let nextCursor: string | undefined;
-
-  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+  const fetchPage = async (
+    pageCursor: string | undefined
+  ): Promise<PaginatedResponse<IssueEvent[]>> => {
     const result = await listAnIssue_sEvents({
       ...config,
       path: {
@@ -229,7 +229,7 @@ export async function listIssueEvents(
       query: {
         query: query || undefined,
         full,
-        cursor: currentCursor,
+        cursor: pageCursor,
         statsPeriod,
         start,
         end,
@@ -240,22 +240,20 @@ export async function listIssueEvents(
       result,
       "Failed to list issue events"
     );
+    return {
+      data: paginated.data as IssueEvent[],
+      nextCursor: paginated.nextCursor,
+    };
+  };
 
-    allEvents.push(...(paginated.data as IssueEvent[]));
-    nextCursor = paginated.nextCursor;
+  const result = await autoPaginate(fetchPage, limit, cursor);
 
-    if (allEvents.length >= limit || !nextCursor) {
-      break;
-    }
-    currentCursor = nextCursor;
+  // The issue events endpoint has no per-page parameter, so a single page can
+  // already overshoot `limit` (autoPaginate's fast path returns it untrimmed).
+  // When trimming we MUST drop nextCursor — it points past the trimmed tail and
+  // would make `-c next` skip the events between the trim point and that cursor.
+  if (result.data.length > limit) {
+    return { data: result.data.slice(0, limit) };
   }
-
-  // Trim to exact limit. Unlike listIssuesAllPages (which controls per_page),
-  // the issue events endpoint has no per-page parameter, so the API may return
-  // more items than requested. We preserve nextCursor so the command-level
-  // cursor stack can navigate to subsequent pages.
-  const trimmed =
-    allEvents.length > limit ? allEvents.slice(0, limit) : allEvents;
-
-  return { data: trimmed, nextCursor };
+  return result;
 }
