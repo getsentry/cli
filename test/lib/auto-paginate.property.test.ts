@@ -8,9 +8,13 @@
  *   its nextCursor. Callers whose endpoint can overshoot a single page (e.g.
  *   `listIssueEvents`, which has no per-page param) must trim-and-drop-cursor
  *   themselves; that behavior is covered by `events-overshoot.test.ts`.
- * - Multi-page path (`limit > API_MAX_PER_PAGE`): accumulates across pages and,
- *   on overshoot, trims to `limit` AND drops nextCursor so cursor navigation
- *   never skips the rows between the trim point and the dropped cursor.
+ * - Multi-page path (`limit > API_MAX_PER_PAGE`): accumulates across pages up to
+ *   `limit`. On true overshoot (a page pushes the total strictly past `limit`),
+ *   it trims to `limit` AND drops nextCursor, so cursor navigation never skips
+ *   the trimmed rows. But when `limit` lands exactly on a page boundary, nothing
+ *   is trimmed and the last page's cursor points precisely at the first
+ *   unreturned row — so it is PRESERVED (dropping it would strand the tail, the
+ *   regression pinned by events-overshoot.test.ts).
  *
  * These tests pin the multi-page contract, the source of the original bug class.
  */
@@ -75,7 +79,7 @@ describe("property: autoPaginate multi-page contract", () => {
     );
   });
 
-  test("drops nextCursor whenever the result is trimmed to limit", () => {
+  test("drops nextCursor on overshoot, but keeps a page-aligned boundary cursor", () => {
     fcAssert(
       asyncProperty(
         nat(API_MAX_PER_PAGE * 5),
@@ -86,11 +90,33 @@ describe("property: autoPaginate multi-page contract", () => {
             makePagedFetcher(total, pageSize),
             limit
           );
-          // When more rows exist than we returned, the data must be exactly
-          // `limit` long AND nextCursor undefined — a non-undefined cursor would
-          // skip the rows between the trim point and that cursor.
-          if (total > limit) {
-            expect(result.data.length).toBe(limit);
+
+          // Only meaningful when more rows exist than the limit.
+          if (total <= limit) {
+            return;
+          }
+
+          // The result is always capped at `limit`.
+          expect(result.data.length).toBe(limit);
+
+          // Two distinct cases share `total > limit`, and they have OPPOSITE
+          // cursor contracts. The discriminator is whether `limit` falls exactly
+          // on a page boundary of the (capped) page size:
+          const effectivePageSize = Math.min(pageSize, API_MAX_PER_PAGE);
+          const limitOnPageBoundary = limit % effectivePageSize === 0;
+
+          if (limitOnPageBoundary) {
+            // Exact boundary: accumulation lands precisely on `limit`, so NO row
+            // was trimmed. The last page's cursor points at exactly index
+            // `limit` — the first unreturned row — so it MUST be preserved and
+            // resume contiguously. Dropping it would strand the tail (the
+            // regression documented in events-overshoot.test.ts).
+            expect(result.nextCursor).toBe(String(limit));
+          } else {
+            // True overshoot: the page that crossed `limit` was trimmed, so the
+            // server cursor points PAST the trimmed rows. It MUST be dropped —
+            // a preserved cursor would skip the rows between the trim point and
+            // that cursor. This is the original skip-bug guard.
             expect(result.nextCursor).toBeUndefined();
           }
         }
