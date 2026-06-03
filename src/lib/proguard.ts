@@ -40,12 +40,20 @@ const VARIANT_NIBBLE = ["8", "9", "a", "b"] as const;
  * representation (mirroring {@link contentToDebugId}) to avoid bitwise byte
  * manipulation. Safe for arbitrary (non-UTF-8) file content.
  *
+ * SHA-1 is mandated by the UUIDv5 specification and is required to match the
+ * IDs produced by the legacy `sentry-cli`/`rust-proguard`. It is used purely
+ * as a deterministic identifier function here — never for security, signing,
+ * or integrity — so the "weak algorithm" warning does not apply.
+ *
  * @param name - The name bytes to hash (file content or a UTF-8 string)
  * @param namespace - Hyphenated namespace UUID string
  * @returns Lowercase hyphenated UUIDv5 string
  */
 function uuidV5(name: Buffer, namespace: string): string {
   const namespaceBytes = Buffer.from(namespace.replaceAll("-", ""), "hex");
+  // SHA-1 is required by RFC 4122 §4.3 for name-based (v5) UUIDs and to match
+  // the legacy sentry-cli mapping IDs. Not used for any security purpose.
+  // codeql[js/weak-cryptographic-algorithm]
   const hash = createHash("sha1");
   hash.update(namespaceBytes);
   hash.update(name);
