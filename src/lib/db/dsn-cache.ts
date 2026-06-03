@@ -308,9 +308,16 @@ async function validateDirMtimes(
   return true;
 }
 
-/** Type guard: value is a plain object usable as a mtimes record. */
+/** Type guard: value is a plain object with all-numeric values (mtimes record). */
 function isMtimesRecord(value: unknown): value is Record<string, number> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value as Record<string, unknown>).every(
+      (v) => typeof v === "number"
+    )
+  );
 }
 
 /** Type guard: value is an array (used for the cached DSN list). */

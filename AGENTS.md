@@ -510,7 +510,7 @@ CliError (base, exitCode=1)
 - Pass `alternatives: []` when defaults are irrelevant (e.g., for missing Trace ID, Event ID)
 - Use `" and "` in `resource` for plural grammar: `"Trace ID and span ID"` → "are required"
 
-**CI enforcement:** `pnpm run check:errors` scans for `ContextError` with multiline commands, `CliError` with ad-hoc "Try:" strings, and silent `catch` blocks (advisory).
+**CI enforcement:** `bun run check:errors` scans for `ContextError` with multiline commands, `CliError` with ad-hoc "Try:" strings, and silent `catch` blocks (advisory).
 
 ```typescript
 // Usage examples
@@ -554,7 +554,7 @@ catch (error) {
 
 Use `logger.withTag("command-name")` for tagged logging in command files.
 
-**CI enforcement:** `pnpm run check:errors` includes a silent-catch scan that flags
+**CI enforcement:** `bun run check:errors` includes a silent-catch scan that flags
 `catch` blocks which are empty, comment-only, or return-only without surfacing the
 error. It is currently **advisory** (warns, does not fail CI) because of a pre-existing
 backlog; run with `SENTRY_STRICT_SILENT_CATCH=1` to enforce. Do not add new silent

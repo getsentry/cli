@@ -19,6 +19,7 @@ import { ApiError, AuthError } from "../errors.js";
 import {
   API_MAX_PER_PAGE,
   getOrgSdkConfig,
+  MAX_PAGINATION_PAGES,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
   unwrapPaginatedResult,
@@ -197,17 +198,20 @@ export type ListIssueEventsOptions = {
  * List events for a specific issue.
  *
  * Uses the SDK's `listAnIssue_sEvents` endpoint with region-aware routing.
+ * When `limit` exceeds {@link API_MAX_PER_PAGE} (100), auto-paginates through
+ * multiple API calls to fill the requested limit, bounded by
+ * {@link MAX_PAGINATION_PAGES}.
  *
- * Page size is capped at `min(limit, {@link API_MAX_PER_PAGE})` via `per_page`,
- * which Sentry accepts on this route at runtime even though it is absent from
- * the OpenAPI spec. Capping page size means the server-issued `nextCursor` is
- * aligned to a page boundary, so cursor navigation never skips events.
+ * Page size is capped at `min(limit, API_MAX_PER_PAGE)` via `per_page`, which
+ * Sentry accepts on this route at runtime even though it is absent from the
+ * OpenAPI spec. Capping page size keeps the server-issued `nextCursor` aligned
+ * to a page boundary, preventing the skip bug where trim + keep-cursor would
+ * jump past items.
  *
- * As defense-in-depth (in case the server ignores `per_page`), the result is
- * trimmed to `limit` but `nextCursor` is PRESERVED: the events cursor is
+ * When trimming to `limit`, `nextCursor` is PRESERVED: the events cursor is
  * offset-based, so resuming from it re-includes any trimmed tail rather than
- * skipping it. Preserving the cursor is also what lets `-c next` advance at all
- * when a page is larger than `limit` — dropping it would strand later events.
+ * skipping it. This prevents both the original skip bug and the stall
+ * (drop-cursor) regression.
  *
  * @param orgSlug - Organization slug for region routing
  * @param issueId - Numeric issue ID
@@ -224,34 +228,48 @@ export async function listIssueEvents(
   const config = await getOrgSdkConfig(orgSlug);
   const perPage = Math.min(limit, API_MAX_PER_PAGE);
 
-  const result = await listAnIssue_sEvents({
-    ...config,
-    path: {
-      organization_id_or_slug: orgSlug,
-      issue_id: Number(issueId),
-    },
-    query: {
-      query: query || undefined,
-      full,
-      cursor,
-      statsPeriod,
-      start,
-      end,
-      // `per_page` is accepted at runtime but absent from the generated query
-      // type, so widen via cast.
-      per_page: perPage,
-    } as Parameters<typeof listAnIssue_sEvents>[0]["query"],
-  });
+  const allEvents: IssueEvent[] = [];
+  let currentCursor = cursor;
+  let nextCursor: string | undefined;
 
-  const paginated = unwrapPaginatedResult(
-    result,
-    "Failed to list issue events"
-  );
-  const events = paginated.data as IssueEvent[];
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+    const result = await listAnIssue_sEvents({
+      ...config,
+      path: {
+        organization_id_or_slug: orgSlug,
+        issue_id: Number(issueId),
+      },
+      query: {
+        query: query || undefined,
+        full,
+        cursor: currentCursor,
+        statsPeriod,
+        start,
+        end,
+        // `per_page` is accepted at runtime but absent from the generated query
+        // type, so widen via cast.
+        per_page: perPage,
+      } as Parameters<typeof listAnIssue_sEvents>[0]["query"],
+    });
 
-  // Trim to limit but keep nextCursor (see JSDoc): the offset-based events
-  // cursor re-includes any trimmed tail on the next page, so navigation neither
-  // skips nor stalls.
-  const data = events.length > limit ? events.slice(0, limit) : events;
-  return { data, nextCursor: paginated.nextCursor };
+    const paginated = unwrapPaginatedResult(
+      result,
+      "Failed to list issue events"
+    );
+
+    allEvents.push(...(paginated.data as IssueEvent[]));
+    nextCursor = paginated.nextCursor;
+
+    if (allEvents.length >= limit || !nextCursor) {
+      break;
+    }
+    currentCursor = nextCursor;
+  }
+
+  // Trim to limit but PRESERVE nextCursor. The events cursor is offset-based,
+  // so resuming from it re-includes any trimmed tail rather than skipping it.
+  // Preserving the cursor lets `-c next` advance; dropping it would strand all
+  // events past the first page.
+  const data = allEvents.length > limit ? allEvents.slice(0, limit) : allEvents;
+  return { data, nextCursor };
 }
