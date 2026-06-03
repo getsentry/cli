@@ -254,6 +254,42 @@ describe("extractRootCauses", () => {
     expect(causes[0]?.description).toBe("Configuration error");
     expect(causes[0]?.relevant_repos).toBeUndefined();
   });
+
+  test("falls through to agent artifacts when legacy causes array is empty", () => {
+    const state = {
+      run_id: 789,
+      status: "COMPLETED",
+      blocks: [
+        {
+          key: "root_cause_analysis",
+          status: "COMPLETED",
+          causes: [],
+          artifacts: [],
+        },
+        {
+          id: "block-2",
+          message: { role: "assistant", content: "Found it" },
+          timestamp: "2025-01-01T00:00:00Z",
+          artifacts: [
+            {
+              key: "root_cause",
+              data: {
+                one_line_description: "Race condition in auth middleware",
+                five_whys: ["Token refresh not atomic"],
+                relevant_repo: "org/api-server",
+              },
+              reason: "",
+            },
+          ],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    const causes = extractRootCauses(state);
+    expect(causes).toHaveLength(1);
+    expect(causes[0]?.description).toBe("Race condition in auth middleware");
+    expect(causes[0]?.relevant_repos).toEqual(["org/api-server"]);
+  });
 });
 
 describe("extractNoSolutionReason", () => {
@@ -344,6 +380,63 @@ describe("extractNoSolutionReason", () => {
   test("returns undefined when no steps or blocks", () => {
     const state: AutofixState = { run_id: 1, status: "COMPLETED" };
     expect(extractNoSolutionReason(state)).toBeUndefined();
+  });
+
+  test("extracts reason from step-level description when solution is empty", () => {
+    const state = {
+      run_id: 1,
+      status: "NEED_MORE_INFORMATION",
+      blocks: [
+        {
+          key: "solution",
+          description:
+            "Cannot produce a fix: the issue is in a third-party library",
+          solution: [],
+          artifacts: [],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    expect(extractNoSolutionReason(state)).toBe(
+      "Cannot produce a fix: the issue is in a third-party library"
+    );
+  });
+
+  test("extracts reason from step-level when solution field is missing", () => {
+    const state = {
+      run_id: 1,
+      status: "NEED_MORE_INFORMATION",
+      steps: [
+        {
+          key: "solution",
+          description: "Infrastructure-level issue, no code change applicable",
+          artifacts: [],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    expect(extractNoSolutionReason(state)).toBe(
+      "Infrastructure-level issue, no code change applicable"
+    );
+  });
+
+  test("prefers step-level reason over artifact-level reason", () => {
+    const state = {
+      run_id: 1,
+      status: "COMPLETED",
+      blocks: [
+        {
+          key: "solution",
+          description: "Step-level reason",
+          solution: [],
+          artifacts: [
+            { key: "solution", data: null, reason: "Artifact-level reason" },
+          ],
+        },
+      ],
+    } as unknown as AutofixState;
+
+    expect(extractNoSolutionReason(state)).toBe("Step-level reason");
   });
 });
 

@@ -510,7 +510,7 @@ CliError (base, exitCode=1)
 - Pass `alternatives: []` when defaults are irrelevant (e.g., for missing Trace ID, Event ID)
 - Use `" and "` in `resource` for plural grammar: `"Trace ID and span ID"` → "are required"
 
-**CI enforcement:** `bun run check:errors` scans for `ContextError` with multiline commands and `CliError` with ad-hoc "Try:" strings.
+**CI enforcement:** `bun run check:errors` scans for `ContextError` with multiline commands, `CliError` with ad-hoc "Try:" strings, and silent `catch` blocks (advisory).
 
 ```typescript
 // Usage examples
@@ -553,6 +553,12 @@ catch (error) {
 ```
 
 Use `logger.withTag("command-name")` for tagged logging in command files.
+
+**CI enforcement:** `bun run check:errors` includes a silent-catch scan that flags
+`catch` blocks which are empty, comment-only, or return-only without surfacing the
+error. It is currently **advisory** (warns, does not fail CI) because of a pre-existing
+backlog; run with `SENTRY_STRICT_SILENT_CATCH=1` to enforce. Do not add new silent
+catches — they will appear in the scan output during review.
 
 ### Auto-Recovery for Wrong Entity Types
 
@@ -960,6 +966,38 @@ mock.module("./some-module", () => ({
 | Test helpers | `test/model-based/helpers.ts` |
 | Add documentation | `docs/src/content/docs/` |
 | Hand-written command doc content | `docs/src/fragments/commands/` |
+
+## Automated Fix PRs (BugBot / agents)
+
+Automated bug-fix PRs (e.g. Cursor BugBot) must follow these rules to avoid the
+duplication and staleness that caused five overlapping PRs to pile up:
+
+1. **Check for existing work first.** Before opening a PR, search open PRs and
+   recently-closed PRs/issues for the same file + symbol:
+   ```bash
+   gh pr list --state open --search "in:title <file-or-symbol>"
+   gh issue list --state all --search "<symbol>"
+   ```
+   If an open PR already touches the target function, **comment on it** or extend
+   it instead of opening a duplicate. Multiple BugBot PRs independently re-fixed
+   the same `JSON.parse` guard, `withTTY` helper, and pagination code.
+
+2. **Rebase before review.** A PR that is many commits behind `main` may fail CI
+   on unrelated drift (e.g. a lint error in a file the PR never touched) and its
+   fix may already be superseded. Rebase onto `main` and re-verify the bug still
+   exists before requesting review. Verify against current `main`, not the
+   snapshot the PR was generated from.
+
+3. **Separate correctness fixes from opinion.** A real bug (wrong output, crash,
+   skipped data) is in scope. A subjective UX change (different hint wording,
+   different default) is **not** a bug — `main`'s current behavior is often
+   deliberate. Do not bundle UX opinions into bug-fix PRs; they waste review
+   cycles and are usually dropped.
+
+4. **Prefer shared helpers over re-deriving fixes.** If a correct implementation
+   already exists (e.g. `autoPaginate()` for pagination, `safeParseJson()` for
+   cached JSON), use it rather than hand-rolling a one-off fix. The recurring
+   pagination-overshoot and parse-crash bugs were classes solved once centrally.
 
 <!-- This section is maintained by the coding agent via lore (https://github.com/BYK/loreai) -->
 ## Long-term Knowledge

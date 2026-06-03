@@ -402,6 +402,18 @@ async function getPreviousReleaseCommit(
  * Set commits on a release using auto-discovery mode.
  *
  * Lists the org's repositories from the Sentry API, matches against the
+/**
+ * Message of the client-side {@link ApiError} thrown by {@link setCommitsAuto}
+ * when the org has no repository integrations. Exported so callers can
+ * distinguish this specific no-repo-integration case from unrelated 400s
+ * returned by the server (e.g. invalid commit refs), which must not be masked
+ * as "no integration". Matched on `message` (not `detail`) because this error is
+ * constructed client-side with `detail: undefined`.
+ */
+export const NO_REPO_INTEGRATIONS_MESSAGE =
+  "No repository integrations configured for this organization.";
+
+/**
  * local git remote URL to find the corresponding Sentry repo, then sends
  * a refs payload with the HEAD commit SHA. This is the equivalent of the
  * reference sentry-cli's `--auto` mode.
@@ -470,12 +482,7 @@ export async function setCommitsAuto(
 
   if (!foundAnyRepos) {
     const endpoint = `organizations/${orgSlug}/releases/${encodeURIComponent(version)}/`;
-    throw new ApiError(
-      "No repository integrations configured for this organization.",
-      400,
-      undefined,
-      endpoint
-    );
+    throw new ApiError(NO_REPO_INTEGRATIONS_MESSAGE, 400, undefined, endpoint);
   }
 
   throw new ValidationError(
