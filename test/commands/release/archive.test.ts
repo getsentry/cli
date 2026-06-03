@@ -168,4 +168,24 @@ describe("release restore", () => {
 
     expect(updateReleaseSpy).not.toHaveBeenCalled();
   });
+
+  test("throws when no version provided", async () => {
+    const { context } = createMockContext();
+    const func = await restoreCommand.loader();
+
+    await expect(
+      func.call(context, { "dry-run": false, json: false })
+    ).rejects.toThrow("Release version");
+  });
+
+  test("throws when org cannot be resolved", async () => {
+    resolveOrgSpy.mockResolvedValue(null);
+
+    const { context } = createMockContext();
+    const func = await restoreCommand.loader();
+
+    await expect(
+      func.call(context, { "dry-run": false, json: false }, "1.0.0")
+    ).rejects.toThrow("organization");
+  });
 });

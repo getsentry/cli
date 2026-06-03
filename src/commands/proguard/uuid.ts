@@ -32,6 +32,8 @@ export const uuidCommand = buildCommand({
       "  sentry proguard uuid ./app/build/outputs/mapping/release/mapping.txt\n" +
       "  sentry proguard uuid mapping.txt --json",
   },
+  // Purely local file operation — no Sentry API calls, no auth needed.
+  auth: false,
   output: {
     // Print only the bare UUID for human/plain output (scriptable, matches
     // legacy `sentry-cli proguard uuid`). JSON output includes the path.

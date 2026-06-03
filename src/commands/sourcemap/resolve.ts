@@ -21,37 +21,43 @@ import {
   assertDirectoryReadable,
   buildIgnoreMatcher,
   resolveDirectorySourcemaps,
-  type SourcemapResolution,
 } from "../../lib/sourcemap/inject.js";
+
+/** Per-file resolution entry for the command output. Uses relative paths only. */
+type ResolveFileEntry = {
+  /** JS path relative to the scanned directory. */
+  path: string;
+  /** Companion sourcemap path relative to the scanned directory, if any. */
+  mapPath?: string;
+  /** Raw `sourceMappingURL` directive value, if any. */
+  sourceMappingUrl?: string;
+  /** True when the sourceMappingURL is an inline data: URL. */
+  inline: boolean;
+  /** True when the sourceMappingURL is a remote http(s) reference. */
+  remote: boolean;
+  /** The embedded `//# debugId=<uuid>` value, if any. */
+  debugId?: string;
+};
 
 /** Result type for the resolve command output. */
 type ResolveCommandResult = {
   /** Total JS files scanned. */
   total: number;
-  /** Files with a resolvable companion sourcemap. */
+  /** Files with a resolvable sourcemap (companion file, inline, or remote). */
   resolved: number;
   /** Files with an injected debug ID. */
   withDebugId: number;
-  /** Per-file resolution details (paths relative to the scanned dir). */
-  files: Array<
-    SourcemapResolution & {
-      /** JS path relative to the scanned directory (for display). */
-      relPath: string;
-      /** Map path relative to the scanned directory, if any. */
-      relMapPath?: string;
-    }
-  >;
+  /** Per-file resolution details (relative paths only). */
+  files: ResolveFileEntry[];
 };
 
 /**
  * Describe how the sourcemap resolved, for the human table's "Source map"
  * column.
  */
-function describeMapStatus(
-  file: ResolveCommandResult["files"][number]
-): string {
-  if (file.relMapPath) {
-    return escapeMarkdownCell(file.relMapPath);
+function describeMapStatus(file: ResolveFileEntry): string {
+  if (file.mapPath) {
+    return escapeMarkdownCell(file.mapPath);
   }
   if (file.inline) {
     return colorTag("muted", "inline (data: URL)");
@@ -60,6 +66,11 @@ function describeMapStatus(
     return colorTag("muted", "remote URL");
   }
   return colorTag("red", "not found");
+}
+
+/** True when a file has any kind of sourcemap (companion, inline, or remote). */
+function hasSourcemap(file: ResolveFileEntry): boolean {
+  return !!file.mapPath || file.inline || file.remote;
 }
 
 /** Format human-readable output for resolve results. */
@@ -82,7 +93,7 @@ function formatResolveResult(data: ResolveCommandResult): string {
         ? escapeMarkdownCell(file.debugId)
         : colorTag("muted", "—");
       lines.push(
-        `| ${escapeMarkdownCell(file.relPath)} | ${describeMapStatus(file)} | ${debugId} |`
+        `| ${escapeMarkdownCell(file.path)} | ${describeMapStatus(file)} | ${debugId} |`
       );
     }
   }
@@ -105,6 +116,8 @@ export const resolveCommand = buildCommand({
       "  sentry sourcemap resolve ./build --ext .js,.mjs\n" +
       "  sentry sourcemap resolve ./out --json",
   },
+  // Purely local file operation — no Sentry API calls, no auth needed.
+  auth: false,
   output: {
     human: formatResolveResult,
   },
@@ -172,13 +185,16 @@ export const resolveCommand = buildCommand({
     );
 
     const absDir = resolvePath(dir);
-    const files = resolutions.map((r) => ({
-      ...r,
-      relPath: relative(absDir, r.jsPath) || r.jsPath,
-      relMapPath: r.mapPath ? relative(absDir, r.mapPath) : undefined,
+    const files: ResolveFileEntry[] = resolutions.map((r) => ({
+      path: relative(absDir, r.jsPath) || r.jsPath,
+      mapPath: r.mapPath ? relative(absDir, r.mapPath) : undefined,
+      sourceMappingUrl: r.sourceMappingUrl,
+      inline: r.inline,
+      remote: r.remote,
+      debugId: r.debugId,
     }));
 
-    const resolved = files.filter((f) => f.mapPath).length;
+    const resolved = files.filter(hasSourcemap).length;
     const withDebugId = files.filter((f) => f.debugId).length;
 
     yield new CommandOutput<ResolveCommandResult>({
