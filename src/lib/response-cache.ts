@@ -14,11 +14,12 @@
  * @module
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   mkdir,
   readdir,
   readFile,
+  rename,
   rm,
   unlink,
   writeFile,
@@ -582,6 +583,36 @@ export async function storeCachedResponse(
   }
 }
 
+/**
+ * Atomically write a cache file by writing to a unique temp file in the same
+ * directory and renaming it into place.
+ *
+ * A plain `writeFile` is not atomic: a concurrent reader (e.g. the probabilistic
+ * {@link cleanupCache} sweep fired fire-and-forget by an earlier write) can read
+ * the file mid-write, fail to `JSON.parse` the truncated content, and delete it
+ * as "corrupted" — silently losing a valid cache entry. `rename` within the same
+ * directory is atomic on POSIX and Windows, so a concurrent reader always sees
+ * either the complete old file or the complete new file, never a torn one.
+ *
+ * Best-effort cleanup of the temp file on failure; the caller treats write
+ * failures as non-fatal.
+ */
+async function atomicWriteCacheFile(
+  finalPath: string,
+  serialized: string
+): Promise<void> {
+  const tmpPath = `${finalPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmpPath, serialized, "utf-8");
+    await rename(tmpPath, finalPath);
+  } catch (error) {
+    await unlink(tmpPath).catch(() => {
+      // Best-effort cleanup — the temp file may not have been created.
+    });
+    throw error;
+  }
+}
+
 /** Inputs for {@link writeResponseToCache}, bundled to stay under useMaxParams. */
 type WriteRequest = {
   key: string;
@@ -634,7 +665,7 @@ async function writeResponseToCache(req: WriteRequest): Promise<number> {
 
   const serialized = JSON.stringify(entry);
   await mkdir(getCacheDir(), { recursive: true, mode: 0o700 });
-  await writeFile(cacheFilePath(key), serialized, "utf-8");
+  await atomicWriteCacheFile(cacheFilePath(key), serialized);
 
   // Probabilistic cleanup to avoid unbounded cache growth
   if (Math.random() < CLEANUP_PROBABILITY) {
@@ -779,10 +810,13 @@ async function collectEntryMetadata(
             FALLBACK_TTL_MS[classifyUrl(entry.url ?? "")];
       entries.push({ file, createdAt: entry.createdAt, expired });
     } catch {
-      // Unparseable file — delete it
-      unlink(filePath).catch(() => {
-        // Best-effort cleanup of corrupted file
-      });
+      // Parse/read failure during a best-effort cleanup sweep. Do NOT delete:
+      // a concurrent write may be in flight and the read could be transient
+      // (despite atomic writes, locking/AV scanners can still cause a read to
+      // fail momentarily). Skip the file — a genuinely corrupt entry self-heals
+      // on the read path ({@link getCachedResponse}) or is overwritten on the
+      // next write to the same key. Deleting here was the cause of a torn-read
+      // data-loss bug (see {@link atomicWriteCacheFile}).
     }
   });
 
