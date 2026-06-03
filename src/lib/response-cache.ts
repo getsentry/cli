@@ -21,6 +21,7 @@ import {
   readFile,
   rename,
   rm,
+  stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -31,7 +32,11 @@ import pLimit from "p-limit";
 import { getIdentityFingerprint } from "./db/auth.js";
 import { getConfigDir } from "./db/index.js";
 import { getEnv } from "./env.js";
+import { logger } from "./logger.js";
 import { recordCacheHit, withCacheSpan } from "./telemetry.js";
+
+/** Tagged logger for diagnostic visibility into best-effort cache operations. */
+const log = logger.withTag("response-cache");
 
 // ---------------------------------------------------------------------------
 // TTL tiers — used as fallback when the server sends no cache headers
@@ -590,9 +595,10 @@ export async function storeCachedResponse(
  * A plain `writeFile` is not atomic: a concurrent reader (e.g. the probabilistic
  * {@link cleanupCache} sweep fired fire-and-forget by an earlier write) can read
  * the file mid-write, fail to `JSON.parse` the truncated content, and delete it
- * as "corrupted" — silently losing a valid cache entry. `rename` within the same
- * directory is atomic on POSIX and Windows, so a concurrent reader always sees
- * either the complete old file or the complete new file, never a torn one.
+ * as "corrupted" — silently losing a valid cache entry. `rename` into place is
+ * atomic on POSIX (same filesystem) and near-atomic on Windows (same volume), so
+ * a concurrent reader sees either the complete old file or the complete new file
+ * rather than a half-written one.
  *
  * Best-effort cleanup of the temp file on failure; the caller treats write
  * failures as non-fatal.
@@ -606,8 +612,9 @@ async function atomicWriteCacheFile(
     await writeFile(tmpPath, serialized, "utf-8");
     await rename(tmpPath, finalPath);
   } catch (error) {
-    await unlink(tmpPath).catch(() => {
-      // Best-effort cleanup — the temp file may not have been created.
+    await unlink(tmpPath).catch((cleanupError) => {
+      // The temp file may never have been created (e.g. writeFile failed).
+      log.debug("Failed to clean up cache temp file", cleanupError);
     });
     throw error;
   }
@@ -767,6 +774,14 @@ async function cleanupCache(): Promise<void> {
     throw error;
   }
 
+  // Sweep orphaned temp files left by a crash between writeFile and rename in
+  // {@link atomicWriteCacheFile}. Done regardless of whether any .json files
+  // exist so leaked temp files can never accumulate unbounded.
+  const tmpFiles = files.filter((f) => f.endsWith(".tmp"));
+  if (tmpFiles.length > 0) {
+    await deleteStaleTempFiles(cacheDir, tmpFiles);
+  }
+
   const jsonFiles = files.filter((f) => f.endsWith(".json"));
   if (jsonFiles.length === 0) {
     return;
@@ -779,6 +794,36 @@ async function cleanupCache(): Promise<void> {
     deleteExpiredEntries(cacheDir, entries),
     evictExcessEntries(cacheDir, entries),
   ]);
+}
+
+/**
+ * Age (ms) after which an orphaned `.tmp` file is considered abandoned.
+ *
+ * A live {@link atomicWriteCacheFile} writes then renames in well under a
+ * second, so any `.tmp` file older than this was left by a crashed process and
+ * is safe to remove. The generous threshold avoids racing a concurrent write.
+ */
+const STALE_TEMP_FILE_MS = 60_000;
+
+/** Delete `.tmp` files older than {@link STALE_TEMP_FILE_MS}. Best-effort. */
+async function deleteStaleTempFiles(
+  cacheDir: string,
+  tmpFiles: string[]
+): Promise<void> {
+  const cutoff = Date.now() - STALE_TEMP_FILE_MS;
+  await cacheIO.map(tmpFiles, async (file) => {
+    const filePath = join(cacheDir, file);
+    try {
+      const stats = await stat(filePath);
+      if (stats.mtimeMs < cutoff) {
+        await unlink(filePath).catch(() => {
+          // Already gone — another sweep or the owning process removed it.
+        });
+      }
+    } catch (error) {
+      log.debug("Failed to inspect cache temp file during sweep", error);
+    }
+  });
 }
 
 /** Metadata for a cache entry, used for cleanup decisions */
@@ -800,8 +845,24 @@ async function collectEntryMetadata(
 
   await cacheIO.map(jsonFiles, async (file) => {
     const filePath = join(cacheDir, file);
+
+    // Read and parse are handled separately so we can distinguish a transient
+    // read failure (skip — never delete) from genuine corruption (parse failed
+    // on a fully-read file — safe to delete). Atomic writes
+    // ({@link atomicWriteCacheFile}) guarantee readers never see a half-written
+    // file, so a parse failure here means real corruption, not a torn read —
+    // deleting was previously a data-loss bug when writes were non-atomic.
+    let raw: string;
     try {
-      const raw = await readFile(filePath, "utf-8");
+      raw = await readFile(filePath, "utf-8");
+    } catch (error) {
+      // Transient read failure (locking, AV scanner, ENOENT from a concurrent
+      // sweep). Skip — a later sweep will reconsider the file.
+      log.debug("Skipping cache file with unreadable contents", error);
+      return;
+    }
+
+    try {
       const entry = JSON.parse(raw) as CacheEntry;
       const expired =
         entry.expiresAt !== undefined
@@ -809,14 +870,12 @@ async function collectEntryMetadata(
           : now - entry.createdAt >
             FALLBACK_TTL_MS[classifyUrl(entry.url ?? "")];
       entries.push({ file, createdAt: entry.createdAt, expired });
-    } catch {
-      // Parse/read failure during a best-effort cleanup sweep. Do NOT delete:
-      // a concurrent write may be in flight and the read could be transient
-      // (despite atomic writes, locking/AV scanners can still cause a read to
-      // fail momentarily). Skip the file — a genuinely corrupt entry self-heals
-      // on the read path ({@link getCachedResponse}) or is overwritten on the
-      // next write to the same key. Deleting here was the cause of a torn-read
-      // data-loss bug (see {@link atomicWriteCacheFile}).
+    } catch (error) {
+      // Fully read but unparseable — genuine corruption. Mark expired so
+      // {@link deleteExpiredEntries} reclaims it; this also keeps eviction
+      // counts accurate (corrupt files are not invisible to MAX_CACHE_ENTRIES).
+      log.debug("Reclaiming corrupt cache file during cleanup", error);
+      entries.push({ file, createdAt: now, expired: true });
     }
   });
 
