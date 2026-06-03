@@ -114,21 +114,36 @@ describe("fixabilityColor", () => {
 });
 
 describe("terminalLink", () => {
-  /** Save/restore isTTY and env around TTY-specific tests */
+  function restoreEnv(key: string, saved: string | undefined): void {
+    if (saved !== undefined) {
+      process.env[key] = saved;
+    } else {
+      delete process.env[key];
+    }
+  }
+
+  /**
+   * Save/restore isTTY and ALL plain-output env vars around TTY-specific tests.
+   * `isPlainOutput()` precedence is SENTRY_PLAIN_OUTPUT > NO_COLOR > FORCE_COLOR
+   * > !isTTY — so in CI (where NO_COLOR=1) failing to clear NO_COLOR/FORCE_COLOR
+   * makes terminalLink return plain text even with isTTY forced true.
+   */
   function withTTY(fn: () => void): void {
     const savedTTY = process.stdout.isTTY;
     const savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    const savedNoColor = process.env.NO_COLOR;
+    const savedForceColor = process.env.FORCE_COLOR;
     process.stdout.isTTY = true;
     delete process.env.SENTRY_PLAIN_OUTPUT;
+    delete process.env.NO_COLOR;
+    delete process.env.FORCE_COLOR;
     try {
       fn();
     } finally {
       process.stdout.isTTY = savedTTY;
-      if (savedPlain !== undefined) {
-        process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
-      } else {
-        delete process.env.SENTRY_PLAIN_OUTPUT;
-      }
+      restoreEnv("SENTRY_PLAIN_OUTPUT", savedPlain);
+      restoreEnv("NO_COLOR", savedNoColor);
+      restoreEnv("FORCE_COLOR", savedForceColor);
     }
   }
 
