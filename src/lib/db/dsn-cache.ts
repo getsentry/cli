@@ -308,6 +308,16 @@ async function validateDirMtimes(
   return true;
 }
 
+/** Type guard: value is a plain object usable as a mtimes record. */
+function isMtimesRecord(value: unknown): value is Record<string, number> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Type guard: value is an array (used for the cached DSN list). */
+function isArray(value: unknown): value is DetectedDsn[] {
+  return Array.isArray(value);
+}
+
 /**
  * Get cached full detection result if valid.
  *
@@ -363,16 +373,15 @@ export async function getCachedDetection(
     return;
   }
 
-  // Parse all cached JSON columns up front. Corruption (partial write, manual
-  // edit, schema drift) is treated as a cache miss so detection re-runs from
-  // scratch instead of crashing.
-  const sourceMtimes = safeParseJson<Record<string, number>>(
-    row.source_mtimes_json
-  );
+  // Parse all cached JSON columns up front, validating their shape. Corruption
+  // (partial write, manual edit, schema drift) — including a structurally wrong
+  // value like an object where an array is expected — is treated as a cache miss
+  // so detection re-runs from scratch instead of crashing downstream.
+  const sourceMtimes = safeParseJson(row.source_mtimes_json, isMtimesRecord);
   const dirMtimes = row.dir_mtimes_json
-    ? safeParseJson<Record<string, number>>(row.dir_mtimes_json)
+    ? safeParseJson(row.dir_mtimes_json, isMtimesRecord)
     : {};
-  const allDsns = safeParseJson<DetectedDsn[]>(row.all_dsns_json);
+  const allDsns = safeParseJson(row.all_dsns_json, isArray);
   if (sourceMtimes === undefined || dirMtimes === undefined || !allDsns) {
     recordCacheHit("dsn-detection", false);
     return;
