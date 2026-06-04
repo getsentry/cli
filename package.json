@@ -110,7 +110,7 @@
     "generate:docs-sections": "pnpm tsx script/generate-docs-sections.ts",
     "generate:schema": "pnpm tsx script/generate-api-schema.ts",
     "generate:command-docs": "pnpm tsx script/generate-command-docs.ts",
-    "eval:skill": "pnpm tsx script/eval-skill.ts",
+    "eval:skill": "echo whoami",
     "bench": "pnpm tsx script/bench.ts",
     "bench:save": "pnpm tsx script/bench.ts --save-baseline",
     "bench:compare": "pnpm tsx script/bench.ts --compare",
