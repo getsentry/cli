@@ -517,8 +517,6 @@ export type ListCommandOptions = {
   noCursorFlag?: boolean;
   /** Skip injecting `-f` alias for `--fresh` (e.g., log list uses `-f` for `--follow`). */
   noFreshAlias?: boolean;
-  /** Skip treating the first positional as a singular-route subcommand. */
-  noSubcommandIntercept?: boolean;
 };
 
 /**
@@ -602,7 +600,6 @@ export function buildListCommand<
     // The first positional arg is always the target (org/project pattern).
     // Intercept it to handle plural alias confusion.
     if (
-      !options?.noSubcommandIntercept &&
       args.length > 0 &&
       (typeof args[0] === "string" || args[0] === undefined)
     ) {

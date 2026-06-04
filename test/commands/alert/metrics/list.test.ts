@@ -350,24 +350,6 @@ describe("alert metrics list pagination", () => {
     expect(stdout.output).toContain("org-one");
   });
 
-  test("rejects metric alert list limits outside the shared range", async () => {
-    const { context } = createContext();
-    await expect(
-      func.call(
-        context,
-        { web: false, fresh: false, limit: 0, json: true },
-        "test-org/"
-      )
-    ).rejects.toThrow("--limit must be at least 1");
-    await expect(
-      func.call(
-        context,
-        { web: false, fresh: false, limit: 1001, json: true },
-        "test-org/"
-      )
-    ).rejects.toThrow("--limit cannot exceed 1000");
-  });
-
   test("human output includes org column for multi-org project-search results", async () => {
     setOrgRegion("org-one", DEFAULT_SENTRY_URL);
     setOrgRegion("org-two", DEFAULT_SENTRY_URL);

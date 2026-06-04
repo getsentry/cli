@@ -61,6 +61,8 @@ async function resolveMetricCreateOrg(
   if (parsed.type === "explicit" || parsed.type === "org-all") {
     org = parsed.org;
   } else if (parsed.type === "project-search") {
+    // Metric alert rules are org-scoped, so a bare target is always treated
+    // as an organization slug here, never as a project search.
     org = parsed.projectSlug;
   }
 

@@ -23,7 +23,6 @@ import { openInBrowser } from "../../../lib/browser.js";
 import {
   advancePaginationState,
   buildMultiTargetContextKey,
-  CURSOR_SEP,
   decodeCompoundCursor,
   encodeCompoundCursor,
   hasPreviousPage,
@@ -35,7 +34,6 @@ import {
 } from "../../../lib/db/project-aliases.js";
 import { createDsnFingerprint } from "../../../lib/dsn/index.js";
 import {
-  ApiError,
   ContextError,
   ValidationError,
   withAuthGuard,
@@ -59,7 +57,6 @@ import {
 import { logger } from "../../../lib/logger.js";
 import {
   dispatchOrgScopedList,
-  distributeFetchBudget,
   type FetchResult as FetchResultOf,
   jsonTransformListResult,
   type ListCommandMeta,
@@ -74,13 +71,17 @@ import {
 } from "../../../lib/resolve-target.js";
 import { buildIssueAlertsUrl } from "../../../lib/sentry-urls.js";
 import type { ProjectAliasEntry, Writer } from "../../../types/index.js";
+import {
+  assertAlertListLimit,
+  buildAlertListFailureErrors,
+  fetchAlertRulesWithBudget,
+  throwAlertListFetchFailure,
+} from "../list-utils.js";
 
 /** Command key for pagination cursor storage */
 export const PAGINATION_KEY = "alert-issues-list";
 
 const USAGE_HINT = "sentry alert issues list <org>/<project>";
-
-const MAX_LIMIT = LIST_MAX_LIMIT;
 
 type ListFlags = {
   readonly web: boolean;
@@ -123,49 +124,6 @@ const issueAlertListMeta: ListCommandMeta = {
   entityPlural: "issue alert rules",
   commandPrefix: "sentry alert issues list",
 };
-
-function validateLimit(limit: number): void {
-  if (limit < 1) {
-    throw new ValidationError("--limit must be at least 1.", "limit");
-  }
-  if (limit > LIST_MAX_LIMIT) {
-    throw new ValidationError(
-      `--limit cannot exceed ${LIST_MAX_LIMIT}. ` +
-        "Use --cursor to paginate through larger result sets.",
-      "limit"
-    );
-  }
-}
-
-function throwAllFetchesFailed(prefix: string, error: Error): never {
-  if (error instanceof ApiError) {
-    throw new ApiError(
-      `${prefix}: ${error.message}`,
-      error.status,
-      error.detail,
-      error.endpoint,
-      error.enriched403
-    );
-  }
-  throw new Error(`${prefix}: ${error.message}`);
-}
-
-function buildFailureErrors(
-  failures: { target: ResolvedTarget; error: Error }[]
-): Array<{ project: string; status?: number; message: string }> | undefined {
-  if (failures.length === 0) {
-    return;
-  }
-  return failures.map(({ target: t, error: e }) =>
-    e instanceof ApiError
-      ? {
-          project: `${t.org}/${t.project}`,
-          status: e.status,
-          message: e.message,
-        }
-      : { project: `${t.org}/${t.project}`, message: e.message }
-  );
-}
 
 // Fetch helpers
 
@@ -225,153 +183,6 @@ async function fetchRulesForTarget(
     return { success: false, error };
   }
   return { success: true, data: result.value };
-}
-
-/**
- * Execute Phase 2: redistribute surplus budget to expandable targets.
- */
-async function runPhase2(
-  targets: ResolvedTarget[],
-  phase1: FetchResult[],
-  expandableIndices: number[],
-  surplus: number
-): Promise<void> {
-  const extraQuotas = distributeFetchBudget(surplus, expandableIndices.length);
-  const requests = expandableIndices
-    .map((targetIndex, allocationIndex) => ({
-      targetIndex,
-      limit: extraQuotas[allocationIndex] ?? 0,
-    }))
-    .filter((request) => request.limit > 0);
-
-  if (requests.length === 0) {
-    return;
-  }
-
-  const phase2 = await Promise.all(
-    requests.map(({ targetIndex, limit }) => {
-      // biome-ignore lint/style/noNonNullAssertion: guaranteed by expandableIndices filter
-      const target = targets[targetIndex]!;
-      const r = phase1[targetIndex] as {
-        success: true;
-        data: AlertRuleListFetchResult;
-      };
-      // biome-ignore lint/style/noNonNullAssertion: same guarantee
-      const cursor = r.data.nextCursor!;
-      return fetchRulesForTarget(target, {
-        limit,
-        startCursor: cursor,
-      });
-    })
-  );
-
-  for (let j = 0; j < requests.length; j++) {
-    // biome-ignore lint/style/noNonNullAssertion: j is within requests bounds
-    const i = requests[j]!.targetIndex;
-    const p2 = phase2[j];
-    const p1 = phase1[i];
-    if (p1?.success && p2?.success) {
-      p1.data.rules.push(...p2.data.rules);
-      p1.data.hasMore = p2.data.hasMore;
-      p1.data.nextCursor = p2.data.nextCursor;
-    }
-  }
-}
-
-/** True if any target in phase 1 still has additional pages to fetch. */
-function phase1HasMore(phase1: FetchResult[]): boolean {
-  return phase1.some((r) => r.success && r.data.hasMore);
-}
-
-/**
- * Fetch alert rules from multiple targets within a global limit budget.
- *
- * Phase 1: distribute quota per target, fetch in parallel.
- * Phase 2: redistribute surplus to expandable targets.
- */
-async function fetchWithBudget(
-  targets: ResolvedTarget[],
-  options: { limit: number; startCursors?: Map<string, string> },
-  onProgress: (fetched: number) => void
-): Promise<{ results: FetchResult[]; hasMore: boolean }> {
-  const { limit, startCursors } = options;
-  const quotas = distributeFetchBudget(limit, targets.length, {
-    minimumPerGroup: true,
-  });
-
-  const phase1 = await Promise.all(
-    targets.map((t, i) =>
-      fetchRulesForTarget(t, {
-        limit: quotas[i] ?? 1,
-        startCursor: startCursors?.get(`${t.org}/${t.project}`),
-      })
-    )
-  );
-
-  let totalFetched = 0;
-  for (const r of phase1) {
-    if (r.success) {
-      totalFetched += r.data.rules.length;
-    }
-  }
-  onProgress(totalFetched);
-
-  const surplus = limit - totalFetched;
-  if (surplus <= 0) {
-    return {
-      results: phase1,
-      hasMore: phase1HasMore(phase1),
-    };
-  }
-
-  const expandableIndices: number[] = [];
-  for (let i = 0; i < phase1.length; i++) {
-    const r = phase1[i];
-    if (
-      r?.success &&
-      r.data.rules.length >= (quotas[i] ?? 1) &&
-      r.data.nextCursor
-    ) {
-      expandableIndices.push(i);
-    }
-  }
-
-  if (expandableIndices.length === 0) {
-    return {
-      results: phase1,
-      hasMore: phase1HasMore(phase1),
-    };
-  }
-
-  await runPhase2(targets, phase1, expandableIndices, surplus);
-
-  totalFetched = 0;
-  for (const r of phase1) {
-    if (r.success) {
-      totalFetched += r.data.rules.length;
-    }
-  }
-  onProgress(totalFetched);
-
-  return {
-    results: phase1,
-    hasMore: phase1HasMore(phase1),
-  };
-}
-
-/**
- * Trim display rows to the global limit while guaranteeing at least one row
- * per project (when possible).
- */
-function trimWithProjectGuarantee(
-  rows: AlertRuleRow[],
-  limit: number
-): AlertRuleRow[] {
-  return trimWithGroupGuarantee(
-    rows,
-    limit,
-    (r) => `${r.target.org}/${r.target.project}`
-  );
 }
 
 async function resolveWebUrl(
@@ -472,15 +283,17 @@ async function handleResolvedTargets(
   const { results, hasMore } = await withProgress(
     { message: `${baseMessage} (up to ${flags.limit})...`, json: flags.json },
     (setMessage) =>
-      fetchWithBudget(
-        activeTargets,
-        { limit: flags.limit, startCursors },
-        (fetched) => {
+      fetchAlertRulesWithBudget(activeTargets, {
+        limit: flags.limit,
+        startCursors,
+        getGroupKey: (target) => `${target.org}/${target.project}`,
+        fetchGroup: fetchRulesForTarget,
+        onProgress: (fetched) => {
           setMessage(
             `${baseMessage}, ${fetched} and counting (up to ${flags.limit})...`
           );
-        }
-      )
+        },
+      })
   );
 
   const validResults: AlertRuleListFetchResult[] = [];
@@ -500,7 +313,7 @@ async function handleResolvedTargets(
   if (validResults.length === 0 && failures.length > 0) {
     // biome-ignore lint/style/noNonNullAssertion: guarded by failures.length > 0
     const { error: first } = failures[0]!;
-    throwAllFetchesFailed(
+    throwAlertListFetchFailure(
       `Failed to fetch alert rules from ${targets.length} project(s)`,
       first
     );
@@ -540,7 +353,11 @@ async function handleResolvedTargets(
       )
     : allRows;
 
-  const displayRows = trimWithProjectGuarantee(filteredRows, flags.limit);
+  const displayRows = trimWithGroupGuarantee(
+    filteredRows,
+    flags.limit,
+    (row) => `${row.target.org}/${row.target.project}`
+  );
   const trimmed = displayRows.length < filteredRows.length;
   const cursorValues: (string | null)[] = sortedTargetKeys.map((key) => {
     if (exhaustedTargets.has(key)) {
@@ -575,7 +392,12 @@ async function handleResolvedTargets(
   const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
   const allRules = displayRows.map((r) => r.rule);
-  const errors = buildFailureErrors(failures);
+  const errors = buildAlertListFailureErrors(
+    failures,
+    "project",
+    ({ target: t }) => `${t.org}/${t.project}`,
+    ({ error }) => error
+  );
 
   const nav = paginationHint({
     hasPrev,
@@ -583,7 +405,7 @@ async function handleResolvedTargets(
     prevHint: "-c prev",
     nextHint: "-c next",
   });
-  const higherLimit = Math.min(flags.limit * 2, MAX_LIMIT);
+  const higherLimit = Math.min(flags.limit * 2, LIST_MAX_LIMIT);
   const limitHint =
     hasMoreToShow && higherLimit > flags.limit
       ? `Use -n ${higherLimit} for more.`
@@ -690,118 +512,101 @@ const jsonTransformIssueAlertList = jsonTransformListResult;
 
 // Command
 
-export const listCommand = buildListCommand(
-  "alert",
-  {
-    docs: {
-      brief: "List issue alert rules",
-      fullDescription:
-        "List issue alert rules for one or more Sentry projects.\n\n" +
-        "Issue alerts trigger notifications when error events match conditions.\n\n" +
-        "Target patterns:\n" +
-        "  sentry alert issues list                     # auto-detect from DSN or config\n" +
-        "  sentry alert issues list <org>/<project>     # explicit org and project\n" +
-        "  sentry alert issues list <org>/              # all projects in org\n" +
-        "  sentry alert issues list <project>           # find project across all orgs\n\n" +
-        `${targetPatternExplanation()}\n\n` +
-        "In monorepos with multiple Sentry projects, shows alert rules from all detected projects.\n\n" +
-        "Use --cursor / -c next / -c prev to paginate through larger result sets.",
-    },
-    output: {
-      human: formatIssueAlertListHuman,
-      jsonTransform: jsonTransformIssueAlertList,
-    },
-    parameters: {
-      positional: LIST_TARGET_POSITIONAL,
-      flags: {
-        web: {
-          kind: "boolean",
-          brief: "Open in browser",
-          default: false,
-        },
-        limit: buildListLimitFlag("issue alert rules"),
-        query: {
-          kind: "parsed",
-          parse: String,
-          brief: "Filter rules by name",
-          optional: true,
-        },
-        cursor: {
-          kind: "parsed",
-          parse: parseCursorFlag,
-          brief:
-            'Pagination cursor (use "next" for next page, "prev" for previous)',
-          optional: true,
-        },
-      },
-      aliases: { ...LIST_BASE_ALIASES, w: "web", q: "query" },
-    },
-    async *func(this: SentryContext, flags: ListFlags, target?: string) {
-      const { cwd } = this;
-      const parsed = parseOrgProjectArg(target);
-      validateLimit(flags.limit);
-
-      if (flags.web) {
-        await openInBrowser(
-          await resolveWebUrl(parsed, cwd),
-          "issue alert rules"
-        );
-        return;
-      }
-
-      // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
-      const resolveAndHandle: ModeHandler<any> = (ctx) =>
-        handleResolvedTargets({ ...ctx, flags });
-
-      const result = (await dispatchOrgScopedList({
-        config: issueAlertListMeta,
-        cwd,
-        flags,
-        parsed,
-        orgSlugMatchBehavior: "redirect",
-        // All modes use per-project fetching with compound cursor support
-        allowCursorInModes: [
-          "auto-detect",
-          "explicit",
-          "project-search",
-          "org-all",
-        ],
-        overrides: {
-          "auto-detect": resolveAndHandle,
-          explicit: resolveAndHandle,
-          "project-search": resolveAndHandle,
-          "org-all": resolveAndHandle,
-        },
-      })) as IssueAlertListResult;
-
-      let combinedHint: string | undefined;
-      if (result.items.length > 0) {
-        const hintParts: string[] = [];
-        if (result.moreHint) {
-          hintParts.push(result.moreHint);
-        }
-        if (result.footer) {
-          hintParts.push(result.footer);
-        }
-        combinedHint =
-          hintParts.length > 0 ? hintParts.join("\n") : result.hint;
-      }
-
-      yield new CommandOutput(result);
-      return { hint: combinedHint };
-    },
+export const listCommand = buildListCommand("alert issues", {
+  docs: {
+    brief: "List issue alert rules",
+    fullDescription:
+      "List issue alert rules for one or more Sentry projects.\n\n" +
+      "Issue alerts trigger notifications when error events match conditions.\n\n" +
+      "Target patterns:\n" +
+      "  sentry alert issues list                     # auto-detect from DSN or config\n" +
+      "  sentry alert issues list <org>/<project>     # explicit org and project\n" +
+      "  sentry alert issues list <org>/              # all projects in org\n" +
+      "  sentry alert issues list <project>           # find project across all orgs\n\n" +
+      `${targetPatternExplanation()}\n\n` +
+      "In monorepos with multiple Sentry projects, shows alert rules from all detected projects.\n\n" +
+      "Use --cursor / -c next / -c prev to paginate through larger result sets.",
   },
-  { noSubcommandIntercept: true }
-);
+  output: {
+    human: formatIssueAlertListHuman,
+    jsonTransform: jsonTransformIssueAlertList,
+  },
+  parameters: {
+    positional: LIST_TARGET_POSITIONAL,
+    flags: {
+      web: {
+        kind: "boolean",
+        brief: "Open in browser",
+        default: false,
+      },
+      limit: buildListLimitFlag("issue alert rules"),
+      query: {
+        kind: "parsed",
+        parse: String,
+        brief: "Filter rules by name",
+        optional: true,
+      },
+      cursor: {
+        kind: "parsed",
+        parse: parseCursorFlag,
+        brief:
+          'Pagination cursor (use "next" for next page, "prev" for previous)',
+        optional: true,
+      },
+    },
+    aliases: { ...LIST_BASE_ALIASES, w: "web", q: "query" },
+  },
+  async *func(this: SentryContext, flags: ListFlags, target?: string) {
+    const { cwd } = this;
+    const parsed = parseOrgProjectArg(target);
+    assertAlertListLimit(flags.limit);
 
-/** @internal Exported for testing only. */
-export const __testing = {
-  trimWithProjectGuarantee,
-  encodeCompoundCursor,
-  decodeCompoundCursor,
-  buildMultiTargetContextKey,
-  buildProjectAliasMap,
-  phase1HasMore,
-  CURSOR_SEP,
-  MAX_LIMIT,
-};
+    if (flags.web) {
+      await openInBrowser(
+        await resolveWebUrl(parsed, cwd),
+        "issue alert rules"
+      );
+      return;
+    }
+
+    // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
+    const resolveAndHandle: ModeHandler<any> = (ctx) =>
+      handleResolvedTargets({ ...ctx, flags });
+
+    const result = (await dispatchOrgScopedList({
+      config: issueAlertListMeta,
+      cwd,
+      flags,
+      parsed,
+      orgSlugMatchBehavior: "redirect",
+      // All modes use per-project fetching with compound cursor support
+      allowCursorInModes: [
+        "auto-detect",
+        "explicit",
+        "project-search",
+        "org-all",
+      ],
+      overrides: {
+        "auto-detect": resolveAndHandle,
+        explicit: resolveAndHandle,
+        "project-search": resolveAndHandle,
+        "org-all": resolveAndHandle,
+      },
+    })) as IssueAlertListResult;
+
+    let combinedHint: string | undefined;
+    if (result.items.length > 0) {
+      const hintParts: string[] = [];
+      if (result.moreHint) {
+        hintParts.push(result.moreHint);
+      }
+      if (result.footer) {
+        hintParts.push(result.footer);
+      }
+      combinedHint = hintParts.length > 0 ? hintParts.join("\n") : result.hint;
+    }
+
+    yield new CommandOutput(result);
+    return { hint: combinedHint };
+  },
+});
