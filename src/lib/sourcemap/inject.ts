@@ -280,7 +280,7 @@ function findSourceMappingDirective(
   return;
 }
 
-/** Whether `buf` starts with `prefix` at `from`, optionally case-sensitive. */
+/** Whether `buf` contains the ASCII `prefix` starting at byte offset `from`. */
 function bytesStartsWith(buf: Buffer, prefix: string, from: number): boolean {
   if (from + prefix.length > buf.length) {
     return false;
@@ -383,7 +383,8 @@ async function extractSourceMappingDirective(
   try {
     const tail = await readDirectiveTail(jsPath);
     return findSourceMappingDirective(tail);
-  } catch {
+  } catch (error) {
+    log.debug(`failed to read directive tail from ${jsPath}`, error);
     return;
   }
 }
@@ -395,7 +396,8 @@ async function fileExists(path: string): Promise<boolean> {
   try {
     const s = await stat(path);
     return s.isFile();
-  } catch {
+  } catch (error) {
+    log.debug(`stat failed for ${path}`, error);
     return false;
   }
 }

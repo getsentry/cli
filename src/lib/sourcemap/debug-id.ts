@@ -24,7 +24,6 @@ const log = logger.withTag("sourcemap.debug-id");
 /** Comment prefix used to identify an existing debug ID in a JS file. */
 const DEBUGID_COMMENT_PREFIX = "//# debugId=";
 
-/** Regex to extract an existing debug ID from a JS file. */
 /** Regex to extract an existing debug ID from a JS file. @internal */
 export const EXISTING_DEBUGID_RE = /\/\/# debugId=([0-9a-fA-F-]{36})/;
 

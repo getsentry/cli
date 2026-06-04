@@ -400,6 +400,37 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
     }
   });
 
+  test("--no-rewrite + inline map: uploads original map without debug ID", async () => {
+    const jsPath = join(dir, "inline-norw.js");
+    const map = { version: 3, sources: ["b.ts"], names: [], mappings: "BBBB" };
+    const dataUrl = `data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString("base64")}`;
+    writeFileSync(jsPath, `console.log(1)\n//# sourceMappingURL=${dataUrl}\n`);
+
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
+    try {
+      const ctx = makeContext();
+      await func.call(ctx, { "no-rewrite": true }, dir);
+      const files = uploadSpy.mock.calls[0]?.[0]?.files ?? [];
+      expect(files).toHaveLength(2);
+      const js = files.find((f) => f.type === "minified_source");
+      const mapFile = files.find((f) => f.type === "source_map");
+      // No debug ID injected — relying on release/URL matching.
+      expect(js?.debugId).toBeUndefined();
+      expect(mapFile?.debugId).toBeUndefined();
+      // The source_map entry carries the original (un-injected) map content.
+      expect(mapFile?.content).toBeInstanceOf(Buffer);
+      const uploaded = JSON.parse(
+        (mapFile?.content as Buffer).toString("utf-8")
+      );
+      expect(uploaded.version).toBe(3);
+      expect(uploaded.debug_id).toBeUndefined();
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
   test("--dist flag: passes dist to uploadSourcemaps", async () => {
     mkdirSync(join(dir, "_astro"));
     writeFileSync(join(dir, "_astro", "app.js"), "console.log(1)\n");
