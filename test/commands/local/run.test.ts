@@ -5,7 +5,7 @@
  * exit code propagation, signal handling, and error cases.
  */
 
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   CLIENT_SPOTLIGHT_PREFIXES,
   runCommand,
@@ -50,6 +50,10 @@ function makeContext() {
 }
 
 describe("sentry local run", () => {
+  beforeEach(() => {
+    spawnCapture.env = undefined;
+  });
+
   test("throws ValidationError when no command provided", async () => {
     const func = (await runCommand.loader()) as unknown as RunFunc;
     const ctx = makeContext();
@@ -159,9 +163,7 @@ describe("sentry local run", () => {
     const expectedUrl = `http://${host}:${port}/stream`;
 
     // `node:child_process` is mocked at module scope (see vi.mock below). The
-    // mock records the env handed to spawn and returns a fake child that closes
-    // with code 0 so func() resolves.
-    spawnCapture.env = undefined;
+    // mock records the env handed to spawn so we can assert against it.
     await func.call(ctx, { port, host }, "printenv");
 
     const capturedEnv = spawnCapture.env;

@@ -42,10 +42,11 @@ The `<PREFIX>` variants cover every common framework client prefix so the spotli
 
 **Server vs. client.** Server-side SDKs (`@sentry/node`, Python, and friends) read `SENTRY_SPOTLIGHT` automatically — no code changes needed.
 
-For browser/client events, the CLI exposes the spotlight URL under every framework client prefix above. Once the [browser SDK reads these variables automatically](https://github.com/getsentry/sentry-javascript/pull/18198), client-side capture will be zero-config too. **Until then**, reference the variable for your framework in your client config:
+For browser/client events, the CLI exposes the spotlight URL under every framework client prefix above. Once the [browser SDK reads these variables automatically](https://github.com/getsentry/sentry-javascript/pull/18198), client-side capture will be zero-config too. **Until then**, reference the variable matching your framework in your client config:
 
 ```ts
-// Next.js — use VITE_, PUBLIC_, REACT_APP_, etc. to match your framework.
+// Next.js example — other frameworks use their own env access pattern
+// (e.g. import.meta.env.VITE_SENTRY_SPOTLIGHT for Vite-based frameworks).
 Sentry.init({ spotlight: process.env.NEXT_PUBLIC_SENTRY_SPOTLIGHT ?? false });
 ```
 
