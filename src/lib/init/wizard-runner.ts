@@ -12,6 +12,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { MastraClient } from "@mastra/client-js";
 import {
@@ -54,6 +55,8 @@ import { describeTool, executeTool } from "./tools/registry.js";
 import type {
   ResolvedInitContext,
   SuspendPayload,
+  ToolPayload,
+  ToolResult,
   WizardOptions,
   WorkflowRunResult,
 } from "./types.js";
@@ -67,6 +70,16 @@ import {
 } from "./workflow-inputs.js";
 
 type SpinState = { running: boolean };
+
+const APPLY_CODEMODS_STEP = "apply-codemods";
+
+type CompactPhaseHistoryEntry = {
+  ok: boolean;
+  operation: ToolPayload["operation"];
+  _phase: string;
+  error?: string;
+  data?: { files: Record<string, null> };
+};
 
 type StepContext = {
   payload: SuspendPayload;
@@ -85,6 +98,46 @@ function nextPhase(
   const phase = (stepPhases.get(stepId) ?? 0) + 1;
   stepPhases.set(stepId, phase);
   return names[Math.min(phase - 1, names.length - 1)] ?? "done";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function filePathMarkersForHistory(
+  data: unknown
+): Record<string, null> | undefined {
+  if (!(isRecord(data) && isRecord(data.files))) {
+    return;
+  }
+
+  return Object.fromEntries(
+    Object.keys(data.files).map((path) => [path, null])
+  );
+}
+
+/**
+ * Keep `_prevPhases` useful to apply-codemods without resending prior file contents.
+ * The server only needs prior errors and read file paths for retry/replan decisions.
+ */
+function summarizeToolPhaseForHistory(
+  payload: ToolPayload,
+  phase: string,
+  result: ToolResult
+): CompactPhaseHistoryEntry {
+  const summary: CompactPhaseHistoryEntry = {
+    ok: result.ok,
+    operation: payload.operation,
+    _phase: phase,
+  };
+  if (result.error) {
+    summary.error = result.error;
+  }
+  const files = filePathMarkersForHistory(result.data);
+  if (files) {
+    summary.data = { files };
+  }
+  return summary;
 }
 
 /**
@@ -156,7 +209,7 @@ function describePostTool(payload: SuspendPayload): string | undefined {
 async function handleSuspendedStep(
   ctx: StepContext,
   stepPhases: Map<string, number>,
-  stepHistory: Map<string, Record<string, unknown>[]>
+  stepHistory: Map<string, CompactPhaseHistoryEntry[]>
 ): Promise<Record<string, unknown>> {
   const { payload, stepId, spin, spinState, context, ui } = ctx;
   const label = STEP_LABELS[stepId] ?? stepId;
@@ -203,15 +256,26 @@ async function handleSuspendedStep(
       ui.markFilesAnalyzed?.(payload.params.paths);
     }
 
+    const phase = nextPhase(stepPhases, stepId, [
+      "read-files",
+      "analyze",
+      "done",
+    ]);
     const history = stepHistory.get(stepId) ?? [];
-    history.push(toolResult);
+    const previousPhases = history.slice();
+    history.push(summarizeToolPhaseForHistory(payload, phase, toolResult));
     stepHistory.set(stepId, history);
 
-    return {
+    const resumeData: Record<string, unknown> = {
       ...toolResult,
-      _phase: nextPhase(stepPhases, stepId, ["read-files", "analyze", "done"]),
-      _prevPhases: history.slice(0, -1),
+      _phase: phase,
     };
+    if (stepId === APPLY_CODEMODS_STEP) {
+      // apply-codemods uses prior failures and read paths to repair failed patches.
+      // Other steps do not need phase history, so skip it to avoid payload growth.
+      resumeData._prevPhases = previousPhases;
+    }
+    return resumeData;
   }
 
   if (payload.type === "interactive") {
@@ -278,6 +342,12 @@ function assertWorkflowResult(raw: unknown): WorkflowRunResult {
     !["suspended", "success", "failed"].includes(obj.status)
   ) {
     throw new Error(`Unexpected workflow status: ${String(obj.status)}`);
+  }
+  if (isRecord(obj.activeStepsPath)) {
+    const activeStepIds = Object.keys(obj.activeStepsPath);
+    if (activeStepIds.length > 0) {
+      obj.suspended = activeStepIds.map((id) => [id]);
+    }
   }
   return obj as WorkflowRunResult;
 }
@@ -435,9 +505,9 @@ async function preamble(
   return true;
 }
 
-const MAX_RESUME_RETRIES = 3;
-const RETRY_BACKOFF_MS = [2000, 4000, 8000];
-const RUN_STATE_RECOVERY_BACKOFF_MS = [0, 250, 750, 1500];
+const RUN_STATE_RECOVERY_INITIAL_BACKOFF_MS = [0, 250, 750, 1500];
+const RUN_STATE_RECOVERY_POLL_MS = 3000;
+const RUN_STATE_RECOVERY_MAX_WAIT_MS = 120_000;
 const RUN_STATE_RECOVERY_TIMEOUT_MS = 10_000;
 
 type ResumeRetryArgs = {
@@ -449,6 +519,7 @@ type ResumeRetryArgs = {
     runById: (runId: string, opts?: { fields?: string[] }) => Promise<unknown>;
   };
   stepId: string;
+  payload: SuspendPayload;
   resumeData: Record<string, unknown>;
   tracingOptions: Record<string, unknown>;
   spin: SpinnerHandle;
@@ -456,7 +527,7 @@ type ResumeRetryArgs = {
 };
 
 /**
- * Detect Mastra's "not suspended" 500 — means the server already
+ * Detect Mastra's "not suspended" conflict — means the server already
  * processed this step (our previous request succeeded but the response was
  * dropped before we received it). The MastraClientError message embeds the
  * server body, e.g.:
@@ -468,116 +539,182 @@ function isStepAlreadyAdvancedError(err: unknown): boolean {
   return err instanceof Error && err.message.includes("was not suspended");
 }
 
+function httpStatus(err: unknown): number | undefined {
+  if (!isRecord(err)) {
+    return;
+  }
+  return typeof err.status === "number" ? err.status : undefined;
+}
+
+function runStateRecoveryBackoffMs(): number[] {
+  const delays = [...RUN_STATE_RECOVERY_INITIAL_BACKOFF_MS];
+  let totalWaitMs = delays.reduce((total, delayMs) => total + delayMs, 0);
+  while (totalWaitMs < RUN_STATE_RECOVERY_MAX_WAIT_MS) {
+    const delayMs = Math.min(
+      RUN_STATE_RECOVERY_POLL_MS,
+      RUN_STATE_RECOVERY_MAX_WAIT_MS - totalWaitMs
+    );
+    delays.push(delayMs);
+    totalWaitMs += delayMs;
+  }
+  return delays;
+}
+
+function isRecoverableRunState(
+  result: WorkflowRunResult,
+  resumedStepId: string,
+  resumedPayload: SuspendPayload
+): boolean {
+  if (result.status !== "suspended") {
+    return true;
+  }
+
+  const recovered = extractSuspendPayload(result, resumedStepId);
+  if (!recovered) {
+    return false;
+  }
+
+  return !(
+    recovered.stepId === resumedStepId &&
+    isDeepStrictEqual(recovered.payload, resumedPayload)
+  );
+}
+
 /**
- * Recover from a stale-step retry by fetching the current run state.
+ * Recover from stale or ambiguous resume failures by fetching the current run state.
  * If the workflow has already advanced (e.g. plan-codemods is now suspended),
  * the returned WorkflowRunResult lets the main loop continue from the right step.
  */
 async function tryRecoverCurrentRunState(
   workflow: ResumeRetryArgs["workflow"],
-  runId: string
+  runId: string,
+  resumedStepId: string,
+  resumedPayload: SuspendPayload
 ): Promise<WorkflowRunResult | null> {
-  for (const delayMs of RUN_STATE_RECOVERY_BACKOFF_MS) {
+  const deadlineAt = Date.now() + RUN_STATE_RECOVERY_MAX_WAIT_MS;
+  for (const delayMs of runStateRecoveryBackoffMs()) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      return null;
+    }
     if (delayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(delayMs, remainingMs))
+      );
+    }
+    const timeoutMs = Math.min(
+      RUN_STATE_RECOVERY_TIMEOUT_MS,
+      deadlineAt - Date.now()
+    );
+    if (timeoutMs <= 0) {
+      return null;
     }
     try {
       const raw = await withTimeout(
         workflow.runById(runId, {
-          fields: ["steps", "activeStepsPath", "result"],
+          fields: [
+            "status",
+            "suspended",
+            "steps",
+            "activeStepsPath",
+            "suspendPayload",
+            "result",
+            "error",
+          ],
         }),
-        RUN_STATE_RECOVERY_TIMEOUT_MS,
+        timeoutMs,
         "Run state recovery"
       );
-      // runById returns activeStepsPath (Record<stepId, executionPath>) but
-      // not suspended (string[][]). The main loop reads result.suspended to
-      // find the active step; without it, stepId falls back to "unknown" and
-      // extractSuspendPayload iterates all steps — picking the first with any
-      // suspendPayload, which could be a completed step with stale D1 data.
-      // Derive suspended from the activeStepsPath keys so the lookup is
-      // deterministic: those keys are exactly the currently-active step IDs.
-      const state = raw as Record<string, unknown>;
-      if (!state.suspended && state.activeStepsPath) {
-        state.suspended = Object.keys(
-          state.activeStepsPath as Record<string, unknown>
-        ).map((id) => [id]);
+      const result = assertWorkflowResult(raw);
+      if (isRecoverableRunState(result, resumedStepId, resumedPayload)) {
+        return result;
       }
-      return assertWorkflowResult(state);
     } catch {
       // Mastra/D1 can briefly return a not-yet-readable or intermediate run
-      // state immediately after rejecting a stale resume. Poll a few times
-      // before surfacing the original 500 to the user.
+      // state while the original resume request is still running. Keep
+      // observing run state instead of replaying a non-idempotent resume.
     }
   }
   return null;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: retry loop branches across transient errors, stale-step recovery, and backoff
-async function resumeWithRetry(
+async function resumeWithRecovery(
   args: ResumeRetryArgs
 ): Promise<WorkflowRunResult> {
-  const { run, workflow, stepId, resumeData, tracingOptions, spin, ui } = args;
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= MAX_RESUME_RETRIES; attempt++) {
-    try {
-      if (attempt > 0) {
-        ui.setOverlay?.({
-          kind: "health",
-          message: "Connection interrupted, retrying...",
-          retryCount: attempt,
-        });
-        await new Promise((r) =>
-          setTimeout(r, RETRY_BACKOFF_MS[attempt - 1] ?? 8000)
-        );
-      }
-      const raw = await withTimeout(
-        run.resumeAsync({ step: stepId, resumeData, tracingOptions }),
-        API_TIMEOUT_MS,
-        "Workflow resume"
+  const {
+    run,
+    workflow,
+    stepId,
+    payload,
+    resumeData,
+    tracingOptions,
+    spin,
+    ui,
+  } = args;
+  try {
+    const raw = await withTimeout(
+      run.resumeAsync({ step: stepId, resumeData, tracingOptions }),
+      API_TIMEOUT_MS,
+      "Workflow resume"
+    );
+    return assertWorkflowResult(raw);
+  } catch (err) {
+    if (isStepAlreadyAdvancedError(err)) {
+      spin.message("Reconnecting...");
+      const recovered = await tryRecoverCurrentRunState(
+        workflow,
+        run.runId,
+        stepId,
+        payload
       );
-      if (attempt > 0) {
-        ui.clearOverlay?.();
-      }
-      return assertWorkflowResult(raw);
-    } catch (err) {
-      lastError = err;
-      // "Step not suspended" means the server processed our step but the
-      // response was dropped (network blip, CF response timeout, etc.).
-      // Retrying the same step will always 500. Fetch the current run state
-      // so the main loop can continue from whichever step is actually suspended.
-      if (isStepAlreadyAdvancedError(err)) {
-        ui.clearOverlay?.();
-        spin.message("Reconnecting...");
-        const recovered = await tryRecoverCurrentRunState(workflow, run.runId);
-        if (recovered) {
-          addBreadcrumb({
-            category: "wizard",
-            message: `stale-step recovery succeeded for ${stepId}`,
-            level: "info",
-            data: { stepId, runId: run.runId },
-          });
-          return recovered;
-        }
-        // Recovery failed — the step is confirmed not suspended and retrying
-        // it will always 500. Throw immediately instead of wasting 14s.
-        captureException(err, {
-          level: "warning",
-          tags: {
-            "wizard.stale_step_recovery": "failed",
-            "wizard.resume_step": stepId,
-          },
-          extra: { runId: run.runId },
+      if (recovered) {
+        addBreadcrumb({
+          category: "wizard",
+          message: `stale-step recovery succeeded for ${stepId}`,
+          level: "info",
+          data: { stepId, runId: run.runId },
         });
-        throw err;
+        return recovered;
       }
-      if (attempt === MAX_RESUME_RETRIES) {
-        ui.clearOverlay?.();
-        throw err;
-      }
+      captureException(err, {
+        level: "warning",
+        tags: {
+          "wizard.stale_step_recovery": "failed",
+          "wizard.resume_step": stepId,
+        },
+        extra: { runId: run.runId },
+      });
+      throw err;
     }
+
+    if (httpStatus(err) !== undefined) {
+      throw err;
+    }
+
+    ui.setOverlay?.({
+      kind: "health",
+      message: "Connection interrupted, reconnecting...",
+      retryCount: 1,
+    });
+    spin.message("Reconnecting...");
+    const recovered = await tryRecoverCurrentRunState(
+      workflow,
+      run.runId,
+      stepId,
+      payload
+    );
+    ui.clearOverlay?.();
+    if (recovered) {
+      addBreadcrumb({
+        category: "wizard",
+        message: `resume state recovery succeeded for ${stepId}`,
+        level: "info",
+        data: { stepId, runId: run.runId },
+      });
+      return recovered;
+    }
+    throw err;
   }
-  ui.clearOverlay?.();
-  throw lastError;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
@@ -657,6 +794,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
 
   const client = new MastraClient({
     baseUrl: MASTRA_API_URL,
+    retries: 0,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     abortSignal: abortController.signal,
     fetch: ((url, init) => {
@@ -732,7 +870,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   }
 
   const stepPhases = new Map<string, number>();
-  const stepHistory = new Map<string, Record<string, unknown>[]>();
+  const stepHistory = new Map<string, CompactPhaseHistoryEntry[]>();
 
   // Track which step the runner is currently suspended on so the
   // sidebar checklist can flip rows as the workflow advances. A
@@ -791,10 +929,11 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         stepHistory
       );
 
-      result = await resumeWithRetry({
+      result = await resumeWithRecovery({
         run,
         workflow,
         stepId: extracted.stepId,
+        payload: extracted.payload,
         resumeData,
         tracingOptions,
         spin,
@@ -922,28 +1061,73 @@ function mapWorkflowExitCode(workflowCode: number | undefined): number {
   }
 }
 
-function extractSuspendPayload(
+function activeStepIdsFor(result: WorkflowRunResult, stepId: string): string[] {
+  const activeStepsPathIds = Object.keys(result.activeStepsPath ?? {});
+  if (activeStepsPathIds.length > 0) {
+    return activeStepsPathIds;
+  }
+
+  const ids = new Set<string>();
+  for (const path of result.suspended ?? []) {
+    const id = path.at(-1);
+    if (id) {
+      ids.add(id);
+    }
+  }
+  if (ids.size === 0 && stepId !== "unknown") {
+    ids.add(stepId);
+  }
+  return [...ids];
+}
+
+function extractSuspendPayloadFromStep(
   result: WorkflowRunResult,
   stepId: string
 ): { payload: SuspendPayload; stepId: string } | undefined {
   const stepPayload = result.steps?.[stepId]?.suspendPayload;
-  if (stepPayload) {
-    return { payload: assertSuspendPayload(stepPayload), stepId };
+  if (!stepPayload) {
+    return;
+  }
+  return { payload: assertSuspendPayload(stepPayload), stepId };
+}
+
+function extractSuspendPayload(
+  result: WorkflowRunResult,
+  stepId: string
+): { payload: SuspendPayload; stepId: string } | undefined {
+  const activeStepIds = activeStepIdsFor(result, stepId);
+  if (activeStepIds.length > 0) {
+    for (const activeStepId of activeStepIds) {
+      const extracted = extractSuspendPayloadFromStep(result, activeStepId);
+      if (extracted) {
+        return extracted;
+      }
+    }
+    if (result.suspendPayload) {
+      return {
+        payload: assertSuspendPayload(result.suspendPayload),
+        stepId: activeStepIds[0] ?? stepId,
+      };
+    }
+    return;
   }
 
   if (result.suspendPayload) {
     return { payload: assertSuspendPayload(result.suspendPayload), stepId };
   }
 
-  for (const key of Object.keys(result.steps ?? {})) {
-    const step = result.steps?.[key];
-    if (step?.suspendPayload) {
-      return {
-        payload: assertSuspendPayload(step.suspendPayload),
-        stepId: key,
-      };
-    }
+  const payloadEntries = Object.entries(result.steps ?? {}).filter(
+    ([, entry]) => entry.suspendPayload
+  );
+  if (payloadEntries.length !== 1) {
+    return;
   }
-
-  return;
+  const [payloadStepId, step] = payloadEntries[0] as [
+    string,
+    { suspendPayload: unknown },
+  ];
+  return {
+    payload: assertSuspendPayload(step.suspendPayload),
+    stepId: payloadStepId,
+  };
 }

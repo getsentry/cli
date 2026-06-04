@@ -114,7 +114,8 @@ let stderrSpy: ReturnType<typeof spyOn>;
  * runWizard. Used by the MastraClient lifecycle suite to assert that the
  * `abortSignal` passed at construction time is aborted on teardown.
  */
-let capturedClientOptions: { abortSignal?: AbortSignal }[] = [];
+let capturedClientOptions: { abortSignal?: AbortSignal; retries?: number }[] =
+  [];
 
 let savedPlainOutput: string | undefined;
 
@@ -240,13 +241,19 @@ beforeEach(() => {
       // `this` is the MastraClient instance. `BaseResource.options` holds the
       // full ClientOptions passed to the constructor — including abortSignal.
       capturedClientOptions.push(
-        (this as unknown as { options: { abortSignal?: AbortSignal } }).options
+        (
+          this as unknown as {
+            options: { abortSignal?: AbortSignal; retries?: number };
+          }
+        ).options
       );
       return workflow as any;
     });
 });
 
 afterEach(() => {
+  vi.useRealTimers();
+
   getUISpy.mockRestore();
   formatBannerSpy.mockRestore();
   formatResultSpy.mockRestore();
@@ -825,6 +832,7 @@ describe("runWizard — MastraClient lifecycle", () => {
     await runWizard(makeOptions());
 
     expect(capturedClientOptions).toHaveLength(1);
+    expect(capturedClientOptions[0]?.retries).toBe(0);
     const signal = capturedClientOptions[0]?.abortSignal;
     expect(signal).toBeInstanceOf(AbortSignal);
     // Using the non-null assertion safely — we asserted toBeInstanceOf above.
@@ -889,7 +897,9 @@ describe("runWizard — MastraClient lifecycle", () => {
     let abortedAtConstruction: boolean | undefined;
     getWorkflowSpy.mockImplementation(function (this: MastraClient) {
       const opts = (
-        this as unknown as { options: { abortSignal?: AbortSignal } }
+        this as unknown as {
+          options: { abortSignal?: AbortSignal; retries?: number };
+        }
       ).options;
       capturedClientOptions.push(opts);
       abortedAtConstruction = opts.abortSignal?.aborted;
@@ -946,11 +956,19 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     params: { commands: ["npm install"] },
   };
 
-  function makeStaleStepRun(resumeAsyncImpl: () => Promise<WorkflowRunResult>) {
+  function makeStaleStepRun(
+    resumeAsyncImpl: (
+      args: Record<string, unknown>
+    ) => Promise<WorkflowRunResult>
+  ) {
     let runByIdRef: ReturnType<typeof mock>;
     getWorkflowSpy.mockImplementation(function (this: MastraClient) {
       capturedClientOptions.push(
-        (this as unknown as { options: { abortSignal?: AbortSignal } }).options
+        (
+          this as unknown as {
+            options: { abortSignal?: AbortSignal; retries?: number };
+          }
+        ).options
       );
       runByIdRef = runByIdMock;
       return {
@@ -966,31 +984,140 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     });
   }
 
-  function staleStepError(): Error {
-    return new Error(
-      "HTTP error! status: 500 - " +
-        JSON.stringify({
-          error:
-            "This workflow step 'tool-step' was not suspended. Available suspended steps: [next-step]",
-        })
+  function httpError(
+    status: number,
+    body: unknown
+  ): Error & { status: number } {
+    return Object.assign(
+      new Error(`HTTP error! status: ${status} - ${JSON.stringify(body)}`),
+      { status }
     );
   }
 
-  function staleRunError(): Error {
-    return new Error(
-      "HTTP error! status: 500 - " +
-        JSON.stringify({ error: "This workflow run was not suspended" })
-    );
+  function staleStepError(status = 500): Error & { status: number } {
+    return httpError(status, {
+      error:
+        "This workflow step 'tool-step' was not suspended. Available suspended steps: [next-step]",
+    });
   }
 
-  test("recovers when server has already advanced to the next step", async () => {
+  function staleRunError(status = 500): Error & { status: number } {
+    return httpError(status, {
+      error: "This workflow run was not suspended",
+    });
+  }
+
+  function selectWorkflowFields(
+    result: WorkflowRunResult,
+    fields: string[] | undefined
+  ): Record<string, unknown> {
+    const source = result as unknown as Record<string, unknown>;
+    const selected: Record<string, unknown> = {};
+    for (const field of fields ?? Object.keys(source)) {
+      if (field in source) {
+        selected[field] = source[field];
+      }
+    }
+    return selected;
+  }
+
+  test("recovers from a sparse 409 stale-resume conflict", async () => {
     mockStartResult = {
       status: "suspended",
       suspended: [["tool-step"]],
       steps: { "tool-step": { suspendPayload: toolPayload } },
     };
-    // runById returns a finished workflow — the wizard should complete cleanly.
-    mockRunByIdResult = { status: "success" };
+    const currentRunState: WorkflowRunResult = {
+      status: "success",
+      suspended: [],
+    };
+    runByIdMock.mockImplementation(
+      (_runId: string, opts?: { fields?: string[] }) =>
+        Promise.resolve(selectWorkflowFields(currentRunState, opts?.fields))
+    );
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      if (resumeCount === 1) {
+        return Promise.reject(staleStepError(409));
+      }
+      return Promise.resolve({ status: "success" });
+    });
+
+    await runWizard(makeOptions());
+
+    expect(formatResultSpy).toHaveBeenCalled();
+    expect(runByIdMock).toHaveBeenCalledWith(
+      "test-run-id",
+      expect.objectContaining({
+        fields: expect.arrayContaining([
+          "status",
+          "suspended",
+          "activeStepsPath",
+        ]),
+      })
+    );
+    // Recovery succeeded on the first attempt — resumeAsync was not called again.
+    expect(resumeCount).toBe(1);
+  });
+
+  test("keeps polling when runById returns the same suspended payload snapshot", async () => {
+    vi.useFakeTimers();
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+    runByIdMock
+      .mockResolvedValueOnce({
+        status: "suspended",
+        suspendPayload: toolPayload,
+      })
+      .mockResolvedValueOnce({ status: "success" });
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      return Promise.reject(staleRunError(409));
+    });
+
+    const run = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(250);
+    await run;
+
+    expect(formatResultSpy).toHaveBeenCalled();
+    expect(runByIdMock).toHaveBeenCalledTimes(2);
+    expect(resumeCount).toBe(1);
+  });
+
+  test("uses active recovered payload instead of stale historical step payloads", async () => {
+    const stalePayload: ToolPayload = {
+      type: "tool",
+      operation: "read-files",
+      cwd: "/tmp/test",
+      params: { paths: ["old-package.json"] },
+    };
+    const activePayload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["echo apply"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+    mockRunByIdResult = {
+      status: "suspended",
+      suspended: [["discover-context"]],
+      activeStepsPath: { "apply-codemods": [] },
+      steps: {
+        "discover-context": { suspendPayload: stalePayload },
+        "apply-codemods": { suspendPayload: activePayload },
+      },
+    };
 
     let resumeCount = 0;
     makeStaleStepRun(() => {
@@ -1003,39 +1130,62 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
 
     await runWizard(makeOptions());
 
-    expect(formatResultSpy).toHaveBeenCalled();
-    expect(runByIdMock).toHaveBeenCalledWith(
-      "test-run-id",
-      expect.objectContaining({ fields: expect.any(Array) })
+    expect(executeToolSpy).toHaveBeenCalledWith(toolPayload, makeContext());
+    expect(executeToolSpy).toHaveBeenCalledWith(activePayload, makeContext());
+    expect(executeToolSpy).not.toHaveBeenCalledWith(
+      stalePayload,
+      makeContext()
     );
-    // Recovery succeeded on the first attempt — resumeAsync was not called again.
-    expect(resumeCount).toBe(1);
+    expect(resumeCount).toBe(2);
   });
 
-  test("recovers from run-level not-suspended errors after transient runById failure", async () => {
+  test("does not replay non-stale HTTP 500 resume responses", async () => {
     mockStartResult = {
       status: "suspended",
       suspended: [["tool-step"]],
       steps: { "tool-step": { suspendPayload: toolPayload } },
     };
-    runByIdMock
-      .mockRejectedValueOnce(new Error("D1 snapshot not ready"))
-      .mockResolvedValueOnce({ status: "success" });
 
     let resumeCount = 0;
     makeStaleStepRun(() => {
       resumeCount += 1;
-      return Promise.reject(staleRunError());
+      return Promise.reject(httpError(500, { error: "Error calling handler" }));
     });
 
-    await runWizard(makeOptions());
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(resumeCount).toBe(1);
+    expect(runByIdMock).not.toHaveBeenCalled();
+  });
+
+  test("observes run state after a resume timeout without replaying resumeAsync", async () => {
+    vi.useFakeTimers();
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+    mockRunByIdResult = { status: "success" };
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      return new Promise<WorkflowRunResult>(() => {
+        /* Simulate a response that never arrives. */
+      });
+    });
+
+    const run = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(180_000);
+    await run;
 
     expect(formatResultSpy).toHaveBeenCalled();
-    expect(runByIdMock).toHaveBeenCalledTimes(2);
     expect(resumeCount).toBe(1);
+    expect(runByIdMock).toHaveBeenCalledTimes(1);
   });
 
   test("throws when stale-step error occurs and runById keeps failing", async () => {
+    vi.useFakeTimers();
     mockStartResult = {
       status: "suspended",
       suspended: [["tool-step"]],
@@ -1051,11 +1201,74 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
       return Promise.reject(staleStepError());
     });
 
-    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+    const run = runWizard(makeOptions());
+    const rejection = expect(run).rejects.toThrow(WizardError);
+    await vi.runAllTimersAsync();
+    await rejection;
 
     // Threw after recovery polling failed — no futile retries of the stale step.
     expect(resumeCount).toBe(1);
-    expect(runByIdMock).toHaveBeenCalledTimes(4);
+    expect(runByIdMock).toHaveBeenCalled();
+  });
+
+  test("sends compact _prevPhases only for apply-codemods", async () => {
+    const largeContent = "x".repeat(10_000);
+    const readPayload: ToolPayload = {
+      type: "tool",
+      operation: "read-files",
+      cwd: "/tmp/test",
+      params: { paths: ["package.json"] },
+    };
+    const applyPayload: ToolPayload = {
+      type: "tool",
+      operation: "apply-patchset",
+      cwd: "/tmp/test",
+      params: { patches: [] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["apply-codemods"]],
+      steps: { "apply-codemods": { suspendPayload: readPayload } },
+    };
+    executeToolSpy
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { files: { "package.json": largeContent } },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: "patch conflict",
+      });
+
+    const resumeArgs: Record<string, unknown>[] = [];
+    makeStaleStepRun((args) => {
+      resumeArgs.push(args);
+      if (resumeArgs.length === 1) {
+        return Promise.resolve({
+          status: "suspended",
+          suspended: [["apply-codemods"]],
+          steps: { "apply-codemods": { suspendPayload: applyPayload } },
+        });
+      }
+      return Promise.resolve({ status: "success" });
+    });
+
+    await runWizard(makeOptions());
+
+    const secondResumeData = resumeArgs[1]?.resumeData as
+      | Record<string, unknown>
+      | undefined;
+    expect(secondResumeData?._prevPhases).toEqual([
+      {
+        ok: true,
+        operation: "read-files",
+        _phase: "read-files",
+        data: { files: { "package.json": null } },
+      },
+    ]);
+    expect(JSON.stringify(secondResumeData?._prevPhases)).not.toContain(
+      largeContent
+    );
   });
 });
 
@@ -1093,21 +1306,40 @@ describe("runWizard — additional coverage", () => {
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
   });
 
-  test("finds suspend payload via fallback loop when primary step has none", async () => {
+  test("does not use inactive step payloads when active step info exists", async () => {
     const payload: ToolPayload = {
       type: "tool",
       operation: "run-commands",
       cwd: "/tmp/test",
       params: { commands: ["echo hi"] },
     };
-    // `suspended` points to "step-a", but its payload is missing.
-    // extractSuspendPayload falls back to iterating all steps and finds
-    // the payload in "step-b".
+    // `suspended` points to "step-a", so the stale payload on "step-b"
+    // must not be used.
     mockStartResult = {
       status: "suspended",
       suspended: [["step-a"]],
       steps: {
         "step-a": {},
+        "step-b": { suspendPayload: payload },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(executeToolSpy).not.toHaveBeenCalledWith(payload, makeContext());
+  });
+
+  test("uses legacy fallback only when no active step info exists and one payload is present", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["echo hi"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      steps: {
         "step-b": { suspendPayload: payload },
       },
     };

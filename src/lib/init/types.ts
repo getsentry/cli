@@ -272,6 +272,7 @@ export type SuspendPayload = ToolPayload | InteractivePayload;
 export type WorkflowRunResult = {
   status: "suspended" | "success" | "failed";
   suspended?: string[][];
+  activeStepsPath?: Record<string, unknown>;
   steps?: Record<string, { suspendPayload?: unknown }>;
   suspendPayload?: unknown;
   result?: WizardOutput;
