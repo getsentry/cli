@@ -15,6 +15,5 @@ export const monitorRoute = buildRouteMap({
       "  sentry monitor run <slug> -- <command>  # wrap a command with check-ins\n" +
       "  sentry monitor list                     # list configured monitors\n\n" +
       "Alias: `sentry monitors` → `sentry monitor list`",
-    hideRoute: {},
   },
 });

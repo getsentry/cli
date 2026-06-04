@@ -31,8 +31,9 @@ type MonitorWithOrg = SentryMonitor & { orgSlug?: string };
 /**
  * Render a monitor's schedule for display.
  *
- * Crontab schedules show the raw expression; interval schedules show
- * `<value> <unit>`. Returns an empty string when no schedule is configured.
+ * Crontab schedules show the raw expression (e.g. `"0 * * * *"`).
+ * Interval schedules show `"every <value> <unit>"` (e.g. `"every 1 hour"`).
+ * Returns an empty string when no schedule is configured.
  */
 function formatSchedule(monitor: MonitorWithOrg): string {
   const config = monitor.config;
@@ -40,7 +41,7 @@ function formatSchedule(monitor: MonitorWithOrg): string {
     return "";
   }
   if (Array.isArray(config.schedule)) {
-    return config.schedule.join(" ");
+    return `every ${config.schedule[0]} ${config.schedule[1]}`;
   }
   return config.schedule;
 }

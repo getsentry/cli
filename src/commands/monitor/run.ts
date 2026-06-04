@@ -114,6 +114,11 @@ async function sendCheckInSafely(
     );
     const body = serializeEnvelope(envelope);
     const send = sendEnvelopeRequest(dsn, body);
+    // Prevent unhandled rejection if the timeout wins the race but the
+    // fetch later rejects (Node 15+ terminates on unhandled rejections).
+    send.catch(() => {
+      // Intentionally empty — prevents unhandled rejection if timeout wins.
+    });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -128,10 +133,10 @@ async function sendCheckInSafely(
       clearTimeout(timer);
     }
   } catch (err) {
-    log.error(
+    log.warn(
       `Failed to send ${phase} check-in: ${err instanceof Error ? err.message : String(err)}`
     );
-    log.info("Continuing despite check-in failure...");
+    log.debug("Continuing despite check-in failure...");
   }
 }
 
@@ -315,8 +320,11 @@ The wrapped command receives the \`SENTRY_MONITOR_SLUG\` environment variable.`,
     // Forward signals so the whole process tree shuts down together.
     const onSigint = () => child.kill("SIGINT");
     const onSigterm = () => child.kill("SIGTERM");
-    process.once("SIGINT", onSigint);
-    process.once("SIGTERM", onSigterm);
+    // Use `on` (not `once`) so repeated signals are still forwarded to the
+    // child instead of letting Node's default handler kill the parent — which
+    // would skip the closing check-in and leave the monitor stuck in_progress.
+    process.on("SIGINT", onSigint);
+    process.on("SIGTERM", onSigterm);
 
     let exitCode: number;
     let spawnError: Error | undefined;
