@@ -6,8 +6,34 @@
  */
 
 import { describe, expect, test, vi } from "vitest";
-import { runCommand } from "../../../src/commands/local/run.js";
+import {
+  CLIENT_SPOTLIGHT_PREFIXES,
+  runCommand,
+} from "../../../src/commands/local/run.js";
 import { CliError, ValidationError } from "../../../src/lib/errors.js";
+
+/**
+ * Records the env passed to the most recent `spawn` call so tests can assert
+ * which variables were injected into the child process. The mock below still
+ * delegates to the real `spawn`, so commands like `printenv`/`true` run for
+ * real and exit codes propagate normally.
+ */
+const spawnCapture: { env?: NodeJS.ProcessEnv } = {};
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawn: (
+      cmd: string,
+      args: readonly string[],
+      options: Parameters<typeof actual.spawn>[2]
+    ) => {
+      spawnCapture.env = (options as { env?: NodeJS.ProcessEnv })?.env;
+      return actual.spawn(cmd, args as string[], options);
+    },
+  };
+});
 
 type RunFunc = (
   this: unknown,
@@ -122,5 +148,29 @@ describe("sentry local run", () => {
 
     // "-- true" should strip "--" and run "true" successfully
     await func.call(ctx, { port: 19_880, host: "127.0.0.1" }, "--", "true");
+  });
+
+  test("injects spotlight URL under every framework client prefix", async () => {
+    const func = (await runCommand.loader()) as unknown as RunFunc;
+    const ctx = makeContext();
+
+    const port = 19_881;
+    const host = "127.0.0.1";
+    const expectedUrl = `http://${host}:${port}/stream`;
+
+    // `node:child_process` is mocked at module scope (see vi.mock below). The
+    // mock records the env handed to spawn and returns a fake child that closes
+    // with code 0 so func() resolves.
+    spawnCapture.env = undefined;
+    await func.call(ctx, { port, host }, "printenv");
+
+    const capturedEnv = spawnCapture.env;
+    expect(capturedEnv).toBeDefined();
+    // Base name read by server-side SDKs.
+    expect(capturedEnv?.SENTRY_SPOTLIGHT).toBe(expectedUrl);
+    // Every framework client variant points at the same URL.
+    for (const prefix of CLIENT_SPOTLIGHT_PREFIXES) {
+      expect(capturedEnv?.[`${prefix}SENTRY_SPOTLIGHT`]).toBe(expectedUrl);
+    }
   });
 });

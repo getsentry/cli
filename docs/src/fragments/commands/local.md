@@ -35,16 +35,19 @@ Env vars injected into the child process:
 | Variable | Value |
 |----------|-------|
 | `SENTRY_SPOTLIGHT` | `http://localhost:<port>/stream` |
-| `NEXT_PUBLIC_SENTRY_SPOTLIGHT` | `http://localhost:<port>/stream` |
+| `<PREFIX>SENTRY_SPOTLIGHT` | `http://localhost:<port>/stream` |
 | `SENTRY_TRACES_SAMPLE_RATE` | `1` (unless already set) |
 
-**Server vs. client.** Server-side SDKs (`@sentry/node`, Python, and friends) read `SENTRY_SPOTLIGHT` automatically — no code changes needed. Browser/client SDKs can't read process env, so the CLI also injects `NEXT_PUBLIC_SENTRY_SPOTLIGHT` to expose the URL to Next.js client bundles. The SDK does **not** read that variable on its own, though — to capture client-side events you must reference it in your client config:
+The `<PREFIX>` variants cover every common framework client prefix so the spotlight URL is inlined into your browser bundle no matter which bundler you use: `PUBLIC_` (SvelteKit, Astro, Qwik), `NEXT_PUBLIC_` (Next.js), `VITE_` (Vite), `NUXT_PUBLIC_` (Nuxt), `REACT_APP_` (Create React App), `VUE_APP_` (Vue CLI), and `GATSBY_` (Gatsby).
+
+**Server vs. client.** Server-side SDKs (`@sentry/node`, Python, and friends) read `SENTRY_SPOTLIGHT` automatically — no code changes needed.
+
+For browser/client events, the CLI exposes the spotlight URL under every framework client prefix above. Once the [browser SDK reads these variables automatically](https://github.com/getsentry/sentry-javascript/pull/18198), client-side capture will be zero-config too. **Until then**, reference the variable for your framework in your client config:
 
 ```ts
+// Next.js — use VITE_, PUBLIC_, REACT_APP_, etc. to match your framework.
 Sentry.init({ spotlight: process.env.NEXT_PUBLIC_SENTRY_SPOTLIGHT ?? false });
 ```
-
-Other frameworks expose client env vars under different prefixes (Vite `VITE_`, CRA `REACT_APP_`) — set the equivalent yourself.
 
 ## Endpoints
 
