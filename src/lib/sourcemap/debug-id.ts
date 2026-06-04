@@ -13,10 +13,13 @@
 
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import { logger } from "../logger.js";
 import {
   type DecodedInlineMap,
   encodeInlineSourcemap,
 } from "./inline-sourcemap.js";
+
+const log = logger.withTag("sourcemap.debug-id");
 
 /** Comment prefix used to identify an existing debug ID in a JS file. */
 const DEBUGID_COMMENT_PREFIX = "//# debugId=";
@@ -253,28 +256,40 @@ export async function injectInlineDebugId(
     };
   }
 
+  // Locate the LAST inline directive to rewrite. If it can't be found (the
+  // discovery parser and this regex disagree on an edge case), abort WITHOUT
+  // modifying the file — writing the IIFE snippet + debugId comment while
+  // leaving the inline map un-updated would produce inconsistent metadata.
+  const matches = [...jsContent.matchAll(INLINE_DIRECTIVE_RE)];
+  const last = matches.at(-1);
+  if (last?.index === undefined) {
+    log.debug(
+      `inline sourcemap directive not found for rewrite in ${jsPath}; leaving file unmodified`
+    );
+    return {
+      debugId,
+      wasInjected: false,
+      injectedMapContent: Buffer.from(decoded.json),
+    };
+  }
+
   // Mutate the decoded map (IIFE adds one top line — same offset as external).
   const map = decoded.map as SourcemapJson;
   mutateSourcemap(map, debugId, { offsetMappings: true });
   const newDataUrl = encodeInlineSourcemap(map, decoded.dataUrlPrefix);
 
-  // Rewrite the LAST inline directive in place. Done before prepending the
-  // snippet / appending the comment so the regex operates on the original
-  // body. String.replace hits the first match, so we splice the last by index.
-  const matches = [...jsContent.matchAll(INLINE_DIRECTIVE_RE)];
-  const last = matches.at(-1);
-  let rewritten = jsContent;
-  if (last?.index !== undefined) {
-    const start = last.index;
-    const end = start + last[0].length;
-    const prefixEnd = last[0].indexOf("data:");
-    const directivePrefix = last[0].slice(0, prefixEnd);
-    rewritten =
-      jsContent.slice(0, start) +
-      directivePrefix +
-      newDataUrl +
-      jsContent.slice(end);
-  }
+  // Rewrite the directive in place, before prepending the snippet / appending
+  // the comment so the regex operated on the original body. We splice the last
+  // match by index (String.replace would hit the first).
+  const start = last.index;
+  const end = start + last[0].length;
+  const prefixEnd = last[0].indexOf("data:");
+  const directivePrefix = last[0].slice(0, prefixEnd);
+  const rewritten =
+    jsContent.slice(0, start) +
+    directivePrefix +
+    newDataUrl +
+    jsContent.slice(end);
 
   let newJs = prependDebugIdSnippet(rewritten, getDebugIdSnippet(debugId));
   newJs += `\n${DEBUGID_COMMENT_PREFIX}${debugId}\n`;

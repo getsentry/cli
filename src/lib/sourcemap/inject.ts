@@ -199,19 +199,23 @@ function* linesFromEnd(buf: Buffer): Generator<Buffer> {
 
 /**
  * Read the tail of a file as a Buffer, scanning backward from EOF until the
- * `sourceMappingURL` directive is captured in full (or the scan cap is hit).
+ * `sourceMappingURL` directive line is captured in full (or the scan cap is
+ * hit).
  *
  * A `sourceMappingURL` directive is always a single line, and base64 data
  * contains no newlines, so even a multi-megabyte inline data URL is a single
  * line. The authoritative directive is at (or near) the end of the file, but
- * may be followed by an injected `//# debugId=` comment and/or blank lines —
- * so we read enough of the tail to contain it.
+ * may be followed by trailing content (an injected `//# debugId=` comment,
+ * blank lines, a license banner, etc.) — so we read enough of the tail to
+ * contain it.
  *
  * Returns the full buffered tail; callers locate the directive within it via
- * {@link findSourceMappingDirective}. Reads in {@link DIRECTIVE_CHUNK_BYTES}
- * chunks and stops as soon as a `sourceMappingURL` directive line is fully
- * buffered, so short external directives cost a single chunk while large
- * inline directives grow the buffer only as needed.
+ * {@link findSourceMappingDirective}. To keep allocation linear, chunks are
+ * accumulated without concatenation; we concatenate and re-scan **only** after
+ * reading a chunk that contains a newline (a new line boundary may complete a
+ * directive line). For a large inline map — a single newline-free line — this
+ * means a single concat once the chunk holding the line's start is read,
+ * rather than a quadratic concat-per-chunk.
  */
 async function readDirectiveTail(filePath: string): Promise<Buffer> {
   const fh = await open(filePath, "r");
@@ -232,12 +236,15 @@ async function readDirectiveTail(filePath: string): Promise<Buffer> {
       collected += readSize;
       end = offset;
 
-      // Stop once a complete sourceMappingURL directive line is buffered. A
-      // directive line is "complete" only if it is preceded by a newline (so
-      // we have its start) — i.e. there is a newline before it in the buffer.
-      const combined = Buffer.concat(chunks);
-      if (findSourceMappingDirective(combined)) {
-        return combined;
+      // A directive line is only "complete" once its leading newline is
+      // buffered. Re-scanning is worthwhile only when the chunk we just read
+      // introduced a new line boundary — otherwise (mid-blob of a giant inline
+      // line) there is nothing new to find. This keeps allocation linear.
+      if (buf.indexOf(NEWLINE) !== -1) {
+        const combined = Buffer.concat(chunks);
+        if (findSourceMappingDirective(combined)) {
+          return combined;
+        }
       }
     }
     return Buffer.concat(chunks);
@@ -250,11 +257,16 @@ async function readDirectiveTail(filePath: string): Promise<Buffer> {
  * Find and parse the authoritative `sourceMappingURL` directive within a
  * buffered file tail.
  *
- * Scans lines from the end, skipping trailing `//# debugId=` comments and
- * blank lines (which injection appends after the directive), and returns the
- * first `sourceMappingURL` directive found. Returns `undefined` if a
- * non-directive, non-skippable line is reached first (the directive is not at
- * the end of the file) or none is present.
+ * Scans lines from the end and returns the **last** `sourceMappingURL`
+ * directive (the source map spec says the last directive wins). Trailing
+ * content after the directive — an injected `//# debugId=` comment, blank
+ * lines, license banners, or other code — does not prevent discovery.
+ *
+ * Note: the first line yielded by {@link linesFromEnd} may be truncated if its
+ * start is not yet buffered, but `parseSourceMappingDirective` requires the
+ * line to *begin* with the directive marker, so a partially-buffered directive
+ * line simply doesn't match until {@link readDirectiveTail} has read far
+ * enough back to include its start.
  */
 function findSourceMappingDirective(
   tail: Buffer
@@ -264,34 +276,8 @@ function findSourceMappingDirective(
     if (directive) {
       return directive;
     }
-    if (isSkippableTrailingLine(line)) {
-      continue;
-    }
-    // A real code/content line before any directive → no trailing directive.
-    return;
   }
   return;
-}
-
-/** True for blank lines or injected `//# debugId=` comments. */
-function isSkippableTrailingLine(line: Buffer): boolean {
-  let start = 0;
-  let endIdx = line.length;
-  while (
-    endIdx > start &&
-    (line[endIdx - 1] === 0x20 ||
-      line[endIdx - 1] === 0x09 ||
-      line[endIdx - 1] === CARRIAGE_RETURN)
-  ) {
-    endIdx -= 1;
-  }
-  while (start < endIdx && (line[start] === 0x20 || line[start] === 0x09)) {
-    start += 1;
-  }
-  if (start === endIdx) {
-    return true; // blank
-  }
-  return bytesStartsWith(line, "//# debugId=", start);
 }
 
 /** Whether `buf` starts with `prefix` at `from`, optionally case-sensitive. */

@@ -282,6 +282,17 @@ describe("injectDirectory — inline sourcemaps", () => {
     expect(results[0]?.map.kind).toBe("inline");
   });
 
+  test("discovers an inline directive followed by a trailing license banner", async () => {
+    const jsPath = join(dir, "banner.js");
+    writeFileSync(
+      jsPath,
+      `console.log(1)\n//# sourceMappingURL=${toDataUrl(SAMPLE_MAP)}\n/*! some-lib v1.2.3 | MIT */\n`
+    );
+    const results = await injectDirectory(dir, { dryRun: true });
+    expect(results).toHaveLength(1);
+    expect(results[0]?.map.kind).toBe("inline");
+  });
+
   test("preserves a hashbang when injecting into an inline-map file", async () => {
     const jsPath = writeInline(
       "cli.js",
