@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  The command-line interface for Sentry. Built for developers and AI agents.
+  The command-line (cli) interface for Sentry. Built for developers and AI agents.
 </p>
 
 <p align="center">
