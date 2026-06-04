@@ -106,6 +106,26 @@ sentry log list --follow
 sentry log list --query "severity:error"
 ```
 
+#### Capture Events Locally (Spotlight)
+
+```bash
+# Run the app with the local server auto-enabled; tail errors/traces/logs.
+# No DSN needed — with no DSN, events go ONLY to the local server (nothing
+# reaches the user's Sentry org, no production quota). With a DSN set, the
+# SDK sends to both.
+sentry local run -- npm run dev          # or: python manage.py runserver, etc.
+
+# Watch only AI/agent (gen_ai, mcp) spans while iterating on an agent.
+sentry local -f ai
+
+# Server-side SDKs read SENTRY_SPOTLIGHT automatically. The CLI also injects
+# the URL under every framework client prefix (NEXT_PUBLIC_, VITE_, PUBLIC_,
+# NUXT_PUBLIC_, REACT_APP_, VUE_APP_, GATSBY_). Until the browser SDK reads
+# these automatically (getsentry/sentry-javascript#18198), reference the var
+# matching your framework in the client config:
+# Sentry.init({ spotlight: process.env.NEXT_PUBLIC_SENTRY_SPOTLIGHT ?? false })
+```
+
 #### Explore the API Schema
 
 ```bash
@@ -389,15 +409,15 @@ Search and inspect Session Replays
 Work with Sentry releases
 
 - `sentry release list <org/project>` — List releases with adoption and health metrics
-- `sentry release view <org/version...>` — View release details with health metrics
-- `sentry release create <org/version...>` — Create a release
-- `sentry release finalize <org/version...>` — Finalize a release
-- `sentry release delete <org/version...>` — Delete a release
-- `sentry release archive <org/version...>` — Archive a release
-- `sentry release restore <org/version...>` — Restore an archived release
-- `sentry release deploy <org/version environment name...>` — Create a deploy for a release
-- `sentry release deploys <org/version...>` — List deploys for a release
-- `sentry release set-commits <org/version...>` — Set commits for a release
+- `sentry release view <org/version>` — View release details with health metrics
+- `sentry release create <org/version>` — Create a release
+- `sentry release finalize <org/version>` — Finalize a release
+- `sentry release delete <org/version>` — Delete a release
+- `sentry release archive <org/version>` — Archive a release
+- `sentry release restore <org/version>` — Restore an archived release
+- `sentry release deploy <org/version> <environment> <name>` — Create a deploy for a release
+- `sentry release deploys <org/version>` — List deploys for a release
+- `sentry release set-commits <org/version>` — Set commits for a release
 - `sentry release propose-version` — Propose a release version
 
 → Full flags and examples: `references/release.md`
