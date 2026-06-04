@@ -114,14 +114,19 @@ async function sendCheckInSafely(
     );
     const body = serializeEnvelope(envelope);
     const send = sendEnvelopeRequest(dsn, body);
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
         reject,
         CHECKIN_SEND_TIMEOUT_MS,
         new Error("Check-in send timed out")
-      )
-    );
-    await Promise.race([send, timeout]);
+      );
+    });
+    try {
+      await Promise.race([send, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
   } catch (err) {
     log.error(
       `Failed to send ${phase} check-in: ${err instanceof Error ? err.message : String(err)}`
