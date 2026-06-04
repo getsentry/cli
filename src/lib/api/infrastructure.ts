@@ -553,6 +553,45 @@ async function throwRawApiError(
 }
 
 /**
+ * Make an authenticated request to a Sentry region where success has no JSON body
+ * (e.g. DELETE returning 204 No Content, or 202 Accepted with an empty body).
+ */
+export async function apiRequestToRegionNoContent(
+  regionUrl: string,
+  endpoint: string,
+  options: Omit<ApiRequestOptions, "schema"> = {}
+): Promise<void> {
+  const { method = "GET", body, params } = options;
+  const config = getSdkConfig(regionUrl);
+
+  const searchParams = buildSearchParams(params);
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint.slice(1)
+    : endpoint;
+  const queryString = searchParams ? `?${searchParams.toString()}` : "";
+  const url = `${config.baseUrl}/api/0/${normalizedEndpoint}${queryString}`;
+
+  const fetchFn = config.fetch;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const response = await fetchFn(url, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    await throwRawApiError(response, endpoint);
+  }
+
+  if (response.status === 204 || response.status === 205) {
+    return;
+  }
+  await response.text();
+}
+
+/**
  * Make an authenticated request to the default Sentry API.
  *
  * @param endpoint - API endpoint path (e.g., "/organizations/")

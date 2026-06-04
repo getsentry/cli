@@ -21,6 +21,22 @@
  */
 
 export {
+  createIssueAlertRule,
+  createMetricAlertRule,
+  deleteIssueAlertRule,
+  deleteMetricAlertRule,
+  getIssueAlertRule,
+  getIssueAlertRuleDocument,
+  getMetricAlertRule,
+  getMetricAlertRuleDocument,
+  type IssueAlertRule,
+  listIssueAlertsPaginated,
+  listMetricAlertsPaginated,
+  type MetricAlertRule,
+  putIssueAlertRule,
+  putMetricAlertRule,
+} from "./api/alerts.js";
+export {
   createDashboard,
   getDashboard,
   listDashboardRevisionsPaginated,
@@ -31,6 +47,7 @@ export {
 } from "./api/dashboards.js";
 export type { MetricMeta } from "./api/discover.js";
 export { queryEvents, queryMetricsMeta } from "./api/discover.js";
+export { isNotFoundApiError } from "./api/error-guards.js";
 export {
   findEventAcrossOrgs,
   getEvent,
@@ -44,6 +61,7 @@ export {
   type ApiRequestOptions,
   apiRequest,
   apiRequestToRegion,
+  apiRequestToRegionNoContent,
   autoPaginate,
   buildSearchParams,
   ORG_FANOUT_CONCURRENCY,

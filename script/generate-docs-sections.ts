@@ -132,13 +132,18 @@ function isStandaloneCommand(route: RouteInfo): boolean {
 
 /**
  * Get subcommand names for a route group (e.g., "list, view, create").
- * Extracts the last path segment from each command's path.
+ * Extracts the last path segment from each command's path, deduplicated
+ * and sorted (nested routes like `issues` / `metrics` would otherwise repeat
+ * the same subcommand list twice, e.g. for `alert/`).
  */
-function getSubcommandNames(route: RouteInfo): string[] {
-  return route.commands.map((cmd) => {
+function getSubcommandLabel(route: RouteInfo): string {
+  const raw = route.commands.map((cmd) => {
     const parts = cmd.path.split(" ");
     return parts.at(-1) ?? route.name;
   });
+  return Array.from(new Set(raw))
+    .sort((a, b) => a.localeCompare(b))
+    .join(", ");
 }
 
 /**
@@ -177,7 +182,7 @@ function generateProjectStructure(allRoutes: RouteInfo[]): string {
 
   // Render group directories (always use ├── since standalones follow)
   for (const route of groups) {
-    const subcmds = getSubcommandNames(route).join(", ");
+    const subcmds = getSubcommandLabel(route);
     lines.push(`│   │   ├── ${`${route.name}/`.padEnd(13)}# ${subcmds}`);
   }
 

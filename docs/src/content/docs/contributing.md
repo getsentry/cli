@@ -52,23 +52,24 @@ cli/
 │   ├── app.ts          # Stricli application setup
 │   ├── context.ts      # Dependency injection context
 │   ├── commands/       # CLI commands
+│   │   ├── alert/       # create, delete, edit, list, view
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
 │   │   ├── cli/         # defaults, feedback, fix, import, setup, upgrade
-│   │   ├── dashboard/   # list, view, create, add, edit, delete, revisions, restore
-│   │   ├── event/       # view, list, send
-│   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, archive, merge
-│   │   ├── local/       # serve, run
+│   │   ├── dashboard/   # add, create, delete, edit, list, restore, revisions, view
+│   │   ├── event/       # list, send, view
+│   │   ├── issue/       # archive, events, explain, list, merge, plan, resolve, unresolve, view
+│   │   ├── local/       # run, serve
 │   │   ├── log/         # list, view
 │   │   ├── org/         # list, view
 │   │   ├── proguard/    # uuid
 │   │   ├── project/     # create, delete, list, view
-│   │   ├── release/     # list, view, create, finalize, delete, archive, restore, deploy, deploys, set-commits, propose-version
+│   │   ├── release/     # archive, create, delete, deploy, deploys, finalize, list, propose-version, restore, set-commits, view
 │   │   ├── replay/      # list, view
 │   │   ├── repo/        # list
-│   │   ├── sourcemap/   # inject, upload, resolve
+│   │   ├── sourcemap/   # inject, resolve, upload
 │   │   ├── span/        # list, view
 │   │   ├── team/        # list
-│   │   ├── trace/       # list, view, logs
+│   │   ├── trace/       # list, logs, view
 │   │   ├── trial/       # list, start
 │   │   ├── api.ts       # Make an authenticated API request
 │   │   ├── explore.ts   # Query aggregate event data (Explore)
