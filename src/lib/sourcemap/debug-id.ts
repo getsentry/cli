@@ -13,11 +13,17 @@
 
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import { logger } from "../logger.js";
+import {
+  type DecodedInlineMap,
+  encodeInlineSourcemap,
+} from "./inline-sourcemap.js";
+
+const log = logger.withTag("sourcemap.debug-id");
 
 /** Comment prefix used to identify an existing debug ID in a JS file. */
 const DEBUGID_COMMENT_PREFIX = "//# debugId=";
 
-/** Regex to extract an existing debug ID from a JS file. */
 /** Regex to extract an existing debug ID from a JS file. @internal */
 export const EXISTING_DEBUGID_RE = /\/\/# debugId=([0-9a-fA-F-]{36})/;
 
@@ -58,6 +64,34 @@ export function contentToDebugId(content: string | Buffer): string {
  */
 export function getDebugIdSnippet(debugId: string): string {
   return `;!function(){try{var e="undefined"!=typeof window?window:"undefined"!=typeof global?global:"undefined"!=typeof globalThis?globalThis:"undefined"!=typeof self?self:{},n=(new e.Error).stack;n&&(e._sentryDebugIds=e._sentryDebugIds||{},e._sentryDebugIds[n]="${debugId}",e._sentryDebugIdIdentifier="sentry-dbid-${debugId}")}catch(e){}}();`;
+}
+
+/**
+ * Prepend the runtime IIFE snippet to a JS file's content, preserving a
+ * leading hashbang (`#!`) line if present.
+ *
+ * The snippet must run before any other code but after the hashbang, which
+ * must remain the first line for the file to stay executable.
+ *
+ * @param jsContent - Original JS file content
+ * @param snippet - The IIFE snippet from {@link getDebugIdSnippet}
+ * @returns The JS content with the snippet prepended
+ * @internal
+ */
+export function prependDebugIdSnippet(
+  jsContent: string,
+  snippet: string
+): string {
+  if (jsContent.startsWith("#!")) {
+    const newlineIdx = jsContent.indexOf("\n");
+    // Handle hashbang without trailing newline (entire file is the #! line)
+    const splitAt = newlineIdx === -1 ? jsContent.length : newlineIdx + 1;
+    const hashbang = jsContent.slice(0, splitAt);
+    const rest = jsContent.slice(splitAt);
+    const sep = newlineIdx === -1 ? "\n" : "";
+    return `${hashbang}${sep}${snippet}\n${rest}`;
+  }
+  return `${snippet}\n${jsContent}`;
 }
 
 /**
@@ -112,48 +146,14 @@ export async function injectDebugId(
     newJs = jsContent;
   } else {
     // Full mode: prepend the runtime IIFE snippet (for user-facing injection).
-    const snippet = getDebugIdSnippet(debugId);
-    // Preserve hashbang if present, insert snippet after it
-    if (jsContent.startsWith("#!")) {
-      const newlineIdx = jsContent.indexOf("\n");
-      // Handle hashbang without trailing newline (entire file is the #! line)
-      const splitAt = newlineIdx === -1 ? jsContent.length : newlineIdx + 1;
-      const hashbang = jsContent.slice(0, splitAt);
-      const rest = jsContent.slice(splitAt);
-      const sep = newlineIdx === -1 ? "\n" : "";
-      newJs = `${hashbang}${sep}${snippet}\n${rest}`;
-    } else {
-      newJs = `${snippet}\n${jsContent}`;
-    }
+    newJs = prependDebugIdSnippet(jsContent, getDebugIdSnippet(debugId));
   }
   // Append debug ID comment at the end
   newJs += `\n${DEBUGID_COMMENT_PREFIX}${debugId}\n`;
 
   // --- Mutate sourcemap ---
-  // Parse, adjust mappings, add debug ID fields
-  const map = JSON.parse(mapContent) as {
-    mappings: string;
-    sources?: (string | null)[];
-    debug_id?: string;
-    debugId?: string;
-  };
-
-  // Normalize Windows backslashes in the sources array so uploaded
-  // sourcemaps have consistent forward-slash paths regardless of build
-  // platform. Bundlers on Windows (esbuild, Bun) may produce paths like
-  // "src\\bin.ts". No-op on Linux/macOS.
-  if (map.sources) {
-    map.sources = map.sources.map((s) => (s ? s.replaceAll("\\", "/") : s));
-  }
-
-  if (!skipSnippet) {
-    // Prepend one `;` to mappings — tells decoders "no mappings for the
-    // first line" (the injected snippet line). Each `;` in VLQ mappings
-    // represents a line boundary.
-    map.mappings = `;${map.mappings}`;
-  }
-  map.debug_id = debugId;
-  map.debugId = debugId;
+  const map = JSON.parse(mapContent) as SourcemapJson;
+  mutateSourcemap(map, debugId, { offsetMappings: !skipSnippet });
 
   // Write both files concurrently
   await Promise.all([
@@ -162,4 +162,145 @@ export async function injectDebugId(
   ]);
 
   return { debugId, wasInjected: true };
+}
+
+/** Minimal shape of a sourcemap JSON object that we mutate during injection. */
+type SourcemapJson = {
+  mappings?: string;
+  sources?: (string | null)[];
+  debug_id?: string;
+  debugId?: string;
+};
+
+/**
+ * Mutate a parsed sourcemap in place to carry a debug ID.
+ *
+ * - Normalizes Windows backslashes in `sources` to forward slashes so
+ *   uploaded paths are platform-consistent (esbuild/Bun on Windows emit
+ *   `"src\\bin.ts"`). No-op on Linux/macOS.
+ * - When `offsetMappings` is true, prepends one `;` to `mappings` to account
+ *   for the injected IIFE snippet line (each `;` is a VLQ line boundary).
+ * - Sets both `debug_id` and `debugId` fields.
+ *
+ * @param map - The parsed sourcemap object (mutated in place)
+ * @param debugId - The debug ID to embed
+ * @param options.offsetMappings - Prepend a `;` to `mappings` (snippet added a line)
+ */
+function mutateSourcemap(
+  map: SourcemapJson,
+  debugId: string,
+  options: { offsetMappings: boolean }
+): void {
+  if (map.sources) {
+    map.sources = map.sources.map((s) => (s ? s.replaceAll("\\", "/") : s));
+  }
+  if (options.offsetMappings && typeof map.mappings === "string") {
+    map.mappings = `;${map.mappings}`;
+  }
+  map.debug_id = debugId;
+  map.debugId = debugId;
+}
+
+/**
+ * Regex matching a `//# sourceMappingURL=data:...;base64,...` directive at the
+ * **start of a line** (optionally indented).
+ *
+ * Anchored with `^` under the multiline flag so it only matches a directive
+ * that *begins* a line — mirroring discovery's line-based parser
+ * (`parseSourceMappingDirective`). This prevents rewriting a false-positive
+ * `data:` URL embedded mid-line inside a string/template literal while leaving
+ * the authoritative trailing directive untouched. Global so all matches can be
+ * iterated and only the **last** one rewritten (spec: last directive wins).
+ *
+ * @internal
+ */
+const INLINE_DIRECTIVE_RE =
+  /^[ \t]*\/\/[#@][ \t]*sourceMappingURL[ \t]*=[ \t]*data:application\/json(?:;charset=[\w-]+)?;base64,[A-Za-z0-9+/=]+/gm;
+
+/**
+ * Inject a debug ID into a JS file whose sourcemap is inline (a base64
+ * `data:` URL) rather than a companion `.map` file.
+ *
+ * The decoded map is provided by the caller (see `tryDecodeInlineSourcemap`).
+ * This performs the same JS mutations as {@link injectDebugId} (IIFE snippet +
+ * `//# debugId=` comment) and additionally re-encodes the debug-ID-injected
+ * map back into the `sourceMappingURL=data:...;base64,<NEW>` directive **in
+ * place**, so the file stays self-contained. Only the **last** inline
+ * directive is rewritten.
+ *
+ * Idempotent — files already carrying a `//# debugId=` comment are unchanged.
+ *
+ * @param jsPath - Path to the JavaScript file
+ * @param decoded - The decoded inline sourcemap and its re-encode metadata
+ * @returns The debug ID, whether it was newly injected, and the injected map
+ *   content (for upload as a standalone artifact). When the directive cannot
+ *   be located for rewrite, returns an empty `debugId` and no
+ *   `injectedMapContent` so callers attach nothing inconsistent.
+ */
+export async function injectInlineDebugId(
+  jsPath: string,
+  decoded: DecodedInlineMap
+): Promise<{
+  debugId: string;
+  wasInjected: boolean;
+  injectedMapContent?: Buffer;
+}> {
+  // Full read required: the directive lives in the file body and must be
+  // rewritten in place.
+  const jsContent = await readFile(jsPath, "utf-8");
+
+  const debugId = contentToDebugId(decoded.json);
+
+  // Idempotent: if already injected, return the existing ID without writing.
+  const existingMatch = jsContent.match(EXISTING_DEBUGID_RE);
+  if (existingMatch?.[1]) {
+    return {
+      debugId: existingMatch[1],
+      wasInjected: false,
+      injectedMapContent: Buffer.from(decoded.json),
+    };
+  }
+
+  // Locate the LAST inline directive to rewrite. If it can't be found (the
+  // discovery parser and this regex disagree on an edge case), abort WITHOUT
+  // modifying the file. Return an EMPTY debug ID and no map content so the
+  // upload path attaches nothing — otherwise a debug ID and pre-injection map
+  // would be uploaded for a bundle that has no snippet/comment/updated map.
+  const matches = [...jsContent.matchAll(INLINE_DIRECTIVE_RE)];
+  const last = matches.at(-1);
+  if (last?.index === undefined) {
+    log.debug(
+      `inline sourcemap directive not found for rewrite in ${jsPath}; leaving file unmodified`
+    );
+    return { debugId: "", wasInjected: false };
+  }
+
+  // Mutate the decoded map (IIFE adds one top line — same offset as external).
+  const map = decoded.map as SourcemapJson;
+  mutateSourcemap(map, debugId, { offsetMappings: true });
+  const newDataUrl = encodeInlineSourcemap(map, decoded.dataUrlPrefix);
+
+  // Rewrite the directive in place, before prepending the snippet / appending
+  // the comment so the regex operated on the original body. We splice the last
+  // match by index (String.replace would hit the first).
+  const start = last.index;
+  const end = start + last[0].length;
+  const prefixEnd = last[0].indexOf("data:");
+  const directivePrefix = last[0].slice(0, prefixEnd);
+  const rewritten =
+    jsContent.slice(0, start) +
+    directivePrefix +
+    newDataUrl +
+    jsContent.slice(end);
+
+  let newJs = prependDebugIdSnippet(rewritten, getDebugIdSnippet(debugId));
+  newJs += `\n${DEBUGID_COMMENT_PREFIX}${debugId}\n`;
+
+  await writeFile(jsPath, newJs);
+
+  return {
+    debugId,
+    wasInjected: true,
+    injectedMapContent: Buffer.from(JSON.stringify(map)),
+  };
 }

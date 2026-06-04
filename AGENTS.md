@@ -1002,33 +1002,5 @@ duplication and staleness that caused five overlapping PRs to pile up:
 <!-- This section is maintained by the coding agent via lore (https://github.com/BYK/loreai) -->
 ## Long-term Knowledge
 
-### Architecture
-
-<!-- lore:019dabe5-3eee-73a9-83b4-edc56734696a -->
-* **env-registry.ts drives --help env var section + docs**: \`src/lib/env-registry.ts\` (\`ENV\_VAR\_REGISTRY\`) is the single source for all env vars the CLI honors. Entries have \`{name, description, example?, defaultValue?, installOnly?, topLevel?, briefDescription?}\`. \`topLevel: true\` + \`briefDescription\` surfaces in \`sentry --help\` Environment Variables section (via \`formatEnvVarsSection()\` in \`help.ts\`) and in \`sentry help --json\` as \`envVars\` array on the full-tree envelope. Docs generator consumes the full registry for \`configuration.md\`. When adding a new env var, add it here with \`installOnly: true\` if install-script-only. Reserve \`topLevel: true\` for core-path vars only (auth, targeting, URL, key display/logging).
-
-<!-- lore:019da557-63d5-7c8a-9ce7-54e992f312ec -->
-* **Sentry log IDs are UUIDv7 — enables deterministic retention checks**: Sentry log IDs are UUIDv7 (first 12 hex = ms timestamp, version char \`7\` at pos 13). Traces/event IDs are NOT v7. \`decodeUuidV7Timestamp()\` and \`ageInDaysFromUuidV7()\` in \`src/lib/hex-id.ts\` return null for non-v7, safe to call unconditionally. Enables deterministic 'past retention' messages; wired in \`recoverHexId\` and \`log/view.ts#throwNotFoundError\`. \`RETENTION\_DAYS.log = 90\` in \`src/lib/retention.ts\`; traces/events are \`null\` (plan-dependent). \`LOG\_RETENTION\_PERIOD\` is DERIVED as \`\` \`${RETENTION\_DAYS.log}d\` \`\` — never hardcode \`'90d'\`. Shared hex primitives (\`HEX\_ID\_RE\`, \`SPAN\_ID\_RE\`, \`UUID\_DASH\_RE\`, etc.) live in \`hex-id.ts\`.
-
-<!-- lore:019d4a08-22c3-765b-ba12-d91b29e9d497 -->
-* **Three Sentry APIs for span custom attributes with different capabilities**: \*\*Three Sentry span APIs with different capabilities\*\*: (1) \`/trace/{traceId}/\` — hierarchical tree with \`additional\_attributes\`. (2) \`/projects/{org}/{project}/trace-items/{itemId}/\` — single span with ALL attributes. (3) \`/events/?dataset=spans\&field=X\` — list/search. Critical: \`meta.fields\` order is non-deterministic — derive column order from user's \`--field\`/\`-F\` list, not \`Object.keys()\`. See \`orderFieldNames()\` in \`explore.ts\`.
-
-### Gotcha
-
-<!-- lore:019dd024-464d-74e7-b637-c6b87a9d2082 -->
-* **api.ts: plain Error throws inside func() bypass CliError handling**: \*\*api.ts: plain Error throws inside func() bypass CliError handling\*\*: \`src/commands/api.ts\` throws plain \`new Error(...)\` in validation paths called from \`func()\` — this bypasses \`app.ts\`'s \`instanceof CliError\` check, causing user to see stack traces AND Sentry bug reports. Fix: use \`ValidationError\` for user-input errors inside \`func()\`. Plain \`Error\` is only OK in Stricli \`parse:\` callbacks where Stricli catches them.
-
-<!-- lore:019da644-b93f-776d-843d-05c3c1d3a193 -->
-* **Biome lint differs between local lint:fix and CI lint**: \*\*Biome lint differs between local lint:fix and CI lint\*\*: \`lint:fix\` hides CI issues; always run \`bun run lint\` before pushing. Key gotchas: (1) \`noPrecisionLoss\` on int >2^53 — use \`Number(string)\`. (2) \`noIncrementDecrement\` — use \`i += 1\`. (3) \`noExcessiveCognitiveComplexity\` caps at 15 — extract helpers, don't biome-ignore. (4) \`noUselessUndefined\` then \`noEmptyBlockStatements\` — use \`function noop() {}\`. (5) Plugin forbids raw \`metadata\` table queries — use \`getMetadata\`/\`setMetadata\`/\`clearMetadata\`. Also enforced: \`useBlockStatements\`, \`noNestedTernary\`, \`useAtIndex\`, \`noStaticOnlyClass\`.
-
-<!-- lore:019dc0ef-bb36-7230-be5d-56b536a6de8e -->
-* **buildCommand wrapper: loader() returns wrapped async fn, not the generator**: \*\*buildCommand wrapper: loader() returns wrapped async fn, not generator\*\*: \`cmd.loader()\` returns the wrapped async fn, not \`async \*func()\`. Wrapper iterates generator internally and writes to \`ctx.stdout\`. Tests: \`await func.call(ctx, flags, ...args)\` like a promise — don't iterate. Auth guard runs first; \`test/preload.ts:100\` sets fake \`SENTRY\_AUTH\_TOKEN\`. Tests must save/restore only env vars they mutate.
-
-### Pattern
-
-<!-- lore:019dc053-2e98-7b93-80e0-dee06710e849 -->
-* **Merging mock.module() test files with static-import counterparts**: \*\*Bun test mocking traps\*\*: (1) \`mock.module()\` for CJS built-ins needs \`default\` re-export + named exports, declared top-level BEFORE \`await import()\`. (2) Convert code-under-test to \`await import()\` when merging mocks — pre-existing static imports won't re-bind. (3) Destructured imports capture binding at load. (4) \`Bun.mmap()\` always PROT\_WRITE — use \`new Uint8Array(await Bun.file(path).arrayBuffer())\` for read-only.
-
-<!-- lore:019dd2ff-f956-7c25-80bd-486c57c2297a -->
-* **URL-encoded paren assertions: decode before contains-check**: \*\*URL-encoded paren assertions in tests\*\*: Aggregate field names like \`count()\` become \`count%28%29\` via \`encodeURIComponent\` — use \`expect(decodeURIComponent(url)).toContain("field=count()")\`. Sentry pagination Link header format: \`\<url>; rel="next"; cursor="0:50:0"\` — cursor is in a separate attribute, NOT in URL query. Use \`parseSentryLinkHeader()\` from \`src/lib/api/infrastructure.ts\` to extract.
+For long-term knowledge entries managed by [lore](https://github.com/BYK/loreai) (gotchas, patterns, decisions, architecture), see [`.lore.md`](.lore.md) in the project root.
 <!-- End lore-managed section -->
