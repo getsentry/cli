@@ -12,23 +12,55 @@ import { NODE_MODULES_DIRNAME } from "../constants.js";
 import { ValidationError } from "../errors.js";
 import { logger } from "../logger.js";
 import { walkFiles } from "../scan/index.js";
-import { EXISTING_DEBUGID_RE, injectDebugId } from "./debug-id.js";
+import {
+  EXISTING_DEBUGID_RE,
+  injectDebugId,
+  injectInlineDebugId,
+} from "./debug-id.js";
+import {
+  type DecodedInlineMap,
+  isInlineSourcemapUrl,
+  tryDecodeInlineSourcemap,
+} from "./inline-sourcemap.js";
 
 const log = logger.withTag("sourcemap.inject");
 
 /** Default JavaScript file extensions to scan. */
 const DEFAULT_EXTENSIONS = new Set([".js", ".cjs", ".mjs"]);
 
+/**
+ * The location of a JavaScript file's sourcemap.
+ *
+ * - `external`: a companion `.map` file on disk (convention `<name>.map` or a
+ *   relative `sourceMappingURL` directive).
+ * - `inline`: a base64 data URL embedded in the JS file itself (no `.map` file).
+ */
+export type MapSource =
+  | { kind: "external"; mapPath: string }
+  | { kind: "inline"; jsPath: string; decoded: DecodedInlineMap };
+
 /** Result of injecting a single file pair. */
 export type InjectResult = {
   /** Path to the JavaScript file. */
   jsPath: string;
-  /** Path to the companion sourcemap. */
-  mapPath: string;
+  /** Discriminated location of the sourcemap (external file vs inline data URL). */
+  map: MapSource;
+  /**
+   * Path to the companion sourcemap on disk. Set only for external maps;
+   * `undefined` for inline maps (which have no standalone file).
+   */
+  mapPath?: string;
   /** Whether debug IDs were injected (false if already present or skipped). */
   injected: boolean;
   /** The debug ID (injected or pre-existing). */
   debugId: string;
+  /**
+   * The debug-ID-injected sourcemap content, as a Buffer. Populated only for
+   * inline maps (which have no `.map` file on disk) so the upload path can
+   * ship it as a standalone artifact. `undefined` for external maps — read
+   * those from `mapPath` instead.
+   */
+  injectedMapContent?: Buffer;
 };
 
 /** Options for directory-level injection. */
@@ -66,85 +98,305 @@ export async function injectDirectory(
   const filePairs = await discoverFilePairs(dir, extensions, ig);
 
   const results: InjectResult[] = [];
-  for (const { jsPath, mapPath } of filePairs) {
+  for (const { jsPath, map } of filePairs) {
+    const mapPath = map.kind === "external" ? map.mapPath : undefined;
     if (options.dryRun) {
       // Check if file already has a debug ID without modifying it
       const js = await readFile(jsPath, "utf-8");
       const existing = js.match(EXISTING_DEBUGID_RE);
       const wouldInject = !existing;
       const id = existing?.[1] ?? "(pending)";
-      results.push({ jsPath, mapPath, injected: wouldInject, debugId: id });
+      results.push({
+        jsPath,
+        map,
+        mapPath,
+        injected: wouldInject,
+        debugId: id,
+      });
       continue;
     }
-    const { debugId, wasInjected } = await injectDebugId(jsPath, mapPath);
-    results.push({ jsPath, mapPath, injected: wasInjected, debugId });
+    if (map.kind === "external") {
+      const r = await injectDebugId(jsPath, map.mapPath);
+      results.push({
+        jsPath,
+        map,
+        mapPath,
+        injected: r.wasInjected,
+        debugId: r.debugId,
+      });
+    } else {
+      const r = await injectInlineDebugId(jsPath, map.decoded);
+      results.push({
+        jsPath,
+        map,
+        mapPath,
+        injected: r.wasInjected,
+        debugId: r.debugId,
+        injectedMapContent: r.injectedMapContent,
+      });
+    }
   }
   return results;
 }
 
 /** A discovered JS + sourcemap pair. */
-export type FilePair = { jsPath: string; mapPath: string };
+export type FilePair = { jsPath: string; map: MapSource };
 
 /**
- * Regex matching `//# sourceMappingURL=<url>` or `//@ sourceMappingURL=<url>`.
+ * Classification of a parsed `sourceMappingURL` directive.
  *
- * Uses global + multiline flags so we can iterate all matches and take the
- * **last** one — the source map spec says the last directive is authoritative.
- * Concatenated bundles or string literals in the file tail may produce earlier
- * false positives; only the final match matters.
+ * - `external`: a file path (relative or convention-based).
+ * - `inline`: a base64 `data:` URL embedding the sourcemap.
+ * - `remote`: an `http(s)://` URL.
  */
-const SOURCE_MAPPING_URL_RE = /\/\/[#@]\s*sourceMappingURL\s*=\s*(\S+)\s*$/gm;
+export type SourceMappingDirective = {
+  kind: "external" | "inline" | "remote";
+  /** The directive value (path or data/remote URL). */
+  value: string;
+};
 
 /**
- * Matches a `sourceMappingURL` that points at a remote `http(s)://` location
- * (as opposed to an inline `data:` URL or a local companion path).
+ * Maximum bytes to scan backward when locating the `sourceMappingURL`
+ * directive. Inline data URLs embed the whole sourcemap, so the directive
+ * line can be multiple megabytes; we must read it in full to rewrite it in
+ * place. The cap guards against pathological single-line files while
+ * comfortably covering real-world inline maps.
  */
-const REMOTE_SOURCE_MAPPING_URL_RE = /^https?:\/\//i;
+const MAX_DIRECTIVE_SCAN_BYTES = 64 * 1024 * 1024;
+
+/** Size of each backward read chunk. */
+const DIRECTIVE_CHUNK_BYTES = 64 * 1024;
+
+const NEWLINE = 0x0a; // "\n"
+const CARRIAGE_RETURN = 0x0d; // "\r"
 
 /**
- * Read the last ~512 bytes of a file efficiently.
+ * Iterate the lines of a buffer from the end toward the start.
  *
- * We only need the very end of the JS file to find the
- * `sourceMappingURL` directive. Reading just the tail avoids
- * loading multi-megabyte bundles into memory.
+ * Yields each line as a subarray (without the delimiting `\n`). A single
+ * trailing newline at the very end is ignored so the first yielded line is
+ * the last non-empty line.
  */
-async function readFileTail(filePath: string, maxBytes = 512): Promise<string> {
+function* linesFromEnd(buf: Buffer): Generator<Buffer> {
+  let end = buf.length;
+  // Ignore one trailing newline (and CR) at EOF.
+  if (end > 0 && buf[end - 1] === NEWLINE) {
+    end -= 1;
+    if (end > 0 && buf[end - 1] === CARRIAGE_RETURN) {
+      end -= 1;
+    }
+  }
+  while (end > 0) {
+    const nlIdx = buf.lastIndexOf(NEWLINE, end - 1);
+    const start = nlIdx + 1;
+    yield buf.subarray(start, end);
+    if (nlIdx === -1) {
+      return;
+    }
+    end = nlIdx;
+  }
+}
+
+/**
+ * Read the tail of a file as a Buffer, scanning backward from EOF until the
+ * `sourceMappingURL` directive is captured in full (or the scan cap is hit).
+ *
+ * A `sourceMappingURL` directive is always a single line, and base64 data
+ * contains no newlines, so even a multi-megabyte inline data URL is a single
+ * line. The authoritative directive is at (or near) the end of the file, but
+ * may be followed by an injected `//# debugId=` comment and/or blank lines —
+ * so we read enough of the tail to contain it.
+ *
+ * Returns the full buffered tail; callers locate the directive within it via
+ * {@link findSourceMappingDirective}. Reads in {@link DIRECTIVE_CHUNK_BYTES}
+ * chunks and stops as soon as a `sourceMappingURL` directive line is fully
+ * buffered, so short external directives cost a single chunk while large
+ * inline directives grow the buffer only as needed.
+ */
+async function readDirectiveTail(filePath: string): Promise<Buffer> {
   const fh = await open(filePath, "r");
   try {
-    const fstat = await fh.stat();
-    const fileSize = fstat.size;
+    const fileSize = (await fh.stat()).size;
     if (fileSize === 0) {
-      return "";
+      return Buffer.alloc(0);
     }
-    const readSize = Math.min(maxBytes, fileSize);
-    const offset = fileSize - readSize;
-    const buf = Buffer.alloc(readSize);
-    await fh.read(buf, 0, readSize, offset);
-    return buf.toString("utf-8");
+    const chunks: Buffer[] = [];
+    let collected = 0;
+    let end = fileSize;
+    while (end > 0 && collected < MAX_DIRECTIVE_SCAN_BYTES) {
+      const readSize = Math.min(DIRECTIVE_CHUNK_BYTES, end);
+      const offset = end - readSize;
+      const buf = Buffer.alloc(readSize);
+      await fh.read(buf, 0, readSize, offset);
+      chunks.unshift(buf);
+      collected += readSize;
+      end = offset;
+
+      // Stop once a complete sourceMappingURL directive line is buffered. A
+      // directive line is "complete" only if it is preceded by a newline (so
+      // we have its start) — i.e. there is a newline before it in the buffer.
+      const combined = Buffer.concat(chunks);
+      if (findSourceMappingDirective(combined)) {
+        return combined;
+      }
+    }
+    return Buffer.concat(chunks);
   } finally {
     await fh.close();
   }
 }
 
 /**
- * Extract the **last** `sourceMappingURL` value from the tail of a JS file.
+ * Find and parse the authoritative `sourceMappingURL` directive within a
+ * buffered file tail.
  *
- * The source map spec says the last directive is authoritative. Concatenated
- * bundles may have multiple directives; we iterate all matches and return
- * the final one.
- *
- * Returns `undefined` if no directive is found.
+ * Scans lines from the end, skipping trailing `//# debugId=` comments and
+ * blank lines (which injection appends after the directive), and returns the
+ * first `sourceMappingURL` directive found. Returns `undefined` if a
+ * non-directive, non-skippable line is reached first (the directive is not at
+ * the end of the file) or none is present.
  */
-async function extractSourceMappingUrl(
-  jsPath: string
-): Promise<string | undefined> {
-  try {
-    const tail = await readFileTail(jsPath);
-    let lastUrl: string | undefined;
-    for (const match of tail.matchAll(SOURCE_MAPPING_URL_RE)) {
-      lastUrl = match[1];
+function findSourceMappingDirective(
+  tail: Buffer
+): SourceMappingDirective | undefined {
+  for (const line of linesFromEnd(tail)) {
+    const directive = parseSourceMappingDirective(line);
+    if (directive) {
+      return directive;
     }
-    return lastUrl;
+    if (isSkippableTrailingLine(line)) {
+      continue;
+    }
+    // A real code/content line before any directive → no trailing directive.
+    return;
+  }
+  return;
+}
+
+/** True for blank lines or injected `//# debugId=` comments. */
+function isSkippableTrailingLine(line: Buffer): boolean {
+  let start = 0;
+  let endIdx = line.length;
+  while (
+    endIdx > start &&
+    (line[endIdx - 1] === 0x20 ||
+      line[endIdx - 1] === 0x09 ||
+      line[endIdx - 1] === CARRIAGE_RETURN)
+  ) {
+    endIdx -= 1;
+  }
+  while (start < endIdx && (line[start] === 0x20 || line[start] === 0x09)) {
+    start += 1;
+  }
+  if (start === endIdx) {
+    return true; // blank
+  }
+  return bytesStartsWith(line, "//# debugId=", start);
+}
+
+/** Whether `buf` starts with `prefix` at `from`, optionally case-sensitive. */
+function bytesStartsWith(buf: Buffer, prefix: string, from: number): boolean {
+  if (from + prefix.length > buf.length) {
+    return false;
+  }
+  for (let i = 0; i < prefix.length; i += 1) {
+    if (buf[from + i] !== prefix.charCodeAt(i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Skip ASCII spaces/tabs starting at `from`; returns the new index. */
+function skipSpaces(buf: Buffer, from: number): number {
+  let i = from;
+  while (i < buf.length && (buf[i] === 0x20 || buf[i] === 0x09)) {
+    i += 1;
+  }
+  return i;
+}
+
+/**
+ * Parse a `sourceMappingURL` directive from a single line (as bytes).
+ *
+ * Matches `//# sourceMappingURL=<value>` or `//@ sourceMappingURL=<value>`
+ * with optional single spaces around the marker, tolerating a trailing CR.
+ * Operates at the byte level so multi-megabyte inline lines are not converted
+ * to strings until the (short) value is extracted.
+ *
+ * Whitespace handling matches real bundler output (esbuild/webpack/rollup/
+ * terser); the pathological arbitrary-whitespace cases the old regex allowed
+ * are intentionally not supported.
+ *
+ * @returns The classified directive, or `undefined` when the line is not a
+ *   `sourceMappingURL` directive.
+ */
+export function parseSourceMappingDirective(
+  line: Buffer
+): SourceMappingDirective | undefined {
+  // Trim trailing whitespace/CR at the byte level.
+  let endIdx = line.length;
+  while (
+    endIdx > 0 &&
+    (line[endIdx - 1] === 0x20 ||
+      line[endIdx - 1] === 0x09 ||
+      line[endIdx - 1] === CARRIAGE_RETURN ||
+      line[endIdx - 1] === NEWLINE)
+  ) {
+    endIdx -= 1;
+  }
+
+  let i = 0;
+  i = skipSpaces(line, i);
+  // Require "//" then "#" or "@".
+  if (!bytesStartsWith(line, "//", i)) {
+    return;
+  }
+  i += 2;
+  const marker = line[i];
+  if (marker !== 0x23 /* # */ && marker !== 0x40 /* @ */) {
+    return;
+  }
+  i += 1;
+  i = skipSpaces(line, i);
+  if (!bytesStartsWith(line, "sourceMappingURL", i)) {
+    return;
+  }
+  i += "sourceMappingURL".length;
+  i = skipSpaces(line, i);
+  if (line[i] !== 0x3d /* = */) {
+    return;
+  }
+  i += 1;
+  i = skipSpaces(line, i);
+  if (i >= endIdx) {
+    return;
+  }
+
+  const value = line.toString("utf-8", i, endIdx);
+  let kind: SourceMappingDirective["kind"] = "external";
+  if (isInlineSourcemapUrl(value)) {
+    kind = "inline";
+  } else if (value.startsWith("http://") || value.startsWith("https://")) {
+    kind = "remote";
+  }
+  return { kind, value };
+}
+
+/**
+ * Extract and classify the authoritative `sourceMappingURL` directive from a
+ * JS file.
+ *
+ * Reads the file tail (where the directive lives, possibly followed by an
+ * injected `//# debugId=` comment) and parses the directive. Returns
+ * `undefined` when no directive is present or the file cannot be read.
+ */
+async function extractSourceMappingDirective(
+  jsPath: string
+): Promise<SourceMappingDirective | undefined> {
+  try {
+    const tail = await readDirectiveTail(jsPath);
+    return findSourceMappingDirective(tail);
   } catch {
     return;
   }
@@ -166,46 +418,54 @@ async function fileExists(path: string): Promise<boolean> {
  * Find the companion sourcemap for a JS file.
  *
  * Resolution order:
- * 1. Convention: `<jsPath>.map` on disk
- * 2. `//# sourceMappingURL=<relative-path>` directive in the JS file
- *    (only external file references — `data:` URLs are logged and skipped)
+ * 1. Convention: `<jsPath>.map` on disk → external
+ * 2. `//# sourceMappingURL=<value>` directive in the JS file:
+ *    - inline `data:` URL → decoded inline map (non-fatal on decode failure)
+ *    - relative file reference → external
+ *    - remote `http(s)://` URL → skipped
  *
- * @returns The map path if a companion exists, undefined otherwise.
+ * @returns A {@link MapSource} if a sourcemap is found, undefined otherwise.
  */
-async function findCompanionMap(jsPath: string): Promise<string | undefined> {
+async function findCompanionMap(
+  jsPath: string
+): Promise<MapSource | undefined> {
   // Fast path: convention-based naming (most bundlers use this)
   const conventionPath = `${jsPath}.map`;
   if (await fileExists(conventionPath)) {
-    return conventionPath;
+    return { kind: "external", mapPath: conventionPath };
   }
 
-  // Slow path: parse sourceMappingURL from the file tail
-  const url = await extractSourceMappingUrl(jsPath);
-  if (!url) {
+  // Slow path: parse the authoritative sourceMappingURL directive.
+  const directive = await extractSourceMappingDirective(jsPath);
+  if (!directive) {
     return;
   }
 
-  // Skip data: URLs (inline sourcemaps) — we can't inject debug IDs
-  // into inline sourcemaps without re-encoding the entire base64 blob
-  // back into the JS file. Log and move on.
-  if (url.startsWith("data:")) {
-    log.debug(
-      `skipping inline sourcemap in ${jsPath} (data: URL not supported for injection)`
-    );
+  // Inline data: URL — decode and inject in place. Decode failures are
+  // non-fatal: bundled terser/babel output can contain template literals
+  // that look like inline sourcemap directives but are not valid base64 JSON.
+  if (directive.kind === "inline") {
+    const decoded = tryDecodeInlineSourcemap(directive.value);
+    if (!decoded) {
+      log.warn(
+        `skipping ${jsPath}: inline sourcemap is not valid base64 JSON; leaving file unmodified`
+      );
+      return;
+    }
+    return { kind: "inline", jsPath, decoded };
+  }
+
+  // Skip remote URLs (http/https) — can't inject into remote maps.
+  if (directive.kind === "remote") {
+    log.debug(`skipping remote sourcemap URL in ${jsPath}: ${directive.value}`);
     return;
   }
 
-  // Skip absolute URLs (http/https) — can't inject into remote maps
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    log.debug(`skipping remote sourcemap URL in ${jsPath}: ${url}`);
-    return;
-  }
-
-  // Strip query strings and fragments (e.g. "app.js.map?v=abc123")
-  // that bundlers like Vite/Rollup may append. indexOf returns -1 when
-  // no delimiter is found, and slice(0, -1) would chop the last char —
-  // so only slice when the delimiter actually exists.
-  let cleanUrl = url;
+  // External relative reference. Strip query strings and fragments
+  // (e.g. "app.js.map?v=abc123") that bundlers like Vite/Rollup may append.
+  // indexOf returns -1 when no delimiter is found, and slice(0, -1) would
+  // chop the last char — so only slice when the delimiter actually exists.
+  let cleanUrl = directive.value;
   const qIdx = cleanUrl.indexOf("?");
   if (qIdx !== -1) {
     cleanUrl = cleanUrl.slice(0, qIdx);
@@ -219,7 +479,7 @@ async function findCompanionMap(jsPath: string): Promise<string | undefined> {
   const jsDir = dirname(jsPath);
   const resolvedMapPath = resolvePath(jsDir, cleanUrl);
   if (await fileExists(resolvedMapPath)) {
-    return resolvedMapPath;
+    return { kind: "external", mapPath: resolvedMapPath };
   }
 
   return;
@@ -312,24 +572,41 @@ export async function discoverFilePairs(
         continue;
       }
     }
-    const mapPath = await findCompanionMap(entry.absolutePath);
-    if (mapPath) {
-      // Guard against sourceMappingURL directives that resolve outside the
-      // upload directory (e.g. "../../other/app.js.map"). Convention-based
-      // maps (foo.js.map) are always adjacent so they're inherently safe.
-      // Trailing separator prevents prefix collisions (e.g. /dist vs /dist-backup).
-      // Use path.sep for Windows compatibility (backslash separators).
-      const dirPrefix = absDir.endsWith(sep) ? absDir : `${absDir}${sep}`;
-      if (!mapPath.startsWith(dirPrefix)) {
-        log.debug(
-          `skipping sourcemap outside directory: ${mapPath} (resolved from ${entry.absolutePath})`
-        );
-        continue;
-      }
-      pairs.push({ jsPath: entry.absolutePath, mapPath });
+    const map = await findCompanionMap(entry.absolutePath);
+    if (map && isMapInsideDir(map, absDir, entry.absolutePath)) {
+      pairs.push({ jsPath: entry.absolutePath, map });
     }
   }
   return pairs;
+}
+
+/**
+ * Whether a resolved {@link MapSource} is safe to include — i.e. an external
+ * map resolves inside the upload directory.
+ *
+ * Guards against `sourceMappingURL` directives that resolve outside the
+ * upload directory (e.g. `"../../other/app.js.map"`). Convention-based maps
+ * (`foo.js.map`) are always adjacent and inline maps live inside the JS file,
+ * so both are inherently in-dir. The trailing separator prevents prefix
+ * collisions (e.g. `/dist` vs `/dist-backup`); `path.sep` keeps it correct on
+ * Windows.
+ */
+function isMapInsideDir(
+  map: MapSource,
+  absDir: string,
+  jsPath: string
+): boolean {
+  if (map.kind === "inline") {
+    return true;
+  }
+  const dirPrefix = absDir.endsWith(sep) ? absDir : `${absDir}${sep}`;
+  if (map.mapPath.startsWith(dirPrefix)) {
+    return true;
+  }
+  log.debug(
+    `skipping sourcemap outside directory: ${map.mapPath} (resolved from ${jsPath})`
+  );
+  return false;
 }
 
 /**
@@ -502,11 +779,12 @@ export async function resolveDirectorySourcemaps(
       }
     }
 
-    const sourceMappingUrl = await extractSourceMappingUrl(jsPath);
-    const inline = sourceMappingUrl?.startsWith("data:") ?? false;
-    const remote =
-      !!sourceMappingUrl && REMOTE_SOURCE_MAPPING_URL_RE.test(sourceMappingUrl);
-    const mapPath = await findCompanionMap(jsPath);
+    const directive = await extractSourceMappingDirective(jsPath);
+    const sourceMappingUrl = directive?.value;
+    const inline = directive?.kind === "inline";
+    const remote = directive?.kind === "remote";
+    const map = await findCompanionMap(jsPath);
+    const mapPath = map?.kind === "external" ? map.mapPath : undefined;
 
     let debugId: string | undefined;
     try {

@@ -9,6 +9,7 @@
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -183,5 +184,145 @@ describe("injectDirectory — discovery", () => {
     const results = await injectDirectory(dir, { dryRun: true });
     const paths = results.map((r) => r.jsPath.slice(dir.length + 1));
     expect(paths).toEqual(["bundle.js"]);
+  });
+});
+
+describe("injectDirectory — inline sourcemaps", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "sentry-inject-inline-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** Build a `data:` URL for a sourcemap object. */
+  function toDataUrl(map: unknown): string {
+    const b64 = Buffer.from(JSON.stringify(map)).toString("base64");
+    return `data:application/json;base64,${b64}`;
+  }
+
+  /** Write a JS file with an inline sourcemap and no companion .map. */
+  function writeInline(rel: string, map: unknown, body = "console.log(1)\n") {
+    const full = join(dir, rel);
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, `${body}//# sourceMappingURL=${toDataUrl(map)}\n`);
+    return full;
+  }
+
+  const SAMPLE_MAP = {
+    version: 3,
+    sources: ["a.ts"],
+    mappings: "AAAA",
+    names: [],
+  };
+
+  test("discovers an inline-map JS file (no companion .map)", async () => {
+    writeInline("inline.js", SAMPLE_MAP);
+    const results = await injectDirectory(dir, { dryRun: true });
+    expect(results).toHaveLength(1);
+    expect(results[0]?.map.kind).toBe("inline");
+    expect(results[0]?.mapPath).toBeUndefined();
+  });
+
+  test("injects a debug ID and rewrites the inline directive in place", async () => {
+    const jsPath = writeInline("inline.js", SAMPLE_MAP);
+    const results = await injectDirectory(dir);
+    expect(results).toHaveLength(1);
+    const { debugId, injected, injectedMapContent } = results[0] ?? {};
+    expect(injected).toBe(true);
+    expect(debugId).toMatch(/^[0-9a-f-]{36}$/);
+
+    const js = readFileSync(jsPath, "utf-8");
+    // IIFE snippet + debugId comment present.
+    expect(js).toContain(`sentry-dbid-${debugId}`);
+    expect(js).toContain(`//# debugId=${debugId}`);
+
+    // The rewritten inline directive carries the injected map.
+    const m = js.match(
+      /sourceMappingURL=data:application\/json;base64,([A-Za-z0-9+/=]+)/
+    );
+    expect(m).not.toBeNull();
+    const rewritten = JSON.parse(
+      Buffer.from(m?.[1] ?? "", "base64").toString("utf-8")
+    );
+    expect(rewritten.debug_id).toBe(debugId);
+    expect(rewritten.debugId).toBe(debugId);
+    expect(rewritten.mappings).toBe(`;${SAMPLE_MAP.mappings}`);
+
+    // injectedMapContent matches the rewritten inline map.
+    expect(
+      JSON.parse((injectedMapContent ?? Buffer.alloc(0)).toString())
+    ).toEqual(rewritten);
+  });
+
+  test("is idempotent across repeated injection", async () => {
+    const jsPath = writeInline("inline.js", SAMPLE_MAP);
+    await injectDirectory(dir);
+    const first = readFileSync(jsPath, "utf-8");
+    const second = await injectDirectory(dir);
+    expect(second[0]?.injected).toBe(false);
+    expect(readFileSync(jsPath, "utf-8")).toBe(first);
+  });
+
+  test("discovers inline maps larger than the 2MB last-line window", async () => {
+    // Pad the sourcemap so its base64 data URL exceeds 2 MB, forcing the
+    // backward last-line reader to slide its window.
+    const bigMap = {
+      version: 3,
+      sources: ["a.ts"],
+      mappings: "AAAA",
+      sourcesContent: ["x".repeat(3 * 1024 * 1024)],
+    };
+    writeInline("big-inline.js", bigMap);
+    const results = await injectDirectory(dir, { dryRun: true });
+    expect(results).toHaveLength(1);
+    expect(results[0]?.map.kind).toBe("inline");
+  });
+
+  test("preserves a hashbang when injecting into an inline-map file", async () => {
+    const jsPath = writeInline(
+      "cli.js",
+      SAMPLE_MAP,
+      "#!/usr/bin/env node\nconsole.log(1)\n"
+    );
+    await injectDirectory(dir);
+    const js = readFileSync(jsPath, "utf-8");
+    expect(js.startsWith("#!/usr/bin/env node\n")).toBe(true);
+    // Snippet must follow the hashbang, not precede it.
+    expect(js.indexOf("sentry-dbid-")).toBeGreaterThan(
+      js.indexOf("#!/usr/bin/env node")
+    );
+  });
+
+  test("only rewrites the last inline directive (earlier false positives untouched)", async () => {
+    // An earlier line embeds a fake directive inside a string literal.
+    const fake = `data:application/json;base64,${Buffer.from('{"version":1}').toString("base64")}`;
+    const jsPath = writeInline(
+      "twin.js",
+      SAMPLE_MAP,
+      `const s = "//# sourceMappingURL=${fake}";\nconsole.log(s)\n`
+    );
+    await injectDirectory(dir);
+    const js = readFileSync(jsPath, "utf-8");
+    // The fake (version:1) directive in the string literal is preserved.
+    expect(js).toContain(`const s = "//# sourceMappingURL=${fake}"`);
+  });
+
+  test("skips invalid inline base64 non-fatally and keeps other pairs", async () => {
+    // Valid inline map.
+    writeInline("good.js", SAMPLE_MAP);
+    // Bogus inline directive (terser template-literal false positive).
+    const bad = join(dir, "bad.js");
+    writeFileSync(
+      bad,
+      "console.log(2)\n//# sourceMappingURL=data:application/json;base64,@@@nope@@@\n"
+    );
+
+    const results = await injectDirectory(dir, { dryRun: true });
+    const names = results.map((r) => r.jsPath.slice(dir.length + 1)).sort();
+    expect(names).toEqual(["good.js"]);
   });
 });

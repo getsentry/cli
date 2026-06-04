@@ -209,12 +209,23 @@ describe("sourcemap inject command — --allow-empty behavior", () => {
     await expect(func.call(ctx, {}, dir)).resolves.toBeUndefined();
   });
 
-  test("sourceMappingURL: skips data: URLs gracefully", async () => {
+  test("sourceMappingURL: valid inline data: URL is injected (1 pair)", async () => {
+    // eyJ2ZXJzaW9uIjozfQ== === {"version":3}
     writeFileSync(
       join(dir, "inline.js"),
       "console.log(1)\n//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozfQ==\n"
     );
-    // No convention map either — should fail with zero pairs
+    // No convention map — the inline map is discovered as a pair and injected.
+    const ctx = makeContext();
+    await expect(func.call(ctx, {}, dir)).resolves.toBeUndefined();
+  });
+
+  test("sourceMappingURL: invalid inline base64 is skipped (zero pairs)", async () => {
+    writeFileSync(
+      join(dir, "bad-inline.js"),
+      "console.log(1)\n//# sourceMappingURL=data:application/json;base64,@@@not-base64@@@\n"
+    );
+    // Non-fatal skip → no pairs → actionable ValidationError, not a crash.
     const ctx = makeContext();
     await expect(func.call(ctx, {}, dir)).rejects.toBeInstanceOf(
       ValidationError
@@ -353,6 +364,37 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       const types = callArgs?.files.map((f) => f.type);
       expect(types).toContain("minified_source");
       expect(types).toContain("source_map");
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
+  test("inline sourcemap: uploads decoded map as a source_map with content", async () => {
+    const jsPath = join(dir, "inline.js");
+    const map = { version: 3, sources: ["a.ts"], names: [], mappings: "AAAA" };
+    const dataUrl = `data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString("base64")}`;
+    writeFileSync(jsPath, `console.log(1)\n//# sourceMappingURL=${dataUrl}\n`);
+
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
+    try {
+      const ctx = makeContext();
+      await func.call(ctx, {}, dir);
+      const files = uploadSpy.mock.calls[0]?.[0]?.files ?? [];
+      expect(files).toHaveLength(2);
+      const js = files.find((f) => f.type === "minified_source");
+      const mapFile = files.find((f) => f.type === "source_map");
+      // The source_map entry carries in-memory content (no .map on disk).
+      expect(mapFile?.content).toBeInstanceOf(Buffer);
+      // Both entries share the injected debug ID.
+      expect(js?.debugId).toBeTruthy();
+      expect(mapFile?.debugId).toBe(js?.debugId);
+      // The uploaded map carries the injected debug ID.
+      const uploaded = JSON.parse(
+        (mapFile?.content as Buffer).toString("utf-8")
+      );
+      expect(uploaded.debug_id).toBe(js?.debugId);
     } finally {
       uploadSpy.mockRestore();
     }

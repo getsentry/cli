@@ -77,8 +77,18 @@ export type AssembleResponse = z.infer<typeof AssembleResponseSchema>;
 
 /** A source file to include in the artifact bundle. */
 export type ArtifactFile = {
-  /** Filesystem path to the file. */
+  /**
+   * Filesystem path to the file. Read from disk unless {@link ArtifactFile.content}
+   * is set; for inline sourcemaps (which have no `.map` file) this is
+   * informational only.
+   */
   path: string;
+  /**
+   * In-memory file content. When set, {@link buildArtifactBundle} uses this
+   * instead of reading from `path`. Used for inline sourcemaps that have no
+   * standalone `.map` file on disk.
+   */
+  content?: Buffer;
   /** Debug ID injected into this file (from {@link injectDebugId}). Omitted when uploading without rewriting. */
   debugId?: string;
   /**
@@ -359,7 +369,8 @@ export async function buildArtifactBundle(
 
     for (const file of files) {
       const bundlePath = urlToBundlePath(file.url);
-      const content = await readFile(file.path);
+      // Prefer in-memory content (inline sourcemaps); otherwise read from disk.
+      const content = file.content ?? (await readFile(file.path));
       await zip.addEntry(bundlePath, content);
     }
 
