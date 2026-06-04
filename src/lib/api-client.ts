@@ -101,6 +101,7 @@ export {
   listLogs,
   listTraceLogs,
 } from "./api/logs.js";
+export { listMonitors, listMonitorsPaginated } from "./api/monitors.js";
 export {
   getOrganization,
   getUserRegions,

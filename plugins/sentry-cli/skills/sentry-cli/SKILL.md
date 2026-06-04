@@ -472,6 +472,15 @@ View Sentry logs
 
 → Full flags and examples: `references/log.md`
 
+### Monitor
+
+Work with Sentry cron monitors
+
+- `sentry monitor run <monitor-slug command...>` — Wrap a command with cron monitor check-ins
+- `sentry monitor list <org/project>` — List cron monitors
+
+→ Full flags and examples: `references/monitor.md`
+
 ### Sourcemap
 
 Manage sourcemaps

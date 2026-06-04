@@ -22,6 +22,8 @@ import { listCommand as issueListCommand } from "./commands/issue/list.js";
 import { localRoute } from "./commands/local/index.js";
 import { logRoute } from "./commands/log/index.js";
 import { listCommand as logListCommand } from "./commands/log/list.js";
+import { monitorRoute } from "./commands/monitor/index.js";
+import { listCommand as monitorListCommand } from "./commands/monitor/list.js";
 import { orgRoute } from "./commands/org/index.js";
 import { listCommand as orgListCommand } from "./commands/org/list.js";
 import { proguardRoute } from "./commands/proguard/index.js";
@@ -77,6 +79,7 @@ const PLURAL_TO_SINGULAR: Record<string, string> = {
   repos: "repo",
   teams: "team",
   logs: "log",
+  monitors: "monitor",
   replays: "replay",
 
   spans: "span",
@@ -104,6 +107,7 @@ export const routes = buildRouteMap({
     events: eventListCommand,
     explore: exploreCommand,
     log: logRoute,
+    monitor: monitorRoute,
     sourcemap: sourcemapRoute,
     sourcemaps: sourcemapRoute,
     span: spanRoute,
@@ -125,6 +129,7 @@ export const routes = buildRouteMap({
     repos: repoListCommand,
     teams: teamListCommand,
     logs: logListCommand,
+    monitors: monitorListCommand,
     spans: spanListCommand,
     traces: traceListCommand,
     trials: trialListCommand,
@@ -147,6 +152,7 @@ export const routes = buildRouteMap({
       repos: true,
       teams: true,
       logs: true,
+      monitors: true,
       spans: true,
       traces: true,
       trials: true,
@@ -370,6 +376,10 @@ export const app = buildApplication(routes, {
   },
   scanner: {
     caseStyle: "allow-kebab-for-camel",
+    // Allow `--` to stop flag parsing so wrapper commands (e.g.
+    // `sentry monitor run <slug> -- <command>`) can pass through flags
+    // like `-e` or `--verbose` to the wrapped command unambiguously.
+    allowArgumentEscapeSequence: true,
   },
   determineExitCode: getExitCode,
   localization: {
