@@ -114,6 +114,8 @@ type ArtifactContext = {
   urlPrefix: string;
   /** Directory prefix to strip from relative paths (may be empty). */
   pathPrefixToStrip: string;
+  /** True when `--no-rewrite` is set (upload as-is, no debug IDs injected). */
+  noRewrite: boolean;
 };
 
 /** Compute a JS file's URL-space relative path (post-strip, forward slashes). */
@@ -135,10 +137,20 @@ function buildArtifactPair(
   const debugIdField = debugId ? { debugId } : {};
 
   if (map.kind === "inline") {
-    // For the rewrite path, inject produced the debug-ID-injected map
-    // (`injectedMapContent`). For --no-rewrite, upload the original inline
-    // map as-is — it was already decoded during discovery (`map.decoded`).
-    const content = result.injectedMapContent ?? Buffer.from(map.decoded.json);
+    // Resolve the map bytes to upload:
+    // - rewrite path: inject produced the debug-ID-injected map.
+    // - --no-rewrite: upload the original inline map decoded at discovery.
+    // - rewrite aborted (directive not found): no `injectedMapContent` and not
+    //   --no-rewrite → the JS was left unmodified, so upload nothing for it
+    //   rather than attaching a debug ID / map the bundle doesn't carry.
+    let content = result.injectedMapContent;
+    if (!content) {
+      if (ctx.noRewrite) {
+        content = Buffer.from(map.decoded.json);
+      } else {
+        return [];
+      }
+    }
     // Synthetic map URL — the server matches by debug ID, so the filename is
     // cosmetic. Derived from the (post-strip) JS URL.
     const mapRelative = `${jsRelative}.map`;
@@ -407,6 +419,7 @@ export const uploadCommand = buildCommand({
         resolvedDir,
         urlPrefix,
         pathPrefixToStrip,
+        noRewrite: flags["no-rewrite"] ?? false,
       })
     );
 

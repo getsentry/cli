@@ -230,7 +230,9 @@ const INLINE_DIRECTIVE_RE =
  * @param jsPath - Path to the JavaScript file
  * @param decoded - The decoded inline sourcemap and its re-encode metadata
  * @returns The debug ID, whether it was newly injected, and the injected map
- *   content (for upload as a standalone artifact)
+ *   content (for upload as a standalone artifact). When the directive cannot
+ *   be located for rewrite, returns an empty `debugId` and no
+ *   `injectedMapContent` so callers attach nothing inconsistent.
  */
 export async function injectInlineDebugId(
   jsPath: string,
@@ -238,7 +240,7 @@ export async function injectInlineDebugId(
 ): Promise<{
   debugId: string;
   wasInjected: boolean;
-  injectedMapContent: Buffer;
+  injectedMapContent?: Buffer;
 }> {
   // Full read required: the directive lives in the file body and must be
   // rewritten in place.
@@ -258,19 +260,16 @@ export async function injectInlineDebugId(
 
   // Locate the LAST inline directive to rewrite. If it can't be found (the
   // discovery parser and this regex disagree on an edge case), abort WITHOUT
-  // modifying the file — writing the IIFE snippet + debugId comment while
-  // leaving the inline map un-updated would produce inconsistent metadata.
+  // modifying the file. Return an EMPTY debug ID and no map content so the
+  // upload path attaches nothing — otherwise a debug ID and pre-injection map
+  // would be uploaded for a bundle that has no snippet/comment/updated map.
   const matches = [...jsContent.matchAll(INLINE_DIRECTIVE_RE)];
   const last = matches.at(-1);
   if (last?.index === undefined) {
     log.debug(
       `inline sourcemap directive not found for rewrite in ${jsPath}; leaving file unmodified`
     );
-    return {
-      debugId,
-      wasInjected: false,
-      injectedMapContent: Buffer.from(decoded.json),
-    };
+    return { debugId: "", wasInjected: false };
   }
 
   // Mutate the decoded map (IIFE adds one top line — same offset as external).
