@@ -2,6 +2,8 @@
 
 `sentry local` runs a local development server that captures Sentry SDK envelopes from your dev stack and surfaces errors, traces, and logs in real time — right in your terminal. No authentication required.
 
+No DSN is required either. If your app has no DSN configured, events flow **only** to the local server — nothing reaches your Sentry organization and no production quota is used. If a DSN *is* set, the SDK sends to both Sentry and the local server.
+
 If a server is already running on the port, the command attaches as an SSE consumer instead of starting a duplicate.
 
 ## Examples
@@ -33,8 +35,20 @@ Env vars injected into the child process:
 | Variable | Value |
 |----------|-------|
 | `SENTRY_SPOTLIGHT` | `http://localhost:<port>/stream` |
-| `NEXT_PUBLIC_SENTRY_SPOTLIGHT` | `http://localhost:<port>/stream` |
+| `<PREFIX>SENTRY_SPOTLIGHT` | `http://localhost:<port>/stream` |
 | `SENTRY_TRACES_SAMPLE_RATE` | `1` (unless already set) |
+
+The `<PREFIX>` variants cover every common framework client prefix so the spotlight URL is inlined into your browser bundle no matter which bundler you use: `PUBLIC_` (SvelteKit, Astro, Qwik), `NEXT_PUBLIC_` (Next.js), `VITE_` (Vite), `NUXT_PUBLIC_` (Nuxt), `REACT_APP_` (Create React App), `VUE_APP_` (Vue CLI), and `GATSBY_` (Gatsby).
+
+**Server vs. client.** Server-side SDKs (`@sentry/node`, Python, and friends) read `SENTRY_SPOTLIGHT` automatically — no code changes needed.
+
+For browser/client events, the CLI exposes the spotlight URL under every framework client prefix above. Once the [browser SDK reads these variables automatically](https://github.com/getsentry/sentry-javascript/pull/18198), client-side capture will be zero-config too. **Until then**, reference the variable matching your framework in your client config:
+
+```ts
+// Next.js example — other frameworks use their own env access pattern
+// (e.g. import.meta.env.VITE_SENTRY_SPOTLIGHT for Vite-based frameworks).
+Sentry.init({ spotlight: process.env.NEXT_PUBLIC_SENTRY_SPOTLIGHT ?? false });
+```
 
 ## Endpoints
 
@@ -77,6 +91,13 @@ Use `--quiet` to suppress tail output entirely if you only need the SSE stream.
 ```
 
 GenAI operations show the model name, MCP tool calls show the tool being invoked, and database queries show the system and query summary. This works automatically when your Sentry SDK is configured with AI/LLM integrations.
+
+To watch only agent activity, filter to the `ai` item type:
+
+```bash
+sentry local -f ai          # only AI/agent spans
+sentry local -f ai -f error # agent spans and errors
+```
 
 ## JSON output
 
