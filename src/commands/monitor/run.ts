@@ -254,7 +254,13 @@ The wrapped command receives the \`SENTRY_MONITOR_SLUG\` environment variable.`,
     const monitorConfig = buildMonitorConfig(flags);
 
     const dsn = await resolveCheckInDsn(flags, cwd);
-    const dsnComponents = makeDsn(dsn);
+    let dsnComponents: ReturnType<typeof makeDsn>;
+    try {
+      dsnComponents = makeDsn(dsn);
+    } catch (err) {
+      log.debug("makeDsn threw for DSN input", err);
+      dsnComponents = undefined;
+    }
     if (!dsnComponents) {
       throw new ValidationError(`Invalid DSN: ${dsn}`, "dsn");
     }
@@ -298,10 +304,25 @@ The wrapped command receives the \`SENTRY_MONITOR_SLUG\` environment variable.`,
     try {
       exitCode = await new Promise<number>((resolve) => {
         let settled = false;
-        child.on("close", (code) => {
+        child.on("close", (code, signal) => {
           if (!settled) {
             settled = true;
-            resolve(code ?? 1);
+            if (code !== null) {
+              resolve(code);
+            } else if (signal) {
+              // Map signal kills to 128+N (Unix convention: e.g. 130 for
+              // SIGINT, 143 for SIGTERM) so CI pipelines and shell scripts
+              // inspecting $? see the correct exit code.
+              const signalNumbers: Partial<Record<NodeJS.Signals, number>> = {
+                SIGHUP: 1,
+                SIGINT: 2,
+                SIGQUIT: 3,
+                SIGTERM: 15,
+              };
+              resolve(128 + (signalNumbers[signal] ?? 1));
+            } else {
+              resolve(1);
+            }
           }
         });
         // If spawn itself fails (e.g. ENOENT), 'close' may never fire.

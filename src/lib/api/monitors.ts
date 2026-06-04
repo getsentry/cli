@@ -12,14 +12,19 @@ import { retrieveMonitorsForAnOrganization } from "@sentry/api";
 import type { SentryMonitor } from "../../types/index.js";
 
 import {
+  API_MAX_PER_PAGE,
+  autoPaginate,
   getOrgSdkConfig,
+  MAX_PAGINATION_PAGES,
   type PaginatedResponse,
   unwrapPaginatedResult,
-  unwrapResult,
 } from "./infrastructure.js";
 
 /**
  * List all cron monitors in an organization.
+ *
+ * Transparently fetches multiple pages when the org has more monitors than
+ * the API page size (100). Matches the `listProjects` pattern.
  *
  * @param orgSlug - Organization slug
  * @returns Monitors, including nested monitor environments
@@ -27,13 +32,24 @@ import {
 export async function listMonitors(orgSlug: string): Promise<SentryMonitor[]> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await retrieveMonitorsForAnOrganization({
-    ...config,
-    path: { organization_id_or_slug: orgSlug },
-  });
+  const { data: allResults } = await autoPaginate(async (cursor) => {
+    const result = await retrieveMonitorsForAnOrganization({
+      ...config,
+      path: { organization_id_or_slug: orgSlug },
+      query: { cursor, per_page: API_MAX_PER_PAGE } as {
+        cursor?: string;
+        per_page?: number;
+      },
+    });
+    return unwrapPaginatedResult<SentryMonitor[]>(
+      result as
+        | { data: SentryMonitor[]; error: undefined }
+        | { data: undefined; error: unknown },
+      "Failed to list monitors"
+    );
+  }, MAX_PAGINATION_PAGES * API_MAX_PER_PAGE);
 
-  const data = unwrapResult(result, "Failed to list monitors");
-  return data as unknown as SentryMonitor[];
+  return allResults as unknown as SentryMonitor[];
 }
 
 /**
@@ -55,7 +71,7 @@ export async function listMonitorsPaginated(
     path: { organization_id_or_slug: orgSlug },
     query: {
       cursor: options.cursor,
-      per_page: options.perPage ?? 25,
+      per_page: options.perPage ?? API_MAX_PER_PAGE,
     } as { cursor?: string; per_page?: number },
   });
 
