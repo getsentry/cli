@@ -329,13 +329,13 @@ export function applyOrgProjectFlags(
   commandOwnsProject: boolean
 ): void {
   const env = getEnv();
-  const orgTrimmed = org?.trim();
-  const projectTrimmed = project?.trim();
-  if (orgTrimmed && !commandOwnsOrg) {
+  const orgTrimmed = commandOwnsOrg ? undefined : org?.trim();
+  const projectTrimmed = commandOwnsProject ? undefined : project?.trim();
+  if (orgTrimmed) {
     orgProjectLog.debug(`--org flag → SENTRY_ORG=${orgTrimmed}`);
     env.SENTRY_ORG = orgTrimmed;
   }
-  if (projectTrimmed && !commandOwnsProject) {
+  if (projectTrimmed) {
     orgProjectLog.debug(`--project flag → SENTRY_PROJECT=${projectTrimmed}`);
     env.SENTRY_PROJECT = projectTrimmed;
   }

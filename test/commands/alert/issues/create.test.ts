@@ -25,15 +25,21 @@ type CreateFlags = {
   readonly action?: string[];
   readonly "action-match"?: "all" | "any";
   readonly frequency: number;
+  readonly environment?: string;
+  readonly filter?: string[];
+  readonly "filter-match"?: "all" | "any";
+  readonly owner?: string;
   readonly "dry-run": boolean;
   readonly json: boolean;
 };
 
 function createContext() {
+  const stdoutWrite = vi.fn(() => true);
   return {
-    stdout: { write: vi.fn(() => true) },
+    stdout: { write: stdoutWrite },
     stderr: { write: vi.fn(() => true) },
     cwd: getConfigDir(),
+    stdoutWrite,
   };
 }
 
@@ -75,6 +81,56 @@ describe("alert issues create", () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
+  test("rejects blank rule name", async () => {
+    const context = createContext();
+    const func = (await createCommand.loader()) as unknown as (
+      this: unknown,
+      flags: CreateFlags,
+      arg: string
+    ) => Promise<void>;
+
+    await expect(
+      func.call(
+        context,
+        {
+          name: "   ",
+          condition: ['{"id":"condition-a"}'],
+          action: ['{"id":"action-a"}'],
+          "action-match": "any",
+          frequency: 30,
+          "dry-run": true,
+          json: true,
+        },
+        "test-org/test-project"
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("rejects nonpositive frequency", async () => {
+    const context = createContext();
+    const func = (await createCommand.loader()) as unknown as (
+      this: unknown,
+      flags: CreateFlags,
+      arg: string
+    ) => Promise<void>;
+
+    await expect(
+      func.call(
+        context,
+        {
+          name: "Rule A",
+          condition: ['{"id":"condition-a"}'],
+          action: ['{"id":"action-a"}'],
+          "action-match": "any",
+          frequency: 0,
+          "dry-run": true,
+          json: true,
+        },
+        "test-org/test-project"
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
   test("dry run does not call create API", async () => {
     const context = createContext();
     resolveSpy.mockResolvedValue({ targets: [sampleTarget] });
@@ -98,6 +154,91 @@ describe("alert issues create", () => {
       "test-org/test-project"
     );
 
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  test("dry run JSON includes optional fields and default filterMatch", async () => {
+    const context = createContext();
+    resolveSpy.mockResolvedValue({ targets: [sampleTarget] });
+    const func = (await createCommand.loader()) as unknown as (
+      this: unknown,
+      flags: CreateFlags,
+      arg: string
+    ) => Promise<void>;
+
+    await func.call(
+      context,
+      {
+        name: "Rule A",
+        condition: ['{"id":"condition-a"}'],
+        action: ['{"id":"action-a"}'],
+        "action-match": "all",
+        frequency: 30,
+        environment: "prod",
+        filter: ['{"id":"filter-a"}'],
+        owner: "team:ops",
+        "dry-run": true,
+        json: true,
+      },
+      "test-org/test-project"
+    );
+
+    const parsed = JSON.parse(
+      context.stdoutWrite.mock.calls.map((c) => c[0]).join("")
+    );
+    expect(parsed).toEqual({
+      org: "test-org",
+      project: "test-project",
+      name: "Rule A",
+      dryRun: true,
+      body: {
+        name: "Rule A",
+        conditions: [{ id: "condition-a" }],
+        actions: [{ id: "action-a" }],
+        actionMatch: "all",
+        frequency: 30,
+        environment: "prod",
+        filters: [{ id: "filter-a" }],
+        filterMatch: "all",
+        owner: "team:ops",
+      },
+    });
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  test("rejects targets that resolve to multiple projects", async () => {
+    const context = createContext();
+    resolveSpy.mockResolvedValue({
+      targets: [
+        sampleTarget,
+        {
+          ...sampleTarget,
+          project: "other-project",
+          projectDisplay: "other-project",
+        },
+      ],
+    });
+    const func = (await createCommand.loader()) as unknown as (
+      this: unknown,
+      flags: CreateFlags,
+      arg: string
+    ) => Promise<void>;
+
+    await expect(
+      func.call(
+        context,
+        {
+          name: "Rule A",
+          condition: ['{"id":"condition-a"}'],
+          action: ['{"id":"action-a"}'],
+          "action-match": "any",
+          frequency: 30,
+          "dry-run": true,
+          json: true,
+        },
+        "test-org/"
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
     expect(createSpy).not.toHaveBeenCalled();
   });
 

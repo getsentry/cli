@@ -102,6 +102,28 @@ describe("alert issues delete", () => {
     );
   });
 
+  test("dry-run JSON returns the preview contract", async () => {
+    const { context, stdoutWrite } = createContext();
+    const func = await deleteCommand.loader();
+
+    await func.call(
+      context,
+      { ...defaultFlags, "dry-run": true, json: true },
+      "test-org/test-project/42"
+    );
+
+    expect(
+      JSON.parse(stdoutWrite.mock.calls.map((c) => c[0]).join(""))
+    ).toEqual({
+      dryRun: true,
+      org: "test-org",
+      project: "test-project",
+      id: "42",
+      name: "Rule Alpha",
+    });
+    expect(deleteRuleSpy).not.toHaveBeenCalled();
+  });
+
   test("--yes deletes the resolved rule", async () => {
     const { context, stdoutWrite } = createContext();
     const func = await deleteCommand.loader();

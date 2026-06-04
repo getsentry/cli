@@ -185,12 +185,8 @@ async function runPhase2(
   targets: ResolvedTarget[],
   phase1: FetchResult[],
   expandableIndices: number[],
-  context: {
-    surplus: number;
-    options: { limit: number };
-  }
+  surplus: number
 ): Promise<void> {
-  const { surplus } = context;
   const extraQuotas = distributeFetchBudget(surplus, expandableIndices.length);
   const requests = expandableIndices
     .map((targetIndex, allocationIndex) => ({
@@ -298,7 +294,7 @@ async function fetchWithBudget(
     };
   }
 
-  await runPhase2(targets, phase1, expandableIndices, { surplus, options });
+  await runPhase2(targets, phase1, expandableIndices, surplus);
 
   totalFetched = 0;
   for (const r of phase1) {

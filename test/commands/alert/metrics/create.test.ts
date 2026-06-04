@@ -18,15 +18,20 @@ type CreateFlags = {
   readonly dataset: string;
   readonly "time-window": number;
   readonly trigger?: string[];
+  readonly project?: string[];
+  readonly environment?: string;
+  readonly owner?: string;
   readonly "dry-run": boolean;
   readonly json: boolean;
 };
 
 function createContext() {
+  const stdoutWrite = vi.fn(() => true);
   return {
-    stdout: { write: vi.fn(() => true) },
+    stdout: { write: stdoutWrite },
     stderr: { write: vi.fn(() => true) },
     cwd: getConfigDir(),
+    stdoutWrite,
   };
 }
 
@@ -70,6 +75,45 @@ describe("alert metrics create", () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
+  test.each([
+    [
+      "blank name",
+      { name: "   ", query: "event.type:error", aggregate: "count()" },
+    ],
+    [
+      "blank query",
+      { name: "Metric Rule", query: "   ", aggregate: "count()" },
+    ],
+    [
+      "blank aggregate",
+      { name: "Metric Rule", query: "event.type:error", aggregate: "   " },
+    ],
+  ])("rejects %s", async (_, overrides) => {
+    const context = createContext();
+    const func = (await createCommand.loader()) as unknown as (
+      this: unknown,
+      flags: CreateFlags,
+      arg: string
+    ) => Promise<void>;
+
+    await expect(
+      func.call(
+        context,
+        {
+          name: overrides.name,
+          query: overrides.query,
+          aggregate: overrides.aggregate,
+          dataset: "errors",
+          "time-window": 5,
+          trigger: ['{"alertThreshold":100,"actions":[{"id":"notify"}]}'],
+          "dry-run": true,
+          json: true,
+        },
+        "test-org"
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
   test("dry run does not call create API", async () => {
     const context = createContext();
     resolveSpy.mockResolvedValue({ org: "test-org" });
@@ -94,6 +138,55 @@ describe("alert metrics create", () => {
       "test-org"
     );
 
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  test("dry run JSON includes normalized projects and optional fields", async () => {
+    const context = createContext();
+    resolveSpy.mockResolvedValue({ org: "test-org" });
+    const func = (await createCommand.loader()) as unknown as (
+      this: unknown,
+      flags: CreateFlags,
+      arg: string
+    ) => Promise<void>;
+
+    await func.call(
+      context,
+      {
+        name: "Metric Rule",
+        query: "event.type:error",
+        aggregate: "count()",
+        dataset: "errors",
+        "time-window": 5,
+        trigger: ['{"alertThreshold":100,"actions":[{"id":"notify"}]}'],
+        project: ["frontend, backend", "api"],
+        environment: "prod",
+        owner: "team:ops",
+        "dry-run": true,
+        json: true,
+      },
+      "test-org"
+    );
+
+    const parsed = JSON.parse(
+      context.stdoutWrite.mock.calls.map((c) => c[0]).join("")
+    );
+    expect(parsed).toEqual({
+      org: "test-org",
+      name: "Metric Rule",
+      dryRun: true,
+      body: {
+        name: "Metric Rule",
+        query: "event.type:error",
+        aggregate: "count()",
+        dataset: "errors",
+        timeWindow: 5,
+        triggers: [{ alertThreshold: 100, actions: [{ id: "notify" }] }],
+        projects: ["frontend", "backend", "api"],
+        environment: "prod",
+        owner: "team:ops",
+      },
+    });
     expect(createSpy).not.toHaveBeenCalled();
   });
 

@@ -100,6 +100,27 @@ describe("alert metrics delete", () => {
     );
   });
 
+  test("--yes JSON returns the deleted contract", async () => {
+    const { context, stdoutWrite } = createContext();
+    const func = await deleteCommand.loader();
+
+    await func.call(
+      context,
+      { ...defaultFlags, yes: true, json: true },
+      "test-org/9"
+    );
+
+    expect(
+      JSON.parse(stdoutWrite.mock.calls.map((c) => c[0]).join(""))
+    ).toEqual({
+      deleted: true,
+      org: "test-org",
+      id: "9",
+      name: "Metric Rule",
+    });
+    expect(deleteRuleSpy).toHaveBeenCalledWith("test-org", "9");
+  });
+
   test.each([
     ["--yes", { ...defaultFlags, yes: true }],
     ["--dry-run", { ...defaultFlags, "dry-run": true }],

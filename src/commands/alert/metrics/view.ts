@@ -1,4 +1,5 @@
 import type { SentryContext } from "../../../context.js";
+import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { openInBrowser } from "../../../lib/browser.js";
 import { buildCommand } from "../../../lib/command.js";
 import { CommandOutput } from "../../../lib/formatters/output.js";
@@ -80,6 +81,16 @@ export const viewCommand = buildCommand({
   async *func(this: SentryContext, flags: ViewFlags, arg: string) {
     const { cwd } = this;
     const { ref, targetArg } = parseMetricRuleArg(arg, USAGE_HINT);
+    const parsed = parseOrgProjectArg(targetArg);
+
+    if (flags.web && parsed.type === "org-all") {
+      await openInBrowser(
+        buildMetricAlertsUrl(parsed.org),
+        "metric alert rules"
+      );
+      return;
+    }
+
     const { org } = await resolveOrgOptionalProjectFromArg(
       targetArg,
       cwd,

@@ -82,6 +82,14 @@ export const viewCommand = buildCommand({
     const { ref, targetArg } = parseIssueRuleArg(arg, USAGE_HINT);
     const parsed = parseOrgProjectArg(targetArg);
 
+    if (flags.web && parsed.type === "explicit") {
+      await openInBrowser(
+        buildIssueAlertsUrl(parsed.org, parsed.project),
+        "issue alert rules"
+      );
+      return;
+    }
+
     const { targets } = await resolveTargetsFromParsedArg(parsed, {
       cwd,
       usageHint: "sentry alert issues view <org>/<project>/<rule-id-or-name>",
