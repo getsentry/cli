@@ -53,6 +53,23 @@ describe("statusColor", () => {
     expect(result).toContain("\x1b[");
     expect(stripAnsi(result)).toBe("text");
   });
+
+  test("resolvedInNextRelease → green-styled text", () => {
+    const result = statusColor("text", "resolvedInNextRelease");
+    expect(result).toContain("\x1b[");
+    expect(stripAnsi(result)).toBe("text");
+  });
+
+  test("muted → muted-styled text", () => {
+    const result = statusColor("text", "muted");
+    expect(result).toContain("\x1b[");
+    expect(stripAnsi(result)).toBe("text");
+  });
+
+  test("unknown status defaults to unresolved styling", () => {
+    const result = statusColor("text", "somethingNew");
+    expect(stripAnsi(result)).toBe("text");
+  });
 });
 
 describe("levelColor", () => {

@@ -13,6 +13,8 @@ import {
   formatIssueSubtitle,
   formatProjectCreated,
   formatShortId,
+  formatStatusIcon,
+  formatStatusLabel,
   formatUpgradeResult,
   formatUserIdentity,
   type IssueTableRow,
@@ -846,5 +848,51 @@ describe("formatUpgradeResult", () => {
       // Trailing newline after changelog
       expect(result).toMatch(/\n$/);
     });
+  });
+});
+
+describe("formatStatusIcon", () => {
+  test("resolved shows green icon", () => {
+    expect(stripFormatting(formatStatusIcon("resolved"))).toContain("✓");
+  });
+
+  test("unresolved shows yellow icon", () => {
+    expect(stripFormatting(formatStatusIcon("unresolved"))).toContain("●");
+  });
+
+  test("resolvedInNextRelease shows green icon", () => {
+    expect(stripFormatting(formatStatusIcon("resolvedInNextRelease"))).toContain(
+      "✓"
+    );
+  });
+
+  test("muted shows muted icon", () => {
+    expect(stripFormatting(formatStatusIcon("muted"))).toContain("−");
+  });
+
+  test("unknown status falls back to yellow icon", () => {
+    expect(stripFormatting(formatStatusIcon("unknown"))).toContain("●");
+  });
+});
+
+describe("formatStatusLabel", () => {
+  test("resolved → Resolved label", () => {
+    expect(stripFormatting(formatStatusLabel("resolved"))).toContain(
+      "Resolved"
+    );
+  });
+
+  test("resolvedInNextRelease → Resolved in Next Release label", () => {
+    expect(
+      stripFormatting(formatStatusLabel("resolvedInNextRelease"))
+    ).toContain("Resolved in Next Release");
+  });
+
+  test("muted → Muted label", () => {
+    expect(stripFormatting(formatStatusLabel("muted"))).toContain("Muted");
+  });
+
+  test("unknown status falls back to Unknown label", () => {
+    expect(stripFormatting(formatStatusLabel("unknown"))).toContain("Unknown");
   });
 });
