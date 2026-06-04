@@ -88,8 +88,10 @@ export const header = (text: string): string => muted(text);
 
 const STATUS_COLORS: Record<IssueStatus, (text: string) => string> = {
   resolved: green,
+  resolvedInNextRelease: green,
   unresolved: yellow,
   ignored: muted,
+  muted: muted,
 };
 
 /**

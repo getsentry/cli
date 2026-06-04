@@ -44,7 +44,7 @@ export async function getLatestEvent(
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
-      issue_id: Number(issueId),
+      issue_id: issueId,
       event_id: "latest",
     },
   });
@@ -237,7 +237,7 @@ export async function listIssueEvents(
       ...config,
       path: {
         organization_id_or_slug: orgSlug,
-        issue_id: Number(issueId),
+        issue_id: issueId,
       },
       query: {
         query: query || undefined,

@@ -369,9 +369,9 @@ function getComparator(
 ): (a: SentryIssue, b: SentryIssue) => number {
   switch (sort) {
     case "date":
-      return (a, b) => compareDates(a.lastSeen, b.lastSeen);
+      return (a, b) => compareDates(a.lastSeen ?? undefined, b.lastSeen ?? undefined);
     case "new":
-      return (a, b) => compareDates(a.firstSeen, b.firstSeen);
+      return (a, b) => compareDates(a.firstSeen ?? undefined, b.firstSeen ?? undefined);
     case "freq":
       return (a, b) =>
         Number.parseInt(b.count ?? "0", 10) -
@@ -379,7 +379,7 @@ function getComparator(
     case "user":
       return (a, b) => (b.userCount ?? 0) - (a.userCount ?? 0);
     default:
-      return (a, b) => compareDates(a.lastSeen, b.lastSeen);
+      return (a, b) => compareDates(a.lastSeen ?? undefined, b.lastSeen ?? undefined);
   }
 }
 
