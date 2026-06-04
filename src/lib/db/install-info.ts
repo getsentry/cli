@@ -6,7 +6,7 @@
  * without re-detecting every time.
  */
 
-import type { InstallationMethod } from "../upgrade.js";
+import type { InstallationMethod } from "../binary.js";
 import { getDatabase } from "./index.js";
 import { clearMetadata, getMetadata, setMetadata } from "./utils.js";
 

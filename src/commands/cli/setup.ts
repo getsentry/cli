@@ -14,7 +14,9 @@ import { installAgentSkills } from "../../lib/agent-skills.js";
 import {
   determineInstallDir,
   getBinaryFilename,
+  type InstallationMethod,
   installBinary,
+  parseInstallationMethod,
 } from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
 import {
@@ -41,10 +43,6 @@ import {
   isInPath,
   type ShellInfo,
 } from "../../lib/shell.js";
-import {
-  type InstallationMethod,
-  parseInstallationMethod,
-} from "../../lib/upgrade.js";
 
 type SetupFlags = {
   readonly install: boolean;
