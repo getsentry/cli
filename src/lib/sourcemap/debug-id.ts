@@ -203,16 +203,20 @@ function mutateSourcemap(
 }
 
 /**
- * Regex matching a `//# sourceMappingURL=data:...;base64,...` directive.
+ * Regex matching a `//# sourceMappingURL=data:...;base64,...` directive at the
+ * **start of a line** (optionally indented).
  *
- * Global + multiline so all matches can be iterated and only the **last**
- * one rewritten (the spec says the last directive is authoritative; earlier
- * matches may be false positives inside bundled string literals).
+ * Anchored with `^` under the multiline flag so it only matches a directive
+ * that *begins* a line — mirroring discovery's line-based parser
+ * (`parseSourceMappingDirective`). This prevents rewriting a false-positive
+ * `data:` URL embedded mid-line inside a string/template literal while leaving
+ * the authoritative trailing directive untouched. Global so all matches can be
+ * iterated and only the **last** one rewritten (spec: last directive wins).
  *
  * @internal
  */
 const INLINE_DIRECTIVE_RE =
-  /\/\/[#@]\s*sourceMappingURL\s*=\s*data:application\/json(?:;charset=[\w-]+)?;base64,[A-Za-z0-9+/=]+/gm;
+  /^[ \t]*\/\/[#@][ \t]*sourceMappingURL[ \t]*=[ \t]*data:application\/json(?:;charset=[\w-]+)?;base64,[A-Za-z0-9+/=]+/gm;
 
 /**
  * Inject a debug ID into a JS file whose sourcemap is inline (a base64

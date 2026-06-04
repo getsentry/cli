@@ -308,18 +308,30 @@ describe("injectDirectory — inline sourcemaps", () => {
     );
   });
 
-  test("only rewrites the last inline directive (earlier false positives untouched)", async () => {
-    // An earlier line embeds a fake directive inside a string literal.
+  test("only rewrites the real directive, not a mid-line false positive", async () => {
+    // A string literal embeds a fake `//# sourceMappingURL=data:...` mid-line.
+    // The whole-file regex could match it; line-anchored matching must not.
     const fake = `data:application/json;base64,${Buffer.from('{"version":1}').toString("base64")}`;
     const jsPath = writeInline(
       "twin.js",
       SAMPLE_MAP,
       `const s = "//# sourceMappingURL=${fake}";\nconsole.log(s)\n`
     );
-    await injectDirectory(dir);
+    const results = await injectDirectory(dir);
+    expect(results[0]?.injected).toBe(true);
     const js = readFileSync(jsPath, "utf-8");
-    // The fake (version:1) directive in the string literal is preserved.
+    // The fake (version:1) directive in the string literal is untouched.
     expect(js).toContain(`const s = "//# sourceMappingURL=${fake}"`);
+    // The real (last-line) inline map is the one that got the debug ID.
+    const realLine = js
+      .split("\n")
+      .find((l) => l.startsWith("//# sourceMappingURL=data:"));
+    const realB64 = realLine?.match(/base64,([A-Za-z0-9+/=]+)/)?.[1] ?? "";
+    const realMap = JSON.parse(
+      Buffer.from(realB64, "base64").toString("utf-8")
+    );
+    expect(realMap.debug_id).toBe(results[0]?.debugId);
+    expect(realMap.version).toBe(3); // the real SAMPLE_MAP, not the fake
   });
 
   test("skips invalid inline base64 non-fatally and keeps other pairs", async () => {

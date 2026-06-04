@@ -431,12 +431,19 @@ export const uploadCommand = buildCommand({
       files: artifactFiles,
     });
 
+    // Count actually-uploaded pairs (one minified_source entry per pair).
+    // buildArtifactPair returns no entries for inline pairs whose rewrite was
+    // aborted, so this excludes skipped pairs that results.length would count.
+    const filesUploaded = artifactFiles.filter(
+      (f) => f.type === "minified_source"
+    ).length;
+
     yield new CommandOutput<UploadCommandResult>({
       org,
       project,
       release: flags.release,
       dist: flags.dist,
-      filesUploaded: results.length,
+      filesUploaded,
     });
   },
 });
