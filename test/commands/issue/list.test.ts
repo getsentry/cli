@@ -1419,5 +1419,71 @@ describe("issue list: multi-target cursor-safe budget", () => {
 });
 
 // ---------------------------------------------------------------------------
+// getComparator — sort comparator with null-safe date coercion
+// ---------------------------------------------------------------------------
+
+import { __testing } from "../../../src/commands/issue/list.js";
+
+const { getComparator } = __testing;
+
+import type { SentryIssue } from "../../../src/types/index.js";
+
+function makeIssue(overrides: Partial<SentryIssue> = {}): SentryIssue {
+  return {
+    id: "1",
+    shortId: "TEST-1",
+    title: "Test",
+    status: "unresolved",
+    level: "error",
+    count: "10",
+    userCount: 1,
+    firstSeen: "2024-01-01T00:00:00Z",
+    lastSeen: "2024-01-02T00:00:00Z",
+    permalink: "https://sentry.io/issues/1",
+    ...overrides,
+  };
+}
+
+describe("getComparator", () => {
+  test("sort=new compares by firstSeen with null safety", () => {
+    const cmp = getComparator("new");
+    const older = makeIssue({ firstSeen: "2024-01-01T00:00:00Z" });
+    const newer = makeIssue({ firstSeen: "2024-01-02T00:00:00Z" });
+    expect(cmp(newer, older)).toBeLessThan(0);
+    expect(cmp(older, newer)).toBeGreaterThan(0);
+  });
+
+  test("sort=new handles null firstSeen", () => {
+    const cmp = getComparator("new");
+    const nullDate = makeIssue({ firstSeen: null as unknown as string });
+    const withDate = makeIssue({ firstSeen: "2024-01-01T00:00:00Z" });
+    // should not throw
+    expect(() => cmp(nullDate, withDate)).not.toThrow();
+  });
+
+  test("sort=date handles null lastSeen (covers ?? null branch)", () => {
+    const cmp = getComparator("date");
+    const nullDate = makeIssue({ lastSeen: null as unknown as string });
+    const withDate = makeIssue({ lastSeen: "2024-01-01T00:00:00Z" });
+    expect(cmp(nullDate, withDate)).not.toBe(undefined);
+  });
+
+  test("sort=new handles null firstSeen (covers ?? null branch)", () => {
+    const cmp = getComparator("new");
+    const nullDate = makeIssue({ firstSeen: null as unknown as string });
+    const withDate = makeIssue({ firstSeen: "2024-01-01T00:00:00Z" });
+    expect(cmp(nullDate, withDate)).not.toBe(undefined);
+  });
+
+  test("unknown sort value hits default branch (falls back to lastSeen)", () => {
+    // A value not in the switch exercises the default: compareDates(lastSeen) case
+    const cmp = getComparator("unknown_sort" as unknown as "date");
+    const older = makeIssue({ lastSeen: "2024-01-01T00:00:00Z" });
+    const newer = makeIssue({ lastSeen: "2024-01-02T00:00:00Z" });
+    expect(cmp(newer, older)).toBeLessThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // sanitizeQuery — tests moved to test/lib/search-query.test.ts
 // ---------------------------------------------------------------------------

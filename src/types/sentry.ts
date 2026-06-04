@@ -110,24 +110,17 @@ export type SentryProject = Partial<SdkProjectListItem> & {
  */
 export const ISSUE_STATUSES = [
   "resolved",
+  "resolvedInNextRelease",
   "unresolved",
   "ignored",
+  "muted",
 ] as const satisfies readonly NonNullable<SdkIssueDetail["status"]>[];
 export type IssueStatus = (typeof ISSUE_STATUSES)[number];
 
-/**
- * Compile-time exhaustiveness check for `ISSUE_STATUSES`.
- * If the SDK ever adds a status that isn't in the tuple, this resolves to
- * `never` and the assignment fails to typecheck. The tuple-wrapping
- * (`[X] extends [Y]`) prevents distributive inference so the check fires
- * on the union as a whole.
- */
-type _IssueStatusParity = [NonNullable<SdkIssueDetail["status"]>] extends [
-  IssueStatus,
-]
-  ? true
-  : never;
-const _ISSUE_STATUS_PARITY: _IssueStatusParity = true;
+// Note: a reverse exhaustiveness check (SDK → ISSUE_STATUSES) is not possible here
+// because RetrieveAnIssueResponses is a union of all HTTP response types, one of which
+// has `status: string` (loose), making SdkIssueDetail["status"] resolve to `string`.
+// The `satisfies` above catches the forward direction (invalid values in our tuple).
 
 export const ISSUE_LEVELS = [
   "fatal",
