@@ -7,7 +7,6 @@
 import type { SentryContext } from "../../context.js";
 import { createRelease } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError } from "../../lib/errors.js";
 import {
   colorTag,
   escapeMarkdownInline,
@@ -17,9 +16,10 @@ import {
 } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../lib/mutate-command.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
 import type { SentryRelease } from "../../types/index.js";
-import { parseReleaseArg } from "./parse.js";
+import { resolveReleaseTarget } from "./parse.js";
+
+const USAGE_HINT = "sentry release create [<org>/]<version>";
 
 function formatReleaseCreated(release: SentryRelease): string {
   const lines: string[] = [];
@@ -76,12 +76,14 @@ export const createCommand = buildCommand({
   },
   parameters: {
     positional: {
-      kind: "array",
-      parameter: {
-        placeholder: "org/version",
-        brief: "[<org>/]<version> - Release version to create",
-        parse: String,
-      },
+      kind: "tuple",
+      parameters: [
+        {
+          placeholder: "org/version",
+          brief: "[<org>/]<version> - Release version to create",
+          parse: String,
+        },
+      ],
     },
     flags: {
       project: {
@@ -122,30 +124,15 @@ export const createCommand = buildCommand({
       readonly json: boolean;
       readonly fields?: string[];
     },
-    ...args: string[]
+    target: string
   ) {
     const { cwd } = this;
 
-    const joined = args.join(" ").trim();
-    if (!joined) {
-      throw new ContextError(
-        "Release version",
-        "sentry release create [<org>/]<version>",
-        []
-      );
-    }
-
-    const { version, orgSlug } = parseReleaseArg(
-      joined,
-      "sentry release create [<org>/]<version>"
+    const { version, org } = await resolveReleaseTarget(
+      target,
+      USAGE_HINT,
+      cwd
     );
-    const resolved = await resolveOrg({ org: orgSlug, cwd });
-    if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry release create [<org>/]<version>"
-      );
-    }
 
     const body: Parameters<typeof createRelease>[1] = { version };
     if (flags.project) {
@@ -176,7 +163,7 @@ export const createCommand = buildCommand({
       return { hint: "Dry run — no release was created." };
     }
 
-    const release = await createRelease(resolved.org, body);
+    const release = await createRelease(org, body);
     yield new CommandOutput(release);
 
     const hint = flags.finalize

@@ -15,7 +15,7 @@ import {
 import { buildCommand, numberParser } from "../../lib/command.js";
 import { getDatabase } from "../../lib/db/index.js";
 import { clearMetadata, getMetadata, setMetadata } from "../../lib/db/utils.js";
-import { ApiError, ContextError, ValidationError } from "../../lib/errors.js";
+import { ApiError, ValidationError } from "../../lib/errors.js";
 import {
   escapeMarkdownInline,
   mdKvTable,
@@ -29,11 +29,12 @@ import {
   isShallowRepository,
 } from "../../lib/git.js";
 import { logger } from "../../lib/logger.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
 import type { SentryRelease } from "../../types/index.js";
-import { parseReleaseArg } from "./parse.js";
+import { resolveReleaseTarget } from "./parse.js";
 
 const log = logger.withTag("release.set-commits");
+
+const USAGE_HINT = "sentry release set-commits [<org>/]<version>";
 
 /** Read commits from local git history and send to the Sentry API. */
 function setCommitsFromLocal(
@@ -196,12 +197,14 @@ export const setCommitsCommand = buildCommand({
   },
   parameters: {
     positional: {
-      kind: "array",
-      parameter: {
-        placeholder: "org/version",
-        brief: "[<org>/]<version> - Release version",
-        parse: String,
-      },
+      kind: "tuple",
+      parameters: [
+        {
+          placeholder: "org/version",
+          brief: "[<org>/]<version> - Release version",
+          parse: String,
+        },
+      ],
     },
     flags: {
       auto: {
@@ -246,34 +249,19 @@ export const setCommitsCommand = buildCommand({
       readonly json: boolean;
       readonly fields?: string[];
     },
-    ...args: string[]
+    target: string
   ) {
     const { cwd } = this;
 
-    const joined = args.join(" ").trim();
-    if (!joined) {
-      throw new ContextError(
-        "Release version",
-        "sentry release set-commits [<org>/]<version> --auto",
-        []
-      );
-    }
-
-    const { version, orgSlug } = parseReleaseArg(
-      joined,
-      "sentry release set-commits [<org>/]<version>"
+    const { version, org } = await resolveReleaseTarget(
+      target,
+      USAGE_HINT,
+      cwd
     );
-    const resolved = await resolveOrg({ org: orgSlug, cwd });
-    if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry release set-commits [<org>/]<version>"
-      );
-    }
 
     // Clear mode: remove all commits regardless of other flags
     if (flags.clear) {
-      const release = await updateRelease(resolved.org, version, {
+      const release = await updateRelease(org, version, {
         commits: [],
       });
       yield new CommandOutput(release);
@@ -316,7 +304,7 @@ export const setCommitsCommand = buildCommand({
         return { repository, commit: sha };
       });
 
-      const release = await setCommitsWithRefs(resolved.org, version, refs);
+      const release = await setCommitsWithRefs(org, version, refs);
       yield new CommandOutput(release);
       return;
     }
@@ -326,18 +314,18 @@ export const setCommitsCommand = buildCommand({
     if (flags.local) {
       // Explicit --local: use local git only
       release = await setCommitsFromLocal(
-        resolved.org,
+        org,
         version,
         cwd,
         flags["initial-depth"]
       );
     } else if (flags.auto) {
       // Explicit --auto: use repo integration, fail hard on error
-      release = await setCommitsAuto(resolved.org, version, cwd);
+      release = await setCommitsAuto(org, version, cwd);
     } else {
       // Default (no flag): try auto with cached fallback
       release = await setCommitsDefault(
-        resolved.org,
+        org,
         version,
         cwd,
         flags["initial-depth"]

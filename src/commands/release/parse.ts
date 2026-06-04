@@ -6,7 +6,8 @@
  * slug separators. This module provides version-aware parsing.
  */
 
-import { ValidationError } from "../../lib/errors.js";
+import { ContextError, ValidationError } from "../../lib/errors.js";
+import { resolveOrg } from "../../lib/resolve-target.js";
 
 /** Slug pattern: lowercase alphanumeric + hyphens, no leading/trailing hyphen */
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
@@ -52,4 +53,51 @@ export function parseReleaseArg(
   }
 
   return { version: arg };
+}
+
+/** A fully-resolved release target: a concrete org plus the release version. */
+export type ResolvedReleaseTarget = {
+  /** The release version (never empty). */
+  version: string;
+  /** The resolved organization slug. */
+  org: string;
+  /** Source description when the org was auto-detected (e.g. from a DSN). */
+  detectedFrom?: string;
+};
+
+/**
+ * Resolve a single release positional argument into a concrete `{ version, org }`.
+ *
+ * Centralizes the version-only release-command boilerplate: it parses the
+ * `[<org>/]<version>` target, resolves the organization (from the parsed prefix
+ * or the surrounding project context), and raises consistent {@link ContextError}s
+ * when the version is missing or no organization can be determined.
+ *
+ * Commands pass a single required positional (Stricli `kind: "tuple"`), so callers
+ * never need to join variadic args — preventing the silent
+ * `args.join(" ")` defect where extra positionals were swallowed into the version.
+ *
+ * @param target - The raw positional argument (e.g. `1.0.0` or `my-org/1.0.0`)
+ * @param usageHint - Single-line usage example for error messages
+ * @param cwd - Current working directory, used for context-based org detection
+ * @returns The resolved version and organization
+ * @throws {ContextError} If the version is empty or the org cannot be resolved
+ */
+export async function resolveReleaseTarget(
+  target: string | undefined,
+  usageHint: string,
+  cwd: string
+): Promise<ResolvedReleaseTarget> {
+  const trimmed = target?.trim();
+  if (!trimmed) {
+    throw new ContextError("Release version", usageHint, []);
+  }
+
+  const { version, orgSlug } = parseReleaseArg(trimmed, usageHint);
+  const resolved = await resolveOrg({ org: orgSlug, cwd });
+  if (!resolved) {
+    throw new ContextError("Organization", usageHint);
+  }
+
+  return { version, org: resolved.org, detectedFrom: resolved.detectedFrom };
 }

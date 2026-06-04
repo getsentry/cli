@@ -9,7 +9,7 @@
 
 import type { SentryContext } from "../../context.js";
 import { deleteRelease, getRelease } from "../../lib/api-client.js";
-import { ApiError, ContextError } from "../../lib/errors.js";
+import { ApiError } from "../../lib/errors.js";
 import { renderMarkdown, safeCodeSpan } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
@@ -17,9 +17,10 @@ import {
   confirmByTyping,
   isConfirmationBypassed,
 } from "../../lib/mutate-command.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
 import { buildReleaseUrl } from "../../lib/sentry-urls.js";
-import { parseReleaseArg } from "./parse.js";
+import { resolveReleaseTarget } from "./parse.js";
+
+const USAGE_HINT = "sentry release delete [<org>/]<version>";
 
 type DeleteResult = {
   deleted: boolean;
@@ -93,46 +94,33 @@ export const deleteCommand = buildDeleteCommand({
   },
   parameters: {
     positional: {
-      kind: "array",
-      parameter: {
-        placeholder: "org/version",
-        brief: "[<org>/]<version> - Release version to delete",
-        parse: String,
-      },
+      kind: "tuple",
+      parameters: [
+        {
+          placeholder: "org/version",
+          brief: "[<org>/]<version> - Release version to delete",
+          parse: String,
+        },
+      ],
     },
   },
-  async *func(this: SentryContext, flags: DeleteFlags, ...args: string[]) {
+  async *func(this: SentryContext, flags: DeleteFlags, target: string) {
     const { cwd } = this;
 
-    const joined = args.join(" ").trim();
-    if (!joined) {
-      throw new ContextError(
-        "Release version",
-        "sentry release delete [<org>/]<version>",
-        []
-      );
-    }
-
-    const { version, orgSlug } = parseReleaseArg(
-      joined,
-      "sentry release delete [<org>/]<version>"
+    const { version, org } = await resolveReleaseTarget(
+      target,
+      USAGE_HINT,
+      cwd
     );
-    const resolved = await resolveOrg({ org: orgSlug, cwd });
-    if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry release delete [<org>/]<version>"
-      );
-    }
 
     // Verify the release exists before prompting for confirmation
-    const release = await getRelease(resolved.org, version);
+    const release = await getRelease(org, version);
 
     // Dry-run mode: show what would be deleted
     if (flags["dry-run"]) {
       yield new CommandOutput({
         deleted: false,
-        org: resolved.org,
+        org,
         version,
         dryRun: true,
       });
@@ -152,7 +140,7 @@ export const deleteCommand = buildDeleteCommand({
       if (!confirmed) {
         yield new CommandOutput({
           deleted: false,
-          org: resolved.org,
+          org,
           version,
         });
         return { hint: "Cancelled." };
@@ -160,10 +148,10 @@ export const deleteCommand = buildDeleteCommand({
     }
 
     try {
-      await deleteRelease(resolved.org, version);
+      await deleteRelease(org, version);
     } catch (error) {
-      throw enrichDeleteError(error, resolved.org, version);
+      throw enrichDeleteError(error, org, version);
     }
-    yield new CommandOutput({ deleted: true, org: resolved.org, version });
+    yield new CommandOutput({ deleted: true, org, version });
   },
 });

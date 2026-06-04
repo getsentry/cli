@@ -8,7 +8,6 @@
 import type { SentryContext } from "../../context.js";
 import { updateRelease } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError } from "../../lib/errors.js";
 import {
   colorTag,
   escapeMarkdownInline,
@@ -18,9 +17,10 @@ import {
 } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../lib/mutate-command.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
 import type { SentryRelease } from "../../types/index.js";
-import { parseReleaseArg } from "./parse.js";
+import { resolveReleaseTarget } from "./parse.js";
+
+const USAGE_HINT = "sentry release restore [<org>/]<version>";
 
 /**
  * Render the human-readable result of restoring a release.
@@ -60,12 +60,14 @@ export const restoreCommand = buildCommand({
   },
   parameters: {
     positional: {
-      kind: "array",
-      parameter: {
-        placeholder: "org/version",
-        brief: "[<org>/]<version> - Release version to restore",
-        parse: String,
-      },
+      kind: "tuple",
+      parameters: [
+        {
+          placeholder: "org/version",
+          brief: "[<org>/]<version> - Release version to restore",
+          parse: String,
+        },
+      ],
     },
     flags: {
       "dry-run": DRY_RUN_FLAG,
@@ -79,42 +81,26 @@ export const restoreCommand = buildCommand({
       readonly json: boolean;
       readonly fields?: string[];
     },
-    ...args: string[]
+    target: string
   ) {
     const { cwd } = this;
 
-    const joined = args.join(" ").trim();
-    if (!joined) {
-      throw new ContextError(
-        "Release version",
-        "sentry release restore [<org>/]<version>",
-        []
-      );
-    }
-
-    const { version, orgSlug } = parseReleaseArg(
-      joined,
-      "sentry release restore [<org>/]<version>"
+    const { version, org, detectedFrom } = await resolveReleaseTarget(
+      target,
+      USAGE_HINT,
+      cwd
     );
-    const resolved = await resolveOrg({ org: orgSlug, cwd });
-    if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry release restore [<org>/]<version>"
-      );
-    }
+
     if (flags["dry-run"]) {
-      yield new CommandOutput({ dryRun: true, version, org: resolved.org });
+      yield new CommandOutput({ dryRun: true, version, org });
       return { hint: "Dry run — release was not restored." };
     }
 
-    const release = await updateRelease(resolved.org, version, {
+    const release = await updateRelease(org, version, {
       status: "open",
     });
     yield new CommandOutput(release);
-    const hint = resolved.detectedFrom
-      ? `Detected from ${resolved.detectedFrom}`
-      : undefined;
+    const hint = detectedFrom ? `Detected from ${detectedFrom}` : undefined;
     return { hint };
   },
 });
