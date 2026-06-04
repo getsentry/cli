@@ -861,9 +861,9 @@ describe("formatStatusIcon", () => {
   });
 
   test("resolvedInNextRelease shows green icon", () => {
-    expect(stripFormatting(formatStatusIcon("resolvedInNextRelease"))).toContain(
-      "✓"
-    );
+    expect(
+      stripFormatting(formatStatusIcon("resolvedInNextRelease"))
+    ).toContain("✓");
   });
 
   test("muted shows muted icon", () => {
