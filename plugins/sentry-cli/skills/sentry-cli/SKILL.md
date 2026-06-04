@@ -384,6 +384,14 @@ Manage Sentry dashboards
 
 → Full flags and examples: `references/dashboard.md`
 
+### Proguard
+
+Work with ProGuard/R8 mapping files
+
+- `sentry proguard uuid <path>` — Compute the UUID for a ProGuard mapping file
+
+→ Full flags and examples: `references/proguard.md`
+
 ### Replay
 
 Search and inspect Session Replays
@@ -402,6 +410,8 @@ Work with Sentry releases
 - `sentry release create <org/version...>` — Create a release
 - `sentry release finalize <org/version...>` — Finalize a release
 - `sentry release delete <org/version...>` — Delete a release
+- `sentry release archive <org/version...>` — Archive a release
+- `sentry release restore <org/version...>` — Restore an archived release
 - `sentry release deploy <org/version environment name...>` — Create a deploy for a release
 - `sentry release deploys <org/version...>` — List deploys for a release
 - `sentry release set-commits <org/version...>` — Set commits for a release
@@ -448,6 +458,7 @@ Manage sourcemaps
 
 - `sentry sourcemap inject <directory>` — Inject debug IDs into JavaScript files and sourcemaps
 - `sentry sourcemap upload <directory>` — Upload sourcemaps to Sentry
+- `sentry sourcemap resolve <directory>` — Resolve and report sourcemap linkage for JavaScript files
 
 → Full flags and examples: `references/sourcemap.md`
 

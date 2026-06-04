@@ -131,11 +131,11 @@ sentry issue explain my-org/MYPROJECT-ABC
 # Force a fresh analysis
 sentry issue explain 123456789 --force
 
-# Generate a fix plan (requires explain to be run first)
+# Generate a fix plan (automatically runs explain if needed)
 sentry issue plan 123456789
 
-# Specify which root cause to plan for
-sentry issue plan 123456789 --cause 0
+# Force a fresh plan even if one already exists
+sentry issue plan 123456789 --force
 ```
 
 **Requirements:**
@@ -143,7 +143,7 @@ sentry issue plan 123456789 --cause 0
 - Seer AI enabled for your organization
 - GitHub integration configured with repository access
 - Code mappings set up to link stack frames to source files
-- Root cause analysis must be completed (`sentry issue explain`) before generating a plan
+- Root cause analysis is run automatically if needed (the `plan` command triggers `explain` first)
 
 ### Resolve and reopen issues
 

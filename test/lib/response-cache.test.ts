@@ -470,6 +470,56 @@ describe("file structure", () => {
     expect(files.length).toBe(1);
     expect(files[0]).toMatch(/^[0-9a-f]{64}\.json$/);
   });
+
+  test("atomic write leaves no temp file behind on success", async () => {
+    await storeCachedResponse(
+      TEST_METHOD,
+      TEST_URL,
+      {},
+      mockResponse(TEST_BODY)
+    );
+
+    const cacheDir = join(getConfigDir(), "cache", "responses");
+    const files = await readdir(cacheDir);
+    // Exactly the final .json file — the temp file was renamed into place.
+    expect(files.every((f) => f.endsWith(".json"))).toBe(true);
+    expect(files.some((f) => f.endsWith(".tmp"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Atomic write / torn-read regression (getsentry/cli#1056)
+//
+// A write fires cleanupCache() fire-and-forget at 10% probability. Before
+// atomic writes, a second write to the same key could be read mid-overwrite by
+// that cleanup sweep, fail to JSON.parse, and be deleted as "corrupted" —
+// losing a valid entry. This loop exercises the exact store→overwrite→read
+// sequence many times so the probabilistic cleanup is virtually guaranteed to
+// fire; every iteration must still serve the fresh value.
+// ---------------------------------------------------------------------------
+
+describe("atomic write regression", () => {
+  test("repeated overwrite-then-read never loses the entry", async () => {
+    for (let i = 0; i < 50; i++) {
+      await storeCachedResponse(
+        TEST_METHOD,
+        TEST_URL,
+        {},
+        mockResponse({ data: `stale-${i}` })
+      );
+      const freshBody = { data: `fresh-${i}` };
+      await storeCachedResponse(
+        TEST_METHOD,
+        TEST_URL,
+        {},
+        mockResponse(freshBody)
+      );
+
+      const cached = await getCachedResponse(TEST_METHOD, TEST_URL, {});
+      expect(cached).toBeDefined();
+      expect(await cached!.json()).toEqual(freshBody);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

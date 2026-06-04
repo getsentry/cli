@@ -12,8 +12,8 @@ patchedDependencies:
     hash: 70711b63f77a0c4b4fe10c70350be7126dc05b220ea303cda74090bce733f467
     path: patches/@sentry%2Fnode-core@10.50.0.patch
   '@stricli/core':
-    hash: 10f8318359902742c80029abdcec31fe4c64de89b6f2a3f5afb09f05aacc506d
-    path: patches/@stricli%2Fcore@1.2.5.patch
+    hash: 402d573df36b19c62010d4ff41e49826f69d5c47212b8052ee7b042df34f973f
+    path: patches/@stricli%2Fcore@1.2.7.patch
 
 importers:
 
@@ -54,7 +54,7 @@ importers:
         version: 1.2.7
       '@stricli/core':
         specifier: ^1.2.4
-        version: 1.2.7(patch_hash=10f8318359902742c80029abdcec31fe4c64de89b6f2a3f5afb09f05aacc506d)
+        version: 1.2.7(patch_hash=402d573df36b19c62010d4ff41e49826f69d5c47212b8052ee7b042df34f973f)
       '@types/http-cache-semantics':
         specifier: ^4.2.0
         version: 4.2.0
@@ -4027,9 +4027,9 @@ snapshots:
 
   '@stricli/auto-complete@1.2.7':
     dependencies:
-      '@stricli/core': 1.2.7(patch_hash=10f8318359902742c80029abdcec31fe4c64de89b6f2a3f5afb09f05aacc506d)
+      '@stricli/core': 1.2.7(patch_hash=402d573df36b19c62010d4ff41e49826f69d5c47212b8052ee7b042df34f973f)
 
-  '@stricli/core@1.2.7(patch_hash=10f8318359902742c80029abdcec31fe4c64de89b6f2a3f5afb09f05aacc506d)': {}
+  '@stricli/core@1.2.7(patch_hash=402d573df36b19c62010d4ff41e49826f69d5c47212b8052ee7b042df34f973f)': {}
 
   '@trpc/server@11.17.0(typescript@5.9.3)':
     dependencies:
@@ -4684,7 +4684,7 @@ snapshots:
   fossilize@0.8.1:
     dependencies:
       '@stricli/auto-complete': 1.2.7
-      '@stricli/core': 1.2.7(patch_hash=10f8318359902742c80029abdcec31fe4c64de89b6f2a3f5afb09f05aacc506d)
+      '@stricli/core': 1.2.7(patch_hash=402d573df36b19c62010d4ff41e49826f69d5c47212b8052ee7b042df34f973f)
       binpunch: 1.0.0
       esbuild: 0.25.12
       macho-unsign: 2.0.6

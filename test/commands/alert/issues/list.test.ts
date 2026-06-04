@@ -12,6 +12,7 @@ import {
   setDefaultProject,
 } from "../../../../src/lib/db/defaults.js";
 import { setOrgRegion } from "../../../../src/lib/db/regions.js";
+import type { ApiError } from "../../../../src/lib/errors.js";
 import { logger } from "../../../../src/lib/logger.js";
 import { mockFetch, useTestConfigDir } from "../../../helpers.js";
 
@@ -63,8 +64,10 @@ describe("alert issues list pagination", () => {
   let func: ListFunc;
   let openInBrowserSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
+  let originalFetch: typeof globalThis.fetch;
 
   beforeEach(async () => {
+    originalFetch = globalThis.fetch;
     func = (await listCommand.loader()) as unknown as ListFunc;
     await setAuthToken("test-token");
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
@@ -79,6 +82,7 @@ describe("alert issues list pagination", () => {
   });
 
   afterEach(() => {
+    globalThis.fetch = originalFetch;
     openInBrowserSpy.mockRestore();
     warnSpy.mockRestore();
   });
@@ -203,6 +207,173 @@ describe("alert issues list pagination", () => {
       expect.stringContaining("test-project"),
       "issue alert rules"
     );
+  });
+
+  test("--web with project search resolves target and skips rule fetch", async () => {
+    setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = new URL(req.url);
+      if (url.pathname === "/api/0/organizations/") {
+        return Response.json([{ slug: "org-one", name: "Org One" }]);
+      }
+      if (url.pathname === "/api/0/projects/org-one/myproj/") {
+        return Response.json({
+          id: "101",
+          slug: "myproj",
+          name: "My Project",
+        });
+      }
+      if (url.pathname.includes("/rules/")) {
+        throw new Error("rule fetch should not be called for --web");
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
+    const { context } = createContext();
+    await func.call(
+      context,
+      {
+        web: true,
+        fresh: false,
+        limit: 30,
+        json: false,
+      },
+      "myproj"
+    );
+
+    expect(openInBrowserSpy).toHaveBeenCalledWith(
+      expect.stringContaining("org-one"),
+      "issue alert rules"
+    );
+    expect(openInBrowserSpy).toHaveBeenCalledWith(
+      expect.stringContaining("myproj"),
+      "issue alert rules"
+    );
+  });
+
+  test("--web with project search rejects multi-org targets before fetching rules", async () => {
+    setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-two", DEFAULT_SENTRY_URL);
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = new URL(req.url);
+      if (url.pathname === "/api/0/organizations/") {
+        return Response.json([
+          { slug: "org-one", name: "Org One" },
+          { slug: "org-two", name: "Org Two" },
+        ]);
+      }
+      const projectMatch = url.pathname.match(
+        /\/api\/0\/projects\/([^/]+)\/myproj\//
+      );
+      if (projectMatch) {
+        const org = projectMatch[1] as string;
+        return Response.json({
+          id: `${org}-id`,
+          slug: "myproj",
+          name: "My Project",
+        });
+      }
+      if (url.pathname.includes("/rules/")) {
+        throw new Error("rule fetch should not be called for --web");
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
+    const { context } = createContext();
+    await expect(
+      func.call(
+        context,
+        {
+          web: true,
+          fresh: false,
+          limit: 30,
+          json: false,
+        },
+        "myproj"
+      )
+    ).rejects.toThrow("multiple organizations");
+
+    expect(openInBrowserSpy).not.toHaveBeenCalled();
+  });
+
+  test("does not intercept a project slug named issues as an alert subcommand", async () => {
+    setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = new URL(req.url);
+      if (url.pathname === "/api/0/organizations/") {
+        return Response.json([{ slug: "org-one", name: "Org One" }]);
+      }
+      if (url.pathname === "/api/0/projects/org-one/issues/") {
+        return Response.json({
+          id: "202",
+          slug: "issues",
+          name: "Issues Project",
+        });
+      }
+      if (url.pathname === "/api/0/projects/org-one/issues/rules/") {
+        return Response.json([
+          {
+            id: "issues-rule",
+            name: "Issues Rule",
+            status: "active",
+            actionMatch: "any",
+            conditions: [],
+            actions: [],
+            frequency: 30,
+            environment: null,
+            owner: null,
+            projects: ["issues"],
+            dateCreated: "2026-01-01T00:00:00Z",
+          },
+        ]);
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
+    const { context, stdout } = createContext();
+    await func.call(
+      context,
+      {
+        web: false,
+        fresh: false,
+        limit: 10,
+        json: false,
+      },
+      "issues"
+    );
+
+    expect(stdout.output).toContain("issues-rule");
+    expect(stdout.output).toContain("Issues Rule");
+  });
+
+  test("rejects issue alert list limits outside the shared range", async () => {
+    const { context } = createContext();
+    await expect(
+      func.call(
+        context,
+        { web: false, fresh: false, limit: 0, json: true },
+        "test-org/test-project"
+      )
+    ).rejects.toThrow("--limit must be at least 1");
+    await expect(
+      func.call(
+        context,
+        { web: false, fresh: false, limit: 1001, json: true },
+        "test-org/test-project"
+      )
+    ).rejects.toThrow("--limit cannot exceed 1000");
   });
 
   test("human output includes project column for multi-project results", async () => {
@@ -345,9 +516,56 @@ describe("alert issues list pagination", () => {
     const parsed = JSON.parse(stdout.output);
     expect(parsed.data).toHaveLength(1);
     expect(parsed.data[0].name).toBe("Surviving Rule");
+    expect(parsed.errors).toEqual([
+      expect.objectContaining({
+        project: "org-two/myproj",
+        status: 500,
+        message: expect.stringContaining("API request failed"),
+      }),
+    ]);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("Failed to fetch alert rules from org-two/myproj")
     );
+  });
+
+  test("all project failures preserve ApiError status and endpoint", async () => {
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = new URL(req.url);
+      if (url.pathname === "/api/0/projects/test-org/test-project/") {
+        return Response.json({
+          id: "101",
+          slug: "test-project",
+          name: "Test Project",
+        });
+      }
+      if (url.pathname === "/api/0/projects/test-org/test-project/rules/") {
+        return new Response(JSON.stringify({ detail: "scope denied" }), {
+          status: 403,
+        });
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
+    const { context } = createContext();
+    await expect(
+      func.call(
+        context,
+        {
+          web: false,
+          fresh: false,
+          limit: 10,
+          json: true,
+        },
+        "test-org/test-project"
+      )
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      status: 403,
+      endpoint: "/projects/test-org/test-project/rules/",
+    } satisfies Partial<ApiError>);
   });
 
   test("distributes multi-project budget exactly without over-fetching", async () => {

@@ -28,7 +28,12 @@ import {
   hasPreviousPage,
   resolveCursor,
 } from "../../../lib/db/pagination.js";
-import { ContextError, withAuthGuard } from "../../../lib/errors.js";
+import {
+  ApiError,
+  ContextError,
+  ValidationError,
+  withAuthGuard,
+} from "../../../lib/errors.js";
 import {
   colorTag,
   escapeMarkdownCell,
@@ -39,6 +44,7 @@ import {
   buildListCommand,
   buildListLimitFlag,
   LIST_BASE_ALIASES,
+  LIST_MAX_LIMIT,
   paginationHint,
   parseCursorFlag,
   targetPatternExplanation,
@@ -68,7 +74,7 @@ export const PAGINATION_KEY = "alert-metrics-list";
 
 const USAGE_HINT = "sentry alert metrics list <org>/";
 
-const MAX_LIMIT = 1000;
+const MAX_LIMIT = LIST_MAX_LIMIT;
 
 const METRIC_ALERT_TARGET_POSITIONAL = {
   kind: "tuple" as const,
@@ -123,6 +129,49 @@ const metricAlertListMeta: ListCommandMeta = {
   entityPlural: "metric alert rules",
   commandPrefix: "sentry alert metrics list",
 };
+
+function validateLimit(limit: number): void {
+  if (limit < 1) {
+    throw new ValidationError("--limit must be at least 1.", "limit");
+  }
+  if (limit > LIST_MAX_LIMIT) {
+    throw new ValidationError(
+      `--limit cannot exceed ${LIST_MAX_LIMIT}. ` +
+        "Use --cursor to paginate through larger result sets.",
+      "limit"
+    );
+  }
+}
+
+function throwAllFetchesFailed(prefix: string, error: Error): never {
+  if (error instanceof ApiError) {
+    throw new ApiError(
+      `${prefix}: ${error.message}`,
+      error.status,
+      error.detail,
+      error.endpoint,
+      error.enriched403
+    );
+  }
+  throw new Error(`${prefix}: ${error.message}`);
+}
+
+function buildFailureErrors(
+  failures: { orgSlug: string; error: Error }[]
+): Array<{ org: string; status?: number; message: string }> | undefined {
+  if (failures.length === 0) {
+    return;
+  }
+  return failures.map(({ orgSlug, error }) =>
+    error instanceof ApiError
+      ? {
+          org: orgSlug,
+          status: error.status,
+          message: error.message,
+        }
+      : { org: orgSlug, message: error.message }
+  );
+}
 
 // Fetch helpers
 
@@ -353,6 +402,25 @@ async function resolveOrgs(
   };
 }
 
+async function resolveWebUrl(
+  parsed: ReturnType<typeof parseOrgProjectArg>,
+  cwd: string
+): Promise<string> {
+  const { orgs } = await resolveOrgs(parsed, cwd);
+  const uniqueOrgs = [...new Set(orgs)];
+  if (uniqueOrgs.length === 0) {
+    throw new ContextError("Organization", USAGE_HINT);
+  }
+  if (uniqueOrgs.length !== 1) {
+    throw new ValidationError(
+      "--web resolved metric alert rules in multiple organizations. Specify an explicit <org>/ target.",
+      "target"
+    );
+  }
+  // biome-ignore lint/style/noNonNullAssertion: length checked above
+  return buildMetricAlertsUrl(uniqueOrgs[0]!);
+}
+
 /**
  * Handle all four modes: resolve orgs → fetch within budget → compound cursor
  * per org → display.
@@ -437,8 +505,9 @@ async function handleResolvedOrgs(
   if (validResults.length === 0 && failures.length > 0) {
     // biome-ignore lint/style/noNonNullAssertion: guarded by failures.length > 0
     const { error: first } = failures[0]!;
-    throw new Error(
-      `Failed to fetch metric alert rules from ${uniqueOrgs.length} organization(s): ${first.message}`
+    throwAllFetchesFailed(
+      `Failed to fetch metric alert rules from ${uniqueOrgs.length} organization(s)`,
+      first
     );
   }
 
@@ -492,6 +561,7 @@ async function handleResolvedOrgs(
   const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
   const allRules = displayRows.map((r) => r.rule);
+  const errors = buildFailureErrors(failures);
 
   const nav = paginationHint({
     hasPrev,
@@ -519,6 +589,7 @@ async function handleResolvedOrgs(
       hint: parts.join("\n\n"),
       hasMore: hasMoreToShow,
       hasPrev,
+      errors,
     };
   }
 
@@ -535,6 +606,7 @@ async function handleResolvedOrgs(
     title,
     moreHint,
     footer,
+    errors,
   };
 }
 
@@ -605,109 +677,109 @@ const jsonTransformMetricAlertList = jsonTransformListResult;
 
 // Command
 
-export const listCommand = buildListCommand("alert", {
-  docs: {
-    brief: "List metric alert rules",
-    fullDescription:
-      "List metric alert rules for one or more Sentry organizations.\n\n" +
-      "Metric alerts trigger notifications when a metric query crosses a threshold.\n\n" +
-      "Target patterns:\n" +
-      "  sentry alert metrics list                     # auto-detect from DSN or config\n" +
-      "  sentry alert metrics list <org>/              # explicit org (paginated)\n" +
-      "  sentry alert metrics list <org>/<project>     # explicit org (project ignored)\n" +
-      "  sentry alert metrics list <project>           # find project across all orgs\n\n" +
-      `${targetPatternExplanation()}\n\n` +
-      "Metric alert rules are org-scoped; the project part is ignored when provided.\n\n" +
-      "Use --cursor / -c next / -c prev to paginate through larger result sets.",
-  },
-  output: {
-    human: formatMetricAlertListHuman,
-    jsonTransform: jsonTransformMetricAlertList,
-  },
-  parameters: {
-    positional: METRIC_ALERT_TARGET_POSITIONAL,
-    flags: {
-      web: {
-        kind: "boolean",
-        brief: "Open in browser",
-        default: false,
-      },
-      limit: buildListLimitFlag("metric alert rules"),
-      query: {
-        kind: "parsed",
-        parse: String,
-        brief: "Filter rules by name",
-        optional: true,
-      },
-      cursor: {
-        kind: "parsed",
-        parse: parseCursorFlag,
-        brief:
-          'Pagination cursor (use "next" for next page, "prev" for previous)',
-        optional: true,
-      },
+export const listCommand = buildListCommand(
+  "alert",
+  {
+    docs: {
+      brief: "List metric alert rules",
+      fullDescription:
+        "List metric alert rules for one or more Sentry organizations.\n\n" +
+        "Metric alerts trigger notifications when a metric query crosses a threshold.\n\n" +
+        "Target patterns:\n" +
+        "  sentry alert metrics list                     # auto-detect from DSN or config\n" +
+        "  sentry alert metrics list <org>/              # explicit org (paginated)\n" +
+        "  sentry alert metrics list <org>/<project>     # explicit org (project ignored)\n" +
+        "  sentry alert metrics list <project>           # find project across all orgs\n\n" +
+        `${targetPatternExplanation()}\n\n` +
+        "Metric alert rules are org-scoped; the project part is ignored when provided.\n\n" +
+        "Use --cursor / -c next / -c prev to paginate through larger result sets.",
     },
-    aliases: { ...LIST_BASE_ALIASES, w: "web", q: "query" },
-  },
-  async *func(this: SentryContext, flags: ListFlags, target?: string) {
-    const { cwd } = this;
-    const parsed = parseOrgProjectArg(target);
-
-    // --web: open browser when the target arg provides an org directly.
-    // For auto-detect and project-search modes the org isn't known until
-    // after API resolution, so --web falls through to the normal list path.
-    if (
-      flags.web &&
-      (parsed.type === "explicit" || parsed.type === "org-all")
-    ) {
-      await openInBrowser(
-        buildMetricAlertsUrl(parsed.org),
-        "metric alert rules"
-      );
-      return;
-    }
-
-    // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
-    const resolveAndHandle: ModeHandler<any> = (ctx) =>
-      handleResolvedOrgs({ ...ctx, flags });
-
-    const result = (await dispatchOrgScopedList({
-      config: metricAlertListMeta,
-      cwd,
-      flags,
-      parsed,
-      orgSlugMatchBehavior: "redirect",
-      // All modes use per-org fetching with compound cursor support
-      allowCursorInModes: [
-        "auto-detect",
-        "explicit",
-        "project-search",
-        "org-all",
-      ],
-      overrides: {
-        "auto-detect": resolveAndHandle,
-        explicit: resolveAndHandle,
-        "project-search": resolveAndHandle,
-        "org-all": resolveAndHandle,
+    output: {
+      human: formatMetricAlertListHuman,
+      jsonTransform: jsonTransformMetricAlertList,
+    },
+    parameters: {
+      positional: METRIC_ALERT_TARGET_POSITIONAL,
+      flags: {
+        web: {
+          kind: "boolean",
+          brief: "Open in browser",
+          default: false,
+        },
+        limit: buildListLimitFlag("metric alert rules"),
+        query: {
+          kind: "parsed",
+          parse: String,
+          brief: "Filter rules by name",
+          optional: true,
+        },
+        cursor: {
+          kind: "parsed",
+          parse: parseCursorFlag,
+          brief:
+            'Pagination cursor (use "next" for next page, "prev" for previous)',
+          optional: true,
+        },
       },
-    })) as MetricAlertListResult;
+      aliases: { ...LIST_BASE_ALIASES, w: "web", q: "query" },
+    },
+    async *func(this: SentryContext, flags: ListFlags, target?: string) {
+      const { cwd } = this;
+      const parsed = parseOrgProjectArg(target);
+      validateLimit(flags.limit);
 
-    let combinedHint: string | undefined;
-    if (result.items.length > 0) {
-      const hintParts: string[] = [];
-      if (result.moreHint) {
-        hintParts.push(result.moreHint);
+      if (flags.web) {
+        await openInBrowser(
+          await resolveWebUrl(parsed, cwd),
+          "metric alert rules"
+        );
+        return;
       }
-      if (result.footer) {
-        hintParts.push(result.footer);
-      }
-      combinedHint = hintParts.length > 0 ? hintParts.join("\n") : result.hint;
-    }
 
-    yield new CommandOutput(result);
-    return { hint: combinedHint };
+      // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
+      const resolveAndHandle: ModeHandler<any> = (ctx) =>
+        handleResolvedOrgs({ ...ctx, flags });
+
+      const result = (await dispatchOrgScopedList({
+        config: metricAlertListMeta,
+        cwd,
+        flags,
+        parsed,
+        orgSlugMatchBehavior: "redirect",
+        // All modes use per-org fetching with compound cursor support
+        allowCursorInModes: [
+          "auto-detect",
+          "explicit",
+          "project-search",
+          "org-all",
+        ],
+        overrides: {
+          "auto-detect": resolveAndHandle,
+          explicit: resolveAndHandle,
+          "project-search": resolveAndHandle,
+          "org-all": resolveAndHandle,
+        },
+      })) as MetricAlertListResult;
+
+      let combinedHint: string | undefined;
+      if (result.items.length > 0) {
+        const hintParts: string[] = [];
+        if (result.moreHint) {
+          hintParts.push(result.moreHint);
+        }
+        if (result.footer) {
+          hintParts.push(result.footer);
+        }
+        combinedHint =
+          hintParts.length > 0 ? hintParts.join("\n") : result.hint;
+      }
+
+      yield new CommandOutput(result);
+      return { hint: combinedHint };
+    },
   },
-});
+  { noSubcommandIntercept: true }
+);
 
 /** @internal Exported for testing only. */
 export const __testing = {

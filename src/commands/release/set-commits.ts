@@ -6,6 +6,7 @@
 
 import type { SentryContext } from "../../context.js";
 import {
+  NO_REPO_INTEGRATIONS_MESSAGE,
   setCommitsAuto,
   setCommitsLocal,
   setCommitsWithRefs,
@@ -134,7 +135,17 @@ async function setCommitsDefault(
     clearRepoIntegrationCache(org);
     return release;
   } catch (error) {
-    if (error instanceof ApiError && error.status === 400) {
+    // Only fall back to local git when the org genuinely has no repository
+    // integration. setCommitsAuto internally calls setCommitsWithRefs, which can
+    // return a server 400 for unrelated reasons (invalid refs, bad release
+    // state) — those must propagate, not be masked as "no integration" (which
+    // would also poison the cache). Match on the exact client-side message since
+    // the API exposes no stable error code for this case.
+    if (
+      error instanceof ApiError &&
+      error.status === 400 &&
+      error.message === NO_REPO_INTEGRATIONS_MESSAGE
+    ) {
       cacheNoRepoIntegration(org);
       log.warn(
         "Could not auto-discover commits (no repository integration). " +

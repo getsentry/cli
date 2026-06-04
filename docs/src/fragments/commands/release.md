@@ -35,6 +35,14 @@ sentry release create $(sentry release propose-version)
 sentry release deploys 1.0.0
 sentry release deploys my-org/1.0.0
 
+# Archive a release (hide it from the default list, but keep it)
+sentry release archive 1.0.0
+sentry release archive my-org/1.0.0 --dry-run   # Preview without archiving
+
+# Restore a previously archived release
+sentry release restore 1.0.0
+sentry release restore my-org/1.0.0
+
 # Delete a release
 sentry release delete my-org/1.0.0
 sentry release delete my-org/1.0.0 --yes        # Skip confirmation

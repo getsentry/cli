@@ -5,6 +5,7 @@ import * as browser from "../../../../src/lib/browser.js";
 import { DEFAULT_SENTRY_URL } from "../../../../src/lib/constants.js";
 import { setAuthToken } from "../../../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../../../src/lib/db/regions.js";
+import type { ApiError } from "../../../../src/lib/errors.js";
 import { logger } from "../../../../src/lib/logger.js";
 import { mockFetch, useTestConfigDir } from "../../../helpers.js";
 
@@ -56,8 +57,10 @@ describe("alert metrics list pagination", () => {
   let func: ListFunc;
   let openInBrowserSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
+  let originalFetch: typeof globalThis.fetch;
 
   beforeEach(async () => {
+    originalFetch = globalThis.fetch;
     func = (await listCommand.loader()) as unknown as ListFunc;
     await setAuthToken("test-token");
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
@@ -70,6 +73,7 @@ describe("alert metrics list pagination", () => {
   });
 
   afterEach(() => {
+    globalThis.fetch = originalFetch;
     openInBrowserSpy.mockRestore();
     warnSpy.mockRestore();
   });
@@ -198,6 +202,170 @@ describe("alert metrics list pagination", () => {
       expect.stringContaining("test-org"),
       "metric alert rules"
     );
+  });
+
+  test("--web with project search resolves org and skips rule fetch", async () => {
+    setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = new URL(req.url);
+      if (url.pathname === "/api/0/organizations/") {
+        return Response.json([{ slug: "org-one", name: "Org One" }]);
+      }
+      if (url.pathname === "/api/0/projects/org-one/myproj/") {
+        return Response.json({
+          id: "101",
+          slug: "myproj",
+          name: "My Project",
+        });
+      }
+      if (url.pathname.includes("/alert-rules/")) {
+        throw new Error("rule fetch should not be called for --web");
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
+    const { context } = createContext();
+    await func.call(
+      context,
+      {
+        web: true,
+        fresh: false,
+        limit: 30,
+        json: false,
+      },
+      "myproj"
+    );
+
+    expect(openInBrowserSpy).toHaveBeenCalledWith(
+      expect.stringContaining("org-one"),
+      "metric alert rules"
+    );
+  });
+
+  test("--web with project search rejects multi-org targets before fetching rules", async () => {
+    setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-two", DEFAULT_SENTRY_URL);
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = new URL(req.url);
+      if (url.pathname === "/api/0/organizations/") {
+        return Response.json([
+          { slug: "org-one", name: "Org One" },
+          { slug: "org-two", name: "Org Two" },
+        ]);
+      }
+      const projectMatch = url.pathname.match(
+        /\/api\/0\/projects\/([^/]+)\/myproj\//
+      );
+      if (projectMatch) {
+        const org = projectMatch[1] as string;
+        return Response.json({
+          id: `${org}-id`,
+          slug: "myproj",
+          name: "My Project",
+        });
+      }
+      if (url.pathname.includes("/alert-rules/")) {
+        throw new Error("rule fetch should not be called for --web");
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
+    const { context } = createContext();
+    await expect(
+      func.call(
+        context,
+        {
+          web: true,
+          fresh: false,
+          limit: 30,
+          json: false,
+        },
+        "myproj"
+      )
+    ).rejects.toThrow("multiple organizations");
+
+    expect(openInBrowserSpy).not.toHaveBeenCalled();
+  });
+
+  test("does not intercept a project slug named metrics as an alert subcommand", async () => {
+    setOrgRegion("org-one", DEFAULT_SENTRY_URL);
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = new URL(req.url);
+      if (url.pathname === "/api/0/organizations/") {
+        return Response.json([{ slug: "org-one", name: "Org One" }]);
+      }
+      if (url.pathname === "/api/0/projects/org-one/metrics/") {
+        return Response.json({
+          id: "202",
+          slug: "metrics",
+          name: "Metrics Project",
+        });
+      }
+      if (url.pathname === "/api/0/organizations/org-one/alert-rules/") {
+        return Response.json([
+          {
+            id: "metrics-rule",
+            name: "Metrics Rule",
+            status: 0,
+            query: "event.type:error",
+            aggregate: "count()",
+            dataset: "errors",
+            timeWindow: 5,
+            environment: null,
+            owner: null,
+            projects: ["metrics"],
+            dateCreated: "2026-01-01T00:00:00Z",
+          },
+        ]);
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
+    const { context, stdout } = createContext();
+    await func.call(
+      context,
+      {
+        web: false,
+        fresh: false,
+        limit: 10,
+        json: false,
+      },
+      "metrics"
+    );
+
+    expect(stdout.output).toContain("metrics-ru");
+    expect(stdout.output).toContain("Rule");
+    expect(stdout.output).toContain("org-one");
+  });
+
+  test("rejects metric alert list limits outside the shared range", async () => {
+    const { context } = createContext();
+    await expect(
+      func.call(
+        context,
+        { web: false, fresh: false, limit: 0, json: true },
+        "test-org/"
+      )
+    ).rejects.toThrow("--limit must be at least 1");
+    await expect(
+      func.call(
+        context,
+        { web: false, fresh: false, limit: 1001, json: true },
+        "test-org/"
+      )
+    ).rejects.toThrow("--limit cannot exceed 1000");
   });
 
   test("human output includes org column for multi-org project-search results", async () => {
@@ -341,9 +509,49 @@ describe("alert metrics list pagination", () => {
     const parsed = JSON.parse(stdout.output);
     expect(parsed.data).toHaveLength(1);
     expect(parsed.data[0].name).toBe("Surviving Metric Rule");
+    expect(parsed.errors).toEqual([
+      expect.objectContaining({
+        org: "org-two",
+        status: 500,
+        message: expect.stringContaining("API request failed"),
+      }),
+    ]);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("Failed to fetch metric alert rules from org-two")
     );
+  });
+
+  test("all org failures preserve ApiError status and endpoint", async () => {
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const url = new URL(req.url);
+      if (url.pathname === "/api/0/organizations/test-org/alert-rules/") {
+        return new Response(JSON.stringify({ detail: "scope denied" }), {
+          status: 403,
+        });
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
+    const { context } = createContext();
+    await expect(
+      func.call(
+        context,
+        {
+          web: false,
+          fresh: false,
+          limit: 10,
+          json: true,
+        },
+        "test-org/"
+      )
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      status: 403,
+      endpoint: "/organizations/test-org/alert-rules/",
+    } satisfies Partial<ApiError>);
   });
 
   test("distributes multi-org budget exactly without over-fetching", async () => {

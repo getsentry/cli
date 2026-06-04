@@ -61,11 +61,12 @@ cli/
 │   │   ├── local/       # run, serve
 │   │   ├── log/         # list, view
 │   │   ├── org/         # list, view
+│   │   ├── proguard/    # uuid
 │   │   ├── project/     # create, delete, list, view
-│   │   ├── release/     # create, delete, deploy, deploys, finalize, list, propose-version, set-commits, view
+│   │   ├── release/     # archive, create, delete, deploy, deploys, finalize, list, propose-version, restore, set-commits, view
 │   │   ├── replay/      # list, view
 │   │   ├── repo/        # list
-│   │   ├── sourcemap/   # inject, upload
+│   │   ├── sourcemap/   # inject, resolve, upload
 │   │   ├── span/        # list, view
 │   │   ├── team/        # list
 │   │   ├── trace/       # list, logs, view

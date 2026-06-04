@@ -160,4 +160,20 @@ describe("alert issues delete", () => {
     expect(getRuleSpy).not.toHaveBeenCalled();
     expect(deleteRuleSpy).not.toHaveBeenCalled();
   });
+
+  test.each([
+    ["--yes", { ...defaultFlags, yes: true }],
+    ["--dry-run", { ...defaultFlags, "dry-run": true }],
+  ])("rejects org-all issue alert rule target with %s before resolving target", async (_, flags) => {
+    const { context } = createContext();
+    const func = await deleteCommand.loader();
+
+    await expect(func.call(context, flags, "test-org//42")).rejects.toThrow(
+      "requires an explicit <org>/<project>/<rule-id-or-name>"
+    );
+
+    expect(resolveSpy).not.toHaveBeenCalled();
+    expect(getRuleSpy).not.toHaveBeenCalled();
+    expect(deleteRuleSpy).not.toHaveBeenCalled();
+  });
 });

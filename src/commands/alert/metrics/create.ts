@@ -6,11 +6,12 @@
 
 import type { SentryContext } from "../../../context.js";
 import { createMetricAlertRule } from "../../../lib/api-client.js";
+import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../../lib/command.js";
-import { ValidationError } from "../../../lib/errors.js";
+import { ContextError, ValidationError } from "../../../lib/errors.js";
 import { CommandOutput } from "../../../lib/formatters/output.js";
 import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../../lib/mutate-command.js";
-import { resolveOrgOptionalProjectFromArg } from "../../../lib/resolve-target.js";
+import { resolveOrg } from "../../../lib/resolve-target.js";
 import {
   normalizeProjectList,
   parseJsonObjectList,
@@ -49,6 +50,25 @@ function formatCreated(result: CreateResult): string {
     return `Would create metric alert rule '${result.name}' in ${result.org}.`;
   }
   return `Created metric alert rule ${result.id ?? "(unknown id)"} in ${result.org}: ${result.name} (${result.status ?? "active"}).`;
+}
+
+async function resolveMetricCreateOrg(
+  arg: string | undefined,
+  cwd: string
+): Promise<string> {
+  const parsed = parseOrgProjectArg(arg);
+  let org: string | undefined;
+  if (parsed.type === "explicit" || parsed.type === "org-all") {
+    org = parsed.org;
+  } else if (parsed.type === "project-search") {
+    org = parsed.projectSlug;
+  }
+
+  const resolved = await resolveOrg({ org, cwd });
+  if (!resolved) {
+    throw new ContextError("Organization", "sentry alert metrics create <org>");
+  }
+  return resolved.org;
 }
 
 export const createCommand = buildCommand({
@@ -163,11 +183,7 @@ export const createCommand = buildCommand({
     validateMetricTriggers(triggers);
     const projects = normalizeProjectList(flags.project);
 
-    const { org: orgSlug } = await resolveOrgOptionalProjectFromArg(
-      arg,
-      cwd,
-      "alert metrics create"
-    );
+    const orgSlug = await resolveMetricCreateOrg(arg, cwd);
 
     const body: Record<string, unknown> = {
       name: flags.name,

@@ -7,7 +7,7 @@
 import type { SentryContext } from "../../../context.js";
 import { deleteIssueAlertRule } from "../../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
-import { ContextError } from "../../../lib/errors.js";
+import { ContextError, ValidationError } from "../../../lib/errors.js";
 import { CommandOutput } from "../../../lib/formatters/output.js";
 import { logger } from "../../../lib/logger.js";
 import {
@@ -55,7 +55,7 @@ export const deleteCommand = buildDeleteCommand({
       "Examples:\n" +
       "  sentry alert issues delete my-org/my-app/12345\n" +
       "  sentry alert issues delete my-org/my-app/'My Rule' --yes\n" +
-      "  sentry alert issues delete 12345 --dry-run",
+      "  sentry alert issues delete my-org/my-app/12345 --dry-run",
   },
   output: {
     human: formatDeleted,
@@ -93,6 +93,12 @@ export const deleteCommand = buildDeleteCommand({
     const { ref, targetArg } = parseIssueRuleArg(arg, USAGE_HINT);
     const parsed = parseOrgProjectArg(targetArg);
     requireExplicitTarget(parsed, "Issue alert target", USAGE_HINT);
+    if (parsed.type !== "explicit") {
+      throw new ValidationError(
+        "Issue alert delete requires an explicit <org>/<project>/<rule-id-or-name> target.",
+        "target"
+      );
+    }
 
     const { targets } = await resolveTargetsFromParsedArg(parsed, {
       cwd,

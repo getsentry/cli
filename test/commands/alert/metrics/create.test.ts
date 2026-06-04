@@ -36,16 +36,16 @@ function createContext() {
 }
 
 describe("alert metrics create", () => {
-  let resolveSpy: ReturnType<typeof vi.spyOn>;
+  let resolveOrgSpy: ReturnType<typeof vi.spyOn>;
   let createSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    resolveSpy = vi.spyOn(resolveTarget, "resolveOrgOptionalProjectFromArg");
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
     createSpy = vi.spyOn(apiClient, "createMetricAlertRule");
   });
 
   afterEach(() => {
-    resolveSpy.mockRestore();
+    resolveOrgSpy.mockRestore();
     createSpy.mockRestore();
   });
 
@@ -116,7 +116,7 @@ describe("alert metrics create", () => {
 
   test("dry run does not call create API", async () => {
     const context = createContext();
-    resolveSpy.mockResolvedValue({ org: "test-org" });
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
     const func = (await createCommand.loader()) as unknown as (
       this: unknown,
       flags: CreateFlags,
@@ -141,9 +141,71 @@ describe("alert metrics create", () => {
     expect(createSpy).not.toHaveBeenCalled();
   });
 
+  test("treats a bare metric create target as an organization slug", async () => {
+    const context = createContext();
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    const func = (await createCommand.loader()) as unknown as (
+      this: unknown,
+      flags: CreateFlags,
+      arg: string
+    ) => Promise<void>;
+
+    await func.call(
+      context,
+      {
+        name: "Metric Rule",
+        query: "event.type:error",
+        aggregate: "count()",
+        dataset: "errors",
+        "time-window": 5,
+        trigger: ['{"alertThreshold":100,"actions":[{"id":"notify"}]}'],
+        "dry-run": true,
+        json: true,
+      },
+      "my-org"
+    );
+
+    expect(resolveOrgSpy).toHaveBeenCalledWith({
+      org: "my-org",
+      cwd: getConfigDir(),
+    });
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  test("ignores the project part for metric create org/project targets", async () => {
+    const context = createContext();
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    const func = (await createCommand.loader()) as unknown as (
+      this: unknown,
+      flags: CreateFlags,
+      arg: string
+    ) => Promise<void>;
+
+    await func.call(
+      context,
+      {
+        name: "Metric Rule",
+        query: "event.type:error",
+        aggregate: "count()",
+        dataset: "errors",
+        "time-window": 5,
+        trigger: ['{"alertThreshold":100,"actions":[{"id":"notify"}]}'],
+        "dry-run": true,
+        json: true,
+      },
+      "my-org/frontend"
+    );
+
+    expect(resolveOrgSpy).toHaveBeenCalledWith({
+      org: "my-org",
+      cwd: getConfigDir(),
+    });
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
   test("dry run JSON includes normalized projects and optional fields", async () => {
     const context = createContext();
-    resolveSpy.mockResolvedValue({ org: "test-org" });
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
     const func = (await createCommand.loader()) as unknown as (
       this: unknown,
       flags: CreateFlags,
@@ -192,7 +254,7 @@ describe("alert metrics create", () => {
 
   test("calls create API with parsed trigger payload", async () => {
     const context = createContext();
-    resolveSpy.mockResolvedValue({ org: "test-org" });
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
     createSpy.mockResolvedValue({
       id: "77",
       name: "Metric Rule",

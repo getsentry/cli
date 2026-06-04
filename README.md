@@ -33,13 +33,19 @@ brew install getsentry/tools/sentry
 ```bash
 npm install -g sentry
 pnpm add -g sentry
+yarn global add sentry
 bun add -g sentry
 ```
+
+> The npm/pnpm/yarn packages require Node.js 22.15+.
 
 ### Run Without Installing
 
 ```bash
 npx sentry@latest
+pnpm dlx sentry --help
+yarn dlx sentry --help
+bunx sentry --help
 ```
 
 ## Quick Start

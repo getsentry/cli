@@ -34,7 +34,12 @@ import {
   setProjectAliases,
 } from "../../../lib/db/project-aliases.js";
 import { createDsnFingerprint } from "../../../lib/dsn/index.js";
-import { ContextError, withAuthGuard } from "../../../lib/errors.js";
+import {
+  ApiError,
+  ContextError,
+  ValidationError,
+  withAuthGuard,
+} from "../../../lib/errors.js";
 import {
   colorTag,
   escapeMarkdownCell,
@@ -45,6 +50,7 @@ import {
   buildListCommand,
   buildListLimitFlag,
   LIST_BASE_ALIASES,
+  LIST_MAX_LIMIT,
   LIST_TARGET_POSITIONAL,
   paginationHint,
   parseCursorFlag,
@@ -74,7 +80,7 @@ export const PAGINATION_KEY = "alert-issues-list";
 
 const USAGE_HINT = "sentry alert issues list <org>/<project>";
 
-const MAX_LIMIT = 1000;
+const MAX_LIMIT = LIST_MAX_LIMIT;
 
 type ListFlags = {
   readonly web: boolean;
@@ -117,6 +123,49 @@ const issueAlertListMeta: ListCommandMeta = {
   entityPlural: "issue alert rules",
   commandPrefix: "sentry alert issues list",
 };
+
+function validateLimit(limit: number): void {
+  if (limit < 1) {
+    throw new ValidationError("--limit must be at least 1.", "limit");
+  }
+  if (limit > LIST_MAX_LIMIT) {
+    throw new ValidationError(
+      `--limit cannot exceed ${LIST_MAX_LIMIT}. ` +
+        "Use --cursor to paginate through larger result sets.",
+      "limit"
+    );
+  }
+}
+
+function throwAllFetchesFailed(prefix: string, error: Error): never {
+  if (error instanceof ApiError) {
+    throw new ApiError(
+      `${prefix}: ${error.message}`,
+      error.status,
+      error.detail,
+      error.endpoint,
+      error.enriched403
+    );
+  }
+  throw new Error(`${prefix}: ${error.message}`);
+}
+
+function buildFailureErrors(
+  failures: { target: ResolvedTarget; error: Error }[]
+): Array<{ project: string; status?: number; message: string }> | undefined {
+  if (failures.length === 0) {
+    return;
+  }
+  return failures.map(({ target: t, error: e }) =>
+    e instanceof ApiError
+      ? {
+          project: `${t.org}/${t.project}`,
+          status: e.status,
+          message: e.message,
+        }
+      : { project: `${t.org}/${t.project}`, message: e.message }
+  );
+}
 
 // Fetch helpers
 
@@ -325,6 +374,41 @@ function trimWithProjectGuarantee(
   );
 }
 
+async function resolveWebUrl(
+  parsed: ReturnType<typeof parseOrgProjectArg>,
+  cwd: string
+): Promise<string> {
+  if (parsed.type === "explicit") {
+    return buildIssueAlertsUrl(parsed.org, parsed.project);
+  }
+  if (parsed.type === "org-all") {
+    return buildIssueAlertsUrl(parsed.org);
+  }
+
+  const { targets } = await resolveTargetsFromParsedArg(parsed, {
+    cwd,
+    usageHint: USAGE_HINT,
+  });
+  if (targets.length === 0) {
+    throw new ContextError("Organization and project", USAGE_HINT);
+  }
+
+  const orgs = [...new Set(targets.map((t) => t.org))];
+  if (orgs.length !== 1) {
+    throw new ValidationError(
+      "--web resolved alert rules in multiple organizations. Specify an explicit <org>/ or <org>/<project> target.",
+      "target"
+    );
+  }
+
+  const projects = [...new Set(targets.map((t) => t.project))];
+  return buildIssueAlertsUrl(
+    // biome-ignore lint/style/noNonNullAssertion: orgs length is checked above
+    orgs[0]!,
+    projects.length === 1 ? projects[0] : undefined
+  );
+}
+
 // Mode handler
 
 type ResolvedTargetsOptions = {
@@ -416,8 +500,9 @@ async function handleResolvedTargets(
   if (validResults.length === 0 && failures.length > 0) {
     // biome-ignore lint/style/noNonNullAssertion: guarded by failures.length > 0
     const { error: first } = failures[0]!;
-    throw new Error(
-      `Failed to fetch alert rules from ${targets.length} project(s): ${first.message}`
+    throwAllFetchesFailed(
+      `Failed to fetch alert rules from ${targets.length} project(s)`,
+      first
     );
   }
 
@@ -490,6 +575,7 @@ async function handleResolvedTargets(
   const hasPrev = hasPreviousPage(PAGINATION_KEY, contextKey);
 
   const allRules = displayRows.map((r) => r.rule);
+  const errors = buildFailureErrors(failures);
 
   const nav = paginationHint({
     hasPrev,
@@ -517,6 +603,7 @@ async function handleResolvedTargets(
       hint: parts.join("\n\n"),
       hasMore: hasMoreToShow,
       hasPrev,
+      errors,
     };
   }
 
@@ -533,6 +620,7 @@ async function handleResolvedTargets(
     title,
     moreHint,
     footer,
+    errors,
   };
 }
 
@@ -602,112 +690,109 @@ const jsonTransformIssueAlertList = jsonTransformListResult;
 
 // Command
 
-export const listCommand = buildListCommand("alert", {
-  docs: {
-    brief: "List issue alert rules",
-    fullDescription:
-      "List issue alert rules for one or more Sentry projects.\n\n" +
-      "Issue alerts trigger notifications when error events match conditions.\n\n" +
-      "Target patterns:\n" +
-      "  sentry alert issues list                     # auto-detect from DSN or config\n" +
-      "  sentry alert issues list <org>/<project>     # explicit org and project\n" +
-      "  sentry alert issues list <org>/              # all projects in org\n" +
-      "  sentry alert issues list <project>           # find project across all orgs\n\n" +
-      `${targetPatternExplanation()}\n\n` +
-      "In monorepos with multiple Sentry projects, shows alert rules from all detected projects.\n\n" +
-      "Use --cursor / -c next / -c prev to paginate through larger result sets.",
-  },
-  output: {
-    human: formatIssueAlertListHuman,
-    jsonTransform: jsonTransformIssueAlertList,
-  },
-  parameters: {
-    positional: LIST_TARGET_POSITIONAL,
-    flags: {
-      web: {
-        kind: "boolean",
-        brief: "Open in browser",
-        default: false,
-      },
-      limit: buildListLimitFlag("issue alert rules"),
-      query: {
-        kind: "parsed",
-        parse: String,
-        brief: "Filter rules by name",
-        optional: true,
-      },
-      cursor: {
-        kind: "parsed",
-        parse: parseCursorFlag,
-        brief:
-          'Pagination cursor (use "next" for next page, "prev" for previous)',
-        optional: true,
-      },
+export const listCommand = buildListCommand(
+  "alert",
+  {
+    docs: {
+      brief: "List issue alert rules",
+      fullDescription:
+        "List issue alert rules for one or more Sentry projects.\n\n" +
+        "Issue alerts trigger notifications when error events match conditions.\n\n" +
+        "Target patterns:\n" +
+        "  sentry alert issues list                     # auto-detect from DSN or config\n" +
+        "  sentry alert issues list <org>/<project>     # explicit org and project\n" +
+        "  sentry alert issues list <org>/              # all projects in org\n" +
+        "  sentry alert issues list <project>           # find project across all orgs\n\n" +
+        `${targetPatternExplanation()}\n\n` +
+        "In monorepos with multiple Sentry projects, shows alert rules from all detected projects.\n\n" +
+        "Use --cursor / -c next / -c prev to paginate through larger result sets.",
     },
-    aliases: { ...LIST_BASE_ALIASES, w: "web", q: "query" },
-  },
-  async *func(this: SentryContext, flags: ListFlags, target?: string) {
-    const { cwd } = this;
-    const parsed = parseOrgProjectArg(target);
-
-    // --web: open browser when the target arg provides an org directly.
-    // For auto-detect and project-search modes the org isn't known until
-    // after API resolution, so --web falls through to the normal list path.
-    if (
-      flags.web &&
-      (parsed.type === "explicit" || parsed.type === "org-all")
-    ) {
-      await openInBrowser(
-        buildIssueAlertsUrl(
-          parsed.org,
-          parsed.type === "explicit" ? parsed.project : undefined
-        ),
-        "issue alert rules"
-      );
-      return;
-    }
-
-    // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
-    const resolveAndHandle: ModeHandler<any> = (ctx) =>
-      handleResolvedTargets({ ...ctx, flags });
-
-    const result = (await dispatchOrgScopedList({
-      config: issueAlertListMeta,
-      cwd,
-      flags,
-      parsed,
-      orgSlugMatchBehavior: "redirect",
-      // All modes use per-project fetching with compound cursor support
-      allowCursorInModes: [
-        "auto-detect",
-        "explicit",
-        "project-search",
-        "org-all",
-      ],
-      overrides: {
-        "auto-detect": resolveAndHandle,
-        explicit: resolveAndHandle,
-        "project-search": resolveAndHandle,
-        "org-all": resolveAndHandle,
+    output: {
+      human: formatIssueAlertListHuman,
+      jsonTransform: jsonTransformIssueAlertList,
+    },
+    parameters: {
+      positional: LIST_TARGET_POSITIONAL,
+      flags: {
+        web: {
+          kind: "boolean",
+          brief: "Open in browser",
+          default: false,
+        },
+        limit: buildListLimitFlag("issue alert rules"),
+        query: {
+          kind: "parsed",
+          parse: String,
+          brief: "Filter rules by name",
+          optional: true,
+        },
+        cursor: {
+          kind: "parsed",
+          parse: parseCursorFlag,
+          brief:
+            'Pagination cursor (use "next" for next page, "prev" for previous)',
+          optional: true,
+        },
       },
-    })) as IssueAlertListResult;
+      aliases: { ...LIST_BASE_ALIASES, w: "web", q: "query" },
+    },
+    async *func(this: SentryContext, flags: ListFlags, target?: string) {
+      const { cwd } = this;
+      const parsed = parseOrgProjectArg(target);
+      validateLimit(flags.limit);
 
-    let combinedHint: string | undefined;
-    if (result.items.length > 0) {
-      const hintParts: string[] = [];
-      if (result.moreHint) {
-        hintParts.push(result.moreHint);
+      if (flags.web) {
+        await openInBrowser(
+          await resolveWebUrl(parsed, cwd),
+          "issue alert rules"
+        );
+        return;
       }
-      if (result.footer) {
-        hintParts.push(result.footer);
-      }
-      combinedHint = hintParts.length > 0 ? hintParts.join("\n") : result.hint;
-    }
 
-    yield new CommandOutput(result);
-    return { hint: combinedHint };
+      // biome-ignore lint/suspicious/noExplicitAny: shared handler accepts any mode variant
+      const resolveAndHandle: ModeHandler<any> = (ctx) =>
+        handleResolvedTargets({ ...ctx, flags });
+
+      const result = (await dispatchOrgScopedList({
+        config: issueAlertListMeta,
+        cwd,
+        flags,
+        parsed,
+        orgSlugMatchBehavior: "redirect",
+        // All modes use per-project fetching with compound cursor support
+        allowCursorInModes: [
+          "auto-detect",
+          "explicit",
+          "project-search",
+          "org-all",
+        ],
+        overrides: {
+          "auto-detect": resolveAndHandle,
+          explicit: resolveAndHandle,
+          "project-search": resolveAndHandle,
+          "org-all": resolveAndHandle,
+        },
+      })) as IssueAlertListResult;
+
+      let combinedHint: string | undefined;
+      if (result.items.length > 0) {
+        const hintParts: string[] = [];
+        if (result.moreHint) {
+          hintParts.push(result.moreHint);
+        }
+        if (result.footer) {
+          hintParts.push(result.footer);
+        }
+        combinedHint =
+          hintParts.length > 0 ? hintParts.join("\n") : result.hint;
+      }
+
+      yield new CommandOutput(result);
+      return { hint: combinedHint };
+    },
   },
-});
+  { noSubcommandIntercept: true }
+);
 
 /** @internal Exported for testing only. */
 export const __testing = {

@@ -19,8 +19,14 @@ const EXPLORER_MODE_PARAMS = { mode: "explorer" };
  * Normalize agent status values to the uppercase format used throughout the CLI.
  *
  * The agent endpoint returns lowercase statuses (`processing`, `completed`,
- * `error`, `awaiting_user_input`) while the CLI expects uppercase
- * (`PROCESSING`, `COMPLETED`, `ERROR`, `WAITING_FOR_USER_RESPONSE`).
+ * `error`, `awaiting_user_input`, `canceled`) while the CLI expects uppercase
+ * (`PROCESSING`, `COMPLETED`, `ERROR`, `WAITING_FOR_USER_RESPONSE`, `CANCELLED`).
+ *
+ * Explicit cases are required for any status whose CLI name differs from a naive
+ * `toUpperCase()`. In particular `canceled` (US spelling) must map to `CANCELLED`
+ * (British, used in TERMINAL_STATUSES) — otherwise `isTerminalStatus("CANCELED")`
+ * returns false and polling spins until timeout. `awaiting_user_input` maps to
+ * `WAITING_FOR_USER_RESPONSE`.
  */
 function normalizeAgentStatus(status: string): string {
   switch (status) {
@@ -30,8 +36,13 @@ function normalizeAgentStatus(status: string): string {
       return "COMPLETED";
     case "error":
       return "ERROR";
+    case "canceled":
+    case "cancelled":
+      return "CANCELLED";
     case "awaiting_user_input":
       return "WAITING_FOR_USER_RESPONSE";
+    case "need_more_information":
+      return "NEED_MORE_INFORMATION";
     default:
       return status.toUpperCase();
   }

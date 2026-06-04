@@ -14,7 +14,6 @@ import {
  * `JSON.stringify` only escapes C0 (U+0000–U+001F) per RFC 8259;
  * C1 and BiDi pass through unescaped.
  */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping C1 control chars from untrusted data
 const JSON_UNSAFE_RE = /[\x80-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 
 /** BiDi-only regex for the full `sanitize()` function. */
