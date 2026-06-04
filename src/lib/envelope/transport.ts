@@ -70,15 +70,23 @@ export function resolveDsn(flags: DsnFlags): string | undefined {
  *
  * Auto-detection via project scanning is intentionally deferred — callers
  * that want it can call the DSN detector before this.
+ *
+ * @param flags - DSN flag source (`--dsn`), with `SENTRY_DSN` fallback.
+ * @param usageHint - Optional command-specific usage example shown in the
+ *   error (e.g. `"sentry monitor run <slug> -- <command>"`). Defaults to the
+ *   `event send` example.
  */
-export function requireDsn(flags: DsnFlags): string {
+export function requireDsn(
+  flags: DsnFlags,
+  usageHint = "sentry event send --dsn <your-dsn>"
+): string {
   const dsn = resolveDsn(flags);
   if (dsn) {
     return dsn;
   }
   throw new ConfigError(
     "No DSN found. Provide one via --dsn <dsn> or set the SENTRY_DSN environment variable.",
-    "sentry event send --dsn <your-dsn>"
+    usageHint
   );
 }
 

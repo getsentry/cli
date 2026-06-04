@@ -60,6 +60,7 @@ cli/
 │   │   ├── issue/       # archive, events, explain, list, merge, plan, resolve, unresolve, view
 │   │   ├── local/       # run, serve
 │   │   ├── log/         # list, view
+│   │   ├── monitor/     # list, run
 │   │   ├── org/         # list, view
 │   │   ├── proguard/    # uuid
 │   │   ├── project/     # create, delete, list, view

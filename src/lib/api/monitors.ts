@@ -1,0 +1,66 @@
+/**
+ * Cron Monitor API functions
+ *
+ * Read operations for Sentry cron monitors via the stable
+ * `/organizations/{org}/monitors/` endpoint. Uses region-aware routing for
+ * multi-region support. Check-in ingestion is handled separately via the DSN
+ * envelope transport (`src/lib/envelope/`), not this module.
+ */
+
+import { retrieveMonitorsForAnOrganization } from "@sentry/api";
+
+import type { SentryMonitor } from "../../types/index.js";
+
+import {
+  getOrgSdkConfig,
+  type PaginatedResponse,
+  unwrapPaginatedResult,
+  unwrapResult,
+} from "./infrastructure.js";
+
+/**
+ * List all cron monitors in an organization.
+ *
+ * @param orgSlug - Organization slug
+ * @returns Monitors, including nested monitor environments
+ */
+export async function listMonitors(orgSlug: string): Promise<SentryMonitor[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await retrieveMonitorsForAnOrganization({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+  });
+
+  const data = unwrapResult(result, "Failed to list monitors");
+  return data as unknown as SentryMonitor[];
+}
+
+/**
+ * List cron monitors in an organization with pagination control.
+ * Returns a single page of results with cursor metadata.
+ *
+ * @param orgSlug - Organization slug
+ * @param options - Pagination options
+ * @returns Single page of monitors with cursor metadata
+ */
+export async function listMonitorsPaginated(
+  orgSlug: string,
+  options: { cursor?: string; perPage?: number } = {}
+): Promise<PaginatedResponse<SentryMonitor[]>> {
+  const config = await getOrgSdkConfig(orgSlug);
+
+  const result = await retrieveMonitorsForAnOrganization({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: {
+      cursor: options.cursor,
+      per_page: options.perPage ?? 25,
+    } as { cursor?: string; per_page?: number },
+  });
+
+  return unwrapPaginatedResult<SentryMonitor[]>(
+    result,
+    "Failed to list monitors"
+  );
+}

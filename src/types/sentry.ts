@@ -1108,6 +1108,87 @@ export const SentryRepositorySchema = z
 
 export type SentryRepository = z.infer<typeof SentryRepositorySchema>;
 
+// Cron Monitor
+
+/**
+ * Configuration of a cron monitor's expected schedule and thresholds.
+ *
+ * Returned by the `/organizations/{org}/monitors/` endpoint. The `schedule`
+ * field is either a crontab string (when `schedule_type` is `"crontab"`) or a
+ * `[value, unit]` tuple (when `"interval"`). Other fields are nullable because
+ * the API returns `null` for unset thresholds.
+ */
+export const MonitorConfigSchema = z
+  .object({
+    schedule_type: z
+      .string()
+      .optional()
+      .describe("Schedule type: 'crontab' or 'interval'"),
+    schedule: z
+      .union([z.string(), z.array(z.union([z.string(), z.number()]))])
+      .optional()
+      .describe("Crontab string or [value, unit] interval tuple"),
+    timezone: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Schedule timezone (tz database string)"),
+    checkin_margin: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Allowed minutes after the expected check-in time"),
+    max_runtime: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Allowed minutes a check-in may run before timing out"),
+    failure_issue_threshold: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Consecutive failures before an issue is created"),
+    recovery_threshold: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Consecutive successes before an issue is resolved"),
+  })
+  .passthrough();
+
+export type MonitorConfig = z.infer<typeof MonitorConfigSchema>;
+
+/**
+ * A cron monitor configured in a Sentry organization.
+ *
+ * Cron monitors are not modeled by the `@sentry/api` types this project
+ * re-exports, so this is a hand-written internal schema (Pattern B). Core
+ * identifiers (id, slug, name, status) are required; richer fields are widened
+ * to optional and `.passthrough()` preserves any unmodeled API fields.
+ */
+export const SentryMonitorSchema = z
+  .object({
+    id: z.string().describe("Monitor ID"),
+    slug: z.string().describe("Monitor slug"),
+    name: z.string().describe("Monitor name"),
+    status: z.string().describe("Monitor status (e.g. active, disabled)"),
+    isMuted: z.boolean().optional().describe("Whether the monitor is muted"),
+    config: MonitorConfigSchema.optional().describe("Schedule configuration"),
+    dateCreated: z.string().optional().describe("Creation date (ISO 8601)"),
+    project: z
+      .object({
+        id: z.string().optional().describe("Project ID"),
+        slug: z.string().optional().describe("Project slug"),
+        name: z.string().optional().describe("Project name"),
+      })
+      .passthrough()
+      .optional()
+      .describe("Owning project"),
+  })
+  .passthrough();
+
+export type SentryMonitor = z.infer<typeof SentryMonitorSchema>;
+
 // Team
 
 /**
