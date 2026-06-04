@@ -1362,11 +1362,26 @@ describe("getComparator", () => {
     expect(() => cmp(nullDate, withDate)).not.toThrow();
   });
 
-  test("sort=date (default) handles null lastSeen", () => {
+  test("sort=date handles null lastSeen (covers ?? null branch)", () => {
     const cmp = getComparator("date");
     const nullDate = makeIssue({ lastSeen: null as unknown as string });
     const withDate = makeIssue({ lastSeen: "2024-01-01T00:00:00Z" });
-    expect(() => cmp(nullDate, withDate)).not.toThrow();
+    expect(cmp(nullDate, withDate)).not.toBe(undefined);
+  });
+
+  test("sort=new handles null firstSeen (covers ?? null branch)", () => {
+    const cmp = getComparator("new");
+    const nullDate = makeIssue({ firstSeen: null as unknown as string });
+    const withDate = makeIssue({ firstSeen: "2024-01-01T00:00:00Z" });
+    expect(cmp(nullDate, withDate)).not.toBe(undefined);
+  });
+
+  test("unknown sort value hits default branch (falls back to lastSeen)", () => {
+    // A value not in the switch exercises the default: compareDates(lastSeen) case
+    const cmp = getComparator("unknown_sort" as unknown as "date");
+    const older = makeIssue({ lastSeen: "2024-01-01T00:00:00Z" });
+    const newer = makeIssue({ lastSeen: "2024-01-02T00:00:00Z" });
+    expect(cmp(newer, older)).toBeLessThan(0);
   });
 });
 

@@ -400,6 +400,24 @@ describe("writeIssueTable", () => {
     // default impact (0.5)*0.6 + 0.75*0.4 = 0.30+0.30 = 0.60 → 60%
     expect(text).toContain("60%");
   });
+
+  test("renders table with null lastSeen and firstSeen (covers ?? null branches)", () => {
+    const { writer, output } = capture();
+    const rows: IssueTableRow[] = [
+      {
+        issue: {
+          ...mockIssue,
+          lastSeen: null as unknown as string,
+          firstSeen: null as unknown as string,
+        },
+        orgSlug: "test-org",
+        formatOptions: { projectSlug: "dashboard" },
+      },
+    ];
+    writeIssueTable(writer, rows);
+    // Should render without throwing; SEEN/AGE columns receive undefined
+    expect(stripAnsi(output())).toContain("Test issue");
+  });
 });
 
 describe("substatusLabel", () => {
