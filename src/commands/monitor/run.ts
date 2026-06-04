@@ -16,6 +16,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { constants as osConstants } from "node:os";
 import {
   createCheckInEnvelope,
   makeDsn,
@@ -86,11 +87,16 @@ async function resolveCheckInDsn(
   );
 }
 
+/** Maximum time (ms) to wait for a check-in envelope to be sent. */
+const CHECKIN_SEND_TIMEOUT_MS = 30_000;
+
 /**
  * Send a check-in envelope, swallowing (but logging) any error.
  *
- * Check-in delivery must never abort the wrapped command, so failures are
- * non-fatal — matching the legacy sentry-cli behaviour.
+ * Check-in delivery must never abort or stall the wrapped command, so:
+ * - Failures are non-fatal (logged, then continues).
+ * - A timeout prevents a slow/unreachable ingest endpoint from blocking
+ *   the child process spawn or exit.
  */
 async function sendCheckInSafely(
   dsn: string,
@@ -107,7 +113,15 @@ async function sendCheckInSafely(
       dsnComponents
     );
     const body = serializeEnvelope(envelope);
-    await sendEnvelopeRequest(dsn, body);
+    const send = sendEnvelopeRequest(dsn, body);
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(
+        reject,
+        CHECKIN_SEND_TIMEOUT_MS,
+        new Error("Check-in send timed out")
+      )
+    );
+    await Promise.race([send, timeout]);
   } catch (err) {
     log.error(
       `Failed to send ${phase} check-in: ${err instanceof Error ? err.message : String(err)}`
@@ -311,15 +325,11 @@ The wrapped command receives the \`SENTRY_MONITOR_SLUG\` environment variable.`,
               resolve(code);
             } else if (signal) {
               // Map signal kills to 128+N (Unix convention: e.g. 130 for
-              // SIGINT, 143 for SIGTERM) so CI pipelines and shell scripts
-              // inspecting $? see the correct exit code.
-              const signalNumbers: Partial<Record<NodeJS.Signals, number>> = {
-                SIGHUP: 1,
-                SIGINT: 2,
-                SIGQUIT: 3,
-                SIGTERM: 15,
-              };
-              resolve(128 + (signalNumbers[signal] ?? 1));
+              // SIGINT, 137 for SIGKILL, 143 for SIGTERM) so CI pipelines
+              // and shell scripts inspecting $? see the correct exit code.
+              const sigNum =
+                osConstants.signals[signal as keyof typeof osConstants.signals];
+              resolve(128 + (sigNum ?? 1));
             } else {
               resolve(1);
             }
