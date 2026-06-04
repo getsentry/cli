@@ -8,7 +8,6 @@
 import type { SentryContext } from "../../context.js";
 import { getRelease } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError } from "../../lib/errors.js";
 import {
   colorTag,
   escapeMarkdownCell,
@@ -26,9 +25,10 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
 import type { SentryRelease } from "../../types/index.js";
-import { parseReleaseArg } from "./parse.js";
+import { resolveReleaseTarget } from "./parse.js";
+
+const USAGE_HINT = "sentry release view [<org>/]<version>";
 
 /** Wrap a plain "—" in muted color for consistent table styling. */
 function mutedIfDash(value: string): string {
@@ -173,12 +173,14 @@ export const viewCommand = buildCommand({
   },
   parameters: {
     positional: {
-      kind: "array",
-      parameter: {
-        placeholder: "org/version",
-        brief: "[<org>/]<version> - Release version to view",
-        parse: String,
-      },
+      kind: "tuple",
+      parameters: [
+        {
+          placeholder: "org/version",
+          brief: "[<org>/]<version> - Release version to view",
+          parse: String,
+        },
+      ],
     },
     flags: {
       fresh: FRESH_FLAG,
@@ -192,39 +194,23 @@ export const viewCommand = buildCommand({
       readonly json: boolean;
       readonly fields?: string[];
     },
-    ...args: string[]
+    target: string
   ) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
-    const joined = args.join(" ").trim();
-    if (!joined) {
-      throw new ContextError(
-        "Release version",
-        "sentry release view [<org>/]<version>",
-        []
-      );
-    }
-
-    const { version, orgSlug } = parseReleaseArg(
-      joined,
-      "sentry release view [<org>/]<version>"
+    const { version, org, detectedFrom } = await resolveReleaseTarget(
+      target,
+      USAGE_HINT,
+      cwd
     );
-    const resolved = await resolveOrg({ org: orgSlug, cwd });
-    if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry release view [<org>/]<version>"
-      );
-    }
-    const release = await getRelease(resolved.org, version, {
+
+    const release = await getRelease(org, version, {
       health: true,
       adoptionStages: true,
     });
     yield new CommandOutput(release);
-    const hint = resolved.detectedFrom
-      ? `Detected from ${resolved.detectedFrom}`
-      : undefined;
+    const hint = detectedFrom ? `Detected from ${detectedFrom}` : undefined;
     return { hint };
   },
 });

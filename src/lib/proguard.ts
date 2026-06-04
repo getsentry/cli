@@ -19,10 +19,21 @@
 import { createHash } from "node:crypto";
 
 /**
- * RFC 4122 DNS namespace UUID. Used as the parent namespace from which the
- * ProGuard namespace is derived.
+ * Convert a hyphenated UUID string to its 16 raw bytes.
+ *
+ * @param uuid - Hyphenated UUID string (e.g. `6ba7b810-9dad-...`)
+ * @returns 16-byte Buffer of the UUID's value
  */
-const NAMESPACE_DNS = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+function uuidToBytes(uuid: string): Buffer {
+  return Buffer.from(uuid.replaceAll("-", ""), "hex");
+}
+
+/**
+ * RFC 4122 DNS namespace UUID, as raw bytes. Used as the parent namespace from
+ * which the ProGuard namespace is derived. Precomputed once so {@link uuidV5}
+ * never reparses it per call.
+ */
+const NAMESPACE_DNS_BYTES = uuidToBytes("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
 
 /**
  * RFC 4122 variant nibbles (`10xx`), keyed by the original hex digit at the
@@ -46,11 +57,10 @@ const VARIANT_NIBBLE = ["8", "9", "a", "b"] as const;
  * or integrity — so the "weak algorithm" warning does not apply.
  *
  * @param name - The name bytes to hash (file content or a UTF-8 string)
- * @param namespace - Hyphenated namespace UUID string
+ * @param namespaceBytes - The 16 raw namespace bytes (precomputed by callers)
  * @returns Lowercase hyphenated UUIDv5 string
  */
-function uuidV5(name: Buffer, namespace: string): string {
-  const namespaceBytes = Buffer.from(namespace.replaceAll("-", ""), "hex");
+function uuidV5(name: Buffer, namespaceBytes: Buffer): string {
   // SHA-1 is required by RFC 4122 §4.3 for name-based (v5) UUIDs and to match
   // the legacy sentry-cli mapping IDs. Not used for any security purpose.
   // codeql[js/weak-cryptographic-algorithm]
@@ -75,8 +85,15 @@ function uuidV5(name: Buffer, namespace: string): string {
  */
 export const PROGUARD_NAMESPACE = uuidV5(
   Buffer.from("guardsquare.com", "utf-8"),
-  NAMESPACE_DNS
+  NAMESPACE_DNS_BYTES
 );
+
+/**
+ * The ProGuard namespace UUID as raw bytes. Precomputed once from
+ * {@link PROGUARD_NAMESPACE} so {@link computeProguardUuid} never reparses it
+ * per call.
+ */
+const PROGUARD_NAMESPACE_BYTES = uuidToBytes(PROGUARD_NAMESPACE);
 
 /**
  * Compute the Sentry debug ID (UUID) for a ProGuard/R8 mapping file.
@@ -90,5 +107,5 @@ export const PROGUARD_NAMESPACE = uuidV5(
  * @returns Lowercase hyphenated UUID string
  */
 export function computeProguardUuid(content: Buffer): string {
-  return uuidV5(content, PROGUARD_NAMESPACE);
+  return uuidV5(content, PROGUARD_NAMESPACE_BYTES);
 }

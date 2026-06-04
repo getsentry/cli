@@ -194,8 +194,17 @@ export const resolveCommand = buildCommand({
       debugId: r.debugId,
     }));
 
-    const resolved = files.filter(hasSourcemap).length;
-    const withDebugId = files.filter((f) => f.debugId).length;
+    // Single pass over files to tally both counters, avoiding two full filters.
+    let resolved = 0;
+    let withDebugId = 0;
+    for (const file of files) {
+      if (hasSourcemap(file)) {
+        resolved += 1;
+      }
+      if (file.debugId) {
+        withDebugId += 1;
+      }
+    }
 
     yield new CommandOutput<ResolveCommandResult>({
       total: files.length,

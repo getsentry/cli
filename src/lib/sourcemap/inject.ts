@@ -96,6 +96,12 @@ export type FilePair = { jsPath: string; mapPath: string };
 const SOURCE_MAPPING_URL_RE = /\/\/[#@]\s*sourceMappingURL\s*=\s*(\S+)\s*$/gm;
 
 /**
+ * Matches a `sourceMappingURL` that points at a remote `http(s)://` location
+ * (as opposed to an inline `data:` URL or a local companion path).
+ */
+const REMOTE_SOURCE_MAPPING_URL_RE = /^https?:\/\//i;
+
+/**
  * Read the last ~512 bytes of a file efficiently.
  *
  * We only need the very end of the JS file to find the
@@ -438,6 +444,26 @@ export type SourcemapResolution = {
 };
 
 /**
+ * Byte-wise (code-unit) comparison of two strings for `Array.prototype.sort`.
+ *
+ * Used to order discovered paths deterministically without the locale-dependent
+ * (and slower) `localeCompare`. Returns a negative, zero, or positive number.
+ *
+ * @param a - First string
+ * @param b - Second string
+ * @returns `-1` if `a < b`, `1` if `a > b`, `0` if equal
+ */
+function compareByteWise(a: string, b: string): number {
+  if (a < b) {
+    return -1;
+  }
+  if (a > b) {
+    return 1;
+  }
+  return 0;
+}
+
+/**
  * Read-only diagnostic pass over a build directory.
  *
  * For every discovered JavaScript file this reports how its sourcemap
@@ -479,8 +505,7 @@ export async function resolveDirectorySourcemaps(
     const sourceMappingUrl = await extractSourceMappingUrl(jsPath);
     const inline = sourceMappingUrl?.startsWith("data:") ?? false;
     const remote =
-      (sourceMappingUrl?.startsWith("http://") ?? false) ||
-      (sourceMappingUrl?.startsWith("https://") ?? false);
+      !!sourceMappingUrl && REMOTE_SOURCE_MAPPING_URL_RE.test(sourceMappingUrl);
     const mapPath = await findCompanionMap(jsPath);
 
     let debugId: string | undefined;
@@ -501,7 +526,10 @@ export async function resolveDirectorySourcemaps(
     });
   }
 
-  results.sort((a, b) => a.jsPath.localeCompare(b.jsPath));
+  // Byte-wise comparison is sufficient and stable for filesystem paths; the
+  // locale-aware `localeCompare` is unnecessary (and slower) here. Matches the
+  // plain `.sort()` used for paths in `upload.ts`.
+  results.sort((a, b) => compareByteWise(a.jsPath, b.jsPath));
   return results;
 }
 
