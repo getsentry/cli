@@ -91,7 +91,7 @@ const STATUS_COLORS: Record<IssueStatus, (text: string) => string> = {
   resolvedInNextRelease: green,
   unresolved: yellow,
   ignored: muted,
-  muted: muted,
+  muted,
 };
 
 /**
