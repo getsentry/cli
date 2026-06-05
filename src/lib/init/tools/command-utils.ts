@@ -168,10 +168,6 @@ function hasInitArgAfter(tokens: string[], index: number): boolean {
   return tokens.slice(index + 1).some((arg) => arg.toLowerCase() === "init");
 }
 
-function hasInitArg(tokens: string[]): boolean {
-  return tokens.some((arg) => arg.toLowerCase() === "init");
-}
-
 function isSentryCliPackageSpec(token: string): boolean {
   const lower = token.toLowerCase();
   return lower === "@sentry/cli" || lower.startsWith("@sentry/cli@");
@@ -484,6 +480,12 @@ function findBlockedExecutable(tokens: string[]): string | undefined {
   return;
 }
 
+function packageRunnerExecutesInit(tokens: string[]): boolean {
+  return findPackageExecutionTokenIndexes(tokens).some(
+    (index) => normalizeExecutableName(tokens[index] ?? "") === "init"
+  );
+}
+
 function isRecursiveSentrySetupToken(
   token: string,
   tokens: string[],
@@ -497,7 +499,7 @@ function isRecursiveSentrySetupToken(
     return true;
   }
   if (isSentryCliPackageSpec(token)) {
-    return hasInitArg(tokens);
+    return hasInitArgAfter(tokens, index);
   }
   if (
     !(
@@ -513,9 +515,12 @@ function isRecursiveSentrySetupToken(
 function isRecursiveSentrySetup(tokens: string[]): boolean {
   const packageOptionInvokesSentry = findPackageExecutionPackageOptionValues(
     tokens
-  ).some(({ token, index }) =>
-    isRecursiveSentrySetupToken(token, tokens, index)
-  );
+  ).some(({ token }) => {
+    if (isSentryWizardPackageSpec(token)) {
+      return true;
+    }
+    return isSentryCliPackageSpec(token) && packageRunnerExecutesInit(tokens);
+  });
   if (packageOptionInvokesSentry) {
     return true;
   }

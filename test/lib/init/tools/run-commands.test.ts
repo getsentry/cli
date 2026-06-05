@@ -55,6 +55,12 @@ describe("validateCommand", () => {
     expect(
       validateCommand("npx harmless --registry myregistry @sentry/wizard")
     ).toBeUndefined();
+    expect(
+      validateCommand("npx --package=@sentry/cli cowsay init")
+    ).toBeUndefined();
+    expect(
+      validateCommand("npm exec --package=@sentry/cli cowsay init")
+    ).toBeUndefined();
   });
 
   test("allows path-prefixed package managers but blocks dangerous ones", () => {
@@ -124,6 +130,9 @@ describe("validateCommand", () => {
       "invokes Sentry setup recursively"
     );
     expect(validateCommand("npx -p=@sentry/cli init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx --package=@sentry/cli init")).toContain(
       "invokes Sentry setup recursively"
     );
     expect(validateCommand("npx -p@sentry/wizard -i nextjs")).toContain(
