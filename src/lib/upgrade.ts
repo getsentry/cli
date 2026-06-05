@@ -55,7 +55,6 @@ const log = logger.withTag("upgrade");
 
 // Re-export for backward compatibility — consumers that import
 // InstallationMethod from upgrade.ts continue to work.
-// biome-ignore lint/performance/noBarrelFile: backward-compat re-export, not a barrel
 export type { InstallationMethod } from "./binary.js";
 // biome-ignore lint/performance/noBarrelFile: backward-compat re-export, not a barrel
 export { parseInstallationMethod } from "./binary.js";

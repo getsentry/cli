@@ -29,6 +29,7 @@ import {
   renderInlineMarkdown,
   stripColorTags,
 } from "../formatters/markdown.js";
+import { logger } from "../logger.js";
 import {
   abortIfCancelled,
   STEP_ACTIVE_LABELS,
@@ -60,6 +61,7 @@ import type {
 import { getUIAsync } from "./ui/factory.js";
 import { LoggingUIPromptError } from "./ui/logging-ui.js";
 import type { SpinnerHandle, WelcomeOptions, WizardUI } from "./ui/types.js";
+import { verifySetup } from "./verify-setup.js";
 import {
   precomputeDirListing,
   precomputeSentryDetection,
@@ -846,7 +848,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     ui.setStep?.(activeStepId, "completed");
   }
 
-  handleFinalResult(result, spin, spinState, ui);
+  await handleFinalResult(result, spin, spinState, ui, directory);
   setTag("wizard.outcome", "completed");
   if (result.result?.platform) {
     setTag("wizard.platform", String(result.result.platform));
@@ -862,12 +864,14 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   }
 }
 
-export function handleFinalResult(
+// biome-ignore lint/nursery/useMaxParams: existing 4-param shape; cwd is a defaulted extension
+export async function handleFinalResult(
   result: WorkflowRunResult,
   spin: SpinnerHandle,
   spinState: SpinState,
-  ui: WizardUI
-): void {
+  ui: WizardUI,
+  cwd?: string
+): Promise<void> {
   const hasError = result.status !== "success" || result.result?.exitCode;
 
   if (hasError) {
@@ -888,6 +892,19 @@ export function handleFinalResult(
       result.error ?? result.result?.message ?? "Workflow returned an error",
       { exitCode }
     );
+  }
+
+  // Run verification before printing the final summary so the user
+  // sees the result inline with the rest of the output.
+  if (cwd) {
+    if (spinState.running) {
+      spin.message("Verifying setup...");
+    }
+    try {
+      await verifySetup(result, ui, cwd);
+    } catch (error) {
+      logger.debug("Verification threw unexpectedly", error);
+    }
   }
 
   if (spinState.running) {
