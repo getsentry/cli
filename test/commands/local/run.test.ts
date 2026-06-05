@@ -280,11 +280,7 @@ describe("sentry local run", () => {
 
     // `node:child_process` is mocked at module scope (see vi.mock below). The
     // mock records the env handed to spawn so we can assert against it.
-    await func.call(
-      ctx,
-      { port, host, verify: false, timeout: 0 },
-      "printenv"
-    );
+    await func.call(ctx, { port, host, verify: false, timeout: 0 }, "printenv");
 
     const capturedEnv = spawnCapture.env;
     expect(capturedEnv).toBeDefined();
