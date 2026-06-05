@@ -40,6 +40,9 @@ describe("validateCommand", () => {
     expect(validateCommand("futurepm explain sentry-wizard")).toBeUndefined();
     expect(validateCommand("npm uninstall sentry-wizard")).toBeUndefined();
     expect(validateCommand("npm uninstall @sentry/wizard")).toBeUndefined();
+    expect(
+      validateCommand("npx harmless --package=@sentry/wizard")
+    ).toBeUndefined();
   });
 
   test("allows path-prefixed package managers but blocks dangerous ones", () => {
@@ -90,6 +93,18 @@ describe("validateCommand", () => {
     expect(
       validateCommand("npx -p=innocuous-pkg @sentry/wizard -i nextjs")
     ).toContain("invokes Sentry setup recursively");
+    expect(
+      validateCommand("npx --package=@sentry/wizard -i nextjs")
+    ).toContain("invokes Sentry setup recursively");
+    expect(validateCommand("npx -p=@sentry/cli init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx --package @sentry/wizard -i nextjs")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx -p @sentry/cli init")).toContain(
+      "invokes Sentry setup recursively"
+    );
     expect(validateCommand("npx @sentry/cli init")).toContain(
       "invokes Sentry setup recursively"
     );
@@ -129,11 +144,17 @@ describe("validateCommand", () => {
     expect(
       validateCommand("npm exec --package lodash @sentry/wizard -i nextjs")
     ).toContain("invokes Sentry setup recursively");
+    expect(
+      validateCommand("npm exec --package=@sentry/wizard -i nextjs")
+    ).toContain("invokes Sentry setup recursively");
     expect(validateCommand("pnpm dlx sentry-wizard -i nextjs")).toContain(
       "invokes Sentry setup recursively"
     );
     expect(
       validateCommand("pnpm dlx --package lodash sentry-wizard -i nextjs")
+    ).toContain("invokes Sentry setup recursively");
+    expect(
+      validateCommand("pnpm dlx --package=@sentry/wizard -i nextjs")
     ).toContain("invokes Sentry setup recursively");
     expect(validateCommand("C:\\Tools\\sentry-wizard.cmd -i nextjs")).toContain(
       "invokes Sentry setup recursively"

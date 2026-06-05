@@ -132,8 +132,18 @@ function packageRunnerOptionConsumesValue(token: string): boolean {
   return token === "-p" || token === "--package";
 }
 
+function getInlinePackageRunnerOptionValue(token: string): string | undefined {
+  if (token.startsWith("-p=")) {
+    return token.slice("-p=".length);
+  }
+  if (token.startsWith("--package=")) {
+    return token.slice("--package=".length);
+  }
+  return;
+}
+
 function isInlinePackageRunnerOption(token: string): boolean {
-  return token.startsWith("-p=") || token.startsWith("--package=");
+  return getInlinePackageRunnerOptionValue(token) !== undefined;
 }
 
 function findPackageRunnerCommandIndex(
@@ -164,6 +174,39 @@ function findPackageRunnerCommandIndex(
   return;
 }
 
+function findPackageRunnerPackageOptionValues(
+  tokens: string[],
+  startIndex: number,
+  endIndex = tokens.length
+): Array<{ token: string; index: number }> {
+  const values: Array<{ token: string; index: number }> = [];
+
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const token = tokens[index];
+    if (!token) {
+      continue;
+    }
+    if (token === "--") {
+      break;
+    }
+    if (packageRunnerOptionConsumesValue(token)) {
+      const value = tokens[index + 1];
+      if (value) {
+        values.push({ token: value, index: index + 1 });
+      }
+      index += 1;
+      continue;
+    }
+
+    const inlineValue = getInlinePackageRunnerOptionValue(token);
+    if (inlineValue) {
+      values.push({ token: inlineValue, index });
+    }
+  }
+
+  return values;
+}
+
 function findPackageExecutionTokenIndex(tokens: string[]): number | undefined {
   const firstExecutable = normalizeExecutableName(tokens[0] ?? "");
   if (
@@ -186,35 +229,93 @@ function findPackageExecutionTokenIndex(tokens: string[]): number | undefined {
   return findPackageRunnerCommandIndex(tokens, subcommandIndex + 1);
 }
 
+function findPackageExecutionPackageOptionValues(
+  tokens: string[]
+): Array<{ token: string; index: number }> {
+  const firstExecutable = normalizeExecutableName(tokens[0] ?? "");
+  if (
+    isExecutablePackageSpec(firstExecutable, "npx") ||
+    isExecutablePackageSpec(firstExecutable, "bunx")
+  ) {
+    const commandIndex = findPackageRunnerCommandIndex(tokens, 1);
+    return findPackageRunnerPackageOptionValues(
+      tokens,
+      1,
+      commandIndex ?? tokens.length
+    );
+  }
+
+  const subcommandIndex = findPackageRunnerCommandIndex(tokens, 1);
+  if (subcommandIndex === undefined) {
+    return [];
+  }
+
+  const subcommand = normalizeExecutableName(tokens[subcommandIndex] ?? "");
+  if (subcommand !== "exec" && subcommand !== "dlx") {
+    return [];
+  }
+
+  const commandIndex = findPackageRunnerCommandIndex(
+    tokens,
+    subcommandIndex + 1
+  );
+
+  return [
+    ...findPackageRunnerPackageOptionValues(tokens, 1, subcommandIndex),
+    ...findPackageRunnerPackageOptionValues(
+      tokens,
+      subcommandIndex + 1,
+      commandIndex ?? tokens.length
+    ),
+  ];
+}
+
 function canExecuteToken(tokens: string[], index: number): boolean {
   return index === 0 || index === findPackageExecutionTokenIndex(tokens);
 }
 
+function isRecursiveSentrySetupToken(
+  token: string,
+  tokens: string[],
+  index: number
+): boolean {
+  const executable = normalizeExecutableName(token);
+  if (
+    isSentryWizardPackageSpec(token) ||
+    isExecutablePackageSpec(executable, "sentry-wizard")
+  ) {
+    return true;
+  }
+  if (isSentryCliPackageSpec(token)) {
+    return hasInitArgAfter(tokens, index);
+  }
+  if (
+    !(
+      isExecutablePackageSpec(executable, "sentry") ||
+      isExecutablePackageSpec(executable, "sentry-cli")
+    )
+  ) {
+    return false;
+  }
+  return hasInitArgAfter(tokens, index);
+}
+
 function isRecursiveSentrySetup(tokens: string[]): boolean {
+  const packageOptionInvokesSentry = findPackageExecutionPackageOptionValues(
+    tokens
+  ).some(({ token, index }) =>
+    isRecursiveSentrySetupToken(token, tokens, index)
+  );
+  if (packageOptionInvokesSentry) {
+    return true;
+  }
+
   return tokens.some((token, index) => {
     if (!canExecuteToken(tokens, index)) {
       return false;
     }
 
-    const executable = normalizeExecutableName(token);
-    if (
-      isSentryWizardPackageSpec(token) ||
-      isExecutablePackageSpec(executable, "sentry-wizard")
-    ) {
-      return true;
-    }
-    if (isSentryCliPackageSpec(token)) {
-      return hasInitArgAfter(tokens, index);
-    }
-    if (
-      !(
-        isExecutablePackageSpec(executable, "sentry") ||
-        isExecutablePackageSpec(executable, "sentry-cli")
-      )
-    ) {
-      return false;
-    }
-    return hasInitArgAfter(tokens, index);
+    return isRecursiveSentrySetupToken(token, tokens, index);
   });
 }
 
