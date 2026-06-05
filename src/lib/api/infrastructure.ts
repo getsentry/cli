@@ -101,7 +101,7 @@ function enrich403Detail(rawDetail: string | undefined): string {
  *
  * @see https://github.com/getsentry/sentry/blob/934f1473f198a62f9268d7140b80cd9ca1e59bb9/src/sentry/api/authentication.py#L536-L539
  */
-function enrich401Detail(rawDetail: string | undefined): string {
+export function enrich401Detail(rawDetail: string | undefined): string {
   const lines: string[] = [];
   if (rawDetail) {
     lines.push(rawDetail, "");

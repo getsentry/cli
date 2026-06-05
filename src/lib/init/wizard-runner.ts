@@ -25,7 +25,7 @@ import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { customFetch } from "../custom-ca.js";
 import { detectAgent } from "../detect-agent.js";
-import { EXIT, WizardError } from "../errors.js";
+import { ApiError, EXIT, WizardError } from "../errors.js";
 import {
   renderInlineMarkdown,
   stripColorTags,
@@ -48,6 +48,13 @@ import {
 } from "./constants.js";
 import { formatError, formatResult } from "./formatters.js";
 import { checkGitStatus } from "./git.js";
+import {
+  assertHostedInitServiceAcceptsTokenHost,
+  WORKFLOW_CREATE_RUN_ENDPOINT,
+  WORKFLOW_RESUME_ASYNC_ENDPOINT,
+  WORKFLOW_START_ASYNC_ENDPOINT,
+  withInitServiceAuthClassification,
+} from "./init-service-auth.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
 import { checkReadiness } from "./readiness.js";
@@ -72,6 +79,8 @@ import {
 } from "./workflow-inputs.js";
 
 type SpinState = { running: boolean };
+
+const INIT_SERVICE_AUTH_FAILED_LABEL = "Authentication failed";
 
 const APPLY_CODEMODS_STEP = "apply-codemods";
 
@@ -654,7 +663,10 @@ async function resumeWithRecovery(
   } = args;
   try {
     const raw = await withTimeout(
-      run.resumeAsync({ step: stepId, resumeData, tracingOptions }),
+      withInitServiceAuthClassification(
+        () => run.resumeAsync({ step: stepId, resumeData, tracingOptions }),
+        WORKFLOW_RESUME_ASYNC_ENDPOINT
+      ),
       API_TIMEOUT_MS,
       "Workflow resume"
     );
@@ -777,6 +789,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     },
   };
 
+  assertHostedInitServiceAcceptsTokenHost();
   const token = context.authToken;
 
   // AbortController bound to the MastraClient lifecycle. Aborting on
@@ -833,7 +846,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     const fileCache = await preReadCommonFiles(directory, dirListing);
     ui.setIntroMode?.(false);
     spin.message("Connecting to wizard...");
-    run = await workflow.createRun();
+    run = await withInitServiceAuthClassification(
+      () => workflow.createRun(),
+      WORKFLOW_CREATE_RUN_ENDPOINT
+    );
     // Large shared context (dirListing, fileCache, existingSentry)
     // travels via Mastra's workflow `initialState` instead of `inputData`.
     // Keeping it on state means the server stores it exactly once per run
@@ -843,26 +859,36 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     // error. See getsentry/cli-init-api#98.
     result = assertWorkflowResult(
       await withTimeout(
-        run.startAsync({
-          inputData: {
-            directory,
-            yes,
-            dryRun,
-            features,
-          },
-          initialState: {
-            dirListing,
-            fileCache,
-            existingSentry: existingSentry?.data,
-            knownPlatform: context.existingProject?.platform,
-          },
-          tracingOptions,
-        }),
+        withInitServiceAuthClassification(
+          () =>
+            run.startAsync({
+              inputData: {
+                directory,
+                yes,
+                dryRun,
+                features,
+              },
+              initialState: {
+                dirListing,
+                fileCache,
+                existingSentry: existingSentry?.data,
+                knownPlatform: context.existingProject?.platform,
+              },
+              tracingOptions,
+            }),
+          WORKFLOW_START_ASYNC_ENDPOINT
+        ),
         API_TIMEOUT_MS,
         "Workflow start"
       )
     );
   } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      spin.stop(INIT_SERVICE_AUTH_FAILED_LABEL, 1);
+      spinState.running = false;
+      showFailedFeedback(ui, INIT_SERVICE_AUTH_FAILED_LABEL);
+      throw err;
+    }
     spin.stop("Connection failed", 1);
     spinState.running = false;
     ui.log.error(errorMessage(err));
@@ -942,13 +968,18 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       });
     }
   } catch (err) {
+    const isAuthFailure = err instanceof ApiError && err.status === 401;
     // A running spinner owns a live interval, so stop it before any early
     // return or rethrow to avoid leaving the event loop artificially busy.
     if (spinState.running) {
-      const [label, code] =
-        err instanceof WizardCancelledError
-          ? (["Cancelled", 0] as const)
-          : (["Error", 1] as const);
+      let label = "Error";
+      let code: 0 | 1 = 1;
+      if (err instanceof WizardCancelledError) {
+        label = "Cancelled";
+        code = 0;
+      } else if (isAuthFailure) {
+        label = INIT_SERVICE_AUTH_FAILED_LABEL;
+      }
       spin.stop(label, code);
       spinState.running = false;
     }
@@ -964,6 +995,11 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     }
     if (activeStepId) {
       ui.setStep?.(activeStepId, "failed");
+    }
+    if (isAuthFailure) {
+      showFailedFeedback(ui, INIT_SERVICE_AUTH_FAILED_LABEL);
+      setTag("wizard.outcome", "errored");
+      throw err;
     }
     if (err instanceof WizardError) {
       showFailedFeedback(ui);
