@@ -1,4 +1,6 @@
 import { MastraClient } from "@mastra/client-js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as Sentry from "@sentry/node-core/light";
 import {
   afterEach,
   beforeEach,
@@ -435,13 +437,19 @@ describe("runWizard", () => {
     const { ui, calls, respond } = createMockUI({ welcome: true });
     respond.welcome(CANCELLED);
     useMockUI(ui, calls);
+    const captureSpy = vi.spyOn(Sentry, "captureException");
 
-    await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
+    try {
+      await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
 
-    expect(process.exitCode).toBe(0);
-    expect(lastCancelMessage()).toBe("Setup cancelled.");
-    expect(lastFeedbackOutcome()).toBe("cancelled");
-    expect(getWorkflowSpy).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(0);
+      expect(lastCancelMessage()).toBe("Setup cancelled.");
+      expect(lastFeedbackOutcome()).toBe("cancelled");
+      expect(getWorkflowSpy).not.toHaveBeenCalled();
+      expect(captureSpy).not.toHaveBeenCalled();
+    } finally {
+      captureSpy.mockRestore();
+    }
   });
 
   test("falls back to generic continue prompt without rich welcome", async () => {
@@ -659,6 +667,7 @@ describe("runWizard", () => {
   });
 
   test("tears down forwarding and stops the spinner on cancellation", async () => {
+    const captureSpy = vi.spyOn(Sentry, "captureException");
     const payload: ToolPayload = {
       type: "tool",
       operation: "run-commands",
@@ -674,12 +683,17 @@ describe("runWizard", () => {
     };
     executeToolSpy.mockRejectedValue(new WizardCancelledError());
 
-    await runWizard(makeOptions());
+    try {
+      await runWizard(makeOptions());
 
-    expect(process.exitCode).toBe(0);
-    expect(spinnerMock.stop).toHaveBeenCalledWith("Cancelled", 0);
-    expect(lastCancelMessage()).toBe("Setup cancelled.");
-    expect(lastFeedbackOutcome()).toBe("cancelled");
+      expect(process.exitCode).toBe(0);
+      expect(spinnerMock.stop).toHaveBeenCalledWith("Cancelled", 0);
+      expect(lastCancelMessage()).toBe("Setup cancelled.");
+      expect(lastFeedbackOutcome()).toBe("cancelled");
+      expect(captureSpy).not.toHaveBeenCalled();
+    } finally {
+      captureSpy.mockRestore();
+    }
   });
 
   test("tears down forwarding when a WizardError is rethrown from a tool", async () => {
