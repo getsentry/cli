@@ -270,6 +270,35 @@ export async function hashChunks(
 }
 
 /**
+ * Split an in-memory buffer into chunks and compute SHA-1 checksums.
+ *
+ * Same as {@link hashChunks} but operates on a `Buffer` instead of a file,
+ * used by DIF uploads (e.g. ProGuard) where the raw bytes are chunked
+ * directly without wrapping in a ZIP.
+ *
+ * @param content - Raw file content
+ * @param chunkSize - Size of each chunk in bytes
+ * @returns Per-chunk metadata and an overall SHA-1 checksum of the entire buffer
+ */
+export function hashBuffer(
+  content: Buffer,
+  chunkSize: number
+): { chunks: ChunkInfo[]; overallChecksum: string } {
+  const chunks: ChunkInfo[] = [];
+  const overallHasher = createHash("sha1");
+
+  for (let offset = 0; offset < content.length; offset += chunkSize) {
+    const size = Math.min(chunkSize, content.length - offset);
+    const buf = content.subarray(offset, offset + size);
+    const sha1 = createHash("sha1").update(buf).digest("hex");
+    overallHasher.update(buf);
+    chunks.push({ sha1, offset, size });
+  }
+
+  return { chunks, overallChecksum: overallHasher.digest("hex") };
+}
+
+/**
  * Upload chunks the server reports as missing, in parallel.
  *
  * Filters the full chunk list against the set of missing checksums,
@@ -314,6 +343,95 @@ export async function uploadMissingChunks(params: {
         uploadChunk({
           chunk,
           tmpZipPath,
+          encoding,
+          fetch: authFetch,
+          url: serverOptions.url,
+        })
+      )
+    )
+  );
+}
+
+/**
+ * Upload a single chunk from an in-memory buffer, compress it, and POST.
+ *
+ * Same wire format as {@link uploadChunk} but reads from a buffer
+ * instead of a file handle.
+ */
+async function uploadBufferChunk(params: {
+  chunk: ChunkInfo;
+  content: Buffer;
+  encoding: UploadEncoding | undefined;
+  fetch: (url: string, init: RequestInit) => Promise<Response>;
+  url: string;
+}): Promise<void> {
+  const { chunk, content, encoding, fetch: authFetch, url } = params;
+
+  const buf = content.subarray(chunk.offset, chunk.offset + chunk.size);
+  const payload = await encodeChunk(Buffer.from(buf), encoding);
+
+  const fieldName = encoding === "gzip" ? "file_gzip" : "file";
+  const form = new FormData();
+  form.append(
+    fieldName,
+    new Blob([payload], { type: "application/octet-stream" }),
+    chunk.sha1
+  );
+
+  const init: RequestInit = { method: "POST", body: form };
+  if (encoding === "zstd") {
+    init.headers = { "Content-Encoding": "zstd" };
+  }
+
+  const response = await authFetch(url, init);
+  if (!response.ok) {
+    throw new ApiError(
+      `Chunk upload failed: ${response.status} ${response.statusText}`,
+      response.status,
+      await response.text().catch(() => ""),
+      url
+    );
+  }
+}
+
+/**
+ * Upload missing chunks from an in-memory buffer, in parallel.
+ *
+ * Same as {@link uploadMissingChunks} but reads chunk data from a buffer
+ * instead of a file. Used by DIF uploads (e.g. ProGuard) where raw bytes
+ * are chunked directly without wrapping in a ZIP.
+ */
+export async function uploadMissingBufferChunks(params: {
+  chunks: ChunkInfo[];
+  missingChecksums: Set<string>;
+  content: Buffer;
+  serverOptions: ChunkServerOptions;
+  encoding: UploadEncoding | undefined;
+  regionUrl: string;
+}): Promise<void> {
+  const {
+    chunks,
+    missingChecksums,
+    content,
+    serverOptions,
+    encoding,
+    regionUrl,
+  } = params;
+  const missingChunks = chunks.filter((c) => missingChecksums.has(c.sha1));
+
+  if (missingChunks.length === 0) {
+    return;
+  }
+
+  const limit = pLimit(serverOptions.concurrency);
+  const { fetch: authFetch } = getSdkConfig(regionUrl);
+
+  await Promise.all(
+    missingChunks.map((chunk) =>
+      limit(() =>
+        uploadBufferChunk({
+          chunk,
+          content,
           encoding,
           fetch: authFetch,
           url: serverOptions.url,

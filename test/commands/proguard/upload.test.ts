@@ -20,7 +20,6 @@ type UploadFuncFlags = {
   uuid?: string;
   "no-upload"?: boolean;
   "require-one"?: boolean;
-  "no-reprocessing"?: boolean;
 };
 
 /** The loader returns a wrapped async function, not a raw generator. */
@@ -237,24 +236,6 @@ describe("sentry proguard upload", () => {
 
       const callArgs = uploadSpy.mock.calls[0]?.[0];
       expect(callArgs?.mappings[0]?.uuid).toBe(forcedUuid);
-    } finally {
-      uploadSpy.mockRestore();
-    }
-  });
-
-  test("--no-reprocessing: passes flag through to API", async () => {
-    const f = join(dir, "mapping.txt");
-    writeFileSync(f, "void\n");
-
-    const uploadSpy = vi
-      .spyOn(proguardApi, "uploadProguardMappings")
-      .mockResolvedValue(undefined);
-    try {
-      const ctx = makeContext();
-      await func.call(ctx, { "no-reprocessing": true }, f);
-
-      const callArgs = uploadSpy.mock.calls[0]?.[0];
-      expect(callArgs?.noReprocessing).toBe(true);
     } finally {
       uploadSpy.mockRestore();
     }

@@ -127,7 +127,6 @@ export const uploadCommand = buildCommand({
       "  sentry proguard upload build/mapping1.txt build/mapping2.txt\n" +
       "  sentry proguard upload mapping.txt --uuid 5db7294d-87fc-5726-a5c0-4a90679657a5\n" +
       "  sentry proguard upload mapping.txt --no-upload\n" +
-      "  sentry proguard upload mapping.txt --no-reprocessing\n" +
       "  sentry proguard upload mapping.txt --json",
   },
   output: {
@@ -163,12 +162,6 @@ export const uploadCommand = buildCommand({
         optional: true,
         default: false,
       },
-      "no-reprocessing": {
-        kind: "boolean",
-        brief: "Don't trigger event reprocessing after upload",
-        optional: true,
-        default: false,
-      },
     },
   },
   async *func(
@@ -177,7 +170,6 @@ export const uploadCommand = buildCommand({
       uuid?: string;
       "no-upload"?: boolean;
       "require-one"?: boolean;
-      "no-reprocessing"?: boolean;
     },
     ...paths: string[]
   ) {
@@ -242,7 +234,6 @@ export const uploadCommand = buildCommand({
       org,
       project,
       mappings,
-      noReprocessing: flags["no-reprocessing"],
     });
 
     // 8. Yield result
