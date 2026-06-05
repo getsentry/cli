@@ -4,11 +4,12 @@ import { MAX_OUTPUT_BYTES } from "../constants.js";
 
 /** Characters treated as command token separators. */
 const WHITESPACE_CHAR_RE = /\s/u;
+const WINDOWS_EXECUTABLE_EXTENSION_RE = /\.(?:cmd|exe|bat|ps1)$/u;
+const PATH_SEPARATOR_RE = /\\/g;
 
 /**
- * Patterns that indicate shell injection. Commands run via `child_process.spawn`
- * without a shell, so these patterns are defense-in-depth for chaining,
- * piping, redirection, and command substitution.
+ * Patterns that indicate shell injection. Windows package-manager shims require
+ * shell execution, so workflow commands must reject shell syntax before spawn.
  */
 const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
   [
@@ -24,6 +25,14 @@ const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
     { pattern: ">", label: "redirection (>)" },
     { pattern: "<", label: "redirection (<)" },
   ];
+
+const WINDOWS_SHELL_METACHARACTER_PATTERNS: Array<{
+  pattern: string;
+  label: string;
+}> = [
+  { pattern: "%", label: "Windows environment variable expansion (%)" },
+  { pattern: "!", label: "Windows delayed environment expansion (!)" },
+];
 
 /**
  * Executables that should never appear in a workflow-provided command.
@@ -61,6 +70,12 @@ const BLOCKED_EXECUTABLES = new Set([
   "ssh",
   "scp",
   "sftp",
+  "cd",
+  "pushd",
+  "popd",
+  "cmd",
+  "powershell",
+  "pwsh",
   "bash",
   "sh",
   "zsh",
@@ -93,6 +108,83 @@ export type ParsedCommand = {
   executable: string;
   args: string[];
 };
+
+function normalizeExecutableName(executable: string): string {
+  return path.posix
+    .basename(executable.replace(PATH_SEPARATOR_RE, "/"))
+    .toLowerCase()
+    .replace(WINDOWS_EXECUTABLE_EXTENSION_RE, "");
+}
+
+function hasInitArgAfter(tokens: string[], index: number): boolean {
+  return tokens.slice(index + 1).some((arg) => arg.toLowerCase() === "init");
+}
+
+function isSentryCliPackageSpec(token: string): boolean {
+  const lower = token.toLowerCase();
+  return lower === "@sentry/cli" || lower.startsWith("@sentry/cli@");
+}
+
+function isSentryWizardPackageSpec(token: string): boolean {
+  const lower = token.toLowerCase();
+  return lower === "@sentry/wizard" || lower.startsWith("@sentry/wizard@");
+}
+
+function isExecutablePackageSpec(executable: string, name: string): boolean {
+  return executable === name || executable.startsWith(`${name}@`);
+}
+
+function findBlockedExecutable(tokens: string[]): string | undefined {
+  const executable = normalizeExecutableName(tokens[0] ?? "");
+  if (BLOCKED_EXECUTABLES.has(executable)) {
+    return executable;
+  }
+
+  return;
+}
+
+function isRecursiveSentrySetupToken(
+  token: string,
+  tokens: string[],
+  index: number
+): boolean {
+  const executable = normalizeExecutableName(token);
+  if (
+    isSentryWizardPackageSpec(token) ||
+    isExecutablePackageSpec(executable, "sentry-wizard")
+  ) {
+    return true;
+  }
+  if (isSentryCliPackageSpec(token)) {
+    return hasInitArgAfter(tokens, index);
+  }
+  if (
+    !(
+      isExecutablePackageSpec(executable, "sentry") ||
+      isExecutablePackageSpec(executable, "sentry-cli")
+    )
+  ) {
+    return false;
+  }
+  return hasInitArgAfter(tokens, index);
+}
+
+function isRecursiveSentrySetup(tokens: string[]): boolean {
+  const [firstToken = ""] = tokens;
+  return isRecursiveSentrySetupToken(firstToken, tokens, 0);
+}
+
+function findShellMetacharacterLabel(command: string): string | undefined {
+  const patterns =
+    process.platform === "win32"
+      ? [
+          ...SHELL_METACHARACTER_PATTERNS,
+          ...WINDOWS_SHELL_METACHARACTER_PATTERNS,
+        ]
+      : SHELL_METACHARACTER_PATTERNS;
+
+  return patterns.find(({ pattern }) => command.includes(pattern))?.label;
+}
 
 function isCommandWhitespace(char: string): boolean {
   return WHITESPACE_CHAR_RE.test(char);
@@ -250,19 +342,19 @@ export function parseCommand(command: string): ParsedCommand {
  * Validate a command before execution.
  */
 export function validateCommand(command: string): string | undefined {
-  for (const { pattern, label } of SHELL_METACHARACTER_PATTERNS) {
-    if (command.includes(pattern)) {
-      return `Blocked command: contains ${label} — "${command}"`;
-    }
+  const metacharacterLabel = findShellMetacharacterLabel(command);
+  if (metacharacterLabel) {
+    return `Blocked command: contains ${metacharacterLabel} — "${command}"`;
   }
 
-  let firstToken: string;
+  let tokens: string[];
   try {
-    [firstToken = ""] = tokenizeCommand(command);
+    tokens = tokenizeCommand(command);
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
 
+  const [firstToken = ""] = tokens;
   if (!firstToken) {
     return "Blocked command: empty command";
   }
@@ -271,8 +363,12 @@ export function validateCommand(command: string): string | undefined {
     return `Blocked command: contains environment variable assignment — "${command}"`;
   }
 
-  const executable = path.basename(firstToken);
-  if (BLOCKED_EXECUTABLES.has(executable)) {
+  if (isRecursiveSentrySetup(tokens)) {
+    return `Blocked command: invokes Sentry setup recursively — "${command}"`;
+  }
+
+  const executable = findBlockedExecutable(tokens);
+  if (executable) {
     return `Blocked command: disallowed executable "${executable}" — "${command}"`;
   }
 

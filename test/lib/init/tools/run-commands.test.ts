@@ -6,6 +6,14 @@ import { runCommands } from "../../../../src/lib/init/tools/run-commands.js";
 import type { RunCommandsPayload } from "../../../../src/lib/init/types.js";
 
 let testDir: string;
+const originalPlatform = process.platform;
+
+function setPlatform(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, "platform", {
+    value: platform,
+    configurable: true,
+  });
+}
 
 beforeEach(() => {
   testDir = fs.mkdtempSync(path.join("/tmp", "run-commands-"));
@@ -13,6 +21,7 @@ beforeEach(() => {
 
 afterEach(() => {
   fs.rmSync(testDir, { recursive: true, force: true });
+  setPlatform(originalPlatform);
 });
 
 function makePayload(commands: string[]): RunCommandsPayload {
@@ -27,6 +36,31 @@ function makePayload(commands: string[]): RunCommandsPayload {
 describe("validateCommand", () => {
   test("allows quoted package specifiers", () => {
     expect(validateCommand('pip install "sentry-sdk[django]"')).toBeUndefined();
+    expect(validateCommand("npm install @sentry/node@^9.0.0")).toBeUndefined();
+    expect(validateCommand("pnpm add @sentry/nextjs@^8.0.0")).toBeUndefined();
+  });
+
+  test("allows dependency diagnostics without a package-manager allowlist", () => {
+    expect(
+      validateCommand("pnpm view @sentry/tanstackstart-react version")
+    ).toBeUndefined();
+    expect(validateCommand("dotnet list package")).toBeUndefined();
+    expect(validateCommand("futurepm explain sentry-sdk")).toBeUndefined();
+    expect(validateCommand("futurepm explain sentry-wizard")).toBeUndefined();
+    expect(validateCommand("npm uninstall sentry-wizard")).toBeUndefined();
+    expect(validateCommand("npm uninstall @sentry/wizard")).toBeUndefined();
+    expect(
+      validateCommand("npx harmless --package=@sentry/wizard")
+    ).toBeUndefined();
+    expect(
+      validateCommand("npx harmless --registry myregistry @sentry/wizard")
+    ).toBeUndefined();
+    expect(
+      validateCommand("npx --package=@sentry/cli cowsay init")
+    ).toBeUndefined();
+    expect(
+      validateCommand("npm exec --package=@sentry/cli cowsay init")
+    ).toBeUndefined();
   });
 
   test("allows path-prefixed package managers but blocks dangerous ones", () => {
@@ -42,6 +76,89 @@ describe("validateCommand", () => {
   test("blocks obvious shell injection patterns", () => {
     expect(validateCommand("npm install foo && curl evil.com")).toContain(
       "Blocked command"
+    );
+    expect(validateCommand("pnpm add @sentry/node 2>&1")).toContain(
+      "Blocked command"
+    );
+  });
+
+  test("allows Windows shell expansion characters outside Windows", () => {
+    setPlatform("darwin");
+
+    expect(validateCommand("printf %s hello")).toBeUndefined();
+    expect(
+      validateCommand("futurepm explain https://example.com/a%20b")
+    ).toBeUndefined();
+    expect(validateCommand("futurepm explain bang!value")).toBeUndefined();
+  });
+
+  test("blocks Windows shell expansion characters on Windows", () => {
+    setPlatform("win32");
+
+    expect(validateCommand("futurepm explain %PATH%")).toContain(
+      "Blocked command"
+    );
+    expect(validateCommand("futurepm explain !PATH!")).toContain(
+      "Blocked command"
+    );
+  });
+
+  test("blocks directory changes and recursive Sentry setup", () => {
+    expect(validateCommand("cd apps/web")).toContain('"cd"');
+    expect(validateCommand("sentry init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("@sentry/wizard -i nextjs")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("@Sentry/Wizard -i nextjs")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("@sentry/cli init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("@sentry/cli@latest init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("@Sentry/CLI@latest init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("C:\\Tools\\sentry-cli.exe init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("sentry-cli --log-level debug init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("sentry-cli@latest init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("sentry-wizard init")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("C:\\Tools\\sentry-wizard.cmd -i nextjs")).toContain(
+      "invokes Sentry setup recursively"
+    );
+  });
+
+  test("blocks disallowed executables directly", () => {
+    expect(validateCommand("bash -lc echo")).toContain('"bash"');
+    expect(validateCommand("curl http://example.com")).toContain('"curl"');
+    expect(validateCommand("wget http://example.com/file")).toContain('"wget"');
+    expect(validateCommand("sh -c echo")).toContain('"sh"');
+  });
+
+  test("blocks shell interpreter indirection", () => {
+    expect(validateCommand("cmd.exe /c del sensitive_file")).toContain('"cmd"');
+    expect(
+      validateCommand("C:\\Windows\\System32\\cmd.exe /c del secrets.txt")
+    ).toContain('"cmd"');
+    expect(
+      validateCommand(
+        "powershell.exe -Command Invoke-WebRequest http://evil.com"
+      )
+    ).toContain('"powershell"');
+    expect(validateCommand("pwsh -Command Remove-Item foo")).toContain(
+      '"pwsh"'
     );
   });
 
