@@ -368,7 +368,7 @@ async function uploadBufferChunk(params: {
   const { chunk, content, encoding, fetch: authFetch, url } = params;
 
   const buf = content.subarray(chunk.offset, chunk.offset + chunk.size);
-  const payload = await encodeChunk(Buffer.from(buf), encoding);
+  const payload = await encodeChunk(buf, encoding);
 
   const fieldName = encoding === "gzip" ? "file_gzip" : "file";
   const form = new FormData();
@@ -388,7 +388,10 @@ async function uploadBufferChunk(params: {
     throw new ApiError(
       `Chunk upload failed: ${response.status} ${response.statusText}`,
       response.status,
-      await response.text().catch(() => ""),
+      await response.text().catch((err) => {
+        log.debug("Failed to read chunk upload error response body", err);
+        return "";
+      }),
       url
     );
   }

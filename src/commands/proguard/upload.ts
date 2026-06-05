@@ -16,8 +16,11 @@ import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { mdKvTable, renderMarkdown } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { logger } from "../../lib/logger.js";
 import { computeProguardUuid } from "../../lib/proguard.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+
+const log = logger.withTag("proguard.upload");
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -88,8 +91,9 @@ function validateUuidFormat(uuid: string): void {
  * @throws {ValidationError} On ENOENT, EISDIR, or other read failures
  */
 async function readMappingFile(path: string): Promise<Buffer> {
+  let content: Buffer;
   try {
-    return await readFile(path);
+    content = await readFile(path);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
@@ -110,11 +114,42 @@ async function readMappingFile(path: string): Promise<Buffer> {
       "path"
     );
   }
+  if (content.length === 0) {
+    throw new ValidationError(
+      `ProGuard mapping file '${path}' is empty.`,
+      "path"
+    );
+  }
+  return content;
+}
+
+/**
+ * Deduplicate mappings with identical content (same UUID = same content).
+ * Logs a warning for each skipped duplicate.
+ */
+function deduplicateMappings(mappings: ProguardMapping[]): ProguardMapping[] {
+  const seen = new Map<string, string>();
+  const unique: ProguardMapping[] = [];
+  for (const m of mappings) {
+    const existing = seen.get(m.uuid);
+    if (existing) {
+      log.warn(
+        `Skipping '${m.path}': identical content as '${existing}' (UUID ${m.uuid})`
+      );
+      continue;
+    }
+    seen.set(m.uuid, m.path);
+    unique.push(m);
+  }
+  return unique;
 }
 
 // ── Command ─────────────────────────────────────────────────────────
 
 export const uploadCommand = buildCommand({
+  // Auth is not required for --no-upload (dry-run mode).
+  // The upload path calls resolveOrgAndProject which triggers auth.
+  auth: false,
   docs: {
     brief: "Upload ProGuard/R8 mapping files to Sentry",
     fullDescription:
@@ -205,21 +240,24 @@ export const uploadCommand = buildCommand({
       mappings.push({ path, uuid, content });
     }
 
-    // 5. --no-upload: just print UUIDs and return (no auth needed)
+    // 5. Deduplicate mappings with identical content (same UUID = same content)
+    const uniqueMappings = deduplicateMappings(mappings);
+
+    // 6. --no-upload: just print UUIDs and return (no auth needed)
     if (flags["no-upload"]) {
       yield new CommandOutput<ProguardUploadResult>({
-        mappings: mappings.map((m) => ({ path: m.path, uuid: m.uuid })),
+        mappings: uniqueMappings.map((m) => ({ path: m.path, uuid: m.uuid })),
         filesUploaded: 0,
       });
       return {
         hint:
-          mappings.length === 1
-            ? `UUID: ${mappings[0]?.uuid}`
-            : `Computed UUIDs for ${mappings.length} mapping files`,
+          uniqueMappings.length === 1
+            ? `UUID: ${uniqueMappings[0]?.uuid}`
+            : `Computed UUIDs for ${uniqueMappings.length} mapping files`,
       };
     }
 
-    // 6. Resolve org/project
+    // 7. Resolve org/project
     const resolved = await resolveOrgAndProject({
       cwd: this.cwd,
       usageHint: USAGE_HINT,
@@ -229,26 +267,26 @@ export const uploadCommand = buildCommand({
     }
     const { org, project } = resolved;
 
-    // 7. Upload
+    // 8. Upload
     await uploadProguardMappings({
       org,
       project,
-      mappings,
+      mappings: uniqueMappings,
     });
 
-    // 8. Yield result
+    // 9. Yield result
     yield new CommandOutput<ProguardUploadResult>({
       org,
       project,
-      mappings: mappings.map((m) => ({ path: m.path, uuid: m.uuid })),
-      filesUploaded: mappings.length,
+      mappings: uniqueMappings.map((m) => ({ path: m.path, uuid: m.uuid })),
+      filesUploaded: uniqueMappings.length,
     });
 
     return {
       hint:
-        mappings.length === 1
-          ? `Uploaded mapping ${mappings[0]?.uuid}`
-          : `Uploaded ${mappings.length} mapping files`,
+        uniqueMappings.length === 1
+          ? `Uploaded mapping ${uniqueMappings[0]?.uuid}`
+          : `Uploaded ${uniqueMappings.length} mapping files`,
     };
   },
 });

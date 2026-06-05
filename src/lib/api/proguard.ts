@@ -17,6 +17,8 @@ import { ApiError } from "../errors.js";
 import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import {
+  ASSEMBLE_MAX_WAIT_MS,
+  ASSEMBLE_POLL_INTERVAL_MS,
   type AssembleResponse,
   AssembleResponseSchema,
   type ChunkInfo,
@@ -221,12 +223,10 @@ async function pollDifAssembly(params: {
   checksums: string[];
 }): Promise<void> {
   const { regionUrl, endpoint, body, checksums } = params;
-  const POLL_INTERVAL_MS = 1000;
-  const MAX_WAIT_MS = 300_000;
-  const deadline = Date.now() + MAX_WAIT_MS;
+  const deadline = Date.now() + ASSEMBLE_MAX_WAIT_MS;
 
   while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    await new Promise((r) => setTimeout(r, ASSEMBLE_POLL_INTERVAL_MS));
 
     const { data: pollResult } = await apiRequestToRegion<DifAssembleResponse>(
       regionUrl,
@@ -247,7 +247,7 @@ async function pollDifAssembly(params: {
   throw new ApiError(
     "ProGuard mapping assembly timed out",
     408,
-    `Assembly did not complete within ${MAX_WAIT_MS / 1000}s`,
+    `Assembly did not complete within ${ASSEMBLE_MAX_WAIT_MS / 1000}s`,
     endpoint
   );
 }
