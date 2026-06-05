@@ -23,7 +23,30 @@ function isWindowsBatchShim(executable: string): boolean {
 }
 
 function quoteWindowsCommandArg(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`;
+  let quoted = '"';
+  let backslashes = 0;
+
+  for (const char of value) {
+    if (char === "\\") {
+      backslashes += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      quoted += "\\".repeat(backslashes * 2 + 1);
+      quoted += char;
+      backslashes = 0;
+      continue;
+    }
+
+    quoted += "\\".repeat(backslashes);
+    quoted += char;
+    backslashes = 0;
+  }
+
+  quoted += "\\".repeat(backslashes * 2);
+  quoted += '"';
+  return quoted;
 }
 
 function buildWindowsBatchCommand(executable: string, args: string[]): string {

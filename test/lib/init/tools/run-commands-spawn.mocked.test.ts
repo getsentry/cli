@@ -122,6 +122,26 @@ describe("runCommands spawn options", () => {
     });
   });
 
+  test("doubles trailing backslashes for Windows .cmd shim arguments", async () => {
+    setPlatform("win32");
+
+    const result = await runCommands(makePayload("pnpm add C:\\some\\path\\"), {
+      dryRun: false,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(spawnCalls[0]).toMatchObject({
+      command: "cmd.exe",
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        '""C:\\Tools\\pnpm.CMD" "add" "C:\\some\\path\\\\""',
+      ],
+      options: { shell: false, windowsVerbatimArguments: true },
+    });
+  });
+
   test("keeps Windows .exe commands shell-free", async () => {
     setPlatform("win32");
 
