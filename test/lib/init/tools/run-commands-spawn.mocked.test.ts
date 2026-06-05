@@ -142,6 +142,25 @@ describe("runCommands spawn options", () => {
     });
   });
 
+  test("doubles embedded quotes for Windows .cmd shim arguments", async () => {
+    setPlatform("win32");
+
+    const result = await runCommands(
+      makePayload('pnpm add "value \\"quoted\\""'),
+      { dryRun: false }
+    );
+
+    const commandLine = spawnCalls[0]?.args.at(-1) ?? "";
+
+    expect(result.ok).toBe(true);
+    expect(commandLine).toContain('"value ""quoted"""');
+    expect(commandLine).not.toContain('\\"');
+    expect(spawnCalls[0]).toMatchObject({
+      command: "cmd.exe",
+      options: { shell: false, windowsVerbatimArguments: true },
+    });
+  });
+
   test("keeps Windows .exe commands shell-free", async () => {
     setPlatform("win32");
 

@@ -6,7 +6,18 @@ import { MAX_OUTPUT_BYTES } from "../constants.js";
 const WHITESPACE_CHAR_RE = /\s/u;
 const WINDOWS_EXECUTABLE_EXTENSION_RE = /\.(?:cmd|exe|bat|ps1)$/u;
 const PATH_SEPARATOR_RE = /\\/g;
-const PACKAGE_RUNNER_SUBCOMMANDS = new Set(["exec", "dlx"]);
+const TOP_LEVEL_PACKAGE_RUNNERS = new Set(["npx", "pnpx", "bunx"]);
+const PACKAGE_MANAGER_EXECUTION_SUBCOMMANDS = new Map<string, Set<string>>([
+  ["bun", new Set(["x"])],
+  ["npm", new Set(["exec", "x", "init", "create"])],
+  ["pnpm", new Set(["exec", "dlx", "create"])],
+  ["yarn", new Set(["create", "dlx", "exec"])],
+]);
+const PACKAGE_RUNNER_SUBCOMMANDS = new Set(
+  [...PACKAGE_MANAGER_EXECUTION_SUBCOMMANDS.values()].flatMap((subcommands) => [
+    ...subcommands,
+  ])
+);
 const PACKAGE_RUNNER_VALUE_OPTIONS = new Set([
   "allow-build",
   "cache",
@@ -66,9 +77,9 @@ const WINDOWS_SHELL_METACHARACTER_PATTERNS: Array<{
   pattern: string;
   label: string;
 }> = [
-    { pattern: "%", label: "Windows environment variable expansion (%)" },
-    { pattern: "!", label: "Windows delayed environment expansion (!)" },
-  ];
+  { pattern: "%", label: "Windows environment variable expansion (%)" },
+  { pattern: "!", label: "Windows delayed environment expansion (!)" },
+];
 
 /**
  * Executables that should never appear in a workflow-provided command.
@@ -170,8 +181,25 @@ function isExecutablePackageSpec(executable: string, name: string): boolean {
   return executable === name || executable.startsWith(`${name}@`);
 }
 
+function isTopLevelPackageRunner(executable: string): boolean {
+  return [...TOP_LEVEL_PACKAGE_RUNNERS].some((runner) =>
+    isExecutablePackageSpec(executable, runner)
+  );
+}
+
 function isPackageRunnerSubcommand(token: string): boolean {
   return PACKAGE_RUNNER_SUBCOMMANDS.has(normalizeExecutableName(token));
+}
+
+function isPackageManagerExecutionSubcommand(
+  executable: string,
+  subcommand: string
+): boolean {
+  const subcommands = [...PACKAGE_MANAGER_EXECUTION_SUBCOMMANDS].find(
+    ([manager]) => isExecutablePackageSpec(executable, manager)
+  )?.[1];
+
+  return subcommands?.has(normalizeExecutableName(subcommand)) ?? false;
 }
 
 function getLongPackageRunnerOptionName(token: string): string | undefined {
@@ -189,7 +217,8 @@ function packageRunnerPackageOptionConsumesValue(token: string): boolean {
 
 function packageRunnerOptionConsumesValue(
   token: string,
-  nextToken: string | undefined
+  nextToken: string | undefined,
+  options: { preserveSubcommands?: boolean } = {}
 ): boolean {
   if (!nextToken || nextToken === "--") {
     return false;
@@ -202,9 +231,13 @@ function packageRunnerOptionConsumesValue(
   }
   if (
     PACKAGE_RUNNER_VALUE_SHORT_OPTIONS.has(token) ||
-    PACKAGE_RUNNER_VALUE_OPTIONS.has(getLongPackageRunnerOptionName(token) ?? "")
+    PACKAGE_RUNNER_VALUE_OPTIONS.has(
+      getLongPackageRunnerOptionName(token) ?? ""
+    )
   ) {
-    return !nextToken.startsWith("-") && !isPackageRunnerSubcommand(nextToken);
+    return options.preserveSubcommands
+      ? !(nextToken.startsWith("-") || isPackageRunnerSubcommand(nextToken))
+      : !nextToken.startsWith("-");
   }
   return false;
 }
@@ -215,6 +248,9 @@ function getInlinePackageRunnerPackageOptionValue(
   if (token.startsWith("-p=")) {
     return token.slice("-p=".length);
   }
+  if (token.startsWith("-p") && token.length > "-p".length) {
+    return token.slice("-p".length);
+  }
   if (token.startsWith("--package=")) {
     return token.slice("--package=".length);
   }
@@ -222,6 +258,9 @@ function getInlinePackageRunnerPackageOptionValue(
 }
 
 function isInlinePackageRunnerOption(token: string): boolean {
+  if (getInlinePackageRunnerPackageOptionValue(token) !== undefined) {
+    return true;
+  }
   if (token.startsWith("--")) {
     return token.includes("=");
   }
@@ -232,7 +271,8 @@ function isInlinePackageRunnerOption(token: string): boolean {
 
 function findPackageRunnerCommandIndex(
   tokens: string[],
-  startIndex: number
+  startIndex: number,
+  options: { preserveSubcommands?: boolean } = {}
 ): number | undefined {
   for (let index = startIndex; index < tokens.length; index += 1) {
     const token = tokens[index];
@@ -242,7 +282,7 @@ function findPackageRunnerCommandIndex(
     if (token === "--") {
       return index + 1 < tokens.length ? index + 1 : undefined;
     }
-    if (packageRunnerOptionConsumesValue(token, tokens[index + 1])) {
+    if (packageRunnerOptionConsumesValue(token, tokens[index + 1], options)) {
       index += 1;
       continue;
     }
@@ -293,20 +333,23 @@ function findPackageRunnerPackageOptionValues(
 
 function findPackageExecutionTokenIndex(tokens: string[]): number | undefined {
   const firstExecutable = normalizeExecutableName(tokens[0] ?? "");
-  if (
-    isExecutablePackageSpec(firstExecutable, "npx") ||
-    isExecutablePackageSpec(firstExecutable, "bunx")
-  ) {
+  if (isTopLevelPackageRunner(firstExecutable)) {
     return findPackageRunnerCommandIndex(tokens, 1);
   }
 
-  const subcommandIndex = findPackageRunnerCommandIndex(tokens, 1);
+  const subcommandIndex = findPackageRunnerCommandIndex(tokens, 1, {
+    preserveSubcommands: true,
+  });
   if (subcommandIndex === undefined) {
     return;
   }
 
-  const subcommand = normalizeExecutableName(tokens[subcommandIndex] ?? "");
-  if (!PACKAGE_RUNNER_SUBCOMMANDS.has(subcommand)) {
+  if (
+    !isPackageManagerExecutionSubcommand(
+      firstExecutable,
+      tokens[subcommandIndex] ?? ""
+    )
+  ) {
     return;
   }
 
@@ -317,10 +360,7 @@ function findPackageExecutionPackageOptionValues(
   tokens: string[]
 ): Array<{ token: string; index: number }> {
   const firstExecutable = normalizeExecutableName(tokens[0] ?? "");
-  if (
-    isExecutablePackageSpec(firstExecutable, "npx") ||
-    isExecutablePackageSpec(firstExecutable, "bunx")
-  ) {
+  if (isTopLevelPackageRunner(firstExecutable)) {
     const commandIndex = findPackageRunnerCommandIndex(tokens, 1);
     return findPackageRunnerPackageOptionValues(
       tokens,
@@ -329,13 +369,19 @@ function findPackageExecutionPackageOptionValues(
     );
   }
 
-  const subcommandIndex = findPackageRunnerCommandIndex(tokens, 1);
+  const subcommandIndex = findPackageRunnerCommandIndex(tokens, 1, {
+    preserveSubcommands: true,
+  });
   if (subcommandIndex === undefined) {
     return [];
   }
 
-  const subcommand = normalizeExecutableName(tokens[subcommandIndex] ?? "");
-  if (!PACKAGE_RUNNER_SUBCOMMANDS.has(subcommand)) {
+  if (
+    !isPackageManagerExecutionSubcommand(
+      firstExecutable,
+      tokens[subcommandIndex] ?? ""
+    )
+  ) {
     return [];
   }
 
@@ -356,6 +402,23 @@ function findPackageExecutionPackageOptionValues(
 
 function canExecuteToken(tokens: string[], index: number): boolean {
   return index === 0 || index === findPackageExecutionTokenIndex(tokens);
+}
+
+function findBlockedExecutable(tokens: string[]): string | undefined {
+  const candidateIndexes = new Set([0]);
+  const packageExecutionIndex = findPackageExecutionTokenIndex(tokens);
+  if (packageExecutionIndex !== undefined) {
+    candidateIndexes.add(packageExecutionIndex);
+  }
+
+  for (const index of candidateIndexes) {
+    const executable = normalizeExecutableName(tokens[index] ?? "");
+    if (BLOCKED_EXECUTABLES.has(executable)) {
+      return executable;
+    }
+  }
+
+  return;
 }
 
 function isRecursiveSentrySetupToken(
@@ -401,6 +464,18 @@ function isRecursiveSentrySetup(tokens: string[]): boolean {
 
     return isRecursiveSentrySetupToken(token, tokens, index);
   });
+}
+
+function findShellMetacharacterLabel(command: string): string | undefined {
+  const patterns =
+    process.platform === "win32"
+      ? [
+          ...SHELL_METACHARACTER_PATTERNS,
+          ...WINDOWS_SHELL_METACHARACTER_PATTERNS,
+        ]
+      : SHELL_METACHARACTER_PATTERNS;
+
+  return patterns.find(({ pattern }) => command.includes(pattern))?.label;
 }
 
 function isCommandWhitespace(char: string): boolean {
@@ -559,18 +634,9 @@ export function parseCommand(command: string): ParsedCommand {
  * Validate a command before execution.
  */
 export function validateCommand(command: string): string | undefined {
-  for (const { pattern, label } of SHELL_METACHARACTER_PATTERNS) {
-    if (command.includes(pattern)) {
-      return `Blocked command: contains ${label} — "${command}"`;
-    }
-  }
-
-  if (process.platform === "win32") {
-    for (const { pattern, label } of WINDOWS_SHELL_METACHARACTER_PATTERNS) {
-      if (command.includes(pattern)) {
-        return `Blocked command: contains ${label} — "${command}"`;
-      }
-    }
+  const metacharacterLabel = findShellMetacharacterLabel(command);
+  if (metacharacterLabel) {
+    return `Blocked command: contains ${metacharacterLabel} — "${command}"`;
   }
 
   let tokens: string[];
@@ -593,8 +659,8 @@ export function validateCommand(command: string): string | undefined {
     return `Blocked command: invokes Sentry setup recursively — "${command}"`;
   }
 
-  const executable = normalizeExecutableName(firstToken);
-  if (BLOCKED_EXECUTABLES.has(executable)) {
+  const executable = findBlockedExecutable(tokens);
+  if (executable) {
     return `Blocked command: disallowed executable "${executable}" — "${command}"`;
   }
 

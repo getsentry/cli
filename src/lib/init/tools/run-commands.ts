@@ -33,8 +33,8 @@ function quoteWindowsCommandArg(value: string): string {
     }
 
     if (char === '"') {
-      quoted += "\\".repeat(backslashes * 2 + 1);
-      quoted += char;
+      quoted += "\\".repeat(backslashes);
+      quoted += '""';
       backslashes = 0;
       continue;
     }
