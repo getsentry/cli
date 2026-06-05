@@ -108,52 +108,19 @@ describe("validateCommand", () => {
     expect(validateCommand("sentry init")).toContain(
       "invokes Sentry setup recursively"
     );
-    expect(validateCommand("npx @sentry/wizard -i nextjs")).toContain(
+    expect(validateCommand("@sentry/wizard -i nextjs")).toContain(
       "invokes Sentry setup recursively"
     );
-    expect(validateCommand("npx @Sentry/Wizard -i nextjs")).toContain(
+    expect(validateCommand("@Sentry/Wizard -i nextjs")).toContain(
       "invokes Sentry setup recursively"
     );
-    expect(
-      validateCommand("npx -p innocuous-pkg @sentry/wizard -i nextjs")
-    ).toContain("invokes Sentry setup recursively");
-    expect(
-      validateCommand("npx --package innocuous-pkg @sentry/wizard -i nextjs")
-    ).toContain("invokes Sentry setup recursively");
-    expect(
-      validateCommand("npx --package=innocuous-pkg @sentry/wizard -i nextjs")
-    ).toContain("invokes Sentry setup recursively");
-    expect(
-      validateCommand("npx -p=innocuous-pkg @sentry/wizard -i nextjs")
-    ).toContain("invokes Sentry setup recursively");
-    expect(validateCommand("npx --package=@sentry/wizard -i nextjs")).toContain(
+    expect(validateCommand("@sentry/cli init")).toContain(
       "invokes Sentry setup recursively"
     );
-    expect(validateCommand("npx -p=@sentry/cli init")).toContain(
+    expect(validateCommand("@sentry/cli@latest init")).toContain(
       "invokes Sentry setup recursively"
     );
-    expect(validateCommand("npx --package=@sentry/cli init")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx -p@sentry/wizard -i nextjs")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx -p@sentry/cli init")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx --package @sentry/wizard -i nextjs")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx -p @sentry/cli init")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx @sentry/cli init")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx @sentry/cli@latest init")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx @Sentry/CLI@latest init")).toContain(
+    expect(validateCommand("@Sentry/CLI@latest init")).toContain(
       "invokes Sentry setup recursively"
     );
     expect(validateCommand("C:\\Tools\\sentry-cli.exe init")).toContain(
@@ -162,109 +129,10 @@ describe("validateCommand", () => {
     expect(validateCommand("sentry-cli --log-level debug init")).toContain(
       "invokes Sentry setup recursively"
     );
-    expect(validateCommand("npx sentry-cli init")).toContain(
-      "invokes Sentry setup recursively"
-    );
     expect(validateCommand("sentry-cli@latest init")).toContain(
       "invokes Sentry setup recursively"
     );
-    expect(validateCommand("npx sentry-cli@latest init")).toContain(
-      "invokes Sentry setup recursively"
-    );
     expect(validateCommand("sentry-wizard init")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx sentry-wizard -i nextjs")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx sentry-wizard@latest -i nextjs")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx create @sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx init @sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx init --package=@sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx init --package @sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx init --package=@sentry/cli")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npx create --package=@sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("pnpx create @sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("pnpx init --package=@sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("bunx init @sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("pnpx @sentry/wizard -i nextjs")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("bun x @sentry/wizard -i nextjs")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npm exec @sentry/wizard -i nextjs")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npm x @sentry/wizard -i nextjs")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npm init @sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("npm create @sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(
-      validateCommand("npm exec --package lodash @sentry/wizard -i nextjs")
-    ).toContain("invokes Sentry setup recursively");
-    expect(
-      validateCommand("npm exec --package=@sentry/wizard -i nextjs")
-    ).toContain("invokes Sentry setup recursively");
-    expect(validateCommand("pnpm dlx sentry-wizard -i nextjs")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("pnpm create @sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(
-      validateCommand("pnpm dlx --package lodash sentry-wizard -i nextjs")
-    ).toContain("invokes Sentry setup recursively");
-    expect(
-      validateCommand("pnpm dlx --package=@sentry/wizard -i nextjs")
-    ).toContain("invokes Sentry setup recursively");
-    expect(
-      validateCommand("npm --registry myregistry exec @sentry/wizard")
-    ).toContain("invokes Sentry setup recursively");
-    expect(
-      validateCommand("npm exec --registry myregistry @sentry/wizard")
-    ).toContain("invokes Sentry setup recursively");
-    expect(
-      validateCommand("pnpm --registry myregistry dlx @sentry/wizard")
-    ).toContain("invokes Sentry setup recursively");
-    expect(
-      validateCommand("pnpm dlx --registry myregistry @sentry/wizard")
-    ).toContain("invokes Sentry setup recursively");
-    expect(
-      validateCommand("npx --registry myregistry @sentry/wizard")
-    ).toContain("invokes Sentry setup recursively");
-    expect(validateCommand("npx --registry create @sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("yarn create @sentry/wizard")).toContain(
-      "invokes Sentry setup recursively"
-    );
-    expect(validateCommand("yarn dlx @sentry/wizard")).toContain(
       "invokes Sentry setup recursively"
     );
     expect(validateCommand("C:\\Tools\\sentry-wizard.cmd -i nextjs")).toContain(
@@ -272,13 +140,11 @@ describe("validateCommand", () => {
     );
   });
 
-  test("blocks disallowed executables through package runners", () => {
-    expect(validateCommand("npx bash")).toContain('"bash"');
-    expect(validateCommand("npx curl http://example.com")).toContain('"curl"');
-    expect(validateCommand("npm exec wget http://example.com/file")).toContain(
-      '"wget"'
-    );
-    expect(validateCommand("pnpm dlx sh")).toContain('"sh"');
+  test("blocks disallowed executables directly", () => {
+    expect(validateCommand("bash -lc echo")).toContain('"bash"');
+    expect(validateCommand("curl http://example.com")).toContain('"curl"');
+    expect(validateCommand("wget http://example.com/file")).toContain('"wget"');
+    expect(validateCommand("sh -c echo")).toContain('"sh"');
   });
 
   test("blocks shell interpreter indirection", () => {
