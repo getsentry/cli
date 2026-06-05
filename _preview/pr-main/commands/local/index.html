@@ -229,7 +229,15 @@
 
 
 
-<table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">-p, --port &#x3C;port></code></td><td>Port for the local server (default 8969) (default: "8969")</td></tr><tr><td><code dir="auto">--host &#x3C;host></code></td><td>Hostname for the local server (default localhost) (default: "localhost")</td></tr></tbody></table>
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">-p, --port &#x3C;port></code></td><td>Port for the local server (default 8969) (default: "8969")</td></tr><tr><td><code dir="auto">--host &#x3C;host></code></td><td>Hostname for the local server (default localhost) (default: "localhost")</td></tr><tr><td><code dir="auto">-V, --verify</code></td><td>Verify SDK sends events, then exit</td></tr><tr><td><code dir="auto">-t, --timeout &#x3C;timeout></code></td><td>Kill the child after N seconds (0 = no timeout; defaults to 30 s in --verify mode) (default: "0")</td></tr></tbody></table>
 <p>All commands support <code dir="auto">--json</code> for machine-readable output and <code dir="auto">--fields</code> to select specific JSON fields.</p>
 <!-- GENERATED:END -->
 <p><code dir="auto">sentry local</code> runs a local development server that captures Sentry SDK envelopes from your dev stack and surfaces errors, traces, and logs in real time — right in your terminal. No authentication required.</p>
