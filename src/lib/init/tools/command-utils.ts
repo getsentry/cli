@@ -7,6 +7,7 @@ const WHITESPACE_CHAR_RE = /\s/u;
 const WINDOWS_EXECUTABLE_EXTENSION_RE = /\.(?:cmd|exe|bat|ps1)$/u;
 const PATH_SEPARATOR_RE = /\\/g;
 const TOP_LEVEL_PACKAGE_RUNNERS = new Set(["npx", "pnpx", "bunx"]);
+const TOP_LEVEL_RUNNER_NESTED_SUBCOMMANDS = new Set(["create", "init"]);
 const PACKAGE_MANAGER_EXECUTION_SUBCOMMANDS = new Map<string, Set<string>>([
   ["bun", new Set(["x"])],
   ["npm", new Set(["exec", "x", "init", "create"])],
@@ -191,6 +192,12 @@ function isPackageRunnerSubcommand(token: string): boolean {
   return PACKAGE_RUNNER_SUBCOMMANDS.has(normalizeExecutableName(token));
 }
 
+function isTopLevelRunnerNestedSubcommand(token: string): boolean {
+  return TOP_LEVEL_RUNNER_NESTED_SUBCOMMANDS.has(
+    normalizeExecutableName(token)
+  );
+}
+
 function isPackageManagerExecutionSubcommand(
   executable: string,
   subcommand: string
@@ -356,17 +363,60 @@ function findPackageExecutionTokenIndex(tokens: string[]): number | undefined {
   return findPackageRunnerCommandIndex(tokens, subcommandIndex + 1);
 }
 
+function findTopLevelRunnerNestedExecutionTokenIndex(
+  tokens: string[],
+  commandIndex: number | undefined
+): number | undefined {
+  if (
+    commandIndex === undefined ||
+    !isTopLevelRunnerNestedSubcommand(tokens[commandIndex] ?? "")
+  ) {
+    return;
+  }
+
+  return findPackageRunnerCommandIndex(tokens, commandIndex + 1);
+}
+
+function findPackageExecutionTokenIndexes(tokens: string[]): number[] {
+  const commandIndex = findPackageExecutionTokenIndex(tokens);
+  if (commandIndex === undefined) {
+    return [];
+  }
+
+  const firstExecutable = normalizeExecutableName(tokens[0] ?? "");
+  const nestedCommandIndex = isTopLevelPackageRunner(firstExecutable)
+    ? findTopLevelRunnerNestedExecutionTokenIndex(tokens, commandIndex)
+    : undefined;
+
+  return nestedCommandIndex === undefined
+    ? [commandIndex]
+    : [commandIndex, nestedCommandIndex];
+}
+
 function findPackageExecutionPackageOptionValues(
   tokens: string[]
 ): Array<{ token: string; index: number }> {
   const firstExecutable = normalizeExecutableName(tokens[0] ?? "");
   if (isTopLevelPackageRunner(firstExecutable)) {
     const commandIndex = findPackageRunnerCommandIndex(tokens, 1);
-    return findPackageRunnerPackageOptionValues(
+    const nestedCommandIndex = findTopLevelRunnerNestedExecutionTokenIndex(
       tokens,
-      1,
-      commandIndex ?? tokens.length
+      commandIndex
     );
+    return [
+      ...findPackageRunnerPackageOptionValues(
+        tokens,
+        1,
+        commandIndex ?? tokens.length
+      ),
+      ...(commandIndex === undefined || nestedCommandIndex === undefined
+        ? []
+        : findPackageRunnerPackageOptionValues(
+            tokens,
+            commandIndex + 1,
+            nestedCommandIndex
+          )),
+    ];
   }
 
   const subcommandIndex = findPackageRunnerCommandIndex(tokens, 1, {
@@ -401,13 +451,16 @@ function findPackageExecutionPackageOptionValues(
 }
 
 function canExecuteToken(tokens: string[], index: number): boolean {
-  return index === 0 || index === findPackageExecutionTokenIndex(tokens);
+  return (
+    index === 0 || findPackageExecutionTokenIndexes(tokens).includes(index)
+  );
 }
 
 function findBlockedExecutable(tokens: string[]): string | undefined {
   const candidateIndexes = new Set([0]);
-  const packageExecutionIndex = findPackageExecutionTokenIndex(tokens);
-  if (packageExecutionIndex !== undefined) {
+  for (const packageExecutionIndex of findPackageExecutionTokenIndexes(
+    tokens
+  )) {
     candidateIndexes.add(packageExecutionIndex);
   }
 
