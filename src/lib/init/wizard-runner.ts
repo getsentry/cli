@@ -467,7 +467,6 @@ async function preamble(
     confirmed = await confirmExperimental(options, ui);
   } catch (err) {
     if (err instanceof WizardCancelledError) {
-      captureException(err);
       setTag("wizard.outcome", "bailed");
       showCancelledFeedback(ui);
       process.exitCode = 0;
@@ -958,7 +957,6 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       // active step as `in_progress` rather than flipping it to
       // failed; the post-dispose report shows the cancel message
       // instead.
-      captureException(err);
       setTag("wizard.outcome", "bailed");
       showCancelledFeedback(ui);
       process.exitCode = 0;
