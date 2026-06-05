@@ -168,6 +168,10 @@ function hasInitArgAfter(tokens: string[], index: number): boolean {
   return tokens.slice(index + 1).some((arg) => arg.toLowerCase() === "init");
 }
 
+function hasInitArg(tokens: string[]): boolean {
+  return tokens.some((arg) => arg.toLowerCase() === "init");
+}
+
 function isSentryCliPackageSpec(token: string): boolean {
   const lower = token.toLowerCase();
   return lower === "@sentry/cli" || lower.startsWith("@sentry/cli@");
@@ -399,23 +403,29 @@ function findPackageExecutionPackageOptionValues(
   const firstExecutable = normalizeExecutableName(tokens[0] ?? "");
   if (isTopLevelPackageRunner(firstExecutable)) {
     const commandIndex = findPackageRunnerCommandIndex(tokens, 1);
+    const packageOptionValues = findPackageRunnerPackageOptionValues(
+      tokens,
+      1,
+      commandIndex ?? tokens.length
+    );
+    if (
+      commandIndex === undefined ||
+      !isTopLevelRunnerNestedSubcommand(tokens[commandIndex] ?? "")
+    ) {
+      return packageOptionValues;
+    }
+
     const nestedCommandIndex = findTopLevelRunnerNestedExecutionTokenIndex(
       tokens,
       commandIndex
     );
     return [
+      ...packageOptionValues,
       ...findPackageRunnerPackageOptionValues(
         tokens,
-        1,
-        commandIndex ?? tokens.length
+        commandIndex + 1,
+        nestedCommandIndex ?? tokens.length
       ),
-      ...(commandIndex === undefined || nestedCommandIndex === undefined
-        ? []
-        : findPackageRunnerPackageOptionValues(
-            tokens,
-            commandIndex + 1,
-            nestedCommandIndex
-          )),
     ];
   }
 
@@ -487,7 +497,7 @@ function isRecursiveSentrySetupToken(
     return true;
   }
   if (isSentryCliPackageSpec(token)) {
-    return hasInitArgAfter(tokens, index);
+    return hasInitArg(tokens);
   }
   if (
     !(

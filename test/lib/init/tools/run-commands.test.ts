@@ -177,7 +177,22 @@ describe("validateCommand", () => {
     expect(validateCommand("npx init @sentry/wizard")).toContain(
       "invokes Sentry setup recursively"
     );
+    expect(validateCommand("npx init --package=@sentry/wizard")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx init --package @sentry/wizard")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx init --package=@sentry/cli")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("npx create --package=@sentry/wizard")).toContain(
+      "invokes Sentry setup recursively"
+    );
     expect(validateCommand("pnpx create @sentry/wizard")).toContain(
+      "invokes Sentry setup recursively"
+    );
+    expect(validateCommand("pnpx init --package=@sentry/wizard")).toContain(
       "invokes Sentry setup recursively"
     );
     expect(validateCommand("bunx init @sentry/wizard")).toContain(
