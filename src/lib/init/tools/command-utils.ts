@@ -6,6 +6,42 @@ import { MAX_OUTPUT_BYTES } from "../constants.js";
 const WHITESPACE_CHAR_RE = /\s/u;
 const WINDOWS_EXECUTABLE_EXTENSION_RE = /\.(?:cmd|exe|bat|ps1)$/u;
 const PATH_SEPARATOR_RE = /\\/g;
+const PACKAGE_RUNNER_SUBCOMMANDS = new Set(["exec", "dlx"]);
+const PACKAGE_RUNNER_VALUE_OPTIONS = new Set([
+  "allow-build",
+  "cache",
+  "cafile",
+  "call",
+  "cert",
+  "changed-files-ignore-pattern",
+  "config",
+  "dir",
+  "filter",
+  "filter-prod",
+  "globalconfig",
+  "https-proxy",
+  "key",
+  "lockfile-dir",
+  "loglevel",
+  "noproxy",
+  "node-options",
+  "package",
+  "prefix",
+  "proxy",
+  "registry",
+  "reporter",
+  "resume-from",
+  "script-shell",
+  "shell",
+  "store-dir",
+  "test-pattern",
+  "use-node-version",
+  "userconfig",
+  "virtual-store-dir",
+  "workspace",
+  "workspace-concurrency",
+]);
+const PACKAGE_RUNNER_VALUE_SHORT_OPTIONS = new Set(["-p", "-w", "-C", "-c"]);
 
 /**
  * Patterns that indicate shell injection. Windows package-manager shims require
@@ -24,6 +60,12 @@ const SHELL_METACHARACTER_PATTERNS: Array<{ pattern: string; label: string }> =
     { pattern: "\r", label: "carriage return" },
     { pattern: ">", label: "redirection (>)" },
     { pattern: "<", label: "redirection (<)" },
+  ];
+
+const WINDOWS_SHELL_METACHARACTER_PATTERNS: Array<{
+  pattern: string;
+  label: string;
+}> = [
     { pattern: "%", label: "Windows environment variable expansion (%)" },
     { pattern: "!", label: "Windows delayed environment expansion (!)" },
   ];
@@ -128,11 +170,48 @@ function isExecutablePackageSpec(executable: string, name: string): boolean {
   return executable === name || executable.startsWith(`${name}@`);
 }
 
-function packageRunnerOptionConsumesValue(token: string): boolean {
+function isPackageRunnerSubcommand(token: string): boolean {
+  return PACKAGE_RUNNER_SUBCOMMANDS.has(normalizeExecutableName(token));
+}
+
+function getLongPackageRunnerOptionName(token: string): string | undefined {
+  if (!token.startsWith("--") || token === "--" || token.startsWith("--no-")) {
+    return;
+  }
+
+  const [name = ""] = token.slice(2).split("=", 1);
+  return name.toLowerCase();
+}
+
+function packageRunnerPackageOptionConsumesValue(token: string): boolean {
   return token === "-p" || token === "--package";
 }
 
-function getInlinePackageRunnerOptionValue(token: string): string | undefined {
+function packageRunnerOptionConsumesValue(
+  token: string,
+  nextToken: string | undefined
+): boolean {
+  if (!nextToken || nextToken === "--") {
+    return false;
+  }
+  if (token.startsWith("--") && token.includes("=")) {
+    return false;
+  }
+  if (packageRunnerPackageOptionConsumesValue(token)) {
+    return true;
+  }
+  if (
+    PACKAGE_RUNNER_VALUE_SHORT_OPTIONS.has(token) ||
+    PACKAGE_RUNNER_VALUE_OPTIONS.has(getLongPackageRunnerOptionName(token) ?? "")
+  ) {
+    return !nextToken.startsWith("-") && !isPackageRunnerSubcommand(nextToken);
+  }
+  return false;
+}
+
+function getInlinePackageRunnerPackageOptionValue(
+  token: string
+): string | undefined {
   if (token.startsWith("-p=")) {
     return token.slice("-p=".length);
   }
@@ -143,7 +222,12 @@ function getInlinePackageRunnerOptionValue(token: string): string | undefined {
 }
 
 function isInlinePackageRunnerOption(token: string): boolean {
-  return getInlinePackageRunnerOptionValue(token) !== undefined;
+  if (token.startsWith("--")) {
+    return token.includes("=");
+  }
+  return PACKAGE_RUNNER_VALUE_SHORT_OPTIONS.has(token.slice(0, 2))
+    ? token.startsWith(`${token.slice(0, 2)}=`)
+    : false;
 }
 
 function findPackageRunnerCommandIndex(
@@ -158,7 +242,7 @@ function findPackageRunnerCommandIndex(
     if (token === "--") {
       return index + 1 < tokens.length ? index + 1 : undefined;
     }
-    if (packageRunnerOptionConsumesValue(token)) {
+    if (packageRunnerOptionConsumesValue(token, tokens[index + 1])) {
       index += 1;
       continue;
     }
@@ -189,7 +273,7 @@ function findPackageRunnerPackageOptionValues(
     if (token === "--") {
       break;
     }
-    if (packageRunnerOptionConsumesValue(token)) {
+    if (packageRunnerPackageOptionConsumesValue(token)) {
       const value = tokens[index + 1];
       if (value) {
         values.push({ token: value, index: index + 1 });
@@ -198,7 +282,7 @@ function findPackageRunnerPackageOptionValues(
       continue;
     }
 
-    const inlineValue = getInlinePackageRunnerOptionValue(token);
+    const inlineValue = getInlinePackageRunnerPackageOptionValue(token);
     if (inlineValue) {
       values.push({ token: inlineValue, index });
     }
@@ -222,7 +306,7 @@ function findPackageExecutionTokenIndex(tokens: string[]): number | undefined {
   }
 
   const subcommand = normalizeExecutableName(tokens[subcommandIndex] ?? "");
-  if (subcommand !== "exec" && subcommand !== "dlx") {
+  if (!PACKAGE_RUNNER_SUBCOMMANDS.has(subcommand)) {
     return;
   }
 
@@ -251,7 +335,7 @@ function findPackageExecutionPackageOptionValues(
   }
 
   const subcommand = normalizeExecutableName(tokens[subcommandIndex] ?? "");
-  if (subcommand !== "exec" && subcommand !== "dlx") {
+  if (!PACKAGE_RUNNER_SUBCOMMANDS.has(subcommand)) {
     return [];
   }
 
@@ -478,6 +562,14 @@ export function validateCommand(command: string): string | undefined {
   for (const { pattern, label } of SHELL_METACHARACTER_PATTERNS) {
     if (command.includes(pattern)) {
       return `Blocked command: contains ${label} — "${command}"`;
+    }
+  }
+
+  if (process.platform === "win32") {
+    for (const { pattern, label } of WINDOWS_SHELL_METACHARACTER_PATTERNS) {
+      if (command.includes(pattern)) {
+        return `Blocked command: contains ${label} — "${command}"`;
+      }
     }
   }
 

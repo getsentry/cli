@@ -6,6 +6,14 @@ import { runCommands } from "../../../../src/lib/init/tools/run-commands.js";
 import type { RunCommandsPayload } from "../../../../src/lib/init/types.js";
 
 let testDir: string;
+const originalPlatform = process.platform;
+
+function setPlatform(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, "platform", {
+    value: platform,
+    configurable: true,
+  });
+}
 
 beforeEach(() => {
   testDir = fs.mkdtempSync(path.join("/tmp", "run-commands-"));
@@ -13,6 +21,7 @@ beforeEach(() => {
 
 afterEach(() => {
   fs.rmSync(testDir, { recursive: true, force: true });
+  setPlatform(originalPlatform);
 });
 
 function makePayload(commands: string[]): RunCommandsPayload {
@@ -43,6 +52,9 @@ describe("validateCommand", () => {
     expect(
       validateCommand("npx harmless --package=@sentry/wizard")
     ).toBeUndefined();
+    expect(
+      validateCommand("npx harmless --registry myregistry @sentry/wizard")
+    ).toBeUndefined();
   });
 
   test("allows path-prefixed package managers but blocks dangerous ones", () => {
@@ -62,6 +74,21 @@ describe("validateCommand", () => {
     expect(validateCommand("pnpm add @sentry/node 2>&1")).toContain(
       "Blocked command"
     );
+  });
+
+  test("allows Windows shell expansion characters outside Windows", () => {
+    setPlatform("darwin");
+
+    expect(validateCommand("printf %s hello")).toBeUndefined();
+    expect(
+      validateCommand("futurepm explain https://example.com/a%20b")
+    ).toBeUndefined();
+    expect(validateCommand("futurepm explain bang!value")).toBeUndefined();
+  });
+
+  test("blocks Windows shell expansion characters on Windows", () => {
+    setPlatform("win32");
+
     expect(validateCommand("futurepm explain %PATH%")).toContain(
       "Blocked command"
     );
@@ -155,6 +182,21 @@ describe("validateCommand", () => {
     ).toContain("invokes Sentry setup recursively");
     expect(
       validateCommand("pnpm dlx --package=@sentry/wizard -i nextjs")
+    ).toContain("invokes Sentry setup recursively");
+    expect(
+      validateCommand("npm --registry myregistry exec @sentry/wizard")
+    ).toContain("invokes Sentry setup recursively");
+    expect(
+      validateCommand("npm exec --registry myregistry @sentry/wizard")
+    ).toContain("invokes Sentry setup recursively");
+    expect(
+      validateCommand("pnpm --registry myregistry dlx @sentry/wizard")
+    ).toContain("invokes Sentry setup recursively");
+    expect(
+      validateCommand("pnpm dlx --registry myregistry @sentry/wizard")
+    ).toContain("invokes Sentry setup recursively");
+    expect(
+      validateCommand("npx --registry myregistry @sentry/wizard")
     ).toContain("invokes Sentry setup recursively");
     expect(validateCommand("C:\\Tools\\sentry-wizard.cmd -i nextjs")).toContain(
       "invokes Sentry setup recursively"
