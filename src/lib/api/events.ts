@@ -44,7 +44,7 @@ export async function getLatestEvent(
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
-      issue_id: Number(issueId),
+      issue_id: issueId,
       event_id: "latest",
     },
   });
@@ -199,7 +199,19 @@ export type ListIssueEventsOptions = {
  *
  * Uses the SDK's `listAnIssue_sEvents` endpoint with region-aware routing.
  * When `limit` exceeds {@link API_MAX_PER_PAGE} (100), auto-paginates through
- * multiple API calls to fill the requested limit, bounded by {@link MAX_PAGINATION_PAGES}.
+ * multiple API calls to fill the requested limit, bounded by
+ * {@link MAX_PAGINATION_PAGES}.
+ *
+ * Page size is capped at `min(limit, API_MAX_PER_PAGE)` via `per_page`, which
+ * Sentry accepts on this route at runtime even though it is absent from the
+ * OpenAPI spec. Capping page size keeps the server-issued `nextCursor` aligned
+ * to a page boundary, preventing the skip bug where trim + keep-cursor would
+ * jump past items.
+ *
+ * When trimming to `limit`, `nextCursor` is PRESERVED: the events cursor is
+ * offset-based, so resuming from it re-includes any trimmed tail rather than
+ * skipping it. This prevents both the original skip bug and the stall
+ * (drop-cursor) regression.
  *
  * @param orgSlug - Organization slug for region routing
  * @param issueId - Numeric issue ID
@@ -214,17 +226,18 @@ export async function listIssueEvents(
   const { limit = 25, query, full, cursor, statsPeriod, start, end } = options;
 
   const config = await getOrgSdkConfig(orgSlug);
+  const perPage = Math.min(limit, API_MAX_PER_PAGE);
 
   const allEvents: IssueEvent[] = [];
   let currentCursor = cursor;
   let nextCursor: string | undefined;
 
-  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
     const result = await listAnIssue_sEvents({
       ...config,
       path: {
         organization_id_or_slug: orgSlug,
-        issue_id: Number(issueId),
+        issue_id: issueId,
       },
       query: {
         query: query || undefined,
@@ -233,7 +246,10 @@ export async function listIssueEvents(
         statsPeriod,
         start,
         end,
-      },
+        // `per_page` is accepted at runtime but absent from the generated query
+        // type, so widen via cast.
+        per_page: perPage,
+      } as Parameters<typeof listAnIssue_sEvents>[0]["query"],
     });
 
     const paginated = unwrapPaginatedResult(
@@ -250,12 +266,10 @@ export async function listIssueEvents(
     currentCursor = nextCursor;
   }
 
-  // Trim to exact limit. Unlike listIssuesAllPages (which controls per_page),
-  // the issue events endpoint has no per-page parameter, so the API may return
-  // more items than requested. We preserve nextCursor so the command-level
-  // cursor stack can navigate to subsequent pages.
-  const trimmed =
-    allEvents.length > limit ? allEvents.slice(0, limit) : allEvents;
-
-  return { data: trimmed, nextCursor };
+  // Trim to limit but PRESERVE nextCursor. The events cursor is offset-based,
+  // so resuming from it re-includes any trimmed tail rather than skipping it.
+  // Preserving the cursor lets `-c next` advance; dropping it would strand all
+  // events past the first page.
+  const data = allEvents.length > limit ? allEvents.slice(0, limit) : allEvents;
+  return { data, nextCursor };
 }

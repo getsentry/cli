@@ -5,6 +5,7 @@ import {
   UnexpectedPositionalError,
   UnsatisfiedPositionalError,
 } from "@stricli/core";
+import { alertRoute } from "./commands/alert/index.js";
 import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
 import { whoamiCommand } from "./commands/auth/whoami.js";
@@ -21,8 +22,11 @@ import { listCommand as issueListCommand } from "./commands/issue/list.js";
 import { localRoute } from "./commands/local/index.js";
 import { logRoute } from "./commands/log/index.js";
 import { listCommand as logListCommand } from "./commands/log/list.js";
+import { monitorRoute } from "./commands/monitor/index.js";
+import { listCommand as monitorListCommand } from "./commands/monitor/list.js";
 import { orgRoute } from "./commands/org/index.js";
 import { listCommand as orgListCommand } from "./commands/org/list.js";
+import { proguardRoute } from "./commands/proguard/index.js";
 import { projectRoute } from "./commands/project/index.js";
 import { listCommand as projectListCommand } from "./commands/project/list.js";
 import { releaseRoute } from "./commands/release/index.js";
@@ -32,6 +36,8 @@ import { listCommand as replayListCommand } from "./commands/replay/list.js";
 import { repoRoute } from "./commands/repo/index.js";
 import { listCommand as repoListCommand } from "./commands/repo/list.js";
 import { schemaCommand } from "./commands/schema.js";
+import { sendEnvelopeCommand } from "./commands/send-envelope.js";
+import { sendEventCommand } from "./commands/send-event.js";
 import { sourcemapRoute } from "./commands/sourcemap/index.js";
 import { spanRoute } from "./commands/span/index.js";
 import { listCommand as spanListCommand } from "./commands/span/list.js";
@@ -73,6 +79,7 @@ const PLURAL_TO_SINGULAR: Record<string, string> = {
   repos: "repo",
   teams: "team",
   logs: "log",
+  monitors: "monitor",
   replays: "replay",
 
   spans: "span",
@@ -84,11 +91,13 @@ const PLURAL_TO_SINGULAR: Record<string, string> = {
 export const routes = buildRouteMap({
   routes: {
     help: helpCommand,
+    alert: alertRoute,
     auth: authRoute,
     cli: cliRoute,
     dashboard: dashboardRoute,
     org: orgRoute,
     project: projectRoute,
+    proguard: proguardRoute,
     replay: replayRoute,
     release: releaseRoute,
     repo: repoRoute,
@@ -98,6 +107,7 @@ export const routes = buildRouteMap({
     events: eventListCommand,
     explore: exploreCommand,
     log: logRoute,
+    monitor: monitorRoute,
     sourcemap: sourcemapRoute,
     sourcemaps: sourcemapRoute,
     span: spanRoute,
@@ -107,6 +117,9 @@ export const routes = buildRouteMap({
     local: localRoute,
     api: apiCommand,
     schema: schemaCommand,
+    // Backward-compat aliases for old sentry-cli — hidden from help
+    "send-event": sendEventCommand,
+    "send-envelope": sendEnvelopeCommand,
     dashboards: dashboardListCommand,
     issues: issueListCommand,
     orgs: orgListCommand,
@@ -116,6 +129,7 @@ export const routes = buildRouteMap({
     repos: repoListCommand,
     teams: teamListCommand,
     logs: logListCommand,
+    monitors: monitorListCommand,
     spans: spanListCommand,
     traces: traceListCommand,
     trials: trialListCommand,
@@ -138,11 +152,14 @@ export const routes = buildRouteMap({
       repos: true,
       teams: true,
       logs: true,
+      monitors: true,
       spans: true,
       traces: true,
       trials: true,
       sourcemaps: true,
       whoami: true,
+      "send-event": true,
+      "send-envelope": true,
     },
   },
 });
@@ -359,6 +376,10 @@ export const app = buildApplication(routes, {
   },
   scanner: {
     caseStyle: "allow-kebab-for-camel",
+    // Allow `--` to stop flag parsing so wrapper commands (e.g.
+    // `sentry monitor run <slug> -- <command>`) can pass through flags
+    // like `-e` or `--verbose` to the wrapped command unambiguously.
+    allowArgumentEscapeSequence: true,
   },
   determineExitCode: getExitCode,
   localization: {

@@ -14,6 +14,7 @@ import {
   apiRequest,
   apiRequestToRegion,
   createProject,
+  createProjectWithAutoTeam,
   createTeam,
   getCurrentUser,
   getDetailedTrace,
@@ -35,6 +36,7 @@ import {
   listTeamsPaginated,
   listTraceLogs,
   listTransactions,
+  MEMBER_PROJECT_CREATION_DISABLED_DETAIL,
   rawApiRequest,
   tryGetPrimaryDsn,
   updateIssueStatus,
@@ -677,6 +679,84 @@ describe("projects.ts", () => {
         name: "New Project",
       });
       expect(result.slug).toBe("new-project");
+    });
+  });
+
+  describe("createProjectWithAutoTeam", () => {
+    const autoTeamProject = {
+      id: "99",
+      slug: "auto-proj",
+      name: "Auto Project",
+      platform: "node",
+      dateCreated: "2026-01-01T00:00:00Z",
+      team_slug: "team-testuser",
+    };
+    const dsnKeys = [
+      {
+        id: "k1",
+        isActive: true,
+        dsn: { public: "https://key@o1.ingest.sentry.io/99", secret: "" },
+      },
+    ];
+
+    test("POSTs to /organizations/{org}/projects/ and returns project with DSN and team_slug", async () => {
+      globalThis.fetch = mockFetch(async (input, init) => {
+        const req = new Request(input!, init);
+        if (req.url.includes("/projects/") && req.method === "POST") {
+          return new Response(JSON.stringify(autoTeamProject), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        // DSN key fetch
+        return new Response(JSON.stringify(dsnKeys), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+      const result = await createProjectWithAutoTeam("test-org", {
+        name: "Auto Project",
+      });
+      expect(result.project.slug).toBe("auto-proj");
+      expect(result.team_slug).toBe("team-testuser");
+      expect(result.dsn).toContain("key");
+      expect(result.url).toContain("auto-proj");
+    });
+
+    test("propagates 403 when org has disabled member project creation", async () => {
+      globalThis.fetch = mockFetch(
+        async () =>
+          new Response(
+            JSON.stringify({ detail: MEMBER_PROJECT_CREATION_DISABLED_DETAIL }),
+            { status: 403, headers: { "Content-Type": "application/json" } }
+          )
+      );
+
+      await expect(
+        createProjectWithAutoTeam("test-org", { name: "Blocked" })
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    test("returns dsn:null when DSN fetch fails", async () => {
+      globalThis.fetch = mockFetch(async (input, init) => {
+        const req = new Request(input!, init);
+        if (req.method === "POST") {
+          return new Response(JSON.stringify(autoTeamProject), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("[]", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+      const result = await createProjectWithAutoTeam("test-org", {
+        name: "Auto Project",
+      });
+      expect(result.dsn).toBeNull();
     });
   });
 

@@ -27,6 +27,7 @@ import {
   buildIgnoreMatcher,
   diagnoseEmptyDiscovery,
   discoverFilePairs,
+  type InjectResult,
   injectDirectory,
 } from "../../lib/sourcemap/inject.js";
 
@@ -103,6 +104,102 @@ function stripPrefix(path: string, prefix: string): string {
     return path.slice(prefix.length);
   }
   return path;
+}
+
+/** Context shared across artifact-file construction for one upload. */
+type ArtifactContext = {
+  /** Absolute upload directory (paths are made relative to this). */
+  resolvedDir: string;
+  /** URL prefix applied to every artifact URL (e.g. `"~/"`). */
+  urlPrefix: string;
+  /** Directory prefix to strip from relative paths (may be empty). */
+  pathPrefixToStrip: string;
+  /** True when `--no-rewrite` is set (upload as-is, no debug IDs injected). */
+  noRewrite: boolean;
+};
+
+/** Compute a JS file's URL-space relative path (post-strip, forward slashes). */
+function jsRelativePath(jsPath: string, ctx: ArtifactContext): string {
+  const rel = relative(ctx.resolvedDir, jsPath).replaceAll("\\", "/");
+  return ctx.pathPrefixToStrip ? stripPrefix(rel, ctx.pathPrefixToStrip) : rel;
+}
+
+/**
+ * Build the `minified_source` + `source_map` artifact pair for a discovered
+ * file, dispatching on whether the sourcemap is inline or an external file.
+ */
+function buildArtifactPair(
+  result: InjectResult,
+  ctx: ArtifactContext
+): ArtifactFile[] {
+  const { jsPath, map, debugId } = result;
+  const jsRelative = jsRelativePath(jsPath, ctx);
+  const debugIdField = debugId ? { debugId } : {};
+
+  if (map.kind === "inline") {
+    // Resolve the map bytes to upload:
+    // - rewrite path: inject produced the debug-ID-injected map.
+    // - --no-rewrite: upload the original inline map decoded at discovery.
+    // - rewrite aborted (directive not found): no `injectedMapContent` and not
+    //   --no-rewrite → the JS was left unmodified, so upload nothing for it
+    //   rather than attaching a debug ID / map the bundle doesn't carry.
+    let content = result.injectedMapContent;
+    if (!content) {
+      if (ctx.noRewrite) {
+        content = Buffer.from(map.decoded.json);
+      } else {
+        return [];
+      }
+    }
+    // Synthetic map URL — the server matches by debug ID, so the filename is
+    // cosmetic. Derived from the (post-strip) JS URL.
+    const mapRelative = `${jsRelative}.map`;
+    return [
+      {
+        path: jsPath,
+        ...debugIdField,
+        type: "minified_source",
+        url: `${ctx.urlPrefix}${jsRelative}`,
+        sourcemapFilename: posixRelative(posixDirname(jsRelative), mapRelative),
+      },
+      {
+        // path is informational for inline maps; content is used instead.
+        path: jsPath,
+        content,
+        ...debugIdField,
+        type: "source_map",
+        url: `${ctx.urlPrefix}${mapRelative}`,
+      },
+    ];
+  }
+
+  // External map on disk.
+  let mapRelative = relative(ctx.resolvedDir, map.mapPath).replaceAll(
+    "\\",
+    "/"
+  );
+  if (ctx.pathPrefixToStrip) {
+    mapRelative = stripPrefix(mapRelative, ctx.pathPrefixToStrip);
+  }
+  return [
+    {
+      path: jsPath,
+      // Empty debugId when --no-rewrite: files uploaded without debug IDs,
+      // relying on release/URL-based matching instead.
+      ...debugIdField,
+      type: "minified_source",
+      url: `${ctx.urlPrefix}${jsRelative}`,
+      // Sourcemap header is resolved relative to the JS file's URL. Compute
+      // from post-strip URL-space paths so --strip-prefix doesn't break it.
+      sourcemapFilename: posixRelative(posixDirname(jsRelative), mapRelative),
+    },
+    {
+      path: map.mapPath,
+      ...debugIdField,
+      type: "source_map",
+      url: `${ctx.urlPrefix}${mapRelative}`,
+    },
+  ];
 }
 
 export const uploadCommand = buildCommand({
@@ -281,8 +378,14 @@ export const uploadCommand = buildCommand({
     }
     const { org, project } = resolved;
 
-    const results = flags["no-rewrite"]
-      ? pairs.map((p) => ({ ...p, injected: false, debugId: "" }))
+    const results: InjectResult[] = flags["no-rewrite"]
+      ? pairs.map((p) => ({
+          jsPath: p.jsPath,
+          map: p.map,
+          mapPath: p.map.kind === "external" ? p.map.mapPath : undefined,
+          injected: false,
+          debugId: "",
+        }))
       : await injectDirectory(dir, {
           extensions,
           ignoreMatcher,
@@ -300,49 +403,24 @@ export const uploadCommand = buildCommand({
       pathPrefixToStrip = `${pathPrefixToStrip}/`;
     }
     if (flags["strip-common-prefix"]) {
-      const allRelative = results.flatMap(({ jsPath, mapPath }) => [
-        relative(resolvedDir, jsPath).replaceAll("\\", "/"),
-        relative(resolvedDir, mapPath).replaceAll("\\", "/"),
-      ]);
+      // Only the JS path participates for inline maps (no standalone .map file).
+      const allRelative = results.flatMap((r) => {
+        const rels = [relative(resolvedDir, r.jsPath).replaceAll("\\", "/")];
+        if (r.mapPath) {
+          rels.push(relative(resolvedDir, r.mapPath).replaceAll("\\", "/"));
+        }
+        return rels;
+      });
       pathPrefixToStrip = computeCommonPrefix(allRelative);
     }
 
-    const artifactFiles: ArtifactFile[] = results.flatMap(
-      ({ jsPath, mapPath, debugId }) => {
-        // Normalize to forward slashes for URLs (handles Windows backslashes)
-        let jsRelative = relative(resolvedDir, jsPath).replaceAll("\\", "/");
-        let mapRelative = relative(resolvedDir, mapPath).replaceAll("\\", "/");
-
-        if (pathPrefixToStrip) {
-          jsRelative = stripPrefix(jsRelative, pathPrefixToStrip);
-          mapRelative = stripPrefix(mapRelative, pathPrefixToStrip);
-        }
-
-        // Sourcemap header is resolved relative to the JS file's URL.
-        // Compute from post-strip URL-space paths so --strip-prefix
-        // doesn't break the reference.
-        const sourcemapRef = posixRelative(
-          posixDirname(jsRelative),
-          mapRelative
-        );
-        return [
-          {
-            path: jsPath,
-            // Empty debugId when --no-rewrite: files uploaded without debug IDs,
-            // relying on release/URL-based matching instead.
-            ...(debugId ? { debugId } : {}),
-            type: "minified_source" as const,
-            url: `${urlPrefix}${jsRelative}`,
-            sourcemapFilename: sourcemapRef,
-          },
-          {
-            path: mapPath,
-            ...(debugId ? { debugId } : {}),
-            type: "source_map" as const,
-            url: `${urlPrefix}${mapRelative}`,
-          },
-        ] satisfies ArtifactFile[];
-      }
+    const artifactFiles: ArtifactFile[] = results.flatMap((result) =>
+      buildArtifactPair(result, {
+        resolvedDir,
+        urlPrefix,
+        pathPrefixToStrip,
+        noRewrite: flags["no-rewrite"] ?? false,
+      })
     );
 
     await uploadSourcemaps({
@@ -353,12 +431,19 @@ export const uploadCommand = buildCommand({
       files: artifactFiles,
     });
 
+    // Count actually-uploaded pairs (one minified_source entry per pair).
+    // buildArtifactPair returns no entries for inline pairs whose rewrite was
+    // aborted, so this excludes skipped pairs that results.length would count.
+    const filesUploaded = artifactFiles.filter(
+      (f) => f.type === "minified_source"
+    ).length;
+
     yield new CommandOutput<UploadCommandResult>({
       org,
       project,
       release: flags.release,
       dist: flags.dist,
-      filesUploaded: results.length,
+      filesUploaded,
     });
   },
 });

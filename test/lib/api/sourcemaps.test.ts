@@ -132,6 +132,32 @@ describe("buildArtifactBundle", () => {
     expect(bytes.readUInt16LE(LOCAL_HEADER_METHOD_OFFSET)).toBe(0);
   });
 
+  test("uses in-memory content and never reads disk for inline maps", async () => {
+    const mapBytes = Buffer.from(
+      JSON.stringify({ version: 3, sources: [], mappings: "AAAA" })
+    );
+    const out = join(tmpDir, "bundle-inline.zip");
+    // `path` points at a nonexistent file — must not be read because
+    // `content` is provided.
+    await buildArtifactBundle(
+      out,
+      [
+        {
+          path: join(tmpDir, "does-not-exist.map"),
+          content: mapBytes,
+          debugId: "00000000-0000-0000-0000-000000000002",
+          type: "source_map" as const,
+          url: "~/app.js.map",
+        },
+      ],
+      { org: "o", project: "p", compression: "stored" }
+    );
+
+    // Build succeeded (no ENOENT) and the STORED archive contains the bytes.
+    const bytes = await readFile(out);
+    expect(bytes.includes(mapBytes)).toBe(true);
+  });
+
   test("STORED archive is larger than DEFLATE for the same redundant input", async () => {
     const files = await makePair();
     const deflateOut = join(tmpDir, "bundle-deflate.zip");

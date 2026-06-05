@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-sourcemap
-version: 0.35.0-dev.0
+version: 0.36.0-dev.0
 description: Manage sourcemaps
 requires:
   bins: ["sentry"]
@@ -64,6 +64,26 @@ sentry sourcemap upload ./dist --release 1.0.0
 sentry sourcemap upload ./dist --url-prefix '~/static/js/'
 
 sentry sourcemap upload ./dist --allow-empty
+```
+
+### `sentry sourcemap resolve <directory>`
+
+Resolve and report sourcemap linkage for JavaScript files
+
+**Flags:**
+- `--ext <value> - Comma-separated file extensions to process (default: .js,.cjs,.mjs)`
+- `--ignore <value> - Comma-separated glob patterns to exclude (gitignore-style)`
+- `--ignore-file <value> - Path to a file with gitignore-style patterns to exclude`
+
+**Examples:**
+
+```bash
+# Report how each JS file's sourcemap resolves and whether a debug ID
+# has been injected (read-only — never modifies files)
+sentry sourcemap resolve ./dist
+
+# Machine-readable output
+sentry sourcemap resolve ./dist --json
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

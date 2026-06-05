@@ -132,13 +132,18 @@ function isStandaloneCommand(route: RouteInfo): boolean {
 
 /**
  * Get subcommand names for a route group (e.g., "list, view, create").
- * Extracts the last path segment from each command's path.
+ * Extracts the last path segment from each command's path, deduplicated
+ * and sorted (nested routes like `issues` / `metrics` would otherwise repeat
+ * the same subcommand list twice, e.g. for `alert/`).
  */
-function getSubcommandNames(route: RouteInfo): string[] {
-  return route.commands.map((cmd) => {
+function getSubcommandLabel(route: RouteInfo): string {
+  const raw = route.commands.map((cmd) => {
     const parts = cmd.path.split(" ");
     return parts.at(-1) ?? route.name;
   });
+  return Array.from(new Set(raw))
+    .sort((a, b) => a.localeCompare(b))
+    .join(", ");
 }
 
 /**
@@ -177,7 +182,7 @@ function generateProjectStructure(allRoutes: RouteInfo[]): string {
 
   // Render group directories (always use ├── since standalones follow)
   for (const route of groups) {
-    const subcmds = getSubcommandNames(route).join(", ");
+    const subcmds = getSubcommandLabel(route);
     lines.push(`│   │   ├── ${`${route.name}/`.padEnd(13)}# ${subcmds}`);
   }
 
@@ -261,39 +266,100 @@ function generateScopesInline(scopes: readonly string[]): string {
 // Section: Prerequisites (README.md, contributing.md)
 // ---------------------------------------------------------------------------
 
-const BUN_VERSION_RE = /bun@(\d+\.\d+)/;
+const PNPM_VERSION_RE = /pnpm@(\d+\.\d+)/;
 const SEMVER_RE = /(\d+\.\d+)/;
 
 /**
- * Extract the Bun major.minor version from the `packageManager` field.
- * `bun@1.3.13` → `1.3`
+ * Extract the pnpm major.minor version from the `packageManager` field.
+ * `pnpm@10.11.0` → `10.11`
+ *
+ * Throws if `packageManager` doesn't match the expected format —
+ * silent fallbacks caused stale Bun prerequisites after the Bun→Node migration.
  */
-function extractBunVersion(): string {
+function extractPnpmVersion(): string {
   const pm: string = pkg.packageManager ?? "";
-  const match = pm.match(BUN_VERSION_RE);
-  return match ? match[1] : "1.3";
+  const match = pm.match(PNPM_VERSION_RE);
+  if (!match) {
+    throw new Error(
+      `Cannot extract pnpm version from packageManager: "${pm}". ` +
+        "Expected format: pnpm@X.Y.Z"
+    );
+  }
+  return match[1];
 }
 
-/** Extract the Node.js minimum version from `engines.node` (e.g., `>=22.12` → `22.12`). */
+/**
+ * Extract the Node.js minimum version from `engines.node`.
+ * `>=22.15` → `22.15`
+ *
+ * Throws if `engines.node` is missing or doesn't contain a semver-like version.
+ */
 function extractNodeVersion(): string {
-  const constraint: string = pkg.engines?.node ?? ">=22.12";
+  const constraint: string | undefined = pkg.engines?.node;
+  if (!constraint) {
+    throw new Error("Missing engines.node in package.json");
+  }
   const match = constraint.match(SEMVER_RE);
-  return match ? match[1] : "22.12";
+  if (!match) {
+    throw new Error(
+      `Cannot extract Node.js version from engines.node: "${constraint}". ` +
+        "Expected a semver-like version (e.g., >=22.15)"
+    );
+  }
+  return match[1];
 }
 
-/** Generate dev prerequisite line for README.md and contributing.md. */
+/** Generate dev prerequisite line for README.md. */
 function generateDevPrereq(): string {
-  return `- [Bun](https://bun.sh) v${extractBunVersion()}+`;
+  return `- [Node.js](https://nodejs.org) v${extractNodeVersion()}+ and [pnpm](https://pnpm.io) v${extractPnpmVersion()}+`;
 }
 
-/** Also used by contributing.md (same content, different phrasing). */
+/** Generate dev prerequisite lines for contributing.md. */
 function generateDevPrereqContributing(): string {
-  return `- [Bun](https://bun.sh) runtime (v${extractBunVersion()} or later)`;
+  return [
+    `- [Node.js](https://nodejs.org) (v${extractNodeVersion()} or later)`,
+    `- [pnpm](https://pnpm.io) (v${extractPnpmVersion()} or later)`,
+  ].join("\n");
 }
 
 /** Generate the library-usage prerequisite line for README.md. */
 function generateLibraryPrereq(): string {
-  return `Use Sentry CLI programmatically in Node.js (≥${extractNodeVersion()}) or Bun without spawning a subprocess:`;
+  return `Use Sentry CLI programmatically in Node.js (≥${extractNodeVersion()}) without spawning a subprocess:`;
+}
+
+/** Generate dev prerequisite lines for DEVELOPMENT.md. */
+function generateDevPrereqDevelopment(): string {
+  return [
+    `- [Node.js](https://nodejs.org/) v${extractNodeVersion()}+ installed`,
+    `- [pnpm](https://pnpm.io/) v${extractPnpmVersion()}+ installed`,
+  ].join("\n");
+}
+
+/** Generate build toolchain description for DEVELOPMENT.md. */
+function generateBuildToolchain(): string {
+  return [
+    "Build the native binary (uses esbuild for bundling and fossilize for Node SEA packaging):",
+    "",
+    "```bash",
+    "pnpm run build",
+    "```",
+  ].join("\n");
+}
+
+/** Generate build commands section for contributing.md. */
+function generateBuildCommands(): string {
+  return [
+    "```bash",
+    "# Build for current platform (uses esbuild + fossilize for Node SEA packaging)",
+    "pnpm run build",
+    "",
+    "# Build for all platforms",
+    "pnpm run build:all",
+    "",
+    "# Create npm bundle",
+    "pnpm run bundle",
+    "```",
+  ].join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -491,6 +557,21 @@ const sections: SectionDef[] = [
     filePath: "docs/src/content/docs/contributing.md",
     sectionName: "dev-prereq",
     generate: generateDevPrereqContributing,
+  },
+  {
+    filePath: "DEVELOPMENT.md",
+    sectionName: "dev-prereq",
+    generate: generateDevPrereqDevelopment,
+  },
+  {
+    filePath: "DEVELOPMENT.md",
+    sectionName: "build-toolchain",
+    generate: generateBuildToolchain,
+  },
+  {
+    filePath: "docs/src/content/docs/contributing.md",
+    sectionName: "build-commands",
+    generate: generateBuildCommands,
   },
   // -- Dev scripts (README.md) --
   {

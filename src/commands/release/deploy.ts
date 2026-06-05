@@ -21,6 +21,9 @@ import { resolveOrg } from "../../lib/resolve-target.js";
 import type { SentryDeploy } from "../../types/index.js";
 import { parseReleaseArg } from "./parse.js";
 
+const USAGE_HINT =
+  "sentry release deploy [<org>/]<version> <environment> [name]";
+
 function formatDeployCreated(data: Record<string, unknown>): string {
   if (data.dryRun) {
     return renderMarkdown(
@@ -49,37 +52,34 @@ function formatDeployCreated(data: Record<string, unknown>): string {
 }
 
 /**
- * Parse the deploy positional args: `[org/]version environment [name]`
+ * Parse the deploy positionals: `[org/]version`, `environment`, optional `name`.
  *
  * The first arg is parsed as the release target (version with optional org prefix).
- * The second arg is the required environment.
- * The third arg is an optional deploy name.
+ * The second arg is the required environment. The third is an optional deploy
+ * name — multi-word names must be quoted (e.g. `"Deploy #42"`), matching standard
+ * CLI conventions and avoiding the silent `args.join(" ")` defect.
+ *
+ * @param target - The `[<org>/]<version>` release target
+ * @param environment - The deploy environment
+ * @param name - Optional deploy name
  */
-function parseDeployArgs(args: string[]): {
+function parseDeployArgs(
+  target: string,
+  environment: string,
+  name?: string
+): {
   version: string;
   orgSlug?: string;
   environment: string;
   name?: string;
 } {
-  const first = args[0];
-  const second = args[1];
-  if (!(first && second)) {
-    throw new ContextError(
-      "Release version and environment",
-      "sentry release deploy [<org>/]<version> <environment> [name]",
-      []
-    );
+  if (!(target && environment)) {
+    throw new ContextError("Release version and environment", USAGE_HINT, []);
   }
 
-  const { version, orgSlug } = parseReleaseArg(
-    first,
-    "sentry release deploy [<org>/]<version> <environment>"
-  );
+  const { version, orgSlug } = parseReleaseArg(target, USAGE_HINT);
 
-  const environment = second;
-  const name = args.length > 2 ? args.slice(2).join(" ") : undefined;
-
-  return { version, orgSlug, environment, name };
+  return { version, orgSlug, environment, name: name || undefined };
 }
 
 export const deployCommand = buildCommand({
@@ -99,12 +99,26 @@ export const deployCommand = buildCommand({
   },
   parameters: {
     positional: {
-      kind: "array",
-      parameter: {
-        placeholder: "org/version environment name",
-        brief: "[<org>/]<version> <environment> [name]",
-        parse: String,
-      },
+      kind: "tuple",
+      parameters: [
+        {
+          placeholder: "org/version",
+          brief: "[<org>/]<version> - Release version",
+          parse: String,
+        },
+        {
+          placeholder: "environment",
+          brief: "Deploy environment (e.g. production)",
+          parse: String,
+        },
+        {
+          placeholder: "name",
+          brief:
+            'Optional deploy name (quote multi-word names, e.g. "Deploy #42")',
+          parse: String,
+          optional: true,
+        },
+      ],
     },
     flags: {
       url: {
@@ -136,6 +150,7 @@ export const deployCommand = buildCommand({
     },
     aliases: { ...DRY_RUN_ALIASES, t: "time" },
   },
+  // biome-ignore lint/nursery/useMaxParams: Stricli maps each `kind: "tuple"` positional to a named func param; deploy legitimately takes version + environment + optional name.
   async *func(
     this: SentryContext,
     flags: {
@@ -147,17 +162,20 @@ export const deployCommand = buildCommand({
       readonly json: boolean;
       readonly fields?: string[];
     },
-    ...args: string[]
+    target: string,
+    environmentArg: string,
+    nameArg?: string
   ) {
     const { cwd } = this;
 
-    const { version, orgSlug, environment, name } = parseDeployArgs(args);
+    const { version, orgSlug, environment, name } = parseDeployArgs(
+      target,
+      environmentArg,
+      nameArg
+    );
     const resolved = await resolveOrg({ org: orgSlug, cwd });
     if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry release deploy [<org>/]<version> <environment>"
-      );
+      throw new ContextError("Organization", USAGE_HINT);
     }
 
     const body: Parameters<typeof createReleaseDeploy>[2] = { environment };

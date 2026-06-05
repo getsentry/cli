@@ -976,6 +976,13 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     );
   }
 
+  function staleRunError(): Error {
+    return new Error(
+      "HTTP error! status: 500 - " +
+        JSON.stringify({ error: "This workflow run was not suspended" })
+    );
+  }
+
   test("recovers when server has already advanced to the next step", async () => {
     mockStartResult = {
       status: "suspended",
@@ -1005,13 +1012,37 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     expect(resumeCount).toBe(1);
   });
 
-  test("throws immediately when stale-step error occurs and runById fails", async () => {
+  test("recovers from run-level not-suspended errors after transient runById failure", async () => {
     mockStartResult = {
       status: "suspended",
       suspended: [["tool-step"]],
       steps: { "tool-step": { suspendPayload: toolPayload } },
     };
-    // runById is unreachable — recovery fails, wizard throws without retrying.
+    runByIdMock
+      .mockRejectedValueOnce(new Error("D1 snapshot not ready"))
+      .mockResolvedValueOnce({ status: "success" });
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      return Promise.reject(staleRunError());
+    });
+
+    await runWizard(makeOptions());
+
+    expect(formatResultSpy).toHaveBeenCalled();
+    expect(runByIdMock).toHaveBeenCalledTimes(2);
+    expect(resumeCount).toBe(1);
+  });
+
+  test("throws when stale-step error occurs and runById keeps failing", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+    // runById is unreachable — recovery fails, wizard throws without retrying
+    // the stale resume request.
     mockRunByIdResult = new Error("runById network error");
 
     let resumeCount = 0;
@@ -1022,9 +1053,9 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
 
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
-    // Threw immediately after recovery failed — no futile retries of the stale step.
+    // Threw after recovery polling failed — no futile retries of the stale step.
     expect(resumeCount).toBe(1);
-    expect(runByIdMock).toHaveBeenCalledTimes(1);
+    expect(runByIdMock).toHaveBeenCalledTimes(4);
   });
 });
 

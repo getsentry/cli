@@ -10,7 +10,8 @@ We welcome contributions to the Sentry CLI! This guide will help you get started
 ### Prerequisites
 
 <!-- GENERATED:START dev-prereq -->
-- [Bun](https://bun.sh) runtime (v1.3 or later)
+- [Node.js](https://nodejs.org) (v22.15 or later)
+- [pnpm](https://pnpm.io) (v10.11 or later)
 <!-- GENERATED:END dev-prereq -->
 - Git
 
@@ -51,22 +52,25 @@ cli/
 │   ├── app.ts          # Stricli application setup
 │   ├── context.ts      # Dependency injection context
 │   ├── commands/       # CLI commands
+│   │   ├── alert/       # create, delete, edit, list, view
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
 │   │   ├── cli/         # defaults, feedback, fix, import, setup, upgrade
-│   │   ├── dashboard/   # list, view, create, add, edit, delete, revisions, restore
-│   │   ├── event/       # view, list
-│   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, archive, merge
-│   │   ├── local/       # serve, run
+│   │   ├── dashboard/   # add, create, delete, edit, list, restore, revisions, view
+│   │   ├── event/       # list, send, view
+│   │   ├── issue/       # archive, events, explain, list, merge, plan, resolve, unresolve, view
+│   │   ├── local/       # run, serve
 │   │   ├── log/         # list, view
+│   │   ├── monitor/     # list, run
 │   │   ├── org/         # list, view
+│   │   ├── proguard/    # uuid
 │   │   ├── project/     # create, delete, list, view
-│   │   ├── release/     # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
+│   │   ├── release/     # archive, create, delete, deploy, deploys, finalize, list, propose-version, restore, set-commits, view
 │   │   ├── replay/      # list, view
 │   │   ├── repo/        # list
-│   │   ├── sourcemap/   # inject, upload
+│   │   ├── sourcemap/   # inject, resolve, upload
 │   │   ├── span/        # list, view
 │   │   ├── team/        # list
-│   │   ├── trace/       # list, view, logs
+│   │   ├── trace/       # list, logs, view
 │   │   ├── trial/       # list, start
 │   │   ├── api.ts       # Make an authenticated API request
 │   │   ├── explore.ts   # Query aggregate event data (Explore)
@@ -84,8 +88,9 @@ cli/
 
 ## Building
 
+<!-- GENERATED:START build-commands -->
 ```bash
-# Build for current platform (requires Bun for native binary compilation)
+# Build for current platform (uses esbuild + fossilize for Node SEA packaging)
 pnpm run build
 
 # Build for all platforms
@@ -94,6 +99,7 @@ pnpm run build:all
 # Create npm bundle
 pnpm run bundle
 ```
+<!-- GENERATED:END build-commands -->
 
 ## Testing
 

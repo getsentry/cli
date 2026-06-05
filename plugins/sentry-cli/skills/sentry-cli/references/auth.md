@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-auth
-version: 0.35.0-dev.0
+version: 0.36.0-dev.0
 description: Authenticate with Sentry
 requires:
   bins: ["sentry"]
@@ -20,6 +20,8 @@ Authenticate with Sentry
 - `--timeout <value> - Timeout for OAuth flow in seconds (default: 900) - (default: "900")`
 - `--force - Re-authenticate without prompting`
 - `--url <value> - Sentry instance URL to authenticate against (e.g. https://sentry.example.com). Required for self-hosted; defaults to SaaS (https://sentry.io).`
+- `--read-only - Request only read-only OAuth scopes (project:read, org:read, event:read, member:read, team:read). Useful for handing tokens to AI agents or CI jobs that should not be able to mutate Sentry state.`
+- `-s, --scope <value>... - Request specific OAuth scopes (repeatable, comma-separated). E.g. --scope project:read --scope org:read. Overrides the default scope set.`
 
 **Examples:**
 
@@ -49,6 +51,8 @@ Refresh your authentication token
 
 **Flags:**
 - `--force - Force refresh even if token is still valid`
+- `--read-only - Re-authenticate with read-only OAuth scopes (project:read, org:read, event:read, member:read, team:read)`
+- `-s, --scope <value>... - Re-authenticate with specific OAuth scopes (repeatable, comma-separated). E.g. --scope project:read --scope org:read`
 
 **Examples:**
 

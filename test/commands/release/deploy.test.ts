@@ -99,14 +99,8 @@ describe("release deploy", () => {
 
     const { context } = createMockContext();
     const func = await deployCommand.loader();
-    await func.call(
-      context,
-      { json: true },
-      "1.0.0",
-      "staging",
-      "Deploy",
-      "#42"
-    );
+    // Multi-word deploy names are passed as a single quoted positional.
+    await func.call(context, { json: true }, "1.0.0", "staging", "Deploy #42");
 
     expect(createRelaseDeploySpy).toHaveBeenCalledWith(
       "my-org",

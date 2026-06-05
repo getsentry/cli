@@ -81,9 +81,9 @@ describe("getCommandSuggestion", () => {
     expect(getCommandSuggestion("cli", "logs")?.command).toContain("log list");
   });
 
-  test("suggests api for 'cli/send-event'", () => {
+  test("suggests send-event for 'cli/send-event'", () => {
     expect(getCommandSuggestion("cli", "send-event")?.command).toContain(
-      "sentry api"
+      "sentry event send"
     );
   });
 

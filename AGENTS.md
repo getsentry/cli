@@ -4,7 +4,7 @@ Guidelines for AI agents working in this codebase.
 
 ## Project Overview
 
-**Sentry CLI** is a command-line interface for [Sentry](https://sentry.io), built with [Node.js](https://nodejs.org) and [Stricli](https://bloomberg.github.io/stricli/).
+**Sentry CLI** is a command-line interface for [Sentry](https://sentry.io), built with [Bun](https://bun.sh) and [Stricli](https://bloomberg.github.io/stricli/).
 
 ### Goals
 
@@ -12,7 +12,7 @@ Guidelines for AI agents working in this codebase.
 - **AI-powered debugging** - Integrate Seer AI for root cause analysis and fix plans
 - **Developer-friendly** - Follow `gh` CLI conventions for intuitive UX
 - **Agent-friendly** - JSON output and predictable behavior for AI coding agents
-- **Fast** - Native binaries via Node SEA, SQLite caching for API responses
+- **Fast** - Native binaries via Bun, SQLite caching for API responses
 
 ### Key Features
 
@@ -28,6 +28,7 @@ Guidelines for AI agents working in this codebase.
 
 Before working on this codebase, read the Cursor rules:
 
+- **`.cursor/rules/bun-cli.mdc`** - Bun API usage, file I/O, process spawning, testing
 - **`.cursor/rules/ultracite.mdc`** - Code style, formatting, linting rules
 
 ## Quick Reference: Commands
@@ -36,199 +37,98 @@ Before working on this codebase, read the Cursor rules:
 
 ```bash
 # Development
-pnpm install                              # Install dependencies
-pnpm run dev                              # Run CLI in dev mode
-pnpm run cli                              # Run CLI directly via tsx
+bun install                              # Install dependencies
+bun run dev                              # Run CLI in dev mode
+bun run --env-file=.env.local src/bin.ts # Dev with env vars
 
 # Build
-pnpm run build                            # Build for current platform
-pnpm run build:all                        # Build for all platforms
+bun run build                            # Build for current platform
+bun run build:all                        # Build for all platforms
 
 # Type Checking
-pnpm run typecheck                        # Check types
+bun run typecheck                        # Check types
 
 # Linting & Formatting
-pnpm run lint                             # Check for issues
-pnpm run lint:fix                         # Auto-fix issues (run before committing)
+bun run lint                             # Check for issues
+bun run lint:fix                         # Auto-fix issues (run before committing)
 
 # Testing
-pnpm test                                 # Run all tests
-pnpm test -- path/to/file.test.ts         # Run single test file
-pnpm run test:unit                        # Run unit tests only
-pnpm run test:e2e                         # Run e2e tests only
+bun test                                 # Run all tests
+bun test path/to/file.test.ts            # Run single test file
+bun test --watch                         # Watch mode
+bun test --filter "test name"            # Run tests matching pattern
+bun run test:unit                        # Run unit tests only
+bun run test:e2e                         # Run e2e tests only
 ```
-
-## Rules: esbuild Bundling & `require()` in `src/`
-
-**CRITICAL**: The CLI ships as a CJS bundle (both the Node SEA binary and the npm package). esbuild bundles all `src/` code into a single file. This has important implications for `require()`:
-
-| Pattern | esbuild resolves it? | Safe in bundle? | Use for |
-|---------|---------------------|-----------------|---------|
-| `require("./foo.js")` | **Yes** — inlined at bundle time | Yes | Relative lazy imports (circular dep breaking) |
-| `require("node:fs")` | **Yes** — left as external | Yes | Node builtins |
-| `_require("node:fs")` | **No** — opaque call, passes through | Yes (builtins resolve by name) | Node builtins via `createRequire` |
-| `_require("./foo.js")` | **No** — opaque call, passes through | **NO** — resolves from bundle location | **Never use this** |
-
-**Key rules:**
-1. **Never alias `require()` for relative imports.** esbuild only statically resolves bare `require()` calls. Any aliased require (`_require`, `localRequire`, etc.) passes through as-is into the bundle. At runtime, relative paths resolve from the bundle file's location (`dist/index.cjs` or the SEA binary), where `./foo.js` doesn't exist.
-
-2. **Use `createRequire(import.meta.url)` as `_require` only for node builtins and npm packages.** These resolve by name (not relative path) so the base directory doesn't matter: `_require("node:sqlite")`, `_require("@sentry/node-core/light")`.
-
-3. **Keep bare `require()` for relative lazy imports.** The global `require` shim (`script/require-shim.mjs`) provides `require` in ESM/tsx dev mode. esbuild resolves relative requires at bundle time, so they never reach runtime.
-
-4. **Never merge a PR with failing CI.** The build jobs (binary + npm bundle) catch require resolution bugs that unit tests miss. Always wait for all CI jobs to pass.
 
 ## Rules: No Runtime Dependencies
 
-**CRITICAL**: All packages must be in `devDependencies`, never `dependencies`. Everything is bundled at build time via esbuild. CI enforces this with `pnpm run check:deps`.
+**CRITICAL**: All packages must be in `devDependencies`, never `dependencies`. Everything is bundled at build time via esbuild. CI enforces this with `bun run check:deps`.
 
-When adding a package, always use `pnpm add -D <package>` (the `-D` flag).
+When adding a package, always use `bun add -d <package>` (the `-d` flag).
 
 When the `@sentry/api` SDK provides types for an API response, import them directly from `@sentry/api` instead of creating redundant Zod schemas in `src/types/sentry.ts`.
 
-## Rules: Use Node.js APIs
+## Rules: Use Bun APIs
 
-**CRITICAL**: This project uses Node.js as its runtime. Use standard `node:*` built-in modules.
+**CRITICAL**: This project uses Bun as runtime. Always prefer Bun-native APIs over Node.js equivalents.
+
+Read the full guidelines in `.cursor/rules/bun-cli.mdc`.
+
+**Bun Documentation**: https://bun.sh/docs - Consult these docs when unsure about Bun APIs.
+
+### Quick Bun API Reference
 
 | Task | Use This | NOT This |
 |------|----------|----------|
-| Read file | `readFileSync(path, "utf-8")` | `Bun.file(path).text()` |
-| Write file | `writeFileSync(path, content)` | `Bun.write(path, content)` |
-| Check file exists | `existsSync(path)` | `Bun.file(path).exists()` |
-| Spawn process | `spawn()` from `node:child_process` | `Bun.spawn()` |
-| Find executable | `whichSync()` from `src/lib/which.ts` | `Bun.which()` |
-| Glob patterns | `picomatch` | `new Bun.Glob()` |
-| Sleep | `setTimeout` from `node:timers/promises` | `Bun.sleep(ms)` |
-| Parse JSON file | `JSON.parse(readFileSync(path, "utf-8"))` | `Bun.file(path).json()` |
+| Read file | `await Bun.file(path).text()` | `fs.readFileSync()` |
+| Write file | `await Bun.write(path, content)` | `fs.writeFileSync()` |
+| Check file exists | `await Bun.file(path).exists()` | `fs.existsSync()` |
+| Spawn process | `Bun.spawn()` | `child_process.spawn()` |
+| Shell commands | `Bun.$\`command\`` ⚠️ | `child_process.exec()` |
+| Find executable | `Bun.which("git")` | `which` package |
+| Glob patterns | `new Bun.Glob()` | `glob` / `fast-glob` packages |
+| Sleep | `await Bun.sleep(ms)` | `setTimeout` with Promise |
+| Parse JSON file | `await Bun.file(path).json()` | Read + JSON.parse |
+
+**Exception**: Use `node:fs` for directory creation with permissions:
+```typescript
+import { mkdirSync } from "node:fs";
+mkdirSync(dir, { recursive: true, mode: 0o700 });
+```
+
+**Exception**: `Bun.$` (shell tagged template) has no shim in `script/node-polyfills.ts` and will crash on the npm/node distribution. Until a shim is added, use `execSync` from `node:child_process` for shell commands that must work in both runtimes:
+```typescript
+import { execSync } from "node:child_process";
+const result = execSync("id -u username", { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] });
+```
 
 ## Architecture
 
-```
-cli/
-├── src/
-│   ├── bin.ts              # Entry point
-│   ├── app.ts              # Stricli application setup
-│   ├── context.ts          # Dependency injection context
-│   ├── commands/           # CLI commands
-│   │   ├── auth/           # login, logout, refresh, status, token, whoami
-│   │   ├── cli/            # defaults, feedback, fix, setup, upgrade
-│   │   ├── dashboard/      # list, view, create, widget (add, edit, delete)
-│   │   ├── event/          # list, view
-│   │   ├── issue/          # list, view, events, explain, plan, resolve, unresolve, merge
-│   │   ├── log/            # list, view
-│   │   ├── org/            # list, view
-│   │   ├── project/        # list, view, create, delete
-│   │   ├── release/        # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
-│   │   ├── repo/           # list
-│   │   ├── sourcemap/      # inject, upload
-│   │   ├── span/           # list, view
-│   │   ├── team/           # list
-│   │   ├── trace/          # list, view, logs
-│   │   ├── trial/          # list, start
-│   │   ├── api.ts          # Direct API access command
-│   │   ├── help.ts         # Help command
-│   │   ├── init.ts         # Initialize Sentry in your project (experimental)
-│   │   └── schema.ts       # Browse the Sentry API schema
-│   ├── lib/                # Shared utilities
-│   │   ├── command.ts      # buildCommand wrapper (telemetry + output)
-│   │   ├── api-client.ts   # Barrel re-export for API modules
-│   │   ├── api/            # Domain API modules
-│   │   │   ├── infrastructure.ts # Shared helpers, types, raw requests
-│   │   │   ├── organizations.ts
-│   │   │   ├── projects.ts
-│   │   │   ├── issues.ts
-│   │   │   ├── events.ts
-│   │   │   ├── traces.ts      # Trace + span listing
-│   │   │   ├── logs.ts
-│   │   │   ├── seer.ts
-│   │   │   └── trials.ts
-│   │   ├── region.ts       # Multi-region resolution
-│   │   ├── telemetry.ts    # Sentry SDK instrumentation
-│   │   ├── sentry-urls.ts  # URL builders for Sentry
-│   │   ├── hex-id.ts       # Hex ID validation (32-char + 16-char span)
-│   │   ├── trace-id.ts     # Trace ID validation wrapper
-│   │   ├── db/             # SQLite database layer
-│   │   │   ├── instance.ts     # Database singleton
-│   │   │   ├── schema.ts       # Table definitions
-│   │   │   ├── migration.ts    # Schema migrations
-│   │   │   ├── utils.ts        # SQL helpers (upsert)
-│   │   │   ├── auth.ts         # Token storage
-│   │   │   ├── user.ts         # User info cache
-│   │   │   ├── regions.ts      # Org→region URL cache
-│   │   │   ├── defaults.ts     # Default org/project
-│   │   │   ├── pagination.ts   # Cursor pagination storage
-│   │   │   ├── dsn-cache.ts    # DSN resolution cache
-│   │   │   ├── project-cache.ts    # Project data cache
-│   │   │   ├── project-root-cache.ts # Project root cache
-│   │   │   ├── project-aliases.ts  # Monorepo alias mappings
-│   │   │   └── version-check.ts    # Version check cache
-│   │   ├── dsn/            # DSN detection system
-│   │   │   ├── detector.ts     # High-level detection API
-│   │   │   ├── scanner.ts      # File scanning logic
-│   │   │   ├── code-scanner.ts # Code file DSN extraction
-│   │   │   ├── project-root.ts # Project root detection
-│   │   │   ├── parser.ts       # DSN parsing utilities
-│   │   │   ├── resolver.ts     # DSN to org/project resolution
-│   │   │   ├── fs-utils.ts     # File system helpers
-│   │   │   ├── env.ts          # Environment variable detection
-│   │   │   ├── env-file.ts     # .env file parsing
-│   │   │   ├── errors.ts       # DSN-specific errors
-│   │   │   ├── types.ts        # Type definitions
-│   │   │   └── languages/      # Per-language DSN extractors
-│   │   │       ├── javascript.ts
-│   │   │       ├── python.ts
-│   │   │       ├── go.ts
-│   │   │       ├── java.ts
-│   │   │       ├── ruby.ts
-│   │   │       └── php.ts
-│   │   ├── formatters/     # Output formatting
-│   │   │   ├── human.ts    # Human-readable output
-│   │   │   ├── json.ts     # JSON output
-│   │   │   ├── output.ts   # Output utilities
-│   │   │   ├── seer.ts     # Seer AI response formatting
-│   │   │   ├── colors.ts   # Terminal colors
-│   │   │   ├── markdown.ts # Markdown → ANSI renderer
-│   │   │   ├── trace.ts    # Trace/span formatters
-│   │   │   ├── time-utils.ts # Shared time/duration utils
-│   │   │   ├── table.ts    # Table rendering
-│   │   │   └── log.ts      # Log entry formatting
-│   │   ├── oauth.ts            # OAuth device flow
-│   │   ├── errors.ts           # Error classes
-│   │   ├── resolve-target.ts   # Org/project resolution
-│   │   ├── resolve-issue.ts    # Issue ID resolution
-│   │   ├── issue-id.ts         # Issue ID parsing utilities
-│   │   ├── arg-parsing.ts      # Argument parsing helpers
-│   │   ├── alias.ts            # Alias generation
-│   │   ├── promises.ts         # Promise utilities
-│   │   ├── polling.ts          # Polling utilities
-│   │   ├── upgrade.ts          # CLI upgrade functionality
-│   │   ├── version-check.ts    # Version checking
-│   │   ├── browser.ts          # Open URLs in browser
-│   │   ├── clipboard.ts        # Clipboard access
-│   │   └── qrcode.ts           # QR code generation
-│   └── types/              # TypeScript types and Zod schemas
-│       ├── sentry.ts       # Sentry API types
-│       ├── config.ts       # Configuration types
-│       ├── oauth.ts        # OAuth types
-│       └── seer.ts         # Seer AI types
-├── test/                   # Test files (mirrors src/ structure)
-│   ├── lib/                # Unit tests for lib/
-│   │   ├── *.test.ts           # Standard unit tests
-│   │   ├── *.property.test.ts  # Property-based tests
-│   │   └── db/
-│   │       ├── *.test.ts           # DB unit tests
-│   │       └── *.model-based.test.ts # Model-based tests
-│   ├── model-based/        # Model-based testing helpers
-│   │   └── helpers.ts      # Isolated DB context, constants
-│   ├── commands/           # Unit tests for commands/
-│   ├── e2e/                # End-to-end tests
-│   ├── fixtures/           # Test fixtures
-│   └── mocks/              # Test mocks
-├── docs/                   # Documentation site (Astro + Starlight)
-├── script/                 # Build and utility scripts
-├── .cursor/rules/          # Cursor AI rules (read these!)
-└── biome.jsonc             # Linting config (extends ultracite)
-```
+The full project-structure tree — including the live command/subcommand list and the
+domain API modules — is generated from the route tree and lives in
+[`docs/src/content/docs/contributing.md`](docs/src/content/docs/contributing.md)
+(the `project-structure` block produced by `script/generate-docs-sections.ts`). It is
+kept in sync automatically, so it is **not** duplicated here to avoid drift. For the
+current command list run `ls src/commands/` or `sentry --help`.
+
+Top-level layout:
+
+- **`src/bin.ts`** — entry point; **`src/app.ts`** — Stricli application setup;
+  **`src/context.ts`** — dependency-injection context.
+- **`src/commands/`** — one directory per command group (`auth`, `cli`, `dashboard`,
+  `event`, `issue`, `log`, `org`, `project`, `release`, `replay`, `repo`, `sourcemap`,
+  `span`, `team`, `trace`, `trial`, `local`, …) plus standalone command files
+  (`api.ts`, `explore.ts`, `help.ts`, `init.ts`, `schema.ts`).
+- **`src/lib/`** — shared utilities. Key subtrees: `api/` (domain API modules),
+  `db/` (SQLite layer), `dsn/` (DSN detection, with per-language extractors under
+  `dsn/languages/`), and `formatters/` (output formatting). See the file-locations
+  table below and the JSDoc in each module for details.
+- **`src/types/`** — TypeScript types and Zod schemas.
+- **`test/`** — tests mirroring `src/` (unit, `*.property.test.ts`,
+  `*.model-based.test.ts`, `e2e/`, `fixtures/`, `mocks/`).
+- **`docs/`** — documentation site (Astro + Starlight); **`script/`** — build/utility
+  scripts; **`.cursor/rules/`** — Cursor AI rules; **`biome.jsonc`** — lint config.
 
 ## Key Patterns
 
@@ -509,12 +409,12 @@ Use `"date"` for timestamp-based sort (not `"time"`). Export sort types from the
 
 ### Generated Docs & Skills
 
-All command docs and skill files are generated via `pnpm run generate:docs` (which runs `generate:command-docs` then `generate:skill`). This runs automatically as part of `dev`, `build`, `typecheck`, and `test` scripts.
+All command docs and skill files are generated via `bun run generate:docs` (which runs `generate:command-docs` then `generate:skill`). This runs automatically as part of `dev`, `build`, `typecheck`, and `test` scripts.
 
 - **Command docs** (`docs/src/content/docs/commands/*.md`) are **gitignored** and generated from CLI metadata + hand-written fragments in `docs/src/fragments/commands/`.
 - **Skill files** (`plugins/sentry-cli/skills/sentry-cli/`) are **committed** (consumed by external plugin systems) and auto-committed by CI when stale.
 - Edit fragments in `docs/src/fragments/commands/` for custom examples and guides.
-- `pnpm run check:fragments` validates fragment ↔ route consistency.
+- `bun run check:fragments` validates fragment ↔ route consistency.
 - Positional `placeholder` values must be descriptive: `"org/project/trace-id"` not `"args"`.
 
 ### Zod Schemas for Validation
@@ -610,7 +510,7 @@ CliError (base, exitCode=1)
 - Pass `alternatives: []` when defaults are irrelevant (e.g., for missing Trace ID, Event ID)
 - Use `" and "` in `resource` for plural grammar: `"Trace ID and span ID"` → "are required"
 
-**CI enforcement:** `pnpm run check:errors` scans for `ContextError` with multiline commands and `CliError` with ad-hoc "Try:" strings.
+**CI enforcement:** `bun run check:errors` scans for `ContextError` with multiline commands, `CliError` with ad-hoc "Try:" strings, and silent `catch` blocks (advisory).
 
 ```typescript
 // Usage examples
@@ -653,6 +553,12 @@ catch (error) {
 ```
 
 Use `logger.withTag("command-name")` for tagged logging in command files.
+
+**CI enforcement:** `bun run check:errors` includes a silent-catch scan that flags
+`catch` blocks which are empty, comment-only, or return-only without surfacing the
+error. It is currently **advisory** (warns, does not fail CI) because of a pre-existing
+backlog; run with `SENTRY_STRICT_SILENT_CATCH=1` to enforce. Do not add new silent
+catches — they will appear in the scan output during review.
 
 ### Auto-Recovery for Wrong Entity Types
 
@@ -794,7 +700,7 @@ await deleteUserData(userId)
 ### Goal
 Minimal comments, maximum clarity. Comments explain **intent and reasoning**, not syntax.
 
-## Testing (vitest + fast-check)
+## Testing (bun:test + fast-check)
 
 **Prefer property-based and model-based testing** over traditional unit tests. These approaches find edge cases automatically and provide better coverage with less code.
 
@@ -828,7 +734,7 @@ Tests that need a database or config directory **must** use `useTestConfigDir()`
 - `const baseDir = process.env[CONFIG_DIR_ENV_VAR]!` at module scope — This captures a value that may be stale
 - Manual `beforeEach`/`afterEach` that sets/deletes `SENTRY_CONFIG_DIR`
 
-**Why**: The test runner uses `--isolate --parallel` (see `test:unit` in `package.json`), so each test file runs in a fresh global environment within a worker process. That bounds most cross-file leaks to a single worker, but `process.env` is still shared within a file's lifecycle — if your `afterEach` deletes the env var, the next describe/test's module-level code (or a beforeEach that re-reads env) gets `undefined`, causing `TypeError: The "paths[0]" property must be of type string`. Also, `TEST_TMP_DIR` is namespaced by worker ID in `test/constants.ts` so parallel workers don't wipe each other's temp state during preload.
+**Why**: Bun's test runner uses `--isolate --parallel` (see `test:unit` in `package.json`), so each test file runs in a fresh global environment within a worker process. That bounds most cross-file leaks to a single worker, but `process.env` is still shared within a file's lifecycle — if your `afterEach` deletes the env var, the next describe/test's module-level code (or a beforeEach that re-reads env) gets `undefined`, causing `TypeError: The "paths[0]" property must be of type string`. Also, `TEST_TMP_DIR` is namespaced by `BUN_TEST_WORKER_ID` in `test/constants.ts` so parallel workers don't wipe each other's temp state during preload.
 
 ```typescript
 // CORRECT: Use the helper
@@ -851,7 +757,7 @@ afterEach(() => { delete process.env.SENTRY_CONFIG_DIR; }); // BUG!
 Use property-based tests when verifying invariants that should hold for **any valid input**.
 
 ```typescript
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "bun:test";
 import { constantFrom, assert as fcAssert, property, tuple } from "fast-check";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
@@ -899,7 +805,7 @@ describe("property: myFunction", () => {
 Use model-based tests for **stateful systems** where sequences of operations should maintain invariants.
 
 ```typescript
-import { describe, expect, test } from "vitest";
+import { describe, expect, test } from "bun:test";
 import {
   type AsyncCommand,
   asyncModelRun,
@@ -1027,7 +933,7 @@ When adding property tests for a function that already has unit tests, **remove 
 ```
 
 ```typescript
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test, mock } from "bun:test";
 
 describe("feature", () => {
   test("should return specific value", async () => {
@@ -1036,7 +942,7 @@ describe("feature", () => {
 });
 
 // Mock modules when needed
-vi.mock("./some-module", () => ({
+mock.module("./some-module", () => ({
   default: () => "mocked",
 }));
 ```
@@ -1060,6 +966,38 @@ vi.mock("./some-module", () => ({
 | Test helpers | `test/model-based/helpers.ts` |
 | Add documentation | `docs/src/content/docs/` |
 | Hand-written command doc content | `docs/src/fragments/commands/` |
+
+## Automated Fix PRs (BugBot / agents)
+
+Automated bug-fix PRs (e.g. Cursor BugBot) must follow these rules to avoid the
+duplication and staleness that caused five overlapping PRs to pile up:
+
+1. **Check for existing work first.** Before opening a PR, search open PRs and
+   recently-closed PRs/issues for the same file + symbol:
+   ```bash
+   gh pr list --state open --search "in:title <file-or-symbol>"
+   gh issue list --state all --search "<symbol>"
+   ```
+   If an open PR already touches the target function, **comment on it** or extend
+   it instead of opening a duplicate. Multiple BugBot PRs independently re-fixed
+   the same `JSON.parse` guard, `withTTY` helper, and pagination code.
+
+2. **Rebase before review.** A PR that is many commits behind `main` may fail CI
+   on unrelated drift (e.g. a lint error in a file the PR never touched) and its
+   fix may already be superseded. Rebase onto `main` and re-verify the bug still
+   exists before requesting review. Verify against current `main`, not the
+   snapshot the PR was generated from.
+
+3. **Separate correctness fixes from opinion.** A real bug (wrong output, crash,
+   skipped data) is in scope. A subjective UX change (different hint wording,
+   different default) is **not** a bug — `main`'s current behavior is often
+   deliberate. Do not bundle UX opinions into bug-fix PRs; they waste review
+   cycles and are usually dropped.
+
+4. **Prefer shared helpers over re-deriving fixes.** If a correct implementation
+   already exists (e.g. `autoPaginate()` for pagination, `safeParseJson()` for
+   cached JSON), use it rather than hand-rolling a one-off fix. The recurring
+   pagination-overshoot and parse-crash bugs were classes solved once centrally.
 
 <!-- This section is maintained by the coding agent via lore (https://github.com/BYK/loreai) -->
 ## Long-term Knowledge

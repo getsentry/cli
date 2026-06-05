@@ -82,6 +82,9 @@ describe("project create", () => {
   // With vitest auto-mock, createProjectWithDsn is a vi.fn() stub that
   // doesn't internally call createProject, so we assert on this spy.
   const createProjectWithDsnSpy = vi.mocked(projectsApi.createProjectWithDsn);
+  const createProjectWithAutoTeamSpy = vi.mocked(
+    projectsApi.createProjectWithAutoTeam
+  );
   const createTeamSpy = vi.mocked(teamsApi.createTeam);
   const tryGetPrimaryDsnSpy = vi.mocked(projectsApi.tryGetPrimaryDsn);
   const listOrgsSpy = vi.mocked(orgsApi.listOrganizations);
@@ -102,6 +105,14 @@ describe("project create", () => {
       dsn: "https://abc@o123.ingest.us.sentry.io/999",
       url: "https://sentry.io/organizations/acme-corp/projects/my-app/",
     });
+    // Default: org-scoped fallback is disabled (matches the common org config).
+    createProjectWithAutoTeamSpy.mockRejectedValue(
+      new ApiError(
+        "Forbidden",
+        403,
+        "Your organization has disabled this feature for members."
+      )
+    );
     createTeamSpy.mockResolvedValue(sampleTeam);
     tryGetPrimaryDsnSpy.mockResolvedValue(
       "https://abc@o123.ingest.us.sentry.io/999"
@@ -115,6 +126,7 @@ describe("project create", () => {
   afterEach(() => {
     listTeamsSpy.mockReset();
     createProjectWithDsnSpy.mockReset();
+    createProjectWithAutoTeamSpy.mockReset();
     createTeamSpy.mockReset();
     tryGetPrimaryDsnSpy.mockReset();
     listOrgsSpy.mockReset();
@@ -444,8 +456,10 @@ describe("project create", () => {
   });
 
   test("wraps other API errors with context, preserving ApiError type", async () => {
+    // createProjectWithDsn fails with a non-403 server error (e.g. 500).
+    // The fallback is only attempted on 403; this should surface directly.
     createProjectWithDsnSpy.mockRejectedValue(
-      new ApiError("API request failed: 403 Forbidden", 403, "No permission")
+      new ApiError("Internal Server Error", 500, "Something went wrong")
     );
 
     const { context } = createMockContext();
@@ -454,17 +468,55 @@ describe("project create", () => {
     const err = (await func
       .call(context, { json: false }, "my-app", "node")
       .catch((e: Error) => e)) as ApiError;
-    // Stays ApiError (not a plain CliError wrapper) so the 401–499
-    // user-error silencing in error-reporting.ts still applies.
+    // Stays ApiError (not a plain CliError wrapper) so 5xx errors are
+    // captured for error reporting.
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(500);
+    expect(err.message).toContain("Failed to create project");
+    expect(err.message).toContain("500");
+    expect(err.format()).toContain("Something went wrong");
+  });
+
+  test("falls back to org-scoped endpoint when team-based creation 403s", async () => {
+    // Simulate: member has a team (via listTeams) but can't create projects on it.
+    // The fallback to POST /organizations/{org}/projects/ should kick in.
+    createProjectWithDsnSpy.mockRejectedValue(
+      new ApiError("Forbidden", 403, "You do not have permission")
+    );
+    createProjectWithAutoTeamSpy.mockResolvedValue({
+      project: sampleProject,
+      dsn: "https://abc@o123.ingest.us.sentry.io/999",
+      url: "https://sentry.io/organizations/acme-corp/projects/my-app/",
+      team_slug: "team-testuser",
+    });
+
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-app", "node");
+
+    expect(createProjectWithAutoTeamSpy).toHaveBeenCalledWith("acme-corp", {
+      name: "my-app",
+      platform: "node",
+    });
+  });
+
+  test("surfaces policy error when org has disabled member project creation", async () => {
+    // Both paths 403: team-based creation fails, and the fallback returns
+    // the org-level policy error ("disabled this feature").
+    createProjectWithDsnSpy.mockRejectedValue(
+      new ApiError("Forbidden", 403, "You do not have permission")
+    );
+    // createProjectWithAutoTeamSpy already defaults to "disabled this feature" 403
+
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+
+    const err = (await func
+      .call(context, { json: false }, "my-app", "node")
+      .catch((e: Error) => e)) as ApiError;
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(403);
-    expect(err.detail).toBe("No permission");
-    expect(err.message).toContain("Failed to create project");
-    expect(err.message).toContain("403");
-    // Detail is NOT duplicated in message — ApiError.format() appends it.
-    expect(err.message).not.toContain("No permission");
-    // But format() surfaces it for the user
-    expect(err.format()).toContain("No permission");
+    expect(err.message).toContain("disabled project creation for members");
   });
 
   test("outputs JSON when --json flag is set", async () => {
@@ -620,8 +672,11 @@ describe("project create", () => {
     expect(err.message).toContain("Your organizations");
   });
 
-  test("resolveOrCreateTeam with non-404 listTeams failure shows generic error", async () => {
-    // listTeams returns 403 — org may exist, but user lacks access
+  test("listTeams 403 triggers org-scoped fallback, surfaces policy error if fallback also blocked", async () => {
+    // listTeams returns 403 (member lacks team:read). handleListTeamsError re-throws
+    // the raw ApiError so the outer catch can route to the org-scoped fallback.
+    // The default beforeEach mock has createProjectWithAutoTeam reject with
+    // "disabled this feature", so the final error is the policy-disabled message.
     listTeamsSpy.mockRejectedValue(
       new ApiError("API request failed: 403 Forbidden", 403)
     );
@@ -629,15 +684,12 @@ describe("project create", () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
 
-    const err = await func
+    const err = (await func
       .call(context, { json: false }, "my-app", "node")
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(CliError);
-    expect(err.message).toContain("could not be accessed");
-    expect(err.message).toContain("403");
-    expect(err.message).toContain("may not exist, or you may lack access");
-    // Should NOT say "Organization is required" — we don't know that
-    expect(err.message).not.toContain("is required");
+      .catch((e: Error) => e)) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(403);
+    expect(err.message).toContain("disabled project creation for members");
   });
 
   test("auto-corrects dot-separated platform to hyphen-separated", async () => {

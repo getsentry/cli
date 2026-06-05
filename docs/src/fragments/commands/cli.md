@@ -61,6 +61,58 @@ The CLI detects how it was installed and uses the appropriate upgrade method:
 
 Nightly builds are only available as standalone binaries (via the curl install method). Switching to nightly from a package manager install will automatically migrate to a standalone binary.
 
+### View and manage defaults
+
+```bash
+# Show all current defaults
+sentry cli defaults
+
+# Set default organization
+sentry cli defaults org my-org
+
+# Set default project
+sentry cli defaults project my-project
+
+# Set default Sentry URL (self-hosted)
+sentry cli defaults url https://sentry.example.com
+
+# Set custom HTTP headers (self-hosted, e.g. for IAP/proxies)
+sentry cli defaults headers "X-IAP: token"
+
+# Set a custom CA certificate (self-hosted, behind a TLS proxy)
+sentry cli defaults ca-cert /path/to/ca.pem
+
+# Disable telemetry
+sentry cli defaults telemetry off
+
+# Clear a single default
+sentry cli defaults org --clear
+
+# Clear all defaults
+sentry cli defaults --clear
+```
+
+### Import legacy settings
+
+Import settings from `.sentryclirc` files used by the legacy `sentry-cli`:
+
+```bash
+# Auto-detect and import .sentryclirc
+sentry cli import
+
+# Preview what would be imported
+sentry cli import --dry-run
+
+# Skip confirmation prompt
+sentry cli import --yes
+
+# Explicitly trust a self-hosted URL
+sentry cli import --url https://sentry.example.com
+
+# Skip API validation of the imported token
+sentry cli import --skip-validation
+```
+
 ### Send feedback
 
 ```bash

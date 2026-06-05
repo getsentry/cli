@@ -21,6 +21,22 @@
  */
 
 export {
+  createIssueAlertRule,
+  createMetricAlertRule,
+  deleteIssueAlertRule,
+  deleteMetricAlertRule,
+  getIssueAlertRule,
+  getIssueAlertRuleDocument,
+  getMetricAlertRule,
+  getMetricAlertRuleDocument,
+  type IssueAlertRule,
+  listIssueAlertsPaginated,
+  listMetricAlertsPaginated,
+  type MetricAlertRule,
+  putIssueAlertRule,
+  putMetricAlertRule,
+} from "./api/alerts.js";
+export {
   createDashboard,
   getDashboard,
   listDashboardRevisionsPaginated,
@@ -31,6 +47,7 @@ export {
 } from "./api/dashboards.js";
 export type { MetricMeta } from "./api/discover.js";
 export { queryEvents, queryMetricsMeta } from "./api/discover.js";
+export { isNotFoundApiError } from "./api/error-guards.js";
 export {
   findEventAcrossOrgs,
   getEvent,
@@ -44,6 +61,7 @@ export {
   type ApiRequestOptions,
   apiRequest,
   apiRequestToRegion,
+  apiRequestToRegionNoContent,
   autoPaginate,
   buildSearchParams,
   ORG_FANOUT_CONCURRENCY,
@@ -83,6 +101,7 @@ export {
   listLogs,
   listTraceLogs,
 } from "./api/logs.js";
+export { listMonitors, listMonitorsPaginated } from "./api/monitors.js";
 export {
   getOrganization,
   getUserRegions,
@@ -93,6 +112,7 @@ export {
 export {
   type CreatedProjectDetails,
   createProject,
+  createProjectWithAutoTeam,
   createProjectWithDsn,
   deleteProject,
   findProjectByDsnKey,
@@ -102,6 +122,7 @@ export {
   getProjectKeys,
   listProjects,
   listProjectsPaginated,
+  MEMBER_PROJECT_CREATION_DISABLED_DETAIL,
   matchesWordBoundary,
   type ProjectSearchResult,
   type ProjectWithOrg,
@@ -118,6 +139,7 @@ export {
   listReleaseDeploys,
   listReleasesForProject,
   listReleasesPaginated,
+  NO_REPO_INTEGRATIONS_MESSAGE,
   type ReleaseSortValue,
   setCommitsAuto,
   setCommitsLocal,

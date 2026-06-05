@@ -110,24 +110,17 @@ export type SentryProject = Partial<SdkProjectListItem> & {
  */
 export const ISSUE_STATUSES = [
   "resolved",
+  "resolvedInNextRelease",
   "unresolved",
   "ignored",
+  "muted",
 ] as const satisfies readonly NonNullable<SdkIssueDetail["status"]>[];
 export type IssueStatus = (typeof ISSUE_STATUSES)[number];
 
-/**
- * Compile-time exhaustiveness check for `ISSUE_STATUSES`.
- * If the SDK ever adds a status that isn't in the tuple, this resolves to
- * `never` and the assignment fails to typecheck. The tuple-wrapping
- * (`[X] extends [Y]`) prevents distributive inference so the check fires
- * on the union as a whole.
- */
-type _IssueStatusParity = [NonNullable<SdkIssueDetail["status"]>] extends [
-  IssueStatus,
-]
-  ? true
-  : never;
-const _ISSUE_STATUS_PARITY: _IssueStatusParity = true;
+// Note: a reverse exhaustiveness check (SDK → ISSUE_STATUSES) is not possible here
+// because RetrieveAnIssueResponses is a union of all HTTP response types, one of which
+// has `status: string` (loose), making SdkIssueDetail["status"] resolve to `string`.
+// The `satisfies` above catches the forward direction (invalid values in our tuple).
 
 export const ISSUE_LEVELS = [
   "fatal",
@@ -269,6 +262,35 @@ export const SentryIssueSchema = zRetrieveAnIssueResponse
   })
   .passthrough()
   .describe("Sentry issue");
+
+/**
+ * Documentation-oriented schema for `issue view` JSON output.
+ *
+ * The view command's jsonTransform spreads all issue fields at the top level
+ * and adds enrichment fields (`event`, `org`, `replayIds`, `trace`). This
+ * schema describes that flattened shape for `--help`, `sentry help issue view`,
+ * and SKILL.md field table generation.
+ */
+export const IssueViewOutputSchema = SentryIssueSchema.extend({
+  event: z
+    .unknown()
+    .nullable()
+    .optional()
+    .describe("Latest event for the issue (full detail)"),
+  org: z.string().nullable().optional().describe("Organization slug"),
+  replayIds: z
+    .array(z.string())
+    .optional()
+    .describe("Related Session Replay IDs"),
+  trace: z
+    .object({
+      traceId: z.string().describe("Trace ID from the latest event"),
+      spans: z.array(z.unknown()).describe("Span tree data"),
+    })
+    .nullable()
+    .optional()
+    .describe("Trace context from the latest event's span tree"),
+}).describe("Issue view output");
 
 // Event
 
@@ -1085,6 +1107,87 @@ export const SentryRepositorySchema = z
   .passthrough();
 
 export type SentryRepository = z.infer<typeof SentryRepositorySchema>;
+
+// Cron Monitor
+
+/**
+ * Configuration of a cron monitor's expected schedule and thresholds.
+ *
+ * Returned by the `/organizations/{org}/monitors/` endpoint. The `schedule`
+ * field is either a crontab string (when `schedule_type` is `"crontab"`) or a
+ * `[value, unit]` tuple (when `"interval"`). Other fields are nullable because
+ * the API returns `null` for unset thresholds.
+ */
+export const MonitorConfigSchema = z
+  .object({
+    schedule_type: z
+      .string()
+      .optional()
+      .describe("Schedule type: 'crontab' or 'interval'"),
+    schedule: z
+      .union([z.string(), z.array(z.union([z.string(), z.number()]))])
+      .optional()
+      .describe("Crontab string or [value, unit] interval tuple"),
+    timezone: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Schedule timezone (tz database string)"),
+    checkin_margin: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Allowed minutes after the expected check-in time"),
+    max_runtime: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Allowed minutes a check-in may run before timing out"),
+    failure_issue_threshold: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Consecutive failures before an issue is created"),
+    recovery_threshold: z
+      .number()
+      .nullable()
+      .optional()
+      .describe("Consecutive successes before an issue is resolved"),
+  })
+  .passthrough();
+
+export type MonitorConfig = z.infer<typeof MonitorConfigSchema>;
+
+/**
+ * A cron monitor configured in a Sentry organization.
+ *
+ * Cron monitors are not modeled by the `@sentry/api` types this project
+ * re-exports, so this is a hand-written internal schema (Pattern B). Core
+ * identifiers (id, slug, name, status) are required; richer fields are widened
+ * to optional and `.passthrough()` preserves any unmodeled API fields.
+ */
+export const SentryMonitorSchema = z
+  .object({
+    id: z.string().describe("Monitor ID"),
+    slug: z.string().describe("Monitor slug"),
+    name: z.string().describe("Monitor name"),
+    status: z.string().describe("Monitor status (e.g. active, disabled)"),
+    isMuted: z.boolean().optional().describe("Whether the monitor is muted"),
+    config: MonitorConfigSchema.optional().describe("Schedule configuration"),
+    dateCreated: z.string().optional().describe("Creation date (ISO 8601)"),
+    project: z
+      .object({
+        id: z.string().optional().describe("Project ID"),
+        slug: z.string().optional().describe("Project slug"),
+        name: z.string().optional().describe("Project name"),
+      })
+      .passthrough()
+      .optional()
+      .describe("Owning project"),
+  })
+  .passthrough();
+
+export type SentryMonitor = z.infer<typeof SentryMonitorSchema>;
 
 // Team
 

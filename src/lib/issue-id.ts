@@ -7,6 +7,8 @@
  * - Short suffixes: "ABC", "4Y" (requires project context)
  * - Alias-suffix format: "e-4y", "w-2c" (requires alias cache)
  * - Org-prefixed format: "org/PROJECT-ABC", "org/project-suffix"
+ * - GitHub-style format: "org/project#PROJECT-ABC", "project#ABC" (the "#"
+ *   replaces the final slash; handled in arg-parsing.ts)
  *
  * Note: parseIssueArg is in arg-parsing.ts for shared logic with org/project parsing.
  */

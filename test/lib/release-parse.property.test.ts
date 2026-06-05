@@ -1,8 +1,25 @@
 import { array, constantFrom, assert as fcAssert, property } from "fast-check";
-import { describe, expect, test } from "vitest";
-import { parseReleaseArg } from "../../src/commands/release/parse.js";
-import { ValidationError } from "../../src/lib/errors.js";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  parseReleaseArg,
+  resolveReleaseTarget,
+} from "../../src/commands/release/parse.js";
+import { ContextError, ValidationError } from "../../src/lib/errors.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
+
+vi.mock("../../src/lib/resolve-target.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/lib/resolve-target.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as resolveTarget from "../../src/lib/resolve-target.js";
 
 const slugChars = "abcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -113,5 +130,51 @@ describe("unit: parseReleaseArg edge cases", () => {
     const result = parseReleaseArg("/1.0.0", "test");
     expect(result.version).toBe("/1.0.0");
     expect(result.orgSlug).toBeUndefined();
+  });
+});
+
+describe("unit: resolveReleaseTarget", () => {
+  let resolveOrgSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
+  });
+
+  afterEach(() => {
+    resolveOrgSpy.mockRestore();
+  });
+
+  const USAGE = "sentry release archive [<org>/]<version>";
+
+  test("resolves version and org from a target", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    const result = await resolveReleaseTarget("my-org/1.0.0", USAGE, "/tmp");
+    expect(result).toEqual({ version: "1.0.0", org: "my-org" });
+    expect(resolveOrgSpy).toHaveBeenCalledWith({ org: "my-org", cwd: "/tmp" });
+  });
+
+  test("forwards detectedFrom from the resolved org", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org", detectedFrom: "DSN" });
+    const result = await resolveReleaseTarget("1.0.0", USAGE, "/tmp");
+    expect(result.detectedFrom).toBe("DSN");
+  });
+
+  test("throws ContextError when target is undefined", async () => {
+    await expect(
+      resolveReleaseTarget(undefined, USAGE, "/tmp")
+    ).rejects.toThrow(ContextError);
+  });
+
+  test("throws ContextError when target is whitespace", async () => {
+    await expect(resolveReleaseTarget("   ", USAGE, "/tmp")).rejects.toThrow(
+      "Release version"
+    );
+  });
+
+  test("throws ContextError when org cannot be resolved", async () => {
+    resolveOrgSpy.mockResolvedValue(null);
+    await expect(resolveReleaseTarget("1.0.0", USAGE, "/tmp")).rejects.toThrow(
+      ContextError
+    );
   });
 });

@@ -437,4 +437,40 @@ describe("resolveInitContext", () => {
 
     expect(context?.authToken).toBe("sntrys_test");
   });
+
+  test("sets isExplicitTeam:true when --team flag is provided", async () => {
+    resolveOrCreateTeamSpy.mockResolvedValue({
+      slug: "backend",
+      source: "explicit",
+    } as any);
+
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(
+      makeOptions({ team: "backend" }),
+      ui
+    );
+
+    expect(context?.isExplicitTeam).toBe(true);
+    expect(context?.team).toBe("backend");
+  });
+
+  test("sets isExplicitTeam:false when no --team flag is provided", async () => {
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
+
+    expect(context?.isExplicitTeam).toBe(false);
+  });
+
+  test("swallows 403 from listTeams and resolves context with team:undefined", async () => {
+    resolveOrCreateTeamSpy.mockRejectedValueOnce(
+      new ApiError("Forbidden", 403, "No team:read access")
+    );
+
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
+
+    // 403 is swallowed so the wizard can proceed to the org-scoped fallback
+    expect(context).not.toBeNull();
+    expect(context?.team).toBeUndefined();
+  });
 });

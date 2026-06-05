@@ -53,6 +53,40 @@ Sentry search uses **implicit AND** — space-separated terms are all required.
 Full syntax reference: [Sentry Search Docs](https://docs.sentry.io/concepts/search/)
 :::
 
+### Magic selectors
+
+Use `@latest` and `@most_frequent` to target issues without knowing their ID:
+
+```bash
+# View the most recent issue
+sentry issue view @latest
+
+# Explain the most frequently occurring issue
+sentry issue explain @most_frequent
+
+# Generate a fix plan for the latest issue
+sentry issue plan @latest
+```
+
+### List events for an issue
+
+```bash
+# List recent events for an issue
+sentry issue events FRONT-ABC
+
+# Filter events by search query
+sentry issue events FRONT-ABC --query "browser:Chrome"
+
+# Show full event details
+sentry issue events FRONT-ABC --full
+
+# Limit results and filter by time period
+sentry issue events FRONT-ABC --limit 50 --period 24h
+
+# Paginate through results
+sentry issue events FRONT-ABC -c next
+```
+
 ### View an issue
 
 ```bash
@@ -79,6 +113,12 @@ Latest event:
 sentry issue view FRONT-ABC -w
 ```
 
+```bash
+# GitHub-style identifiers work too (the "#" replaces the final slash)
+sentry issue view my-org/my-project#FRONT-ABC
+sentry issue view my-project#FRONT-ABC
+```
+
 ### Explain and plan with Seer AI
 
 ```bash
@@ -91,11 +131,11 @@ sentry issue explain my-org/MYPROJECT-ABC
 # Force a fresh analysis
 sentry issue explain 123456789 --force
 
-# Generate a fix plan (requires explain to be run first)
+# Generate a fix plan (automatically runs explain if needed)
 sentry issue plan 123456789
 
-# Specify which root cause to plan for
-sentry issue plan 123456789 --cause 0
+# Force a fresh plan even if one already exists
+sentry issue plan 123456789 --force
 ```
 
 **Requirements:**
@@ -103,7 +143,7 @@ sentry issue plan 123456789 --cause 0
 - Seer AI enabled for your organization
 - GitHub integration configured with repository access
 - Code mappings set up to link stack frames to source files
-- Root cause analysis must be completed (`sentry issue explain`) before generating a plan
+- Root cause analysis is run automatically if needed (the `plan` command triggers `explain` first)
 
 ### Resolve and reopen issues
 

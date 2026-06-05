@@ -15,6 +15,7 @@ import type {
 } from "../dsn/types.js";
 import { recordCacheHit } from "../telemetry.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
+import { safeParseJson } from "./json.js";
 import { runUpsert, touchCacheEntry } from "./utils.js";
 
 /** Cache TTL in milliseconds (24 hours) */
@@ -307,6 +308,23 @@ async function validateDirMtimes(
   return true;
 }
 
+/** Type guard: value is a plain object with all-numeric values (mtimes record). */
+function isMtimesRecord(value: unknown): value is Record<string, number> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value as Record<string, unknown>).every(
+      (v) => typeof v === "number"
+    )
+  );
+}
+
+/** Type guard: value is an array (used for the cached DSN list). */
+function isArray(value: unknown): value is DetectedDsn[] {
+  return Array.isArray(value);
+}
+
 /**
  * Get cached full detection result if valid.
  *
@@ -362,20 +380,25 @@ export async function getCachedDetection(
     return;
   }
 
-  // Parse source mtimes and validate
-  const sourceMtimes = JSON.parse(row.source_mtimes_json) as Record<
-    string,
-    number
-  >;
+  // Parse all cached JSON columns up front, validating their shape. Corruption
+  // (partial write, manual edit, schema drift) — including a structurally wrong
+  // value like an object where an array is expected — is treated as a cache miss
+  // so detection re-runs from scratch instead of crashing downstream.
+  const sourceMtimes = safeParseJson(row.source_mtimes_json, isMtimesRecord);
+  const dirMtimes = row.dir_mtimes_json
+    ? safeParseJson(row.dir_mtimes_json, isMtimesRecord)
+    : {};
+  const allDsns = safeParseJson(row.all_dsns_json, isArray);
+  if (sourceMtimes === undefined || dirMtimes === undefined || !allDsns) {
+    recordCacheHit("dsn-detection", false);
+    return;
+  }
+
   if (!(await validateSourceMtimes(projectRoot, sourceMtimes))) {
     recordCacheHit("dsn-detection", false);
     return;
   }
 
-  // Parse directory mtimes and validate (if present)
-  const dirMtimes = row.dir_mtimes_json
-    ? (JSON.parse(row.dir_mtimes_json) as Record<string, number>)
-    : {};
   if (!(await validateDirMtimes(projectRoot, dirMtimes))) {
     recordCacheHit("dsn-detection", false);
     return;
@@ -384,9 +407,6 @@ export async function getCachedDetection(
   recordCacheHit("dsn-detection", true);
   // Cache is valid - update last access time
   touchCacheEntry("dsn_cache", "directory", projectRoot);
-
-  // Parse and return cached detection
-  const allDsns = JSON.parse(row.all_dsns_json) as DetectedDsn[];
 
   return {
     fingerprint: row.fingerprint,

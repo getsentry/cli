@@ -62,14 +62,18 @@ const FIXABILITY_TAGS: Record<FixabilityTier, Parameters<typeof colorTag>[0]> =
 
 const STATUS_ICONS: Record<IssueStatus, string> = {
   resolved: colorTag("green", "✓"),
+  resolvedInNextRelease: colorTag("green", "✓"),
   unresolved: colorTag("yellow", "●"),
   ignored: colorTag("muted", "−"),
+  muted: colorTag("muted", "−"),
 };
 
 const STATUS_LABELS: Record<IssueStatus, string> = {
   resolved: `${colorTag("green", "✓")} Resolved`,
+  resolvedInNextRelease: `${colorTag("green", "✓")} Resolved in Next Release`,
   unresolved: `${colorTag("yellow", "●")} Unresolved`,
   ignored: `${colorTag("muted", "−")} Ignored`,
+  muted: `${colorTag("muted", "−")} Muted`,
 };
 
 /** Maximum features to display before truncating with "... and N more" */
@@ -628,12 +632,12 @@ export function writeIssueTable(
     // SEEN — lastSeen
     {
       header: "SEEN",
-      value: ({ issue }) => formatRelativeTime(issue.lastSeen),
+      value: ({ issue }) => formatRelativeTime(issue.lastSeen ?? undefined),
     },
     // AGE — firstSeen
     {
       header: "AGE",
-      value: ({ issue }) => formatRelativeTime(issue.firstSeen),
+      value: ({ issue }) => formatRelativeTime(issue.firstSeen ?? undefined),
     },
   ];
 

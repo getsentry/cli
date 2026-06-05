@@ -7,7 +7,6 @@
 import type { SentryContext } from "../../context.js";
 import { updateRelease } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError } from "../../lib/errors.js";
 import {
   colorTag,
   escapeMarkdownInline,
@@ -17,9 +16,10 @@ import {
 } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../lib/mutate-command.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
 import type { SentryRelease } from "../../types/index.js";
-import { parseReleaseArg } from "./parse.js";
+import { resolveReleaseTarget } from "./parse.js";
+
+const USAGE_HINT = "sentry release finalize [<org>/]<version>";
 
 function formatReleaseFinalized(data: Record<string, unknown>): string {
   if (data.dryRun) {
@@ -55,12 +55,14 @@ export const finalizeCommand = buildCommand({
   },
   parameters: {
     positional: {
-      kind: "array",
-      parameter: {
-        placeholder: "org/version",
-        brief: "[<org>/]<version> - Release version to finalize",
-        parse: String,
-      },
+      kind: "tuple",
+      parameters: [
+        {
+          placeholder: "org/version",
+          brief: "[<org>/]<version> - Release version to finalize",
+          parse: String,
+        },
+      ],
     },
     flags: {
       released: {
@@ -88,35 +90,21 @@ export const finalizeCommand = buildCommand({
       readonly json: boolean;
       readonly fields?: string[];
     },
-    ...args: string[]
+    target: string
   ) {
     const { cwd } = this;
 
-    const joined = args.join(" ").trim();
-    if (!joined) {
-      throw new ContextError(
-        "Release version",
-        "sentry release finalize [<org>/]<version>",
-        []
-      );
-    }
-
-    const { version, orgSlug } = parseReleaseArg(
-      joined,
-      "sentry release finalize [<org>/]<version>"
+    const { version, org, detectedFrom } = await resolveReleaseTarget(
+      target,
+      USAGE_HINT,
+      cwd
     );
-    const resolved = await resolveOrg({ org: orgSlug, cwd });
-    if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry release finalize [<org>/]<version>"
-      );
-    }
+
     if (flags["dry-run"]) {
       yield new CommandOutput({
         dryRun: true,
         version,
-        org: resolved.org,
+        org,
         released: flags.released || new Date().toISOString(),
       });
       return { hint: "Dry run — release was not finalized." };
@@ -128,11 +116,9 @@ export const finalizeCommand = buildCommand({
     if (flags.url) {
       body.url = flags.url;
     }
-    const release = await updateRelease(resolved.org, version, body);
+    const release = await updateRelease(org, version, body);
     yield new CommandOutput(release);
-    const hint = resolved.detectedFrom
-      ? `Detected from ${resolved.detectedFrom}`
-      : undefined;
+    const hint = detectedFrom ? `Detected from ${detectedFrom}` : undefined;
     return { hint };
   },
 });

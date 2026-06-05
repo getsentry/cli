@@ -31,7 +31,9 @@ export function formatRelativeTime(dateString: string | undefined): string {
 
   const date = new Date(dateString);
   const now = Date.now();
-  const diffMs = now - date.getTime();
+  // Clamp to >= 0 so clock skew, scheduled/future timestamps, or bad API data
+  // render as "0m ago" instead of a negative duration like "-5m ago".
+  const diffMs = Math.max(0, now - date.getTime());
   const diffMins = Math.floor(diffMs / 60_000);
   const diffHours = Math.floor(diffMs / 3_600_000);
   const diffDays = Math.floor(diffMs / 86_400_000);

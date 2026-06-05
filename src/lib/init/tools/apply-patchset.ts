@@ -14,8 +14,65 @@ import type { InitToolDefinition, ToolContext } from "./types.js";
 const EMPTY_AUTH_TOKEN_RE =
   /^(SENTRY_AUTH_TOKEN[ \t]*=[ \t]*)(?:['"]?[ \t]*['"]?)?[ \t]*$/m;
 const PATH_SEGMENT_RE = /[/\\]/u;
+const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 
 const VALID_PATCH_ACTIONS = new Set(["create", "modify", "delete"]);
+
+function validatePatchPath(filePath: unknown): string | undefined {
+  if (typeof filePath !== "string" || filePath.length === 0) {
+    return "Invalid patch path: expected a non-empty project-relative path";
+  }
+  if (filePath.includes("\\")) {
+    return `Invalid patch path "${filePath}": use project-relative POSIX paths`;
+  }
+  if (WINDOWS_DRIVE_RE.test(filePath) || path.posix.isAbsolute(filePath)) {
+    return `Invalid patch path "${filePath}": absolute paths are not allowed`;
+  }
+  const segments = filePath.split("/");
+  if (
+    segments.some(
+      (segment) => segment.length === 0 || segment === "." || segment === ".."
+    )
+  ) {
+    return `Invalid patch path "${filePath}": path segments must not be empty, "." or ".."`;
+  }
+  return;
+}
+
+function validatePatch(patch: unknown, cwd: string): ToolResult | undefined {
+  if (!patch || typeof patch !== "object") {
+    return {
+      ok: false,
+      error:
+        "Invalid patch path: expected a patch object with a project-relative path",
+    };
+  }
+
+  const candidate = patch as { action?: unknown; path?: unknown };
+  const pathError = validatePatchPath(candidate.path);
+  if (pathError) {
+    return { ok: false, error: pathError };
+  }
+  const patchPath = candidate.path as string;
+  try {
+    safePath(cwd, patchPath);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  if (
+    typeof candidate.action !== "string" ||
+    !VALID_PATCH_ACTIONS.has(candidate.action)
+  ) {
+    return {
+      ok: false,
+      error: `Unknown patch action: "${String(candidate.action)}" for path "${patchPath}"`,
+    };
+  }
+  return;
+}
 
 /**
  * Apply a batch of file creates, modifications, and deletes.
@@ -29,12 +86,9 @@ export async function applyPatchset(
   }
 
   for (const patch of payload.params.patches) {
-    safePath(payload.cwd, patch.path);
-    if (!VALID_PATCH_ACTIONS.has(patch.action)) {
-      return {
-        ok: false,
-        error: `Unknown patch action: "${patch.action}" for path "${patch.path}"`,
-      };
+    const validationError = validatePatch(patch, payload.cwd);
+    if (validationError) {
+      return validationError;
     }
   }
 
@@ -66,12 +120,9 @@ function applyPatchsetDryRun(payload: ApplyPatchsetPayload): ToolResult {
   const applied: Array<{ path: string; action: string }> = [];
 
   for (const patch of payload.params.patches) {
-    safePath(payload.cwd, patch.path);
-    if (!VALID_PATCH_ACTIONS.has(patch.action)) {
-      return {
-        ok: false,
-        error: `Unknown patch action: "${patch.action}" for path "${patch.path}"`,
-      };
+    const validationError = validatePatch(patch, payload.cwd);
+    if (validationError) {
+      return validationError;
     }
     applied.push({ path: patch.path, action: patch.action });
   }

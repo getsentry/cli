@@ -7,13 +7,13 @@
 import type { SentryContext } from "../../context.js";
 import { listReleaseDeploys } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { type Column, formatTable } from "../../lib/formatters/table.js";
 import { formatRelativeTime } from "../../lib/formatters/time-utils.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
 import type { SentryDeploy } from "../../types/index.js";
-import { parseReleaseArg } from "./parse.js";
+import { resolveReleaseTarget } from "./parse.js";
+
+const USAGE_HINT = "sentry release deploys [<org>/]<version>";
 
 const DEPLOY_COLUMNS: Column<SentryDeploy>[] = [
   { header: "ENVIRONMENT", value: (d) => d.environment },
@@ -46,43 +46,30 @@ export const deploysCommand = buildCommand({
   },
   parameters: {
     positional: {
-      kind: "array",
-      parameter: {
-        placeholder: "org/version",
-        brief: "[<org>/]<version> - Release version",
-        parse: String,
-      },
+      kind: "tuple",
+      parameters: [
+        {
+          placeholder: "org/version",
+          brief: "[<org>/]<version> - Release version",
+          parse: String,
+        },
+      ],
     },
   },
   async *func(
     this: SentryContext,
     _flags: { readonly json: boolean; readonly fields?: string[] },
-    ...args: string[]
+    target: string
   ) {
     const { cwd } = this;
 
-    const joined = args.join(" ").trim();
-    if (!joined) {
-      throw new ContextError(
-        "Release version",
-        "sentry release deploys [<org>/]<version>",
-        []
-      );
-    }
-
-    const { version, orgSlug } = parseReleaseArg(
-      joined,
-      "sentry release deploys [<org>/]<version>"
+    const { version, org } = await resolveReleaseTarget(
+      target,
+      USAGE_HINT,
+      cwd
     );
-    const resolved = await resolveOrg({ org: orgSlug, cwd });
-    if (!resolved) {
-      throw new ContextError(
-        "Organization",
-        "sentry release deploys [<org>/]<version>"
-      );
-    }
 
-    const deploys = await listReleaseDeploys(resolved.org, version);
+    const deploys = await listReleaseDeploys(org, version);
     yield new CommandOutput(deploys);
   },
 });

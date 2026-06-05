@@ -139,6 +139,15 @@ describe("formatRelativeTime", () => {
     // Should be "0m ago" or similar for very recent times
     expect(result.trim()).toMatch(/^\d+[mhd] ago$|^[A-Z][a-z]{2} \d{1,2}$/);
   });
+
+  test("clamps future timestamps to '0m ago' instead of negative", () => {
+    // Clock skew / scheduled timestamps can be in the future; diffMs is clamped
+    // to >= 0 so we never render "-5m ago".
+    const fiveMinutesAhead = new Date(Date.now() + 5 * 60_000).toISOString();
+    const result = stripAnsi(formatRelativeTime(fiveMinutesAhead));
+    expect(result.trim()).toBe("0m ago");
+    expect(result).not.toContain("-");
+  });
 });
 
 // Token Masking

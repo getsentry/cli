@@ -13,7 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { chmod, copyFile, mkdir, unlink } from "node:fs/promises";
+import { chmod, copyFile, mkdir, realpath, unlink } from "node:fs/promises";
 import { delimiter, join, resolve } from "node:path";
 import { compare as semverCompare } from "semver";
 import { getUserAgent } from "./constants.js";
@@ -23,9 +23,56 @@ import {
   isTlsCertError,
 } from "./custom-ca.js";
 import { stringifyUnknown, UpgradeError } from "./errors.js";
+import { logger } from "./logger.js";
 
 /** Known directories where the curl installer may place the binary */
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
+
+/**
+ * How the CLI was installed. Determines the upgrade strategy.
+ *
+ * Defined here (alongside other installation constants like
+ * {@link KNOWN_CURL_DIRS}) so that both `upgrade.ts` and
+ * `db/install-info.ts` can import it without creating a circular
+ * dependency.
+ */
+export type InstallationMethod =
+  | "curl"
+  | "brew"
+  | "npm"
+  | "pnpm"
+  | "bun"
+  | "yarn"
+  | "unknown";
+
+/** Valid methods that can be specified via --method flag */
+const VALID_METHODS: InstallationMethod[] = [
+  "curl",
+  "brew",
+  "npm",
+  "pnpm",
+  "bun",
+  "yarn",
+];
+
+/**
+ * Parse and validate an installation method from user input.
+ *
+ * @param value - Method string from --method flag
+ * @returns Validated installation method
+ * @throws {Error} When method is not recognized
+ */
+export function parseInstallationMethod(value: string): InstallationMethod {
+  const normalized = value.toLowerCase() as InstallationMethod;
+
+  if (!VALID_METHODS.includes(normalized)) {
+    throw new Error(
+      `Invalid method: ${value}. Must be one of: ${VALID_METHODS.join(", ")}`
+    );
+  }
+
+  return normalized;
+}
 
 /**
  * Detect whether the current process is running on a musl-based Linux system
@@ -443,12 +490,29 @@ export async function installBinary(
     // When upgrade spawns setup --install, the child's execPath IS the
     // .download file (sourcePath === tempPath). In that case skip the
     // unlink+copy — the file is already where we need it.
-    if (resolve(sourcePath) !== resolve(tempPath)) {
+    // Compare symlink-resolved paths: process.execPath is canonicalized by
+    // the OS, but installDir may go through a symlink (e.g. macOS /tmp →
+    // /private/tmp). Falls back to resolve() when the path doesn't exist yet.
+    const canonical = async (p: string): Promise<string> => {
+      try {
+        return await realpath(p);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return resolve(p);
+        }
+        logger.debug("realpath failed, falling back to resolve()", error);
+        return resolve(p);
+      }
+    };
+
+    if ((await canonical(sourcePath)) !== (await canonical(tempPath))) {
       // Clean up any leftover temp file from interrupted operation
       try {
         await unlink(tempPath);
-      } catch {
-        // Ignore if doesn't exist
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          logger.debug("Failed to clean up temp file", error);
+        }
       }
 
       // Copy source binary to temp path next to install location

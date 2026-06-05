@@ -52,8 +52,9 @@ function enrich403Detail(rawDetail: string | undefined): string {
     lines.push(rawDetail, "");
   }
 
+  const scopes = extractRequiredScopes(rawDetail);
+
   if (isEnvTokenActive()) {
-    const scopes = extractRequiredScopes(rawDetail);
     if (scopes.length > 0) {
       lines.push(
         `Your ${getActiveEnvVarName()} token is missing the required scope(s) '${scopes.join("', '")}'.`
@@ -65,6 +66,12 @@ function enrich403Detail(rawDetail: string | undefined): string {
     }
     lines.push(
       "Check token scopes at: https://sentry.io/settings/account/api/auth-tokens/"
+    );
+  } else if (scopes.length > 0) {
+    const scopeArgs = scopes.map((s) => `--scope ${s}`).join(" ");
+    lines.push(
+      `Your token is missing the required scope(s) '${scopes.join("', '")}'.`,
+      `Re-authenticate with: sentry auth refresh ${scopeArgs}`
     );
   } else {
     lines.push(
@@ -543,6 +550,45 @@ async function throwRawApiError(
     endpoint,
     is403
   );
+}
+
+/**
+ * Make an authenticated request to a Sentry region where success has no JSON body
+ * (e.g. DELETE returning 204 No Content, or 202 Accepted with an empty body).
+ */
+export async function apiRequestToRegionNoContent(
+  regionUrl: string,
+  endpoint: string,
+  options: Omit<ApiRequestOptions, "schema"> = {}
+): Promise<void> {
+  const { method = "GET", body, params } = options;
+  const config = getSdkConfig(regionUrl);
+
+  const searchParams = buildSearchParams(params);
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint.slice(1)
+    : endpoint;
+  const queryString = searchParams ? `?${searchParams.toString()}` : "";
+  const url = `${config.baseUrl}/api/0/${normalizedEndpoint}${queryString}`;
+
+  const fetchFn = config.fetch;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const response = await fetchFn(url, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    await throwRawApiError(response, endpoint);
+  }
+
+  if (response.status === 204 || response.status === 205) {
+    return;
+  }
+  await response.text();
 }
 
 /**
