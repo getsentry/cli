@@ -128,7 +128,15 @@ function isExecutablePackageSpec(executable: string, name: string): boolean {
   return executable === name || executable.startsWith(`${name}@`);
 }
 
-function findFirstNonOptionIndex(
+function packageRunnerOptionConsumesValue(token: string): boolean {
+  return token === "-p" || token === "--package";
+}
+
+function isInlinePackageRunnerOption(token: string): boolean {
+  return token.startsWith("-p=") || token.startsWith("--package=");
+}
+
+function findPackageRunnerCommandIndex(
   tokens: string[],
   startIndex: number
 ): number | undefined {
@@ -139,6 +147,13 @@ function findFirstNonOptionIndex(
     }
     if (token === "--") {
       return index + 1 < tokens.length ? index + 1 : undefined;
+    }
+    if (packageRunnerOptionConsumesValue(token)) {
+      index += 1;
+      continue;
+    }
+    if (isInlinePackageRunnerOption(token)) {
+      continue;
     }
     if (token.startsWith("-")) {
       continue;
@@ -155,10 +170,10 @@ function findPackageExecutionTokenIndex(tokens: string[]): number | undefined {
     isExecutablePackageSpec(firstExecutable, "npx") ||
     isExecutablePackageSpec(firstExecutable, "bunx")
   ) {
-    return findFirstNonOptionIndex(tokens, 1);
+    return findPackageRunnerCommandIndex(tokens, 1);
   }
 
-  const subcommandIndex = findFirstNonOptionIndex(tokens, 1);
+  const subcommandIndex = findPackageRunnerCommandIndex(tokens, 1);
   if (subcommandIndex === undefined) {
     return;
   }
@@ -168,7 +183,7 @@ function findPackageExecutionTokenIndex(tokens: string[]): number | undefined {
     return;
   }
 
-  return findFirstNonOptionIndex(tokens, subcommandIndex + 1);
+  return findPackageRunnerCommandIndex(tokens, subcommandIndex + 1);
 }
 
 function canExecuteToken(tokens: string[], index: number): boolean {
