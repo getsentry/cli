@@ -11,6 +11,15 @@ requires:
 
 Work with ProGuard/R8 mapping files
 
+### `sentry proguard upload <path...>`
+
+Upload ProGuard/R8 mapping files to Sentry
+
+**Flags:**
+- `--uuid <value> - Force a specific UUID instead of computing from file content (only valid with a single file)`
+- `--no-upload - Compute and print UUIDs without uploading (dry-run)`
+- `--require-one - Require at least one mapping file (error if none provided)`
+
 ### `sentry proguard uuid <path>`
 
 Compute the UUID for a ProGuard mapping file

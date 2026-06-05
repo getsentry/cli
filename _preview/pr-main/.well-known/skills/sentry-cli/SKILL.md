@@ -408,6 +408,7 @@ Manage Sentry dashboards
 
 Work with ProGuard/R8 mapping files
 
+- `sentry proguard upload <path...>` — Upload ProGuard/R8 mapping files to Sentry
 - `sentry proguard uuid <path>` — Compute the UUID for a ProGuard mapping file
 
 → Full flags and examples: `references/proguard.md`
