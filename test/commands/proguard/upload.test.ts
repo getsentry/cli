@@ -100,7 +100,7 @@ describe("sentry proguard upload", () => {
         ctx,
         { uuid: "5db7294d-87fc-5726-a5c0-4a90679657a5" },
         f1,
-        f2,
+        f2
       );
       expect.unreachable("should have thrown");
     } catch (err) {
@@ -169,7 +169,7 @@ describe("sentry proguard upload", () => {
     const ctx = makeContext();
     // Should succeed without org/project set
     await expect(
-      func.call(ctx, { "no-upload": true }, f),
+      func.call(ctx, { "no-upload": true }, f)
     ).resolves.toBeUndefined();
   });
 
@@ -192,7 +192,7 @@ describe("sentry proguard upload", () => {
       expect(callArgs?.project).toBe("test-project");
       expect(callArgs?.mappings).toHaveLength(1);
       expect(callArgs?.mappings[0]?.uuid).toBe(
-        "5db7294d-87fc-5726-a5c0-4a90679657a5",
+        "5db7294d-87fc-5726-a5c0-4a90679657a5"
       );
       expect(callArgs?.mappings[0]?.content).toBeInstanceOf(Buffer);
     } finally {
@@ -217,9 +217,7 @@ describe("sentry proguard upload", () => {
       const callArgs = uploadSpy.mock.calls[0]?.[0];
       expect(callArgs?.mappings).toHaveLength(2);
       // Different content should yield different UUIDs
-      expect(callArgs?.mappings[0]?.uuid).not.toBe(
-        callArgs?.mappings[1]?.uuid,
-      );
+      expect(callArgs?.mappings[0]?.uuid).not.toBe(callArgs?.mappings[1]?.uuid);
     } finally {
       uploadSpy.mockRestore();
     }

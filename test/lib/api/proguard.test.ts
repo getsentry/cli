@@ -2,8 +2,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { buildProguardBundle } from "../../../src/lib/api/proguard.js";
 import type { ProguardMapping } from "../../../src/lib/api/proguard.js";
+import { buildProguardBundle } from "../../../src/lib/api/proguard.js";
 
 describe("buildProguardBundle", () => {
   // ZIP local file header format: at offset 8 (LE u16) is the
@@ -24,7 +24,7 @@ describe("buildProguardBundle", () => {
 
   function makeMapping(
     uuid = "5db7294d-87fc-5726-a5c0-4a90679657a5",
-    content = "void\n",
+    content = "void\n"
   ): ProguardMapping {
     return {
       path: "/fake/mapping.txt",
@@ -72,7 +72,7 @@ describe("buildProguardBundle", () => {
     // Use redundant content so DEFLATE has work to do
     const mapping = makeMapping(
       "c038584d-c366-570c-ad1e-034fa0d194d7",
-      "line\n".repeat(500),
+      "line\n".repeat(500)
     );
     const out = join(tmpDir, "bundle-deflate.zip");
     await buildProguardBundle(out, [mapping], {});
@@ -97,7 +97,7 @@ describe("buildProguardBundle", () => {
     await buildProguardBundle(
       out,
       [makeMapping("aaaaaaaa-bbbb-5ccc-8ddd-eeeeeeeeeeee", content)],
-      { compression: "stored" },
+      { compression: "stored" }
     );
 
     const bytes = await readFile(out);
@@ -125,7 +125,7 @@ describe("buildProguardBundle", () => {
   test("STORED archive is larger than DEFLATE for redundant input", async () => {
     const mapping = makeMapping(
       "c038584d-c366-570c-ad1e-034fa0d194d7",
-      "com.example.MyClass -> a:\n".repeat(500),
+      "com.example.MyClass -> a:\n".repeat(500)
     );
 
     const deflateOut = join(tmpDir, "bundle-deflate-size.zip");
