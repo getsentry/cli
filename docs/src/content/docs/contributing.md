@@ -62,7 +62,7 @@ cli/
 │   │   ├── log/         # list, view
 │   │   ├── monitor/     # list, run
 │   │   ├── org/         # list, view
-│   │   ├── proguard/    # uuid
+│   │   ├── proguard/    # upload, uuid
 │   │   ├── project/     # create, delete, list, view
 │   │   ├── release/     # archive, create, delete, deploy, deploys, finalize, list, propose-version, restore, set-commits, view
 │   │   ├── replay/      # list, view
