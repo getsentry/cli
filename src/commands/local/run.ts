@@ -406,8 +406,15 @@ async function* runWithVerify(
     );
   }
 
-  const onSigint = () => child.kill("SIGINT");
-  const onSigterm = () => child.kill("SIGTERM");
+  let signalReceived: NodeJS.Signals | null = null;
+  const onSigint = () => {
+    signalReceived = "SIGINT";
+    child.kill("SIGINT");
+  };
+  const onSigterm = () => {
+    signalReceived = "SIGTERM";
+    child.kill("SIGTERM");
+  };
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);
 
@@ -463,6 +470,13 @@ async function* runWithVerify(
     process.removeListener("SIGINT", onSigint);
     process.removeListener("SIGTERM", onSigterm);
     await shutdownServer(server);
+  }
+
+  // Re-emit the signal after cleanup so the default handler terminates the
+  // process instead of continuing with the outcome switch below.
+  if (signalReceived) {
+    process.kill(process.pid, signalReceived);
+    return;
   }
 
   switch (outcome.kind) {
