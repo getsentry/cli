@@ -282,6 +282,9 @@ export async function verifySetup(
     return;
   }
 
+  // Track whether the user sent an interrupt so we can re-emit it after
+  // cleanup instead of silently continuing the wizard.
+  let signalReceived: NodeJS.Signals | null = null;
   const safeKill = (sig: NodeJS.Signals) => {
     try {
       child.kill(sig);
@@ -289,8 +292,14 @@ export async function verifySetup(
       logger.debug(`Child already exited when forwarding ${sig}`);
     }
   };
-  const onSigint = () => safeKill("SIGINT");
-  const onSigterm = () => safeKill("SIGTERM");
+  const onSigint = () => {
+    signalReceived = "SIGINT";
+    safeKill("SIGINT");
+  };
+  const onSigterm = () => {
+    signalReceived = "SIGTERM";
+    safeKill("SIGTERM");
+  };
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);
 
@@ -332,6 +341,14 @@ export async function verifySetup(
   process.removeListener("SIGINT", onSigint);
   process.removeListener("SIGTERM", onSigterm);
   await shutdownServer(server);
+
+  // Re-emit the signal after cleanup so the default handler terminates the
+  // process. Without this, Ctrl+C during verification would be swallowed and
+  // the wizard would continue as if nothing happened.
+  if (signalReceived) {
+    process.kill(process.pid, signalReceived);
+    return;
+  }
 
   // If the child crashed (non-zero exit) but the startup watcher resolved
   // first as "started" or "silent", correct to "exited" so the crash is
