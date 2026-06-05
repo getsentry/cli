@@ -12,9 +12,16 @@ import {
 } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
+import { clearAuth, setAuthToken } from "../../../src/lib/db/auth.js";
 import { ENV_VAR_AGENTS } from "../../../src/lib/detect-agent.js";
 import { setEnv } from "../../../src/lib/env.js";
-import { EXIT, WizardError } from "../../../src/lib/errors.js";
+import { classifySilenced } from "../../../src/lib/error-reporting.js";
+import {
+  ApiError,
+  EXIT,
+  HostScopeError,
+  WizardError,
+} from "../../../src/lib/errors.js";
 import { WizardCancelledError } from "../../../src/lib/init/clack-utils.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as fmt from "../../../src/lib/init/formatters.js";
@@ -311,6 +318,51 @@ function lastWarn(): string | undefined {
     }
   }
   return;
+}
+
+function lastError(): string | undefined {
+  for (let i = mockUICalls.length - 1; i >= 0; i--) {
+    const call = mockUICalls[i];
+    if (call?.kind === "log.error") {
+      return call.message;
+    }
+  }
+  return;
+}
+
+function initService401Error(): Error {
+  return new Error(
+    'HTTP error! status: 401 - {"error":"Unauthorized: invalid token"}'
+  );
+}
+
+async function useSaaSOAuthAuth(authToken = "oauth-token"): Promise<void> {
+  await clearAuth();
+  const env = { ...process.env };
+  delete env.SENTRY_AUTH_TOKEN;
+  delete env.SENTRY_TOKEN;
+  delete env.SENTRY_FORCE_ENV_TOKEN;
+  setEnv(env);
+  setAuthToken(authToken, 3600, "refresh-token", {
+    host: "https://sentry.io",
+  });
+  resolveInitContextSpy.mockResolvedValue(makeContext({ authToken }));
+}
+
+function initServiceApiErrorShape(endpoint: string) {
+  return {
+    name: "ApiError",
+    status: 401,
+    endpoint,
+  };
+}
+
+function hasExpectedInitServiceAuthPolicy(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.status === 401 &&
+    classifySilenced(err) === "api_user_error"
+  );
 }
 
 describe("runWizard", () => {
@@ -1172,6 +1224,39 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     expect(runByIdMock).not.toHaveBeenCalled();
   });
 
+  test("classifies resumeAsync 401 instead of recovering as a transport failure", async () => {
+    await useSaaSOAuthAuth();
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      return Promise.reject(initService401Error());
+    });
+
+    try {
+      const err = await runWizard(makeOptions()).catch((error) => error);
+
+      expect(err).toMatchObject(
+        initServiceApiErrorShape("/api/workflows/sentry-wizard/resume-async")
+      );
+      expect(hasExpectedInitServiceAuthPolicy(err)).toBe(true);
+      expect(err).not.toBeInstanceOf(WizardError);
+      expect(resumeCount).toBe(1);
+      expect(runByIdMock).not.toHaveBeenCalled();
+      expect(spinnerMock.stop).toHaveBeenCalledWith("Authentication failed", 1);
+      expect(err.format()).toContain("sentry auth login");
+      expect(lastError()).toBeUndefined();
+      expect(lastCancelMessage()).toBe("Authentication failed");
+    } finally {
+      await clearAuth();
+    }
+  });
+
   test("observes run state after a resume timeout without replaying resumeAsync", async () => {
     vi.useFakeTimers();
     mockStartResult = {
@@ -1294,6 +1379,120 @@ describe("runWizard — additional coverage", () => {
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Connection failed", 1);
     expect(lastCancelMessage()).toBe("Setup failed");
+  });
+
+  test("classifies init service 401 as expected OAuth auth state", async () => {
+    await useSaaSOAuthAuth();
+    startAsyncMock.mockRejectedValue(initService401Error());
+    const captureSpy = vi.spyOn(Sentry, "captureException");
+
+    try {
+      const err = await runWizard(makeOptions()).catch((error) => error);
+
+      expect(err).toMatchObject(
+        initServiceApiErrorShape("/api/workflows/sentry-wizard/start-async")
+      );
+      expect(hasExpectedInitServiceAuthPolicy(err)).toBe(true);
+      expect(err.format()).toContain("sentry auth login");
+      expect(spinnerMock.stop).toHaveBeenCalledWith("Authentication failed", 1);
+      expect(lastError()).toBeUndefined();
+      expect(lastCancelMessage()).toBe("Authentication failed");
+      expect(captureSpy).not.toHaveBeenCalled();
+    } finally {
+      captureSpy.mockRestore();
+      await clearAuth();
+    }
+  });
+
+  test("classifies createRun 401 before starting the workflow", async () => {
+    await useSaaSOAuthAuth();
+    const createRunMock = vi.fn(() => Promise.reject(initService401Error()));
+    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+      capturedClientOptions.push(
+        (
+          this as unknown as {
+            options: { abortSignal?: AbortSignal; retries?: number };
+          }
+        ).options
+      );
+      return {
+        createRun: createRunMock,
+        runById: runByIdMock,
+      } as any;
+    });
+
+    try {
+      const err = await runWizard(makeOptions()).catch((error) => error);
+
+      expect(err).toMatchObject(
+        initServiceApiErrorShape("/api/workflows/sentry-wizard/create-run")
+      );
+      expect(hasExpectedInitServiceAuthPolicy(err)).toBe(true);
+      expect(createRunMock).toHaveBeenCalledTimes(1);
+      expect(startAsyncMock).not.toHaveBeenCalled();
+      expect(err.format()).toContain("sentry auth login");
+      expect(spinnerMock.stop).toHaveBeenCalledWith("Authentication failed", 1);
+      expect(lastError()).toBeUndefined();
+      expect(lastCancelMessage()).toBe("Authentication failed");
+    } finally {
+      await clearAuth();
+    }
+  });
+
+  test("classifies init service 401 with env-token guidance", async () => {
+    await clearAuth();
+    const env = {
+      ...process.env,
+      SENTRY_AUTH_TOKEN: "env-token",
+      SENTRY_FORCE_ENV_TOKEN: "1",
+    };
+    delete env.SENTRY_TOKEN;
+    setEnv(env);
+    resolveInitContextSpy.mockResolvedValue(
+      makeContext({ authToken: "env-token" })
+    );
+    startAsyncMock.mockRejectedValue(initService401Error());
+
+    try {
+      const err = await runWizard(makeOptions()).catch((error) => error);
+
+      expect(err).toMatchObject(
+        initServiceApiErrorShape("/api/workflows/sentry-wizard/start-async")
+      );
+      expect(hasExpectedInitServiceAuthPolicy(err)).toBe(true);
+      expect(err.format()).toContain("SENTRY_AUTH_TOKEN");
+      expect(err.format()).toContain("not recognized or has been revoked");
+      expect(err.format()).toContain("auth-tokens");
+      expect(lastError()).toBeUndefined();
+    } finally {
+      setEnv(process.env);
+      await clearAuth();
+    }
+  });
+
+  test("blocks self-hosted tokens before constructing hosted init workflow", async () => {
+    await clearAuth();
+    setAuthToken("self-hosted-token", 3600, "refresh-token", {
+      host: "https://sentry.internal.example.com",
+    });
+    resolveInitContextSpy.mockResolvedValue(
+      makeContext({ authToken: "self-hosted-token" })
+    );
+
+    try {
+      const err = await runWizard(makeOptions()).catch((error) => error);
+
+      expect(err).toBeInstanceOf(HostScopeError);
+      expect(getWorkflowSpy).not.toHaveBeenCalled();
+      expect(startAsyncMock).not.toHaveBeenCalled();
+      expect(capturedClientOptions).toHaveLength(0);
+      expect(err.format()).toContain("sentry.internal.example.com");
+      expect(err.format()).toContain(
+        "sentry auth login --url https://sentry.io"
+      );
+    } finally {
+      await clearAuth();
+    }
   });
 
   test("throws when the workflow response has an unrecognised status", async () => {
