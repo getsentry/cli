@@ -23,6 +23,7 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import { logger } from "../../lib/logger.js";
 import {
   collectReplayIds,
   getReplayIdFromEvent,
@@ -51,10 +52,11 @@ async function tryGetLatestEvent(
   orgSlug: string,
   issueId: string
 ): Promise<SentryEvent | undefined> {
+  const log = logger.withTag("issue.view");
   try {
     return await getLatestEvent(orgSlug, issueId);
-  } catch {
-    // Non-blocking: event fetch failures shouldn't prevent issue display
+  } catch (error) {
+    log.debug("Failed to fetch latest event for issue", error);
     return;
   }
 }
@@ -67,9 +69,11 @@ async function tryListReplayIdsForIssue(
   orgSlug: string,
   issueId: string
 ): Promise<string[]> {
+  const log = logger.withTag("issue.view");
   try {
     return await listReplayIdsForIssue(orgSlug, issueId);
-  } catch {
+  } catch (error) {
+    log.debug("Failed to fetch replay IDs for issue", error);
     return [];
   }
 }

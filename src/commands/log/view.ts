@@ -543,7 +543,8 @@ export const viewCommand = buildCommand({
               entry["sentry.item_id"],
               entry.trace
             );
-          } catch {
+          } catch (error) {
+            cmdLog.debug("Failed to fetch log item detail", error);
             return;
           }
         });
