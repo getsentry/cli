@@ -8,16 +8,9 @@ import type { InitToolDefinition } from "./types.js";
 const NATIVE_SEP = path.sep;
 const INIT_SKIP_DIRS = new Set([
   ...DEFAULT_SKIP_DIRS,
-  "out",
   "tmp",
   "temp",
   "bin",
-  "obj",
-  ".pytest_cache",
-  ".mypy_cache",
-  ".ruff_cache",
-  ".pnpm-store",
-  "bower_components",
   "Pods",
 ]);
 
