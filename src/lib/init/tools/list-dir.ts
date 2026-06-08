@@ -1,12 +1,25 @@
 import fs from "node:fs";
 import path from "node:path";
-import { NODE_MODULES_DIRNAME } from "../../constants.js";
-import { normalizePath } from "../../scan/index.js";
+import { DEFAULT_SKIP_DIRS, normalizePath } from "../../scan/index.js";
 import type { DirEntry, ListDirPayload, ToolResult } from "../types.js";
 import { safePath } from "./shared.js";
 import type { InitToolDefinition } from "./types.js";
 
 const NATIVE_SEP = path.sep;
+const INIT_SKIP_DIRS = new Set([
+  ...DEFAULT_SKIP_DIRS,
+  "out",
+  "tmp",
+  "temp",
+  "bin",
+  "obj",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".pnpm-store",
+  "bower_components",
+  "Pods",
+]);
 
 /**
  * List files and directories within the workflow sandbox.
@@ -59,7 +72,7 @@ function shouldRecurseInto(entry: fs.Dirent, state: WalkState): boolean {
     entry.isDirectory() &&
     !entry.isSymbolicLink() &&
     !entry.name.startsWith(".") &&
-    entry.name !== NODE_MODULES_DIRNAME
+    !INIT_SKIP_DIRS.has(entry.name)
   );
 }
 
