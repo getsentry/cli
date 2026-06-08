@@ -6,13 +6,12 @@
  */
 
 import { execSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { applyPatchset } from "../../src/lib/init/tools/apply-patchset.js";
 import { readFiles } from "../../src/lib/init/tools/read-files.js";
-import type { DirEntry } from "../../src/lib/init/types.js";
 import { preReadCommonFiles } from "../../src/lib/init/workflow-inputs.js";
 import { safeReadFile } from "../../src/lib/safe-read.js";
 import {
@@ -264,12 +263,35 @@ describe("workflow-inputs preReadCommonFiles FIFO safety", () => {
     // a FIFO. Without the `stat.isFile()` guard the read would hang.
     createFifo(join(dir, "tsconfig.json"));
 
-    const listing: DirEntry[] = [
-      { name: "package.json", path: "package.json", type: "file" },
-      { name: "tsconfig.json", path: "tsconfig.json", type: "file" },
-    ];
-    const cache = await preReadCommonFiles(dir, listing);
+    const cache = await preReadCommonFiles(dir);
     expect(cache["package.json"]).toBe('{"name":"x"}');
     expect(cache["tsconfig.json"]).toBeNull();
+  });
+
+  test("reads common config files even when they are absent from dirListing", async () => {
+    writeFileSync(join(dir, "package.json"), '{"name":"x"}');
+    writeFileSync(join(dir, "app.config.ts"), "export default {};\n");
+
+    const cache = await preReadCommonFiles(dir);
+
+    expect(cache["package.json"]).toBe('{"name":"x"}');
+    expect(cache["app.config.ts"]).toBe("export default {};\n");
+  });
+
+  test("does not read common config symlinks outside the project", async () => {
+    const outsideDir = join(
+      tmpdir(),
+      `preread-outside-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(outsideDir, { recursive: true });
+    writeFileSync(join(outsideDir, "package.json"), '{"secret":true}');
+    symlinkSync(join(outsideDir, "package.json"), join(dir, "package.json"));
+
+    try {
+      const cache = await preReadCommonFiles(dir);
+      expect(cache["package.json"]).toBeNull();
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
   });
 });

@@ -27,10 +27,26 @@ function makePayload(
 }
 
 function entriesOf(result: Awaited<ReturnType<typeof listDir>>): DirEntry[] {
+  return dataOf(result).entries;
+}
+
+function dataOf(result: Awaited<ReturnType<typeof listDir>>): {
+  entries: DirEntry[];
+  maxDepth: number;
+  maxEntries: number;
+  skippedDirectories: string[];
+  truncated: boolean;
+} {
   if (!result.ok) {
     throw new Error(`expected listDir to succeed, got: ${result.error}`);
   }
-  return (result.data as { entries: DirEntry[] }).entries;
+  return result.data as {
+    entries: DirEntry[];
+    maxDepth: number;
+    maxEntries: number;
+    skippedDirectories: string[];
+    truncated: boolean;
+  };
 }
 
 describe("listDir", () => {
@@ -73,6 +89,26 @@ describe("listDir", () => {
     );
     const paths = entries.map((e) => e.path).sort();
     expect(paths).toEqual(["src", "top.ts"]);
+  });
+
+  test("recursive listing is breadth-first and keeps root files before nested files", async () => {
+    mkdirSync(join(testDir, "src", "deep"), { recursive: true });
+    writeFileSync(join(testDir, "src", "deep", "nested.ts"), "");
+    writeFileSync(join(testDir, "z.ts"), "");
+    writeFileSync(join(testDir, "package.json"), "{}");
+
+    const entries = entriesOf(
+      await listDir(makePayload(testDir, { path: ".", recursive: true }))
+    );
+    const paths = entries.map((e) => e.path);
+
+    expect(paths.indexOf("package.json")).toBeLessThan(paths.indexOf("src"));
+    expect(paths.indexOf("src")).toBeLessThan(
+      paths.indexOf("src/deep/nested.ts")
+    );
+    expect(paths.indexOf("z.ts")).toBeLessThan(
+      paths.indexOf("src/deep/nested.ts")
+    );
   });
 
   test("recursive mode descends into subdirectories up to maxDepth", async () => {
@@ -138,15 +174,105 @@ describe("listDir", () => {
     expect(paths).not.toContain("node_modules/pkg");
   });
 
+  test("surfaces artifact directories but does not recurse into them", async () => {
+    const artifactDirs = [
+      "dist",
+      "build",
+      ".next",
+      "target",
+      "out",
+      "bin",
+      "obj",
+      ".pytest_cache",
+    ];
+    for (const dir of artifactDirs) {
+      mkdirSync(join(testDir, dir, "nested"), { recursive: true });
+      writeFileSync(join(testDir, dir, "nested", "generated.js"), "");
+    }
+
+    const data = dataOf(
+      await listDir(makePayload(testDir, { path: ".", recursive: true }))
+    );
+    const paths = data.entries.map((e) => e.path);
+
+    for (const dir of artifactDirs) {
+      const entry = data.entries.find((e) => e.path === dir);
+      expect(entry).toMatchObject({
+        path: dir,
+        type: "directory",
+        skipped: true,
+      });
+      expect(paths).not.toContain(`${dir}/nested`);
+      expect(paths).not.toContain(`${dir}/nested/generated.js`);
+      expect(data.skippedDirectories).toContain(dir);
+    }
+  });
+
+  test("keeps source/config files when dist contains hundreds of generated assets", async () => {
+    writeFileSync(join(testDir, "package.json"), "{}");
+    writeFileSync(join(testDir, "app.config.ts"), "export default {};\n");
+    writeFileSync(join(testDir, "vite.config.ts"), "export default {};\n");
+    mkdirSync(join(testDir, "app", "routes"), { recursive: true });
+    writeFileSync(join(testDir, "app", "router.tsx"), "export {};\n");
+    writeFileSync(join(testDir, "app", "routes", "__root.tsx"), "export {};\n");
+    mkdirSync(join(testDir, "dist", "client", "assets"), { recursive: true });
+    for (let i = 0; i < 300; i += 1) {
+      writeFileSync(
+        join(testDir, "dist", "client", "assets", `chunk-${i}.js`),
+        ""
+      );
+    }
+
+    const data = dataOf(
+      await listDir(
+        makePayload(testDir, {
+          path: ".",
+          recursive: true,
+          maxDepth: 5,
+          maxEntries: 50,
+        })
+      )
+    );
+    const paths = data.entries.map((e) => e.path);
+
+    expect(paths).toContain("package.json");
+    expect(paths).toContain("app.config.ts");
+    expect(paths).toContain("vite.config.ts");
+    expect(paths).toContain("app/router.tsx");
+    expect(paths).toContain("app/routes/__root.tsx");
+    expect(paths).toContain("dist");
+    expect(paths).not.toContain("dist/client");
+    expect(paths.some((p) => p.startsWith("dist/client/assets/"))).toBe(false);
+    expect(data.entries.find((e) => e.path === "dist")?.skipped).toBe(true);
+    expect(data.skippedDirectories).toContain("dist");
+    expect(data.truncated).toBe(false);
+  });
+
   test("applies maxEntries as a hard cap", async () => {
     for (let i = 0; i < 20; i += 1) {
       writeFileSync(join(testDir, `f${i.toString().padStart(2, "0")}.ts`), "");
     }
 
-    const entries = entriesOf(
+    const data = dataOf(
       await listDir(makePayload(testDir, { path: ".", maxEntries: 5 }))
     );
+    const entries = data.entries;
     expect(entries).toHaveLength(5);
+    expect(data.maxEntries).toBe(5);
+    expect(data.truncated).toBe(true);
+  });
+
+  test("does not mark truncated when entry count exactly equals maxEntries", async () => {
+    for (let i = 0; i < 5; i += 1) {
+      writeFileSync(join(testDir, `f${i}.ts`), "");
+    }
+
+    const data = dataOf(
+      await listDir(makePayload(testDir, { path: ".", maxEntries: 5 }))
+    );
+
+    expect(data.entries).toHaveLength(5);
+    expect(data.truncated).toBe(false);
   });
 
   test("throws on sandbox escape via `..`", async () => {

@@ -72,7 +72,10 @@ describe("filesystem tools", () => {
 
     expect(result.ok).toBe(true);
     expect(entries.map((entry) => entry.path)).toContain("src/app.ts");
-    expect(precomputed.map((entry) => entry.path)).toContain("src/app.ts");
+    expect(precomputed.entries.map((entry) => entry.path)).toContain(
+      "src/app.ts"
+    );
+    expect(precomputed.maxDepth).toBe(5);
   });
 
   test("reads files and checks existence in batches", async () => {

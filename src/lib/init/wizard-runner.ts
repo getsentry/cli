@@ -839,11 +839,12 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   let run: Awaited<ReturnType<typeof workflow.createRun>>;
   let result: WorkflowRunResult;
   try {
-    const [dirListing, existingSentry] = await Promise.all([
+    const [dirListingResult, existingSentry] = await Promise.all([
       precomputeDirListing(directory),
       precomputeSentryDetection(directory).catch(() => null),
     ]);
-    const fileCache = await preReadCommonFiles(directory, dirListing);
+    const { entries: dirListing, ...dirListingMeta } = dirListingResult;
+    const fileCache = await preReadCommonFiles(directory);
     ui.setIntroMode?.(false);
     spin.message("Connecting to wizard...");
     run = await withInitServiceAuthClassification(
@@ -870,6 +871,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
               },
               initialState: {
                 dirListing,
+                dirListingMeta,
                 fileCache,
                 existingSentry: existingSentry?.data,
                 knownPlatform: context.existingProject?.platform,

@@ -1,9 +1,9 @@
 import fs from "node:fs";
-import path from "node:path";
 import { MAX_FILE_BYTES } from "./constants.js";
 import { detectSentry } from "./tools/detect-sentry.js";
 import { listDir } from "./tools/list-dir.js";
-import type { DirEntry } from "./types.js";
+import { safePath } from "./tools/shared.js";
+import type { DirListingResult } from "./types.js";
 
 /**
  * Common config files that multiple init steps frequently inspect.
@@ -34,6 +34,10 @@ const COMMON_CONFIG_FILES = [
   "next.config.js",
   "next.config.mjs",
   "next.config.ts",
+  "app.config.js",
+  "app.config.mjs",
+  "app.config.cjs",
+  "app.config.ts",
   "nuxt.config.ts",
   "nuxt.config.js",
   "angular.json",
@@ -80,46 +84,51 @@ const COMMON_CONFIG_FILES = [
 ] as const;
 
 const MAX_PREREAD_TOTAL_BYTES = 512 * 1024;
+const INIT_DISCOVERY_MAX_DEPTH = 5;
+const INIT_DISCOVERY_MAX_ENTRIES = 500;
 
 /**
  * Pre-compute the initial directory listing before the first workflow call.
  */
 export async function precomputeDirListing(
   directory: string
-): Promise<DirEntry[]> {
+): Promise<DirListingResult> {
   const result = await listDir({
     type: "tool",
     operation: "list-dir",
     cwd: directory,
-    params: { path: ".", recursive: true, maxDepth: 3, maxEntries: 500 },
+    params: {
+      path: ".",
+      recursive: true,
+      maxDepth: INIT_DISCOVERY_MAX_DEPTH,
+      maxEntries: INIT_DISCOVERY_MAX_ENTRIES,
+    },
   });
-  return (result.data as { entries?: DirEntry[] } | undefined)?.entries ?? [];
+  return {
+    entries: [],
+    truncated: false,
+    skippedDirectories: [],
+    maxDepth: INIT_DISCOVERY_MAX_DEPTH,
+    maxEntries: INIT_DISCOVERY_MAX_ENTRIES,
+    ...((result.data as Partial<DirListingResult> | undefined) ?? {}),
+  };
 }
 
 /**
  * Pre-read common config files to avoid repeated suspend/resume round-trips.
  */
 export async function preReadCommonFiles(
-  directory: string,
-  dirListing: DirEntry[]
+  directory: string
 ): Promise<Record<string, string | null>> {
-  // `listDir` emits POSIX-normalized paths regardless of host OS,
-  // so `COMMON_CONFIG_FILES` (POSIX) membership checks don't need
-  // any per-path separator translation.
-  const listingPaths = new Set(dirListing.map((entry) => entry.path));
-  const toRead = COMMON_CONFIG_FILES.filter((filePath) =>
-    listingPaths.has(filePath)
-  );
-
   const cache: Record<string, string | null> = {};
   let totalBytes = 0;
 
-  for (const filePath of toRead) {
+  for (const filePath of COMMON_CONFIG_FILES) {
     if (totalBytes >= MAX_PREREAD_TOTAL_BYTES) {
       break;
     }
     try {
-      const absPath = path.join(directory, filePath);
+      const absPath = safePath(directory, filePath);
       const stat = await fs.promises.stat(absPath);
       // Guard against FIFOs / sockets / devices — `fs.readFile` on a
       // FIFO blocks indefinitely waiting for a writer. `stat` follows
@@ -136,7 +145,10 @@ export async function preReadCommonFiles(
         cache[filePath] = content;
         totalBytes += content.length;
       }
-    } catch {
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        continue;
+      }
       cache[filePath] = null;
     }
   }

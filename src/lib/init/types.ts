@@ -2,6 +2,16 @@ export type DirEntry = {
   name: string;
   path: string;
   type: "file" | "directory";
+  depth?: number;
+  skipped?: true;
+};
+
+export type DirListingResult = {
+  entries: DirEntry[];
+  truncated: boolean;
+  skippedDirectories: string[];
+  maxDepth: number;
+  maxEntries: number;
 };
 
 export type ExistingProjectData = {
