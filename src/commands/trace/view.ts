@@ -39,7 +39,7 @@ import {
   FRESH_FLAG,
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
+import { resolveOrg, toNumericId } from "../../lib/resolve-target.js";
 import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import {
@@ -550,7 +550,7 @@ export const viewCommand = buildCommand({
     let numericProjectId: number | undefined;
     if (projectFilter) {
       const projectData = await getProject(org, projectFilter);
-      numericProjectId = Number(projectData.id);
+      numericProjectId = toNumericId(projectData.id);
     }
 
     // The trace API requires a timestamp to help locate the trace data.

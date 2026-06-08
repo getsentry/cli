@@ -118,12 +118,15 @@ export async function listReleasesForProject(
 ): Promise<SentryRelease[]> {
   // Resolve slug → numeric ID (the API requires numeric project IDs)
   const info = await getProject(orgSlug, projectSlug);
-  const numericId = Number(info.id);
-  const projectIds =
-    Number.isFinite(numericId) && numericId > 0 ? [numericId] : undefined;
+  const n = Number(info.id);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new ValidationError(
+      `Project "${projectSlug}" has an invalid numeric ID: ${info.id}`
+    );
+  }
   const { data } = await listReleasesPaginated(orgSlug, {
     ...options,
-    project: projectIds,
+    project: [n],
     perPage: options.perPage ?? 100,
   });
   return data;

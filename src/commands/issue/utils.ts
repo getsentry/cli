@@ -252,8 +252,8 @@ async function resolveProjectSearch(
   let dsnTarget: Awaited<ReturnType<typeof resolveFromDsn>> | undefined;
   try {
     dsnTarget = await resolveFromDsn(cwd);
-  } catch {
-    // DSN resolution failed — fall through to full search
+  } catch (error) {
+    log.debug("DSN resolution failed, falling through to full search", error);
   }
   if (
     dsnTarget &&
