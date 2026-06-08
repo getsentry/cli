@@ -31,6 +31,7 @@ import {
   LIST_BASE_ALIASES,
   LIST_TARGET_POSITIONAL,
 } from "../../lib/list-command.js";
+import { logger } from "../../lib/logger.js";
 import {
   dispatchOrgScopedList,
   type HandlerContext,
@@ -348,12 +349,14 @@ async function resolveProjectIds(
   org: string,
   project: string
 ): Promise<number[] | undefined> {
+  const log = logger.withTag("release.list");
   try {
     const { getProject } = await import("../../lib/api-client.js");
     const info = await getProject(org, project);
     const id = toNumericId(info.id);
     return id ? [id] : undefined;
-  } catch {
+  } catch (error) {
+    log.debug(`Failed to resolve project ID for ${org}/${project}`, error);
     return;
   }
 }
@@ -578,6 +581,7 @@ async function resolveDefaultEnvironment(
   org: string,
   project: string
 ): Promise<string[] | undefined> {
+  const log = logger.withTag("release.list");
   try {
     const envs = await listProjectEnvironments(org, project);
     const names = envs.map((e) => e.name);
@@ -586,8 +590,8 @@ async function resolveDefaultEnvironment(
         return [candidate];
       }
     }
-  } catch {
-    // Environment listing failed — don't filter
+  } catch (error) {
+    log.debug(`Failed to list environments for ${org}/${project}`, error);
   }
   return;
 }
