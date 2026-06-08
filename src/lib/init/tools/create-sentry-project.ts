@@ -2,9 +2,9 @@
  * Sentry project creation tool for the init wizard.
  *
  * Implements the `create-sentry-project` and `ensure-sentry-project` wizard
- * operations. Uses the team-scoped endpoint when the caller has team access,
- * falling back to POST /organizations/{org}/projects/ for org members who
- * lack team:write.
+ * operations. Uses the team-scoped endpoint for explicit or Team Admin teams;
+ * otherwise uses POST /organizations/{org}/projects/, the onboarding endpoint
+ * that auto-creates a personal team for eligible members.
  */
 
 import { captureException } from "@sentry/node-core/light";
@@ -17,6 +17,7 @@ import { ApiError } from "../../errors.js";
 import { resolveOrCreateTeam } from "../../resolve-team.js";
 import { slugify } from "../../utils.js";
 import { tryGetExistingProjectData } from "../existing-project.js";
+import { formatMemberProjectCreationDisabledError } from "../project-creation-errors.js";
 import type {
   CreateSentryProjectPayload,
   EnsureSentryProjectPayload,
@@ -32,20 +33,36 @@ type ProjectData = {
   url: string;
 };
 
+type ProjectCreationResponse = {
+  project: {
+    id: string;
+    slug: string;
+  };
+  dsn?: string | null;
+  url: string;
+};
+
+function toProjectData(response: ProjectCreationResponse): ProjectData {
+  return {
+    projectSlug: response.project.slug,
+    projectId: response.project.id,
+    dsn: response.dsn ?? "",
+    url: response.url,
+  };
+}
+
 /**
- * Resolve project creation using the team-based flow, falling back to the
- * org-scoped endpoint on 403 (member lacks team creation permission).
+ * Resolve project creation using the frontend onboarding policy.
  *
  * @param opts.org - Organization slug
  * @param opts.name - Project display name
  * @param opts.platform - Platform identifier (null/undefined → omitted from request)
  * @param opts.team - Pre-resolved team slug (explicit or auto-selected by preflight).
- *   When undefined the team is resolved fresh via resolveOrCreateTeam.
+ *   When undefined, use the org-scoped onboarding endpoint directly.
  * @param opts.suppressFallback - When true, a 403 from the team-scoped flow is
  *   surfaced directly rather than triggering the org-scoped fallback. Set only
  *   when the team was explicitly named via `--team` — a 403 there is meaningful
  *   user feedback, not a permission gap.
- * @param opts.slugHint - Slug used for auto-creating a team when org has none
  * @returns Resolved project identifiers and DSN
  */
 async function resolveProjectCreation(opts: {
@@ -54,9 +71,8 @@ async function resolveProjectCreation(opts: {
   platform: string | null | undefined;
   team: string | undefined;
   suppressFallback: boolean;
-  slugHint: string;
 }): Promise<ProjectData> {
-  const { org, name, team, suppressFallback, slugHint } = opts;
+  const { org, name, team, suppressFallback } = opts;
   // Coerce null → undefined: CreateProjectBody.platform is string | undefined.
   const platform = opts.platform ?? undefined;
 
@@ -90,26 +106,23 @@ async function resolveProjectCreation(opts: {
     }
   };
 
-  try {
-    const teamSlug = team
-      ? team
-      : (
-          await resolveOrCreateTeam(org, {
-            autoCreateSlug: slugHint,
-            usageHint: "sentry init",
-          })
-        ).slug;
+  if (!team) {
     return await withPlatformFallback(async (p) => {
-      const result = await createProjectWithDsn(org, teamSlug, {
+      const result = await createProjectWithAutoTeam(org, {
         name,
         platform: p,
       });
-      return {
-        projectSlug: result.project.slug,
-        projectId: result.project.id,
-        dsn: result.dsn ?? "",
-        url: result.url,
-      };
+      return toProjectData(result);
+    });
+  }
+
+  try {
+    return await withPlatformFallback(async (p) => {
+      const result = await createProjectWithDsn(org, team, {
+        name,
+        platform: p,
+      });
+      return toProjectData(result);
     });
   } catch (innerError) {
     // Fall back to org-scoped endpoint on 403, unless the fallback is suppressed
@@ -134,22 +147,16 @@ async function resolveProjectCreation(opts: {
         name,
         platform: p,
       });
-      return {
-        projectSlug: result.project.slug,
-        projectId: result.project.id,
-        url: result.url,
-        dsn: result.dsn ?? "",
-      };
+      return toProjectData(result);
     });
   }
 }
 
 /**
- * Validate team access for a dry-run, mirroring preflight.ts:resolveTeam.
+ * Validate explicit team access for a dry-run, mirroring preflight.ts:resolveTeam.
  *
- * Calls resolveOrCreateTeam with dryRun=true and deferAutoCreateOnEmptyOrg=true
- * so no real teams are created. A 403 is swallowed — the real run falls back
- * to the org-scoped endpoint.
+ * When `team` is undefined, preflight intentionally chose the org-scoped
+ * onboarding endpoint, so there is no local team path to validate.
  *
  * @throws Non-403 errors from resolveOrCreateTeam (org not found, network, etc.)
  */
@@ -158,6 +165,10 @@ async function validateTeamForDryRun(
   team: string | undefined,
   autoCreateSlug: string
 ): Promise<void> {
+  if (!team) {
+    return;
+  }
+
   try {
     await resolveOrCreateTeam(org, {
       team,
@@ -175,8 +186,8 @@ async function validateTeamForDryRun(
 
 /**
  * Create a new Sentry project using the org that preflight already resolved.
- * Team creation is deferred here for empty-org init flows so the final project
- * slug can be reused as the team slug.
+ * When preflight does not resolve a Team Admin team, creation uses the same
+ * org-scoped auto-team endpoint as Sentry onboarding.
  *
  * New Sentry orgs have member project creation disabled by default
  * (Organization.flags.disable_member_project_creation = true). When the org
@@ -235,16 +246,15 @@ export async function createSentryProject(
       };
     }
 
-    // Try the normal team-based flow. If the user is an org member who can't
-    // create or see teams (403), fall back to POST /organizations/{org}/projects/
-    // which requires only project:read scope and auto-creates a personal team.
+    // Use the Team Admin path when preflight found one; otherwise use the
+    // org-scoped onboarding path, which auto-creates a personal team for
+    // eligible members.
     const projectData = await resolveProjectCreation({
       org: context.org,
       name,
       platform: payload.params.platform,
       team: context.team,
       suppressFallback: Boolean(context.isExplicitTeam),
-      slugHint: slug,
     });
 
     return {
@@ -267,11 +277,7 @@ export async function createSentryProject(
     ) {
       return {
         ok: false,
-        error:
-          `Project creation is disabled for members in "${context.org}".\n` +
-          "Ask an org owner to either enable project creation for members\n" +
-          "or create the project for you. Once the project exists, run:\n" +
-          `  sentry init ${context.org}/<project-slug>`,
+        error: formatMemberProjectCreationDisabledError(context.org),
       };
     }
     // 409: project already exists (from either the team-scoped or org-scoped

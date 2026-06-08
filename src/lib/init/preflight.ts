@@ -1,12 +1,17 @@
 import type { SentryTeam } from "../../types/index.js";
-import { listOrganizations } from "../api-client.js";
+import {
+  getOrganization,
+  listOrganizations,
+  listTeams,
+} from "../api-client.js";
 import { getAuthToken } from "../db/auth.js";
 import { ApiError, WizardError } from "../errors.js";
-import { resolveOrCreateTeam } from "../resolve-team.js";
+import { buildOrgNotFoundError, resolveOrCreateTeam } from "../resolve-team.js";
 import { slugify } from "../utils.js";
 import { WizardCancelledError } from "./clack-utils.js";
 import { tryGetExistingProjectData } from "./existing-project.js";
 import { resolveOrgPrefetched } from "./org-prefetch.js";
+import { formatMemberProjectCreationDisabledError } from "./project-creation-errors.js";
 import type {
   ExistingProjectData,
   ResolvedInitContext,
@@ -310,37 +315,22 @@ async function resolveTeam(
   initial: WizardOptions,
   ui: WizardUI
 ): Promise<string | undefined> {
+  if (!initial.team) {
+    return await resolveImplicitTeam(org, initial, ui);
+  }
+
   try {
     const result = await resolveOrCreateTeam(org, {
       team: initial.team,
       usageHint: "sentry init",
       dryRun: initial.dryRun,
       deferAutoCreateOnEmptyOrg: true,
-      onAmbiguous: initial.yes
-        ? (candidates) => Promise.resolve((candidates[0] as SentryTeam).slug)
-        : async (candidates) => {
-            const selected = await ui.select<string>({
-              message: "Which team should own this project?",
-              options: candidates.map((team) => ({
-                value: team.slug,
-                label: team.slug,
-                ...(team.name !== team.slug ? { hint: team.name } : {}),
-              })),
-            });
-            if (isCancelled(selected)) {
-              throw new WizardCancelledError();
-            }
-            return selected;
-          },
     });
     return result.source === "deferred" ? undefined : result.slug;
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       throw error;
     }
-    // 403 from listTeams: member lacks team:read. Return undefined (same as the
-    // "deferred" path) so the wizard continues to the project creation tool,
-    // where resolveProjectCreation has the createProjectWithAutoTeam fallback.
     if (error instanceof ApiError && error.status === 403) {
       return;
     }
@@ -348,6 +338,86 @@ async function resolveTeam(
       ? error
       : new WizardError(error instanceof Error ? error.message : String(error));
   }
+}
+
+function canCreateProjectInTeam(team: SentryTeam): boolean {
+  return Array.isArray(team.access) && team.access.includes("team:admin");
+}
+
+function hasOrgWriteAccess(access: unknown): boolean {
+  return Array.isArray(access) && access.includes("org:write");
+}
+
+async function assertOrgScopedCreationCanProceed(org: string): Promise<void> {
+  let organization: Awaited<ReturnType<typeof getOrganization>>;
+  try {
+    organization = await getOrganization(org);
+  } catch {
+    // If org details cannot be fetched, let the actual create endpoint surface
+    // the precise API error during the project-creation step.
+    return;
+  }
+
+  if (
+    organization.allowMemberProjectCreation === false &&
+    !hasOrgWriteAccess(organization.access)
+  ) {
+    throw new WizardError(formatMemberProjectCreationDisabledError(org));
+  }
+}
+
+async function listTeamsForImplicitInit(
+  org: string
+): Promise<SentryTeam[] | undefined> {
+  try {
+    return await listTeams(org);
+  } catch (error) {
+    // 403 from listTeams means the user cannot inspect team access. Continue
+    // without a team so init mirrors onboarding's org-scoped auto-team path.
+    if (error instanceof ApiError && error.status === 403) {
+      await assertOrgScopedCreationCanProceed(org);
+      return;
+    }
+    if (error instanceof ApiError && error.status === 404) {
+      return await buildOrgNotFoundError(org, "sentry init");
+    }
+    throw error instanceof WizardError
+      ? error
+      : new WizardError(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function resolveImplicitTeam(
+  org: string,
+  initial: WizardOptions,
+  ui: WizardUI
+): Promise<string | undefined> {
+  const teams = await listTeamsForImplicitInit(org);
+  if (!teams) {
+    return;
+  }
+
+  const candidateTeams = teams.filter(canCreateProjectInTeam);
+  if (candidateTeams.length === 0) {
+    await assertOrgScopedCreationCanProceed(org);
+    return;
+  }
+  if (candidateTeams.length === 1 || initial.yes) {
+    return (candidateTeams[0] as SentryTeam).slug;
+  }
+
+  const selected = await ui.select<string>({
+    message: "Which team should own this project?",
+    options: candidateTeams.map((team) => ({
+      value: team.slug,
+      label: team.slug,
+      ...(team.name !== team.slug ? { hint: team.name } : {}),
+    })),
+  });
+  if (isCancelled(selected)) {
+    throw new WizardCancelledError();
+  }
+  return selected;
 }
 
 /**
