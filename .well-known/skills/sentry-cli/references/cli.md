@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-cli
-version: 0.35.0
+version: 0.36.0
 description: CLI-related commands
 requires:
   bins: ["sentry"]
@@ -34,6 +34,12 @@ sentry cli defaults project my-project
 
 # Set default Sentry URL (self-hosted)
 sentry cli defaults url https://sentry.example.com
+
+# Set custom HTTP headers (self-hosted, e.g. for IAP/proxies)
+sentry cli defaults headers "X-IAP: token"
+
+# Set a custom CA certificate (self-hosted, behind a TLS proxy)
+sentry cli defaults ca-cert /path/to/ca.pem
 
 # Disable telemetry
 sentry cli defaults telemetry off

@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-span
-version: 0.35.0
+version: 0.36.0
 description: List and view spans in projects or traces
 requires:
   bins: ["sentry"]
