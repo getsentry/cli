@@ -118,9 +118,9 @@ export async function listReleasesForProject(
 ): Promise<SentryRelease[]> {
   // Resolve slug → numeric ID (the API requires numeric project IDs)
   const info = await getProject(orgSlug, projectSlug);
-  const numericId = Number(info.id);
-  const projectIds =
-    Number.isFinite(numericId) && numericId > 0 ? [numericId] : undefined;
+  const n = Number(info.id);
+  const numericId = Number.isInteger(n) && n > 0 ? n : undefined;
+  const projectIds = numericId ? [numericId] : undefined;
   const { data } = await listReleasesPaginated(orgSlug, {
     ...options,
     project: projectIds,

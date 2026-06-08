@@ -7,6 +7,9 @@
 import type { SentryEvent, TraceSpan } from "../types/index.js";
 import { getDetailedTrace } from "./api-client.js";
 import { formatSimpleSpanTree, muted } from "./formatters/index.js";
+import { logger } from "./logger.js";
+
+const log = logger.withTag("span-tree");
 
 /**
  * Truncate a span tree to a maximum depth.
@@ -95,7 +98,8 @@ export async function getSpanTreeLines(
         ? spans
         : truncateSpanTree(spans, maxDepth);
     return { lines, spans: truncatedSpans, traceId, success: true };
-  } catch {
+  } catch (error) {
+    log.debug("Failed to fetch span tree", error);
     return {
       lines: [muted("\nUnable to fetch span tree for this event.")],
       spans: null,

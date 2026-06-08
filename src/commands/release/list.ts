@@ -31,6 +31,7 @@ import {
   LIST_BASE_ALIASES,
   LIST_TARGET_POSITIONAL,
 } from "../../lib/list-command.js";
+import { logger } from "../../lib/logger.js";
 import {
   dispatchOrgScopedList,
   type HandlerContext,
@@ -46,6 +47,8 @@ import {
 import { buildReleaseUrl } from "../../lib/sentry-urls.js";
 import type { SentryRelease } from "../../types/index.js";
 import { fmtCrashFree } from "./view.js";
+
+const log = logger.withTag("release.list");
 
 export const PAGINATION_KEY = "release-list";
 
@@ -353,8 +356,9 @@ async function resolveProjectIds(
     const info = await getProject(org, project);
     const id = toNumericId(info.id);
     return id ? [id] : undefined;
-  } catch {
-    return;
+  } catch (error) {
+    log.debug(`Failed to resolve project ID for ${org}/${project}`, error);
+    return [];
   }
 }
 
@@ -586,8 +590,8 @@ async function resolveDefaultEnvironment(
         return [candidate];
       }
     }
-  } catch {
-    // Environment listing failed — don't filter
+  } catch (error) {
+    log.debug(`Failed to list environments for ${org}/${project}`, error);
   }
   return;
 }

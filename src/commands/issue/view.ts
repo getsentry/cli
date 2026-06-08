@@ -23,6 +23,7 @@ import {
   FRESH_ALIASES,
   FRESH_FLAG,
 } from "../../lib/list-command.js";
+import { logger } from "../../lib/logger.js";
 import {
   collectReplayIds,
   getReplayIdFromEvent,
@@ -31,6 +32,8 @@ import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, SentryIssue } from "../../types/index.js";
 import { IssueViewOutputSchema } from "../../types/index.js";
 import { issueIdPositional, resolveIssue } from "./utils.js";
+
+const log = logger.withTag("issue.view");
 
 type ViewFlags = {
   readonly json: boolean;
@@ -53,8 +56,8 @@ async function tryGetLatestEvent(
 ): Promise<SentryEvent | undefined> {
   try {
     return await getLatestEvent(orgSlug, issueId);
-  } catch {
-    // Non-blocking: event fetch failures shouldn't prevent issue display
+  } catch (error) {
+    log.debug("Failed to fetch latest event for issue", error);
     return;
   }
 }
@@ -69,7 +72,8 @@ async function tryListReplayIdsForIssue(
 ): Promise<string[]> {
   try {
     return await listReplayIdsForIssue(orgSlug, issueId);
-  } catch {
+  } catch (error) {
+    log.debug("Failed to fetch replay IDs for issue", error);
     return [];
   }
 }
