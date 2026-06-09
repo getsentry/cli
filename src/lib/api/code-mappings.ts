@@ -17,7 +17,7 @@ import { apiRequestToRegion } from "./infrastructure.js";
 
 const log = logger.withTag("api.code-mappings");
 
-// ── Schemas ─────────────────────────────────────────────────────────
+// Schemas
 
 /** A single code mapping entry. */
 export const CodeMappingSchema = z.object({
@@ -49,12 +49,12 @@ export type BulkCodeMappingsResponse = z.infer<
 
 export type CodeMappingResult = z.infer<typeof CodeMappingResultSchema>;
 
-// ── Constants ───────────────────────────────────────────────────────
+// Constants
 
 /** Maximum mappings per API request. */
 const BATCH_SIZE = 300;
 
-// ── Types ───────────────────────────────────────────────────────────
+// Types
 
 /** Options for {@link uploadCodeMappings}. */
 export type CodeMappingsUploadOptions = {
@@ -73,7 +73,7 @@ export type MergedCodeMappingsResponse = {
   mappings: CodeMappingResult[];
 };
 
-// ── API Function ────────────────────────────────────────────────────
+// API Function
 
 /**
  * Upload code mappings to Sentry via the bulk endpoint.
