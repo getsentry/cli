@@ -9,6 +9,7 @@
         "references/api.md",
         "references/auth.md",
         "references/cli.md",
+        "references/dart-symbol-map.md",
         "references/dashboard.md",
         "references/event.md",
         "references/explore.md",
