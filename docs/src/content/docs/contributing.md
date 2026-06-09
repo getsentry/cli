@@ -54,7 +54,7 @@ cli/
 │   ├── commands/       # CLI commands
 │   │   ├── alert/       # create, delete, edit, list, view
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
-│   │   ├── cli/         # defaults, feedback, fix, import, setup, upgrade
+│   │   ├── cli/         # defaults, feedback, fix, import, setup, uninstall, upgrade
 │   │   ├── dashboard/   # add, create, delete, edit, list, restore, revisions, view
 │   │   ├── event/       # list, send, view
 │   │   ├── issue/       # archive, events, explain, list, merge, plan, resolve, unresolve, view

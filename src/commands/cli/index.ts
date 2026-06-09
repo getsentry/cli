@@ -4,6 +4,7 @@ import { feedbackCommand } from "./feedback.js";
 import { fixCommand } from "./fix.js";
 import { importCommand } from "./import.js";
 import { setupCommand } from "./setup.js";
+import { uninstallCommand } from "./uninstall.js";
 import { upgradeCommand } from "./upgrade.js";
 
 export const cliRoute = buildRouteMap({
@@ -13,6 +14,7 @@ export const cliRoute = buildRouteMap({
     fix: fixCommand,
     import: importCommand,
     setup: setupCommand,
+    uninstall: uninstallCommand,
     upgrade: upgradeCommand,
   },
   docs: {
