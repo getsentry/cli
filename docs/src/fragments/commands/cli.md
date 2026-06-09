@@ -143,3 +143,16 @@ sentry cli setup --no-agent-skills
 # Skip PATH and completion modifications
 sentry cli setup --no-modify-path --no-completions
 ```
+
+### Uninstall
+
+```bash
+# Show what would be removed (dry run)
+sentry cli uninstall --dry-run
+
+# Uninstall, keeping config directory
+sentry cli uninstall --yes --keep-config
+
+# Full uninstall with confirmation
+sentry cli uninstall
+```

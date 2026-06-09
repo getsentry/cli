@@ -390,6 +390,14 @@ CLI-related commands
 
 → Full flags and examples: `references/cli.md`
 
+### Dart-symbol-map
+
+Work with Dart/Flutter symbol maps
+
+- `sentry dart-symbol-map upload <path>` — Upload a Dart/Flutter symbol map to Sentry
+
+→ Full flags and examples: `references/dart-symbol-map.md`
+
 ### Dashboard
 
 Manage Sentry dashboards
