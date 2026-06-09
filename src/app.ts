@@ -9,6 +9,7 @@ import { alertRoute } from "./commands/alert/index.js";
 import { apiCommand } from "./commands/api.js";
 import { authRoute } from "./commands/auth/index.js";
 import { whoamiCommand } from "./commands/auth/whoami.js";
+import { bashHookCommand } from "./commands/bash-hook.js";
 import { cliRoute } from "./commands/cli/index.js";
 import { dashboardRoute } from "./commands/dashboard/index.js";
 import { listCommand as dashboardListCommand } from "./commands/dashboard/list.js";
@@ -120,6 +121,7 @@ export const routes = buildRouteMap({
     // Backward-compat aliases for old sentry-cli — hidden from help
     "send-event": sendEventCommand,
     "send-envelope": sendEnvelopeCommand,
+    "bash-hook": bashHookCommand,
     dashboards: dashboardListCommand,
     issues: issueListCommand,
     orgs: orgListCommand,
@@ -160,6 +162,7 @@ export const routes = buildRouteMap({
       whoami: true,
       "send-event": true,
       "send-envelope": true,
+      "bash-hook": true,
     },
   },
 });
