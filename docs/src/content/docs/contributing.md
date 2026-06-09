@@ -55,6 +55,7 @@ cli/
 │   │   ├── alert/       # create, delete, edit, list, view
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
 │   │   ├── cli/         # defaults, feedback, fix, import, setup, uninstall, upgrade
+│   │   ├── code-mappings/# upload
 │   │   ├── dart-symbol-map/# upload
 │   │   ├── dashboard/   # add, create, delete, edit, list, restore, revisions, view
 │   │   ├── event/       # list, send, view

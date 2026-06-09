@@ -11,6 +11,7 @@ import { authRoute } from "./commands/auth/index.js";
 import { whoamiCommand } from "./commands/auth/whoami.js";
 import { bashHookCommand } from "./commands/bash-hook.js";
 import { cliRoute } from "./commands/cli/index.js";
+import { codeMappingsRoute } from "./commands/code-mappings/index.js";
 import { dartSymbolMapRoute } from "./commands/dart-symbol-map/index.js";
 import { dashboardRoute } from "./commands/dashboard/index.js";
 import { listCommand as dashboardListCommand } from "./commands/dashboard/list.js";
@@ -96,6 +97,7 @@ export const routes = buildRouteMap({
     alert: alertRoute,
     auth: authRoute,
     cli: cliRoute,
+    "code-mappings": codeMappingsRoute,
     "dart-symbol-map": dartSymbolMapRoute,
     dashboard: dashboardRoute,
     org: orgRoute,

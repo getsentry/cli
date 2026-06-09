@@ -390,6 +390,14 @@ CLI-related commands
 
 → Full flags and examples: `references/cli.md`
 
+### Code-mappings
+
+Manage code mappings for stack trace linking
+
+- `sentry code-mappings upload <path>` — Upload code mappings for stack trace linking
+
+→ Full flags and examples: `references/code-mappings.md`
+
 ### Dart-symbol-map
 
 Work with Dart/Flutter symbol maps
