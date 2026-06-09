@@ -30,7 +30,7 @@ import { apiRequestToRegion } from "./infrastructure.js";
 
 const log = logger.withTag("api.dart-symbols");
 
-// ── Types ───────────────────────────────────────────────────────────
+// Types
 
 /** A single dart symbol map file to upload. */
 export type DartSymbolMap = {
@@ -52,7 +52,7 @@ export type DartSymbolMapUploadOptions = {
   mapping: DartSymbolMap;
 };
 
-// ── Schemas ─────────────────────────────────────────────────────────
+// Schemas
 
 /**
  * DIF assemble response — keyed by overall checksum, each value has
@@ -62,7 +62,7 @@ const DifAssembleResponseSchema = z.record(z.string(), AssembleResponseSchema);
 
 type DifAssembleResponse = z.infer<typeof DifAssembleResponseSchema>;
 
-// ── Helpers ─────────────────────────────────────────────────────────
+// Helpers
 
 /** Result of checking a DIF assemble response. */
 type AssembleCheckResult = {
@@ -110,7 +110,7 @@ function checkAssembleResponse(
   return { allDone: false, missingChecksums };
 }
 
-// ── API Function ────────────────────────────────────────────────────
+// API Function
 
 /**
  * Upload a dart symbol map to Sentry via the DIF chunk-upload protocol.

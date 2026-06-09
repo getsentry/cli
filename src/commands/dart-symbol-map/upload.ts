@@ -23,7 +23,7 @@ import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 
 const log = logger.withTag("dart-symbol-map.upload");
 
-// ── Types ───────────────────────────────────────────────────────────
+// Types
 
 /** Structured result for the upload command. */
 type DartSymbolMapUploadResult = {
@@ -39,7 +39,7 @@ type DartSymbolMapUploadResult = {
   uploaded: boolean;
 };
 
-// ── Formatter ───────────────────────────────────────────────────────
+// Formatter
 
 const USAGE_HINT = "sentry dart-symbol-map upload --debug-id <uuid> <path>";
 
@@ -58,7 +58,7 @@ function formatUploadResult(data: DartSymbolMapUploadResult): string {
   return renderMarkdown(mdKvTable(rows));
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────
+// Helpers
 
 /** UUID format: 8-4-4-4-12 hex with hyphens. */
 const UUID_RE =
@@ -152,7 +152,7 @@ async function readMappingFile(path: string): Promise<Buffer> {
   }
 }
 
-// ── Command ─────────────────────────────────────────────────────────
+// Command
 
 export const uploadCommand = buildCommand({
   // Auth is not required for --no-upload (dry-run mode).

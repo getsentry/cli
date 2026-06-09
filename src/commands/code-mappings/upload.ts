@@ -14,7 +14,6 @@
  * 5. Report created/updated/errors counts
  */
 
-import { execSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 
 import type { SentryContext } from "../../context.js";
@@ -26,12 +25,13 @@ import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { mdKvTable, renderMarkdown } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { inferDefaultBranch, inferRepositoryName } from "../../lib/git.js";
 import { logger } from "../../lib/logger.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 
 const log = logger.withTag("code-mappings.upload");
 
-// ── Types ───────────────────────────────────────────────────────────
+// Types
 
 /** Structured result for the upload command. */
 type CodeMappingsUploadResult = {
@@ -50,7 +50,7 @@ type CodeMappingsUploadResult = {
   }>;
 };
 
-// ── Formatter ───────────────────────────────────────────────────────
+// Formatter
 
 const USAGE_HINT = "sentry code-mappings upload <path>";
 
@@ -82,81 +82,7 @@ function formatUploadResult(data: CodeMappingsUploadResult): string {
   return output;
 }
 
-/** SSH remote URL pattern: git@host:path.git — captures the full path after `:` */
-const SSH_REMOTE_RE = /:(.+?)(?:\.git)?$/;
-/** HTTPS remote URL pattern: https://host/path.git — captures the path after the host */
-const HTTPS_REMOTE_RE = /^https?:\/\/[^/]+\/(.+?)(?:\.git)?$/;
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-/**
- * Infer the repository name and the remote used from local git remotes.
- *
- * Tries remotes in order: upstream → origin. Extracts `owner/repo` from
- * the remote URL. Falls back to the next remote if the URL can't be parsed.
- *
- * Returns both the repo name and which remote was used (for branch inference).
- */
-function inferRepo(): { name: string; remote: string } | null {
-  for (const remote of ["upstream", "origin"]) {
-    try {
-      const remoteUrl = execSync(`git remote get-url ${remote}`, {
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "ignore"],
-      }).trim();
-      const name = extractRepoName(remoteUrl);
-      if (name) {
-        return { name, remote };
-      }
-      log.debug(`Could not parse repo name from '${remote}' URL: ${remoteUrl}`);
-    } catch {
-      log.debug(`No '${remote}' remote found`);
-    }
-  }
-  return null;
-}
-
-/**
- * Extract the repository path from a git remote URL.
- *
- * Handles HTTPS, SSH, and git:// URLs. Supports nested paths for
- * GitLab subgroups (e.g., `group/subgroup/project`).
- */
-function extractRepoName(url: string): string | null {
-  // SSH: git@github.com:owner/repo.git or git@gitlab.com:group/sub/project.git
-  const sshMatch = url.match(SSH_REMOTE_RE);
-  if (sshMatch?.[1]) {
-    return sshMatch[1];
-  }
-  // HTTPS: https://github.com/owner/repo.git or https://gitlab.com/group/sub/project.git
-  const httpsMatch = url.match(HTTPS_REMOTE_RE);
-  if (httpsMatch?.[1]) {
-    return httpsMatch[1];
-  }
-  return null;
-}
-
-/**
- * Infer the default branch from a git remote's HEAD ref.
- *
- * @param remote - The remote name to check (e.g., "origin", "upstream")
- */
-function inferDefaultBranch(remote: string): string {
-  try {
-    const output = execSync(`git symbolic-ref refs/remotes/${remote}/HEAD`, {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "ignore"],
-    }).trim();
-    // refs/remotes/origin/main → main
-    const parts = output.split("/");
-    return parts.at(-1) ?? "main";
-  } catch {
-    log.debug(
-      `Could not infer default branch from '${remote}' remote HEAD, using 'main'`
-    );
-    return "main";
-  }
-}
+// Helpers
 
 /**
  * Read and validate the code mappings JSON file.
@@ -231,7 +157,7 @@ async function readAndValidateMappings(
   return mappings;
 }
 
-// ── Command ─────────────────────────────────────────────────────────
+// Command
 
 export const uploadCommand = buildCommand({
   auth: true,
@@ -304,7 +230,7 @@ export const uploadCommand = buildCommand({
     const { org, project } = resolved;
 
     // 3. Resolve repository name and the remote it came from
-    const repoInfo = flags.repo ? null : inferRepo();
+    const repoInfo = flags.repo ? undefined : inferRepositoryName(this.cwd);
     const repository = flags.repo ?? repoInfo?.name ?? null;
     if (!repository) {
       throw new ContextError(
@@ -320,7 +246,7 @@ export const uploadCommand = buildCommand({
     // 4. Resolve default branch (from the same remote that provided the repo name)
     const defaultBranch =
       flags["default-branch"] ??
-      inferDefaultBranch(repoInfo?.remote ?? "origin");
+      inferDefaultBranch(repoInfo?.remote ?? "origin", this.cwd);
 
     log.info(
       `Uploading ${mappings.length} code mapping(s) for ${org}/${project} → ${repository}`
