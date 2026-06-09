@@ -266,8 +266,11 @@ export function inferDefaultBranch(remote: string, cwd?: string): string {
   try {
     const output = git(["symbolic-ref", `refs/remotes/${remote}/HEAD`], cwd);
     // refs/remotes/origin/main → main
-    const parts = output.split("/");
-    return parts.at(-1) ?? "main";
+    // refs/remotes/origin/release/2.0 → release/2.0
+    const prefix = `refs/remotes/${remote}/`;
+    return output.startsWith(prefix)
+      ? output.slice(prefix.length) || "main"
+      : "main";
   } catch {
     return "main";
   }
