@@ -133,6 +133,16 @@ sentry cli setup --no-agent-skills
 sentry cli setup --no-modify-path --no-completions
 ```
 
+### `sentry cli uninstall`
+
+Uninstall Sentry CLI
+
+**Flags:**
+- `--keep-config - Keep the config directory (~/.sentry) and auth tokens`
+- `-y, --yes - Skip confirmation prompt`
+- `-f, --force - Force the operation without confirmation`
+- `-n, --dry-run - Show what would happen without making changes`
+
 ### `sentry cli upgrade <version>`
 
 Update the Sentry CLI to the latest version
