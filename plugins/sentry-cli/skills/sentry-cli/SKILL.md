@@ -385,6 +385,7 @@ CLI-related commands
 - `sentry cli fix` — Diagnose and repair CLI database issues
 - `sentry cli import` — Import settings from legacy .sentryclirc files
 - `sentry cli setup` — Configure shell integration
+- `sentry cli uninstall` — Uninstall Sentry CLI
 - `sentry cli upgrade <version>` — Update the Sentry CLI to the latest version
 
 → Full flags and examples: `references/cli.md`
