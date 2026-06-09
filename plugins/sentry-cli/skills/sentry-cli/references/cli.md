@@ -143,19 +143,6 @@ Uninstall Sentry CLI
 - `-f, --force - Force the operation without confirmation`
 - `-n, --dry-run - Show what would happen without making changes`
 
-**Examples:**
-
-```bash
-# Show what would be removed (dry run)
-sentry cli uninstall --dry-run
-
-# Uninstall, keeping config directory
-sentry cli uninstall --yes --keep-config
-
-# Full uninstall with confirmation
-sentry cli uninstall
-```
-
 ### `sentry cli upgrade <version>`
 
 Update the Sentry CLI to the latest version

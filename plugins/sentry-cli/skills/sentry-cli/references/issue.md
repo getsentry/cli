@@ -31,11 +31,11 @@ List issues in a project
 | `id` | string | Numeric issue ID |
 | `shortId` | string | Human-readable short ID (e.g. PROJ-ABC) |
 | `title` | string | Issue title |
-| `culprit` | string \| null | Culprit string |
+| `culprit` | string | Culprit string |
 | `count` | string | Total event count |
 | `userCount` | number | Number of affected users |
-| `firstSeen` | string \| null | First occurrence (ISO 8601) |
-| `lastSeen` | string \| null | Most recent occurrence (ISO 8601) |
+| `firstSeen` | string | First occurrence (ISO 8601) |
+| `lastSeen` | string | Most recent occurrence (ISO 8601) |
 | `level` | string | Severity level |
 | `status` | string | Issue status |
 | `permalink` | string | URL to the issue in Sentry |
@@ -190,11 +190,11 @@ View details of a specific issue
 | `id` | string | Numeric issue ID |
 | `shortId` | string | Human-readable short ID (e.g. PROJ-ABC) |
 | `title` | string | Issue title |
-| `culprit` | string \| null | Culprit string |
+| `culprit` | string | Culprit string |
 | `count` | string | Total event count |
 | `userCount` | number | Number of affected users |
-| `firstSeen` | string \| null | First occurrence (ISO 8601) |
-| `lastSeen` | string \| null | Most recent occurrence (ISO 8601) |
+| `firstSeen` | string | First occurrence (ISO 8601) |
+| `lastSeen` | string | Most recent occurrence (ISO 8601) |
 | `level` | string | Severity level |
 | `status` | string | Issue status |
 | `permalink` | string | URL to the issue in Sentry |
