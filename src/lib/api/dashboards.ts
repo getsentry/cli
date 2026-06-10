@@ -95,7 +95,7 @@ export async function getDashboard(
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
-      dashboard_id: Number.parseInt(dashboardId, 10),
+      dashboard_id: dashboardId as unknown as number,
     },
   });
 
@@ -155,7 +155,7 @@ export async function updateDashboard(
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
-      dashboard_id: Number.parseInt(dashboardId, 10),
+      dashboard_id: dashboardId as unknown as number,
     },
     body: body as unknown as Parameters<
       typeof editAnOrganization_sCustomDashboard
