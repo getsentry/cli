@@ -62,7 +62,10 @@ export async function listOrganizationsInRegion(
 
   // 403 enrichment (CLI-89, 24 users) is now handled centrally by
   // throwApiError() in infrastructure.ts — no per-endpoint catch needed.
-  const data = unwrapResult(result, "Failed to list organizations");
+  const data = unwrapResult<SentryOrganization[]>(
+    result,
+    "Failed to list organizations"
+  );
   if (!Array.isArray(data)) {
     throw new ApiError(
       "Failed to list organizations: unexpected response format",
@@ -71,7 +74,7 @@ export async function listOrganizationsInRegion(
         "This may indicate an incompatible self-hosted Sentry version or a proxy interfering with the response."
     );
   }
-  return data as unknown as SentryOrganization[];
+  return data;
 }
 
 /**
@@ -211,6 +214,5 @@ export async function getOrganization(
     path: { organization_id_or_slug: orgSlug },
   });
 
-  const data = unwrapResult(result, "Failed to get organization");
-  return data as unknown as SentryOrganization;
+  return unwrapResult<SentryOrganization>(result, "Failed to get organization");
 }

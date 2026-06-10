@@ -49,8 +49,7 @@ export async function getLatestEvent(
     },
   });
 
-  const data = unwrapResult(result, "Failed to get latest event");
-  return data as unknown as SentryEvent;
+  return unwrapResult<SentryEvent>(result, "Failed to get latest event");
 }
 
 /**
@@ -73,8 +72,7 @@ export async function getEvent(
     },
   });
 
-  const data = unwrapResult(result, "Failed to get event");
-  return data as unknown as SentryEvent;
+  return unwrapResult<SentryEvent>(result, "Failed to get event");
 }
 
 /**
@@ -106,11 +104,15 @@ export async function resolveEventInOrg(
   });
 
   try {
-    const data = unwrapResult(result, "Failed to resolve event ID");
+    const data = unwrapResult<{
+      organizationSlug: string;
+      projectSlug: string;
+      event: unknown;
+    }>(result, "Failed to resolve event ID");
     return {
       org: data.organizationSlug,
       project: data.projectSlug,
-      event: data.event as unknown as SentryEvent,
+      event: data.event as SentryEvent,
     };
   } catch (error) {
     // 404 means the event doesn't exist in this org — not an error
