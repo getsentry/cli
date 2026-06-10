@@ -95,12 +95,14 @@ export async function getDashboard(
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
-      dashboard_id: dashboardId as unknown as number,
+      dashboard_id: Number.parseInt(dashboardId, 10),
     },
   });
 
-  const data = unwrapResult(result, `Failed to get dashboard '${dashboardId}'`);
-  return data as unknown as DashboardDetail;
+  return unwrapResult<DashboardDetail>(
+    result,
+    `Failed to get dashboard '${dashboardId}'`
+  );
 }
 
 /**
@@ -124,8 +126,7 @@ export async function createDashboard(
     >[0]["body"],
   });
 
-  const data = unwrapResult(result, "Failed to create dashboard");
-  return data as unknown as DashboardDetail;
+  return unwrapResult<DashboardDetail>(result, "Failed to create dashboard");
 }
 
 /**
@@ -154,18 +155,17 @@ export async function updateDashboard(
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
-      dashboard_id: dashboardId as unknown as number,
+      dashboard_id: Number.parseInt(dashboardId, 10),
     },
     body: body as unknown as Parameters<
       typeof editAnOrganization_sCustomDashboard
     >[0]["body"],
   });
 
-  const data = unwrapResult(
+  return unwrapResult<DashboardDetail>(
     result,
     `Failed to update dashboard '${dashboardId}'`
   );
-  return data as unknown as DashboardDetail;
 }
 
 // ---------------------------------------------------------------------------

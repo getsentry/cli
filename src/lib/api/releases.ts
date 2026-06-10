@@ -31,10 +31,6 @@ import {
 import { getProject } from "./projects.js";
 import { listRepositoriesPaginated } from "./repositories.js";
 
-// We cast through `unknown` to bridge the gap between the SDK's internal
-// return types and the public response types — the shapes are compatible
-// at runtime.
-
 /**
  * List releases in an organization with pagination control.
  * Returns a single page of results with cursor metadata.
@@ -98,9 +94,7 @@ export async function listReleasesPaginated(
   });
 
   return unwrapPaginatedResult<SentryRelease[]>(
-    result as
-      | { data: SentryRelease[]; error: undefined }
-      | { data: undefined; error: unknown },
+    result,
     "Failed to list releases"
   );
 }
@@ -190,8 +184,10 @@ export async function getRelease(
     },
   });
 
-  const data = unwrapResult(result, `Failed to get release '${version}'`);
-  return data as unknown as SentryRelease;
+  return unwrapResult<SentryRelease>(
+    result,
+    `Failed to get release '${version}'`
+  );
 }
 
 /**
@@ -233,10 +229,9 @@ export async function createRelease(
 
   // 208 = release already exists (idempotent) — treat as success
   if (result.data) {
-    return result.data as unknown as SentryRelease;
+    return result.data as SentryRelease;
   }
-  const data = unwrapResult(result, "Failed to create release");
-  return data as unknown as SentryRelease;
+  return unwrapResult<SentryRelease>(result, "Failed to create release");
 }
 
 /**
@@ -279,8 +274,10 @@ export async function updateRelease(
     >[0]["body"],
   });
 
-  const data = unwrapResult(result, `Failed to update release '${version}'`);
-  return data as unknown as SentryRelease;
+  return unwrapResult<SentryRelease>(
+    result,
+    `Failed to update release '${version}'`
+  );
 }
 
 /**
@@ -327,11 +324,10 @@ export async function listReleaseDeploys(
     },
   });
 
-  const data = unwrapResult(
+  return unwrapResult<SentryDeploy[]>(
     result,
     `Failed to list deploys for release '${version}'`
   );
-  return data as unknown as SentryDeploy[];
 }
 
 /**
@@ -364,8 +360,7 @@ export async function createReleaseDeploy(
     body: body as unknown as Parameters<typeof createADeploy>[0]["body"],
   });
 
-  const data = unwrapResult(result, "Failed to create deploy");
-  return data as unknown as SentryDeploy;
+  return unwrapResult<SentryDeploy>(result, "Failed to create deploy");
 }
 
 /**
@@ -582,6 +577,8 @@ export async function listProjectEnvironments(
     },
     query: { visibility: "visible" },
   });
-  const data = unwrapResult(result, "Failed to list environments");
-  return data as unknown as ProjectEnvironment[];
+  return unwrapResult<ProjectEnvironment[]>(
+    result,
+    "Failed to list environments"
+  );
 }

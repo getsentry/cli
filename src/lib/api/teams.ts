@@ -36,8 +36,7 @@ export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
     path: { organization_id_or_slug: orgSlug },
   });
 
-  const data = unwrapResult(result, "Failed to list teams");
-  return data as unknown as SentryTeam[];
+  return unwrapResult<SentryTeam[]>(result, "Failed to list teams");
 }
 
 /**
@@ -88,8 +87,7 @@ export async function listProjectTeams(
       project_id_or_slug: projectSlug,
     },
   });
-  const data = unwrapResult(result, "Failed to list project teams");
-  return data as unknown as SentryTeam[];
+  return unwrapResult<SentryTeam[]>(result, "Failed to list project teams");
 }
 
 /**
@@ -114,8 +112,7 @@ export async function createTeam(
     path: { organization_id_or_slug: orgSlug },
     body: { slug },
   });
-  const data = unwrapResult(result, "Failed to create team");
-  const team = data as unknown as SentryTeam;
+  const team = unwrapResult<SentryTeam>(result, "Failed to create team");
 
   // Best-effort: add the current user to the team
   try {

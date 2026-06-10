@@ -42,14 +42,12 @@ export async function listMonitors(orgSlug: string): Promise<SentryMonitor[]> {
       },
     });
     return unwrapPaginatedResult<SentryMonitor[]>(
-      result as
-        | { data: SentryMonitor[]; error: undefined }
-        | { data: undefined; error: unknown },
+      result,
       "Failed to list monitors"
     );
   }, MAX_PAGINATION_PAGES * API_MAX_PER_PAGE);
 
-  return allResults as unknown as SentryMonitor[];
+  return allResults;
 }
 
 /**

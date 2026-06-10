@@ -228,7 +228,9 @@ export function throwApiError(
  * @returns The data from the successful response
  */
 export function unwrapResult<T>(
-  result: { data: T; error: undefined } | { data: undefined; error: unknown },
+  result:
+    | { data: unknown; error: undefined }
+    | { data: undefined; error: unknown },
   context: string
 ): T {
   const { data, error } = result as {
@@ -265,11 +267,13 @@ export function unwrapResult<T>(
  * @returns Data and optional next-page cursor
  */
 export function unwrapPaginatedResult<T>(
-  result: { data: T; error: undefined } | { data: undefined; error: unknown },
+  result:
+    | { data: unknown; error: undefined }
+    | { data: undefined; error: unknown },
   context: string
 ): PaginatedResponse<T> {
   const response = (result as { response?: Response }).response;
-  const data = unwrapResult(result, context);
+  const data = unwrapResult<T>(result, context);
   const { nextCursor, prevCursor } = parseLinkHeader(
     response?.headers.get("link") ?? null
   );
