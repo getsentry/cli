@@ -321,6 +321,12 @@ async function compileAllTargets(
         fossilizeBin,
         "--no-bundle",
         "--hole-punch",
+        // Make the binary ignore NODE_OPTIONS so user V8 flags (e.g.
+        // `NODE_OPTIONS=--max-old-space-size=8192`) don't change V8's
+        // flag-hash and reject the embedded code cache ("Code cache data
+        // rejected"). process.env is untouched, so child processes still
+        // inherit the user's NODE_OPTIONS.
+        "--ignore-node-options",
         "--output-name",
         "sentry",
         "--platforms",
