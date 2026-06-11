@@ -310,6 +310,23 @@ async function resolveExistingProjectChoice(opts: {
   };
 }
 
+/**
+ * Normalize a team-resolution failure into a WizardError, preserving an
+ * ApiError's enriched detail (e.g. 401 `member-disabled-over-limit`) via
+ * format() instead of collapsing to its bare message + status line.
+ */
+function toPreflightWizardError(error: unknown): WizardError {
+  if (error instanceof WizardError) {
+    return error;
+  }
+  if (error instanceof ApiError) {
+    return new WizardError(error.format());
+  }
+  return new WizardError(
+    error instanceof Error ? error.message : String(error)
+  );
+}
+
 async function resolveTeam(
   org: string,
   initial: WizardOptions,
@@ -334,9 +351,7 @@ async function resolveTeam(
     if (error instanceof ApiError && error.status === 403) {
       return;
     }
-    throw error instanceof WizardError
-      ? error
-      : new WizardError(error instanceof Error ? error.message : String(error));
+    throw toPreflightWizardError(error);
   }
 }
 
@@ -381,9 +396,7 @@ async function listTeamsForImplicitInit(
     if (error instanceof ApiError && error.status === 404) {
       return await buildOrgNotFoundError(org, "sentry init");
     }
-    throw error instanceof WizardError
-      ? error
-      : new WizardError(error instanceof Error ? error.message : String(error));
+    throw toPreflightWizardError(error);
   }
 }
 

@@ -46,7 +46,7 @@ vi.mock("../../../src/lib/dsn/index.js", async (importOriginal) => {
 
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as dsnIndex from "../../../src/lib/dsn/index.js";
-import { ApiError } from "../../../src/lib/errors.js";
+import { ApiError, WizardError } from "../../../src/lib/errors.js";
 
 vi.mock("../../../src/lib/init/org-prefetch.js", async (importOriginal) => {
   const actual =
@@ -581,6 +581,80 @@ describe("resolveInitContext", () => {
     expect(errorCall?.message).toContain("Your organizations:");
     expect(errorCall?.message).toContain("acme");
     expect(errorCall?.message).toContain("beta");
+  });
+
+  test("surfaces the enriched detail when implicit listTeams returns 401", async () => {
+    // member-disabled-over-limit: a 401 from listTeams must reach the user with
+    // its actionable detail, not a bare "Failed to list teams" + status line.
+    listTeamsSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Failed to list teams",
+        401,
+        "Your account is disabled in this organization because it is over its member limit."
+      )
+    );
+
+    const { ui, calls } = createMockUI();
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow();
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toContain("over its member limit");
+  });
+
+  test("surfaces the enriched detail when explicit --team listTeams returns 401", async () => {
+    resolveOrCreateTeamSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Failed to list teams",
+        401,
+        "Your account is disabled in this organization because it is over its member limit."
+      )
+    );
+
+    const { ui, calls } = createMockUI();
+    await expect(
+      resolveInitContext(makeOptions({ team: "backend" }), ui)
+    ).rejects.toThrow();
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toContain("over its member limit");
+  });
+
+  test("passes a pre-rendered WizardError through team resolution unchanged", async () => {
+    listTeamsSpy.mockRejectedValueOnce(
+      new WizardError("custom preflight failure")
+    );
+
+    const { ui, calls } = createMockUI();
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
+      "custom preflight failure"
+    );
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toBe("custom preflight failure");
+  });
+
+  test("surfaces a non-API error message from implicit team resolution", async () => {
+    listTeamsSpy.mockRejectedValueOnce(new Error("network down"));
+
+    const { ui, calls } = createMockUI();
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
+      "network down"
+    );
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toContain("network down");
   });
 
   test("fails early when listTeams is forbidden and member project creation is disabled", async () => {

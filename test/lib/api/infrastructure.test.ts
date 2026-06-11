@@ -445,6 +445,39 @@ describe("throwApiError", () => {
       }
     });
 
+    test("treats member-disabled-over-limit as a seat-limit issue, not auth", () => {
+      const mockResponse = new Response("", {
+        status: 401,
+        statusText: "Unauthorized",
+      });
+
+      let captured: ApiError | undefined;
+      try {
+        throwApiError(
+          {
+            detail: {
+              code: "member-disabled-over-limit",
+              message: "Organization over member limit",
+              extra: { next: "/organizations/chisme/disabled-member/" },
+            },
+          },
+          mockResponse,
+          "Failed to list teams"
+        );
+      } catch (error) {
+        captured = error as ApiError;
+      }
+
+      expect(captured).toBeDefined();
+      expect(captured?.status).toBe(401);
+      expect(captured?.detail).toContain("over its member limit");
+      expect(captured?.detail).toContain("billing/seat-limit");
+      // The fix must NOT give the misleading re-auth advice for this case.
+      expect(captured?.detail).not.toContain("sentry auth login");
+      expect(captured?.detail).not.toContain("session has expired");
+      expect(captured?.detail).not.toContain("SENTRY_AUTH_TOKEN");
+    });
+
     describe("with OAuth token (no env var)", () => {
       let savedAuthToken: string | undefined;
       let savedToken: string | undefined;
