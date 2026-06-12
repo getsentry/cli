@@ -445,40 +445,71 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   };
 
   /**
+   * Run the OAuth device flow to recover from an auth error, retrying the
+   * command on success.
+   *
+   * On failure the outcome depends on interactivity: an interactive terminal
+   * exits 1 (the device flow has already reported why), while a non-TTY
+   * re-throws the original error so its standard message and exit code reach the
+   * user — matching the behavior before auto-auth was attempted in non-TTY
+   * contexts.
+   *
+   * @param err - Auth error that triggered recovery; re-thrown on non-TTY failure
+   * @param proceed - Re-runs the inner middleware chain to retry the command
+   * @param retryArgs - Argv passed to {@link proceed} on retry
+   */
+  async function recoverWithAutoAuth(
+    err: InstanceType<typeof AuthError>,
+    proceed: (cmdInput: string[]) => Promise<void>,
+    retryArgs: string[]
+  ): Promise<void> {
+    // Direct fd check; used only to pick the failure behavior on a failed login.
+    const interactive = isatty(0);
+
+    process.stderr.write(
+      err.reason === "expired"
+        ? "Authentication expired. Starting login flow...\n\n"
+        : "Authentication required. Starting login flow...\n\n"
+    );
+
+    const loginSuccess = await runInteractiveLogin();
+    if (loginSuccess) {
+      process.stderr.write("\nRetrying command...\n\n");
+      await proceed(retryArgs);
+      return;
+    }
+
+    if (interactive) {
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
+  }
+
+  /**
    * Auto-authentication middleware.
    *
-   * Catches auth errors (not_authenticated, expired) in interactive TTYs
-   * and runs the login flow. On success, retries through the full middleware
-   * chain so inner middlewares (e.g., trial prompt) also apply to the retry.
+   * Catches auth errors (not_authenticated, expired) and runs the OAuth device
+   * flow via {@link recoverWithAutoAuth}, retrying through the full middleware
+   * chain on success so inner middlewares (e.g., trial prompt) also apply.
+   *
+   * The flow is attempted in non-TTY contexts too (piped output, the
+   * Bun-compiled-binary `isTTY===undefined` case, CI): the device flow is
+   * TTY-agnostic — `openBrowser` falls back to printing the verification URL +
+   * QR code, and the copy-key listener is gated on `process.stdin.isTTY` inside
+   * `runInteractiveLogin`. Auth commands opt out via `skipAutoAuth`
+   * (e.g. `auth status`).
    */
   const autoAuthMiddleware: ErrorMiddleware = async (next, argv) => {
     try {
       await next(argv);
     } catch (err) {
-      // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY can be undefined in Bun)
-      // Errors can opt-out via skipAutoAuth (e.g., auth status command)
       if (
         err instanceof AuthError &&
         (err.reason === "not_authenticated" || err.reason === "expired") &&
-        !err.skipAutoAuth &&
-        isatty(0)
+        !err.skipAutoAuth
       ) {
-        process.stderr.write(
-          err.reason === "expired"
-            ? "Authentication expired. Starting login flow...\n\n"
-            : "Authentication required. Starting login flow...\n\n"
-        );
-
-        const loginSuccess = await runInteractiveLogin();
-
-        if (loginSuccess) {
-          process.stderr.write("\nRetrying command...\n\n");
-          await next(argv);
-          return;
-        }
-
-        // Login failed or was cancelled
-        process.exitCode = 1;
+        await recoverWithAutoAuth(err, next, argv);
         return;
       }
 
