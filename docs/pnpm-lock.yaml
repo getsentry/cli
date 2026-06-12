@@ -26,6 +26,10 @@ importers:
       shiki:
         specifier: ^3.21.0
         version: 3.23.0
+    devDependencies:
+      nanoid:
+        specifier: 3.3.12
+        version: 3.3.12
 
 packages:
 

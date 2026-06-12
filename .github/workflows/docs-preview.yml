@@ -30,6 +30,9 @@ concurrency:
 jobs:
   preview:
     runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'push' && 'production' || '' }}
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     steps:
       - uses: actions/checkout@v6
 
@@ -73,7 +76,6 @@ jobs:
       - name: Inject debug IDs and upload sourcemaps
         if: env.SENTRY_AUTH_TOKEN != ''
         env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: sentry
           SENTRY_PROJECT: cli-website
         run: |
@@ -83,8 +85,48 @@ jobs:
             --url-prefix "~/"
 
       # Remove .map files — uploaded to Sentry but shouldn't be deployed.
-      - name: Remove sourcemaps from output
+      - name: Remove Preview sourcemaps from output
         run: find docs/dist -name '*.map' -delete
+
+      - name: Preserve Preview Docs
+        # Same fork-PR guard as the deploy step below.
+        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
+        run: |
+          rm -rf docs/dist-preview
+          mkdir -p docs/dist-preview
+          cp -a docs/dist/. docs/dist-preview/
+
+      - name: Build Production Docs
+        if: github.event_name == 'push'
+        working-directory: docs
+        env:
+          PUBLIC_SENTRY_ENVIRONMENT: production
+          SENTRY_RELEASE: ${{ steps.version.outputs.version }}
+          PUBLIC_SENTRY_RELEASE: ${{ steps.version.outputs.version }}
+        run: pnpm run build
+
+      - name: Inject production debug IDs and upload sourcemaps
+        if: github.event_name == 'push' && env.SENTRY_AUTH_TOKEN != ''
+        env:
+          SENTRY_ORG: sentry
+          SENTRY_PROJECT: cli-website
+        run: |
+          pnpm run cli sourcemap inject docs/dist/
+          pnpm run cli sourcemap upload docs/dist/ \
+            --release "${{ steps.version.outputs.version }}" \
+            --url-prefix "~/"
+
+      # Remove .map files — uploaded to Sentry but shouldn't be deployed.
+      - name: Remove Production sourcemaps from output
+        if: github.event_name == 'push'
+        run: find docs/dist -name '*.map' -delete
+
+      - name: Preserve Production Docs
+        if: github.event_name == 'push'
+        run: |
+          rm -rf /tmp/sentry-cli-docs-production
+          mkdir -p /tmp/sentry-cli-docs-production
+          cp -a docs/dist/. /tmp/sentry-cli-docs-production/
 
       - name: Ensure .nojekyll at gh-pages root
         # Fork PRs can't push to the base repo (GITHUB_TOKEN is read-only on
@@ -126,10 +168,31 @@ jobs:
         if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
         uses: rossjrw/pr-preview-action@v1
         with:
-          source-dir: docs/dist/
+          source-dir: docs/dist-preview/
           preview-branch: gh-pages
           umbrella-dir: _preview
           pages-base-url: cli.sentry.dev
           action: ${{ github.event_name == 'push' && 'deploy' || 'auto' }}
           pr-number: ${{ github.event_name == 'push' && 'main' || github.event.pull_request.number }}
           comment: ${{ github.event_name != 'push' }}
+
+      - name: Deploy Production
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+
+          git fetch origin gh-pages
+          git checkout -B gh-pages FETCH_HEAD
+
+          # Replace the production root while preserving PR previews.
+          find . -mindepth 1 -maxdepth 1 ! -name .git ! -name _preview -exec rm -rf {} +
+          cp -a /tmp/sentry-cli-docs-production/. .
+          touch .nojekyll
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No production docs changes"
+          else
+            git commit -m "Deploy production docs"
+            git push origin gh-pages
+          fi

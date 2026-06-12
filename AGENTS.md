@@ -24,11 +24,10 @@ Guidelines for AI agents working in this codebase.
 - **Seer AI Integration** - `issue explain` and `issue plan` commands for AI analysis
 - **OAuth Device Flow** - Secure authentication without browser redirects
 
-## Cursor Rules (Important!)
+## Cursor Rules
 
-Before working on this codebase, read the Cursor rules:
+Before working on this codebase, read the available Cursor rules:
 
-- **`.cursor/rules/bun-cli.mdc`** - Bun API usage, file I/O, process spawning, testing
 - **`.cursor/rules/ultracite.mdc`** - Code style, formatting, linting rules
 
 ## Quick Reference: Commands
@@ -72,8 +71,6 @@ When the `@sentry/api` SDK provides types for an API response, import them direc
 ## Rules: Use Bun APIs
 
 **CRITICAL**: This project uses Bun as runtime. Always prefer Bun-native APIs over Node.js equivalents.
-
-Read the full guidelines in `.cursor/rules/bun-cli.mdc`.
 
 **Bun Documentation**: https://bun.sh/docs - Consult these docs when unsure about Bun APIs.
 

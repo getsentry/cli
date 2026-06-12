@@ -14,5 +14,8 @@
     "astro": "^6.3.5",
     "sharp": "^0.33.5",
     "shiki": "^3.21.0"
+  },
+  "devDependencies": {
+    "nanoid": "3.3.12"
   }
 }

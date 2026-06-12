@@ -4,10 +4,15 @@ import sentryStarlightTheme, {
   monochromeCodeTheme,
   sentryAgentMarkdown,
 } from "@sentry/starlight-theme";
+import { createRequire } from "node:module";
 import { defineConfig } from "astro/config";
 
 // Allow base path override via environment variable for PR previews
 const base = process.env.DOCS_BASE_PATH || "/";
+const require = createRequire(import.meta.url);
+// Astro's prerender bundle imports PostCSS as CJS; force this subpath to the
+// CJS entry so `require("nanoid/non-secure")` has the namespace shape it expects.
+const nanoidNonSecureCjs = require.resolve("nanoid/non-secure");
 
 export default defineConfig({
   site: "https://cli.sentry.dev",
@@ -26,6 +31,11 @@ export default defineConfig({
   // `vite.environments.{client,ssr}.build.sourcemap` (Environments API),
   // not the legacy top-level `vite.build.sourcemap`.
   vite: {
+    resolve: {
+      alias: {
+        "nanoid/non-secure": nanoidNonSecureCjs,
+      },
+    },
     environments: {
       client: { build: { sourcemap: "hidden" } },
       ssr: { build: { sourcemap: "hidden" } },
