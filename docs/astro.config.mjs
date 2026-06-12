@@ -2,6 +2,7 @@ import starlight from "@astrojs/starlight";
 import sentry from "@sentry/astro";
 import sentryStarlightTheme, {
   monochromeCodeTheme,
+  sentryAgentMarkdown,
 } from "@sentry/starlight-theme";
 import { defineConfig } from "astro/config";
 
@@ -58,7 +59,7 @@ export default defineConfig({
           href: "https://github.com/getsentry/cli",
         },
       ],
-      plugins: [sentryStarlightTheme()],
+      plugins: [sentryStarlightTheme(), sentryAgentMarkdown()],
       components: {
         Header: "./src/components/Header.astro",
         PageTitle: "./src/components/PageTitle.astro",
