@@ -6,6 +6,9 @@
  */
 
 import { queryExploreEventsInTableFormat } from "@sentry/api";
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
+import * as Sentry from "@sentry/node-core/light";
+import type { z } from "zod";
 
 import {
   DetailedLogsResponseSchema,
@@ -16,6 +19,7 @@ import {
   type TraceLog,
   TraceLogsResponseSchema,
 } from "../../types/index.js";
+import { ApiError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import { LOG_RETENTION_PERIOD } from "../retention.js";
 import { isAllDigits } from "../utils.js";
@@ -44,6 +48,47 @@ const LOG_FIELDS = [
   "timestamp_precise",
   "message",
 ];
+
+/**
+ * Validate that the API returned an object before attempting Zod parsing.
+ * Self-hosted instances may return plain text or HTML when the logs dataset
+ * is unsupported or a reverse proxy intercepts the request.
+ */
+function assertObjectResponse(data: unknown, context: string): void {
+  if (typeof data !== "object" || data === null) {
+    throw new ApiError(
+      `${context}: unexpected response format`,
+      0,
+      `Expected an object but received ${typeof data}. ` +
+        "This may indicate an incompatible self-hosted Sentry version or a proxy interfering with the response."
+    );
+  }
+}
+
+/**
+ * Safe-parse an API response with a Zod schema, throwing {@link ApiError}
+ * on validation failure instead of leaking a raw `ZodError`.
+ */
+function safeParseResponse<T>(
+  schema: z.ZodType<T>,
+  data: unknown,
+  context: string
+): T {
+  assertObjectResponse(data, context);
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    Sentry.setContext("zod_validation", {
+      context,
+      issues: result.error.issues.slice(0, 10),
+    });
+    throw new ApiError(
+      `${context}: unexpected response format`,
+      0,
+      result.error.message
+    );
+  }
+  return result.data;
+}
 
 type ListLogsOptions = {
   /** Search query using Sentry query syntax */
@@ -128,7 +173,11 @@ export async function listLogs(
   });
 
   const data = unwrapResult(result, "Failed to list logs");
-  const logsResponse = LogsResponseSchema.parse(data);
+  const logsResponse = safeParseResponse(
+    LogsResponseSchema,
+    data,
+    "Failed to list logs"
+  );
   return logsResponse.data;
 }
 
@@ -191,7 +240,11 @@ async function getLogsBatch(
   });
 
   const data = unwrapResult(result, "Failed to get log");
-  const logsResponse = DetailedLogsResponseSchema.parse(data);
+  const logsResponse = safeParseResponse(
+    DetailedLogsResponseSchema,
+    data,
+    "Failed to get log"
+  );
   return logsResponse.data;
 }
 
