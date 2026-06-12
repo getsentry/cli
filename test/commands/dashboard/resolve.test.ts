@@ -16,6 +16,7 @@ import {
   parseDashboardPositionalArgs,
   resolveDashboardId,
   resolveOrgFromTarget,
+  resolveWidgetIndex,
   validateWidgetEnums,
 } from "../../../src/commands/dashboard/resolve.js";
 
@@ -434,6 +435,35 @@ describe("resolveDashboardId", () => {
       const message = (error as ValidationError).message;
       expect(message).toContain("My Dashboard");
       expect(message).toContain("No dashboards found in this organization.");
+    }
+  });
+
+  test("handles dashboards with undefined title without crashing", async () => {
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [
+        { id: "10", title: undefined as unknown as string },
+        { id: "20", title: "Performance" },
+      ],
+      nextCursor: undefined,
+    });
+
+    const id = await resolveDashboardId("test-org", "Performance");
+    expect(id).toBe("20");
+  });
+
+  test("undefined title dashboards are collected as '(untitled)' in suggestions", async () => {
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [{ id: "10", title: undefined as unknown as string }],
+      nextCursor: undefined,
+    });
+
+    try {
+      await resolveDashboardId("test-org", "Missing");
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      const message = (error as ValidationError).message;
+      expect(message).toContain("Missing");
     }
   });
 });
@@ -873,5 +903,31 @@ describe("applyGroupLimitAutoDefault", () => {
 
   test("empty --group-by is treated as not passed", () => {
     expect(applyGroupLimitAutoDefault([], [], undefined)).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveWidgetIndex — undefined title handling
+// ---------------------------------------------------------------------------
+
+describe("resolveWidgetIndex", () => {
+  test("resolves by index when title is undefined", () => {
+    const widgets = [
+      { title: undefined as unknown as string } as Parameters<
+        typeof resolveWidgetIndex
+      >[0][0],
+      { title: "My Widget" } as Parameters<typeof resolveWidgetIndex>[0][0],
+    ];
+    expect(resolveWidgetIndex(widgets, 0, undefined)).toBe(0);
+  });
+
+  test("does not crash when widgets have undefined titles during title search", () => {
+    const widgets = [
+      { title: undefined as unknown as string } as Parameters<
+        typeof resolveWidgetIndex
+      >[0][0],
+      { title: "My Widget" } as Parameters<typeof resolveWidgetIndex>[0][0],
+    ];
+    expect(resolveWidgetIndex(widgets, undefined, "My Widget")).toBe(1);
   });
 });

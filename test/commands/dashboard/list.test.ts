@@ -516,6 +516,67 @@ describe("dashboard list command", () => {
       "organization"
     );
   });
+
+  // -------------------------------------------------------------------------
+  // Undefined/null title handling (CLI-20D)
+  // -------------------------------------------------------------------------
+
+  test("handles dashboards with undefined title in human output", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [
+        { id: "1", title: undefined as unknown as string, widgetDisplay: [] },
+        DASHBOARD_B,
+      ],
+      nextCursor: undefined,
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, defaultFlags());
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("(untitled)");
+    expect(output).toContain("Performance");
+  });
+
+  test("handles dashboards with undefined title in JSON output", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [
+        { id: "1", title: undefined as unknown as string, widgetDisplay: [] },
+      ],
+      nextCursor: undefined,
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, defaultFlags({ json: true }));
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.data).toHaveLength(1);
+  });
+
+  test("glob filter does not crash on dashboards with undefined title", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "test-org" });
+    listDashboardsPaginatedSpy.mockResolvedValue({
+      data: [
+        { id: "1", title: undefined as unknown as string, widgetDisplay: [] },
+        DASHBOARD_B,
+      ],
+      nextCursor: undefined,
+    });
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await listCommand.loader();
+    await func.call(context, defaultFlags({ json: true }), "Perf*");
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed.data).toHaveLength(1);
+    expect(parsed.data[0].title).toBe("Performance");
+  });
 });
 
 // ---------------------------------------------------------------------------
