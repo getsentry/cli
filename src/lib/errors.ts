@@ -681,6 +681,41 @@ export class WizardError extends CliError {
   }
 }
 
+/** How the wizard was abandoned, used for the exit code and issue tags. */
+export type AbandonCause = "ctrl_c_spinner" | "sigint" | "sighup" | "sigterm";
+
+/** Conventional 128+signal exit codes so shells/CI see a recognizable status. */
+const ABANDON_EXIT_CODES: Record<AbandonCause, number> = {
+  ctrl_c_spinner: 130, // SIGINT
+  sigint: 130,
+  sighup: 129,
+  sigterm: 143,
+};
+
+/**
+ * Thrown when the wizard is abandoned mid-run by a process-terminating
+ * signal (closed terminal → SIGHUP, `kill` → SIGTERM) or a Ctrl+C while a
+ * spinner/tool is running (no prompt to unwind through). Subclass of
+ * {@link WizardError} so it flows through the same `withTelemetry` →
+ * `reportCliError` → `captureException` harness as every other command
+ * failure — abandonment becomes a grouped, searchable Sentry issue rather
+ * than a silent exit. See `error-reporting.ts` for the grouping kind.
+ */
+export class WizardAbandonedError extends WizardError {
+  // `override` because ES2022 `Error` declares `cause`; we narrow it.
+  override readonly cause: AbandonCause;
+  readonly step?: string;
+
+  constructor(cause: AbandonCause, step?: string) {
+    super(`Setup abandoned (${cause})${step ? ` during "${step}"` : ""}.`, {
+      exitCode: ABANDON_EXIT_CODES[cause],
+    });
+    this.name = "WizardAbandonedError";
+    this.cause = cause;
+    this.step = step;
+  }
+}
+
 // Error Utilities
 
 /**

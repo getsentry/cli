@@ -76,10 +76,28 @@ const DEFAULT_OPTIONS: Required<LoggingUIOptions> = {
 export class LoggingUI implements WizardUI {
   private readonly stdout: NodeJS.WritableStream;
   private readonly stderr: NodeJS.WritableStream;
+  private sigintListener: (() => void) | undefined;
 
   constructor(options: LoggingUIOptions = {}) {
     this.stdout = options.stdout ?? DEFAULT_OPTIONS.stdout;
     this.stderr = options.stderr ?? DEFAULT_OPTIONS.stderr;
+  }
+
+  /**
+   * In non-interactive mode there are no prompts to cancel, so Ctrl+C
+   * (SIGINT) is always abandonment. Route it to the runner's handler so it
+   * unwinds through the shared failure harness (flushed Sentry issue)
+   * rather than Node's default terminate-without-telemetry. The runner
+   * additionally owns SIGHUP/SIGTERM.
+   */
+  setAbandonHandler(
+    handler: (cause: "ctrl_c_spinner" | "sigint") => void
+  ): void {
+    if (this.sigintListener) {
+      return;
+    }
+    this.sigintListener = () => handler("sigint");
+    process.on("SIGINT", this.sigintListener);
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────
@@ -217,8 +235,11 @@ export class LoggingUI implements WizardUI {
   // ── Disposal ──────────────────────────────────────────────────────
 
   [Symbol.asyncDispose](): Promise<void> {
-    // No teardown needed — LoggingUI holds no resources beyond the
-    // injected stream references.
+    // Detach the SIGINT listener so it can't fire after the run ends.
+    if (this.sigintListener) {
+      process.removeListener("SIGINT", this.sigintListener);
+      this.sigintListener = undefined;
+    }
     return Promise.resolve();
   }
 

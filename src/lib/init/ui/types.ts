@@ -247,6 +247,23 @@ export type WizardUI = AsyncDisposable & {
    */
   setIntroMode?(enabled: boolean): void;
 
+  /**
+   * Register the runner's abandonment callback. The runner owns the
+   * `AbortController` and the suspend/resume loop, so when the UI detects
+   * a terminating input that isn't a prompt cancellation — a Ctrl+C while a
+   * spinner/tool is running — it invokes this instead of exiting the
+   * process directly. The runner aborts the in-flight operation and unwinds
+   * through the normal `withTelemetry` failure path, so abandonment is
+   * captured as a Sentry issue and flushed like any other command failure.
+   *
+   * Optional: implementations that can't observe input (or have nothing to
+   * route) leave it undefined. `LoggingUI` uses it to install a SIGINT
+   * handler; `InkUI` routes its spinner-phase Ctrl+C through it.
+   */
+  setAbandonHandler?(
+    handler: (cause: "ctrl_c_spinner" | "sigint") => void
+  ): void;
+
   // ── Logging ───────────────────────────────────────────────────────
 
   log: WizardLog;

@@ -52,7 +52,7 @@ import { ReadStream } from "node:tty";
 
 const _require = createRequire(import.meta.url);
 
-import { setTag } from "@sentry/node-core/light";
+import { flush, setTag } from "@sentry/node-core/light";
 import { CLI_VERSION } from "../../constants.js";
 import { stripAnsi } from "../../formatters/plain-detect.js";
 import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
@@ -381,6 +381,15 @@ export class InkUI implements WizardUI {
   private tipIndex = 0;
   private activePromptCancel: (() => void) | undefined;
   private cancelHandler: (() => void) | undefined;
+  /**
+   * Runner-supplied abandonment callback (see {@link WizardUI.setAbandonHandler}).
+   * When set, a Ctrl+C during a spinner routes here so the runner can abort
+   * the in-flight await and unwind through the shared failure harness —
+   * giving us a flushed Sentry issue — instead of a bare `process.exit`.
+   */
+  private abandonHandler:
+    | ((cause: "ctrl_c_spinner" | "sigint") => void)
+    | undefined;
   /**
    * Guard so `tearDown()` runs at most once even when called from
    * multiple paths (Ctrl+C in a spinner, then SIGINT, then
@@ -821,25 +830,41 @@ export class InkUI implements WizardUI {
     }
     if (this.cancelRequested) {
       // Safety valve: teardown already started but hasn't finished
-      // (or something is stuck). Force-exit so the user isn't trapped.
+      // (or something is stuck). The user is insisting — leave promptly,
+      // but flush the outcome first (bounded) so the run isn't lost, with a
+      // hard backstop so an impatient second Ctrl+C still exits.
       setTag("wizard.outcome", "abandoned");
-      process.exit(130);
+      setTimeout(() => process.exit(130), 1200).unref();
+      Promise.resolve(flush(1000)).finally(() => process.exit(130));
+      return;
     }
     this.cancelRequested = true;
+    // Preferred path: hand control back to the runner. It aborts the
+    // in-flight operation and unwinds through `withTelemetry` →
+    // `reportCliError`, so abandonment is captured as a flushed Sentry
+    // issue and our `[Symbol.asyncDispose]` performs the teardown. We do
+    // NOT tear down or exit here — that would race the graceful unwind.
+    if (this.abandonHandler) {
+      this.abandonHandler("ctrl_c_spinner");
+      return;
+    }
+    // Fallback (no runner handler registered — shouldn't happen during a
+    // real run): tear down and exit directly. Telemetry may be dropped
+    // here, which is exactly the gap the abandonHandler path closes.
     this.failureMessage = "Setup cancelled.";
     this.feedback("cancelled");
     this.tearDown();
-    // Mark as abandoned before exit so the Sentry span carries the
-    // outcome even though beforeExit never fires for explicit process.exit().
     setTag("wizard.outcome", "abandoned");
-    // Match the SIGINT convention so shells (and CI) see a
-    // distinguishable exit. The runner's `await using` won't get a
-    // chance to run after this, but tearDown above already did all
-    // the cleanup that path would have performed.
-    // Defer exit by one tick so the event loop can flush the
-    // stdout writes from tearDown (alternate-screen escape +
-    // cancellation report) before the process terminates.
+    // Defer exit by one tick so the event loop can flush the stdout writes
+    // from tearDown (alternate-screen escape + cancellation report) before
+    // the process terminates.
     setImmediate(() => process.exit(130));
+  }
+
+  setAbandonHandler(
+    handler: (cause: "ctrl_c_spinner" | "sigint") => void
+  ): void {
+    this.abandonHandler = handler;
   }
 
   /**

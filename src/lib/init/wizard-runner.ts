@@ -18,6 +18,7 @@ import { MastraClient } from "@mastra/client-js";
 import {
   addBreadcrumb,
   captureException,
+  flush,
   getTraceData,
   setTag,
 } from "@sentry/node-core/light";
@@ -25,7 +26,14 @@ import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { customFetch } from "../custom-ca.js";
 import { detectAgent } from "../detect-agent.js";
-import { ApiError, EXIT, WizardError } from "../errors.js";
+import { reportCliError } from "../error-reporting.js";
+import {
+  type AbandonCause,
+  ApiError,
+  EXIT,
+  WizardAbandonedError,
+  WizardError,
+} from "../errors.js";
 import {
   renderInlineMarkdown,
   stripColorTags,
@@ -83,6 +91,14 @@ type SpinState = { running: boolean };
 const INIT_SERVICE_AUTH_FAILED_LABEL = "Authentication failed";
 
 const APPLY_CODEMODS_STEP = "apply-codemods";
+
+/**
+ * Grace window after an abandonment signal before the watchdog captures +
+ * flushes + force-exits itself. Long enough for the graceful unwind (abort →
+ * catch → throw → dispose → flush) to win in the common case, short enough
+ * that an uninterruptible await can't trap the process.
+ */
+const ABANDON_WATCHDOG_MS = 4000;
 
 type CompactPhaseHistoryEntry = {
   ok: boolean;
@@ -806,6 +822,67 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     },
   };
 
+  // Abandonment bridge. A terminating signal (closed terminal → SIGHUP,
+  // `kill` → SIGTERM) or a Ctrl+C during a spinner has no prompt to unwind
+  // through, so the suspend/resume loop is blocked on an `await`. Rather
+  // than `process.exit()` (which drops telemetry), we abort the in-flight
+  // operation and let the rejected await land in the main catch below,
+  // which throws `WizardAbandonedError`. That flows through the same
+  // `withTelemetry` → `reportCliError` harness as every other command
+  // failure, so abandonment becomes a flushed Sentry issue.
+  let pendingAbandon: { cause: AbandonCause; step?: string } | null = null;
+  // Flipped true on every terminal path (the suspend-loop catch and the
+  // success path). The watchdog checks it so a signal that arrives during the
+  // post-loop phase (handleFinalResult → verifySetup) can't report a spurious
+  // `abandoned` + force-exit on a run that actually completed.
+  let settled = false;
+
+  const requestAbandon = (cause: AbandonCause): void => {
+    if (pendingAbandon) {
+      return; // first signal wins; ignore repeats
+    }
+    const step = activeStepId;
+    pendingAbandon = { cause, step };
+    abortController.abort();
+    // Watchdog: if the graceful unwind can't interrupt the current await
+    // (e.g. an uninterruptible local op) it never reaches the catch below,
+    // so capture + flush + exit ourselves. No-op once the run has settled by
+    // any other path so we don't race the normal exit machinery or override a
+    // completion. Tears the UI down first so the terminal is restored.
+    setTimeout(async () => {
+      if (settled) {
+        return;
+      }
+      const abandoned = new WizardAbandonedError(cause, step);
+      reportCliError(abandoned);
+      try {
+        await ui[Symbol.asyncDispose]();
+      } catch {
+        // Teardown is best-effort — never block the exit on it.
+      }
+      Promise.resolve(flush(2000)).finally(() => {
+        process.exit(abandoned.exitCode);
+      });
+    }, ABANDON_WATCHDOG_MS).unref();
+  };
+
+  // SIGHUP (terminal closed) and SIGTERM (`kill`) are the silent killers the
+  // CLI never handled — install them here where the AbortController lives.
+  // SIGINT stays owned by the UI: at a prompt it must cancel cleanly
+  // (`bailed`), only its no-prompt/spinner case routes to abandonment via
+  // `setAbandonHandler` below.
+  const onSighup = (): void => requestAbandon("sighup");
+  const onSigterm = (): void => requestAbandon("sigterm");
+  process.on("SIGHUP", onSighup);
+  process.on("SIGTERM", onSigterm);
+  using _signalCleanup = {
+    [Symbol.dispose]: (): void => {
+      process.removeListener("SIGHUP", onSighup);
+      process.removeListener("SIGTERM", onSigterm);
+    },
+  };
+  ui.setAbandonHandler?.((cause) => requestAbandon(cause));
+
   const client = new MastraClient({
     baseUrl: MASTRA_API_URL,
     retries: 0,
@@ -968,6 +1045,32 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       });
     }
   } catch (err) {
+    // We reached a terminal state by a code path (not the watchdog) — disarm
+    // any armed watchdog so it can't double-report or force-exit.
+    settled = true;
+    // Abandonment wins over the error's own type: a terminating signal /
+    // spinner-Ctrl+C aborts the in-flight await, which surfaces here as an
+    // AbortError. Re-throw as WizardAbandonedError so it flows through the
+    // shared `withTelemetry` → `reportCliError` harness — a flushed,
+    // grouped Sentry issue, exactly like any other command failure.
+    // Assertion (not annotation) so the type keys off the union, not the
+    // closure-assigned-only `pendingAbandon` — TS's flow analysis pins it to
+    // its `null` initializer because the only assignment lives in a closure.
+    const abandon = pendingAbandon as {
+      cause: AbandonCause;
+      step?: string;
+    } | null;
+    if (abandon) {
+      if (spinState.running) {
+        spin.stop("Cancelled", 0);
+        spinState.running = false;
+      }
+      // Leave the active step `in_progress` like a clean cancel.
+      setTag("wizard.outcome", "abandoned");
+      setTag("wizard.abandon_cause", abandon.cause);
+      showCancelledFeedback(ui);
+      throw new WizardAbandonedError(abandon.cause, abandon.step);
+    }
     const isAuthFailure = err instanceof ApiError && err.status === 401;
     // A running spinner owns a live interval, so stop it before any early
     // return or rethrow to avoid leaving the event loop artificially busy.
@@ -1023,6 +1126,9 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
 
   await handleFinalResult(result, spin, spinState, ui, directory);
   setTag("wizard.outcome", "completed");
+  // Run completed — disarm any watchdog a late signal (e.g. during
+  // verifySetup) may have armed, so it can't override this with `abandoned`.
+  settled = true;
   if (result.result?.platform) {
     setTag("wizard.platform", String(result.result.platform));
   }

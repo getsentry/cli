@@ -31,6 +31,7 @@ import {
   TimeoutError,
   UpgradeError,
   ValidationError,
+  WizardAbandonedError,
   WizardError,
 } from "./errors.js";
 
@@ -234,6 +235,13 @@ function deriveErrorKind(error: Error): string | undefined {
   if (error instanceof HostScopeError) {
     return "host_scope";
   }
+  // Must precede the WizardError check — WizardAbandonedError is a subclass
+  // and `instanceof` matches the whole prototype chain. Groups all
+  // abandonment into one issue; the `cause` keeps SIGHUP/SIGTERM/Ctrl+C
+  // distinguishable without fragmenting the group per step.
+  if (error instanceof WizardAbandonedError) {
+    return `wizard_abandoned_${error.cause}`;
+  }
   if (error instanceof WizardError) {
     return "wizard";
   }
@@ -306,6 +314,11 @@ function setCliErrorContext(scope: Sentry.Scope, error: unknown): void {
     scope.setContext("cli_error", {
       reason: error.reason,
       org_slug: error.orgSlug,
+    });
+  } else if (error instanceof WizardAbandonedError) {
+    scope.setContext("cli_error", {
+      cause: error.cause,
+      step: error.step,
     });
   }
 }

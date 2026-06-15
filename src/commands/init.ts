@@ -18,7 +18,7 @@
  */
 
 import path from "node:path";
-import { setTag } from "@sentry/node-core/light";
+import { flush, setTag } from "@sentry/node-core/light";
 import type { SentryContext } from "../context.js";
 import { findProjectsBySlug } from "../lib/api/projects.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
@@ -445,16 +445,25 @@ export const initCommand = buildCommand<
       // The .unref() timer doesn't hold the loop itself, so it's a no-op
       // in the happy path (Linux: handle drains naturally; `--yes`
       // on Darwin: LoggingUI doesn't open /dev/tty, may still drain
-      // naturally). On the Darwin hang path, it force-exits after a
-      // 100ms grace window — imperceptible to the user and enough
-      // for Sentry telemetry + stdio flushes to complete first.
+      // naturally). On the Darwin hang path, the lingering handle keeps
+      // the loop ref'd so `beforeExit` (which owns the normal flush) may
+      // never fire — a bare `process.exit` here would then drop the run's
+      // telemetry entirely, which is exactly how completed runs ended up
+      // with no recorded `wizard.outcome`. So instead of exiting blind,
+      // flush explicitly (bounded) and then exit, with a hard backstop in
+      // case the flush itself hangs. The 100ms lead lets the synchronous
+      // unwind (incl. `reportCliError` on the error path) queue its events
+      // before we flush.
       //
       // Skipped under `bun test` (which sets NODE_ENV=test automatically)
       // because the test runner calls `initCommand.func` directly; an
       // unref'd timer would still fire and terminate the runner mid-suite.
       if (process.platform === "darwin" && process.env.NODE_ENV !== "test") {
         setTimeout(() => {
-          process.exit(process.exitCode ?? 0);
+          const exitCode = process.exitCode ?? 0;
+          // Hard backstop: never let a stuck flush trap the process.
+          setTimeout(() => process.exit(exitCode), 2500).unref();
+          Promise.resolve(flush(2000)).finally(() => process.exit(exitCode));
         }, 100).unref();
       }
     }
