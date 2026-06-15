@@ -211,11 +211,11 @@ Calls should be sequential (awaited one at a time).
 | **Output** | Parsed object (zero-copy) | String (needs JSON.parse) |
 | **Errors** | `SentryError` with typed fields | Exit code + stderr string |
 | **Auth** | `token` option or env vars | Env vars only |
-| **Node.js** | >=22 required | Any version |
+| **Node.js** | >=22.15 required | Any version |
 
 ## Requirements
 
-- **Node.js >= 22** (required for `node:sqlite`)
+- **Node.js >= 22.15** (required for `node:sqlite`)
 
 ## Streaming Commands
 
