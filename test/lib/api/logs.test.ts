@@ -85,6 +85,15 @@ describe("listLogs", () => {
     await expect(listLogs("test-org", "test-project")).rejects.toThrow(
       ApiError
     );
+
+    try {
+      await listLogs("test-org", "test-project");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const apiError = error as ApiError;
+      expect(apiError.message).toContain("unexpected response format");
+      expect(apiError.detail).toContain("received null");
+    }
   });
 
   test("throws ApiError when response has wrong shape", async () => {

@@ -59,7 +59,7 @@ function assertObjectResponse(data: unknown, context: string): void {
     throw new ApiError(
       `${context}: unexpected response format`,
       0,
-      `Expected an object but received ${typeof data}. ` +
+      `Expected an object but received ${data === null ? "null" : typeof data}. ` +
         "This may indicate an incompatible self-hosted Sentry version or a proxy interfering with the response."
     );
   }
