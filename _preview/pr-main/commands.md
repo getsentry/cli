@@ -19,6 +19,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`cli`](https://cli.sentry.dev/_preview/pr-main/commands/cli.md) | CLI-related commands |
 | [`code-mappings`](https://cli.sentry.dev/_preview/pr-main/commands/code-mappings.md) | Manage code mappings for stack trace linking |
 | [`dart-symbol-map`](https://cli.sentry.dev/_preview/pr-main/commands/dart-symbol-map.md) | Work with Dart/Flutter symbol maps |
+| [`debug-files`](https://cli.sentry.dev/_preview/pr-main/commands/debug-files.md) | Work with debug information files |
 | [`dashboard`](https://cli.sentry.dev/_preview/pr-main/commands/dashboard.md) | Manage Sentry dashboards |
 | [`org`](https://cli.sentry.dev/_preview/pr-main/commands/org.md) | Work with Sentry organizations |
 | [`project`](https://cli.sentry.dev/_preview/pr-main/commands/project.md) | Work with Sentry projects |
@@ -86,6 +87,7 @@ sentry issue view PROJ-123 -w
 - [code-mappings](https://cli.sentry.dev/_preview/pr-main/commands/code-mappings.md)
 - [dart-symbol-map](https://cli.sentry.dev/_preview/pr-main/commands/dart-symbol-map.md)
 - [dashboard](https://cli.sentry.dev/_preview/pr-main/commands/dashboard.md)
+- [debug-files](https://cli.sentry.dev/_preview/pr-main/commands/debug-files.md)
 - [event](https://cli.sentry.dev/_preview/pr-main/commands/event.md)
 - [explore](https://cli.sentry.dev/_preview/pr-main/commands/explore.md)
 - [init](https://cli.sentry.dev/_preview/pr-main/commands/init.md)
