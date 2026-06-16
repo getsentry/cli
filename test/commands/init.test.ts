@@ -11,12 +11,16 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { initCommand } from "../../src/commands/init.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as projectsApi from "../../src/lib/api/projects.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as authDb from "../../src/lib/db/auth.js";
 import { ContextError, ValidationError } from "../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as prefetchNs from "../../src/lib/init/org-prefetch.js";
 import { resetPrefetch } from "../../src/lib/init/org-prefetch.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as wizardRunner from "../../src/lib/init/wizard-runner.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as interactiveLogin from "../../src/lib/interactive-login.js";
 
 /** Minimal org shape for mock returns */
 const MOCK_ORG = { id: "1", slug: "resolved-org", name: "Resolved Org" };
@@ -30,6 +34,8 @@ let capturedArgs: Record<string, unknown> | undefined;
 let runWizardSpy: ReturnType<typeof spyOn>;
 let findProjectsSpy: ReturnType<typeof spyOn>;
 let warmSpy: ReturnType<typeof spyOn>;
+let getAuthTokenSpy: ReturnType<typeof spyOn>;
+let loginSpy: ReturnType<typeof spyOn>;
 
 const func = (await initCommand.loader()) as unknown as (
   this: {
@@ -79,12 +85,22 @@ beforeEach(() => {
     // biome-ignore lint/suspicious/noEmptyBlockStatements: intentional no-op mock
     () => {}
   );
+  // Default: authenticated, so the interactive auth gate is a no-op and no
+  // real DB/network access happens. Tests that exercise the gate override this.
+  getAuthTokenSpy = vi
+    .spyOn(authDb, "getAuthToken")
+    .mockImplementation(() => "tok_default");
+  loginSpy = vi
+    .spyOn(interactiveLogin, "runInteractiveLogin")
+    .mockImplementation(() => Promise.resolve(true));
 });
 
 afterEach(() => {
   runWizardSpy.mockRestore();
   findProjectsSpy.mockRestore();
   warmSpy.mockRestore();
+  getAuthTokenSpy.mockRestore();
+  loginSpy.mockRestore();
   resetPrefetch();
 });
 
@@ -263,6 +279,59 @@ describe("init command func", () => {
       const ctx = makeContext("/projects/app", { stdinTTY: false });
       await func.call(ctx, { yes: false, "dry-run": true });
       expect(capturedArgs?.dryRun).toBe(true);
+      expect(runWizardSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── Interactive auth gate ─────────────────────────────────────────────
+
+  describe("interactive auth gate", () => {
+    const INTERACTIVE_FLAGS = { yes: false, "dry-run": false } as const;
+
+    test("unauthenticated interactive run launches login then proceeds", async () => {
+      getAuthTokenSpy.mockReturnValue(undefined);
+      const ctx = makeContext("/projects/app");
+      await func.call(ctx, INTERACTIVE_FLAGS);
+      expect(loginSpy).toHaveBeenCalledTimes(1);
+      expect(runWizardSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("bails with exit 1 without running the wizard when login is cancelled", async () => {
+      getAuthTokenSpy.mockReturnValue(undefined);
+      loginSpy.mockImplementation(() => Promise.resolve(false));
+      const prevExitCode = process.exitCode;
+      const ctx = makeContext("/projects/app");
+      try {
+        await func.call(ctx, INTERACTIVE_FLAGS);
+        expect(loginSpy).toHaveBeenCalledTimes(1);
+        expect(runWizardSpy).not.toHaveBeenCalled();
+        expect(process.exitCode).toBe(1);
+      } finally {
+        process.exitCode = prevExitCode;
+      }
+    });
+
+    test("skips login when already authenticated", async () => {
+      getAuthTokenSpy.mockImplementation(() => "tok_present");
+      const ctx = makeContext("/projects/app");
+      await func.call(ctx, INTERACTIVE_FLAGS);
+      expect(loginSpy).not.toHaveBeenCalled();
+      expect(runWizardSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("skips login under --yes even when unauthenticated", async () => {
+      getAuthTokenSpy.mockReturnValue(undefined);
+      const ctx = makeContext("/projects/app");
+      await func.call(ctx, { ...DEFAULT_FLAGS, features: ["errors"] });
+      expect(loginSpy).not.toHaveBeenCalled();
+      expect(runWizardSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("skips login in non-TTY context", async () => {
+      getAuthTokenSpy.mockReturnValue(undefined);
+      const ctx = makeContext("/projects/app", { stdinTTY: false });
+      await func.call(ctx, { ...DEFAULT_FLAGS, features: ["errors"] });
+      expect(loginSpy).not.toHaveBeenCalled();
       expect(runWizardSpy).toHaveBeenCalledTimes(1);
     });
   });

@@ -393,6 +393,32 @@ export const initCommand = buildCommand<
       throw err;
     }
 
+    // 3b. Launch the browser login flow when unauthenticated in an
+    //     interactive terminal, matching the auto-login every other command
+    //     gets from `autoAuthMiddleware`. The wizard can't lean on that
+    //     middleware: `runWizard`'s `finally` arms a macOS force-exit timer
+    //     (step 7) that would kill an `AuthError`-triggered login mid-poll,
+    //     and the Ink UI owns the terminal once it mounts. Running login here
+    //     — before `resolveTarget`'s API calls, before the timer is armed, and
+    //     before any UI — avoids both. Skipped for `--yes`/`--dry-run`/non-TTY,
+    //     which fail fast in `checkReadiness` with an actionable message.
+    if (!(isNonInteractiveContext(this) || flags.yes || flags["dry-run"])) {
+      const { getAuthToken } = await import("../lib/db/auth.js");
+      if (!getAuthToken()) {
+        const { runInteractiveLogin } = await import(
+          "../lib/interactive-login.js"
+        );
+        const loginSucceeded = await runInteractiveLogin();
+        if (!loginSucceeded) {
+          setTag("wizard.outcome", "auth_cancelled");
+          // `runInteractiveLogin` already reported the failure; exit 1 to match
+          // `auth login` and `autoAuthMiddleware` rather than a misleading 0.
+          process.exitCode = 1;
+          return;
+        }
+      }
+    }
+
     // 4. Resolve target → org + project
     //    Validation of user-provided slugs happens inside resolveTarget.
     //    For bare slugs, if no existing project is found, the slug becomes

@@ -44,7 +44,19 @@ export async function checkReadiness(ui: WizardUI): Promise<void> {
   if (!authOk) {
     spin.stop("Prerequisites failed", 1);
     ui.log.error("No authentication token found.");
-    ui.log.info("Run `sentry auth login` to authenticate, then try again.");
+    ui.log.info(
+      "Run `sentry init` from an interactive terminal to sign in automatically,"
+    );
+    ui.log.info(
+      "or export SENTRY_AUTH_TOKEN in your shell for non-interactive use:"
+    );
+    ui.log.info("  export SENTRY_AUTH_TOKEN=<token>");
+    ui.log.info(
+      "The CLI reads SENTRY_AUTH_TOKEN from your shell environment, not from a project .env file."
+    );
+    ui.log.info(
+      "Create a token at https://sentry.io/settings/account/api/auth-tokens/"
+    );
     ui.cancel("Setup failed");
     ui.feedback("failed");
     throw new WizardError("Not authenticated");
