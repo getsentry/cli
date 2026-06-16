@@ -6,7 +6,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -266,5 +266,68 @@ describe("buildJvmBundle", () => {
 
     expect(result.fileCount).toBe(1);
     expect(existsSync(result.outputPath)).toBe(true);
+  });
+
+  test("follows symlinked source files", async () => {
+    // Real file lives outside the scanned source tree.
+    const externalDir = join(tempDir, "external");
+    await mkdir(externalDir, { recursive: true });
+    const realFile = join(externalDir, "Linked.java");
+    await writeFile(realFile, "class Linked {}");
+
+    // A symlink to it sits inside the source tree.
+    const pkgDir = join(tempDir, "src", "main", "java", "com", "example");
+    await mkdir(pkgDir, { recursive: true });
+    await symlink(realFile, join(pkgDir, "Linked.java"));
+
+    const result = await buildJvmBundle({
+      sourcePath: join(tempDir, "src"),
+      outputPath: join(outputDir, "test.zip"),
+      debugId: "12345678-1234-1234-1234-123456789abc",
+      excludePatterns: ["external"],
+    });
+
+    expect(result.fileCount).toBe(1);
+    expect([...result.files.keys()][0]).toBe("~/com/example/Linked.jvm");
+  });
+
+  test("follows symlinked directories", async () => {
+    // Real package directory outside the scanned source tree.
+    const externalPkg = join(tempDir, "shared", "com", "example");
+    await mkdir(externalPkg, { recursive: true });
+    await writeFile(join(externalPkg, "Shared.java"), "class Shared {}");
+
+    // Source tree contains a symlink to the external "com" package dir.
+    const srcJava = join(tempDir, "src", "main", "java");
+    await mkdir(srcJava, { recursive: true });
+    await symlink(join(tempDir, "shared", "com"), join(srcJava, "com"));
+
+    const result = await buildJvmBundle({
+      sourcePath: join(tempDir, "src"),
+      outputPath: join(outputDir, "test.zip"),
+      debugId: "12345678-1234-1234-1234-123456789abc",
+    });
+
+    expect(result.fileCount).toBe(1);
+    expect([...result.files.keys()][0]).toBe("~/com/example/Shared.jvm");
+  });
+
+  test("does not loop on symlink cycles", async () => {
+    const pkgDir = join(tempDir, "src", "main", "java", "com", "example");
+    await mkdir(pkgDir, { recursive: true });
+    await writeFile(join(pkgDir, "App.java"), "class App {}");
+
+    // Create a self-referential symlink cycle: example/loop -> src
+    await symlink(join(tempDir, "src"), join(pkgDir, "loop"));
+
+    const result = await buildJvmBundle({
+      sourcePath: join(tempDir, "src"),
+      outputPath: join(outputDir, "test.zip"),
+      debugId: "12345678-1234-1234-1234-123456789abc",
+    });
+
+    // The single real file is collected exactly once despite the cycle.
+    expect(result.fileCount).toBe(1);
+    expect([...result.files.keys()][0]).toBe("~/com/example/App.jvm");
   });
 });

@@ -166,7 +166,6 @@ export const routes = buildRouteMap({
       trials: true,
       sourcemaps: true,
       whoami: true,
-      "debug-files": true,
       "send-event": true,
       "send-envelope": true,
       "bash-hook": true,

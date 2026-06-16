@@ -9,7 +9,7 @@
  * via `debug-files upload --type jvm`.
  */
 
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 import { logger } from "./logger.js";
 import { ZipWriter } from "./sourcemap/zip.js";
@@ -188,19 +188,18 @@ function buildSourceUrl(packagePath: string): string {
 }
 
 /**
- * Check if a directory entry is a JVM source file that should be included.
+ * Check if a file (by name and relative path) is a JVM source file that
+ * should be included.
  *
- * @returns `true` if the entry is a regular file with a JVM extension
- *   and is not inside an ambiguous build directory.
+ * The caller is responsible for determining that the entry resolves to a
+ * regular file (following symlinks if necessary), since this only inspects
+ * the name and path.
+ *
+ * @returns `true` if the name has a JVM extension and the path is not inside
+ *   an ambiguous build directory.
  */
-function isJvmSourceFile(
-  entry: import("node:fs").Dirent,
-  relPath: string
-): boolean {
-  if (!entry.isFile()) {
-    return false;
-  }
-  const ext = extname(entry.name).slice(1).toLowerCase();
+function isJvmSourceFile(name: string, relPath: string): boolean {
+  const ext = extname(name).slice(1).toLowerCase();
   if (!JVM_EXTENSIONS.has(ext)) {
     return false;
   }
@@ -212,10 +211,51 @@ function isJvmSourceFile(
 }
 
 /**
+ * Resolve whether a directory entry is ultimately a directory or a regular
+ * file, following symbolic links.
+ *
+ * `Dirent.isDirectory()` / `isFile()` both return `false` for symlinks, so
+ * symlinked sources would otherwise be silently dropped. For symlinks we
+ * `stat` the target (which follows the link) to recover its real type.
+ *
+ * @returns `"dir"`, `"file"`, or `"other"` (sockets, FIFOs, broken/unreadable
+ *   symlinks, etc.).
+ */
+async function resolveEntryKind(
+  entry: import("node:fs").Dirent,
+  fullPath: string
+): Promise<"dir" | "file" | "other"> {
+  if (entry.isDirectory()) {
+    return "dir";
+  }
+  if (entry.isFile()) {
+    return "file";
+  }
+  if (entry.isSymbolicLink()) {
+    try {
+      const stats = await stat(fullPath);
+      if (stats.isDirectory()) {
+        return "dir";
+      }
+      if (stats.isFile()) {
+        return "file";
+      }
+    } catch (err) {
+      // Broken or unreadable symlink — warn so the omission isn't silent.
+      log.warn(`Skipping unresolvable symlink: ${fullPath}`, err);
+      return "other";
+    }
+  }
+  return "other";
+}
+
+/**
  * Recursively collect JVM source files from a directory.
  *
  * Respects safe excludes, ambiguous build directory filtering,
- * and user-provided exclude patterns. Results are sorted for
+ * and user-provided exclude patterns. Symbolic links to files and
+ * directories are followed, with cycle protection via a set of visited
+ * real (canonicalized) directory paths. Results are sorted for
  * deterministic output.
  *
  * @returns Map of relative path → absolute path
@@ -226,30 +266,70 @@ async function collectJvmSources(
   rootIsSrc: boolean
 ): Promise<Map<string, string>> {
   const files = new Map<string, string>();
+  // Track canonicalized directory paths already visited so that symlink
+  // cycles (e.g. a/link -> a) don't cause infinite recursion.
+  const visitedDirs = new Set<string>();
+
+  /**
+   * Determine the canonical path of `dir`, returning `null` (and logging) when
+   * it's unreadable or has already been visited via another symlink path.
+   */
+  async function claimDir(dir: string): Promise<string | null> {
+    let realDir: string;
+    try {
+      realDir = await realpath(dir);
+    } catch (err) {
+      log.warn(`Skipping unreadable directory: ${dir}`, err);
+      return null;
+    }
+    if (visitedDirs.has(realDir)) {
+      log.debug(`Skipping already-visited directory (symlink cycle): ${dir}`);
+      return null;
+    }
+    visitedDirs.add(realDir);
+    return realDir;
+  }
+
+  /** Process a single directory entry: recurse into dirs, collect source files. */
+  async function processEntry(
+    entry: import("node:fs").Dirent,
+    dir: string
+  ): Promise<void> {
+    const fullPath = join(dir, entry.name);
+    const kind = await resolveEntryKind(entry, fullPath);
+
+    if (kind === "dir") {
+      if (!shouldExcludeDir(entry.name, userExcludes)) {
+        await walk(fullPath);
+      }
+      return;
+    }
+
+    if (kind !== "file") {
+      return;
+    }
+
+    const relPath = relative(rootDir, fullPath);
+    // When the scan root is a src/ directory, relative paths lack the
+    // src/ prefix that isInAmbiguousBuildDir needs to recognise packages
+    // named "build" etc. as legitimate source (not build output).
+    const checkPath = rootIsSrc ? `src/${relPath}` : relPath;
+    if (isJvmSourceFile(entry.name, checkPath)) {
+      files.set(relPath, fullPath);
+    }
+  }
 
   async function walk(dir: string): Promise<void> {
+    if ((await claimDir(dir)) === null) {
+      return;
+    }
+
     const entries = await readdir(dir, { withFileTypes: true });
     // Sort for deterministic ordering
     entries.sort((a, b) => a.name.localeCompare(b.name));
 
     for (const entry of entries) {
-      const fullPath = join(dir, entry.name);
-      const relPath = relative(rootDir, fullPath);
-
-      if (entry.isDirectory()) {
-        if (!shouldExcludeDir(entry.name, userExcludes)) {
-          await walk(fullPath);
-        }
-        continue;
-      }
-
-      // When the scan root is a src/ directory, relative paths lack the
-      // src/ prefix that isInAmbiguousBuildDir needs to recognise packages
-      // named "build" etc. as legitimate source (not build output).
-      const checkPath = rootIsSrc ? `src/${relPath}` : relPath;
-      if (isJvmSourceFile(entry, checkPath)) {
-        files.set(relPath, fullPath);
-      }
+      await processEntry(entry, dir);
     }
   }
 
