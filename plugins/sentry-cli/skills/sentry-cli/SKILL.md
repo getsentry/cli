@@ -406,6 +406,14 @@ Work with Dart/Flutter symbol maps
 
 → Full flags and examples: `references/dart-symbol-map.md`
 
+### Debug-files
+
+Work with debug information files
+
+- `sentry debug-files bundle-jvm <path>` — Create a JVM source bundle for source context
+
+→ Full flags and examples: `references/debug-files.md`
+
 ### Dashboard
 
 Manage Sentry dashboards
