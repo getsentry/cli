@@ -447,42 +447,48 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   /**
    * Auto-authentication middleware.
    *
-   * Catches auth errors (not_authenticated, expired) in interactive TTYs
-   * and runs the login flow. On success, retries through the full middleware
-   * chain so inner middlewares (e.g., trial prompt) also apply to the retry.
+   * Catches auth errors (not_authenticated, expired) and runs the login flow.
+   * On success, retries through the full middleware chain so inner middlewares
+   * (e.g., trial prompt) also apply to the retry.
+   *
+   * Runs regardless of TTY: the device flow opens the browser when possible and
+   * otherwise prints the verification URL + QR code, so it works when stdin is
+   * piped/redirected too.
    */
   const autoAuthMiddleware: ErrorMiddleware = async (next, argv) => {
     try {
       await next(argv);
     } catch (err) {
-      // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY can be undefined in Bun)
-      // Errors can opt-out via skipAutoAuth (e.g., auth status command)
+      // Only recover auth errors that haven't opted out (e.g. auth status sets
+      // skipAutoAuth); rethrow everything else unchanged.
       if (
-        err instanceof AuthError &&
-        (err.reason === "not_authenticated" || err.reason === "expired") &&
-        !err.skipAutoAuth &&
-        isatty(0)
+        !(err instanceof AuthError) ||
+        err.skipAutoAuth ||
+        !["not_authenticated", "expired"].includes(err.reason)
       ) {
-        process.stderr.write(
-          err.reason === "expired"
-            ? "Authentication expired. Starting login flow...\n\n"
-            : "Authentication required. Starting login flow...\n\n"
-        );
+        throw err;
+      }
 
-        const loginSuccess = await runInteractiveLogin();
+      process.stderr.write(
+        err.reason === "expired"
+          ? "Authentication expired. Starting login flow...\n\n"
+          : "Authentication required. Starting login flow...\n\n"
+      );
 
-        if (loginSuccess) {
-          process.stderr.write("\nRetrying command...\n\n");
-          await next(argv);
-          return;
-        }
-
-        // Login failed or was cancelled
-        process.exitCode = 1;
+      const loginSuccess = await runInteractiveLogin();
+      if (loginSuccess) {
+        process.stderr.write("\nRetrying command...\n\n");
+        await next(argv);
         return;
       }
 
-      throw err;
+      // Login failed or was cancelled. In a non-TTY, re-throw so the original
+      // auth error's standard message and exit code surface ("Not
+      // authenticated", exit 10); in a TTY the flow already reported it.
+      if (!isatty(0)) {
+        throw err;
+      }
+      process.exitCode = 1;
     }
   };
 
