@@ -188,6 +188,11 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   // that rely on the original token positions.
   const hoistedArgs = hoistGlobalFlags(cliArgs);
 
+  // A human can complete the device-flow prompt when a terminal is attached to
+  // stdin or stderr (the URL/QR prints to stderr), so treat either as
+  // interactive when deciding how a failed login surfaces.
+  const hasInteractiveTerminal = (): boolean => isatty(0) || isatty(2);
+
   // ---------------------------------------------------------------------------
   // Error-recovery middleware
   // ---------------------------------------------------------------------------
@@ -482,10 +487,11 @@ export async function runCli(cliArgs: string[]): Promise<void> {
         return;
       }
 
-      // Login failed or was cancelled. In a non-TTY, re-throw so the original
-      // auth error's standard message and exit code surface ("Not
-      // authenticated", exit 10); in a TTY the flow already reported it.
-      if (!isatty(0)) {
+      // Login failed or was cancelled. Re-throw the original auth error (exit
+      // 10) only when fully headless — no terminal on stdin or stderr. If a
+      // human saw the prompt (the URL/QR prints to stderr) and cancelled, the
+      // flow already reported it, so exit 1.
+      if (!hasInteractiveTerminal()) {
         throw err;
       }
       process.exitCode = 1;
