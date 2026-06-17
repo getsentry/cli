@@ -190,7 +190,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
 
   // A human can complete the device-flow prompt when a terminal is attached to
   // stdin or stderr (the URL/QR prints to stderr), so treat either as
-  // interactive when deciding how a failed login surfaces.
+  // interactive when deciding whether to attempt auto-login.
   const hasInteractiveTerminal = (): boolean => isatty(0) || isatty(2);
 
   // ---------------------------------------------------------------------------
@@ -465,11 +465,15 @@ export async function runCli(cliArgs: string[]): Promise<void> {
       await next(argv);
     } catch (err) {
       // Only recover auth errors that haven't opted out (e.g. auth status sets
-      // skipAutoAuth); rethrow everything else unchanged.
+      // skipAutoAuth); rethrow everything else unchanged. Skip the login flow
+      // when fully headless — no terminal on stdin or stderr means nobody can
+      // complete the device flow, so fail fast with the original auth error
+      // instead of polling for minutes.
       if (
         !(err instanceof AuthError) ||
         err.skipAutoAuth ||
-        !["not_authenticated", "expired"].includes(err.reason)
+        !["not_authenticated", "expired"].includes(err.reason) ||
+        !hasInteractiveTerminal()
       ) {
         throw err;
       }
@@ -487,13 +491,8 @@ export async function runCli(cliArgs: string[]): Promise<void> {
         return;
       }
 
-      // Login failed or was cancelled. Re-throw the original auth error (exit
-      // 10) only when fully headless — no terminal on stdin or stderr. If a
-      // human saw the prompt (the URL/QR prints to stderr) and cancelled, the
-      // flow already reported it, so exit 1.
-      if (!hasInteractiveTerminal()) {
-        throw err;
-      }
+      // Login failed or was cancelled. A terminal was attached (the prompt
+      // printed to stdin/stderr), so the flow already reported it; exit 1.
       process.exitCode = 1;
     }
   };

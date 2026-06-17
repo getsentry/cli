@@ -77,18 +77,15 @@ describe("sentry auth status", () => {
 });
 
 describe("non-TTY auto-auth", () => {
-  // Auth-required commands attempt the OAuth device flow even in a non-TTY
-  // (the test subprocess has no TTY on stdin). The device-code request fails
-  // fast against the mock (no /oauth/device/code/ route → 404), so the command
-  // still exits 10 with the standard not-authenticated message — but only
-  // after attempting to start the login flow.
-  test("attempts login flow then exits not-authenticated", async () => {
+  // The test subprocess is fully headless (no TTY on stdin or stderr), so
+  // nobody can complete the device flow. Auto-auth is skipped entirely and the
+  // command fails fast with the standard not-authenticated error (exit 10)
+  // instead of polling the device flow for minutes.
+  test("skips login flow and exits not-authenticated when fully headless", async () => {
     const result = await ctx.run(["api", "organizations/"]);
 
     const output = result.stdout + result.stderr;
-    // The login flow was attempted (gate is no longer TTY-only)...
-    expect(output).toMatch(/starting login flow/i);
-    // ...but it failed, so the standard not-authenticated path still wins.
+    expect(output).not.toMatch(/starting login flow/i);
     expect(output).toMatch(/not authenticated/i);
     expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
   });
