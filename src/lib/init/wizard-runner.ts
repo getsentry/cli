@@ -218,33 +218,60 @@ function describePostTool(payload: SuspendPayload): string | undefined {
   }
 }
 
+type ProgressRotationHandle = {
+  /** Stop the rotation timer permanently. */
+  stop: () => void;
+  /**
+   * Pause rotation so recovery paths (e.g. "Reconnecting...") can
+   * set the spinner without the next tick overwriting it.
+   */
+  pause: () => void;
+  /** Resume rotation after a paused recovery completes. */
+  resume: () => void;
+};
+
+const NOOP_ROTATION: ProgressRotationHandle = {
+  stop: () => {
+    // No rotating messages for this step.
+  },
+  pause: () => {
+    // noop
+  },
+  resume: () => {
+    // noop
+  },
+};
+
 /**
  * Start a rotating progress message timer for steps that have long
- * server-side phases without intermediate suspends. Returns a cleanup
- * function that stops the timer.
+ * server-side phases without intermediate suspends. Returns a handle
+ * to stop or pause the timer.
  *
  * The timer cycles through {@link STEP_PROGRESS_MESSAGES} for the given
  * step, updating the spinner text every {@link PROGRESS_ROTATE_INTERVAL_MS}.
  * After exhausting all messages, it appends elapsed time so the user
  * knows the system is still working.
+ *
+ * The handle exposes `pause()`/`resume()` so that recovery paths inside
+ * `resumeWithRecovery` can temporarily suppress rotation while showing
+ * "Reconnecting..." without the next tick overwriting it.
  */
 function startProgressRotation(
   stepId: string,
   spin: SpinnerHandle,
   spinState: SpinState
-): () => void {
+): ProgressRotationHandle {
   const messages = STEP_PROGRESS_MESSAGES[stepId];
   if (!messages || messages.length === 0) {
-    return () => {
-      // No rotating messages for this step — no-op cleanup.
-    };
+    return NOOP_ROTATION;
   }
 
   let index = -1;
+  let paused = false;
   const startedAt = Date.now();
 
   const timer = setInterval(() => {
-    if (!spinState.running) {
+    if (!spinState.running || paused) {
       return;
     }
     index += 1;
@@ -257,8 +284,16 @@ function startProgressRotation(
     }
   }, PROGRESS_ROTATE_INTERVAL_MS);
 
-  return () => {
-    clearInterval(timer);
+  return {
+    stop: () => {
+      clearInterval(timer);
+    },
+    pause: () => {
+      paused = true;
+    },
+    resume: () => {
+      paused = false;
+    },
   };
 }
 
@@ -580,6 +615,7 @@ type ResumeRetryArgs = {
   tracingOptions: Record<string, unknown>;
   spin: SpinnerHandle;
   ui: WizardUI;
+  progressRotation?: ProgressRotationHandle;
 };
 
 /**
@@ -706,6 +742,7 @@ async function resumeWithRecovery(
     tracingOptions,
     spin,
     ui,
+    progressRotation,
   } = args;
   try {
     const raw = await withTimeout(
@@ -719,6 +756,7 @@ async function resumeWithRecovery(
     return assertWorkflowResult(raw);
   } catch (err) {
     if (isStepAlreadyAdvancedError(err)) {
+      progressRotation?.pause();
       spin.message("Reconnecting...");
       const recovered = await tryRecoverCurrentRunState(
         workflow,
@@ -750,6 +788,7 @@ async function resumeWithRecovery(
       throw err;
     }
 
+    progressRotation?.pause();
     ui.setOverlay?.({
       kind: "health",
       message: "Connection interrupted, reconnecting...",
@@ -1002,7 +1041,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         stepHistory
       );
 
-      const stopProgress = startProgressRotation(
+      const progressRotation = startProgressRotation(
         extracted.stepId,
         spin,
         spinState
@@ -1017,9 +1056,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           tracingOptions,
           spin,
           ui,
+          progressRotation,
         });
       } finally {
-        stopProgress();
+        progressRotation.stop();
       }
     }
   } catch (err) {
