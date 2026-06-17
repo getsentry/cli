@@ -89,7 +89,7 @@ describe("non-TTY auto-auth", () => {
     // The login flow was attempted (gate is no longer TTY-only)...
     expect(output).toMatch(/starting login flow/i);
     // ...but it failed, so the standard not-authenticated path still wins.
-    expect(output).toMatch(/not authenticated|login/i);
+    expect(output).toMatch(/not authenticated/i);
     expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
   });
 });
