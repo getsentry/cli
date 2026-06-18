@@ -4,6 +4,11 @@
 ## Examples
 
 ```bash
+# Inspect a debug information file (auto-detects the format)
+sentry debug-files check ./libexample.so
+sentry debug-files check MyApp.dSYM/Contents/Resources/DWARF/MyApp
+sentry debug-files check ./app.pdb --json
+
 # Bundle JVM sources with a debug ID
 sentry debug-files bundle-jvm --output ./out --debug-id <uuid> ./src
 
@@ -16,8 +21,12 @@ sentry debug-files bundle-jvm --output ./out --debug-id <uuid> --json ./src
 
 ## Important Notes
 
-- This command is **local-only** — it makes no network requests. Upload the
-  generated bundle separately via `sentry debug-files upload --type jvm`.
+- `check` and `bundle-jvm` are **local-only** — they make no network requests.
+  Both parse object files in-process (Mach-O/dSYM, ELF, PE/PDB, Portable PDB,
+  WebAssembly, Breakpad, source bundles) via a bundled `symbolic` WASM module.
+- `check` exits non-zero if the file is not usable for symbolication (no debug
+  id or no useful features).
+- Upload a JVM bundle separately via `sentry debug-files upload --type jvm`.
 - Supported JVM source file extensions: `.java`, `.kt`, `.scala`, `.sc`,
   `.groovy`, `.gvy`, `.gy`, `.gsh`, `.clj`, `.cljc`
 - Build output directories (`build/`, `target/`, `out/`, `bin/`) are
