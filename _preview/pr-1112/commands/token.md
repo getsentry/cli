@@ -64,3 +64,16 @@ List org auth tokens
 | `<org>` | Organization slug |
 
 All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
+
+## Examples
+
+[Section titled “Examples”](#examples)
+Terminal window
+
+```
+# List org auth tokenssentry token list my-org
+# Create a new tokensentry token create my-org --name 'CI deploy token'
+# Delete a token by IDsentry token delete my-org 12345 --yes
+# Delete a token (dry run)sentry token delete my-org 12345 --dry-run
+# Output as JSONsentry token list --json
+```
