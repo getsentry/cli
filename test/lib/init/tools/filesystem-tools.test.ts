@@ -128,6 +128,71 @@ describe("filesystem tools", () => {
     ).toContain("sntrys_test_token_123");
   });
 
+  test("materializes auth token placeholders in Sentry CLI config files", async () => {
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: ".sentryclirc",
+              action: "create",
+              patch: "[auth]\ntoken=___ORG_AUTH_TOKEN___\n",
+            },
+            {
+              path: "ios/sentry.properties",
+              action: "create",
+              patch: "auth.token=___ORG_AUTH_TOKEN___\n",
+            },
+          ],
+        },
+      },
+      makeContext(testDir)
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fs.readFileSync(path.join(testDir, ".sentryclirc"), "utf-8")).toBe(
+      "[auth]\ntoken=sntrys_test_token_123\n"
+    );
+    expect(
+      fs.readFileSync(path.join(testDir, "ios", "sentry.properties"), "utf-8")
+    ).toBe("auth.token=sntrys_test_token_123\n");
+  });
+
+  test("preserves existing .gitignore entries when adding .sentryclirc", async () => {
+    fs.writeFileSync(path.join(testDir, ".gitignore"), "node_modules\n");
+
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: ".gitignore",
+              action: "modify",
+              edits: [
+                {
+                  oldString: "node_modules\n",
+                  newString: "node_modules\n.sentryclirc\n",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      makeContext(testDir)
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fs.readFileSync(path.join(testDir, ".gitignore"), "utf-8")).toBe(
+      "node_modules\n.sentryclirc\n"
+    );
+  });
+
   test("rejects unsafe apply-patchset paths before writing", async () => {
     const unsafePaths: unknown[] = [
       null,

@@ -13,6 +13,7 @@ import type { InitToolDefinition, ToolContext } from "./types.js";
 /** Pattern matching empty or placeholder SENTRY_AUTH_TOKEN values in env files. */
 const EMPTY_AUTH_TOKEN_RE =
   /^(SENTRY_AUTH_TOKEN[ \t]*=[ \t]*)(?:['"]?[ \t]*['"]?)?[ \t]*$/m;
+const AUTH_TOKEN_PLACEHOLDER = "___ORG_AUTH_TOKEN___";
 const PATH_SEGMENT_RE = /[/\\]/u;
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 
@@ -146,7 +147,11 @@ async function applySinglePatch(
       break;
     }
     case "modify": {
-      const content = await applyEdits(absPath, patch.path, patch.edits);
+      const content = materializeAuthToken(
+        await applyEdits(absPath, patch.path, patch.edits),
+        patch.path,
+        authToken
+      );
       await fs.promises.writeFile(absPath, content, "utf-8");
       break;
     }
@@ -173,14 +178,36 @@ function resolvePatchContent(
     ? prettyPrintJson(patch.patch)
     : patch.patch;
 
-  if (authToken && isEnvFile(patch.path) && EMPTY_AUTH_TOKEN_RE.test(content)) {
-    content = content.replace(
+  content = materializeAuthToken(content, patch.path, authToken);
+
+  return content;
+}
+
+function materializeAuthToken(
+  content: string,
+  filePath: string,
+  authToken?: string
+): string {
+  if (!authToken) {
+    return content;
+  }
+
+  let nextContent = content;
+  if (
+    shouldMaterializeAuthToken(filePath) &&
+    nextContent.includes(AUTH_TOKEN_PLACEHOLDER)
+  ) {
+    nextContent = nextContent.replaceAll(AUTH_TOKEN_PLACEHOLDER, authToken);
+  }
+
+  if (isEnvFile(filePath) && EMPTY_AUTH_TOKEN_RE.test(nextContent)) {
+    nextContent = nextContent.replace(
       EMPTY_AUTH_TOKEN_RE,
       (_, prefix) => `${prefix}${authToken}`
     );
   }
 
-  return content;
+  return nextContent;
 }
 
 function prettyPrintJson(content: string): string {
@@ -194,6 +221,15 @@ function prettyPrintJson(content: string): string {
 function isEnvFile(filePath: string): boolean {
   const name = filePath.split(PATH_SEGMENT_RE).at(-1) ?? "";
   return name === ".env" || name.startsWith(".env.");
+}
+
+function shouldMaterializeAuthToken(filePath: string): boolean {
+  const name = filePath.split(PATH_SEGMENT_RE).at(-1) ?? "";
+  return (
+    isEnvFile(filePath) ||
+    name === ".sentryclirc" ||
+    name === "sentry.properties"
+  );
 }
 
 async function applyEdits(
