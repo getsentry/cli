@@ -42,7 +42,7 @@ import {
  * Reasons an error may be silenced (not sent to Sentry as an issue).
  * Exposed as the `reason` attribute on the `cli.error.silenced` metric.
  */
-type SilenceReason = "output_error" | "auth_expected" | "api_user_error";
+type SilenceReason = "output_error" | "auth_expected" | "api_user_error" | "user_input_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -53,6 +53,9 @@ type SilenceReason = "output_error" | "auth_expected" | "api_user_error";
 export function classifySilenced(error: unknown): SilenceReason | null {
   if (error instanceof OutputError) {
     return "output_error";
+  }
+  if (error instanceof ResolutionError) {
+    return "user_input_error";
   }
   if (
     error instanceof AuthError &&
