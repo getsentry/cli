@@ -370,6 +370,12 @@ export type ParsedOrgProject =
       /** True if project slug was normalized */
       normalized?: boolean;
       /**
+       * Organization slug to scope the search to, when the caller provided
+       * one (e.g. "org/My Project"). When unset the search spans all
+       * accessible organizations.
+       */
+      org?: string;
+      /**
        * Pre-normalization input when {@link normalized} is `true`.
        * Used by the resolution layer to produce user-friendly messages
        * that reference what the user actually typed rather than the
@@ -536,6 +542,18 @@ function parseSlashOrgProject(input: string): ParsedOrgProject {
 
   // "sentry/cli" → explicit org and project
   rejectAtSelector(rawProject, "project slug");
+  if (looksLikeDisplayName(rawProject)) {
+    // Spaces → display name, not a slug. Skip slug validation and let the
+    // resolution layer do a fuzzy name-based search (mirrors the bare-slug
+    // and leading-slash paths). Prevents a hard ValidationError when callers
+    // pass a project display name in "org/project" form (CLI-1RA).
+    return {
+      type: "project-search",
+      projectSlug: rawProject,
+      originalSlug: rawProject,
+      org: no.slug,
+    };
+  }
   const np = normalizeSlug(rawProject);
   validateResourceId(np.slug, "project slug");
   const normalized = no.normalized || np.normalized;

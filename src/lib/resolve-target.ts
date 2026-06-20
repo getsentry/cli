@@ -1640,9 +1640,16 @@ export async function resolveOrgProjectTarget(
     case "project-search": {
       const displaySlug = parsed.originalSlug ?? parsed.projectSlug;
       const isDisplayName = parsed.originalSlug !== undefined;
-      const { projects, orgs } = isDisplayName
+      const { projects, orgs: foundOrgs } = isDisplayName
         ? { projects: [], orgs: await listOrganizations() }
         : await findProjectsBySlug(parsed.projectSlug);
+
+      // When the caller provided an org (e.g. "org/My Project"), scope the
+      // display-name search to that org instead of all accessible orgs.
+      const orgs =
+        isDisplayName && parsed.org !== undefined
+          ? foundOrgs.filter((o) => o.slug === parsed.org)
+          : foundOrgs;
 
       if (projects.length === 0) {
         const outcome = await triageProjectNotFound(
