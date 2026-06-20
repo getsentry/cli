@@ -196,6 +196,7 @@ describe("proposeCompletions: Stricli integration", () => {
     "log",
     "local",
     "monitor",
+    "token",
   ]);
 
   test("subcommands match extractCommandTree for each group without defaultCommand", async () => {
