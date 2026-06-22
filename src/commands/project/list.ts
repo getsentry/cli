@@ -564,7 +564,9 @@ async function handleProjectNotFound(
   if (outcome.kind === "fuzzy-match") {
     // Pass isRecoveryAttempt=true to prevent infinite recursion if the
     // fuzzy-recovered slug also fails to resolve.
-    return handleProjectSearch(outcome.project, flags, { isRecoveryAttempt: true });
+    return handleProjectSearch(outcome.project, flags, {
+      isRecoveryAttempt: true,
+    });
   }
 
   // JSON mode returns empty array; human mode throws a helpful error
