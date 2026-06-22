@@ -773,17 +773,19 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
     orgAllFallback?: (orgSlug: string) => Promise<ListResult<TWithOrg>>;
     /** Original user input before normalization — for clearer messages. */
     originalSlug?: string;
+    /** Organization slug to scope the search to (e.g. from "org/My Project"). */
+    org?: string;
   },
   /** Guard against infinite recursion from fuzzy recovery. */
   _isRecoveryAttempt = false
 ): Promise<ListResult<TWithOrg>> {
-  const { flags, orgAllFallback, originalSlug } = options;
+  const { flags, orgAllFallback, originalSlug, org: scopedOrg } = options;
   /** Display label: the user's raw input when available, otherwise the slug. */
   const displaySlug = originalSlug ?? projectSlug;
   // When the input is a display name (originalSlug set, contains spaces),
   // skip the slug-based API lookup and go straight to name-based matching.
   const isDisplayName = originalSlug !== undefined;
-  const { projects: matches, orgs } = isDisplayName
+  const { projects: matches, orgs: foundOrgs } = isDisplayName
     ? { projects: [], orgs: await listOrganizations() }
     : await withProgress(
         {
@@ -792,6 +794,13 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
         },
         () => findProjectsBySlug(projectSlug)
       );
+
+  // When the caller provided an org (e.g. "org/My Project"), scope the
+  // search to that org instead of all accessible orgs.
+  const orgs =
+    isDisplayName && scopedOrg !== undefined
+      ? foundOrgs.filter((o) => o.slug === scopedOrg)
+      : foundOrgs;
 
   if (matches.length === 0) {
     // Skip triage on recovery attempts to prevent infinite recursion.
@@ -953,6 +962,7 @@ function buildDefaultHandlers<TEntity, TWithOrg>(
         flags: ctx.flags,
         orgAllFallback: (orgSlug) => runOrgAll(config, orgSlug, ctx.flags),
         originalSlug: ctx.parsed.originalSlug,
+        org: ctx.parsed.org,
       }),
 
     "org-all": (ctx) => {

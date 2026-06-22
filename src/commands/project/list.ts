@@ -587,12 +587,14 @@ export async function handleProjectSearch(
   /** Original user input before normalization — for clearer messages. */
   originalSlug?: string,
   /** @internal — prevents infinite recursion from fuzzy recovery. */
-  _isRecoveryAttempt = false
+  _isRecoveryAttempt = false,
+  /** Organization slug to scope the search to (e.g. from "org/My Project"). */
+  scopedOrg?: string
 ): Promise<ListResult<ProjectWithOrg>> {
   // When the input is a display name (originalSlug set, contains spaces),
   // skip the slug-based API lookup and go straight to name-based matching.
   const isDisplayName = originalSlug !== undefined;
-  const { projects, orgs } = isDisplayName
+  const { projects, orgs: foundOrgs } = isDisplayName
     ? { projects: [], orgs: await listOrganizations() }
     : await withProgress(
         {
@@ -601,6 +603,14 @@ export async function handleProjectSearch(
         },
         () => findProjectsBySlug(projectSlug)
       );
+
+  // When the caller provided an org (e.g. "org/My Project"), scope the
+  // search to that org instead of all accessible orgs.
+  const orgs =
+    isDisplayName && scopedOrg !== undefined
+      ? foundOrgs.filter((o) => o.slug === scopedOrg)
+      : foundOrgs;
+
   const filtered = filterByPlatform(projects, flags.platform);
 
   if (filtered.length === 0) {
@@ -734,7 +744,9 @@ export const listCommand = buildListCommand("project", {
           handleProjectSearch(
             ctx.parsed.projectSlug,
             flags,
-            ctx.parsed.originalSlug
+            ctx.parsed.originalSlug,
+            false,
+            ctx.parsed.org
           ),
       },
     });
