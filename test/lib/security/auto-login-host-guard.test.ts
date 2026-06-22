@@ -15,8 +15,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { setAuthToken } from "../../../src/lib/db/auth.js";
-import { captureEnvTokenHost } from "../../../src/lib/env-token-host.js";
+import { clearAuth, setAuthToken } from "../../../src/lib/db/auth.js";
+import { setDefaultUrl } from "../../../src/lib/db/defaults.js";
 import {
   buildHostRefusalMessage,
   isAutoLoginHostTrusted,
@@ -74,13 +74,11 @@ describe("auto-login host guard", () => {
       expect(isLoginHostTrusted("https://sentry.example.com")).toBe(true);
     });
 
-    test("a stored token's host alone does NOT relax the explicit gate", () => {
+    test("a persisted default URL does NOT relax the explicit gate", () => {
       // Explicit `auth login` is intentionally stricter than auto-login:
-      // confirming a self-hosted host still requires `--url` even when a
-      // token for that host is already stored.
-      setAuthToken("tok", undefined, undefined, {
-        host: "https://sentry.example.com",
-      });
+      // confirming a self-hosted host still requires `--url` even when that
+      // host is the persisted default.
+      setDefaultUrl("https://sentry.example.com");
       expect(isLoginHostTrusted("https://sentry.example.com")).toBe(false);
     });
   });
@@ -90,28 +88,38 @@ describe("auto-login host guard", () => {
       expect(isAutoLoginHostTrusted("https://sentry.io")).toBe(true);
     });
 
-    test("self-hosted with no stored token and no anchor is REFUSED", () => {
+    test("self-hosted with no confirmed host is REFUSED", () => {
       // The reported bug: `whoami` against SENTRY_HOST with no creds used to
       // auto-login here. Must now be refused, matching `auth login`.
       expect(isAutoLoginHostTrusted("https://sentry.example.com")).toBe(false);
     });
 
-    test("self-hosted re-auth against the stored host is allowed", () => {
-      // Expired-session re-auth: the host was confirmed in a prior login, so
-      // we don't force `--url` again on every token expiry.
-      setAuthToken("tok", undefined, undefined, {
-        host: "https://sentry.example.com",
-      });
+    test("self-hosted re-auth against the persisted default URL is allowed", () => {
+      // Expired-session re-auth: the host was confirmed via `auth login --url`
+      // (which persists defaults.url), so we don't force `--url` again on
+      // every token expiry.
+      setDefaultUrl("https://sentry.example.com");
       expect(isAutoLoginHostTrusted("https://sentry.example.com")).toBe(true);
     });
 
-    test("injected host that differs from the stored host is REFUSED", () => {
-      // Stored token is for the real instance; a poisoned env.SENTRY_URL
-      // points elsewhere. The stored host must not act as a free pass for a
-      // different (attacker) host.
+    test("the anchor survives clearAuth (the expired-session path)", async () => {
+      // Both expired paths call clearAuth() before the AuthError reaches the
+      // middleware, so the stored token row is gone by the time the guard
+      // runs. defaults.url survives clearAuth, so re-auth still proceeds —
+      // this is the regression Cursor flagged.
       setAuthToken("tok", undefined, undefined, {
         host: "https://sentry.example.com",
       });
+      setDefaultUrl("https://sentry.example.com");
+      await clearAuth();
+      expect(isAutoLoginHostTrusted("https://sentry.example.com")).toBe(true);
+    });
+
+    test("injected host that differs from the confirmed default is REFUSED", () => {
+      // Default is the real instance; a poisoned env.SENTRY_URL points
+      // elsewhere. The confirmed host must not act as a free pass for a
+      // different (attacker) host.
+      setDefaultUrl("https://sentry.example.com");
       expect(isAutoLoginHostTrusted("https://evil.com")).toBe(false);
     });
 
@@ -143,13 +151,5 @@ describe("auto-login host guard", () => {
         "  sentry auth login --url https://sentry.example.com --token <your-token>"
       );
     });
-  });
-
-  // captureEnvTokenHost is exercised indirectly by resetHostScopingState's
-  // snapshot reset; reference it so the import documents the boot interaction.
-  test("env-token snapshot reset leaves resolution env-driven", () => {
-    process.env.SENTRY_HOST = "https://sentry.example.com";
-    captureEnvTokenHost();
-    expect(resolveEffectiveLoginHost()).toBe("https://sentry.example.com");
   });
 });

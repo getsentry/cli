@@ -361,13 +361,6 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     }
   };
 
-  /**
-   * Auto-authentication middleware.
-   *
-   * Catches auth errors (not_authenticated, expired) in interactive TTYs
-   * and runs the login flow. On success, retries through the full middleware
-   * chain so inner middlewares (e.g., trial prompt) also apply to the retry.
-   */
   // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY can be
   // undefined in Bun). Errors can opt out via skipAutoAuth (e.g. auth status).
   const shouldAutoAuth = (
@@ -378,6 +371,13 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     !err.skipAutoAuth &&
     isatty(0);
 
+  /**
+   * Auto-authentication middleware.
+   *
+   * Catches auth errors (not_authenticated, expired) in interactive TTYs
+   * and runs the login flow. On success, retries through the full middleware
+   * chain so inner middlewares (e.g., trial prompt) also apply to the retry.
+   */
   const autoAuthMiddleware: ErrorMiddleware = async (next, argv) => {
     try {
       await next(argv);

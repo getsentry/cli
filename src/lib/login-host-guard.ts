@@ -15,7 +15,7 @@
  */
 
 import { DEFAULT_SENTRY_URL } from "./constants.js";
-import { getStoredAuthHost } from "./db/auth.js";
+import { getDefaultUrl } from "./db/defaults.js";
 import { getEnv } from "./env.js";
 import {
   isSaaSTrustOrigin,
@@ -47,16 +47,23 @@ export function isLoginHostTrusted(host: string): boolean {
 
 /**
  * Whether auto-login (re-auth triggered by a command's auth error) may
- * proceed against `host`. Same as {@link isLoginHostTrusted}, plus the host
- * of an existing stored token: re-authing an expired session against the
- * host the user already confirmed in a prior login is safe and avoids forcing
- * `--url` on every token expiry. A `.sentryclirc`-injected host that matches
- * neither the SaaS class, a trust anchor, nor the stored host is still
- * refused — which is the `not_authenticated` (first-login) case the bug
- * report describes.
+ * proceed against `host`. Same as {@link isLoginHostTrusted}, plus the
+ * persisted default URL: re-authing an expired session against the host the
+ * user already confirmed via `auth login --url` (or `cli defaults url`) is
+ * safe and avoids forcing `--url` again on every token expiry.
+ *
+ * The default URL is the right anchor here — not the stored token's host —
+ * because both expired paths call `clearAuth()` before the `AuthError`
+ * reaches the middleware (see db/auth.ts `refreshToken`), so the token row is
+ * already gone. `defaults.url` survives `clearAuth()` and is only ever written
+ * by explicit, confirmed user actions, never by the `.sentryclirc` env shim
+ * that injects `env.SENTRY_URL`. So an injected host that doesn't match the
+ * SaaS class, a trust anchor, or the persisted default is still refused —
+ * which is the `not_authenticated` (first-login) case the bug report
+ * describes.
  */
 export function isAutoLoginHostTrusted(host: string): boolean {
-  return isLoginHostTrusted(host) || isHostTrusted(host, getStoredAuthHost());
+  return isLoginHostTrusted(host) || isHostTrusted(host, getDefaultUrl());
 }
 
 /**
