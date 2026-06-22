@@ -216,21 +216,26 @@ describe("parseOrgProjectArg", () => {
       expect(() => parseOrgProjectArg("My Org/cli")).toThrow(ValidationError);
     });
 
-    test("project with spaces in explicit mode throws ValidationError", () => {
-      expect(() => parseOrgProjectArg("sentry/My Project")).toThrow(
-        ValidationError
-      );
+    test("project with spaces in explicit mode produces project-search with org", () => {
+      expect(parseOrgProjectArg("sentry/My Project")).toEqual({
+        type: "project-search",
+        projectSlug: "My Project",
+        originalSlug: "My Project",
+        org: "sentry",
+      });
     });
 
     test("org with spaces in org-all mode throws ValidationError", () => {
       expect(() => parseOrgProjectArg("My Org/")).toThrow(ValidationError);
     });
 
-    test("org with underscores and project with spaces throws ValidationError", () => {
-      // Spaces in the project part of explicit mode hit validateResourceId.
-      expect(() => parseOrgProjectArg("my_org/My Project")).toThrow(
-        ValidationError
-      );
+    test("org with underscores and project with spaces produces project-search with org", () => {
+      expect(parseOrgProjectArg("my_org/My Project")).toEqual({
+        type: "project-search",
+        projectSlug: "My Project",
+        originalSlug: "My Project",
+        org: "my_org",
+      });
     });
 
     test("does not throw for auto-detect", () => {
@@ -1128,11 +1133,13 @@ describe("parseOrgProjectArg space handling (no normalization)", () => {
     });
   });
 
-  test("underscores with spaces in explicit mode throws ValidationError", () => {
-    // Spaces in the project part of explicit mode hit validateResourceId.
-    expect(() => parseOrgProjectArg("my_org/My Project")).toThrow(
-      ValidationError
-    );
+  test("underscores with spaces in explicit mode produces project-search with org", () => {
+    expect(parseOrgProjectArg("my_org/My Project")).toEqual({
+      type: "project-search",
+      projectSlug: "My Project",
+      originalSlug: "My Project",
+      org: "my_org",
+    });
   });
 });
 

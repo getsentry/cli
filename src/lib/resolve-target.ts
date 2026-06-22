@@ -1879,15 +1879,29 @@ export async function resolveTargetsFromParsedArg(
         );
       }
 
-      const { projects: matches, orgs } = await findProjectsBySlug(
-        parsed.projectSlug
-      );
+      const displaySlug = parsed.originalSlug ?? parsed.projectSlug;
+      // When the input is a display name (originalSlug set, contains spaces),
+      // skip the slug-based API lookup and go straight to fuzzy matching.
+      const isDisplayName = parsed.originalSlug !== undefined;
+      const { projects: matches, orgs: foundOrgs } = isDisplayName
+        ? { projects: [], orgs: await listOrganizations() }
+        : await findProjectsBySlug(parsed.projectSlug);
+
+      // When the caller provided an org (e.g. "org/My Project"), scope the
+      // search to that org instead of all accessible orgs.
+      const orgs =
+        isDisplayName && parsed.org !== undefined
+          ? foundOrgs.filter((o) => o.slug === parsed.org)
+          : foundOrgs;
 
       if (matches.length === 0) {
-        const isOrg = orgs.some((o) => o.slug === parsed.projectSlug);
-        if (isOrg) {
-          // Derive the base command from the usage hint (strip trailing placeholder).
-          // e.g. "sentry issue list <org>/<project>" → "sentry issue list"
+        const outcome = await triageProjectNotFound(
+          parsed.projectSlug,
+          orgs,
+          parsed.originalSlug
+        );
+
+        if (outcome.kind === "org-match") {
           const prefix = usageHint.split(" <")[0];
           throw new ResolutionError(
             `'${parsed.projectSlug}'`,
@@ -1900,19 +1914,32 @@ export async function resolveTargetsFromParsedArg(
           );
         }
 
-        const similar = await findProjectsByPattern(parsed.projectSlug);
-        const suggestions: string[] = [];
-        if (similar.length > 0) {
-          const names = similar
-            .slice(0, 3)
-            .map((p) => `'${p.orgSlug}/${p.slug}'`);
-          suggestions.push(`Similar projects: ${names.join(", ")}`);
+        if (outcome.kind === "fuzzy-match") {
+          const projectId = await fetchProjectId(
+            outcome.org,
+            outcome.project
+          );
+          const targets: ResolvedTarget[] = [
+            {
+              org: outcome.org,
+              project: outcome.project,
+              projectId,
+              orgDisplay: outcome.org,
+              projectDisplay: outcome.project,
+            },
+          ];
+          setOrgProjectContext([outcome.org], [outcome.project]);
+          return { targets };
         }
-        suggestions.push(
-          "No project with this slug found in any accessible organization"
-        );
+
+        const suggestions =
+          outcome.suggestions.length > 0
+            ? outcome.suggestions
+            : [
+                "No project with this slug found in any accessible organization",
+              ];
         throw new ResolutionError(
-          `Project '${parsed.projectSlug}'`,
+          `Project '${displaySlug}'`,
           "not found",
           "sentry project list",
           suggestions
