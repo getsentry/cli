@@ -15,6 +15,7 @@
  */
 
 import { DEFAULT_SENTRY_URL } from "./constants.js";
+import { getStoredAuthHost } from "./db/auth.js";
 import { getDefaultUrl } from "./db/defaults.js";
 import { getEnv } from "./env.js";
 import {
@@ -46,24 +47,34 @@ export function isLoginHostTrusted(host: string): boolean {
 }
 
 /**
- * Whether auto-login (re-auth triggered by a command's auth error) may
- * proceed against `host`. Same as {@link isLoginHostTrusted}, plus the
- * persisted default URL: re-authing an expired session against the host the
- * user already confirmed via `auth login --url` (or `cli defaults url`) is
- * safe and avoids forcing `--url` again on every token expiry.
+ * Whether auto-login / interactive OAuth re-auth may proceed against `host`.
  *
- * The default URL is the right anchor here — not the stored token's host —
- * because both expired paths call `clearAuth()` before the `AuthError`
- * reaches the middleware (see db/auth.ts `refreshToken`), so the token row is
- * already gone. `defaults.url` survives `clearAuth()` and is only ever written
- * by explicit, confirmed user actions, never by the `.sentryclirc` env shim
- * that injects `env.SENTRY_URL`. So an injected host that doesn't match the
- * SaaS class, a trust anchor, or the persisted default is still refused —
- * which is the `not_authenticated` (first-login) case the bug report
- * describes.
+ * Trusts, in addition to {@link isLoginHostTrusted} (SaaS + process anchor),
+ * two durable records of a host the user already confirmed. Both are needed —
+ * they cover different re-auth paths, and neither alone is sufficient:
+ *
+ *  - **Stored OAuth token host** — authoritative when a token still exists.
+ *    Covers 403 scope-recovery re-auth: the user is already authenticated to
+ *    this exact instance, so re-authing to add scopes is safe. `setAuthToken`
+ *    always records this, even when default-URL persistence failed.
+ *  - **Persisted default URL** (`defaults.url`) — survives `clearAuth()`, so
+ *    it covers the expired-session path, where both expired branches call
+ *    `clearAuth()` before the `AuthError` reaches the middleware (see db/auth
+ *    `refreshToken`) and the token row is already gone.
+ *
+ * Both are written only by explicit, confirmed user actions — never by the
+ * `.sentryclirc` env shim — and {@link isHostTrusted} requires an exact match
+ * against the effective host. So an injected `env.SENTRY_URL` that matches
+ * neither (nor the SaaS class / anchor) is still refused — the
+ * `not_authenticated` first-login case the bug report describes
+ * (getsentry/cli#1121).
  */
 export function isAutoLoginHostTrusted(host: string): boolean {
-  return isLoginHostTrusted(host) || isHostTrusted(host, getDefaultUrl());
+  return (
+    isLoginHostTrusted(host) ||
+    isHostTrusted(host, getStoredAuthHost()) ||
+    isHostTrusted(host, getDefaultUrl())
+  );
 }
 
 /**

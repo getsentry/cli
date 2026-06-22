@@ -115,11 +115,30 @@ describe("auto-login host guard", () => {
       expect(isAutoLoginHostTrusted("https://sentry.example.com")).toBe(true);
     });
 
+    test("scope-recovery re-auth against the stored token host is allowed (no default URL)", () => {
+      // 403 scope recovery: the OAuth token row is still present (clearAuth
+      // has NOT run). The token host is authoritative even when default-URL
+      // persistence failed or was cleared, so re-auth proceeds without --url.
+      setAuthToken("tok", undefined, undefined, {
+        host: "https://sentry.example.com",
+      });
+      expect(isAutoLoginHostTrusted("https://sentry.example.com")).toBe(true);
+    });
+
     test("injected host that differs from the confirmed default is REFUSED", () => {
       // Default is the real instance; a poisoned env.SENTRY_URL points
       // elsewhere. The confirmed host must not act as a free pass for a
       // different (attacker) host.
       setDefaultUrl("https://sentry.example.com");
+      expect(isAutoLoginHostTrusted("https://evil.com")).toBe(false);
+    });
+
+    test("injected host that differs from the stored token host is REFUSED", () => {
+      // Token exists for the real instance; isHostTrusted requires an exact
+      // match, so an injected env.SENTRY_URL pointing elsewhere is refused.
+      setAuthToken("tok", undefined, undefined, {
+        host: "https://sentry.example.com",
+      });
       expect(isAutoLoginHostTrusted("https://evil.com")).toBe(false);
     });
 
