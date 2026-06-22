@@ -162,11 +162,15 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const { app } = await import("./app.js");
   const { hoistGlobalFlags } = await import("./lib/argv-hoist.js");
   const { buildContext } = await import("./context.js");
-  const { AuthError, OutputError, formatError, getExitCode } = await import(
-    "./lib/errors.js"
-  );
+  const { AuthError, HostScopeError, OutputError, formatError, getExitCode } =
+    await import("./lib/errors.js");
   const { error, warning } = await import("./lib/formatters/colors.js");
   const { runInteractiveLogin } = await import("./lib/interactive-login.js");
+  const {
+    buildHostRefusalMessage,
+    isAutoLoginHostTrusted,
+    resolveEffectiveLoginHost,
+  } = await import("./lib/login-host-guard.js");
   const { getEnvLogLevel, setLogLevel } = await import("./lib/logger.js");
   const { isTrialEligible, promptAndStartTrial } = await import(
     "./lib/seer-trial.js"
@@ -364,38 +368,51 @@ export async function runCli(cliArgs: string[]): Promise<void> {
    * and runs the login flow. On success, retries through the full middleware
    * chain so inner middlewares (e.g., trial prompt) also apply to the retry.
    */
+  // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY can be
+  // undefined in Bun). Errors can opt out via skipAutoAuth (e.g. auth status).
+  const shouldAutoAuth = (
+    err: unknown
+  ): err is InstanceType<typeof AuthError> =>
+    err instanceof AuthError &&
+    (err.reason === "not_authenticated" || err.reason === "expired") &&
+    !err.skipAutoAuth &&
+    isatty(0);
+
   const autoAuthMiddleware: ErrorMiddleware = async (next, argv) => {
     try {
       await next(argv);
     } catch (err) {
-      // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY can be undefined in Bun)
-      // Errors can opt-out via skipAutoAuth (e.g., auth status command)
-      if (
-        err instanceof AuthError &&
-        (err.reason === "not_authenticated" || err.reason === "expired") &&
-        !err.skipAutoAuth &&
-        isatty(0)
-      ) {
-        process.stderr.write(
-          err.reason === "expired"
-            ? "Authentication expired. Starting login flow...\n\n"
-            : "Authentication required. Starting login flow...\n\n"
-        );
+      if (!shouldAutoAuth(err)) {
+        throw err;
+      }
 
-        const loginSuccess = await runInteractiveLogin();
+      // Honor the same host-trust gate as `auth login`: never start an
+      // OAuth device flow against an unconfirmed self-hosted host. The host
+      // can be injected via a `.sentryclirc` shim (env.SENTRY_URL), so
+      // auto-login here would otherwise bypass the explicit-`--url`
+      // confirmation that `auth login` enforces and point the user's
+      // browser at an attacker's cloned login page.
+      const effectiveHost = resolveEffectiveLoginHost();
+      if (!isAutoLoginHostTrusted(effectiveHost)) {
+        throw new HostScopeError(buildHostRefusalMessage(effectiveHost));
+      }
 
-        if (loginSuccess) {
-          process.stderr.write("\nRetrying command...\n\n");
-          await next(argv);
-          return;
-        }
+      process.stderr.write(
+        err.reason === "expired"
+          ? "Authentication expired. Starting login flow...\n\n"
+          : "Authentication required. Starting login flow...\n\n"
+      );
 
-        // Login failed or was cancelled
-        process.exitCode = 1;
+      const loginSuccess = await runInteractiveLogin();
+
+      if (loginSuccess) {
+        process.stderr.write("\nRetrying command...\n\n");
+        await next(argv);
         return;
       }
 
-      throw err;
+      // Login failed or was cancelled
+      process.exitCode = 1;
     }
   };
 

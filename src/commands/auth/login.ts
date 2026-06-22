@@ -6,7 +6,7 @@ import {
   listOrganizationsUncached,
 } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
-import { DEFAULT_SENTRY_URL, normalizeUrl } from "../../lib/constants.js";
+import { normalizeUrl } from "../../lib/constants.js";
 import {
   clearAuth,
   getActiveEnvVarName,
@@ -36,20 +36,18 @@ import {
   toLoginUser,
 } from "../../lib/interactive-login.js";
 import { logger } from "../../lib/logger.js";
-import { clearResponseCache } from "../../lib/response-cache.js";
 import {
-  isSaaSTrustOrigin,
-  normalizeOrigin,
-  normalizeUserInputToOrigin,
-} from "../../lib/sentry-urls.js";
+  buildHostRefusalMessage,
+  isLoginHostTrusted,
+  resolveEffectiveLoginHost,
+} from "../../lib/login-host-guard.js";
+import { clearResponseCache } from "../../lib/response-cache.js";
+import { isSaaSTrustOrigin, normalizeOrigin } from "../../lib/sentry-urls.js";
 import {
   loadSentryCliRc,
   type SentryCliRcConfig,
 } from "../../lib/sentryclirc.js";
-import {
-  isLoginTrustAnchorFor,
-  registerLoginTrustAnchor,
-} from "../../lib/token-host.js";
+import { registerLoginTrustAnchor } from "../../lib/token-host.js";
 
 const log = logger.withTag("auth.login");
 
@@ -129,21 +127,14 @@ function refuseLoginToUntrustedHost(
   effectiveHost: string,
   rcSource?: string
 ): void {
-  if (
-    flags.url ||
-    isSaaSTrustOrigin(effectiveHost) ||
-    isLoginTrustAnchorFor(effectiveHost)
-  ) {
+  if (flags.url || isLoginHostTrusted(effectiveHost)) {
     return;
   }
-  const tokenFlag = flags.token ? " --token <your-token>" : "";
-  const sourceClause = rcSource
-    ? `this URL was read from .sentryclirc (${rcSource}) but hasn't been confirmed as trusted yet`
-    : "--url was not provided";
   throw new HostScopeError(
-    `Refusing to log in against ${effectiveHost} — ${sourceClause}.\n\n` +
-      "To authenticate against this self-hosted instance, confirm the host explicitly:\n" +
-      `  sentry auth login --url ${effectiveHost}${tokenFlag}`
+    buildHostRefusalMessage(effectiveHost, {
+      tokenFlag: !!flags.token,
+      rcSource,
+    })
   );
 }
 
@@ -255,10 +246,7 @@ export function applyLoginUrl(url: string | undefined): string {
     return url;
   }
 
-  return (
-    normalizeUserInputToOrigin(env.SENTRY_HOST || env.SENTRY_URL) ??
-    DEFAULT_SENTRY_URL
-  );
+  return resolveEffectiveLoginHost();
 }
 
 /**
