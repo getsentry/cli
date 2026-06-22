@@ -15,11 +15,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import {
-  initSync,
-  parse_debug_file as wasmParseDebugFile,
-  peek_format as wasmPeekFormat,
-} from "@sentry/symbolic";
+import { Archive, initSync } from "@sentry/symbolic";
 import { logger } from "../logger.js";
 
 const log = logger.withTag("dif");
@@ -66,25 +62,6 @@ export type DifArchiveInfo = {
   fileFormat: string;
   /** Objects contained in the archive (e.g. fat Mach-O has one per arch slice). */
   objects: DifObjectInfo[];
-};
-
-/**
- * Raw shape returned by the WASM module (snake_case, matching the Rust
- * serialization). Converted to {@link DifArchiveInfo} for the TS API.
- */
-type RawArchiveInfo = {
-  file_format: string;
-  objects: Array<{
-    debug_id: string;
-    code_id: string | null;
-    arch: string;
-    file_format: string;
-    kind: string;
-    has_symbols: boolean;
-    has_debug_info: boolean;
-    has_unwind_info: boolean;
-    has_sources: boolean;
-  }>;
 };
 
 let initialized = false;
@@ -152,24 +129,19 @@ function ensureInitialized(): void {
  */
 export function parseDebugFile(data: Uint8Array): DifArchiveInfo {
   ensureInitialized();
-  const raw = wasmParseDebugFile(data) as RawArchiveInfo;
-  if (!Array.isArray(raw?.objects)) {
-    throw new Error(
-      "Unexpected response from the DIF parser (missing objects)"
-    );
-  }
+  const archive = new Archive(data);
   return {
-    fileFormat: raw.file_format,
-    objects: raw.objects.map((o) => ({
-      debugId: o.debug_id,
-      codeId: o.code_id ?? null,
+    fileFormat: archive.fileFormat,
+    objects: archive.objects().map((o) => ({
+      debugId: o.debugId,
+      codeId: o.codeId ?? null,
       arch: o.arch,
-      fileFormat: o.file_format,
+      fileFormat: o.fileFormat,
       kind: o.kind,
-      hasSymbols: o.has_symbols,
-      hasDebugInfo: o.has_debug_info,
-      hasUnwindInfo: o.has_unwind_info,
-      hasSources: o.has_sources,
+      hasSymbols: o.hasSymbols,
+      hasDebugInfo: o.hasDebugInfo,
+      hasUnwindInfo: o.hasUnwindInfo,
+      hasSources: o.hasSources,
     })),
   };
 }
@@ -182,5 +154,5 @@ export function parseDebugFile(data: Uint8Array): DifArchiveInfo {
  */
 export function peekFormat(data: Uint8Array): string {
   ensureInitialized();
-  return wasmPeekFormat(data);
+  return Archive.peek(data) ?? "unknown";
 }
