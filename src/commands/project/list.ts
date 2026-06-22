@@ -564,7 +564,7 @@ async function handleProjectNotFound(
   if (outcome.kind === "fuzzy-match") {
     // Pass isRecoveryAttempt=true to prevent infinite recursion if the
     // fuzzy-recovered slug also fails to resolve.
-    return handleProjectSearch(outcome.project, flags, undefined, true);
+    return handleProjectSearch(outcome.project, flags, { isRecoveryAttempt: true });
   }
 
   // JSON mode returns empty array; human mode throws a helpful error
@@ -584,13 +584,16 @@ async function handleProjectNotFound(
 export async function handleProjectSearch(
   projectSlug: string,
   flags: ListFlags,
-  /** Original user input before normalization — for clearer messages. */
-  originalSlug?: string,
-  /** @internal — prevents infinite recursion from fuzzy recovery. */
-  _isRecoveryAttempt = false,
-  /** Organization slug to scope the search to (e.g. from "org/My Project"). */
-  scopedOrg?: string
+  options?: {
+    /** Original user input before normalization — for clearer messages. */
+    originalSlug?: string;
+    /** @internal — prevents infinite recursion from fuzzy recovery. */
+    isRecoveryAttempt?: boolean;
+    /** Organization slug to scope the search to (e.g. from "org/My Project"). */
+    scopedOrg?: string;
+  }
 ): Promise<ListResult<ProjectWithOrg>> {
+  const { originalSlug, isRecoveryAttempt = false, scopedOrg } = options ?? {};
   // When the input is a display name (originalSlug set, contains spaces),
   // skip the slug-based API lookup and go straight to name-based matching.
   const isDisplayName = originalSlug !== undefined;
@@ -623,7 +626,7 @@ export async function handleProjectSearch(
 
     return handleProjectNotFound(projectSlug, orgs, flags, {
       originalSlug,
-      isRecoveryAttempt: _isRecoveryAttempt,
+      isRecoveryAttempt,
     });
   }
 
@@ -741,13 +744,10 @@ export const listCommand = buildListCommand("project", {
           });
         },
         "project-search": (ctx) =>
-          handleProjectSearch(
-            ctx.parsed.projectSlug,
-            flags,
-            ctx.parsed.originalSlug,
-            false,
-            ctx.parsed.org
-          ),
+          handleProjectSearch(ctx.parsed.projectSlug, flags, {
+            originalSlug: ctx.parsed.originalSlug,
+            scopedOrg: ctx.parsed.org,
+          }),
       },
     });
 
