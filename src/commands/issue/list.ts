@@ -1134,9 +1134,18 @@ async function handleResolvedTargets(
     isMultiProject
   );
 
-  allIssuesWithOptions.sort((a, b) =>
-    getComparator(flags.sort)(a.issue, b.issue)
-  );
+  // Only re-sort when merging results from multiple separately-fetched
+  // projects — a client-side comparator is required to interleave them into a
+  // single ordered list. Single-project (and org-all) responses are already
+  // ordered by the server for the requested sort, so we must preserve that
+  // order. This matters for `recommended`, whose relevance score is not in the
+  // payload and therefore cannot be reproduced client-side: re-sorting would
+  // silently replace the server's ranking with a `lastSeen` fallback.
+  if (isMultiProject) {
+    allIssuesWithOptions.sort((a, b) =>
+      getComparator(flags.sort)(a.issue, b.issue)
+    );
+  }
 
   // Trim to the global limit with project representation guarantee
   const issuesWithOptions = trimWithProjectGuarantee(

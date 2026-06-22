@@ -540,6 +540,61 @@ describe("issue list: partial failure handling", () => {
   });
 });
 
+describe("issue list: server sort order preservation", () => {
+  // Regression guard: a single-project response must preserve the order the
+  // server returned. Previously the merged list was re-sorted client-side with
+  // getComparator(flags.sort) unconditionally — fine for date/freq/etc. (the
+  // comparator reproduces the server order) but destructive for `recommended`,
+  // whose relevance score is absent from the payload, so the comparator falls
+  // back to lastSeen and silently replaced the server's ranking.
+  test("single-project recommended sort is not re-ordered by lastSeen", async () => {
+    // Server returns issues in recommended order [1, 2]; their lastSeen values
+    // are intentionally the inverse (issue 1 older than issue 2), so a client
+    // re-sort by lastSeen would flip them to [2, 1].
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
+      if (req.url.includes("/issues/")) {
+        return new Response(
+          JSON.stringify([
+            mockIssue({
+              id: "1",
+              shortId: "TEST-PROJECT-1",
+              lastSeen: "2020-01-01T00:00:00Z",
+            }),
+            mockIssue({
+              id: "2",
+              shortId: "TEST-PROJECT-2",
+              lastSeen: "2025-01-01T00:00:00Z",
+            }),
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const { context, stdout } = createContext();
+
+    await func.call(context, {
+      limit: 10,
+      sort: "recommended",
+      period: parsePeriod("90d"),
+      json: true,
+    });
+
+    const output = JSON.parse(stdout.output);
+    expect(output.data.map((issue: { id: string }) => issue.id)).toEqual([
+      "1",
+      "2",
+    ]);
+  });
+});
+
 /** Shared mock references — vi.mocked() returns the same mock object each time */
 const listIssuesPaginatedMock = vi.mocked(issuesApi.listIssuesPaginated);
 const listIssuesAllPagesMock = vi.mocked(issuesApi.listIssuesAllPages);
