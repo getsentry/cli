@@ -1915,10 +1915,7 @@ export async function resolveTargetsFromParsedArg(
         }
 
         if (outcome.kind === "fuzzy-match") {
-          const projectId = await fetchProjectId(
-            outcome.org,
-            outcome.project
-          );
+          const projectId = await fetchProjectId(outcome.org, outcome.project);
           const targets: ResolvedTarget[] = [
             {
               org: outcome.org,
