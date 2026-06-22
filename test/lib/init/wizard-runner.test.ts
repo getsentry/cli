@@ -1,4 +1,6 @@
 import { MastraClient } from "@mastra/client-js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as Sentry from "@sentry/node-core/light";
 import {
   afterEach,
   beforeEach,
@@ -10,9 +12,16 @@ import {
 } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as banner from "../../../src/lib/banner.js";
+import { clearAuth, setAuthToken } from "../../../src/lib/db/auth.js";
 import { ENV_VAR_AGENTS } from "../../../src/lib/detect-agent.js";
 import { setEnv } from "../../../src/lib/env.js";
-import { EXIT, WizardError } from "../../../src/lib/errors.js";
+import { classifySilenced } from "../../../src/lib/error-reporting.js";
+import {
+  ApiError,
+  EXIT,
+  HostScopeError,
+  WizardError,
+} from "../../../src/lib/errors.js";
 import { WizardCancelledError } from "../../../src/lib/init/clack-utils.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as fmt from "../../../src/lib/init/formatters.js";
@@ -114,7 +123,8 @@ let stderrSpy: ReturnType<typeof spyOn>;
  * runWizard. Used by the MastraClient lifecycle suite to assert that the
  * `abortSignal` passed at construction time is aborted on teardown.
  */
-let capturedClientOptions: { abortSignal?: AbortSignal }[] = [];
+let capturedClientOptions: { abortSignal?: AbortSignal; retries?: number }[] =
+  [];
 
 let savedPlainOutput: string | undefined;
 
@@ -240,13 +250,19 @@ beforeEach(() => {
       // `this` is the MastraClient instance. `BaseResource.options` holds the
       // full ClientOptions passed to the constructor — including abortSignal.
       capturedClientOptions.push(
-        (this as unknown as { options: { abortSignal?: AbortSignal } }).options
+        (
+          this as unknown as {
+            options: { abortSignal?: AbortSignal; retries?: number };
+          }
+        ).options
       );
       return workflow as any;
     });
 });
 
 afterEach(() => {
+  vi.useRealTimers();
+
   getUISpy.mockRestore();
   formatBannerSpy.mockRestore();
   formatResultSpy.mockRestore();
@@ -302,6 +318,51 @@ function lastWarn(): string | undefined {
     }
   }
   return;
+}
+
+function lastError(): string | undefined {
+  for (let i = mockUICalls.length - 1; i >= 0; i--) {
+    const call = mockUICalls[i];
+    if (call?.kind === "log.error") {
+      return call.message;
+    }
+  }
+  return;
+}
+
+function initService401Error(): Error {
+  return new Error(
+    'HTTP error! status: 401 - {"error":"Unauthorized: invalid token"}'
+  );
+}
+
+async function useSaaSOAuthAuth(authToken = "oauth-token"): Promise<void> {
+  await clearAuth();
+  const env = { ...process.env };
+  delete env.SENTRY_AUTH_TOKEN;
+  delete env.SENTRY_TOKEN;
+  delete env.SENTRY_FORCE_ENV_TOKEN;
+  setEnv(env);
+  setAuthToken(authToken, 3600, "refresh-token", {
+    host: "https://sentry.io",
+  });
+  resolveInitContextSpy.mockResolvedValue(makeContext({ authToken }));
+}
+
+function initServiceApiErrorShape(endpoint: string) {
+  return {
+    name: "ApiError",
+    status: 401,
+    endpoint,
+  };
+}
+
+function hasExpectedInitServiceAuthPolicy(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.status === 401 &&
+    classifySilenced(err) === "api_user_error"
+  );
 }
 
 describe("runWizard", () => {
@@ -428,13 +489,19 @@ describe("runWizard", () => {
     const { ui, calls, respond } = createMockUI({ welcome: true });
     respond.welcome(CANCELLED);
     useMockUI(ui, calls);
+    const captureSpy = vi.spyOn(Sentry, "captureException");
 
-    await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
+    try {
+      await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
 
-    expect(process.exitCode).toBe(0);
-    expect(lastCancelMessage()).toBe("Setup cancelled.");
-    expect(lastFeedbackOutcome()).toBe("cancelled");
-    expect(getWorkflowSpy).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(0);
+      expect(lastCancelMessage()).toBe("Setup cancelled.");
+      expect(lastFeedbackOutcome()).toBe("cancelled");
+      expect(getWorkflowSpy).not.toHaveBeenCalled();
+      expect(captureSpy).not.toHaveBeenCalled();
+    } finally {
+      captureSpy.mockRestore();
+    }
   });
 
   test("falls back to generic continue prompt without rich welcome", async () => {
@@ -652,6 +719,7 @@ describe("runWizard", () => {
   });
 
   test("tears down forwarding and stops the spinner on cancellation", async () => {
+    const captureSpy = vi.spyOn(Sentry, "captureException");
     const payload: ToolPayload = {
       type: "tool",
       operation: "run-commands",
@@ -667,12 +735,17 @@ describe("runWizard", () => {
     };
     executeToolSpy.mockRejectedValue(new WizardCancelledError());
 
-    await runWizard(makeOptions());
+    try {
+      await runWizard(makeOptions());
 
-    expect(process.exitCode).toBe(0);
-    expect(spinnerMock.stop).toHaveBeenCalledWith("Cancelled", 0);
-    expect(lastCancelMessage()).toBe("Setup cancelled.");
-    expect(lastFeedbackOutcome()).toBe("cancelled");
+      expect(process.exitCode).toBe(0);
+      expect(spinnerMock.stop).toHaveBeenCalledWith("Cancelled", 0);
+      expect(lastCancelMessage()).toBe("Setup cancelled.");
+      expect(lastFeedbackOutcome()).toBe("cancelled");
+      expect(captureSpy).not.toHaveBeenCalled();
+    } finally {
+      captureSpy.mockRestore();
+    }
   });
 
   test("tears down forwarding when a WizardError is rethrown from a tool", async () => {
@@ -825,6 +898,7 @@ describe("runWizard — MastraClient lifecycle", () => {
     await runWizard(makeOptions());
 
     expect(capturedClientOptions).toHaveLength(1);
+    expect(capturedClientOptions[0]?.retries).toBe(0);
     const signal = capturedClientOptions[0]?.abortSignal;
     expect(signal).toBeInstanceOf(AbortSignal);
     // Using the non-null assertion safely — we asserted toBeInstanceOf above.
@@ -889,7 +963,9 @@ describe("runWizard — MastraClient lifecycle", () => {
     let abortedAtConstruction: boolean | undefined;
     getWorkflowSpy.mockImplementation(function (this: MastraClient) {
       const opts = (
-        this as unknown as { options: { abortSignal?: AbortSignal } }
+        this as unknown as {
+          options: { abortSignal?: AbortSignal; retries?: number };
+        }
       ).options;
       capturedClientOptions.push(opts);
       abortedAtConstruction = opts.abortSignal?.aborted;
@@ -946,11 +1022,19 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     params: { commands: ["npm install"] },
   };
 
-  function makeStaleStepRun(resumeAsyncImpl: () => Promise<WorkflowRunResult>) {
+  function makeStaleStepRun(
+    resumeAsyncImpl: (
+      args: Record<string, unknown>
+    ) => Promise<WorkflowRunResult>
+  ) {
     let runByIdRef: ReturnType<typeof mock>;
     getWorkflowSpy.mockImplementation(function (this: MastraClient) {
       capturedClientOptions.push(
-        (this as unknown as { options: { abortSignal?: AbortSignal } }).options
+        (
+          this as unknown as {
+            options: { abortSignal?: AbortSignal; retries?: number };
+          }
+        ).options
       );
       runByIdRef = runByIdMock;
       return {
@@ -966,31 +1050,140 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     });
   }
 
-  function staleStepError(): Error {
-    return new Error(
-      "HTTP error! status: 500 - " +
-        JSON.stringify({
-          error:
-            "This workflow step 'tool-step' was not suspended. Available suspended steps: [next-step]",
-        })
+  function httpError(
+    status: number,
+    body: unknown
+  ): Error & { status: number } {
+    return Object.assign(
+      new Error(`HTTP error! status: ${status} - ${JSON.stringify(body)}`),
+      { status }
     );
   }
 
-  function staleRunError(): Error {
-    return new Error(
-      "HTTP error! status: 500 - " +
-        JSON.stringify({ error: "This workflow run was not suspended" })
-    );
+  function staleStepError(status = 500): Error & { status: number } {
+    return httpError(status, {
+      error:
+        "This workflow step 'tool-step' was not suspended. Available suspended steps: [next-step]",
+    });
   }
 
-  test("recovers when server has already advanced to the next step", async () => {
+  function staleRunError(status = 500): Error & { status: number } {
+    return httpError(status, {
+      error: "This workflow run was not suspended",
+    });
+  }
+
+  function selectWorkflowFields(
+    result: WorkflowRunResult,
+    fields: string[] | undefined
+  ): Record<string, unknown> {
+    const source = result as unknown as Record<string, unknown>;
+    const selected: Record<string, unknown> = {};
+    for (const field of fields ?? Object.keys(source)) {
+      if (field in source) {
+        selected[field] = source[field];
+      }
+    }
+    return selected;
+  }
+
+  test("recovers from a sparse 409 stale-resume conflict", async () => {
     mockStartResult = {
       status: "suspended",
       suspended: [["tool-step"]],
       steps: { "tool-step": { suspendPayload: toolPayload } },
     };
-    // runById returns a finished workflow — the wizard should complete cleanly.
-    mockRunByIdResult = { status: "success" };
+    const currentRunState: WorkflowRunResult = {
+      status: "success",
+      suspended: [],
+    };
+    runByIdMock.mockImplementation(
+      (_runId: string, opts?: { fields?: string[] }) =>
+        Promise.resolve(selectWorkflowFields(currentRunState, opts?.fields))
+    );
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      if (resumeCount === 1) {
+        return Promise.reject(staleStepError(409));
+      }
+      return Promise.resolve({ status: "success" });
+    });
+
+    await runWizard(makeOptions());
+
+    expect(formatResultSpy).toHaveBeenCalled();
+    expect(runByIdMock).toHaveBeenCalledWith(
+      "test-run-id",
+      expect.objectContaining({
+        fields: expect.arrayContaining([
+          "status",
+          "suspended",
+          "activeStepsPath",
+        ]),
+      })
+    );
+    // Recovery succeeded on the first attempt — resumeAsync was not called again.
+    expect(resumeCount).toBe(1);
+  });
+
+  test("keeps polling when runById returns the same suspended payload snapshot", async () => {
+    vi.useFakeTimers();
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+    runByIdMock
+      .mockResolvedValueOnce({
+        status: "suspended",
+        suspendPayload: toolPayload,
+      })
+      .mockResolvedValueOnce({ status: "success" });
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      return Promise.reject(staleRunError(409));
+    });
+
+    const run = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(250);
+    await run;
+
+    expect(formatResultSpy).toHaveBeenCalled();
+    expect(runByIdMock).toHaveBeenCalledTimes(2);
+    expect(resumeCount).toBe(1);
+  });
+
+  test("uses active recovered payload instead of stale historical step payloads", async () => {
+    const stalePayload: ToolPayload = {
+      type: "tool",
+      operation: "read-files",
+      cwd: "/tmp/test",
+      params: { paths: ["old-package.json"] },
+    };
+    const activePayload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["echo apply"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+    mockRunByIdResult = {
+      status: "suspended",
+      suspended: [["discover-context"]],
+      activeStepsPath: { "apply-codemods": [] },
+      steps: {
+        "discover-context": { suspendPayload: stalePayload },
+        "apply-codemods": { suspendPayload: activePayload },
+      },
+    };
 
     let resumeCount = 0;
     makeStaleStepRun(() => {
@@ -1003,39 +1196,95 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
 
     await runWizard(makeOptions());
 
-    expect(formatResultSpy).toHaveBeenCalled();
-    expect(runByIdMock).toHaveBeenCalledWith(
-      "test-run-id",
-      expect.objectContaining({ fields: expect.any(Array) })
+    expect(executeToolSpy).toHaveBeenCalledWith(toolPayload, makeContext());
+    expect(executeToolSpy).toHaveBeenCalledWith(activePayload, makeContext());
+    expect(executeToolSpy).not.toHaveBeenCalledWith(
+      stalePayload,
+      makeContext()
     );
-    // Recovery succeeded on the first attempt — resumeAsync was not called again.
-    expect(resumeCount).toBe(1);
+    expect(resumeCount).toBe(2);
   });
 
-  test("recovers from run-level not-suspended errors after transient runById failure", async () => {
+  test("does not replay non-stale HTTP 500 resume responses", async () => {
     mockStartResult = {
       status: "suspended",
       suspended: [["tool-step"]],
       steps: { "tool-step": { suspendPayload: toolPayload } },
     };
-    runByIdMock
-      .mockRejectedValueOnce(new Error("D1 snapshot not ready"))
-      .mockResolvedValueOnce({ status: "success" });
 
     let resumeCount = 0;
     makeStaleStepRun(() => {
       resumeCount += 1;
-      return Promise.reject(staleRunError());
+      return Promise.reject(httpError(500, { error: "Error calling handler" }));
     });
 
-    await runWizard(makeOptions());
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(resumeCount).toBe(1);
+    expect(runByIdMock).not.toHaveBeenCalled();
+  });
+
+  test("classifies resumeAsync 401 instead of recovering as a transport failure", async () => {
+    await useSaaSOAuthAuth();
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      return Promise.reject(initService401Error());
+    });
+
+    try {
+      const err = await runWizard(makeOptions()).catch((error) => error);
+
+      expect(err).toMatchObject(
+        initServiceApiErrorShape("/api/workflows/sentry-wizard/resume-async")
+      );
+      expect(hasExpectedInitServiceAuthPolicy(err)).toBe(true);
+      expect(err).not.toBeInstanceOf(WizardError);
+      expect(resumeCount).toBe(1);
+      expect(runByIdMock).not.toHaveBeenCalled();
+      expect(spinnerMock.stop).toHaveBeenCalledWith("Authentication failed", 1);
+      expect(err.format()).toContain("sentry auth login");
+      expect(lastError()).toBeUndefined();
+      expect(lastCancelMessage()).toBe("Authentication failed");
+    } finally {
+      await clearAuth();
+    }
+  });
+
+  test("observes run state after a resume timeout without replaying resumeAsync", async () => {
+    vi.useFakeTimers();
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+    mockRunByIdResult = { status: "success" };
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      return new Promise<WorkflowRunResult>(() => {
+        /* Simulate a response that never arrives. */
+      });
+    });
+
+    const run = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(180_000);
+    await run;
 
     expect(formatResultSpy).toHaveBeenCalled();
-    expect(runByIdMock).toHaveBeenCalledTimes(2);
     expect(resumeCount).toBe(1);
+    expect(runByIdMock).toHaveBeenCalledTimes(1);
   });
 
   test("throws when stale-step error occurs and runById keeps failing", async () => {
+    vi.useFakeTimers();
     mockStartResult = {
       status: "suspended",
       suspended: [["tool-step"]],
@@ -1051,11 +1300,74 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
       return Promise.reject(staleStepError());
     });
 
-    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+    const run = runWizard(makeOptions());
+    const rejection = expect(run).rejects.toThrow(WizardError);
+    await vi.runAllTimersAsync();
+    await rejection;
 
     // Threw after recovery polling failed — no futile retries of the stale step.
     expect(resumeCount).toBe(1);
-    expect(runByIdMock).toHaveBeenCalledTimes(4);
+    expect(runByIdMock).toHaveBeenCalled();
+  });
+
+  test("sends compact _prevPhases only for apply-codemods", async () => {
+    const largeContent = "x".repeat(10_000);
+    const readPayload: ToolPayload = {
+      type: "tool",
+      operation: "read-files",
+      cwd: "/tmp/test",
+      params: { paths: ["package.json"] },
+    };
+    const applyPayload: ToolPayload = {
+      type: "tool",
+      operation: "apply-patchset",
+      cwd: "/tmp/test",
+      params: { patches: [] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["apply-codemods"]],
+      steps: { "apply-codemods": { suspendPayload: readPayload } },
+    };
+    executeToolSpy
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { files: { "package.json": largeContent } },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: "patch conflict",
+      });
+
+    const resumeArgs: Record<string, unknown>[] = [];
+    makeStaleStepRun((args) => {
+      resumeArgs.push(args);
+      if (resumeArgs.length === 1) {
+        return Promise.resolve({
+          status: "suspended",
+          suspended: [["apply-codemods"]],
+          steps: { "apply-codemods": { suspendPayload: applyPayload } },
+        });
+      }
+      return Promise.resolve({ status: "success" });
+    });
+
+    await runWizard(makeOptions());
+
+    const secondResumeData = resumeArgs[1]?.resumeData as
+      | Record<string, unknown>
+      | undefined;
+    expect(secondResumeData?._prevPhases).toEqual([
+      {
+        ok: true,
+        operation: "read-files",
+        _phase: "read-files",
+        data: { files: { "package.json": null } },
+      },
+    ]);
+    expect(JSON.stringify(secondResumeData?._prevPhases)).not.toContain(
+      largeContent
+    );
   });
 });
 
@@ -1067,6 +1379,120 @@ describe("runWizard — additional coverage", () => {
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Connection failed", 1);
     expect(lastCancelMessage()).toBe("Setup failed");
+  });
+
+  test("classifies init service 401 as expected OAuth auth state", async () => {
+    await useSaaSOAuthAuth();
+    startAsyncMock.mockRejectedValue(initService401Error());
+    const captureSpy = vi.spyOn(Sentry, "captureException");
+
+    try {
+      const err = await runWizard(makeOptions()).catch((error) => error);
+
+      expect(err).toMatchObject(
+        initServiceApiErrorShape("/api/workflows/sentry-wizard/start-async")
+      );
+      expect(hasExpectedInitServiceAuthPolicy(err)).toBe(true);
+      expect(err.format()).toContain("sentry auth login");
+      expect(spinnerMock.stop).toHaveBeenCalledWith("Authentication failed", 1);
+      expect(lastError()).toBeUndefined();
+      expect(lastCancelMessage()).toBe("Authentication failed");
+      expect(captureSpy).not.toHaveBeenCalled();
+    } finally {
+      captureSpy.mockRestore();
+      await clearAuth();
+    }
+  });
+
+  test("classifies createRun 401 before starting the workflow", async () => {
+    await useSaaSOAuthAuth();
+    const createRunMock = vi.fn(() => Promise.reject(initService401Error()));
+    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+      capturedClientOptions.push(
+        (
+          this as unknown as {
+            options: { abortSignal?: AbortSignal; retries?: number };
+          }
+        ).options
+      );
+      return {
+        createRun: createRunMock,
+        runById: runByIdMock,
+      } as any;
+    });
+
+    try {
+      const err = await runWizard(makeOptions()).catch((error) => error);
+
+      expect(err).toMatchObject(
+        initServiceApiErrorShape("/api/workflows/sentry-wizard/create-run")
+      );
+      expect(hasExpectedInitServiceAuthPolicy(err)).toBe(true);
+      expect(createRunMock).toHaveBeenCalledTimes(1);
+      expect(startAsyncMock).not.toHaveBeenCalled();
+      expect(err.format()).toContain("sentry auth login");
+      expect(spinnerMock.stop).toHaveBeenCalledWith("Authentication failed", 1);
+      expect(lastError()).toBeUndefined();
+      expect(lastCancelMessage()).toBe("Authentication failed");
+    } finally {
+      await clearAuth();
+    }
+  });
+
+  test("classifies init service 401 with env-token guidance", async () => {
+    await clearAuth();
+    const env = {
+      ...process.env,
+      SENTRY_AUTH_TOKEN: "env-token",
+      SENTRY_FORCE_ENV_TOKEN: "1",
+    };
+    delete env.SENTRY_TOKEN;
+    setEnv(env);
+    resolveInitContextSpy.mockResolvedValue(
+      makeContext({ authToken: "env-token" })
+    );
+    startAsyncMock.mockRejectedValue(initService401Error());
+
+    try {
+      const err = await runWizard(makeOptions()).catch((error) => error);
+
+      expect(err).toMatchObject(
+        initServiceApiErrorShape("/api/workflows/sentry-wizard/start-async")
+      );
+      expect(hasExpectedInitServiceAuthPolicy(err)).toBe(true);
+      expect(err.format()).toContain("SENTRY_AUTH_TOKEN");
+      expect(err.format()).toContain("not recognized or has been revoked");
+      expect(err.format()).toContain("auth-tokens");
+      expect(lastError()).toBeUndefined();
+    } finally {
+      setEnv(process.env);
+      await clearAuth();
+    }
+  });
+
+  test("blocks self-hosted tokens before constructing hosted init workflow", async () => {
+    await clearAuth();
+    setAuthToken("self-hosted-token", 3600, "refresh-token", {
+      host: "https://sentry.internal.example.com",
+    });
+    resolveInitContextSpy.mockResolvedValue(
+      makeContext({ authToken: "self-hosted-token" })
+    );
+
+    try {
+      const err = await runWizard(makeOptions()).catch((error) => error);
+
+      expect(err).toBeInstanceOf(HostScopeError);
+      expect(getWorkflowSpy).not.toHaveBeenCalled();
+      expect(startAsyncMock).not.toHaveBeenCalled();
+      expect(capturedClientOptions).toHaveLength(0);
+      expect(err.format()).toContain("sentry.internal.example.com");
+      expect(err.format()).toContain(
+        "sentry auth login --url https://sentry.io"
+      );
+    } finally {
+      await clearAuth();
+    }
   });
 
   test("throws when the workflow response has an unrecognised status", async () => {
@@ -1093,21 +1519,40 @@ describe("runWizard — additional coverage", () => {
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
   });
 
-  test("finds suspend payload via fallback loop when primary step has none", async () => {
+  test("does not use inactive step payloads when active step info exists", async () => {
     const payload: ToolPayload = {
       type: "tool",
       operation: "run-commands",
       cwd: "/tmp/test",
       params: { commands: ["echo hi"] },
     };
-    // `suspended` points to "step-a", but its payload is missing.
-    // extractSuspendPayload falls back to iterating all steps and finds
-    // the payload in "step-b".
+    // `suspended` points to "step-a", so the stale payload on "step-b"
+    // must not be used.
     mockStartResult = {
       status: "suspended",
       suspended: [["step-a"]],
       steps: {
         "step-a": {},
+        "step-b": { suspendPayload: payload },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+
+    expect(executeToolSpy).not.toHaveBeenCalledWith(payload, makeContext());
+  });
+
+  test("uses legacy fallback only when no active step info exists and one payload is present", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["echo hi"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      steps: {
         "step-b": { suspendPayload: payload },
       },
     };
@@ -1205,5 +1650,196 @@ describe("runWizard — additional coverage", () => {
       (c: unknown[]) => c[0] as string
     );
     expect(messages.some((m) => m.includes("javascript-nextjs"))).toBe(true);
+  });
+});
+
+describe("runWizard — progress rotation for long-running steps", () => {
+  test("rotates spinner messages during plan-codemods resume", async () => {
+    vi.useFakeTimers();
+    const toolPayload = {
+      type: "tool" as const,
+      operation: "read-files",
+      cwd: "/tmp/test",
+      params: { paths: ["src/app.tsx"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["plan-codemods"]],
+      steps: { "plan-codemods": { suspendPayload: toolPayload } },
+    };
+
+    // resumeAsync will block until we advance timers, then resolve
+    let resolveResume!: (value: unknown) => void;
+    const resumePromise = new Promise((resolve) => {
+      resolveResume = resolve;
+    });
+    const resumeAsyncMock = vi.fn(() => resumePromise);
+    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+      capturedClientOptions.push(
+        (
+          this as unknown as {
+            options: { abortSignal?: AbortSignal; retries?: number };
+          }
+        ).options
+      );
+      return {
+        createRun: vi.fn(() =>
+          Promise.resolve({
+            runId: "test-run-id",
+            startAsync: startAsyncMock,
+            resumeAsync: resumeAsyncMock,
+          })
+        ),
+        runById: runByIdMock,
+      } as any;
+    });
+
+    const runPromise = runWizard(makeOptions());
+
+    // Let the wizard start and reach the resume call
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Advance past one rotation interval
+    await vi.advanceTimersByTimeAsync(12_000);
+
+    // Check that the spinner received a rotating message
+    const messagesAfterFirstRotation = spinnerMock.message.mock.calls.map(
+      (c: unknown[]) => c[0] as string
+    );
+    expect(
+      messagesAfterFirstRotation.some((m) =>
+        m.includes("Fetching SDK documentation")
+      )
+    ).toBe(true);
+
+    // Advance past another rotation interval
+    await vi.advanceTimersByTimeAsync(12_000);
+
+    const messagesAfterSecondRotation = spinnerMock.message.mock.calls.map(
+      (c: unknown[]) => c[0] as string
+    );
+    expect(
+      messagesAfterSecondRotation.some((m) =>
+        m.includes("Analyzing integration requirements")
+      )
+    ).toBe(true);
+
+    // Resolve the resume and let the wizard finish
+    resolveResume({ status: "success" });
+    await vi.advanceTimersByTimeAsync(100);
+    await runPromise;
+  });
+
+  test("appends elapsed time after exhausting all progress messages", async () => {
+    vi.useFakeTimers();
+    const toolPayload = {
+      type: "tool" as const,
+      operation: "read-files",
+      cwd: "/tmp/test",
+      params: { paths: ["src/app.tsx"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["plan-codemods"]],
+      steps: { "plan-codemods": { suspendPayload: toolPayload } },
+    };
+
+    let resolveResume!: (value: unknown) => void;
+    const resumePromise = new Promise((resolve) => {
+      resolveResume = resolve;
+    });
+    const resumeAsyncMock = vi.fn(() => resumePromise);
+    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+      capturedClientOptions.push(
+        (
+          this as unknown as {
+            options: { abortSignal?: AbortSignal; retries?: number };
+          }
+        ).options
+      );
+      return {
+        createRun: vi.fn(() =>
+          Promise.resolve({
+            runId: "test-run-id",
+            startAsync: startAsyncMock,
+            resumeAsync: resumeAsyncMock,
+          })
+        ),
+        runById: runByIdMock,
+      } as any;
+    });
+
+    const runPromise = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Advance past all 5 plan-codemods messages (5 * 12s = 60s)
+    // plus one more interval to trigger the elapsed time display
+    await vi.advanceTimersByTimeAsync(72_000);
+
+    const messages = spinnerMock.message.mock.calls.map(
+      (c: unknown[]) => c[0] as string
+    );
+    // After exhausting messages, should show elapsed time
+    expect(messages.some((m) => /\(\d+s\)/.test(m))).toBe(true);
+
+    resolveResume({ status: "success" });
+    await vi.advanceTimersByTimeAsync(100);
+    await runPromise;
+  });
+
+  test("does not rotate messages for steps without progress messages", async () => {
+    vi.useFakeTimers();
+    const toolPayload = {
+      type: "tool" as const,
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: { "install-deps": { suspendPayload: toolPayload } },
+    };
+
+    let resolveResume!: (value: unknown) => void;
+    const resumePromise = new Promise((resolve) => {
+      resolveResume = resolve;
+    });
+    const resumeAsyncMock = vi.fn(() => resumePromise);
+    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+      capturedClientOptions.push(
+        (
+          this as unknown as {
+            options: { abortSignal?: AbortSignal; retries?: number };
+          }
+        ).options
+      );
+      return {
+        createRun: vi.fn(() =>
+          Promise.resolve({
+            runId: "test-run-id",
+            startAsync: startAsyncMock,
+            resumeAsync: resumeAsyncMock,
+          })
+        ),
+        runById: runByIdMock,
+      } as any;
+    });
+
+    const runPromise = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(100);
+
+    const messagesBefore = spinnerMock.message.mock.calls.length;
+
+    // Advance past a rotation interval
+    await vi.advanceTimersByTimeAsync(12_000);
+
+    const messagesAfter = spinnerMock.message.mock.calls.length;
+    // No new messages should have been added by the rotation timer
+    expect(messagesAfter).toBe(messagesBefore);
+
+    resolveResume({ status: "success" });
+    await vi.advanceTimersByTimeAsync(100);
+    await runPromise;
   });
 });

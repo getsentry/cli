@@ -28,6 +28,23 @@ sentry sourcemap upload ./dist --release 1.0.0
 sentry sourcemap upload ./dist --url-prefix '~/static/js/'
 ```
 
+### Resolve sourcemap linkage
+
+```bash
+# Report how each JS file's sourcemap resolves and whether a debug ID
+# has been injected (read-only — never modifies files)
+sentry sourcemap resolve ./dist
+
+# Machine-readable output
+sentry sourcemap resolve ./dist --json
+```
+
+Use `sentry sourcemap resolve` to debug why `sentry sourcemap upload` may
+not find the expected sourcemaps. It reports, for each JavaScript file,
+whether the companion `.map` was located (by convention or via a
+`sourceMappingURL` directive), whether the map is inline (`data:` URL) or
+remote, and whether a Sentry debug ID is present.
+
 ## Error handling
 
 Both `sentry sourcemap inject` and `sentry sourcemap upload` exit with an

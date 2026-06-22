@@ -253,7 +253,14 @@ function searchContainersForRootCauses(
   containers: WithCauses[]
 ): RootCause[] | null {
   for (const container of containers) {
-    if (container.key === "root_cause_analysis" && container.causes) {
+    // Require a non-empty causes array. An empty `causes: []` is truthy and
+    // would short-circuit here, blocking fallthrough to the agent artifact
+    // format (`searchBlocksForAgentRootCause`) when only that has data.
+    if (
+      container.key === "root_cause_analysis" &&
+      container.causes &&
+      container.causes.length > 0
+    ) {
       return container.causes;
     }
   }
@@ -380,7 +387,7 @@ function findNoSolutionReason(artifacts: ArtifactEntry[]): string | undefined {
 }
 
 /**
- * Search containers (blocks or steps) for a no-solution reason.
+ * Search containers (blocks or steps) for a no-solution reason in artifacts.
  */
 function searchContainersForNoSolutionReason(
   containers: WithArtifacts[]
@@ -391,6 +398,29 @@ function searchContainersForNoSolutionReason(
       if (reason) {
         return reason;
       }
+    }
+  }
+  return;
+}
+
+/**
+ * Search containers for a step-level no-solution reason.
+ *
+ * The current Seer API returns solution data directly on steps with
+ * `key === "solution"`. When no fix is produced the step has an empty/missing
+ * `solution` array but its `description` field carries the reason. This mirrors
+ * {@link searchContainersForStepLevelSolution} for the no-solution path.
+ */
+function searchContainersForStepLevelNoSolutionReason(
+  containers: StepWithSolution[]
+): string | undefined {
+  for (const container of containers) {
+    if (
+      container.key === "solution" &&
+      (!container.solution || container.solution.length === 0) &&
+      container.description
+    ) {
+      return container.description;
     }
   }
   return;
@@ -513,36 +543,56 @@ export function extractSolution(state: AutofixState): SolutionArtifact | null {
 /**
  * Extract the reason why no solution was produced.
  *
- * When Seer completes analysis but cannot produce a code fix, the API
- * returns a solution artifact with `data: null` and a `reason` string.
- * This function searches blocks and steps for that reason.
+ * Searches blocks and steps for a no-solution reason in two formats:
+ * 1. Step-level: `step.key === "solution"` with an empty/missing `solution[]`
+ *    and a `description` explaining why (current API).
+ * 2. Artifact-level: `artifact.key === "solution"` with a `reason` field
+ *    (legacy format, kept as fallback).
  *
- * @param state - Autofix state (may contain blocks or steps with artifacts)
+ * Step-level is checked first to match {@link extractSolution}'s ordering.
+ *
+ * @param state - Autofix state (may contain blocks or steps with solution data)
  * @returns Reason string if found, undefined otherwise
  */
 export function extractNoSolutionReason(
   state: AutofixState
 ): string | undefined {
   const stateWithExtras = state as AutofixState & {
-    blocks?: WithArtifacts[];
-    steps?: WithArtifacts[];
+    blocks?: (WithArtifacts & StepWithSolution)[];
+    steps?: (WithArtifacts & StepWithSolution)[];
   };
 
   if (stateWithExtras.blocks) {
-    const reason = searchContainersForNoSolutionReason(stateWithExtras.blocks);
+    const reason = findNoSolutionReasonInContainers(stateWithExtras.blocks);
     if (reason) {
       return reason;
     }
   }
 
   if (stateWithExtras.steps) {
-    const reason = searchContainersForNoSolutionReason(stateWithExtras.steps);
+    const reason = findNoSolutionReasonInContainers(stateWithExtras.steps);
     if (reason) {
       return reason;
     }
   }
 
   return;
+}
+
+/**
+ * Resolve a no-solution reason for a single container list, preferring the
+ * step-level `description` (current API) over the artifact-level `reason`
+ * (legacy). Extracted to keep {@link extractNoSolutionReason} flat and within
+ * the cognitive-complexity budget.
+ */
+function findNoSolutionReasonInContainers(
+  containers: (WithArtifacts & StepWithSolution)[]
+): string | undefined {
+  const stepLevel = searchContainersForStepLevelNoSolutionReason(containers);
+  if (stepLevel) {
+    return stepLevel;
+  }
+  return searchContainersForNoSolutionReason(containers);
 }
 
 /**

@@ -316,6 +316,39 @@ export function buildTraceUrl(orgSlug: string, traceId: string): string {
   return `${getSentryBaseUrl()}/organizations/${orgSlug}/traces/${traceId}/`;
 }
 
+// Alert URLs
+
+/**
+ * Build URL to the issue alert rules list for a project.
+ *
+ * @param orgSlug - Organization slug
+ * @param projectSlug - Project slug
+ * @returns Full URL to the issue alert rules page
+ */
+export function buildIssueAlertsUrl(
+  orgSlug: string,
+  projectSlug?: string
+): string {
+  const projectFilter = projectSlug ? `?project=${projectSlug}` : "";
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/alerts/rules/${projectFilter}`;
+  }
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/alerts/rules/${projectFilter}`;
+}
+
+/**
+ * Build URL to the metric alert rules list for an organization.
+ *
+ * @param orgSlug - Organization slug
+ * @returns Full URL to the metric alert rules page
+ */
+export function buildMetricAlertsUrl(orgSlug: string): string {
+  if (isSaaS()) {
+    return `${getOrgBaseUrl(orgSlug)}/alerts/metric-rules/`;
+  }
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/alerts/metric-rules/`;
+}
+
 /**
  * Build URL to view a release in Sentry.
  *

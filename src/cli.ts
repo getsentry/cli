@@ -372,6 +372,93 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     isatty(0);
 
   /**
+   * Check whether a caught error is a recoverable 403 missing-scope error.
+   *
+   * Returns the extracted scope names when all conditions are met:
+   * - Interactive TTY (stdin)
+   * - Error is an `ApiError` with status 403
+   * - Token is an OAuth token (not env-var — those can't be re-scoped via CLI)
+   * - The 403 detail mentions specific missing scopes
+   *
+   * Returns `null` when recovery is not possible, signaling the caller to
+   * re-throw.
+   */
+  async function extractRecoverableScopes(
+    err: unknown
+  ): Promise<string[] | null> {
+    if (!isatty(0)) {
+      return null;
+    }
+    const { ApiError } = await import("./lib/errors.js");
+    if (!(err instanceof ApiError) || err.status !== 403) {
+      return null;
+    }
+    const { isEnvTokenActive } = await import("./lib/db/auth.js");
+    if (isEnvTokenActive()) {
+      return null;
+    }
+    const { extractRequiredScopes } = await import("./lib/api-scope.js");
+    const scopes = extractRequiredScopes(err.detail);
+    return scopes.length > 0 ? scopes : null;
+  }
+
+  /**
+   * Scope recovery middleware.
+   *
+   * Catches 403 Forbidden errors for OAuth tokens (not env-var tokens) in
+   * interactive TTYs. When specific missing scopes are detected in the API
+   * response, offers to re-authenticate with those scopes and retries the
+   * command — mirroring `gh auth refresh -s <scope>`.
+   *
+   * Env-var tokens are excluded: the user must regenerate those manually
+   * via the Sentry web UI (the 403 enrichment already directs them there).
+   */
+  const scopeRecoveryMiddleware: ErrorMiddleware = async (next, argv) => {
+    try {
+      await next(argv);
+    } catch (err) {
+      const scopes = await extractRecoverableScopes(err);
+      if (!scopes) {
+        throw err;
+      }
+
+      const scopeList = scopes.map((s) => `'${s}'`).join(", ");
+      const { logger: logModule } = await import("./lib/logger.js");
+      const confirmed = await logModule
+        .withTag("auth")
+        .prompt(
+          `Missing scope(s): ${scopeList}. Re-authenticate with default scopes?`,
+          { type: "confirm", initial: true }
+        );
+
+      // Symbol(clack:cancel) is truthy — strict equality check
+      if (confirmed !== true) {
+        throw err;
+      }
+
+      process.stderr.write("\n");
+      // Merge missing scopes with the default set so the new token retains
+      // all previously-held scopes plus the ones the API requested.
+      const { OAUTH_SCOPES, resolveOAuthScopeString } = await import(
+        "./lib/oauth.js"
+      );
+      const merged = [...new Set([...OAUTH_SCOPES, ...scopes])];
+      const scope = resolveOAuthScopeString({ scopes: merged });
+      const loginSuccess = await runInteractiveLogin({ scope });
+
+      if (loginSuccess) {
+        process.stderr.write("\nRetrying command...\n\n");
+        await next(argv);
+        return;
+      }
+
+      // Login failed or was cancelled — re-throw so the user sees the
+      // original 403 message with the scope hint.
+      throw err;
+    }
+  };
+
+  /**
    * Auto-authentication middleware.
    *
    * Catches auth errors (not_authenticated, expired) in interactive TTYs
@@ -426,6 +513,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const errorMiddlewares: ErrorMiddleware[] = [
     seerTrialMiddleware,
     rcImportMiddleware,
+    scopeRecoveryMiddleware,
     autoAuthMiddleware,
   ];
 

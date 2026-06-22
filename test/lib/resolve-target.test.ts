@@ -757,7 +757,7 @@ describe("tryFuzzyProjectRecovery", () => {
 // ============================================================================
 
 describe("resolveOrgOptionalProjectTarget", () => {
-  useTestConfigDir("test-resolve-optional-");
+  const getConfigDir = useTestConfigDir("test-resolve-optional-");
 
   let originalFetch: typeof globalThis.fetch;
 
@@ -785,7 +785,7 @@ describe("resolveOrgOptionalProjectTarget", () => {
 
     const result = await resolveOrgOptionalProjectTarget(
       parsed,
-      "/tmp",
+      getConfigDir(),
       "explore"
     );
     expect(result.org).toBe("myorg");
@@ -798,7 +798,7 @@ describe("resolveOrgOptionalProjectTarget", () => {
 
     const result = await resolveOrgOptionalProjectTarget(
       parsed,
-      "/tmp",
+      getConfigDir(),
       "explore"
     );
     expect(result.org).toBe("myorg");
@@ -812,7 +812,7 @@ describe("resolveOrgOptionalProjectTarget", () => {
 
     const result = await resolveOrgOptionalProjectTarget(
       parsed,
-      "/tmp",
+      getConfigDir(),
       "explore"
     );
     expect(result.org).toBe("env-org");
@@ -824,7 +824,7 @@ describe("resolveOrgOptionalProjectTarget", () => {
     const parsed = parseOrgProjectArg(undefined);
 
     await expect(
-      resolveOrgOptionalProjectTarget(parsed, "/tmp", "explore")
+      resolveOrgOptionalProjectTarget(parsed, getConfigDir(), "explore")
     ).rejects.toThrow(ContextError);
   });
 
@@ -832,7 +832,7 @@ describe("resolveOrgOptionalProjectTarget", () => {
     const parsed = parseOrgProjectArg(undefined);
 
     try {
-      await resolveOrgOptionalProjectTarget(parsed, "/tmp", "explore");
+      await resolveOrgOptionalProjectTarget(parsed, getConfigDir(), "explore");
       // Should not reach here
       expect(true).toBe(false);
     } catch (err) {

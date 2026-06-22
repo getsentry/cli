@@ -28,6 +28,7 @@ import {
   getBinaryPaths,
   getGitHubHeaders,
   getPlatformBinaryName,
+  type InstallationMethod,
   isNightlyVersion,
   KNOWN_CURL_DIRS,
   releaseLock,
@@ -52,16 +53,11 @@ import { clearPatchCache } from "./patch-cache.js";
 /** Scoped logger for upgrade operations */
 const log = logger.withTag("upgrade");
 
-// Types
-
-export type InstallationMethod =
-  | "curl"
-  | "brew"
-  | "npm"
-  | "pnpm"
-  | "bun"
-  | "yarn"
-  | "unknown";
+// Re-export for backward compatibility — consumers that import
+// InstallationMethod from upgrade.ts continue to work.
+export type { InstallationMethod } from "./binary.js";
+// biome-ignore lint/performance/noBarrelFile: backward-compat re-export, not a barrel
+export { parseInstallationMethod } from "./binary.js";
 
 /** Package managers that can be used for global installs */
 type PackageManager = "npm" | "pnpm" | "bun" | "yarn";
@@ -94,10 +90,15 @@ export const VERSION_PREFIX_REGEX = /^v/;
  * Used for legacy detection (when no install info is stored).
  * Trailing separator ensures startsWith matches a directory boundary
  * (e.g. ~/.local/bin/ won't match ~/.local/binaries/).
+ *
+ * Computed lazily (not at module load) to avoid TDZ issues from circular
+ * imports — `KNOWN_CURL_DIRS` must be fully initialized before access.
  */
-const KNOWN_CURL_PATHS = KNOWN_CURL_DIRS.map(
-  (dir) => join(homedir(), dir) + sep
-);
+let _knownCurlPaths: string[] | undefined;
+function getKnownCurlPaths(): string[] {
+  _knownCurlPaths ??= KNOWN_CURL_DIRS.map((dir) => join(homedir(), dir) + sep);
+  return _knownCurlPaths;
+}
 
 /**
  * Get file paths for curl-installed binary.
@@ -122,7 +123,7 @@ export function getCurlInstallPaths(): {
   }
 
   // Check if we're running from a known curl install location
-  for (const dir of KNOWN_CURL_PATHS) {
+  for (const dir of getKnownCurlPaths()) {
     if (process.execPath.startsWith(dir)) {
       return getBinaryPaths(process.execPath);
     }
@@ -272,7 +273,7 @@ export function detectPackageManagerFromPath(): PackageManager | null {
  */
 async function detectLegacyInstallationMethod(): Promise<InstallationMethod> {
   // Check known curl install paths
-  for (const dir of KNOWN_CURL_PATHS) {
+  for (const dir of getKnownCurlPaths()) {
     if (process.execPath.startsWith(dir)) {
       return "curl";
     }
@@ -1032,33 +1033,4 @@ export async function executeUpgrade(
     default:
       throw new UpgradeError("unknown_method");
   }
-}
-
-/** Valid methods that can be specified via --method flag */
-const VALID_METHODS: InstallationMethod[] = [
-  "curl",
-  "brew",
-  "npm",
-  "pnpm",
-  "bun",
-  "yarn",
-];
-
-/**
- * Parse and validate an installation method from user input.
- *
- * @param value - Method string from --method flag
- * @returns Validated installation method
- * @throws {Error} When method is not recognized
- */
-export function parseInstallationMethod(value: string): InstallationMethod {
-  const normalized = value.toLowerCase() as InstallationMethod;
-
-  if (!VALID_METHODS.includes(normalized)) {
-    throw new Error(
-      `Invalid method: ${value}. Must be one of: ${VALID_METHODS.join(", ")}`
-    );
-  }
-
-  return normalized;
 }

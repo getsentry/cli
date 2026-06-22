@@ -66,9 +66,7 @@ export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
       },
     });
     return unwrapPaginatedResult<SentryProject[]>(
-      result as
-        | { data: SentryProject[]; error: undefined }
-        | { data: undefined; error: unknown },
+      result,
       "Failed to list projects"
     );
   }, MAX_PAGINATION_PAGES * API_MAX_PER_PAGE);
@@ -111,9 +109,7 @@ export async function listProjectsPaginated(
   });
 
   return unwrapPaginatedResult<SentryProject[]>(
-    result as
-      | { data: SentryProject[]; error: undefined }
-      | { data: undefined; error: unknown },
+    result,
     "Failed to list projects"
   );
 }
@@ -154,8 +150,7 @@ export async function createProject(
     },
     body,
   });
-  const data = unwrapResult(result, "Failed to create project");
-  return data as unknown as SentryProject;
+  return unwrapResult<SentryProject>(result, "Failed to create project");
 }
 
 /** Result of creating a project and fetching its DSN + dashboard URL. */
@@ -548,8 +543,7 @@ export async function getProject(
     | { data: unknown; error: undefined }
     | { data: undefined; error: unknown };
 
-  const data = unwrapResult(result, "Failed to get project");
-  return data as unknown as SentryProject;
+  return unwrapResult<SentryProject>(result, "Failed to get project");
 }
 
 /**
@@ -600,8 +594,7 @@ export async function getProjectKeys(
     },
   });
 
-  const data = unwrapResult(result, "Failed to get project keys");
-  return data as unknown as ProjectKey[];
+  return unwrapResult<ProjectKey[]>(result, "Failed to get project keys");
 }
 
 /**

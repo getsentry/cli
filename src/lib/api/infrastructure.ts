@@ -52,8 +52,9 @@ function enrich403Detail(rawDetail: string | undefined): string {
     lines.push(rawDetail, "");
   }
 
+  const scopes = extractRequiredScopes(rawDetail);
+
   if (isEnvTokenActive()) {
-    const scopes = extractRequiredScopes(rawDetail);
     if (scopes.length > 0) {
       lines.push(
         `Your ${getActiveEnvVarName()} token is missing the required scope(s) '${scopes.join("', '")}'.`
@@ -65,6 +66,12 @@ function enrich403Detail(rawDetail: string | undefined): string {
     }
     lines.push(
       "Check token scopes at: https://sentry.io/settings/account/api/auth-tokens/"
+    );
+  } else if (scopes.length > 0) {
+    const scopeArgs = scopes.map((s) => `--scope ${s}`).join(" ");
+    lines.push(
+      `Your token is missing the required scope(s) '${scopes.join("', '")}'.`,
+      `Re-authenticate with: sentry auth refresh ${scopeArgs}`
     );
   } else {
     lines.push(
@@ -94,7 +101,19 @@ function enrich403Detail(rawDetail: string | undefined): string {
  *
  * @see https://github.com/getsentry/sentry/blob/934f1473f198a62f9268d7140b80cd9ca1e59bb9/src/sentry/api/authentication.py#L536-L539
  */
-function enrich401Detail(rawDetail: string | undefined): string {
+export function enrich401Detail(rawDetail: string | undefined): string {
+  // Seat-limit lockout, not an auth failure. Sentry returns 401 with
+  // `code: member-disabled-over-limit` when the org is over its member limit
+  // and the caller's seat is disabled — re-authenticating cannot fix this.
+  if (rawDetail?.includes("member-disabled-over-limit")) {
+    return [
+      "Your account is disabled in this organization because it is over its member limit.",
+      "This is a billing/seat-limit issue, not an auth problem — re-authenticating won't help.",
+      "Ask an org owner to upgrade the plan or free up a seat, then retry.",
+      "Or target a different org, e.g.:  sentry init my-other-org/",
+    ].join("\n  ");
+  }
+
   const lines: string[] = [];
   if (rawDetail) {
     lines.push(rawDetail, "");
@@ -221,7 +240,9 @@ export function throwApiError(
  * @returns The data from the successful response
  */
 export function unwrapResult<T>(
-  result: { data: T; error: undefined } | { data: undefined; error: unknown },
+  result:
+    | { data: unknown; error: undefined }
+    | { data: undefined; error: unknown },
   context: string
 ): T {
   const { data, error } = result as {
@@ -258,11 +279,13 @@ export function unwrapResult<T>(
  * @returns Data and optional next-page cursor
  */
 export function unwrapPaginatedResult<T>(
-  result: { data: T; error: undefined } | { data: undefined; error: unknown },
+  result:
+    | { data: unknown; error: undefined }
+    | { data: undefined; error: unknown },
   context: string
 ): PaginatedResponse<T> {
   const response = (result as { response?: Response }).response;
-  const data = unwrapResult(result, context);
+  const data = unwrapResult<T>(result, context);
   const { nextCursor, prevCursor } = parseLinkHeader(
     response?.headers.get("link") ?? null
   );
@@ -543,6 +566,45 @@ async function throwRawApiError(
     endpoint,
     is403
   );
+}
+
+/**
+ * Make an authenticated request to a Sentry region where success has no JSON body
+ * (e.g. DELETE returning 204 No Content, or 202 Accepted with an empty body).
+ */
+export async function apiRequestToRegionNoContent(
+  regionUrl: string,
+  endpoint: string,
+  options: Omit<ApiRequestOptions, "schema"> = {}
+): Promise<void> {
+  const { method = "GET", body, params } = options;
+  const config = getSdkConfig(regionUrl);
+
+  const searchParams = buildSearchParams(params);
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint.slice(1)
+    : endpoint;
+  const queryString = searchParams ? `?${searchParams.toString()}` : "";
+  const url = `${config.baseUrl}/api/0/${normalizedEndpoint}${queryString}`;
+
+  const fetchFn = config.fetch;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const response = await fetchFn(url, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    await throwRawApiError(response, endpoint);
+  }
+
+  if (response.status === 204 || response.status === 205) {
+    return;
+  }
+  await response.text();
 }
 
 /**

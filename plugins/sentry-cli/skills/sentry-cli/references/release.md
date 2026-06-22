@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-release
-version: 0.36.0-dev.0
+version: 0.38.0-dev.0
 description: Work with Sentry releases
 requires:
   bins: ["sentry"]
@@ -24,14 +24,14 @@ List releases with adoption and health metrics
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
-### `sentry release view <org/version...>`
+### `sentry release view <org/version>`
 
 View release details with health metrics
 
 **Flags:**
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
-### `sentry release create <org/version...>`
+### `sentry release create <org/version>`
 
 Create a release
 
@@ -42,7 +42,7 @@ Create a release
 - `--url <value> - URL to the release source`
 - `-n, --dry-run - Show what would happen without making changes`
 
-### `sentry release finalize <org/version...>`
+### `sentry release finalize <org/version>`
 
 Finalize a release
 
@@ -51,7 +51,7 @@ Finalize a release
 - `--url <value> - URL for the release`
 - `-n, --dry-run - Show what would happen without making changes`
 
-### `sentry release delete <org/version...>`
+### `sentry release delete <org/version>`
 
 Delete a release
 
@@ -60,7 +60,21 @@ Delete a release
 - `-f, --force - Force the operation without confirmation`
 - `-n, --dry-run - Show what would happen without making changes`
 
-### `sentry release deploy <org/version environment name...>`
+### `sentry release archive <org/version>`
+
+Archive a release
+
+**Flags:**
+- `-n, --dry-run - Show what would happen without making changes`
+
+### `sentry release restore <org/version>`
+
+Restore an archived release
+
+**Flags:**
+- `-n, --dry-run - Show what would happen without making changes`
+
+### `sentry release deploy <org/version> <environment> <name>`
 
 Create a deploy for a release
 
@@ -71,11 +85,11 @@ Create a deploy for a release
 - `-t, --time <value> - Deploy duration in seconds (sets started = now - time, finished = now)`
 - `-n, --dry-run - Show what would happen without making changes`
 
-### `sentry release deploys <org/version...>`
+### `sentry release deploys <org/version>`
 
 List deploys for a release
 
-### `sentry release set-commits <org/version...>`
+### `sentry release set-commits <org/version>`
 
 Set commits for a release
 
@@ -124,6 +138,14 @@ sentry release create $(sentry release propose-version)
 # List deploys for a release
 sentry release deploys 1.0.0
 sentry release deploys my-org/1.0.0
+
+# Archive a release (hide it from the default list, but keep it)
+sentry release archive 1.0.0
+sentry release archive my-org/1.0.0 --dry-run   # Preview without archiving
+
+# Restore a previously archived release
+sentry release restore 1.0.0
+sentry release restore my-org/1.0.0
 
 # Delete a release
 sentry release delete my-org/1.0.0

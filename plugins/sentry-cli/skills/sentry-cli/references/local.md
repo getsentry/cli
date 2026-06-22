@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-local
-version: 0.36.0-dev.0
+version: 0.38.0-dev.0
 description: Sentry for local development
 requires:
   bins: ["sentry"]
@@ -29,6 +29,8 @@ Run a command with the local dev server enabled
 **Flags:**
 - `-p, --port <value> - Port for the local server (default 8969) - (default: "8969")`
 - `--host <value> - Hostname for the local server (default localhost) - (default: "localhost")`
+- `-V, --verify - Verify SDK sends events, then exit`
+- `-t, --timeout <value> - Kill the child after N seconds (0 = no timeout; defaults to 30 s in --verify mode) - (default: "0")`
 
 **Examples:**
 
@@ -50,6 +52,9 @@ sentry local -f error -f log
 sentry local --quiet
 
 sentry local -f error -f log    # only errors and logs
+
+sentry local -f ai          # only AI/agent spans
+sentry local -f ai -f error # agent spans and errors
 
 sentry local --format json
 ```

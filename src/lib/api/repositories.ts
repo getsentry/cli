@@ -39,8 +39,10 @@ export async function listRepositories(
     path: { organization_id_or_slug: orgSlug },
   });
 
-  const data = unwrapResult(result, "Failed to list repositories");
-  return data as unknown as SentryRepository[];
+  return unwrapResult<SentryRepository[]>(
+    result,
+    "Failed to list repositories"
+  );
 }
 
 /**
@@ -67,9 +69,7 @@ export async function listRepositoriesPaginated(
   });
 
   return unwrapPaginatedResult<SentryRepository[]>(
-    result as
-      | { data: SentryRepository[]; error: undefined }
-      | { data: undefined; error: unknown },
+    result,
     "Failed to list repositories"
   );
 }

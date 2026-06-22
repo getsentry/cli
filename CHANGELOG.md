@@ -1,6 +1,95 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.37.0
+
+### New Features ✨
+
+- Remove 25 response-type `as unknown as` casts from API layer by @jared-outpost in [#1090](https://github.com/getsentry/cli/pull/1090)
+- Implement `code-mappings upload` command by @BYK in [#1086](https://github.com/getsentry/cli/pull/1086)
+- Implement `dart-symbol-map upload` command by @BYK in [#1085](https://github.com/getsentry/cli/pull/1085)
+- Implement `cli uninstall` command by @BYK in [#1084](https://github.com/getsentry/cli/pull/1084)
+- Implement `bash-hook` command for shell error reporting by @BYK in [#1083](https://github.com/getsentry/cli/pull/1083)
+
+### Bug Fixes 🐛
+
+- (build) Ignore NODE_OPTIONS in the SEA binary to keep the V8 code cache valid by @BYK in [#1092](https://github.com/getsentry/cli/pull/1092)
+- (dashboard) Guard against undefined titles in list and resolve by @jared-outpost in [#1097](https://github.com/getsentry/cli/pull/1097)
+- (init) Show actionable error when org is over its member limit by @betegon in [#1091](https://github.com/getsentry/cli/pull/1091)
+- Handle slashes in default branch names for code-mappings by @BYK in [#1088](https://github.com/getsentry/cli/pull/1088)
+- Use shared git helpers for code-mappings repo inference by @BYK in [#1087](https://github.com/getsentry/cli/pull/1087)
+- Resolve silent error swallowing and unsafe type coercion by @BYK in [#1082](https://github.com/getsentry/cli/pull/1082)
+
+### Documentation 📚
+
+- Reset .lore.md with latest state by @BYK in [9d3d21e9](https://github.com/getsentry/cli/commit/9d3d21e95ef78e40c1fbb823e09b218314bdb5a4)
+- Enable Starlight agent markdown by @dcramer in [#1093](https://github.com/getsentry/cli/pull/1093)
+
+### Internal Changes 🔧
+
+- Regenerate docs by @github-actions[bot] in [04b84fb8](https://github.com/getsentry/cli/commit/04b84fb8fbf61becbbd54e8f164f61c092ae5ee8)
+
+## 0.36.0
+
+### New Features ✨
+
+#### Local
+
+- Add --verify, --timeout, auto-detect dev script, post-init verification by @MathurAditya724 in [#998](https://github.com/getsentry/cli/pull/998)
+- Inject all framework spotlight prefixes; document DSN-less capture and -f ai filter by @sergical in [#1034](https://github.com/getsentry/cli/pull/1034)
+
+#### Other
+
+- (alert) Add alert CRUD commands by @betegon in [#579](https://github.com/getsentry/cli/pull/579)
+- (auth) Add --scope/-s and --read-only flags to login and refresh by @RaeesBhatti in [#1032](https://github.com/getsentry/cli/pull/1032)
+- (monitor) Add cron monitor check-ins (monitor run / list) by @BYK in [#1069](https://github.com/getsentry/cli/pull/1069)
+- (proguard) Add 'proguard upload' command (chunk-upload of R8/ProGuard mappings) by @BYK in [#1074](https://github.com/getsentry/cli/pull/1074)
+- (sourcemap) Handle inline base64 sourcemaps in inject/upload by @BYK in [#1065](https://github.com/getsentry/cli/pull/1065)
+- Add release archive/restore, sourcemap resolve, proguard uuid by @BYK in [#1058](https://github.com/getsentry/cli/pull/1058)
+- Add send-event and send-envelope commands with DSN auth by @BYK in [#921](https://github.com/getsentry/cli/pull/921)
+
+### Bug Fixes 🐛
+
+#### Init
+
+- Skip artifact dirs in project listing by @betegon in [#1081](https://github.com/getsentry/cli/pull/1081)
+- Mirror onboarding project creation by @betegon in [#1077](https://github.com/getsentry/cli/pull/1077)
+- Harden install command execution by @betegon in [#1045](https://github.com/getsentry/cli/pull/1045)
+- Handle setup service auth failures by @betegon in [#1076](https://github.com/getsentry/cli/pull/1076)
+- Stop reporting cancelled wizard prompts by @betegon in [#1075](https://github.com/getsentry/cli/pull/1075)
+- Avoid stale resume replays by @betegon in [#1064](https://github.com/getsentry/cli/pull/1064)
+- Validate apply-patchset paths generically by @betegon in [#1042](https://github.com/getsentry/cli/pull/1042)
+
+#### Issue
+
+- Validate org/project prefix in parseWithHash slash path by @BYK in [#1049](https://github.com/getsentry/cli/pull/1049)
+- Handle GitHub-style #SHORTID in issue identifiers by @BYK in [#1048](https://github.com/getsentry/cli/pull/1048)
+
+#### Other
+
+- (cache) Atomic writes to prevent torn-read deletion of valid cache entries by @BYK in [#1056](https://github.com/getsentry/cli/pull/1056)
+- (deps) Bump @sentry/api to 0.180.0 and fix downstream type errors by @betegon in [#1066](https://github.com/getsentry/cli/pull/1066)
+- (local) Re-emit SIGINT/SIGTERM after cleanup in verify mode by @MathurAditya724 in [#1073](https://github.com/getsentry/cli/pull/1073)
+- (stricli) Stop advertising -H as the --help-all alias by @BYK in [#1057](https://github.com/getsentry/cli/pull/1057)
+- (upgrade) Resolve symlinks before self-copy guard in installBinary by @sergical in [#1046](https://github.com/getsentry/cli/pull/1046)
+- Break circular import causing KNOWN_CURL_DIRS TDZ crash by @BYK in [#1072](https://github.com/getsentry/cli/pull/1072)
+- Address unresolved review comments from #1058 by @BYK in [#1067](https://github.com/getsentry/cli/pull/1067)
+- Address self-review findings from #1058 by @BYK in [#1063](https://github.com/getsentry/cli/pull/1063)
+- Consolidate Cursor BugBot PRs (#908, #947, #973, #1023, #1044) by @BYK in [#1051](https://github.com/getsentry/cli/pull/1051)
+- Preserve TTY in dev mode by inlining tsx invocation by @BYK in [#1026](https://github.com/getsentry/cli/pull/1026)
+
+### Documentation 📚
+
+- (proguard) Note SHA-1 is required for v5 UUID, not security by @BYK in [#1059](https://github.com/getsentry/cli/pull/1059)
+- Unify BugBot audit fixes and stop AGENTS.md tree drift by @BYK in [#1050](https://github.com/getsentry/cli/pull/1050)
+
+### Internal Changes 🔧
+
+- (auto-paginate) Fix over-strict cursor contract at exact page boundary by @BYK in [#1060](https://github.com/getsentry/cli/pull/1060)
+- (docs) Bump @sentry/starlight-theme to 0.7.0 by @sentry-junior in [#1016](https://github.com/getsentry/cli/pull/1016)
+- Remove scratch migration doc, stale lore, and harden patch check by @BYK in [#1062](https://github.com/getsentry/cli/pull/1062)
+- Regenerate docs by @github-actions[bot] in [297934ee](https://github.com/getsentry/cli/commit/297934ee592daf409d5a84e5b71846df3c024f4e)
+
 ## 0.35.0
 
 ### New Features ✨

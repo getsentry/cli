@@ -72,3 +72,17 @@ docs/public/.well-known/skills/index.json
 # OpenCode
 .opencode/
 opencode.json*
+
+# Throwaway documentation audit reports (bot-generated, not real docs)
+DOCUMENTATION_GAPS.md
+docs/DOCUMENTATION_GAPS.md
+DOCUMENTATION_GAP_REPORT.md
+
+# Throwaway planning / migration notes (agent- or human-authored scratch docs,
+# not part of the project's real documentation — these should stay local)
+*-PLAN.md
+*_PLAN.md
+PLAN.md
+*-MIGRATION.md
+MIGRATION-*.md
+MIGRATION_*.md

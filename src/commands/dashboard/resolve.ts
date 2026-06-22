@@ -353,14 +353,15 @@ export async function resolveDashboardId(
     // Match by ID/slug first (e.g. "default-overview"), then fall back to title
     const match =
       data.find((d) => d.id.toLowerCase() === lowerRef) ??
-      data.find((d) => d.title.toLowerCase() === lowerRef);
+      data.find((d) => (d.title ?? "").toLowerCase() === lowerRef);
     if (match) {
       return match.id;
     }
 
     for (const d of data) {
-      allTitles.push(d.title);
-      titleToId.set(d.title, d.id);
+      const title = d.title ?? "(untitled)";
+      allTitles.push(title);
+      titleToId.set(title, d.id);
     }
     if (!nextCursor) {
       break;
@@ -411,7 +412,7 @@ export function resolveWidgetIndex(
   }
   const lowerTitle = (title ?? "").toLowerCase();
   const matchIndex = widgets.findIndex(
-    (w) => w.title.toLowerCase() === lowerTitle
+    (w) => (w.title ?? "").toLowerCase() === lowerTitle
   );
   if (matchIndex === -1) {
     throw new ValidationError(
@@ -700,7 +701,9 @@ async function build404Error(
           perPage: MAX_404_SUGGESTIONS,
         });
         if (data.length > 0) {
-          const lines = data.map((d) => `    ${d.id}  ${d.title}`);
+          const lines = data.map(
+            (d) => `    ${d.id}  ${d.title ?? "(untitled)"}`
+          );
           alternatives.push(`Available dashboards:\n${lines.join("\n")}`);
         }
       } catch {

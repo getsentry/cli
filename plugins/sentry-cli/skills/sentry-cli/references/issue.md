@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-issue
-version: 0.36.0-dev.0
+version: 0.38.0-dev.0
 description: Manage Sentry issues
 requires:
   bins: ["sentry"]
@@ -31,11 +31,11 @@ List issues in a project
 | `id` | string | Numeric issue ID |
 | `shortId` | string | Human-readable short ID (e.g. PROJ-ABC) |
 | `title` | string | Issue title |
-| `culprit` | string | Culprit string |
+| `culprit` | string \| null | Culprit string |
 | `count` | string | Total event count |
 | `userCount` | number | Number of affected users |
-| `firstSeen` | string | First occurrence (ISO 8601) |
-| `lastSeen` | string | Most recent occurrence (ISO 8601) |
+| `firstSeen` | string \| null | First occurrence (ISO 8601) |
+| `lastSeen` | string \| null | Most recent occurrence (ISO 8601) |
 | `level` | string | Severity level |
 | `status` | string | Issue status |
 | `permalink` | string | URL to the issue in Sentry |
@@ -159,11 +159,11 @@ sentry issue explain my-org/MYPROJECT-ABC
 # Force a fresh analysis
 sentry issue explain 123456789 --force
 
-# Generate a fix plan (requires explain to be run first)
+# Generate a fix plan (automatically runs explain if needed)
 sentry issue plan 123456789
 
-# Specify which root cause to plan for
-sentry issue plan 123456789 --cause 0
+# Force a fresh plan even if one already exists
+sentry issue plan 123456789 --force
 ```
 
 ### `sentry issue plan <issue>`
@@ -190,11 +190,11 @@ View details of a specific issue
 | `id` | string | Numeric issue ID |
 | `shortId` | string | Human-readable short ID (e.g. PROJ-ABC) |
 | `title` | string | Issue title |
-| `culprit` | string | Culprit string |
+| `culprit` | string \| null | Culprit string |
 | `count` | string | Total event count |
 | `userCount` | number | Number of affected users |
-| `firstSeen` | string | First occurrence (ISO 8601) |
-| `lastSeen` | string | Most recent occurrence (ISO 8601) |
+| `firstSeen` | string \| null | First occurrence (ISO 8601) |
+| `lastSeen` | string \| null | Most recent occurrence (ISO 8601) |
 | `level` | string | Severity level |
 | `status` | string | Issue status |
 | `permalink` | string | URL to the issue in Sentry |
@@ -218,6 +218,10 @@ sentry issue view FRONT-ABC
 
 # Open in browser
 sentry issue view FRONT-ABC -w
+
+# GitHub-style identifiers work too (the "#" replaces the final slash)
+sentry issue view my-org/my-project#FRONT-ABC
+sentry issue view my-project#FRONT-ABC
 ```
 
 ### `sentry issue resolve <issue>`

@@ -1,84 +1,73 @@
 /**
  * Sourcemap Upload API
  *
- * Implements the Sentry chunk-upload + assemble protocol for
- * artifact bundle uploads. Replaces the `@sentry/cli sourcemaps upload`
- * command with a native TypeScript implementation.
+ * Implements artifact bundle building and upload for sourcemaps.
+ * The underlying chunk-upload protocol (chunking, hashing, codec
+ * selection, chunk upload, assembly polling) lives in
+ * {@link ./chunk-upload.ts} and is shared with other upload flows
+ * (e.g. ProGuard DIF uploads).
  *
  * Protocol overview:
  * 1. GET  chunk-upload options (chunk size, concurrency, compression)
  * 2. Build artifact bundle ZIP (streaming to disk via {@link ZipWriter})
  * 3. Split ZIP into chunks, compute SHA-1 checksums
  * 4. POST assemble request → server reports missing chunks
- * 5. Upload missing chunks in parallel as multipart/form-data. When the
- *    server advertises a codec in `compression`, chunks are compressed
- *    per-request and the codec is announced via `Content-Encoding`. Codec
- *    preference is `zstd` > `gzip` > plain. Newer servers advertise both;
- *    older servers advertise only `gzip`; the `chunk-upload.no-compression`
- *    kill-switch makes the list empty.
+ * 5. Upload missing chunks in parallel as multipart/form-data
  * 6. Poll assemble endpoint until complete
  */
 
-import { createHash } from "node:crypto";
-import { open, readFile, stat, unlink } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
-import {
-  gzip as gzipCb,
-  constants as zlibConstants,
-  zstdCompress as zstdCompressCb,
-} from "node:zlib";
-import pLimit from "p-limit";
-import { z } from "zod";
 import { ApiError } from "../errors.js";
-import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
-import { getSdkConfig } from "../sentry-client.js";
 import { type ZipCompression, ZipWriter } from "../sourcemap/zip.js";
+import {
+  type AssembleResponse,
+  AssembleResponseSchema,
+  type ChunkInfo,
+  type ChunkServerOptions,
+  getChunkUploadOptions,
+  hashChunks,
+  pickUploadEncoding,
+  pollAssembly,
+  type UploadEncoding,
+  uploadMissingChunks,
+} from "./chunk-upload.js";
 import { apiRequestToRegion } from "./infrastructure.js";
 
-const gzipAsync = promisify(gzipCb);
-const zstdCompressAsync = promisify(zstdCompressCb);
-const log = logger.withTag("api.sourcemaps");
-
-// ── Schemas ─────────────────────────────────────────────────────────
-
-/** Server-provided chunk upload configuration. */
-export const ChunkServerOptionsSchema = z.object({
-  /** Absolute URL to upload chunks to. */
-  url: z.string(),
-  /** Maximum size of a single chunk in bytes. */
-  chunkSize: z.number(),
-  /** Maximum number of chunks per upload request. */
-  chunksPerRequest: z.number(),
-  /** Maximum total request body size in bytes. */
-  maxRequestSize: z.number(),
-  /** Hash algorithm for chunk checksums (always "sha1"). */
-  hashAlgorithm: z.string(),
-  /** Maximum concurrent upload requests. */
-  concurrency: z.number(),
-  /** Supported compression methods (e.g., ["gzip"]). */
-  compression: z.array(z.string()),
-});
-
-export type ChunkServerOptions = z.infer<typeof ChunkServerOptionsSchema>;
-
-/** Response from the artifact bundle assemble endpoint. */
-export const AssembleResponseSchema = z.object({
-  state: z.enum(["not_found", "created", "assembling", "ok", "error"]),
-  missingChunks: z.array(z.string()).optional(),
-  detail: z.string().nullable().optional(),
-});
-
-export type AssembleResponse = z.infer<typeof AssembleResponseSchema>;
+// ── Re-exports for backward compatibility ───────────────────────────
+// These were originally defined in this module. External consumers
+// (commands, tests) may still import them from here.
+// biome-ignore lint/performance/noBarrelFile: backward-compat re-exports, not a barrel
+export {
+  type AssembleResponse,
+  AssembleResponseSchema,
+  type ChunkServerOptions,
+  ChunkServerOptionsSchema,
+  encodeChunk,
+  getChunkUploadOptions,
+  hashChunks,
+  pickUploadEncoding,
+  type UploadEncoding,
+} from "./chunk-upload.js";
 
 // ── Types ───────────────────────────────────────────────────────────
 
 /** A source file to include in the artifact bundle. */
 export type ArtifactFile = {
-  /** Filesystem path to the file. */
+  /**
+   * Filesystem path to the file. Read from disk unless {@link ArtifactFile.content}
+   * is set; for inline sourcemaps (which have no `.map` file) this is
+   * informational only.
+   */
   path: string;
+  /**
+   * In-memory file content. When set, {@link buildArtifactBundle} uses this
+   * instead of reading from `path`. Used for inline sourcemaps that have no
+   * standalone `.map` file on disk.
+   */
+  content?: Buffer;
   /** Debug ID injected into this file (from {@link injectDebugId}). Omitted when uploading without rewriting. */
   debugId?: string;
   /**
@@ -112,24 +101,6 @@ export type UploadOptions = {
   files: ArtifactFile[];
 };
 
-/** Chunk metadata after splitting the ZIP for upload. */
-type ChunkInfo = {
-  /** SHA-1 checksum of this chunk. */
-  sha1: string;
-  /** Byte offset in the ZIP file. */
-  offset: number;
-  /** Byte size of this chunk. */
-  size: number;
-};
-
-// ── Constants ───────────────────────────────────────────────────────
-
-/** Interval between assemble poll requests. */
-const ASSEMBLE_POLL_INTERVAL_MS = 1000;
-
-/** Maximum time to wait for assembly. */
-const ASSEMBLE_MAX_WAIT_MS = 300_000;
-
 // ── Helpers ─────────────────────────────────────────────────────────
 
 /**
@@ -142,152 +113,6 @@ function urlToBundlePath(url: string): string {
 }
 
 // ── API Functions ───────────────────────────────────────────────────
-
-/**
- * Get chunk upload configuration for an organization.
- *
- * @param orgSlug - Organization slug
- * @returns Server-provided upload options (chunk size, concurrency, etc.)
- */
-export async function getChunkUploadOptions(
-  orgSlug: string
-): Promise<ChunkServerOptions> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data } = await apiRequestToRegion<ChunkServerOptions>(
-    regionUrl,
-    `organizations/${orgSlug}/chunk-upload/`,
-    { schema: ChunkServerOptionsSchema }
-  );
-  return data;
-}
-
-/**
- * Codecs the CLI knows how to emit, in order of preference.
- *
- * `zstd` is the forward-looking codec: advertised only by servers that
- * implement `Content-Encoding`-based detection. `gzip` is the legacy
- * codec supported by every Sentry server since forever; we still send
- * it under the original `file_gzip` multipart field name so that
- * pre-zstd servers -- which ignore `Content-Encoding` -- keep working.
- */
-const UPLOAD_CODECS = ["zstd", "gzip"] as const;
-export type UploadEncoding = (typeof UPLOAD_CODECS)[number];
-
-/**
- * Select the most efficient upload codec the server advertises, or
- * `undefined` for plain (uncompressed) uploads when the server opts out
- * of compression (e.g. the `chunk-upload.no-compression` kill-switch)
- * or advertises only codecs we don't implement.
- *
- * Exported for testing.
- */
-export function pickUploadEncoding(
-  compression: string[]
-): UploadEncoding | undefined {
-  for (const codec of UPLOAD_CODECS) {
-    if (compression.includes(codec)) {
-      return codec;
-    }
-  }
-  if (compression.length > 0) {
-    log.debug(
-      `server advertised unsupported codecs [${compression.join(", ")}]; falling back to plain upload`
-    );
-  }
-  return;
-}
-
-/**
- * Compress a chunk buffer with the chosen codec. Exported for testing.
- *
- * Both codecs run off-thread via libuv's thread pool, so a chunk
- * being compressed doesn't block the event loop --
- * with `concurrency=8`, eight uploads truly compress in parallel.
- */
-export async function encodeChunk(
-  buf: Buffer,
-  encoding: UploadEncoding | undefined
-): Promise<Uint8Array> {
-  if (encoding === "zstd") {
-    // L3 is libzstd's default; passed explicitly for self-documenting
-    // code. L9+ trades ~14% size for 4x compress time and forces the
-    // server's decoder to allocate 15-30 MiB of window state -- not
-    // worth it once decode cost is counted.
-    return await zstdCompressAsync(buf, {
-      params: { [zlibConstants.ZSTD_c_compressionLevel]: 3 },
-    });
-  }
-  if (encoding === "gzip") {
-    // zlib default (L6). Counter-intuitively, lower levels (L1/L5)
-    // DEcompress SLOWER on the server (sparser Huffman codes); L9
-    // costs ~2x the compress CPU for no meaningful size win.
-    return await gzipAsync(buf);
-  }
-  return buf;
-}
-
-/**
- * Read a single chunk from the staging ZIP, compress it with the server's
- * preferred codec, and POST it to the chunk-upload endpoint.
- *
- * Wire format by codec (driven by {@link pickUploadEncoding}):
- *  - `zstd`  -> `Content-Encoding: zstd` + `file` multipart field.
- *               Only works against servers that opted in via
- *               `Content-Encoding` detection (getsentry/sentry#113760+).
- *  - `gzip`  -> LEGACY `file_gzip` multipart field, NO `Content-Encoding`
- *               header. Works with every server that advertises `gzip`,
- *               including pre-zstd self-hosted deployments.
- *  - plain   -> `file` multipart field, no `Content-Encoding`.
- *
- * NB: never emit `Content-Encoding: gzip` alongside the `file_gzip`
- * field -- zstd-aware servers reject that combination (400) to avoid
- * ambiguity.
- */
-async function uploadChunk(params: {
-  chunk: ChunkInfo;
-  tmpZipPath: string;
-  encoding: UploadEncoding | undefined;
-  fetch: (url: string, init: RequestInit) => Promise<Response>;
-  url: string;
-}): Promise<void> {
-  const { chunk, tmpZipPath, encoding, fetch: authFetch, url } = params;
-
-  const chunkFh = await open(tmpZipPath, "r");
-  let buf: Buffer;
-  try {
-    buf = Buffer.alloc(chunk.size);
-    await chunkFh.read(buf, 0, chunk.size, chunk.offset);
-  } finally {
-    await chunkFh.close();
-  }
-
-  const payload = await encodeChunk(buf, encoding);
-
-  // gzip uses the legacy `file_gzip` field for backwards compatibility
-  // with pre-zstd servers; zstd and plain use the standard `file` field.
-  const fieldName = encoding === "gzip" ? "file_gzip" : "file";
-  const form = new FormData();
-  form.append(
-    fieldName,
-    new Blob([payload], { type: "application/octet-stream" }),
-    chunk.sha1
-  );
-
-  const init: RequestInit = { method: "POST", body: form };
-  if (encoding === "zstd") {
-    init.headers = { "Content-Encoding": "zstd" };
-  }
-
-  const response = await authFetch(url, init);
-  if (!response.ok) {
-    throw new ApiError(
-      `Chunk upload failed: ${response.status} ${response.statusText}`,
-      response.status,
-      await response.text().catch(() => ""),
-      url
-    );
-  }
-}
 
 /**
  * Build an artifact bundle ZIP at the given path.
@@ -359,7 +184,8 @@ export async function buildArtifactBundle(
 
     for (const file of files) {
       const bundlePath = urlToBundlePath(file.url);
-      const content = await readFile(file.path);
+      // Prefer in-memory content (inline sourcemaps); otherwise read from disk.
+      const content = file.content ?? (await readFile(file.path));
       await zip.addEntry(bundlePath, content);
     }
 
@@ -368,40 +194,6 @@ export async function buildArtifactBundle(
     // Close handle without finalizing on entry write failure
     await zip.close();
     throw error;
-  }
-}
-
-/**
- * Split a ZIP file into chunks and compute SHA-1 checksums.
- *
- * Reads the file sequentially — only one chunk buffer is live at a time.
- *
- * @param zipPath - Path to the ZIP file
- * @param chunkSize - Size of each chunk in bytes
- * @returns Per-chunk metadata and an overall SHA-1 checksum of the entire file
- */
-export async function hashChunks(
-  zipPath: string,
-  chunkSize: number
-): Promise<{ chunks: ChunkInfo[]; overallChecksum: string }> {
-  const fh = await open(zipPath, "r");
-  try {
-    const fileSize = (await stat(zipPath)).size;
-    const chunks: ChunkInfo[] = [];
-    const overallHasher = createHash("sha1");
-
-    for (let offset = 0; offset < fileSize; offset += chunkSize) {
-      const size = Math.min(chunkSize, fileSize - offset);
-      const buf = Buffer.alloc(size);
-      await fh.read(buf, 0, size, offset);
-      const sha1 = createHash("sha1").update(buf).digest("hex");
-      overallHasher.update(buf);
-      chunks.push({ sha1, offset, size });
-    }
-
-    return { chunks, overallChecksum: overallHasher.digest("hex") };
-  } finally {
-    await fh.close();
   }
 }
 
@@ -518,63 +310,20 @@ async function uploadArtifactBundle(opts: {
   }
 
   // Step 5: Upload missing chunks in parallel
-  const missingSet = new Set(firstAssemble.missingChunks ?? []);
-  const missingChunks = chunks.filter((c) => missingSet.has(c.sha1));
-
-  if (missingChunks.length > 0) {
-    const limit = pLimit(serverOptions.concurrency);
-    // Use the CLI's authenticated fetch for chunk uploads
-    const { fetch: authFetch } = getSdkConfig(regionUrl);
-
-    await Promise.all(
-      missingChunks.map((chunk) =>
-        limit(() =>
-          uploadChunk({
-            chunk,
-            tmpZipPath,
-            encoding,
-            fetch: authFetch,
-            url: serverOptions.url,
-          })
-        )
-      )
-    );
-  }
+  await uploadMissingChunks({
+    chunks,
+    missingChecksums: new Set(firstAssemble.missingChunks ?? []),
+    tmpZipPath,
+    serverOptions,
+    encoding,
+    regionUrl,
+  });
 
   // Step 6: Poll assemble endpoint until done
-  const deadline = Date.now() + ASSEMBLE_MAX_WAIT_MS;
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, ASSEMBLE_POLL_INTERVAL_MS));
-
-    const { data: pollResult } = await apiRequestToRegion<AssembleResponse>(
-      regionUrl,
-      assembleEndpoint,
-      {
-        method: "POST",
-        body: assembleBody,
-        schema: AssembleResponseSchema,
-      }
-    );
-
-    if (pollResult.state === "ok" || pollResult.state === "created") {
-      return;
-    }
-
-    if (pollResult.state === "error") {
-      throw new ApiError(
-        "Artifact bundle assembly failed",
-        500,
-        pollResult.detail ?? "Unknown error",
-        assembleEndpoint
-      );
-    }
-    // "not_found" or "assembling" — keep polling
-  }
-
-  throw new ApiError(
-    "Artifact bundle assembly timed out",
-    408,
-    `Assembly did not complete within ${ASSEMBLE_MAX_WAIT_MS / 1000}s`,
-    assembleEndpoint
-  );
+  await pollAssembly({
+    regionUrl,
+    endpoint: assembleEndpoint,
+    body: assembleBody,
+    entityName: "Artifact bundle",
+  });
 }

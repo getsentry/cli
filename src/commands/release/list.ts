@@ -31,6 +31,7 @@ import {
   LIST_BASE_ALIASES,
   LIST_TARGET_POSITIONAL,
 } from "../../lib/list-command.js";
+import { logger } from "../../lib/logger.js";
 import {
   dispatchOrgScopedList,
   type HandlerContext,
@@ -46,6 +47,8 @@ import {
 import { buildReleaseUrl } from "../../lib/sentry-urls.js";
 import type { SentryRelease } from "../../types/index.js";
 import { fmtCrashFree } from "./view.js";
+
+const log = logger.withTag("release.list");
 
 export const PAGINATION_KEY = "release-list";
 
@@ -343,24 +346,38 @@ function deduplicateTargets(targets: ResolvedTarget[]): ResolvedTarget[] {
   return result.sort((a, b) => targetPriority(a) - targetPriority(b));
 }
 
-/** Resolve a project slug to a numeric ID array for the API query param. */
+/**
+ * Resolve a project slug to a numeric ID array for the API query param.
+ * Returns a non-empty array on success, or an empty array when the project
+ * cannot be resolved (error or unexpected ID shape). The caller must
+ * short-circuit on an empty result to avoid unscoped org-wide queries.
+ */
 async function resolveProjectIds(
   org: string,
   project: string
-): Promise<number[] | undefined> {
+): Promise<number[]> {
   try {
     const { getProject } = await import("../../lib/api-client.js");
     const info = await getProject(org, project);
     const id = toNumericId(info.id);
-    return id ? [id] : undefined;
-  } catch {
-    return;
+    if (!id) {
+      log.debug(
+        `Project ${org}/${project} returned non-numeric ID: ${info.id}`
+      );
+      return [];
+    }
+    return [id];
+  } catch (error) {
+    log.debug(`Failed to resolve project ID for ${org}/${project}`, error);
+    return [];
   }
 }
 
 /**
  * Fetch releases for a single target, scoped by project ID.
  * Tags each release with orgSlug and targetProject for labeling.
+ * Returns an empty array when project ID resolution fails to avoid
+ * returning unscoped org-wide releases mislabeled as the target project.
  */
 async function fetchReleasesForTarget(
   t: ResolvedTarget,
@@ -370,6 +387,9 @@ async function fetchReleasesForTarget(
   const ids = t.projectId
     ? [t.projectId]
     : await resolveProjectIds(t.org, t.project);
+  if (ids.length === 0) {
+    return [];
+  }
   const { data } = await listReleasesPaginated(t.org, {
     perPage,
     health: true,
@@ -586,8 +606,8 @@ async function resolveDefaultEnvironment(
         return [candidate];
       }
     }
-  } catch {
-    // Environment listing failed — don't filter
+  } catch (error) {
+    log.debug(`Failed to list environments for ${org}/${project}`, error);
   }
   return;
 }

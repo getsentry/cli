@@ -128,7 +128,7 @@ vi.mock("../../../src/lib/db/user.js", async (importOriginal) => {
 
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbUser from "../../../src/lib/db/user.js";
-import { AuthError } from "../../../src/lib/errors.js";
+import { AuthError, ValidationError } from "../../../src/lib/errors.js";
 
 vi.mock("../../../src/lib/interactive-login.js", async (importOriginal) => {
   const actual =
@@ -151,6 +151,8 @@ type LoginFlags = {
   readonly token?: string;
   readonly timeout: number;
   readonly force: boolean;
+  readonly "read-only"?: boolean;
+  readonly scope?: readonly string[];
 };
 
 /** Command function type extracted from loader result */
@@ -885,5 +887,147 @@ describe("rcTokenHint", () => {
       "https://self.example.com"
     );
     expect(hint).toBeUndefined();
+  });
+});
+
+describe("loginCommand.func scope selection (--read-only / --scope)", () => {
+  let isAuthenticatedSpy: ReturnType<typeof spyOn>;
+  let isEnvTokenActiveSpy: ReturnType<typeof spyOn>;
+  let hasStoredAuthCredentialsSpy: ReturnType<typeof spyOn>;
+  let runInteractiveLoginSpy: ReturnType<typeof spyOn>;
+  let listOrgsUncachedSpy: ReturnType<typeof spyOn>;
+  let func: LoginFunc;
+
+  beforeEach(async () => {
+    isAuthenticatedSpy = vi.spyOn(dbAuth, "isAuthenticated");
+    isEnvTokenActiveSpy = vi.spyOn(dbAuth, "isEnvTokenActive");
+    hasStoredAuthCredentialsSpy = vi.spyOn(dbAuth, "hasStoredAuthCredentials");
+    runInteractiveLoginSpy = vi.spyOn(interactiveLogin, "runInteractiveLogin");
+    listOrgsUncachedSpy = vi.spyOn(apiClient, "listOrganizationsUncached");
+    listOrgsUncachedSpy.mockResolvedValue([]);
+    isAuthenticatedSpy.mockReturnValue(false);
+    isEnvTokenActiveSpy.mockReturnValue(false);
+    hasStoredAuthCredentialsSpy.mockReturnValue(false);
+    runInteractiveLoginSpy.mockResolvedValue({
+      method: "oauth",
+      configPath: "/fake",
+    });
+    func = (await loginCommand.loader()) as unknown as LoginFunc;
+  });
+
+  afterEach(() => {
+    isAuthenticatedSpy.mockRestore();
+    isEnvTokenActiveSpy.mockRestore();
+    hasStoredAuthCredentialsSpy.mockRestore();
+    runInteractiveLoginSpy.mockRestore();
+    listOrgsUncachedSpy.mockRestore();
+  });
+
+  test("--token + --read-only throws ValidationError", async () => {
+    const { context } = createContext();
+    await expect(
+      func.call(context, {
+        token: "tok",
+        force: false,
+        timeout: 900,
+        "read-only": true,
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(runInteractiveLoginSpy).not.toHaveBeenCalled();
+  });
+
+  test("--token + --scope throws ValidationError", async () => {
+    const { context } = createContext();
+    await expect(
+      func.call(context, {
+        token: "tok",
+        force: false,
+        timeout: 900,
+        scope: ["project:read"],
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(runInteractiveLoginSpy).not.toHaveBeenCalled();
+  });
+
+  test("--read-only + --scope throws ValidationError", async () => {
+    const { context } = createContext();
+    await expect(
+      func.call(context, {
+        force: false,
+        timeout: 900,
+        "read-only": true,
+        scope: ["project:read"],
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(runInteractiveLoginSpy).not.toHaveBeenCalled();
+  });
+
+  test("invalid --scope value throws ValidationError", async () => {
+    const { context } = createContext();
+    await expect(
+      func.call(context, {
+        force: false,
+        timeout: 900,
+        scope: ["not:a:scope"],
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(runInteractiveLoginSpy).not.toHaveBeenCalled();
+  });
+
+  test("--read-only forwards the read-only scope set to runInteractiveLogin", async () => {
+    const { context } = createContext();
+    await func.call(context, {
+      force: false,
+      timeout: 900,
+      "read-only": true,
+    });
+
+    expect(runInteractiveLoginSpy).toHaveBeenCalledTimes(1);
+    const opts = runInteractiveLoginSpy.mock.calls[0]?.[0] as {
+      scope?: string;
+    };
+    expect(opts.scope).toBeDefined();
+    for (const scope of opts.scope!.split(" ")) {
+      expect(scope.endsWith(":read")).toBe(true);
+    }
+  });
+
+  test("--scope forwards the resolved scope string to runInteractiveLogin", async () => {
+    const { context } = createContext();
+    await func.call(context, {
+      force: false,
+      timeout: 900,
+      scope: ["project:read", "org:read"],
+    });
+
+    expect(runInteractiveLoginSpy).toHaveBeenCalledTimes(1);
+    const opts = runInteractiveLoginSpy.mock.calls[0]?.[0] as {
+      scope?: string;
+    };
+    expect(opts.scope).toBe("project:read org:read");
+  });
+
+  test("comma-separated --scope is split before resolution", async () => {
+    const { context } = createContext();
+    await func.call(context, {
+      force: false,
+      timeout: 900,
+      scope: ["project:read,org:read"],
+    });
+
+    const opts = runInteractiveLoginSpy.mock.calls[0]?.[0] as {
+      scope?: string;
+    };
+    expect(opts.scope).toBe("project:read org:read");
+  });
+
+  test("no scope flags forwards undefined scope (full default set)", async () => {
+    const { context } = createContext();
+    await func.call(context, { force: false, timeout: 900 });
+
+    const opts = runInteractiveLoginSpy.mock.calls[0]?.[0] as {
+      scope?: string;
+    };
+    expect(opts.scope).toBeUndefined();
   });
 });

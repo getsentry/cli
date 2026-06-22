@@ -52,22 +52,28 @@ cli/
 │   ├── app.ts          # Stricli application setup
 │   ├── context.ts      # Dependency injection context
 │   ├── commands/       # CLI commands
+│   │   ├── alert/       # create, delete, edit, list, view
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
-│   │   ├── cli/         # defaults, feedback, fix, import, setup, upgrade
-│   │   ├── dashboard/   # list, view, create, add, edit, delete, revisions, restore
-│   │   ├── event/       # view, list
-│   │   ├── issue/       # list, events, explain, plan, view, resolve, unresolve, archive, merge
-│   │   ├── local/       # serve, run
+│   │   ├── cli/         # defaults, feedback, fix, import, setup, uninstall, upgrade
+│   │   ├── code-mappings/# upload
+│   │   ├── dart-symbol-map/# upload
+│   │   ├── dashboard/   # add, create, delete, edit, list, restore, revisions, view
+│   │   ├── debug-files/ # bundle-jvm, check
+│   │   ├── event/       # list, send, view
+│   │   ├── issue/       # archive, events, explain, list, merge, plan, resolve, unresolve, view
+│   │   ├── local/       # run, serve
 │   │   ├── log/         # list, view
+│   │   ├── monitor/     # list, run
 │   │   ├── org/         # list, view
+│   │   ├── proguard/    # upload, uuid
 │   │   ├── project/     # create, delete, list, view
-│   │   ├── release/     # list, view, create, finalize, delete, deploy, deploys, set-commits, propose-version
+│   │   ├── release/     # archive, create, delete, deploy, deploys, finalize, list, propose-version, restore, set-commits, view
 │   │   ├── replay/      # list, view
 │   │   ├── repo/        # list
-│   │   ├── sourcemap/   # inject, upload
+│   │   ├── sourcemap/   # inject, resolve, upload
 │   │   ├── span/        # list, view
 │   │   ├── team/        # list
-│   │   ├── trace/       # list, view, logs
+│   │   ├── trace/       # list, logs, view
 │   │   ├── trial/       # list, start
 │   │   ├── api.ts       # Make an authenticated API request
 │   │   ├── explore.ts   # Query aggregate event data (Explore)

@@ -334,6 +334,36 @@ describe("throwApiError", () => {
           expect(apiError.detail).not.toContain("SENTRY_AUTH_TOKEN");
         }
       });
+
+      test("suggests --scope when specific scopes are detected in 403 detail", () => {
+        const mockResponse = new Response("", {
+          status: 403,
+          statusText: "Forbidden",
+        });
+
+        try {
+          throwApiError(
+            {
+              detail:
+                "You do not have permission. Required scope: event:read, project:read",
+            },
+            mockResponse,
+            "Failed to list issues"
+          );
+        } catch (error) {
+          const apiError = error as ApiError;
+          expect(apiError.enriched403).toBe(true);
+          expect(apiError.detail).toContain(
+            "missing the required scope(s) 'event:read', 'project:read'"
+          );
+          expect(apiError.detail).toContain(
+            "sentry auth refresh --scope event:read --scope project:read"
+          );
+          // Should NOT mention env var or web UI
+          expect(apiError.detail).not.toContain("SENTRY_AUTH_TOKEN");
+          expect(apiError.detail).not.toContain("auth-tokens/");
+        }
+      });
     });
   });
 
@@ -413,6 +443,39 @@ describe("throwApiError", () => {
         expect(apiError.detail).not.toMatch(/^undefined/);
         expect(apiError.detail).not.toContain("{}");
       }
+    });
+
+    test("treats member-disabled-over-limit as a seat-limit issue, not auth", () => {
+      const mockResponse = new Response("", {
+        status: 401,
+        statusText: "Unauthorized",
+      });
+
+      let captured: ApiError | undefined;
+      try {
+        throwApiError(
+          {
+            detail: {
+              code: "member-disabled-over-limit",
+              message: "Organization over member limit",
+              extra: { next: "/organizations/chisme/disabled-member/" },
+            },
+          },
+          mockResponse,
+          "Failed to list teams"
+        );
+      } catch (error) {
+        captured = error as ApiError;
+      }
+
+      expect(captured).toBeDefined();
+      expect(captured?.status).toBe(401);
+      expect(captured?.detail).toContain("over its member limit");
+      expect(captured?.detail).toContain("billing/seat-limit");
+      // The fix must NOT give the misleading re-auth advice for this case.
+      expect(captured?.detail).not.toContain("sentry auth login");
+      expect(captured?.detail).not.toContain("session has expired");
+      expect(captured?.detail).not.toContain("SENTRY_AUTH_TOKEN");
     });
 
     describe("with OAuth token (no env var)", () => {

@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-cli
-version: 0.36.0-dev.0
+version: 0.38.0-dev.0
 description: CLI-related commands
 requires:
   bins: ["sentry"]
@@ -34,6 +34,12 @@ sentry cli defaults project my-project
 
 # Set default Sentry URL (self-hosted)
 sentry cli defaults url https://sentry.example.com
+
+# Set custom HTTP headers (self-hosted, e.g. for IAP/proxies)
+sentry cli defaults headers "X-IAP: token"
+
+# Set a custom CA certificate (self-hosted, behind a TLS proxy)
+sentry cli defaults ca-cert /path/to/ca.pem
 
 # Disable telemetry
 sentry cli defaults telemetry off
@@ -125,6 +131,29 @@ sentry cli setup --no-agent-skills
 
 # Skip PATH and completion modifications
 sentry cli setup --no-modify-path --no-completions
+```
+
+### `sentry cli uninstall`
+
+Uninstall Sentry CLI
+
+**Flags:**
+- `--keep-config - Keep the config directory (~/.sentry) and auth tokens`
+- `-y, --yes - Skip confirmation prompt`
+- `-f, --force - Force the operation without confirmation`
+- `-n, --dry-run - Show what would happen without making changes`
+
+**Examples:**
+
+```bash
+# Show what would be removed (dry run)
+sentry cli uninstall --dry-run
+
+# Uninstall, keeping config directory
+sentry cli uninstall --yes --keep-config
+
+# Full uninstall with confirmation
+sentry cli uninstall
 ```
 
 ### `sentry cli upgrade <version>`

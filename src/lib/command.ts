@@ -166,8 +166,13 @@ type LocalCommandBuilderArguments<
    *
    * Set to `false` for commands that intentionally work without a token
    * (e.g. `auth login`, `auth logout`, `auth status`, `help`, `cli upgrade`).
+   *
+   * Set to `"dsn"` for commands that authenticate via a Sentry DSN instead of
+   * a Bearer token (e.g. `event send`). These commands skip
+   * the token guard and the `.sentryclirc` URL trust check entirely, since
+   * DSN auth is fully independent of the user's logged-in session.
    */
-  readonly auth?: boolean;
+  readonly auth?: boolean | "dsn";
   /**
    * Skip the `.sentryclirc` URL trust check. Defaults to `false`.
    *
@@ -324,13 +329,13 @@ export function applyOrgProjectFlags(
   commandOwnsProject: boolean
 ): void {
   const env = getEnv();
-  const orgTrimmed = org?.trim();
-  const projectTrimmed = project?.trim();
-  if (orgTrimmed && !commandOwnsOrg) {
+  const orgTrimmed = commandOwnsOrg ? undefined : org?.trim();
+  const projectTrimmed = commandOwnsProject ? undefined : project?.trim();
+  if (orgTrimmed) {
     orgProjectLog.debug(`--org flag → SENTRY_ORG=${orgTrimmed}`);
     env.SENTRY_ORG = orgTrimmed;
   }
-  if (projectTrimmed && !commandOwnsProject) {
+  if (projectTrimmed) {
     orgProjectLog.debug(`--project flag → SENTRY_PROJECT=${projectTrimmed}`);
     env.SENTRY_PROJECT = projectTrimmed;
   }
@@ -490,8 +495,9 @@ export function buildCommand<
 ): Command<CONTEXT> {
   const originalFunc = builderArgs.func;
   const outputConfig = builderArgs.output;
-  const requiresAuth = builderArgs.auth !== false;
-  const skipRcUrlCheck = builderArgs.skipRcUrlCheck === true;
+  const requiresAuth = builderArgs.auth !== false && builderArgs.auth !== "dsn";
+  const skipRcUrlCheck =
+    builderArgs.skipRcUrlCheck === true || builderArgs.auth === "dsn";
 
   // Merge global flags into the command's flag definitions.
   const existingParams = (builderArgs.parameters ?? {}) as Record<

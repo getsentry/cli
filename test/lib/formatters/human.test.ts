@@ -13,6 +13,8 @@ import {
   formatIssueSubtitle,
   formatProjectCreated,
   formatShortId,
+  formatStatusIcon,
+  formatStatusLabel,
   formatUpgradeResult,
   formatUserIdentity,
   type IssueTableRow,
@@ -397,6 +399,24 @@ describe("writeIssueTable", () => {
     const text = stripAnsi(output());
     // default impact (0.5)*0.6 + 0.75*0.4 = 0.30+0.30 = 0.60 → 60%
     expect(text).toContain("60%");
+  });
+
+  test("renders table with null lastSeen and firstSeen (covers ?? null branches)", () => {
+    const { writer, output } = capture();
+    const rows: IssueTableRow[] = [
+      {
+        issue: {
+          ...mockIssue,
+          lastSeen: null as unknown as string,
+          firstSeen: null as unknown as string,
+        },
+        orgSlug: "test-org",
+        formatOptions: { projectSlug: "dashboard" },
+      },
+    ];
+    writeIssueTable(writer, rows);
+    // Should render without throwing; SEEN/AGE columns receive undefined
+    expect(stripAnsi(output())).toContain("Test issue");
   });
 });
 
@@ -846,5 +866,51 @@ describe("formatUpgradeResult", () => {
       // Trailing newline after changelog
       expect(result).toMatch(/\n$/);
     });
+  });
+});
+
+describe("formatStatusIcon", () => {
+  test("resolved shows green icon", () => {
+    expect(stripFormatting(formatStatusIcon("resolved"))).toContain("✓");
+  });
+
+  test("unresolved shows yellow icon", () => {
+    expect(stripFormatting(formatStatusIcon("unresolved"))).toContain("●");
+  });
+
+  test("resolvedInNextRelease shows green icon", () => {
+    expect(
+      stripFormatting(formatStatusIcon("resolvedInNextRelease"))
+    ).toContain("✓");
+  });
+
+  test("muted shows muted icon", () => {
+    expect(stripFormatting(formatStatusIcon("muted"))).toContain("−");
+  });
+
+  test("unknown status falls back to yellow icon", () => {
+    expect(stripFormatting(formatStatusIcon("unknown"))).toContain("●");
+  });
+});
+
+describe("formatStatusLabel", () => {
+  test("resolved → Resolved label", () => {
+    expect(stripFormatting(formatStatusLabel("resolved"))).toContain(
+      "Resolved"
+    );
+  });
+
+  test("resolvedInNextRelease → Resolved in Next Release label", () => {
+    expect(
+      stripFormatting(formatStatusLabel("resolvedInNextRelease"))
+    ).toContain("Resolved in Next Release");
+  });
+
+  test("muted → Muted label", () => {
+    expect(stripFormatting(formatStatusLabel("muted"))).toContain("Muted");
+  });
+
+  test("unknown status falls back to Unknown label", () => {
+    expect(stripFormatting(formatStatusLabel("unknown"))).toContain("Unknown");
   });
 });

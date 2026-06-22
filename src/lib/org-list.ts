@@ -138,6 +138,97 @@ export function jsonTransformListResult<T>(
 }
 
 /**
+ * Per-target (or per-org) fetch result for budget-aware list commands.
+ *
+ * Wraps a success value or a captured error so that `fetchWithBudget`
+ * can run all fetches in parallel and report partial failures via
+ * `logger.warn` instead of throwing.
+ *
+ * @template T - The success payload type (e.g. `AlertRuleListFetchResult`)
+ */
+export type FetchResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: Error };
+
+/**
+ * Distribute a global fetch budget across groups in deterministic order.
+ *
+ * By default, the returned quotas sum exactly to `limit`. When
+ * `minimumPerGroup` is true, every group receives at least one slot, so the
+ * sum can exceed `limit` if there are more groups than display slots. Use that
+ * mode only for first-page fan-out where display trimming can suppress unsafe
+ * cursor pagination.
+ */
+export function distributeFetchBudget(
+  limit: number,
+  groupCount: number,
+  options: { minimumPerGroup?: boolean } = {}
+): number[] {
+  if (groupCount <= 0) {
+    return [];
+  }
+
+  const total = Math.max(0, Math.floor(limit));
+  const base = Math.floor(total / groupCount);
+  const remainder = total % groupCount;
+  const minimum = options.minimumPerGroup ? 1 : 0;
+
+  return Array.from({ length: groupCount }, (_, i) =>
+    Math.max(minimum, base + (i < remainder ? 1 : 0))
+  );
+}
+
+/**
+ * Trim an array to `limit` entries while guaranteeing at least one entry
+ * per group (when possible).
+ *
+ * Algorithm:
+ * 1. Walk the list, picking the first entry from each unseen group key until
+ *    `limit` slots are filled or all groups are represented.
+ * 2. Fill remaining slots from the top of the list, skipping already-selected
+ *    entries.
+ * 3. Return the final set in original order.
+ *
+ * When there are more groups than the limit, groups whose first entry ranks
+ * highest in the input order get representation.
+ *
+ * @param rows - Input array (order is preserved in output)
+ * @param limit - Maximum number of entries to return
+ * @param getGroupKey - Returns the group key for an entry (e.g. "org/project")
+ * @returns Trimmed array in the same order as the input
+ */
+export function trimWithGroupGuarantee<T>(
+  rows: T[],
+  limit: number,
+  getGroupKey: (row: T) => string
+): T[] {
+  if (rows.length <= limit) {
+    return rows;
+  }
+
+  const seenGroups = new Set<string>();
+  const guaranteed = new Set<number>();
+
+  // Pass 1: pick one representative per group from the list
+  for (let i = 0; i < rows.length && guaranteed.size < limit; i++) {
+    // biome-ignore lint/style/noNonNullAssertion: i is within bounds
+    const key = getGroupKey(rows[i]!);
+    if (!seenGroups.has(key)) {
+      seenGroups.add(key);
+      guaranteed.add(i);
+    }
+  }
+
+  // Pass 2: fill remaining budget from the top of the list
+  const selected = new Set<number>(guaranteed);
+  for (let i = 0; i < rows.length && selected.size < limit; i++) {
+    selected.add(i);
+  }
+
+  return rows.filter((_, i) => selected.has(i));
+}
+
+/**
  * Metadata required by all list commands.
  *
  * Commands that override every dispatch mode can provide just this — the

@@ -251,7 +251,7 @@ describe("createSentryProject", () => {
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 
-  test("resolves the team at project creation time when preflight deferred it", async () => {
+  test("uses org-scoped auto-team creation when preflight did not resolve a team", async () => {
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
 
     const result = await createSentryProject(makePayload(), {
@@ -262,26 +262,17 @@ describe("createSentryProject", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(resolveOrCreateTeamSpy).toHaveBeenCalledWith(
-      "acme",
-      expect.objectContaining({
-        autoCreateSlug: "my-app",
-        usageHint: "sentry init",
-      })
-    );
-    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
-      "acme",
-      "generated-team",
-      expect.objectContaining({
-        name: "my-app",
-        platform: "javascript-react",
-      })
-    );
+    expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+    expect(createProjectWithAutoTeamSpy).toHaveBeenCalledWith("acme", {
+      name: "my-app",
+      platform: "javascript-react",
+    });
   });
 
   test("returns clear error with sentry-init guidance when org disables member creation", async () => {
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
-    createProjectWithDsnSpy.mockRejectedValueOnce(
+    createProjectWithAutoTeamSpy.mockRejectedValueOnce(
       new ApiError(
         "Failed to create project: 403 Forbidden",
         403,
@@ -324,7 +315,7 @@ describe("createSentryProject", () => {
     const result = await createSentryProject(makePayload(), {
       dryRun: false,
       org: "acme",
-      team: undefined,
+      team: "platform",
       project: undefined,
     });
 
@@ -353,7 +344,7 @@ describe("createSentryProject", () => {
     expect(createProjectWithAutoTeamSpy).not.toHaveBeenCalled();
   });
 
-  test("does not fall back on policy 403 — avoids wasted round-trip to org-scoped endpoint", async () => {
+  test("does not fall back on team-scoped policy 403", async () => {
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
     createProjectWithDsnSpy.mockRejectedValueOnce(
       new ApiError(
@@ -366,7 +357,7 @@ describe("createSentryProject", () => {
     const result = await createSentryProject(makePayload(), {
       dryRun: false,
       org: "acme",
-      team: undefined,
+      team: "platform",
       project: undefined,
     });
 
@@ -380,9 +371,6 @@ describe("createSentryProject", () => {
       new ApiError("Conflict", 409, "Slug already in use")
     );
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
-    createProjectWithDsnSpy.mockRejectedValueOnce(
-      new ApiError("Forbidden", 403, "No project:write access")
-    );
 
     const result = await createSentryProject(makePayload(), {
       dryRun: false,
@@ -393,12 +381,11 @@ describe("createSentryProject", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("already exists");
-    createProjectWithAutoTeamSpy.mockRestore();
   });
 
   // ── dry-run ──────────────────────────────────────────────────────────────
 
-  test("uses the final project slug for deferred team resolution in dry-run mode", async () => {
+  test("does not resolve a team for org-scoped dry-run mode", async () => {
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
 
     const result = await createSentryProject(makePayload(), {
@@ -409,14 +396,7 @@ describe("createSentryProject", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(resolveOrCreateTeamSpy).toHaveBeenCalledWith(
-      "acme",
-      expect.objectContaining({
-        autoCreateSlug: "my-app",
-        usageHint: "sentry init",
-        dryRun: true,
-      })
-    );
+    expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 });

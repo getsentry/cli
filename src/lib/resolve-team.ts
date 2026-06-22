@@ -119,6 +119,8 @@ export type ResolvedTeam = ResolvedConcreteTeam | DeferredResolvedTeam;
  * - 403 → member lacks team:read; re-thrown as `ApiError` so callers that
  *   implement a member-accessible fallback can detect it and use
  *   POST /organizations/{org}/projects/ instead.
+ * - 401 → re-thrown as `ApiError` so the enriched detail (expired session,
+ *   member-disabled-over-limit, etc.) survives instead of being flattened.
  * - other → generic ResolutionError (5xx, network, etc.)
  */
 async function handleListTeamsError(
@@ -135,6 +137,9 @@ async function handleListTeamsError(
       );
     }
     if (error.status === 403) {
+      throw error;
+    }
+    if (error.status === 401) {
       throw error;
     }
     throw new ResolutionError(

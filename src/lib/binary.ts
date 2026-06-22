@@ -29,6 +29,52 @@ import { logger } from "./logger.js";
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
 
 /**
+ * How the CLI was installed. Determines the upgrade strategy.
+ *
+ * Defined here (alongside other installation constants like
+ * {@link KNOWN_CURL_DIRS}) so that both `upgrade.ts` and
+ * `db/install-info.ts` can import it without creating a circular
+ * dependency.
+ */
+export type InstallationMethod =
+  | "curl"
+  | "brew"
+  | "npm"
+  | "pnpm"
+  | "bun"
+  | "yarn"
+  | "unknown";
+
+/** Valid methods that can be specified via --method flag */
+const VALID_METHODS: InstallationMethod[] = [
+  "curl",
+  "brew",
+  "npm",
+  "pnpm",
+  "bun",
+  "yarn",
+];
+
+/**
+ * Parse and validate an installation method from user input.
+ *
+ * @param value - Method string from --method flag
+ * @returns Validated installation method
+ * @throws {Error} When method is not recognized
+ */
+export function parseInstallationMethod(value: string): InstallationMethod {
+  const normalized = value.toLowerCase() as InstallationMethod;
+
+  if (!VALID_METHODS.includes(normalized)) {
+    throw new Error(
+      `Invalid method: ${value}. Must be one of: ${VALID_METHODS.join(", ")}`
+    );
+  }
+
+  return normalized;
+}
+
+/**
  * Detect whether the current process is running on a musl-based Linux system
  * (e.g., Alpine Linux, Void Linux musl variant).
  *

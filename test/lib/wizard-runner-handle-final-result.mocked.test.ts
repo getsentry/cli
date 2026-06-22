@@ -81,88 +81,88 @@ beforeEach(() => {
 
 describe("handleFinalResult", () => {
   describe("WizardError message", () => {
-    test("uses bail message from result.result.message when present", () => {
+    test("uses bail message from result.result.message when present", async () => {
       const result = makeBailResult({
         message:
           "Dependency installation failed after 5 attempts: pnpm exited with code 1",
       });
 
-      expect(() =>
+      await expect(
         handleFinalResult(
           result,
           makeSpinnerHandle(),
           makeSpinState(),
           makeUI()
         )
-      ).toThrow(
+      ).rejects.toThrow(
         "Dependency installation failed after 5 attempts: pnpm exited with code 1"
       );
     });
 
-    test("falls back to generic message when result.result.message is absent", () => {
+    test("falls back to generic message when result.result.message is absent", async () => {
       const result = makeBailResult({ message: undefined });
 
-      expect(() =>
+      await expect(
         handleFinalResult(
           result,
           makeSpinnerHandle(),
           makeSpinState(),
           makeUI()
         )
-      ).toThrow("Workflow returned an error");
+      ).rejects.toThrow("Workflow returned an error");
     });
   });
 
   describe("wizard.exit_code tag", () => {
-    test("tags wizard.exit_code with the workflow exit code", () => {
+    test("tags wizard.exit_code with the workflow exit code", async () => {
       const result = makeBailResult({ exitCode: 11 });
 
-      expect(() =>
+      await expect(
         handleFinalResult(
           result,
           makeSpinnerHandle(),
           makeSpinState(),
           makeUI()
         )
-      ).toThrow(WizardError);
+      ).rejects.toThrow(WizardError);
 
       expect(tags["wizard.exit_code"]).toBe(11);
     });
 
-    test("does not set wizard.exit_code when exitCode is absent", () => {
+    test("does not set wizard.exit_code when exitCode is absent", async () => {
       const result: WorkflowRunResult = {
         status: "failed",
         error: "network error",
       };
 
-      expect(() =>
+      await expect(
         handleFinalResult(
           result,
           makeSpinnerHandle(),
           makeSpinState(),
           makeUI()
         )
-      ).toThrow(WizardError);
+      ).rejects.toThrow(WizardError);
 
       expect(tags["wizard.exit_code"]).toBeUndefined();
     });
   });
 
   describe("WizardError message — result.error fallback", () => {
-    test("uses result.error when result.result is absent (plain workflow failure)", () => {
+    test("uses result.error when result.result is absent (plain workflow failure)", async () => {
       const result: WorkflowRunResult = {
         status: "failed",
         error: "upstream network timeout",
       };
 
-      expect(() =>
+      await expect(
         handleFinalResult(
           result,
           makeSpinnerHandle(),
           makeSpinState(),
           makeUI()
         )
-      ).toThrow("upstream network timeout");
+      ).rejects.toThrow("upstream network timeout");
     });
   });
 });

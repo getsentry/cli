@@ -46,7 +46,7 @@ vi.mock("../../../src/lib/dsn/index.js", async (importOriginal) => {
 
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as dsnIndex from "../../../src/lib/dsn/index.js";
-import { ApiError } from "../../../src/lib/errors.js";
+import { ApiError, WizardError } from "../../../src/lib/errors.js";
 
 vi.mock("../../../src/lib/init/org-prefetch.js", async (importOriginal) => {
   const actual =
@@ -115,6 +115,8 @@ function feedbackOutcomes(calls: MockCall[]): string[] {
 
 let resolveOrgPrefetchedSpy: ReturnType<typeof spyOn>;
 let listOrganizationsSpy: ReturnType<typeof spyOn>;
+let listTeamsSpy: ReturnType<typeof spyOn>;
+let getOrganizationSpy: ReturnType<typeof spyOn>;
 let getProjectSpy: ReturnType<typeof spyOn>;
 let tryGetPrimaryDsnSpy: ReturnType<typeof spyOn>;
 let getAuthTokenSpy: ReturnType<typeof spyOn>;
@@ -129,6 +131,24 @@ beforeEach(() => {
   listOrganizationsSpy = vi
     .spyOn(apiClient, "listOrganizations")
     .mockResolvedValue([{ id: "1", slug: "acme", name: "Acme" }]);
+  listTeamsSpy = vi.spyOn(apiClient, "listTeams").mockResolvedValue([
+    {
+      id: "1",
+      slug: "platform",
+      name: "Platform",
+      access: ["team:admin"],
+      isMember: true,
+    } as any,
+  ]);
+  getOrganizationSpy = vi
+    .spyOn(apiClient, "getOrganization")
+    .mockResolvedValue({
+      id: "1",
+      slug: "acme",
+      name: "Acme",
+      access: ["project:read"],
+      allowMemberProjectCreation: true,
+    } as any);
   getProjectSpy = vi.spyOn(apiClient, "getProject").mockResolvedValue({
     id: "42",
     slug: "my-app",
@@ -157,6 +177,8 @@ beforeEach(() => {
 afterEach(() => {
   resolveOrgPrefetchedSpy.mockRestore();
   listOrganizationsSpy.mockRestore();
+  listTeamsSpy.mockRestore();
+  getOrganizationSpy.mockRestore();
   getProjectSpy.mockRestore();
   tryGetPrimaryDsnSpy.mockRestore();
   getAuthTokenSpy.mockRestore();
@@ -302,20 +324,23 @@ describe("resolveInitContext", () => {
     expect(context?.existingProject).toBeUndefined();
   });
 
-  test("defers empty-org team creation until project creation", async () => {
-    resolveOrCreateTeamSpy.mockResolvedValue({ source: "deferred" } as any);
+  test("uses org-scoped creation when no Team Admin team is available", async () => {
+    listTeamsSpy.mockResolvedValueOnce([
+      {
+        id: "1",
+        slug: "frontend",
+        name: "Frontend",
+        access: ["team:read"],
+        isMember: true,
+      } as any,
+    ]);
 
     const { ui } = createMockUI();
     const context = await resolveInitContext(makeOptions(), ui);
 
     expect(context?.team).toBeUndefined();
-    expect(resolveOrCreateTeamSpy).toHaveBeenCalledWith(
-      "acme",
-      expect.objectContaining({
-        team: undefined,
-        deferAutoCreateOnEmptyOrg: true,
-      })
-    );
+    expect(getOrganizationSpy).toHaveBeenCalledWith("acme");
+    expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
   });
 
   test("clears the project when the user chooses to create new", async () => {
@@ -353,18 +378,76 @@ describe("resolveInitContext", () => {
     );
   });
 
-  test("uses the ambiguity callback when team selection requires it", async () => {
+  test("selects a Team Admin team over non-admin member teams", async () => {
+    listTeamsSpy.mockResolvedValueOnce([
+      {
+        id: "1",
+        slug: "frontend",
+        name: "Frontend",
+        access: ["team:read"],
+        isMember: true,
+      } as any,
+      {
+        id: "2",
+        slug: "platform",
+        name: "Platform",
+        access: ["team:admin"],
+        isMember: true,
+      } as any,
+    ]);
+
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
+
+    expect(context?.team).toBe("platform");
+    expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
+  });
+
+  test("prompts when multiple Team Admin teams are available", async () => {
     const { ui, respond } = createMockUI();
     respond.select("mobile");
-    resolveOrCreateTeamSpy.mockImplementation(async (_org, options) => {
-      const slug = await options.onAmbiguous?.([
-        { slug: "mobile", name: "Mobile", isMember: true },
-        { slug: "platform", name: "Platform", isMember: true },
-      ] as any);
-      return { slug, source: "auto-selected" };
-    });
+    listTeamsSpy.mockResolvedValueOnce([
+      {
+        id: "1",
+        slug: "mobile",
+        name: "Mobile",
+        access: ["team:admin"],
+        isMember: true,
+      } as any,
+      {
+        id: "2",
+        slug: "platform",
+        name: "Platform",
+        access: ["team:admin"],
+        isMember: true,
+      } as any,
+    ]);
 
     const context = await resolveInitContext(makeOptions({ yes: false }), ui);
+
+    expect(context?.team).toBe("mobile");
+  });
+
+  test("selects the first Team Admin team in --yes mode", async () => {
+    listTeamsSpy.mockResolvedValueOnce([
+      {
+        id: "1",
+        slug: "mobile",
+        name: "Mobile",
+        access: ["team:admin"],
+        isMember: true,
+      } as any,
+      {
+        id: "2",
+        slug: "platform",
+        name: "Platform",
+        access: ["team:admin"],
+        isMember: true,
+      } as any,
+    ]);
+
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions({ yes: true }), ui);
 
     expect(context?.team).toBe("mobile");
   });
@@ -462,7 +545,7 @@ describe("resolveInitContext", () => {
   });
 
   test("swallows 403 from listTeams and resolves context with team:undefined", async () => {
-    resolveOrCreateTeamSpy.mockRejectedValueOnce(
+    listTeamsSpy.mockRejectedValueOnce(
       new ApiError("Forbidden", 403, "No team:read access")
     );
 
@@ -471,6 +554,162 @@ describe("resolveInitContext", () => {
 
     // 403 is swallowed so the wizard can proceed to the org-scoped fallback
     expect(context).not.toBeNull();
+    expect(context?.team).toBeUndefined();
+    expect(getOrganizationSpy).toHaveBeenCalledWith("acme");
+    expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
+  });
+
+  test("preserves rich org-not-found guidance when implicit team lookup returns 404", async () => {
+    resolveOrgPrefetchedSpy.mockResolvedValueOnce({ org: "missing-org" });
+    listOrganizationsSpy.mockResolvedValueOnce([
+      { id: "1", slug: "acme", name: "Acme" },
+      { id: "2", slug: "beta", name: "Beta" },
+    ]);
+    listTeamsSpy.mockRejectedValueOnce(
+      new ApiError("Not found", 404, "Organization not found")
+    );
+
+    const { ui, calls } = createMockUI();
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
+      "Organization 'missing-org'"
+    );
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toContain("Your organizations:");
+    expect(errorCall?.message).toContain("acme");
+    expect(errorCall?.message).toContain("beta");
+  });
+
+  test("surfaces the enriched detail when implicit listTeams returns 401", async () => {
+    // member-disabled-over-limit: a 401 from listTeams must reach the user with
+    // its actionable detail, not a bare "Failed to list teams" + status line.
+    listTeamsSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Failed to list teams",
+        401,
+        "Your account is disabled in this organization because it is over its member limit."
+      )
+    );
+
+    const { ui, calls } = createMockUI();
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow();
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toContain("over its member limit");
+  });
+
+  test("surfaces the enriched detail when explicit --team listTeams returns 401", async () => {
+    resolveOrCreateTeamSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Failed to list teams",
+        401,
+        "Your account is disabled in this organization because it is over its member limit."
+      )
+    );
+
+    const { ui, calls } = createMockUI();
+    await expect(
+      resolveInitContext(makeOptions({ team: "backend" }), ui)
+    ).rejects.toThrow();
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toContain("over its member limit");
+  });
+
+  test("passes a pre-rendered WizardError through team resolution unchanged", async () => {
+    listTeamsSpy.mockRejectedValueOnce(
+      new WizardError("custom preflight failure")
+    );
+
+    const { ui, calls } = createMockUI();
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
+      "custom preflight failure"
+    );
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toBe("custom preflight failure");
+  });
+
+  test("surfaces a non-API error message from implicit team resolution", async () => {
+    listTeamsSpy.mockRejectedValueOnce(new Error("network down"));
+
+    const { ui, calls } = createMockUI();
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
+      "network down"
+    );
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toContain("network down");
+  });
+
+  test("fails early when listTeams is forbidden and member project creation is disabled", async () => {
+    listTeamsSpy.mockRejectedValueOnce(
+      new ApiError("Forbidden", 403, "No team:read access")
+    );
+    getOrganizationSpy.mockResolvedValueOnce({
+      id: "1",
+      slug: "acme",
+      name: "Acme",
+      access: ["project:read"],
+      allowMemberProjectCreation: false,
+    } as any);
+
+    const { ui } = createMockUI();
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
+      "Project creation is disabled for members"
+    );
+  });
+
+  test("fails early when member project creation is disabled and no Team Admin team exists", async () => {
+    listTeamsSpy.mockResolvedValueOnce([]);
+    getOrganizationSpy.mockResolvedValueOnce({
+      id: "1",
+      slug: "acme",
+      name: "Acme",
+      access: ["project:read"],
+      allowMemberProjectCreation: false,
+    } as any);
+
+    const { ui, calls } = createMockUI();
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
+      "Project creation is disabled for members"
+    );
+
+    const errorCall = calls.find(
+      (c): c is Extract<MockCall, { kind: "log.error" }> =>
+        c.kind === "log.error"
+    );
+    expect(errorCall?.message).toContain("sentry init acme/<project-slug>");
+  });
+
+  test("allows org-scoped creation when member creation is disabled but token has org:write", async () => {
+    listTeamsSpy.mockResolvedValueOnce([]);
+    getOrganizationSpy.mockResolvedValueOnce({
+      id: "1",
+      slug: "acme",
+      name: "Acme",
+      access: ["org:write"],
+      allowMemberProjectCreation: false,
+    } as any);
+
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
+
     expect(context?.team).toBeUndefined();
   });
 });

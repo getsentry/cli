@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.36.0-dev.0
+version: 0.38.0-dev.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -104,6 +104,26 @@ sentry log list --follow
 
 # Filter logs by severity
 sentry log list --query "severity:error"
+```
+
+#### Capture Events Locally (Spotlight)
+
+```bash
+# Run the app with the local server auto-enabled; tail errors/traces/logs.
+# No DSN needed — with no DSN, events go ONLY to the local server (nothing
+# reaches the user's Sentry org, no production quota). With a DSN set, the
+# SDK sends to both.
+sentry local run -- npm run dev          # or: python manage.py runserver, etc.
+
+# Watch only AI/agent (gen_ai, mcp) spans while iterating on an agent.
+sentry local -f ai
+
+# Server-side SDKs read SENTRY_SPOTLIGHT automatically. The CLI also injects
+# the URL under every framework client prefix (NEXT_PUBLIC_, VITE_, PUBLIC_,
+# NUXT_PUBLIC_, REACT_APP_, VUE_APP_, GATSBY_). Until the browser SDK reads
+# these automatically (getsentry/sentry-javascript#18198), reference the var
+# matching your framework in the client config:
+# Sentry.init({ spotlight: process.env.NEXT_PUBLIC_SENTRY_SPOTLIGHT ?? false })
 ```
 
 #### Explore the API Schema
@@ -323,10 +343,11 @@ Manage Sentry issues
 
 ### Event
 
-View and list Sentry events
+View, list, and send Sentry events
 
 - `sentry event view <org/project/event-id...>` — View details of one or more events
 - `sentry event list <issue>` — List events for an issue
+- `sentry event send <args...>` — Send a Sentry event
 
 → Full flags and examples: `references/event.md`
 
@@ -338,6 +359,23 @@ Make an authenticated API request
 
 → Full flags and examples: `references/api.md`
 
+### Alert
+
+Manage Sentry alert rules
+
+- `sentry alert issues list <org/project>` — List issue alert rules
+- `sentry alert issues view <org/project/rule-id-or-name>` — View an issue alert rule
+- `sentry alert issues create <target>` — Create an issue alert rule
+- `sentry alert issues delete <org/project/rule-id-or-name>` — Delete an issue alert rule
+- `sentry alert issues edit <org/project/rule-id-or-name>` — Edit an issue alert rule
+- `sentry alert metrics list <target>` — List metric alert rules
+- `sentry alert metrics view <org/rule-id-or-name>` — View a metric alert rule
+- `sentry alert metrics create <org>` — Create a metric alert rule
+- `sentry alert metrics delete <org/rule-id-or-name>` — Delete a metric alert rule
+- `sentry alert metrics edit <org/rule-id-or-name>` — Edit a metric alert rule
+
+→ Full flags and examples: `references/alert.md`
+
 ### CLI
 
 CLI-related commands
@@ -347,9 +385,35 @@ CLI-related commands
 - `sentry cli fix` — Diagnose and repair CLI database issues
 - `sentry cli import` — Import settings from legacy .sentryclirc files
 - `sentry cli setup` — Configure shell integration
+- `sentry cli uninstall` — Uninstall Sentry CLI
 - `sentry cli upgrade <version>` — Update the Sentry CLI to the latest version
 
 → Full flags and examples: `references/cli.md`
+
+### Code-mappings
+
+Manage code mappings for stack trace linking
+
+- `sentry code-mappings upload <path>` — Upload code mappings for stack trace linking
+
+→ Full flags and examples: `references/code-mappings.md`
+
+### Dart-symbol-map
+
+Work with Dart/Flutter symbol maps
+
+- `sentry dart-symbol-map upload <path>` — Upload a Dart/Flutter symbol map to Sentry
+
+→ Full flags and examples: `references/dart-symbol-map.md`
+
+### Debug-files
+
+Work with debug information files
+
+- `sentry debug-files check <path>` — Inspect a debug information file
+- `sentry debug-files bundle-jvm <path>` — Create a JVM source bundle for source context
+
+→ Full flags and examples: `references/debug-files.md`
 
 ### Dashboard
 
@@ -366,6 +430,15 @@ Manage Sentry dashboards
 
 → Full flags and examples: `references/dashboard.md`
 
+### Proguard
+
+Work with ProGuard/R8 mapping files
+
+- `sentry proguard upload <path...>` — Upload ProGuard/R8 mapping files to Sentry
+- `sentry proguard uuid <path>` — Compute the UUID for a ProGuard mapping file
+
+→ Full flags and examples: `references/proguard.md`
+
 ### Replay
 
 Search and inspect Session Replays
@@ -380,13 +453,15 @@ Search and inspect Session Replays
 Work with Sentry releases
 
 - `sentry release list <org/project>` — List releases with adoption and health metrics
-- `sentry release view <org/version...>` — View release details with health metrics
-- `sentry release create <org/version...>` — Create a release
-- `sentry release finalize <org/version...>` — Finalize a release
-- `sentry release delete <org/version...>` — Delete a release
-- `sentry release deploy <org/version environment name...>` — Create a deploy for a release
-- `sentry release deploys <org/version...>` — List deploys for a release
-- `sentry release set-commits <org/version...>` — Set commits for a release
+- `sentry release view <org/version>` — View release details with health metrics
+- `sentry release create <org/version>` — Create a release
+- `sentry release finalize <org/version>` — Finalize a release
+- `sentry release delete <org/version>` — Delete a release
+- `sentry release archive <org/version>` — Archive a release
+- `sentry release restore <org/version>` — Restore an archived release
+- `sentry release deploy <org/version> <environment> <name>` — Create a deploy for a release
+- `sentry release deploys <org/version>` — List deploys for a release
+- `sentry release set-commits <org/version>` — Set commits for a release
 - `sentry release propose-version` — Propose a release version
 
 → Full flags and examples: `references/release.md`
@@ -424,12 +499,22 @@ View Sentry logs
 
 → Full flags and examples: `references/log.md`
 
+### Monitor
+
+Work with Sentry cron monitors
+
+- `sentry monitor run <monitor-slug command...>` — Wrap a command with cron monitor check-ins
+- `sentry monitor list <org/project>` — List cron monitors
+
+→ Full flags and examples: `references/monitor.md`
+
 ### Sourcemap
 
 Manage sourcemaps
 
 - `sentry sourcemap inject <directory>` — Inject debug IDs into JavaScript files and sourcemaps
 - `sentry sourcemap upload <directory>` — Upload sourcemaps to Sentry
+- `sentry sourcemap resolve <directory>` — Resolve and report sourcemap linkage for JavaScript files
 
 → Full flags and examples: `references/sourcemap.md`
 

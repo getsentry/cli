@@ -228,3 +228,50 @@ export function parseRemoteUrl(url: string): string | undefined {
 
   return;
 }
+
+/**
+ * Infer the repository name from local git remotes.
+ *
+ * Tries remotes in priority order: upstream → origin. Falls back to the
+ * next remote if the URL can't be parsed.
+ *
+ * @param cwd - Working directory
+ * @returns The repo name and which remote it came from, or undefined
+ */
+export function inferRepositoryName(
+  cwd?: string
+): { name: string; remote: string } | undefined {
+  for (const remote of ["upstream", "origin"]) {
+    try {
+      const url = git(["remote", "get-url", remote], cwd);
+      const name = parseRemoteUrl(url);
+      if (name) {
+        return { name, remote };
+      }
+    } catch {
+      // Remote doesn't exist, try next
+    }
+  }
+  return;
+}
+
+/**
+ * Infer the default branch from a git remote's HEAD ref.
+ *
+ * @param remote - The remote name (e.g., "origin", "upstream")
+ * @param cwd - Working directory
+ * @returns The branch name, or "main" as fallback
+ */
+export function inferDefaultBranch(remote: string, cwd?: string): string {
+  try {
+    const output = git(["symbolic-ref", `refs/remotes/${remote}/HEAD`], cwd);
+    // refs/remotes/origin/main → main
+    // refs/remotes/origin/release/2.0 → release/2.0
+    const prefix = `refs/remotes/${remote}/`;
+    return output.startsWith(prefix)
+      ? output.slice(prefix.length) || "main"
+      : "main";
+  } catch {
+    return "main";
+  }
+}

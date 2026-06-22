@@ -28,7 +28,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, renameSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -133,6 +133,8 @@ async function bundleJs(): Promise<boolean> {
         "react/*",
         "react-reconciler",
         "react-reconciler/*",
+        // The DIF loader resolves this .wasm at runtime (dev only); never bundle it.
+        "@sentry/symbolic/symbolic_bg.wasm",
       ],
       sourcemap: "linked",
       minify: true,
@@ -309,6 +311,19 @@ async function compileAllTargets(
     assetArgs.push("--assets", INK_SIDECAR);
   }
 
+  // Embed the DIF parser WASM (from @sentry/symbolic) as a SEA asset. The
+  // runtime loads it via node:sea.getRawAsset(DIF_WASM_ASSET_KEY) — the asset
+  // key MUST equal this path string (see src/lib/dif/index.ts).
+  const DIF_WASM_SRC = "node_modules/@sentry/symbolic/symbolic_bg.wasm";
+  if (!existsSync(DIF_WASM_SRC)) {
+    throw new Error(
+      `Missing @sentry/symbolic WASM at ${DIF_WASM_SRC}. Run: pnpm install`
+    );
+  }
+  const DIF_WASM = `${BUILD_DIR}/symbolic_bg.wasm`;
+  copyFileSync(DIF_WASM_SRC, DIF_WASM);
+  assetArgs.push("--assets", DIF_WASM);
+
   console.log(
     `  Step 2: Compiling ${platforms.length} target(s) (Node SEA via fossilize)...`
   );
@@ -321,6 +336,12 @@ async function compileAllTargets(
         fossilizeBin,
         "--no-bundle",
         "--hole-punch",
+        // Make the binary ignore NODE_OPTIONS so user V8 flags (e.g.
+        // `NODE_OPTIONS=--max-old-space-size=8192`) don't change V8's
+        // flag-hash and reject the embedded code cache ("Code cache data
+        // rejected"). process.env is untouched, so child processes still
+        // inherit the user's NODE_OPTIONS.
+        "--ignore-node-options",
         "--output-name",
         "sentry",
         "--platforms",

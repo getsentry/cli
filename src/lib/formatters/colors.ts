@@ -88,16 +88,22 @@ export const header = (text: string): string => muted(text);
 
 const STATUS_COLORS: Record<IssueStatus, (text: string) => string> = {
   resolved: green,
+  resolvedInNextRelease: green,
   unresolved: yellow,
   ignored: muted,
+  muted,
 };
 
 /**
  * Color text based on issue status (case-insensitive)
  */
 export function statusColor(text: string, status: string | undefined): string {
-  const normalizedStatus = status?.toLowerCase() as IssueStatus;
-  const colorFn = STATUS_COLORS[normalizedStatus] ?? STATUS_COLORS.unresolved;
+  // Try exact match first (handles camelCase like resolvedInNextRelease),
+  // then fall back to lowercase (handles unexpected uppercase from older instances).
+  const colorFn =
+    STATUS_COLORS[status as IssueStatus] ??
+    STATUS_COLORS[status?.toLowerCase() as IssueStatus] ??
+    STATUS_COLORS.unresolved;
   return colorFn(text);
 }
 

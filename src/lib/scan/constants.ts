@@ -92,23 +92,43 @@ export const DEFAULT_SKIP_DIRS: readonly string[] = [
   ".svn",
   // Node / JS
   "node_modules",
+  "bower_components",
+  ".pnpm-store",
+  ".parcel-cache",
   // Python
   "__pycache__",
   "venv",
   ".venv",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".tox",
+  ".nox",
   // General build outputs
   "dist",
   "build",
+  "out",
   "target",
   ".next",
   ".nuxt",
   ".output",
+  ".svelte-kit",
+  ".angular",
+  ".serverless",
+  ".dart_tool",
+  ".build",
+  "DerivedData",
+  "obj",
+  "CMakeFiles",
+  "cmake-build-debug",
+  "cmake-build-release",
   // Go / Ruby / Gradle
   "vendor",
   ".gradle",
   ".bundle",
   // Coverage + caches
   "coverage",
+  "htmlcov",
   ".cache",
   ".turbo",
 ];
@@ -130,12 +150,6 @@ export const DSN_ADDITIONAL_SKIP_DIRS: readonly string[] = [
   "__mocks__",
   "fixtures",
   "__fixtures__",
-  // Python cache dirs the generic list doesn't cover
-  ".pytest_cache",
-  ".mypy_cache",
-  ".ruff_cache",
-  // Alt build output name
-  "out",
 ];
 
 /**

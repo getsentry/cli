@@ -14,8 +14,12 @@
  * Canonical Sentry scopes, mirrored from getsentry/sentry
  * `src/sentry/conf/server.py` SENTRY_SCOPES. Excludes OIDC scopes
  * (`openid`/`profile`/`email`) and internal-only `org:superuser`.
+ *
+ * Exported so `auth login --scope` can validate user-supplied scope values
+ * against the authoritative set rather than the narrower subset the CLI
+ * requests by default ({@link OAUTH_SCOPES}).
  */
-const SENTRY_SCOPES = [
+export const SENTRY_SCOPES = [
   "org:read",
   "org:write",
   "org:admin",

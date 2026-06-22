@@ -490,7 +490,8 @@ function renderNamespaceNode(node: NamespaceNode, indent: string): string {
   // Render child namespaces
   for (const [name, child] of node.children) {
     const childBody = renderNamespaceNode(child, `${indent}  `);
-    parts.push(`${indent}${name}: {\n${childBody}\n${indent}},`);
+    const key = needsQuoting(name) ? `"${name}"` : name;
+    parts.push(`${indent}${key}: {\n${childBody}\n${indent}},`);
   }
 
   return parts.join("\n");
@@ -508,7 +509,8 @@ function renderNamespaceTypeNode(node: NamespaceNode, indent: string): string {
   // Render child namespaces as nested object types
   for (const [name, child] of node.children) {
     const childBody = renderNamespaceTypeNode(child, `${indent}  `);
-    parts.push(`${indent}${name}: {\n${childBody}\n${indent}};`);
+    const key = needsQuoting(name) ? `"${name}"` : name;
+    parts.push(`${indent}${key}: {\n${childBody}\n${indent}};`);
   }
 
   return parts.join("\n");

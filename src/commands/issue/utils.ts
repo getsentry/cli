@@ -61,7 +61,7 @@ export const issueIdPositional = {
     {
       placeholder: "issue",
       brief:
-        "Issue: @latest, @most_frequent, <org>/ID, <project>-suffix, ID, or suffix",
+        "Issue: @latest, @most_frequent, <org>/ID, <org>/<project>#ID, <project>-suffix, ID, or suffix",
       parse: String,
     },
   ],
@@ -252,8 +252,8 @@ async function resolveProjectSearch(
   let dsnTarget: Awaited<ReturnType<typeof resolveFromDsn>> | undefined;
   try {
     dsnTarget = await resolveFromDsn(cwd);
-  } catch {
-    // DSN resolution failed — fall through to full search
+  } catch (error) {
+    log.debug("DSN resolution failed, falling through to full search", error);
   }
   if (
     dsnTarget &&

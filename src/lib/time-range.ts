@@ -64,15 +64,18 @@ const PERIOD_UNITS = new Set(Object.keys(UNIT_SECONDS));
  * without causing constant regeneration churn in committed skill files.
  */
 const EXAMPLE_START = (() => {
-  const d = new Date();
-  d.setDate(1);
-  d.setMonth(d.getMonth() - 1);
-  return d.toISOString().slice(0, 10);
+  const now = new Date();
+  const previousMonthStartUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)
+  );
+  return previousMonthStartUtc.toISOString().slice(0, 10);
 })();
 const EXAMPLE_END = (() => {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().slice(0, 10);
+  const now = new Date();
+  const currentMonthStartUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  );
+  return currentMonthStartUtc.toISOString().slice(0, 10);
 })();
 
 /** Brief text for --period flag help, shared across commands */
