@@ -3,9 +3,9 @@
  *
  * Provides two things:
  *
- * 1. **Silencing rules** — `OutputError`, expected-state `AuthError`, and
- *    401–499 `ApiError` are not sent to Sentry as issues. A
- *    `cli.error.silenced` metric preserves volume + user/org context.
+ * 1. **Silencing rules** — `OutputError`, `ResolutionError`, expected-state
+ *    `AuthError`, and 401–499 `ApiError` are not sent to Sentry as issues.
+ *    A `cli.error.silenced` metric preserves volume + user/org context.
  *
  * 2. **Grouping tags** — enriches every error event with `cli_error.*` tags
  *    that Sentry's server-side fingerprint rules use for stable grouping.
@@ -42,7 +42,11 @@ import {
  * Reasons an error may be silenced (not sent to Sentry as an issue).
  * Exposed as the `reason` attribute on the `cli.error.silenced` metric.
  */
-type SilenceReason = "output_error" | "auth_expected" | "api_user_error" | "user_input_error";
+type SilenceReason =
+  | "output_error"
+  | "auth_expected"
+  | "api_user_error"
+  | "user_input_error";
 
 /**
  * Classify whether an error should be silenced.

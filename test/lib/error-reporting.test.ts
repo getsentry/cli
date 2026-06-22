@@ -2,7 +2,7 @@
  * Unit tests for the central error reporting helper.
  *
  * Covers:
- * - Silencing rules (OutputError / expected AuthError / 401–499 ApiError)
+ * - Silencing rules (OutputError / ResolutionError / expected AuthError / 401–499 ApiError)
  * - Grouping tag extraction (extractResourceKind)
  * - Tag enrichment in beforeSend (enrichEventWithGroupingTags)
  * - End-to-end behavior of reportCliError (metric emission + capture)
@@ -244,12 +244,16 @@ describe("classifySilenced", () => {
     expect(classifySilenced(new ApiError("x", status))).toBeNull();
   });
 
+  test("silences ResolutionError as user_input_error", () => {
+    expect(
+      classifySilenced(
+        new ResolutionError("Project 'x'", "not found", "sentry issue list")
+      )
+    ).toBe("user_input_error");
+  });
+
   test.each([
     ["ContextError", new ContextError("Organization", "sentry org view <x>")],
-    [
-      "ResolutionError",
-      new ResolutionError("Project 'x'", "not found", "sentry issue list"),
-    ],
     ["ValidationError", new ValidationError("bad")],
     ["SeerError", new SeerError("not_enabled")],
     ["ConfigError", new ConfigError("bad")],
@@ -447,14 +451,25 @@ describe("reportCliError integration", () => {
     expect(traceErr["cli_error.kind"]).not.toBe(eventErr["cli_error.kind"]);
   });
 
-  test("captures ResolutionError", () => {
-    const err = new ResolutionError(
-      "Project 'x'",
-      "not found",
-      "sentry issue list <org>/x"
+  test("silences ResolutionError and emits metric", () => {
+    reportCliError(
+      new ResolutionError(
+        "Project 'x'",
+        "not found",
+        "sentry issue list <org>/x"
+      )
     );
-    reportCliError(err);
-    expect(captureSpy).toHaveBeenCalledWith(err);
+    expect(captureSpy).not.toHaveBeenCalled();
+    expect(metricSpy).toHaveBeenCalledWith(
+      "cli.error.silenced",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          error_class: "ResolutionError",
+          reason: "user_input_error",
+        }),
+      })
+    );
   });
 
   test("captures SeerError (marketing dashboard)", () => {
