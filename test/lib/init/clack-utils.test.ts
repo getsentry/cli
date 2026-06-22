@@ -9,6 +9,9 @@ import {
   abortIfCancelled,
   featureHint,
   featureLabel,
+  PROGRESS_ROTATE_INTERVAL_MS,
+  STEP_ACTIVE_LABELS,
+  STEP_PROGRESS_MESSAGES,
   sortFeatures,
   WizardCancelledError,
 } from "../../../src/lib/init/clack-utils.js";
@@ -123,5 +126,32 @@ describe("sortFeatures", () => {
       "unknown",
       "another",
     ]);
+  });
+});
+
+describe("STEP_PROGRESS_MESSAGES", () => {
+  test("plan-codemods has multiple rotating messages", () => {
+    const messages = STEP_PROGRESS_MESSAGES["plan-codemods"];
+    expect(messages).toBeDefined();
+    expect(messages!.length).toBeGreaterThanOrEqual(3);
+    for (const msg of messages!) {
+      expect(msg).toMatch(/\.\.\.$/);
+    }
+  });
+
+  test("detect-platform has multiple rotating messages", () => {
+    const messages = STEP_PROGRESS_MESSAGES["detect-platform"];
+    expect(messages).toBeDefined();
+    expect(messages!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("every step with progress messages also has an active label", () => {
+    for (const stepId of Object.keys(STEP_PROGRESS_MESSAGES)) {
+      expect(STEP_ACTIVE_LABELS[stepId]).toBeDefined();
+    }
+  });
+
+  test("rotation interval is a positive number", () => {
+    expect(PROGRESS_ROTATE_INTERVAL_MS).toBeGreaterThan(0);
   });
 });
