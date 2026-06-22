@@ -224,10 +224,10 @@ type ProgressRotationHandle = {
   /**
    * Pause rotation so recovery paths (e.g. "Reconnecting...") can
    * set the spinner without the next tick overwriting it.
+   * Recovery always ends with stop() (via the finally block), so
+   * there is no corresponding resume().
    */
   pause: () => void;
-  /** Resume rotation after a paused recovery completes. */
-  resume: () => void;
 };
 
 const NOOP_ROTATION: ProgressRotationHandle = {
@@ -235,9 +235,6 @@ const NOOP_ROTATION: ProgressRotationHandle = {
     // No rotating messages for this step.
   },
   pause: () => {
-    // noop
-  },
-  resume: () => {
     // noop
   },
 };
@@ -252,9 +249,11 @@ const NOOP_ROTATION: ProgressRotationHandle = {
  * After exhausting all messages, it appends elapsed time so the user
  * knows the system is still working.
  *
- * The handle exposes `pause()`/`resume()` so that recovery paths inside
- * `resumeWithRecovery` can temporarily suppress rotation while showing
- * "Reconnecting..." without the next tick overwriting it.
+ * The handle exposes `pause()` so that recovery paths inside
+ * `resumeWithRecovery` can suppress rotation while showing
+ * "Reconnecting..." without the next tick overwriting it. Recovery
+ * always ends with `stop()` (via the `finally` block in the main loop),
+ * so there is no corresponding `resume()`.
  */
 function startProgressRotation(
   stepId: string,
@@ -290,9 +289,6 @@ function startProgressRotation(
     },
     pause: () => {
       paused = true;
-    },
-    resume: () => {
-      paused = false;
     },
   };
 }
