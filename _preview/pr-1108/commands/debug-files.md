@@ -12,6 +12,18 @@ Work with debug information files
 
 [Section titled “Commands”](#commands)
 
+### `sentry debug-files check <path>`
+
+[Section titled “sentry debug-files check <path>”](#sentry-debug-files-check-path)
+
+Inspect a debug information file
+
+**Arguments:**
+
+| Argument | Description |
+| --- | --- |
+| `<path>` | Path to the debug information file |
+
 ### `sentry debug-files bundle-jvm <path>`
 
 [Section titled “sentry debug-files bundle-jvm <path>”](#sentry-debug-files-bundle-jvm-path)
@@ -40,6 +52,7 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 Terminal window
 
 ```
+# Inspect a debug information file (auto-detects the format)sentry debug-files check ./libexample.sosentry debug-files check MyApp.dSYM/Contents/Resources/DWARF/MyAppsentry debug-files check ./app.pdb --json
 # Bundle JVM sources with a debug IDsentry debug-files bundle-jvm --output ./out --debug-id <uuid> ./src
 # Exclude additional directoriessentry debug-files bundle-jvm --output ./out --debug-id <uuid> --exclude generated --exclude build-tools ./src
 # Output as JSONsentry debug-files bundle-jvm --output ./out --debug-id <uuid> --json ./src
