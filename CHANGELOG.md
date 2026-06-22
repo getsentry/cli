@@ -1,6 +1,34 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.37.0
+
+### New Features ✨
+
+- Remove 25 response-type `as unknown as` casts from API layer by @jared-outpost in [#1090](https://github.com/getsentry/cli/pull/1090)
+- Implement `code-mappings upload` command by @BYK in [#1086](https://github.com/getsentry/cli/pull/1086)
+- Implement `dart-symbol-map upload` command by @BYK in [#1085](https://github.com/getsentry/cli/pull/1085)
+- Implement `cli uninstall` command by @BYK in [#1084](https://github.com/getsentry/cli/pull/1084)
+- Implement `bash-hook` command for shell error reporting by @BYK in [#1083](https://github.com/getsentry/cli/pull/1083)
+
+### Bug Fixes 🐛
+
+- (build) Ignore NODE_OPTIONS in the SEA binary to keep the V8 code cache valid by @BYK in [#1092](https://github.com/getsentry/cli/pull/1092)
+- (dashboard) Guard against undefined titles in list and resolve by @jared-outpost in [#1097](https://github.com/getsentry/cli/pull/1097)
+- (init) Show actionable error when org is over its member limit by @betegon in [#1091](https://github.com/getsentry/cli/pull/1091)
+- Handle slashes in default branch names for code-mappings by @BYK in [#1088](https://github.com/getsentry/cli/pull/1088)
+- Use shared git helpers for code-mappings repo inference by @BYK in [#1087](https://github.com/getsentry/cli/pull/1087)
+- Resolve silent error swallowing and unsafe type coercion by @BYK in [#1082](https://github.com/getsentry/cli/pull/1082)
+
+### Documentation 📚
+
+- Reset .lore.md with latest state by @BYK in [9d3d21e9](https://github.com/getsentry/cli/commit/9d3d21e95ef78e40c1fbb823e09b218314bdb5a4)
+- Enable Starlight agent markdown by @dcramer in [#1093](https://github.com/getsentry/cli/pull/1093)
+
+### Internal Changes 🔧
+
+- Regenerate docs by @github-actions[bot] in [04b84fb8](https://github.com/getsentry/cli/commit/04b84fb8fbf61becbbd54e8f164f61c092ae5ee8)
+
 ## 0.36.0
 
 ### New Features ✨

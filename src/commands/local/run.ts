@@ -20,6 +20,7 @@ import { buildCommand } from "../../lib/command.js";
 import { detectDevCommand } from "../../lib/dev-script.js";
 import { CliError, EXIT, ValidationError } from "../../lib/errors.js";
 import { bold } from "../../lib/formatters/colors.js";
+import { formatEnvelopeLines } from "../../lib/formatters/local.js";
 import { logger } from "../../lib/logger.js";
 import {
   buildApp,
@@ -91,6 +92,48 @@ function parseTimeout(value: string): number {
  */
 function isPackageJsonSource(source: string): boolean {
   return source.startsWith("package.json");
+}
+
+/** State for a background server started by `local run`. */
+type BackgroundServer = {
+  url: string;
+  cleanup: () => Promise<void>;
+};
+
+/**
+ * Start a background dev server and subscribe to its buffer so incoming
+ * envelopes are printed inline, matching the behavior of `sentry local serve`.
+ */
+async function startBackgroundServer(
+  port: number,
+  host: string
+): Promise<BackgroundServer> {
+  const buffer = createSpotlightBuffer(BUFFER_SIZE);
+  const app = buildApp(buffer);
+  const { server, port: boundPort } = await tryListen(app, port, host);
+  const url = `http://${host}:${boundPort}`;
+
+  const noFilters = new Set<never>();
+  const subscriptionId = buffer.subscribe((container) => {
+    try {
+      for (const line of formatEnvelopeLines(container, noFilters)) {
+        logger.log(line);
+      }
+    } catch (err) {
+      logger.debug(
+        `Failed to format envelope: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  });
+
+  return {
+    url,
+    cleanup: async () => {
+      buffer.unsubscribe(subscriptionId);
+      logger.info("Stopping background server...");
+      await shutdownServer(server);
+    },
+  };
 }
 
 /** Augment PATH with `./node_modules/.bin` for Node project scripts. */
@@ -228,20 +271,13 @@ export const runCommand = buildCommand({
     }
 
     let url = `http://${flags.host}:${flags.port}`;
-    let bgServer: Server | undefined;
+    let bg: BackgroundServer | undefined;
 
     const alreadyRunning = await isServerRunning(url);
     if (!alreadyRunning) {
       logger.info("No server detected, starting one in the background...");
-      const buffer = createSpotlightBuffer(BUFFER_SIZE);
-      const app = buildApp(buffer);
-      const { server, port: boundPort } = await tryListen(
-        app,
-        flags.port,
-        flags.host
-      );
-      bgServer = server;
-      url = `http://${flags.host}:${boundPort}`;
+      bg = await startBackgroundServer(flags.port, flags.host);
+      url = bg.url;
       logger.info(`Background server listening on ${bold(url)}`);
     }
 
@@ -260,8 +296,8 @@ export const runCommand = buildCommand({
         stdio: "inherit",
       });
     } catch (err) {
-      if (bgServer) {
-        await shutdownServer(bgServer);
+      if (bg) {
+        await bg.cleanup();
       }
       throw new CliError(
         `Failed to start "${args[0]}": ${err instanceof Error ? err.message : String(err)}`,
@@ -306,9 +342,8 @@ export const runCommand = buildCommand({
       }
       process.removeListener("SIGINT", onSigint);
       process.removeListener("SIGTERM", onSigterm);
-      if (bgServer) {
-        logger.info("Stopping background server...");
-        await shutdownServer(bgServer);
+      if (bg) {
+        await bg.cleanup();
       }
     }
 

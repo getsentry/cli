@@ -218,3 +218,32 @@ export const STEP_LABELS_SHORT: Record<string, string> = {
 export function shortStepLabel(stepId: string): string {
   return STEP_LABELS_SHORT[stepId] ?? STEP_LABELS[stepId] ?? stepId;
 }
+
+/**
+ * Rotating progress messages shown while the CLI waits on a long-running
+ * server-side phase that doesn't emit intermediate suspends. The messages
+ * cycle on a timer so the spinner text changes and the UI doesn't look
+ * frozen.
+ *
+ * Only steps with known long waits need entries here. Steps that suspend
+ * frequently (read-files, apply-codemods) already update the spinner via
+ * the suspend payload's `detail` field.
+ */
+export const STEP_PROGRESS_MESSAGES: Record<string, string[]> = {
+  "plan-codemods": [
+    "Fetching SDK documentation...",
+    "Analyzing integration requirements...",
+    "Generating code modification plan...",
+    "Reviewing planned changes for correctness...",
+    "Finalizing integration plan...",
+  ],
+  "detect-platform": [
+    "Scanning project files...",
+    "Identifying framework and language...",
+    "Analyzing project configuration...",
+    "Determining SDK compatibility...",
+  ],
+};
+
+/** Interval between rotating progress messages (ms). */
+export const PROGRESS_ROTATE_INTERVAL_MS = 12_000;

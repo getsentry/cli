@@ -1652,3 +1652,194 @@ describe("runWizard — additional coverage", () => {
     expect(messages.some((m) => m.includes("javascript-nextjs"))).toBe(true);
   });
 });
+
+describe("runWizard — progress rotation for long-running steps", () => {
+  test("rotates spinner messages during plan-codemods resume", async () => {
+    vi.useFakeTimers();
+    const toolPayload = {
+      type: "tool" as const,
+      operation: "read-files",
+      cwd: "/tmp/test",
+      params: { paths: ["src/app.tsx"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["plan-codemods"]],
+      steps: { "plan-codemods": { suspendPayload: toolPayload } },
+    };
+
+    // resumeAsync will block until we advance timers, then resolve
+    let resolveResume!: (value: unknown) => void;
+    const resumePromise = new Promise((resolve) => {
+      resolveResume = resolve;
+    });
+    const resumeAsyncMock = vi.fn(() => resumePromise);
+    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+      capturedClientOptions.push(
+        (
+          this as unknown as {
+            options: { abortSignal?: AbortSignal; retries?: number };
+          }
+        ).options
+      );
+      return {
+        createRun: vi.fn(() =>
+          Promise.resolve({
+            runId: "test-run-id",
+            startAsync: startAsyncMock,
+            resumeAsync: resumeAsyncMock,
+          })
+        ),
+        runById: runByIdMock,
+      } as any;
+    });
+
+    const runPromise = runWizard(makeOptions());
+
+    // Let the wizard start and reach the resume call
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Advance past one rotation interval
+    await vi.advanceTimersByTimeAsync(12_000);
+
+    // Check that the spinner received a rotating message
+    const messagesAfterFirstRotation = spinnerMock.message.mock.calls.map(
+      (c: unknown[]) => c[0] as string
+    );
+    expect(
+      messagesAfterFirstRotation.some((m) =>
+        m.includes("Fetching SDK documentation")
+      )
+    ).toBe(true);
+
+    // Advance past another rotation interval
+    await vi.advanceTimersByTimeAsync(12_000);
+
+    const messagesAfterSecondRotation = spinnerMock.message.mock.calls.map(
+      (c: unknown[]) => c[0] as string
+    );
+    expect(
+      messagesAfterSecondRotation.some((m) =>
+        m.includes("Analyzing integration requirements")
+      )
+    ).toBe(true);
+
+    // Resolve the resume and let the wizard finish
+    resolveResume({ status: "success" });
+    await vi.advanceTimersByTimeAsync(100);
+    await runPromise;
+  });
+
+  test("appends elapsed time after exhausting all progress messages", async () => {
+    vi.useFakeTimers();
+    const toolPayload = {
+      type: "tool" as const,
+      operation: "read-files",
+      cwd: "/tmp/test",
+      params: { paths: ["src/app.tsx"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["plan-codemods"]],
+      steps: { "plan-codemods": { suspendPayload: toolPayload } },
+    };
+
+    let resolveResume!: (value: unknown) => void;
+    const resumePromise = new Promise((resolve) => {
+      resolveResume = resolve;
+    });
+    const resumeAsyncMock = vi.fn(() => resumePromise);
+    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+      capturedClientOptions.push(
+        (
+          this as unknown as {
+            options: { abortSignal?: AbortSignal; retries?: number };
+          }
+        ).options
+      );
+      return {
+        createRun: vi.fn(() =>
+          Promise.resolve({
+            runId: "test-run-id",
+            startAsync: startAsyncMock,
+            resumeAsync: resumeAsyncMock,
+          })
+        ),
+        runById: runByIdMock,
+      } as any;
+    });
+
+    const runPromise = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Advance past all 5 plan-codemods messages (5 * 12s = 60s)
+    // plus one more interval to trigger the elapsed time display
+    await vi.advanceTimersByTimeAsync(72_000);
+
+    const messages = spinnerMock.message.mock.calls.map(
+      (c: unknown[]) => c[0] as string
+    );
+    // After exhausting messages, should show elapsed time
+    expect(messages.some((m) => /\(\d+s\)/.test(m))).toBe(true);
+
+    resolveResume({ status: "success" });
+    await vi.advanceTimersByTimeAsync(100);
+    await runPromise;
+  });
+
+  test("does not rotate messages for steps without progress messages", async () => {
+    vi.useFakeTimers();
+    const toolPayload = {
+      type: "tool" as const,
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["npm install @sentry/node"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["install-deps"]],
+      steps: { "install-deps": { suspendPayload: toolPayload } },
+    };
+
+    let resolveResume!: (value: unknown) => void;
+    const resumePromise = new Promise((resolve) => {
+      resolveResume = resolve;
+    });
+    const resumeAsyncMock = vi.fn(() => resumePromise);
+    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+      capturedClientOptions.push(
+        (
+          this as unknown as {
+            options: { abortSignal?: AbortSignal; retries?: number };
+          }
+        ).options
+      );
+      return {
+        createRun: vi.fn(() =>
+          Promise.resolve({
+            runId: "test-run-id",
+            startAsync: startAsyncMock,
+            resumeAsync: resumeAsyncMock,
+          })
+        ),
+        runById: runByIdMock,
+      } as any;
+    });
+
+    const runPromise = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(100);
+
+    const messagesBefore = spinnerMock.message.mock.calls.length;
+
+    // Advance past a rotation interval
+    await vi.advanceTimersByTimeAsync(12_000);
+
+    const messagesAfter = spinnerMock.message.mock.calls.length;
+    // No new messages should have been added by the rotation timer
+    expect(messagesAfter).toBe(messagesBefore);
+
+    resolveResume({ status: "success" });
+    await vi.advanceTimersByTimeAsync(100);
+    await runPromise;
+  });
+});

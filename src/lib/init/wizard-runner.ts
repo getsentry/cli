@@ -33,8 +33,10 @@ import {
 import { logger } from "../logger.js";
 import {
   abortIfCancelled,
+  PROGRESS_ROTATE_INTERVAL_MS,
   STEP_ACTIVE_LABELS,
   STEP_LABELS,
+  STEP_PROGRESS_MESSAGES,
   WizardCancelledError,
 } from "./clack-utils.js";
 import {
@@ -214,6 +216,81 @@ function describePostTool(payload: SuspendPayload): string | undefined {
     default:
       return;
   }
+}
+
+type ProgressRotationHandle = {
+  /** Stop the rotation timer permanently. */
+  stop: () => void;
+  /**
+   * Pause rotation so recovery paths (e.g. "Reconnecting...") can
+   * set the spinner without the next tick overwriting it.
+   * Recovery always ends with stop() (via the finally block), so
+   * there is no corresponding resume().
+   */
+  pause: () => void;
+};
+
+const NOOP_ROTATION: ProgressRotationHandle = {
+  stop: () => {
+    // No rotating messages for this step.
+  },
+  pause: () => {
+    // noop
+  },
+};
+
+/**
+ * Start a rotating progress message timer for steps that have long
+ * server-side phases without intermediate suspends. Returns a handle
+ * to stop or pause the timer.
+ *
+ * The timer cycles through {@link STEP_PROGRESS_MESSAGES} for the given
+ * step, updating the spinner text every {@link PROGRESS_ROTATE_INTERVAL_MS}.
+ * After exhausting all messages, it appends elapsed time so the user
+ * knows the system is still working.
+ *
+ * The handle exposes `pause()` so that recovery paths inside
+ * `resumeWithRecovery` can suppress rotation while showing
+ * "Reconnecting..." without the next tick overwriting it. Recovery
+ * always ends with `stop()` (via the `finally` block in the main loop),
+ * so there is no corresponding `resume()`.
+ */
+function startProgressRotation(
+  stepId: string,
+  spin: SpinnerHandle,
+  spinState: SpinState
+): ProgressRotationHandle {
+  const messages = STEP_PROGRESS_MESSAGES[stepId];
+  if (!messages || messages.length === 0) {
+    return NOOP_ROTATION;
+  }
+
+  let index = -1;
+  let paused = false;
+  const startedAt = Date.now();
+
+  const timer = setInterval(() => {
+    if (!spinState.running || paused) {
+      return;
+    }
+    index += 1;
+    if (index < messages.length) {
+      spin.message(messages[index]);
+    } else {
+      const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+      const lastMessage = messages.at(-1) ?? messages[0];
+      spin.message(`${lastMessage} (${elapsedSec}s)`);
+    }
+  }, PROGRESS_ROTATE_INTERVAL_MS);
+
+  return {
+    stop: () => {
+      clearInterval(timer);
+    },
+    pause: () => {
+      paused = true;
+    },
+  };
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: suspend handling needs to branch across tool and interactive payload kinds
@@ -534,6 +611,7 @@ type ResumeRetryArgs = {
   tracingOptions: Record<string, unknown>;
   spin: SpinnerHandle;
   ui: WizardUI;
+  progressRotation?: ProgressRotationHandle;
 };
 
 /**
@@ -660,6 +738,7 @@ async function resumeWithRecovery(
     tracingOptions,
     spin,
     ui,
+    progressRotation,
   } = args;
   try {
     const raw = await withTimeout(
@@ -673,6 +752,7 @@ async function resumeWithRecovery(
     return assertWorkflowResult(raw);
   } catch (err) {
     if (isStepAlreadyAdvancedError(err)) {
+      progressRotation?.pause();
       spin.message("Reconnecting...");
       const recovered = await tryRecoverCurrentRunState(
         workflow,
@@ -704,6 +784,7 @@ async function resumeWithRecovery(
       throw err;
     }
 
+    progressRotation?.pause();
     ui.setOverlay?.({
       kind: "health",
       message: "Connection interrupted, reconnecting...",
@@ -956,16 +1037,26 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         stepHistory
       );
 
-      result = await resumeWithRecovery({
-        run,
-        workflow,
-        stepId: extracted.stepId,
-        payload: extracted.payload,
-        resumeData,
-        tracingOptions,
+      const progressRotation = startProgressRotation(
+        extracted.stepId,
         spin,
-        ui,
-      });
+        spinState
+      );
+      try {
+        result = await resumeWithRecovery({
+          run,
+          workflow,
+          stepId: extracted.stepId,
+          payload: extracted.payload,
+          resumeData,
+          tracingOptions,
+          spin,
+          ui,
+          progressRotation,
+        });
+      } finally {
+        progressRotation.stop();
+      }
     }
   } catch (err) {
     const isAuthFailure = err instanceof ApiError && err.status === 401;

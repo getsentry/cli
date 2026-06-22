@@ -1,5 +1,5 @@
 #!/usr/bin/env tsx
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { build, type Plugin } from "esbuild";
 import pkg from "../package.json";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
@@ -222,6 +222,8 @@ const result = await build({
     // reached on Node 22+ where node:sqlite is available). Mark external so
     // esbuild doesn't fail trying to resolve a Bun-only module.
     "bun:sqlite",
+    // The DIF loader resolves this .wasm at runtime (dev only); never bundle it.
+    "@sentry/symbolic/symbolic_bg.wasm",
     "ink",
     "ink-spinner",
     "react",
@@ -297,6 +299,16 @@ console.log("  -> dist/index.d.cts (type declarations)");
 // interactive Ink UI on Node via dynamic import(). The sidecar is
 // self-contained ESM with all deps inlined — no runtime dependencies
 // needed.
+
+// Ship the DIF parser WASM as a sibling of the bundle. The runtime loads it
+// (non-SEA path) via new URL("./vendor/symbolic_bg.wasm", import.meta.url),
+// which resolves relative to dist/index.cjs (see src/lib/dif/index.ts).
+await mkdir("./dist/vendor", { recursive: true });
+await copyFile(
+  "./node_modules/@sentry/symbolic/symbolic_bg.wasm",
+  "./dist/vendor/symbolic_bg.wasm"
+);
+console.log("  -> dist/vendor/symbolic_bg.wasm (DIF parser)");
 
 // Calculate bundle size (only the main bundle, not source maps)
 const bundleOutput = result.metafile?.outputs["dist/index.cjs"];
