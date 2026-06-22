@@ -83,6 +83,7 @@ import {
   SEARCH_SYNTAX_REFERENCE,
   sanitizeQuery,
 } from "../../lib/search-query.js";
+import { isSaaS } from "../../lib/sentry-urls.js";
 import {
   appendPeriodHint,
   formatTimeRangeFlag,
@@ -105,7 +106,7 @@ export const PAGINATION_KEY = "issue-list";
 type ListFlags = {
   readonly query?: string;
   readonly limit: number;
-  readonly sort: "date" | "new" | "freq" | "user";
+  readonly sort: "date" | "new" | "freq" | "user" | "recommended";
   readonly period: TimeRange;
   readonly json: boolean;
   readonly cursor?: string;
@@ -113,6 +114,14 @@ type ListFlags = {
   readonly compact?: boolean;
   readonly fields?: string[];
 };
+
+/**
+ * Raw flags as received by `func()` before the host-dependent sort default is
+ * applied. `sort` is optional here because the Stricli flag carries no static
+ * default — {@link defaultIssueSort} resolves it. All downstream code uses the
+ * resolved {@link ListFlags} where `sort` is concrete.
+ */
+type ListFlagsInput = Omit<ListFlags, "sort"> & { readonly sort?: SortValue };
 
 /**
  * Extended result type for issue list with display context.
@@ -138,9 +147,35 @@ export type IssueListResult = ListResult<SentryIssue> & {
   footer?: string;
 };
 
-/** @internal */ export type SortValue = "date" | "new" | "freq" | "user";
+/** @internal */ export type SortValue =
+  | "date"
+  | "new"
+  | "freq"
+  | "user"
+  | "recommended";
 
-const VALID_SORT_VALUES: SortValue[] = ["date", "new", "freq", "user"];
+const VALID_SORT_VALUES: SortValue[] = [
+  "recommended",
+  "date",
+  "new",
+  "freq",
+  "user",
+];
+
+/**
+ * Resolve the effective default sort based on the active Sentry host.
+ *
+ * `recommended` is a server-computed relevance sort that only exists on recent
+ * Sentry versions and is rejected with HTTP 400 by instances that lack it.
+ * Sentry SaaS always supports it, so it is the default there; self-hosted
+ * instances default to the universally-supported `date` sort. Users can still
+ * explicitly request any sort via `--sort`.
+ *
+ * @returns `"recommended"` on Sentry SaaS, otherwise `"date"`
+ */
+function defaultIssueSort(): SortValue {
+  return isSaaS() ? "recommended" : "date";
+}
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry issue list <org>/<project>";
@@ -334,6 +369,13 @@ function getComparator(
         Number.parseInt(a.count ?? "0", 10);
     case "user":
       return (a, b) => (b.userCount ?? 0) - (a.userCount ?? 0);
+    case "recommended":
+      // The recommended relevance score is computed server-side and is not
+      // present in the issue payload, so it cannot be reproduced client-side.
+      // When merging results across projects, fall back to recency (lastSeen);
+      // single-project results are already server-sorted by recommended.
+      return (a, b) =>
+        compareDates(a.lastSeen ?? undefined, b.lastSeen ?? undefined);
     default:
       return (a, b) =>
         compareDates(a.lastSeen ?? undefined, b.lastSeen ?? undefined);
@@ -581,7 +623,7 @@ function trimWithProjectGuarantee(
 /** Append active non-default issue list flags to a base command string. */
 function appendIssueFlags(base: string, flags: ListFlags): string {
   const parts: string[] = [];
-  if (flags.sort !== "date") {
+  if (flags.sort !== defaultIssueSort()) {
     parts.push(`--sort ${flags.sort}`);
   }
   if (flags.query) {
@@ -1237,6 +1279,8 @@ export const __testing = {
   getComparator,
   compareDates,
   parseSort,
+  defaultIssueSort,
+  appendIssueFlags,
   CURSOR_SEP,
   MAX_LIMIT: LIST_MAX_LIMIT,
   VALID_SORT_VALUES,
@@ -1384,8 +1428,9 @@ export const listCommand = buildListCommand("issue", {
       sort: {
         kind: "parsed",
         parse: parseSort,
-        brief: "Sort by: date, new, freq, user",
-        default: "date" as const,
+        brief:
+          "Sort by: recommended, date, new, freq, user (default: recommended on sentry.io, else date)",
+        optional: true,
       },
       period: {
         kind: "parsed",
@@ -1413,9 +1458,17 @@ export const listCommand = buildListCommand("issue", {
       t: "period",
     },
   },
-  async *func(this: SentryContext, flags: ListFlags, target?: string) {
+  async *func(this: SentryContext, rawFlags: ListFlagsInput, target?: string) {
     const { cwd } = this;
     const log = logger.withTag("issue.list");
+
+    // The --sort flag carries no static default so the host-dependent default
+    // (recommended on SaaS, date on self-hosted) can be applied at runtime.
+    // Resolve it here so all downstream code sees a concrete `flags.sort`.
+    const flags: ListFlags = {
+      ...rawFlags,
+      sort: rawFlags.sort ?? defaultIssueSort(),
+    };
 
     const parsed = parseOrgProjectArg(target);
 

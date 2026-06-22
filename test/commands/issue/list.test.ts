@@ -62,7 +62,7 @@ import { mockFetch, useTestConfigDir } from "../../helpers.js";
 type ListFlags = {
   readonly query?: string;
   readonly limit: number;
-  readonly sort: "date" | "new" | "freq" | "user";
+  readonly sort?: "date" | "new" | "freq" | "user" | "recommended";
   readonly period: TimeRange;
   readonly json: boolean;
   readonly cursor?: string;
@@ -1424,7 +1424,8 @@ describe("issue list: multi-target cursor-safe budget", () => {
 
 import { __testing } from "../../../src/commands/issue/list.js";
 
-const { getComparator } = __testing;
+const { getComparator, defaultIssueSort, appendIssueFlags, parseSort } =
+  __testing;
 
 import type { SentryIssue } from "../../../src/types/index.js";
 
@@ -1481,6 +1482,133 @@ describe("getComparator", () => {
     const older = makeIssue({ lastSeen: "2024-01-01T00:00:00Z" });
     const newer = makeIssue({ lastSeen: "2024-01-02T00:00:00Z" });
     expect(cmp(newer, older)).toBeLessThan(0);
+  });
+
+  test("sort=recommended falls back to lastSeen (recency) for client merge", () => {
+    // No recommended score exists in the payload, so multi-project merges sort
+    // by recency just like sort=date.
+    const cmp = getComparator("recommended");
+    const older = makeIssue({ lastSeen: "2024-01-01T00:00:00Z" });
+    const newer = makeIssue({ lastSeen: "2024-01-02T00:00:00Z" });
+    expect(cmp(newer, older)).toBeLessThan(0);
+    expect(cmp(older, newer)).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// defaultIssueSort — host-dependent default sort
+// ---------------------------------------------------------------------------
+
+describe("defaultIssueSort", () => {
+  let savedUrl: string | undefined;
+  let savedHost: string | undefined;
+
+  beforeEach(() => {
+    savedUrl = process.env.SENTRY_URL;
+    savedHost = process.env.SENTRY_HOST;
+  });
+
+  afterEach(() => {
+    if (savedUrl === undefined) {
+      delete process.env.SENTRY_URL;
+    } else {
+      process.env.SENTRY_URL = savedUrl;
+    }
+    if (savedHost === undefined) {
+      delete process.env.SENTRY_HOST;
+    } else {
+      process.env.SENTRY_HOST = savedHost;
+    }
+  });
+
+  test("defaults to recommended on Sentry SaaS", () => {
+    delete process.env.SENTRY_URL;
+    delete process.env.SENTRY_HOST;
+    expect(defaultIssueSort()).toBe("recommended");
+  });
+
+  test("defaults to recommended for an explicit sentry.io URL", () => {
+    process.env.SENTRY_URL = DEFAULT_SENTRY_URL;
+    expect(defaultIssueSort()).toBe("recommended");
+  });
+
+  test("defaults to date on a self-hosted instance", () => {
+    process.env.SENTRY_URL = "https://sentry.example.com";
+    delete process.env.SENTRY_HOST;
+    expect(defaultIssueSort()).toBe("date");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseSort — accepts recommended
+// ---------------------------------------------------------------------------
+
+describe("parseSort", () => {
+  test("accepts recommended", () => {
+    expect(parseSort("recommended")).toBe("recommended");
+  });
+
+  test("rejects unknown values with a helpful message listing recommended", () => {
+    expect(() => parseSort("bogus")).toThrow(/recommended/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// appendIssueFlags — omits the active default sort from page-navigation hints
+// ---------------------------------------------------------------------------
+
+describe("appendIssueFlags", () => {
+  let savedUrl: string | undefined;
+
+  beforeEach(() => {
+    savedUrl = process.env.SENTRY_URL;
+  });
+
+  afterEach(() => {
+    if (savedUrl === undefined) {
+      delete process.env.SENTRY_URL;
+    } else {
+      process.env.SENTRY_URL = savedUrl;
+    }
+  });
+
+  const baseFlags = {
+    limit: 10,
+    period: parsePeriod("90d"),
+    json: false,
+    fresh: false,
+  };
+
+  test("on SaaS, recommended (the default) is omitted but date is shown", () => {
+    delete process.env.SENTRY_URL;
+    expect(
+      appendIssueFlags("sentry issue list org/", {
+        ...baseFlags,
+        sort: "recommended",
+      })
+    ).toBe("sentry issue list org/");
+    expect(
+      appendIssueFlags("sentry issue list org/", {
+        ...baseFlags,
+        sort: "date",
+      })
+    ).toContain("--sort date");
+  });
+
+  test("on self-hosted, date (the default) is omitted but recommended is shown", () => {
+    process.env.SENTRY_URL = "https://sentry.example.com";
+    expect(
+      appendIssueFlags("sentry issue list org/", {
+        ...baseFlags,
+        sort: "date",
+      })
+    ).toBe("sentry issue list org/");
+    expect(
+      appendIssueFlags("sentry issue list org/", {
+        ...baseFlags,
+        sort: "recommended",
+      })
+    ).toContain("--sort recommended");
   });
 });
 
