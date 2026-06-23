@@ -1,6 +1,45 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.38.0
+
+### New Features ✨
+
+#### Debug Files
+
+- Add bundle-sources command by @BYK in [#1126](https://github.com/getsentry/cli/pull/1126)
+- Migrate DIF parser to the Archive/ObjectFile API by @BYK in [#1124](https://github.com/getsentry/cli/pull/1124)
+
+#### Other
+
+- (issue) Default to recommended sort on Sentry SaaS by @BYK in [#1123](https://github.com/getsentry/cli/pull/1123)
+- `debug-files check` — parse DIFs via @sentry/symbolic (WASM) by @BYK in [#1109](https://github.com/getsentry/cli/pull/1109)
+- Implement `debug-files bundle-jvm` command by @BYK in [#1089](https://github.com/getsentry/cli/pull/1089)
+
+### Bug Fixes 🐛
+
+- (alias) Only strip common word prefix from slugs that start with it by @BYK in [#1131](https://github.com/getsentry/cli/pull/1131)
+- (auth) Apply host-trust gate to auto-login by @betegon in [#1122](https://github.com/getsentry/cli/pull/1122)
+- (cli) Make `sentry cli --version` print the version by @BYK in [#1128](https://github.com/getsentry/cli/pull/1128)
+- (init) Rotate spinner messages during long plan-codemods wait by @jared-outpost in [#1108](https://github.com/getsentry/cli/pull/1108)
+- (local) Surface trace events inline in `sentry local run` by @jared-outpost in [#1105](https://github.com/getsentry/cli/pull/1105)
+- (logs) Replace .parse() with .safeParse() to prevent ZodError crash on self-hosted by @jared-outpost in [#1096](https://github.com/getsentry/cli/pull/1096)
+- (upgrade) Create missing install dir and skip stale stored path by @BYK in [#1125](https://github.com/getsentry/cli/pull/1125)
+
+### Internal Changes 🔧
+
+#### Deps
+
+- Bump astro from 6.3.7 to 6.4.6 in /docs in the npm_and_yarn group across 1 directory by @dependabot in [#1113](https://github.com/getsentry/cli/pull/1113)
+- Bump vulnerable transitive deps to patch GHSA advisories by @BYK in [#1106](https://github.com/getsentry/cli/pull/1106)
+
+#### Other
+
+- (deps-dev) Bump esbuild from 0.25.12 to 0.28.1 in the npm_and_yarn group across 1 directory by @dependabot in [#1101](https://github.com/getsentry/cli/pull/1101)
+- (upgrade) Apply delta patch chains in memory with cached base reads by @BYK in [#1127](https://github.com/getsentry/cli/pull/1127)
+- Fix 5 dependabot alerts via pnpm overrides by @BYK in [#1130](https://github.com/getsentry/cli/pull/1130)
+- Regenerate docs by @github-actions[bot] in [f1f60303](https://github.com/getsentry/cli/commit/f1f603036aecac16048498e32f60d27dffd5a227)
+
 ## 0.37.0
 
 ### New Features ✨
