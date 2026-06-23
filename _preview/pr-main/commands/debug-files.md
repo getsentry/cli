@@ -44,6 +44,24 @@ Create a JVM source bundle for source context
 | `-d, --debug-id <debug-id>` | Debug ID (UUID) to stamp on the bundle |
 | `-e, --exclude <exclude>...` | Additional directory names to exclude (repeatable) |
 
+### `sentry debug-files bundle-sources <path>`
+
+[Section titled “sentry debug-files bundle-sources <path>”](#sentry-debug-files-bundle-sources-path)
+
+Bundle a debug file's source files for source context
+
+**Arguments:**
+
+| Argument | Description |
+| --- | --- |
+| `<path>` | Path to the debug information file |
+
+**Options:**
+
+| Option | Description |
+| --- | --- |
+| `-o, --output <output>` | Output path for the source bundle ZIP (default: .src.zip) |
+
 All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
 
 ## Examples
@@ -53,6 +71,7 @@ Terminal window
 
 ```
 # Inspect a debug information file (auto-detects the format)sentry debug-files check ./libexample.sosentry debug-files check MyApp.dSYM/Contents/Resources/DWARF/MyAppsentry debug-files check ./app.pdb --json
+# Bundle a debug file's referenced source files (run on the build machine)sentry debug-files bundle-sources ./libexample.sosentry debug-files bundle-sources ./app.pdb --output ./app.src.zip
 # Bundle JVM sources with a debug IDsentry debug-files bundle-jvm --output ./out --debug-id <uuid> ./src
 # Exclude additional directoriessentry debug-files bundle-jvm --output ./out --debug-id <uuid> --exclude generated --exclude build-tools ./src
 # Output as JSONsentry debug-files bundle-jvm --output ./out --debug-id <uuid> --json ./src
