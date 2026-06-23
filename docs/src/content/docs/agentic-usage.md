@@ -13,13 +13,33 @@ To skip automatic skill installation, pass `--no-agent-skills` to `sentry cli se
 
 ## Manual Installation
 
-Add the Sentry CLI skill to your agent manually:
+### Claude Code
+
+Install via the Claude Code plugin marketplace:
+
+```bash
+claude plugin marketplace add getsentry/cli
+claude plugin install sentry/cli
+```
+
+### Cursor
+
+Cursor reads skills from the `.cursor/skills/` directory. You can symlink or copy the plugin's skill files:
+
+```bash
+# From a local clone of the CLI repo
+ln -s /path/to/cli/plugins/sentry-cli/skills/sentry-cli ~/.cursor/skills/sentry-cli
+```
+
+### Other Agents
+
+For agents that read from `~/.agents` (the open [Agent Skills](https://github.com/getsentry/skills) format):
 
 ```bash
 npx skills add https://cli.sentry.dev
 ```
 
-This registers the Sentry CLI as a skill that your agent can invoke when needed.
+Or manually copy the skill files from `plugins/sentry-cli/skills/sentry-cli/` into your agent's skills directory.
 
 ## Capabilities
 
@@ -49,4 +69,7 @@ The skill uses your existing CLI authentication, so you'll need to run `sentry a
 ## Requirements
 
 - An authenticated Sentry CLI installation (`sentry auth login`)
-- An AI coding agent that supports the skills system (e.g., Claude Code, or any agent that reads from `~/.agents` such as Cursor)
+- An AI coding agent that supports the skills system:
+  - [Claude Code](https://claude.ai/code) — via plugin marketplace or `~/.claude/skills/`
+  - [Cursor](https://cursor.sh) — via `.cursor/skills/` directory
+  - Any agent that reads from `~/.agents/skills/` (the open [Agent Skills](https://github.com/getsentry/skills) format)

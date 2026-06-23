@@ -36,6 +36,25 @@ The `--version` flag takes precedence over `SENTRY_VERSION` if both are set.
 The chosen channel is persisted so that `sentry cli upgrade` automatically
 tracks the same channel on future updates.
 
+#### Installer Flags
+
+The install script accepts these flags (pass them after `--` when piping to bash):
+
+| Flag | Description |
+|------|-------------|
+| `--version <version>` | Pin to a specific version or `nightly` |
+| `--no-modify-path` | Skip adding the install directory to your shell PATH |
+| `--no-completions` | Skip installing shell completions |
+| `--no-agent-skills` | Skip installing AI agent skill files |
+
+```bash
+# CI/Docker: install without modifying PATH or shell config
+curl https://cli.sentry.dev/install -fsS | bash -s -- --no-modify-path --no-completions
+```
+
+You can also set `SENTRY_INSTALL_DIR` to control where the binary is placed,
+and `SENTRY_INIT=1` to run `sentry init` after installation.
+
 #### Supported Platforms
 
 {/* GENERATED:START platform-support */}
