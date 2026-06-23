@@ -1179,6 +1179,73 @@ describe("issue list: collapse parameter optimization", () => {
     await setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
 
+  // End-to-end guard for the headline feature: when --sort is omitted, the
+  // host-dependent default must actually reach the API call. A regression that
+  // dropped the `?? defaultIssueSort()` resolution would leave sort undefined
+  // here, yet every other test (which passes sort explicitly) would still pass.
+  describe("default sort resolution reaches the API when --sort omitted", () => {
+    let savedUrl: string | undefined;
+    let savedHost: string | undefined;
+
+    beforeEach(() => {
+      savedUrl = process.env.SENTRY_URL;
+      savedHost = process.env.SENTRY_HOST;
+    });
+
+    afterEach(() => {
+      if (savedUrl === undefined) {
+        delete process.env.SENTRY_URL;
+      } else {
+        process.env.SENTRY_URL = savedUrl;
+      }
+      if (savedHost === undefined) {
+        delete process.env.SENTRY_HOST;
+      } else {
+        process.env.SENTRY_HOST = savedHost;
+      }
+    });
+
+    async function runOrgAllWithoutSort(): Promise<Record<string, unknown>> {
+      listIssuesAllPagesMock.mockResolvedValue({
+        issues: [sampleIssue],
+        nextCursor: undefined,
+      });
+      const orgAllFunc = (await listCommand.loader()) as unknown as (
+        this: unknown,
+        flags: Record<string, unknown>,
+        target?: string
+      ) => Promise<void>;
+      const { context } = createOrgAllContext();
+      // Note: no `sort` key — the command must fill in the default.
+      await orgAllFunc.call(
+        context,
+        { limit: 10, period: parsePeriod("90d"), json: true },
+        "my-org/"
+      );
+      return (listIssuesAllPagesMock.mock.calls[0]?.[2] ?? {}) as Record<
+        string,
+        unknown
+      >;
+    }
+
+    test("uses recommended on Sentry SaaS", async () => {
+      delete process.env.SENTRY_URL;
+      delete process.env.SENTRY_HOST;
+      const options = await runOrgAllWithoutSort();
+      expect(listIssuesAllPagesMock).toHaveBeenCalled();
+      expect(options.sort).toBe("recommended");
+    });
+
+    test("uses date on a self-hosted instance", async () => {
+      delete process.env.SENTRY_HOST;
+      process.env.SENTRY_URL = "https://sentry.example.com";
+      await setOrgRegion("my-org", "https://sentry.example.com");
+      const options = await runOrgAllWithoutSort();
+      expect(listIssuesAllPagesMock).toHaveBeenCalled();
+      expect(options.sort).toBe("date");
+    });
+  });
+
   test("always collapses filtered and unhandled in org-all mode", async () => {
     listIssuesAllPagesMock.mockResolvedValue({
       issues: [sampleIssue],
@@ -1479,8 +1546,13 @@ describe("issue list: multi-target cursor-safe budget", () => {
 
 import { __testing } from "../../../src/commands/issue/list.js";
 
-const { getComparator, defaultIssueSort, appendIssueFlags, parseSort } =
-  __testing;
+const {
+  getComparator,
+  defaultIssueSort,
+  appendIssueFlags,
+  parseSort,
+  build400Detail,
+} = __testing;
 
 import type { SentryIssue } from "../../../src/types/index.js";
 
@@ -1583,6 +1655,9 @@ describe("defaultIssueSort", () => {
   });
 
   test("defaults to recommended for an explicit sentry.io URL", () => {
+    // Clear SENTRY_HOST too: getConfiguredSentryUrl prefers SENTRY_HOST, so an
+    // ambient value would mask SENTRY_URL and make this test non-hermetic.
+    delete process.env.SENTRY_HOST;
     process.env.SENTRY_URL = DEFAULT_SENTRY_URL;
     expect(defaultIssueSort()).toBe("recommended");
   });
@@ -1605,6 +1680,39 @@ describe("parseSort", () => {
 
   test("rejects unknown values with a helpful message listing recommended", () => {
     expect(() => parseSort("bogus")).toThrow(/recommended/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// build400Detail — sort-specific guidance for unsupported-sort 400s
+// ---------------------------------------------------------------------------
+
+describe("build400Detail", () => {
+  const flags = {
+    query: undefined,
+    period: parsePeriod("90d"),
+    sort: "recommended" as const,
+  };
+
+  test("gives a sort-specific hint (not the generic trio) for an unsupported sort", () => {
+    const detail = build400Detail(
+      "Sort key 'recommended' not supported.",
+      flags
+    );
+    expect(detail).toContain("does not support the 'recommended' sort");
+    expect(detail).toContain("--sort date");
+    // The generic suggestions must be suppressed for this case.
+    expect(detail).not.toContain("--query syntax");
+    expect(detail).not.toContain("shorter time range");
+  });
+
+  test("still gives generic suggestions for non-sort 400s", () => {
+    const detail = build400Detail("Invalid query: unknown field", {
+      ...flags,
+      query: "foo:bar",
+    });
+    expect(detail).toContain("--query syntax");
+    expect(detail).not.toContain("does not support the");
   });
 });
 

@@ -809,6 +809,13 @@ type ResolvedTargetsOptions = {
 const DEFAULT_PERIOD = "90d";
 
 /**
+ * Matches the Sentry API's unsupported-sort 400 detail
+ * ("Sort key '<x>' not supported."). Used to give a sort-specific hint when
+ * `--sort recommended` hits an older self-hosted instance.
+ */
+const UNSUPPORTED_SORT_RE = /sort key/i;
+
+/**
  * Build an enriched error detail for 400 Bad Request responses.
  *
  * Appends actionable suggestions so users know what to try next. This is the
@@ -822,7 +829,7 @@ const DEFAULT_PERIOD = "90d";
  */
 function build400Detail(
   originalDetail: string | undefined,
-  flags: Pick<ListFlags, "query" | "period">
+  flags: Pick<ListFlags, "query" | "period" | "sort">
 ): string {
   const lines: string[] = [];
 
@@ -831,6 +838,18 @@ function build400Detail(
   }
 
   const suggestions: string[] = [];
+
+  // The Sentry API rejects an unknown sort with "Sort key '<x>' not supported."
+  // This is the expected failure when `--sort recommended` is used against an
+  // older self-hosted instance that predates the recommended sort. A
+  // sort-specific hint is far more actionable than the generic
+  // query/time-range/access suggestions, so short-circuit on it.
+  if (originalDetail && UNSUPPORTED_SORT_RE.test(originalDetail)) {
+    suggestions.push(
+      `This Sentry instance does not support the '${flags.sort}' sort. Use a widely-supported sort such as --sort date (the 'recommended' sort requires a recent Sentry version).`
+    );
+    return formatDetailWithSuggestions(lines, suggestions);
+  }
 
   if (flags.query) {
     suggestions.push(
@@ -846,7 +865,22 @@ function build400Detail(
     "Verify you have access to the target project: sentry project list <org>/"
   );
 
-  // Only add the separator when there's a detail line preceding the suggestions
+  return formatDetailWithSuggestions(lines, suggestions);
+}
+
+/**
+ * Join an optional detail line with a bulleted "Suggestions:" block.
+ *
+ * Adds a blank separator only when a detail line precedes the suggestions.
+ * The output is indented with `"\n  "` because {@link ApiError.format}
+ * prepends `"\n  "` only before the first detail line; continuation lines
+ * must match that indentation to stay aligned.
+ */
+function formatDetailWithSuggestions(
+  detailLines: string[],
+  suggestions: string[]
+): string {
+  const lines = [...detailLines];
   if (lines.length > 0) {
     lines.push("");
   }
@@ -854,9 +888,6 @@ function build400Detail(
   for (const s of suggestions) {
     lines.push(`  • ${s}`);
   }
-
-  // ApiError.format() prepends "\n  " only before the first line of detail.
-  // Indent continuation lines to maintain alignment with the first line.
   return lines.join("\n  ");
 }
 
@@ -868,7 +899,7 @@ function build400Detail(
  */
 function enrichIssueListError(
   error: unknown,
-  flags: Pick<ListFlags, "query" | "period">
+  flags: Pick<ListFlags, "query" | "period" | "sort">
 ): never {
   if (error instanceof ApiError) {
     if (error.status === 400) {
@@ -1290,6 +1321,7 @@ export const __testing = {
   parseSort,
   defaultIssueSort,
   appendIssueFlags,
+  build400Detail,
   CURSOR_SEP,
   MAX_LIMIT: LIST_MAX_LIMIT,
   VALID_SORT_VALUES,
