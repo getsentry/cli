@@ -3,9 +3,11 @@
  *
  * Provides two things:
  *
- * 1. **Silencing rules** — `OutputError`, `ResolutionError`, expected-state
- *    `AuthError`, and 401–499 `ApiError` are not sent to Sentry as issues.
- *    A `cli.error.silenced` metric preserves volume + user/org context.
+ * 1. **Silencing rules** — `OutputError`, opt-in `expected` `ResolutionError`,
+ *    expected-state `AuthError`, and 401–499 `ApiError` are not sent to Sentry
+ *    as issues. A `cli.error.silenced` metric preserves volume + user/org
+ *    context. Resolution failures are silenced only when constructed with
+ *    `{ expected: true }`; the class as a whole stays captured.
  *
  * 2. **Grouping tags** — enriches every error event with `cli_error.*` tags
  *    that Sentry's server-side fingerprint rules use for stable grouping.
@@ -58,7 +60,11 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   if (error instanceof OutputError) {
     return "output_error";
   }
-  if (error instanceof ResolutionError) {
+  // Only silence resolution failures that explicitly opt in via `expected`
+  // (e.g. a looked-up event/issue ID that genuinely doesn't exist). The class
+  // as a whole stays captured — project/issue/replay/log/trace lookup failures
+  // remain observable for product/CLI telemetry.
+  if (error instanceof ResolutionError && error.expected) {
     return "user_input_error";
   }
   if (
@@ -84,6 +90,12 @@ function recordSilencedError(error: unknown, reason: SilenceReason): void {
   }
   if (error instanceof AuthError) {
     attributes.auth_reason = error.reason;
+  }
+  // Preserve the resource "kind" so silenced resolution misses keep some
+  // sub-grouping context (e.g. "Event not found" vs "Issue not found") in the
+  // metric instead of collapsing to a single error_class=ResolutionError tag.
+  if (error instanceof ResolutionError) {
+    attributes.resource_kind = extractResourceKind(error.resource);
   }
 
   try {

@@ -244,16 +244,27 @@ describe("classifySilenced", () => {
     expect(classifySilenced(new ApiError("x", status))).toBeNull();
   });
 
-  test("silences ResolutionError as user_input_error", () => {
+  test("silences ResolutionError only when expected:true", () => {
     expect(
       classifySilenced(
-        new ResolutionError("Project 'x'", "not found", "sentry issue list")
+        new ResolutionError(
+          "Event 'abc'",
+          "not found",
+          "sentry event view <org>/<project> abc",
+          [],
+          { expected: true }
+        )
       )
     ).toBe("user_input_error");
   });
 
   test.each([
     ["ContextError", new ContextError("Organization", "sentry org view <x>")],
+    [
+      // Plain (non-expected) resolution failures stay captured for observability.
+      "ResolutionError",
+      new ResolutionError("Project 'x'", "not found", "sentry issue list"),
+    ],
     ["ValidationError", new ValidationError("bad")],
     ["SeerError", new SeerError("not_enabled")],
     ["ConfigError", new ConfigError("bad")],
@@ -451,12 +462,25 @@ describe("reportCliError integration", () => {
     expect(traceErr["cli_error.kind"]).not.toBe(eventErr["cli_error.kind"]);
   });
 
-  test("silences ResolutionError and emits metric", () => {
+  test("captures plain ResolutionError (not expected)", () => {
+    const err = new ResolutionError(
+      "Project 'x'",
+      "not found",
+      "sentry issue list <org>/x"
+    );
+    reportCliError(err);
+    expect(captureSpy).toHaveBeenCalledWith(err);
+    expect(metricSpy).not.toHaveBeenCalled();
+  });
+
+  test("silences expected ResolutionError and emits metric with resource_kind", () => {
     reportCliError(
       new ResolutionError(
-        "Project 'x'",
+        "Event 'abc' in organization \"my-org\"",
         "not found",
-        "sentry issue list <org>/x"
+        "sentry event view my-org/<project> abc",
+        [],
+        { expected: true }
       )
     );
     expect(captureSpy).not.toHaveBeenCalled();
@@ -467,6 +491,7 @@ describe("reportCliError integration", () => {
         attributes: expect.objectContaining({
           error_class: "ResolutionError",
           reason: "user_input_error",
+          resource_kind: "Event",
         }),
       })
     );

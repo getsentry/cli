@@ -501,7 +501,11 @@ export async function resolveOrgAllTarget(
     throw new ResolutionError(
       `Event ${eventId} in organization "${org}"`,
       "not found",
-      `sentry event view ${org}/<project> ${eventId}`
+      `sentry event view ${org}/<project> ${eventId}`,
+      [],
+      // Looking up an event ID that doesn't exist is an expected user miss,
+      // not a CLI bug — silence it from Sentry issues.
+      { expected: true }
     );
   }
   return {
@@ -700,7 +704,9 @@ export async function fetchEventWithContext(
         `Event '${eventId}'`,
         `not found in ${org}/${project}`,
         `sentry event view ${org}/<project> ${eventId}`,
-        suggestions
+        suggestions,
+        // Expected user miss: a specific event ID that doesn't exist.
+        { expected: true }
       );
     }
     throw error;
