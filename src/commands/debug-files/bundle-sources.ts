@@ -15,8 +15,8 @@
  */
 
 import { readFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { createSourceBundle } from "../../lib/dif/index.js";
@@ -154,7 +154,14 @@ export const bundleSourcesCommand = buildCommand({
       };
     }
 
+    if (result.objectCount > 1) {
+      log.warn(
+        `'${path}' contains ${result.objectCount} objects; bundled sources for ${result.debugId} only. Other slices are not included.`
+      );
+    }
+
     const outputPath = resolve(flags.output ?? `${path}.src.zip`);
+    await mkdir(dirname(outputPath), { recursive: true });
     await writeFile(outputPath, result.bundle);
 
     yield new CommandOutput<BundleSourcesResult>({

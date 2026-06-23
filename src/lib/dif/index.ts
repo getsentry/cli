@@ -165,6 +165,8 @@ export type SourceBundleResult = {
   debugId: string | null;
   /** Number of source files included in the bundle. */
   fileCount: number;
+  /** Total number of objects in the archive (a bundle is built for one of them). */
+  objectCount: number;
 };
 
 /**
@@ -196,9 +198,10 @@ export function createSourceBundle(
   ensureInitialized();
   const archive = new Archive(data);
   const objects = archive.objects();
+  const objectCount = objects.length;
   const object = objects.find((o) => o.hasDebugInfo) ?? objects[0];
   if (!object) {
-    return { bundle: null, debugId: null, fileCount: 0 };
+    return { bundle: null, debugId: null, fileCount: 0, objectCount };
   }
 
   let fileCount = 0;
@@ -216,5 +219,5 @@ export function createSourceBundle(
 
   const bundle =
     writer.writeObject(object, objectName, filter, provider) ?? null;
-  return { bundle, debugId: object.debugId, fileCount };
+  return { bundle, debugId: object.debugId, fileCount, objectCount };
 }

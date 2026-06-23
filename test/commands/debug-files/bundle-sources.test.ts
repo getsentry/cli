@@ -91,7 +91,7 @@ describe("sentry debug-files bundle-sources", () => {
 
     expect(exitCode).toBe(0);
     expect(output).toContain(KNOWN_DEBUG_ID);
-    expect(output).toContain("1");
+    expect(output).toContain("Files bundled");
     expect(await exists(`${debugPath}.src.zip`)).toBe(true);
   });
 
@@ -107,6 +107,19 @@ describe("sentry debug-files bundle-sources", () => {
     expect(exitCode).toBe(0);
     expect(await exists(outPath)).toBe(true);
     expect(await exists(`${debugPath}.src.zip`)).toBe(false);
+  });
+
+  test("creates the output directory if it does not exist", async () => {
+    const sourcePath = join(tempDir, "example.c");
+    await writeFile(sourcePath, "int main(void) { return 0; }\n");
+    const debugPath = join(tempDir, "example.sym");
+    await writeFile(debugPath, breakpadReferencing(sourcePath));
+    const outPath = join(tempDir, "nested", "dir", "out.src.zip");
+
+    const { exitCode } = await runBundleSources([debugPath, "-o", outPath]);
+
+    expect(exitCode).toBe(0);
+    expect(await exists(outPath)).toBe(true);
   });
 
   test("exits non-zero and writes nothing when no sources are on disk", async () => {
