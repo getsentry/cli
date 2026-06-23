@@ -164,6 +164,12 @@ function consumeFlag(
  * version. The `--version=value` form is not matched (no command defines a
  * `--version` value flag).
  *
+ * This is a naive token scan, so a bare `--version` token always wins — even
+ * when it would otherwise be the value of a preceding value flag (e.g. the
+ * contrived `sentry issue list -q --version`). Use the `=` form
+ * (`-q=--version`) to pass the literal string instead. No command defines a
+ * `--version` flag, so there is no real collision.
+ *
  * @param argv - Raw CLI arguments (e.g., `process.argv.slice(2)`)
  * @returns true if a bare `--version` token appears before any `--` separator
  */
