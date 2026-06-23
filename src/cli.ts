@@ -167,6 +167,9 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   );
   const { error, warning } = await import("./lib/formatters/colors.js");
   const { runInteractiveLogin } = await import("./lib/interactive-login.js");
+  const { assertAutoLoginHostTrusted, recoverWithAutoLogin } = await import(
+    "./lib/auto-auth.js"
+  );
   const { getEnvLogLevel, setLogLevel } = await import("./lib/logger.js");
   const { isTrialEligible, promptAndStartTrial } = await import(
     "./lib/seer-trial.js"
@@ -408,6 +411,12 @@ export async function runCli(cliArgs: string[]): Promise<void> {
         throw err;
       }
 
+      // Same host-trust gate as auto-login: re-authenticating to add scopes
+      // also runs the OAuth device flow, so refuse an unconfirmed self-hosted
+      // host before prompting (an injected env.SENTRY_URL must not steer the
+      // browser to an attacker's login page).
+      assertAutoLoginHostTrusted();
+
       const scopeList = scopes.map((s) => `'${s}'`).join(", ");
       const { logger: logModule } = await import("./lib/logger.js");
       const confirmed = await logModule
@@ -447,42 +456,21 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   /**
    * Auto-authentication middleware.
    *
-   * Catches auth errors (not_authenticated, expired) in interactive TTYs
-   * and runs the login flow. On success, retries through the full middleware
-   * chain so inner middlewares (e.g., trial prompt) also apply to the retry.
+   * Catches auth errors (not_authenticated, expired) in interactive TTYs and
+   * runs the login flow, honoring the same host-trust gate as `auth login`
+   * (see {@link recoverWithAutoLogin}). On success, retries through the full
+   * middleware chain so inner middlewares (e.g., trial prompt) also apply.
    */
   const autoAuthMiddleware: ErrorMiddleware = async (next, argv) => {
     try {
       await next(argv);
     } catch (err) {
-      // Use isatty(0) for reliable stdin TTY detection (process.stdin.isTTY can be undefined in Bun)
-      // Errors can opt-out via skipAutoAuth (e.g., auth status command)
-      if (
-        err instanceof AuthError &&
-        (err.reason === "not_authenticated" || err.reason === "expired") &&
-        !err.skipAutoAuth &&
-        isatty(0)
-      ) {
-        process.stderr.write(
-          err.reason === "expired"
-            ? "Authentication expired. Starting login flow...\n\n"
-            : "Authentication required. Starting login flow...\n\n"
-        );
-
-        const loginSuccess = await runInteractiveLogin();
-
-        if (loginSuccess) {
-          process.stderr.write("\nRetrying command...\n\n");
-          await next(argv);
-          return;
-        }
-
-        // Login failed or was cancelled
-        process.exitCode = 1;
-        return;
+      const exitCode = await recoverWithAutoLogin(err, () => next(argv), {
+        runInteractiveLogin: () => runInteractiveLogin(),
+      });
+      if (exitCode !== undefined) {
+        process.exitCode = exitCode;
       }
-
-      throw err;
     }
   };
 
