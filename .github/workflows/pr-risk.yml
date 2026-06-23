@@ -19,19 +19,11 @@ jobs:
     if: github.event.pull_request.draft == false
 
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
       - name: Score current PR
-        uses: ./.github/actions/pr-risk-agent
+        uses: getsentry/pr-risk-action@v0
         with:
           repo: ${{ github.repository }}
           pr-number: ${{ github.event.pull_request.number }}
-          history: .risk-pr/cli-pr-history.jsonl.gz
-          model: .risk-pr/model_selected_static_v1_medium_outcome_strict.json
           result-path: risk-pr-result.json
           skip-reviews: "true"
 
