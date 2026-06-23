@@ -619,7 +619,7 @@ def apply_logistic_model(
         modeled["prediction"]["logistic_percentile_repo"] = round(percentile, 3)
         modeled["prediction"]["logistic_percentile_mode"] = percentile_mode
         modeled["prediction"]["logistic_risk_label"] = risk_label_for_percentile(percentile)
-        apply_final_risk_label(modeled["prediction"])
+        apply_final_risk_label(modeled["prediction"], modeled.get("prediction_features") or {})
         modeled_rows.append(modeled)
     return modeled_rows
 
@@ -660,7 +660,7 @@ def apply_serialized_logistic_model(
         modeled["prediction"]["logistic_risk_label"] = risk_label_for_percentile(percentile)
         modeled["prediction"]["logistic_outcome_name"] = model.get("outcome_name")
         modeled["prediction"]["logistic_feature_set"] = model.get("feature_set")
-        apply_final_risk_label(modeled["prediction"])
+        apply_final_risk_label(modeled["prediction"], modeled.get("prediction_features") or {})
         modeled_rows.append(modeled)
     return modeled_rows
 

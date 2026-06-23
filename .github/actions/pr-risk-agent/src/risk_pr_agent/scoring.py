@@ -448,14 +448,54 @@ def combine_risk_labels(*labels: Any) -> str:
     return max(ranked, key=lambda label: RISK_LABEL_RANK[label])
 
 
-def apply_final_risk_label(prediction: Dict[str, Any]) -> None:
-    """Set the deployable risk label from logistic and deterministic labels."""
+def apply_final_risk_label(prediction: Dict[str, Any], features: Dict[str, Any] | None = None) -> None:
+    """Set the deployable risk label from logistic plus deterministic guardrails."""
 
-    prediction["final_risk_label"] = combine_risk_labels(
-        prediction.get("logistic_risk_label"),
-        prediction.get("risk_label"),
+    features = features or {}
+    logistic_label = normalize_risk_label(prediction.get("logistic_risk_label"))
+    rule_percentile = safe_float(prediction.get("risk_percentile_repo"))
+    rule_raw = safe_float(prediction.get("risk_score_raw"))
+    changed_lines = safe_float(features.get("changed_lines"))
+    file_count = safe_float(features.get("file_count"))
+    prior_bad = max(
+        safe_float(features.get("max_file_prior_bad_outcomes")),
+        safe_float(features.get("max_dir_prior_bad_outcomes")),
     )
-    prediction["final_risk_policy"] = "max_logistic_rule_v1"
+    prior_reverts = max(
+        safe_float(features.get("max_file_prior_reverts")),
+        safe_float(features.get("max_dir_prior_reverts")),
+    )
+    relative_churn = safe_float(features.get("max_file_churn_ratio"))
+
+    hard_sensitive_no_test = bool(
+        features.get("code_changed_without_test_signal")
+        and features.get("sensitive_area_changed")
+        and (prior_bad > 0 or prior_reverts > 0 or relative_churn >= 0.5)
+    )
+    high = bool(
+        logistic_label == "high"
+        or rule_percentile >= 90
+        or changed_lines >= 1000
+        or file_count >= 30
+        or hard_sensitive_no_test
+    )
+    medium = bool(
+        high
+        or logistic_label == "medium"
+        or rule_percentile >= 70
+        or changed_lines >= 500
+        or file_count >= 15
+        or rule_raw >= 100
+    )
+
+    if high:
+        label = "high"
+    elif medium:
+        label = "medium"
+    else:
+        label = "low"
+    prediction["final_risk_label"] = label
+    prediction["final_risk_policy"] = "guardrail_hybrid_v2"
 
 
 def evaluate_label_confusion(
@@ -514,6 +554,15 @@ def evaluate_label_confusion(
 def normalize_risk_label(value: Any) -> str:
     label = str(value or "").strip().lower()
     return label if label in RISK_LABEL_RANK else ""
+
+
+def safe_float(value: Any) -> float:
+    if value is None or value == "":
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def empty_label_counts() -> Dict[str, int]:
