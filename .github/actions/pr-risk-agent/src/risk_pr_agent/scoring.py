@@ -8,6 +8,8 @@ from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 
 TOP_KS = (5, 10, 30)
+RISK_LABELS = ("low", "medium", "high")
+RISK_LABEL_RANK = {label: index for index, label in enumerate(RISK_LABELS)}
 
 
 def score_feature_rows(
@@ -325,10 +327,17 @@ def evaluate_prediction_scores(
         "positive_outcomes": positives,
         "outcome_name": outcome_name,
         "metrics": {},
+        "label_safety": {},
     }
     for score_name, key in score_paths:
         sorted_rows = sorted(evaluated_rows, key=lambda row: nested_get(row, key), reverse=True)
         result["metrics"][score_name] = topk_metrics(sorted_rows, positives, outcome_name)
+        result["label_safety"][score_name] = outcome_label_safety_metrics(
+            evaluated_rows,
+            outcome_name,
+            score_name,
+            key,
+        )
     return result
 
 
@@ -357,6 +366,158 @@ def topk_metrics(
 def nested_get(row: Dict[str, Any], keys: Tuple[str, str]) -> float:
     outer, inner = keys
     return float((row.get(outer) or {}).get(inner) or 0)
+
+
+def outcome_label_safety_metrics(
+    rows: Sequence[Dict[str, Any]],
+    outcome_name: str,
+    score_name: str,
+    score_key: Tuple[str, str],
+) -> Dict[str, Any]:
+    """Measure the dangerous miss mode: outcome-positive PRs labeled low."""
+
+    label_counts = empty_label_counts()
+    positive_counts = empty_label_counts()
+    positives = 0
+    for row in rows:
+        label = predicted_label_for_score(row, score_name, score_key)
+        label_counts[label] = label_counts.get(label, 0) + 1
+        if row.get("outcomes", {}).get(outcome_name):
+            positives += 1
+            positive_counts[label] = positive_counts.get(label, 0) + 1
+
+    high_as_low = positive_counts["low"]
+    positive_not_high = positives - positive_counts["high"]
+    low_label_count = label_counts["low"]
+    return {
+        "actual_high_definition": f"{outcome_name}=true",
+        "label_counts": label_counts,
+        "positive_outcomes_by_label": positive_counts,
+        "positive_outcomes_marked_low": high_as_low,
+        "positive_outcomes_marked_low_rate": round(high_as_low / positives, 4) if positives else 0.0,
+        "positive_outcomes_not_marked_high": positive_not_high,
+        "positive_outcomes_not_marked_high_rate": round(positive_not_high / positives, 4)
+        if positives
+        else 0.0,
+        "non_low_recall_for_positive_outcomes": round(
+            (positives - high_as_low) / positives,
+            4,
+        )
+        if positives
+        else 0.0,
+        "high_label_recall_for_positive_outcomes": round(positive_counts["high"] / positives, 4)
+        if positives
+        else 0.0,
+        "low_label_positive_rate": round(high_as_low / low_label_count, 4) if low_label_count else 0.0,
+    }
+
+
+def predicted_label_for_score(
+    row: Dict[str, Any],
+    score_name: str,
+    score_key: Tuple[str, str],
+) -> str:
+    prediction = row.get("prediction") or {}
+    explicit_label = None
+    if score_name == "logistic_probability":
+        explicit_label = prediction.get("logistic_risk_label")
+    elif score_name == "rule_percentile":
+        explicit_label = prediction.get("risk_label")
+    label = normalize_risk_label(explicit_label)
+    if label:
+        return label
+    score = nested_get(row, score_key)
+    if score_name.endswith("percentile") or score > 1:
+        return risk_label_for_percentile(score)
+    return "unknown"
+
+
+def risk_label_for_percentile(percentile: float) -> str:
+    if percentile >= 90:
+        return "high"
+    if percentile >= 70:
+        return "medium"
+    return "low"
+
+
+def combine_risk_labels(*labels: Any) -> str:
+    normalized = [normalize_risk_label(label) for label in labels]
+    ranked = [label for label in normalized if label]
+    if not ranked:
+        return "unknown"
+    return max(ranked, key=lambda label: RISK_LABEL_RANK[label])
+
+
+def apply_final_risk_label(prediction: Dict[str, Any]) -> None:
+    """Set the deployable risk label from logistic and deterministic labels."""
+
+    prediction["final_risk_label"] = combine_risk_labels(
+        prediction.get("logistic_risk_label"),
+        prediction.get("risk_label"),
+    )
+    prediction["final_risk_policy"] = "max_logistic_rule_v1"
+
+
+def evaluate_label_confusion(
+    rows: Sequence[Dict[str, Any]],
+    actual_label_key: str = "audit_label",
+    predicted_label_key: str = "model_label",
+) -> Dict[str, Any]:
+    """Evaluate low/medium/high labels when explicit audit labels are available."""
+
+    confusion = {actual: empty_label_counts() for actual in RISK_LABELS}
+    confusion["unknown"] = empty_label_counts()
+    label_counts = empty_label_counts()
+    actual_counts = empty_label_counts()
+    undercalls = 0
+    overcalls = 0
+    high_as_low = 0
+    evaluated = 0
+
+    for row in rows:
+        actual = normalize_risk_label(row.get(actual_label_key)) or "unknown"
+        predicted = normalize_risk_label(row.get(predicted_label_key)) or "unknown"
+        evaluated += 1
+        confusion.setdefault(actual, empty_label_counts())
+        confusion[actual][predicted] = confusion[actual].get(predicted, 0) + 1
+        label_counts[predicted] = label_counts.get(predicted, 0) + 1
+        actual_counts[actual] = actual_counts.get(actual, 0) + 1
+
+        actual_rank = RISK_LABEL_RANK.get(actual)
+        predicted_rank = RISK_LABEL_RANK.get(predicted)
+        if actual_rank is None or predicted_rank is None:
+            continue
+        if predicted_rank < actual_rank:
+            undercalls += 1
+        elif predicted_rank > actual_rank:
+            overcalls += 1
+        if actual == "high" and predicted == "low":
+            high_as_low += 1
+
+    high_actual = actual_counts["high"]
+    return {
+        "total_rows": evaluated,
+        "actual_label_key": actual_label_key,
+        "predicted_label_key": predicted_label_key,
+        "actual_label_counts": actual_counts,
+        "predicted_label_counts": label_counts,
+        "confusion": confusion,
+        "undercalls": undercalls,
+        "undercall_rate": round(undercalls / evaluated, 4) if evaluated else 0.0,
+        "overcalls": overcalls,
+        "overcall_rate": round(overcalls / evaluated, 4) if evaluated else 0.0,
+        "high_as_low": high_as_low,
+        "high_as_low_rate": round(high_as_low / high_actual, 4) if high_actual else 0.0,
+    }
+
+
+def normalize_risk_label(value: Any) -> str:
+    label = str(value or "").strip().lower()
+    return label if label in RISK_LABEL_RANK else ""
+
+
+def empty_label_counts() -> Dict[str, int]:
+    return {"low": 0, "medium": 0, "high": 0, "unknown": 0}
 
 
 def write_json(path: str, data: Dict[str, Any]) -> None:
@@ -396,6 +557,25 @@ def markdown_report(evaluation: Dict[str, Any]) -> str:
                     recall=values["recall"],
                     precision=values["precision"],
                     lift=values["lift_over_random"],
+                )
+            )
+        lines.append("")
+    if evaluation.get("label_safety"):
+        lines.append("## Label Safety")
+        lines.append("")
+        lines.append(
+            "| Score | Positive-as-low | Positive-as-low rate | Non-low recall | High-label recall | Low-label positive rate |"
+        )
+        lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
+        for score_name, values in evaluation["label_safety"].items():
+            lines.append(
+                "| {score} | {low_count} | {low_rate:.4f} | {non_low:.4f} | {high_recall:.4f} | {low_positive:.4f} |".format(
+                    score=score_name,
+                    low_count=values["positive_outcomes_marked_low"],
+                    low_rate=values["positive_outcomes_marked_low_rate"],
+                    non_low=values["non_low_recall_for_positive_outcomes"],
+                    high_recall=values["high_label_recall_for_positive_outcomes"],
+                    low_positive=values["low_label_positive_rate"],
                 )
             )
         lines.append("")

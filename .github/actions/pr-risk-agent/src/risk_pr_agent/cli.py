@@ -835,7 +835,13 @@ def write_github_outputs(result: Dict[str, Any]) -> None:
         return
     prediction = result.get("prediction") or {}
     with open(output_path, "a", encoding="utf-8") as handle:
-        handle.write(f"risk_label={prediction.get('logistic_risk_label') or prediction.get('risk_label') or ''}\n")
+        handle.write(
+            f"risk_label={prediction.get('final_risk_label') or prediction.get('logistic_risk_label') or prediction.get('risk_label') or ''}\n"
+        )
+        handle.write(f"final_risk_label={prediction.get('final_risk_label', '')}\n")
+        handle.write(f"final_risk_policy={prediction.get('final_risk_policy', '')}\n")
+        handle.write(f"logistic_risk_label={prediction.get('logistic_risk_label', '')}\n")
+        handle.write(f"rule_risk_label={prediction.get('risk_label', '')}\n")
         handle.write(f"logistic_probability={prediction.get('logistic_probability', '')}\n")
         handle.write(f"logistic_percentile_repo={prediction.get('logistic_percentile_repo', '')}\n")
         handle.write(f"rule_percentile_repo={prediction.get('risk_percentile_repo', '')}\n")
@@ -844,7 +850,12 @@ def write_github_outputs(result: Dict[str, Any]) -> None:
 def pr_risk_markdown_summary(result: Dict[str, Any]) -> str:
     prediction = result.get("prediction") or {}
     features = result.get("prediction_features") or {}
-    label = str(prediction.get("logistic_risk_label") or prediction.get("risk_label") or "unknown")
+    label = str(
+        prediction.get("final_risk_label")
+        or prediction.get("logistic_risk_label")
+        or prediction.get("risk_label")
+        or "unknown"
+    )
     probability = prediction.get("logistic_probability")
     percentile = prediction.get("logistic_percentile_repo")
     rule_percentile = prediction.get("risk_percentile_repo")
@@ -858,6 +869,9 @@ def pr_risk_markdown_summary(result: Dict[str, Any]) -> str:
         f"- PR: [{result.get('repo')}#{result.get('number')}]({result.get('html_url')})",
         f"- Title: {result.get('title')}",
         f"- Risk label: `{label}`",
+        f"- Logistic risk label: `{prediction.get('logistic_risk_label', 'unknown')}`",
+        f"- Rule risk label: `{prediction.get('risk_label', 'unknown')}`",
+        f"- Final risk policy: `{prediction.get('final_risk_policy', 'n/a')}`",
         f"- Logistic probability: `{format_optional_float(probability)}`",
         f"- Logistic repo percentile: `{format_optional_float(percentile)}`",
         f"- Rule repo percentile: `{format_optional_float(rule_percentile)}`",

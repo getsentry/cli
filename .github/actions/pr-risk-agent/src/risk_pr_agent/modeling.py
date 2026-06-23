@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .github import parse_github_time
 from .scoring import (
+    apply_final_risk_label,
     evaluate_prediction_scores,
     markdown_report,
     percentile_values_for_rows,
@@ -618,6 +619,7 @@ def apply_logistic_model(
         modeled["prediction"]["logistic_percentile_repo"] = round(percentile, 3)
         modeled["prediction"]["logistic_percentile_mode"] = percentile_mode
         modeled["prediction"]["logistic_risk_label"] = risk_label_for_percentile(percentile)
+        apply_final_risk_label(modeled["prediction"])
         modeled_rows.append(modeled)
     return modeled_rows
 
@@ -658,6 +660,7 @@ def apply_serialized_logistic_model(
         modeled["prediction"]["logistic_risk_label"] = risk_label_for_percentile(percentile)
         modeled["prediction"]["logistic_outcome_name"] = model.get("outcome_name")
         modeled["prediction"]["logistic_feature_set"] = model.get("feature_set")
+        apply_final_risk_label(modeled["prediction"])
         modeled_rows.append(modeled)
     return modeled_rows
 
