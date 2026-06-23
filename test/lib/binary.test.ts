@@ -496,22 +496,25 @@ describe("acquireLock", () => {
     releaseLock(lockPath);
   });
 
-  test("throws (does not recurse) when the parent path is a regular file", () => {
-    // Edge case from review: if the lock's parent directory is actually an
-    // existing file, mkdirSync throws EEXIST/ENOTDIR. That must propagate as a
-    // genuine error, NOT be misrouted into stale-lock handling (which would
-    // recurse into acquireLock until stack overflow).
+  test("propagates the mkdir EEXIST when the parent path is a regular file", () => {
+    // Edge case from review: if the lock's parent path is an existing regular
+    // file, mkdirSync throws EEXIST. Because mkdir runs OUTSIDE the
+    // writeFileSync try/catch, that EEXIST propagates directly. If mkdir were
+    // inside the try, the EEXIST would be routed into handleExistingLock,
+    // which would then fail reading the lock under a non-directory with a
+    // misleading ENOTDIR. Asserting EEXIST therefore guards mkdir's placement.
     const fileAsDir = join(testDir, "not-a-dir");
     writeFileSync(fileAsDir, "i am a file");
     const lockPath = join(fileAsDir, "sentry.lock");
 
-    expect(() => acquireLock(lockPath)).toThrow();
-    // Must not be a RangeError from infinite recursion.
+    let caught: NodeJS.ErrnoException | undefined;
     try {
       acquireLock(lockPath);
     } catch (error) {
-      expect((error as Error).name).not.toBe("RangeError");
+      caught = error as NodeJS.ErrnoException;
     }
+    expect(caught).toBeDefined();
+    expect(caught?.code).toBe("EEXIST");
   });
 
   test("throws when lock held by another running process", () => {

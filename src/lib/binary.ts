@@ -397,10 +397,12 @@ export function acquireLock(lockPath: string): void {
   // SENTRY_INSTALL_DIR). Without this, writeFileSync crashes with
   // `ENOENT ... open '.../sentry.lock'` (CLI-1E1, CLI-1RV).
   //
-  // Kept OUTSIDE the try/catch below: mkdir failures (EEXIST when the parent
-  // path is a regular file, ENOTDIR, EACCES) are genuine errors and must
-  // propagate. Routing an mkdir EEXIST into handleExistingLock would misread
-  // it as a held lock and recurse infinitely.
+  // Kept OUTSIDE the try/catch below so mkdir failures (EEXIST when the parent
+  // path is a regular file, ENOTDIR, EACCES) propagate directly as the genuine
+  // errors they are. If mkdir ran inside the try, its EEXIST would be routed
+  // into handleExistingLock and re-interpreted as a lock-contention case —
+  // surfacing a misleading ENOTDIR (from reading the lock under a non-dir)
+  // instead of the real EEXIST.
   mkdirSync(dirname(lockPath), { recursive: true, mode: 0o755 });
 
   try {

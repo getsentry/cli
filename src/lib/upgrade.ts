@@ -123,6 +123,12 @@ export function getCurlInstallPaths(): {
   // leave a DB row pointing at a directory that was later purged. Trusting it
   // blindly made the upgrade lock/install into a dead location, crashing with
   // `ENOENT ... open '.../sentry.lock'` (reported in #discuss-cli).
+  //
+  // existsSync also returns false on EACCES / a transiently-unmounted parent,
+  // in which case we fall through to execPath / the ~/.sentry/bin fallback
+  // rather than erroring. That tradeoff is acceptable: the running binary's
+  // own directory (execPath) is by definition accessible, so a genuine install
+  // is still found; only an unreadable *stored hint* is ignored.
   const stored = getInstallInfo();
   if (
     stored?.path &&
