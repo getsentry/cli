@@ -390,15 +390,20 @@ export function isProcessRunning(pid: number): boolean {
  * @throws {UpgradeError} If another upgrade/install is already in progress
  */
 export function acquireLock(lockPath: string): void {
-  try {
-    // Ensure the install directory exists before writing the lock. The
-    // download/upgrade pipeline derives the lock path from an install
-    // location that may not exist yet (fresh ~/.sentry/bin, npm→nightly
-    // migration) or was purged after a test install (a stale
-    // SENTRY_INSTALL_DIR). Without this, writeFileSync crashes with
-    // `ENOENT ... open '.../sentry.lock'` (CLI-1E1, CLI-1RV).
-    mkdirSync(dirname(lockPath), { recursive: true, mode: 0o755 });
+  // Ensure the install directory exists before writing the lock. The
+  // download/upgrade pipeline derives the lock path from an install
+  // location that may not exist yet (fresh ~/.sentry/bin, npm→nightly
+  // migration) or was purged after a test install (a stale
+  // SENTRY_INSTALL_DIR). Without this, writeFileSync crashes with
+  // `ENOENT ... open '.../sentry.lock'` (CLI-1E1, CLI-1RV).
+  //
+  // Kept OUTSIDE the try/catch below: mkdir failures (EEXIST when the parent
+  // path is a regular file, ENOTDIR, EACCES) are genuine errors and must
+  // propagate. Routing an mkdir EEXIST into handleExistingLock would misread
+  // it as a held lock and recurse infinitely.
+  mkdirSync(dirname(lockPath), { recursive: true, mode: 0o755 });
 
+  try {
     // Try atomic exclusive creation — fails if file exists
     writeFileSync(lockPath, String(process.pid), { flag: "wx" });
   } catch (error) {

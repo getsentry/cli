@@ -496,6 +496,24 @@ describe("acquireLock", () => {
     releaseLock(lockPath);
   });
 
+  test("throws (does not recurse) when the parent path is a regular file", () => {
+    // Edge case from review: if the lock's parent directory is actually an
+    // existing file, mkdirSync throws EEXIST/ENOTDIR. That must propagate as a
+    // genuine error, NOT be misrouted into stale-lock handling (which would
+    // recurse into acquireLock until stack overflow).
+    const fileAsDir = join(testDir, "not-a-dir");
+    writeFileSync(fileAsDir, "i am a file");
+    const lockPath = join(fileAsDir, "sentry.lock");
+
+    expect(() => acquireLock(lockPath)).toThrow();
+    // Must not be a RangeError from infinite recursion.
+    try {
+      acquireLock(lockPath);
+    } catch (error) {
+      expect((error as Error).name).not.toBe("RangeError");
+    }
+  });
+
   test("throws when lock held by another running process", () => {
     const lockPath = join(testDir, "test.lock");
     // PID 1 (init/systemd) is always running
