@@ -33,6 +33,11 @@ sentry issue list my-org/frontend --query "is:resolved"
 # Sort by frequency
 sentry issue list my-org/frontend --sort freq --limit 20
 
+# Sort by Sentry's "recommended" relevance ranking (the default on sentry.io;
+# self-hosted instances default to "date" and require a recent Sentry version
+# to accept --sort recommended)
+sentry issue list my-org/frontend --sort recommended
+
 # Multiple filters (space-separated = implicit AND)
 sentry issue list --query "is:unresolved level:error assigned:me"
 

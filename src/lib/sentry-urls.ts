@@ -37,7 +37,17 @@ export function getOrgBaseUrl(orgSlug: string): string {
   return parsed.origin;
 }
 
-function isSaaS(): boolean {
+/**
+ * Whether the CLI is currently pointed at Sentry SaaS (sentry.io).
+ *
+ * Resolves the configured base URL (env `SENTRY_HOST`/`SENTRY_URL`, else the
+ * default SaaS URL) and applies the hostname-only {@link isSentrySaasUrl}
+ * check. Intended for routing/UX decisions (e.g. choosing a SaaS-only default),
+ * NOT for credential-trust decisions — use {@link isSaaSTrustOrigin} for those.
+ *
+ * @returns true when the active base URL is sentry.io or a subdomain of it
+ */
+export function isSaaS(): boolean {
   return isSentrySaasUrl(getSentryBaseUrl());
 }
 

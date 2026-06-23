@@ -373,6 +373,25 @@ describe("property: getComparator", () => {
     } as SentryIssue;
     expect(cmp(high, low)).toBeLessThan(0);
   });
+
+  test("recommended sort falls back to recency (most recent first)", () => {
+    // The recommended score is server-only, so client-side merges degrade to
+    // a lastSeen (recency) ordering — same direction as the date sort.
+    const cmp = getComparator("recommended");
+    const older = {
+      id: "1",
+      shortId: "P-1",
+      title: "a",
+      lastSeen: "2020-01-01T00:00:00Z",
+    } as SentryIssue;
+    const newer = {
+      id: "2",
+      shortId: "P-2",
+      title: "b",
+      lastSeen: "2025-01-01T00:00:00Z",
+    } as SentryIssue;
+    expect(cmp(newer, older)).toBeLessThan(0);
+  });
 });
 
 // --- compareDates ---
