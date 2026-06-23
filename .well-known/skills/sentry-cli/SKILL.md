@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.37.0
+version: 0.38.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -405,6 +405,16 @@ Work with Dart/Flutter symbol maps
 - `sentry dart-symbol-map upload <path>` — Upload a Dart/Flutter symbol map to Sentry
 
 → Full flags and examples: `references/dart-symbol-map.md`
+
+### Debug-files
+
+Work with debug information files
+
+- `sentry debug-files check <path>` — Inspect a debug information file
+- `sentry debug-files bundle-jvm <path>` — Create a JVM source bundle for source context
+- `sentry debug-files bundle-sources <path>` — Bundle a debug file's source files for source context
+
+→ Full flags and examples: `references/debug-files.md`
 
 ### Dashboard
 

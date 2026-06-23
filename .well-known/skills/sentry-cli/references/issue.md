@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-issue
-version: 0.37.0
+version: 0.38.0
 description: Manage Sentry issues
 requires:
   bins: ["sentry"]
@@ -18,7 +18,7 @@ List issues in a project
 **Flags:**
 - `-q, --query <value> - Search query (Sentry syntax, implicit AND, no OR operator)`
 - `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
-- `-s, --sort <value> - Sort by: date, new, freq, user - (default: "date")`
+- `-s, --sort <value> - Sort by: recommended, date, new, freq, user (default: recommended on sentry.io, else date)`
 - `-t, --period <value> - Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01" - (default: "90d")`
 - `-c, --cursor <value> - Pagination cursor (use "next" for next page, "prev" for previous)`
 - `--compact - Single-line rows for compact output (auto-detects if omitted)`
@@ -68,6 +68,11 @@ sentry issue list my-org/frontend --query "is:resolved"
 
 # Sort by frequency
 sentry issue list my-org/frontend --sort freq --limit 20
+
+# Sort by Sentry's "recommended" relevance ranking (the default on sentry.io;
+# self-hosted instances default to "date" and require a recent Sentry version
+# to accept --sort recommended)
+sentry issue list my-org/frontend --sort recommended
 
 # Multiple filters (space-separated = implicit AND)
 sentry issue list --query "is:unresolved level:error assigned:me"
