@@ -218,7 +218,9 @@ function processUniqueSlugs(
   const slugToRemainder = new Map<string, string>();
 
   for (const slug of uniqueProjectSlugs) {
-    const remainder = slug.slice(strippedPrefix.length);
+    const remainder = slug.startsWith(strippedPrefix)
+      ? slug.slice(strippedPrefix.length)
+      : slug;
     slugToRemainder.set(slug, remainder || slug);
   }
 
