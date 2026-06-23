@@ -480,6 +480,22 @@ describe("acquireLock", () => {
     releaseLock(lockPath);
   });
 
+  test("creates the parent directory if it does not exist", () => {
+    // Regression for CLI-1E1 / CLI-1RV: the install dir (e.g. ~/.sentry/bin,
+    // or a stale SENTRY_INSTALL_DIR that was later purged) may not exist when
+    // the upgrade pipeline tries to acquire the lock. acquireLock must create
+    // the parent directory instead of crashing with ENOENT on writeFileSync.
+    const missingDir = join(testDir, "nested", "install-dir");
+    const lockPath = join(missingDir, "sentry.lock");
+
+    expect(() => acquireLock(lockPath)).not.toThrow();
+
+    const content = readFileSync(lockPath, "utf-8").trim();
+    expect(content).toBe(String(process.pid));
+
+    releaseLock(lockPath);
+  });
+
   test("throws when lock held by another running process", () => {
     const lockPath = join(testDir, "test.lock");
     // PID 1 (init/systemd) is always running

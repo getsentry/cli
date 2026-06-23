@@ -10,13 +10,14 @@ import { spawn } from "node:child_process";
 import {
   chmodSync,
   createWriteStream,
+  existsSync,
   realpathSync,
   statSync,
   unlinkSync,
 } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import {
   acquireLock,
@@ -104,7 +105,8 @@ function getKnownCurlPaths(): string[] {
  * Get file paths for curl-installed binary.
  *
  * Priority for determining install path:
- * 1. Stored install path from DB (if method is curl)
+ * 1. Stored install path from DB (if method is curl AND its directory still
+ *    exists — a stale path whose directory was purged is skipped)
  * 2. process.execPath if it's in a known curl install location
  * 3. Default to ~/.sentry/bin/sentry (fallback for fresh installs)
  *
@@ -116,9 +118,17 @@ export function getCurlInstallPaths(): {
   oldPath: string;
   lockPath: string;
 } {
-  // Check stored install path
+  // Check stored install path. Only trust it when its directory still exists:
+  // a test install via SENTRY_INSTALL_DIR (e.g. /tmp/sentry-test-install) can
+  // leave a DB row pointing at a directory that was later purged. Trusting it
+  // blindly made the upgrade lock/install into a dead location, crashing with
+  // `ENOENT ... open '.../sentry.lock'` (reported in #discuss-cli).
   const stored = getInstallInfo();
-  if (stored?.path && stored.method === "curl") {
+  if (
+    stored?.path &&
+    stored.method === "curl" &&
+    existsSync(dirname(stored.path))
+  ) {
     return getBinaryPaths(stored.path);
   }
 

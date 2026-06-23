@@ -8,13 +8,14 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   readFileSync,
   renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { chmod, copyFile, mkdir, realpath, unlink } from "node:fs/promises";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { compare as semverCompare } from "semver";
 import { getUserAgent } from "./constants.js";
 import {
@@ -390,6 +391,14 @@ export function isProcessRunning(pid: number): boolean {
  */
 export function acquireLock(lockPath: string): void {
   try {
+    // Ensure the install directory exists before writing the lock. The
+    // download/upgrade pipeline derives the lock path from an install
+    // location that may not exist yet (fresh ~/.sentry/bin, npm→nightly
+    // migration) or was purged after a test install (a stale
+    // SENTRY_INSTALL_DIR). Without this, writeFileSync crashes with
+    // `ENOENT ... open '.../sentry.lock'` (CLI-1E1, CLI-1RV).
+    mkdirSync(dirname(lockPath), { recursive: true, mode: 0o755 });
+
     // Try atomic exclusive creation — fails if file exists
     writeFileSync(lockPath, String(process.pid), { flag: "wx" });
   } catch (error) {

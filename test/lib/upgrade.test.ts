@@ -1011,19 +1011,41 @@ describe("getCurlInstallPaths", () => {
   });
 
   describe("stored path branch", () => {
-    useTestConfigDir("test-curl-paths-stored-");
+    const getConfigDir = useTestConfigDir("test-curl-paths-stored-");
 
     afterEach(() => {
       clearInstallInfo();
     });
 
-    test("uses stored path when install info has method=curl", () => {
-      const customPath = join(homedir(), "custom", "bin", "sentry");
+    test("uses stored path when its directory still exists", () => {
+      // The stored path is only trusted when its directory still exists —
+      // otherwise the upgrade would lock/install into a dead location.
+      const dir = join(getConfigDir(), "custom", "bin");
+      mkdirSync(dir, { recursive: true });
+      const customPath = join(dir, "sentry");
       setInstallInfo({ method: "curl", path: customPath, version: "1.0.0" });
 
       const paths = getCurlInstallPaths();
       expect(paths.installPath).toBe(customPath);
       expect(paths.tempPath).toBe(`${customPath}.download`);
+    });
+
+    test("ignores a stale stored path whose directory no longer exists", () => {
+      // Regression for sergical's report (#discuss-cli, 2026-06-22): a
+      // `SENTRY_INSTALL_DIR=/tmp/sentry-test-install` test install recorded
+      // install.path there, the dir was later purged, but the DB row
+      // survived. getCurlInstallPaths must NOT return the stale path — doing
+      // so crashed acquireLock with `ENOENT ... open '.../sentry.lock'`.
+      const stalePath = join(
+        getConfigDir(),
+        "purged",
+        "sentry-test-install",
+        "sentry"
+      );
+      setInstallInfo({ method: "curl", path: stalePath, version: "1.0.0" });
+
+      const paths = getCurlInstallPaths();
+      expect(paths.installPath).not.toBe(stalePath);
     });
 
     test("ignores stored path when method is not curl", () => {
