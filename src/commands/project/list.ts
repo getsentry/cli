@@ -533,9 +533,13 @@ async function handleProjectNotFound(
   projectSlug: string,
   orgs: { slug: string }[],
   flags: ListFlags,
-  options?: { originalSlug?: string; isRecoveryAttempt?: boolean }
+  options?: {
+    originalSlug?: string;
+    isRecoveryAttempt?: boolean;
+    scopedOrg?: string;
+  }
 ): Promise<ListResult<ProjectWithOrg>> {
-  const { originalSlug, isRecoveryAttempt = false } = options ?? {};
+  const { originalSlug, isRecoveryAttempt = false, scopedOrg } = options ?? {};
   const displaySlug = originalSlug ?? projectSlug;
 
   // Skip triage on recovery attempts to prevent infinite recursion.
@@ -563,9 +567,11 @@ async function handleProjectNotFound(
 
   if (outcome.kind === "fuzzy-match") {
     // Pass isRecoveryAttempt=true to prevent infinite recursion if the
-    // fuzzy-recovered slug also fails to resolve.
+    // fuzzy-recovered slug also fails to resolve. Preserve scopedOrg so
+    // the recovery lookup stays scoped to the user's specified org.
     return handleProjectSearch(outcome.project, flags, {
       isRecoveryAttempt: true,
+      scopedOrg,
     });
   }
 
@@ -573,13 +579,17 @@ async function handleProjectNotFound(
   if (flags.json) {
     return { items: [] };
   }
+  const fallback = scopedOrg
+    ? [
+        `No project with this name found in organization '${scopedOrg}'`,
+        `Check the organization slug or try: sentry project list ${scopedOrg}/`,
+      ]
+    : ["No project with this slug found in any accessible organization"];
   throw new ResolutionError(
     `Project '${displaySlug}'`,
     "not found",
     `sentry project list <org>/${projectSlug}`,
-    outcome.suggestions.length > 0
-      ? outcome.suggestions
-      : ["No project with this slug found in any accessible organization"]
+    outcome.suggestions.length > 0 ? outcome.suggestions : fallback
   );
 }
 
@@ -610,9 +620,10 @@ export async function handleProjectSearch(
       );
 
   // When the caller provided an org (e.g. "org/My Project"), scope the
-  // search to that org instead of all accessible orgs.
+  // search to that org instead of all accessible orgs. This applies to both
+  // display-name searches and slug-based recovery lookups.
   const orgs =
-    isDisplayName && scopedOrg !== undefined
+    scopedOrg !== undefined
       ? foundOrgs.filter((o) => o.slug === scopedOrg)
       : foundOrgs;
 
@@ -629,6 +640,7 @@ export async function handleProjectSearch(
     return handleProjectNotFound(projectSlug, orgs, flags, {
       originalSlug,
       isRecoveryAttempt,
+      scopedOrg,
     });
   }
 

@@ -1640,15 +1640,22 @@ export async function resolveOrgProjectTarget(
     case "project-search": {
       const displaySlug = parsed.originalSlug ?? parsed.projectSlug;
       const isDisplayName = parsed.originalSlug !== undefined;
+
+      // Resolve DSN-style org identifiers (e.g. "o1081365" → "my-org")
+      // before using the org for filtering.
+      const scopedOrg = parsed.org
+        ? await resolveEffectiveOrg(parsed.org)
+        : undefined;
+
       const { projects, orgs: foundOrgs } = isDisplayName
         ? { projects: [], orgs: await listOrganizations() }
         : await findProjectsBySlug(parsed.projectSlug);
 
       // When the caller provided an org (e.g. "org/My Project"), scope the
-      // display-name search to that org instead of all accessible orgs.
+      // search to that org instead of all accessible orgs.
       const orgs =
-        isDisplayName && parsed.org !== undefined
-          ? foundOrgs.filter((o) => o.slug === parsed.org)
+        scopedOrg !== undefined
+          ? foundOrgs.filter((o) => o.slug === scopedOrg)
           : foundOrgs;
 
       if (projects.length === 0) {
@@ -1674,13 +1681,17 @@ export async function resolveOrgProjectTarget(
           });
         }
 
+        const fallback = scopedOrg
+          ? [
+              `No project with this name found in organization '${scopedOrg}'`,
+              `Check the organization slug or try: sentry project list ${scopedOrg}/`,
+            ]
+          : ["No project with this slug found in any accessible organization"];
         throw new ResolutionError(
           `Project '${displaySlug}'`,
           "not found",
           `sentry ${commandName} <org>/${parsed.projectSlug}`,
-          outcome.suggestions.length > 0
-            ? outcome.suggestions
-            : ["No project with this slug found in any accessible organization"]
+          outcome.suggestions.length > 0 ? outcome.suggestions : fallback
         );
       }
 
@@ -1883,6 +1894,12 @@ export async function resolveTargetsFromParsedArg(
       // When the input is a display name (originalSlug set, contains spaces),
       // skip the slug-based API lookup and go straight to fuzzy matching.
       const isDisplayName = parsed.originalSlug !== undefined;
+
+      // Resolve DSN-style org identifiers before filtering.
+      const scopedOrg = parsed.org
+        ? await resolveEffectiveOrg(parsed.org)
+        : undefined;
+
       const { projects: matches, orgs: foundOrgs } = isDisplayName
         ? { projects: [], orgs: await listOrganizations() }
         : await findProjectsBySlug(parsed.projectSlug);
@@ -1890,8 +1907,8 @@ export async function resolveTargetsFromParsedArg(
       // When the caller provided an org (e.g. "org/My Project"), scope the
       // search to that org instead of all accessible orgs.
       const orgs =
-        isDisplayName && parsed.org !== undefined
-          ? foundOrgs.filter((o) => o.slug === parsed.org)
+        scopedOrg !== undefined
+          ? foundOrgs.filter((o) => o.slug === scopedOrg)
           : foundOrgs;
 
       if (matches.length === 0) {
@@ -1929,12 +1946,14 @@ export async function resolveTargetsFromParsedArg(
           return { targets };
         }
 
+        const fallback = scopedOrg
+          ? [
+              `No project with this name found in organization '${scopedOrg}'`,
+              `Check the organization slug or try: sentry project list ${scopedOrg}/`,
+            ]
+          : ["No project with this slug found in any accessible organization"];
         const suggestions =
-          outcome.suggestions.length > 0
-            ? outcome.suggestions
-            : [
-                "No project with this slug found in any accessible organization",
-              ];
+          outcome.suggestions.length > 0 ? outcome.suggestions : fallback;
         throw new ResolutionError(
           `Project '${displaySlug}'`,
           "not found",

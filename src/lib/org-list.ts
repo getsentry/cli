@@ -796,9 +796,10 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
       );
 
   // When the caller provided an org (e.g. "org/My Project"), scope the
-  // search to that org instead of all accessible orgs.
+  // search to that org instead of all accessible orgs. This applies to both
+  // display-name searches and slug-based recovery lookups.
   const orgs =
-    isDisplayName && scopedOrg !== undefined
+    scopedOrg !== undefined
       ? foundOrgs.filter((o) => o.slug === scopedOrg)
       : foundOrgs;
 
@@ -842,13 +843,17 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
       return { items: [] };
     }
 
+    const fallback = scopedOrg
+      ? [
+          `No project with this name found in organization '${scopedOrg}'`,
+          `Check the organization slug or try: sentry project list ${scopedOrg}/`,
+        ]
+      : ["No project with this slug found in any accessible organization"];
     throw new ResolutionError(
       `Project '${displaySlug}'`,
       "not found",
       `${config.commandPrefix} <org>/${projectSlug}`,
-      outcome.suggestions.length > 0
-        ? outcome.suggestions
-        : ["No project with this slug found in any accessible organization"]
+      outcome.suggestions.length > 0 ? outcome.suggestions : fallback
     );
   }
 
@@ -1063,6 +1068,28 @@ async function resolveOrgSlugMatch(
 }
 
 /**
+ * Resolve DSN-style org identifiers and set org/project context for modes
+ * that carry an org field. Returns the (possibly updated) parsed object.
+ */
+async function resolveOrgInParsed(
+  parsed: ParsedOrgProject
+): Promise<ParsedOrgProject> {
+  if (!("org" in parsed && parsed.org)) {
+    return parsed;
+  }
+  const effectiveOrg = await resolveEffectiveOrg(parsed.org);
+  const resolved =
+    effectiveOrg !== parsed.org ? { ...parsed, org: effectiveOrg } : parsed;
+  if (resolved.type === "explicit" || resolved.type === "org-all") {
+    setOrgProjectContext(
+      [effectiveOrg],
+      resolved.type === "explicit" ? [resolved.project] : []
+    );
+  }
+  return resolved;
+}
+
+/**
  * Validate the cursor flag and dispatch to the correct mode handler.
  *
  * Builds a {@link HandlerContext} from the shared fields (cwd, flags,
@@ -1111,19 +1138,7 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
     );
   }
 
-  if (
-    effectiveParsed.type === "explicit" ||
-    effectiveParsed.type === "org-all"
-  ) {
-    const effectiveOrg = await resolveEffectiveOrg(effectiveParsed.org);
-    if (effectiveOrg !== effectiveParsed.org) {
-      effectiveParsed = { ...effectiveParsed, org: effectiveOrg };
-    }
-    setOrgProjectContext(
-      [effectiveOrg],
-      effectiveParsed.type === "explicit" ? [effectiveParsed.project] : []
-    );
-  }
+  effectiveParsed = await resolveOrgInParsed(effectiveParsed);
 
   const defaults = buildDefaultHandlers(config);
   const handlers: ModeHandlerMap = { ...defaults, ...overrides };
