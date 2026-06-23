@@ -30,7 +30,7 @@ List issues in a project
 | --- | --- |
 | `-q, --query <query>` | Search query (Sentry syntax, implicit AND, no OR operator) |
 | `-n, --limit <limit>` | Maximum number of issues to list (default: "25") |
-| `-s, --sort <sort>` | Sort by: date, new, freq, user (default: "date") |
+| `-s, --sort <sort>` | Sort by: recommended, date, new, freq, user (default: recommended on sentry.io, else date) |
 | `-t, --period <period>` | Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01" (default: "90d") |
 | `-c, --cursor <cursor>` | Pagination cursor (use "next" for next page, "prev" for previous) |
 | `--compact` | Single-line rows for compact output (auto-detects if omitted) |
@@ -214,6 +214,7 @@ Terminal window
 # Show only unresolved issuessentry issue list my-org/frontend --query "is:unresolved"
 # Show resolved issuessentry issue list my-org/frontend --query "is:resolved"
 # Sort by frequencysentry issue list my-org/frontend --sort freq --limit 20
+# Sort by Sentry's "recommended" relevance ranking (the default on sentry.io;# self-hosted instances default to "date" and require a recent Sentry version# to accept --sort recommended)sentry issue list my-org/frontend --sort recommended
 # Multiple filters (space-separated = implicit AND)sentry issue list --query "is:unresolved level:error assigned:me"
 # Negation and wildcardssentry issue list --query "!browser:Chrome message:*timeout*"
 # Match multiple values for one key (in-list syntax)sentry issue list --query "browser:[Chrome,Firefox]"
