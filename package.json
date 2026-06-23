@@ -16,7 +16,7 @@
     "@sentry/core": "10.50.0",
     "@sentry/node-core": "10.50.0",
     "@sentry/sqlish": "^1.0.0",
-    "@sentry/symbolic": "13.3.0",
+    "@sentry/symbolic": "13.4.0",
     "@spotlightjs/spotlight": "^4.11.3",
     "@stricli/auto-complete": "^1.2.4",
     "@stricli/core": "^1.2.4",

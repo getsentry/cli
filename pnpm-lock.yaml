@@ -52,8 +52,8 @@ importers:
         specifier: ^1.0.0
         version: 1.0.1(react@19.2.7)
       '@sentry/symbolic':
-        specifier: 13.3.0
-        version: 13.3.0
+        specifier: 13.4.0
+        version: 13.4.0
       '@spotlightjs/spotlight':
         specifier: ^4.11.3
         version: 4.11.6(hono-rate-limiter@0.4.2(hono@4.12.25))
@@ -942,8 +942,8 @@ packages:
       react:
         optional: true
 
-  '@sentry/symbolic@13.3.0':
-    resolution: {integrity: sha512-bXai8G8YrXKYQprZ+LFkh1o+ST+mj+4MbXw+bHABCPGncV2vvqJBPH4VMRMCHDk1LVdA2/5Yfus7gN+gOfxuDA==}
+  '@sentry/symbolic@13.4.0':
+    resolution: {integrity: sha512-38pUc0+jmRNHPdMEyUr+wUHB9lJLfbIigppfzZs2M7GLvUbCeqV9QzcLjhNyuDRR2K+Db3yMIVFy+EeuVw/MFg==}
 
   '@sindresorhus/merge-streams@4.0.0':
     resolution: {integrity: sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ==}
@@ -3643,7 +3643,7 @@ snapshots:
     optionalDependencies:
       react: 19.2.7
 
-  '@sentry/symbolic@13.3.0': {}
+  '@sentry/symbolic@13.4.0': {}
 
   '@sindresorhus/merge-streams@4.0.0': {}
 
