@@ -722,7 +722,7 @@ function formatLogJson(
                   v?.value !== undefined
               )
               .map(([k, v]) => [
-                k,
+                stripBidi(k),
                 typeof v.value === "string" ? stripBidi(v.value) : v.value,
               ])
           )
