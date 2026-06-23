@@ -8,12 +8,14 @@ import { buildRouteMap } from "../../lib/route-map.js";
 import { bundleJvmCommand } from "./bundle-jvm.js";
 import { bundleSourcesCommand } from "./bundle-sources.js";
 import { checkCommand } from "./check.js";
+import { printSourcesCommand } from "./print-sources.js";
 
 export const debugFilesRoute = buildRouteMap({
   routes: {
     check: checkCommand,
-    "bundle-jvm": bundleJvmCommand,
+    "print-sources": printSourcesCommand,
     "bundle-sources": bundleSourcesCommand,
+    "bundle-jvm": bundleJvmCommand,
   },
   docs: {
     brief: "Work with debug information files",

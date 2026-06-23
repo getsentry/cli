@@ -9,6 +9,7 @@
 import { describe, expect, test } from "vitest";
 import {
   createSourceBundle,
+  listSources,
   parseDebugFile,
   peekFormat,
 } from "../../../src/lib/dif/index.js";
@@ -149,5 +150,33 @@ describe("createSourceBundle", () => {
     expect(() =>
       createSourceBundle(toBytes("not an object file"), "x", () => null)
     ).toThrow();
+  });
+});
+
+describe("listSources", () => {
+  test("lists the source files an object references", () => {
+    const info = listSources(toBytes(BREAKPAD_WITH_SOURCE));
+    expect(info.objects).toHaveLength(1);
+
+    const object = info.objects[0];
+    expect(object?.debugId).toBe("0f13a5da-412a-fbf7-c866-2048f3294f3d");
+    expect(object?.fileFormat).toBe("breakpad");
+    expect(object?.files).toHaveLength(1);
+
+    const file = object?.files[0];
+    expect(file?.path).toBe("/src/example.c");
+    // Breakpad references files but embeds no source content.
+    expect(file?.resolved).toBe(false);
+    expect(file?.type).toBeNull();
+  });
+
+  test("returns an empty file list for an object with no referenced sources", () => {
+    const info = listSources(toBytes(BREAKPAD_FIXTURE));
+    expect(info.objects).toHaveLength(1);
+    expect(info.objects[0]?.files).toHaveLength(0);
+  });
+
+  test("throws on unrecognized data", () => {
+    expect(() => listSources(toBytes("not an object file"))).toThrow();
   });
 });

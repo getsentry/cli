@@ -221,3 +221,83 @@ export function createSourceBundle(
     writer.writeObject(object, objectName, filter, provider) ?? null;
   return { bundle, debugId: object.debugId, fileCount, objectCount };
 }
+
+/** A source file referenced by an object, with any resolved descriptor metadata. */
+export type DifSourceFile = {
+  /** Absolute path recorded in the debug info. */
+  path: string;
+  /** Whether the path resolved to a descriptor (embedded contents or a source link). */
+  resolved: boolean;
+  /**
+   * The descriptor's source-file type (e.g. `source`, `minified_source`,
+   * `source_map`), or `null` when the path did not resolve to a descriptor.
+   */
+  type: string | null;
+  /** Source link URL carried by the descriptor, if any. */
+  url: string | null;
+  /** Debug id associated with the source, if any. */
+  debugId: string | null;
+  /** Source map URL reference, if any. */
+  sourceMappingUrl: string | null;
+};
+
+/** The source files referenced by a single object within a debug file. */
+export type DifObjectSources = {
+  /** The object's debug identifier. */
+  debugId: string;
+  /** The object file format (e.g. `elf`, `pdb`). */
+  fileFormat: string;
+  /** Source files referenced by the object's debug info. */
+  files: DifSourceFile[];
+};
+
+/** All objects and the source files they reference, for a debug file. */
+export type DifSourcesInfo = {
+  objects: DifObjectSources[];
+};
+
+/**
+ * Enumerate the source files referenced by a debug information file.
+ *
+ * For each object, opens a debug session and lists every referenced source
+ * path, resolving each to its descriptor (embedded contents or a source link)
+ * when available. Nothing is read from the local filesystem here.
+ *
+ * @param data - The full contents of the debug information file.
+ * @returns Per-object lists of referenced source files with descriptor metadata.
+ * @throws If the buffer cannot be parsed.
+ */
+export function listSources(data: Uint8Array): DifSourcesInfo {
+  ensureInitialized();
+  const archive = new Archive(data);
+  const objects = archive.objects().map((object) => {
+    const files: DifSourceFile[] = [];
+    try {
+      const session = object.debugSession();
+      for (const file of session.files()) {
+        const path = file.abs_path_str;
+        const descriptor = session.sourceByPath(path);
+        // Only cheap descriptor metadata is read here. Reading `contents`
+        // would copy the full source text across the wasm/JS boundary — and
+        // re-encode the Rust UTF-8 string to a JS UTF-16 string — for every
+        // referenced file, which listing references never needs.
+        files.push({
+          path,
+          resolved: descriptor !== undefined,
+          type: descriptor?.type ?? null,
+          url: descriptor?.url ?? null,
+          debugId: descriptor?.debugId ?? null,
+          sourceMappingUrl: descriptor?.sourceMappingUrl ?? null,
+        });
+      }
+    } catch (err) {
+      log.debug(`Failed to enumerate sources for ${object.debugId}`, err);
+    }
+    return {
+      debugId: object.debugId,
+      fileFormat: object.fileFormat,
+      files,
+    };
+  });
+  return { objects };
+}
