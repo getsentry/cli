@@ -8,13 +8,14 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   readFileSync,
   renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { chmod, copyFile, mkdir, realpath, unlink } from "node:fs/promises";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { compare as semverCompare } from "semver";
 import { getUserAgent } from "./constants.js";
 import {
@@ -389,6 +390,21 @@ export function isProcessRunning(pid: number): boolean {
  * @throws {UpgradeError} If another upgrade/install is already in progress
  */
 export function acquireLock(lockPath: string): void {
+  // Ensure the install directory exists before writing the lock. The
+  // download/upgrade pipeline derives the lock path from an install
+  // location that may not exist yet (fresh ~/.sentry/bin, npm→nightly
+  // migration) or was purged after a test install (a stale
+  // SENTRY_INSTALL_DIR). Without this, writeFileSync crashes with
+  // `ENOENT ... open '.../sentry.lock'` (CLI-1E1, CLI-1RV).
+  //
+  // Kept OUTSIDE the try/catch below so mkdir failures (EEXIST when the parent
+  // path is a regular file, ENOTDIR, EACCES) propagate directly as the genuine
+  // errors they are. If mkdir ran inside the try, its EEXIST would be routed
+  // into handleExistingLock and re-interpreted as a lock-contention case —
+  // surfacing a misleading ENOTDIR (from reading the lock under a non-dir)
+  // instead of the real EEXIST.
+  mkdirSync(dirname(lockPath), { recursive: true, mode: 0o755 });
+
   try {
     // Try atomic exclusive creation — fails if file exists
     writeFileSync(lockPath, String(process.pid), { flag: "wx" });
