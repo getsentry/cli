@@ -1,0 +1,42 @@
+name: PR Risk Experiment
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-risk-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  risk:
+    name: Score PR risk
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Score current PR
+        uses: ./.github/actions/pr-risk-agent
+        with:
+          repo: ${{ github.repository }}
+          pr-number: ${{ github.event.pull_request.number }}
+          history: .risk-pr/cli-pr-history.jsonl.gz
+          model: .risk-pr/model_selected_static_v1_medium_outcome_strict.json
+          result-path: risk-pr-result.json
+          skip-reviews: "true"
+
+      - name: Upload risk result
+        uses: actions/upload-artifact@v4
+        with:
+          name: risk-pr-result
+          path: risk-pr-result.json
