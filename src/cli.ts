@@ -160,7 +160,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const { isatty } = await import("node:tty");
   const { ExitCode, run } = await import("@stricli/core");
   const { app } = await import("./app.js");
-  const { hoistGlobalFlags } = await import("./lib/argv-hoist.js");
+  const { preprocessArgv } = await import("./lib/argv-hoist.js");
   const { buildContext } = await import("./context.js");
   const { AuthError, OutputError, formatError, getExitCode } = await import(
     "./lib/errors.js"
@@ -184,12 +184,15 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     shouldSuppressNotification,
   } = await import("./lib/version-check.js");
 
-  // Move global flags (--verbose, -v, --log-level, --json, --fields) from any
-  // position to the end of argv, where Stricli's leaf-command parser can
-  // find them. This allows `sentry --verbose issue list` to work.
+  // Preprocess argv before dispatch (see preprocessArgv):
+  //  - `--version` after a route group/subcommand (e.g. `sentry cli --version`)
+  //    is normalized to a top-level `--version`; Stricli only handles it at the
+  //    application proxy. `-v` is left alone — it's the --verbose alias.
+  //  - global flags (--verbose, -v, --log-level, --json, --fields) are hoisted
+  //    to the tail so `sentry --verbose issue list` works.
   // The original cliArgs are kept for post-run checks (e.g., help recovery)
   // that rely on the original token positions.
-  const hoistedArgs = hoistGlobalFlags(cliArgs);
+  const hoistedArgs = preprocessArgv(cliArgs);
 
   // ---------------------------------------------------------------------------
   // Error-recovery middleware
