@@ -7,7 +7,9 @@ AI coding agents like Claude Code — and any agent that reads skills from `~/.a
 
 ## Automatic Installation
 
-When you install the CLI (via `curl`, Homebrew, or a package manager), `sentry cli setup` automatically installs agent skills into any detected agent root directories (`~/.claude`, `~/.agents`). Skills are also refreshed on `sentry cli upgrade`. No network fetch is needed — skill files are embedded in the binary.
+When you install the CLI via `curl` or Homebrew, `sentry cli setup` automatically installs agent skills into any detected agent root directories (`~/.claude`, `~/.agents`). Skills are also refreshed on `sentry cli upgrade`. No network fetch is needed — skill files are embedded in the binary.
+
+If you installed via a package manager (`npm`, `pnpm`, `bun`, `yarn`), run `sentry cli setup` once to install the skills — there is no automatic postinstall hook.
 
 To skip automatic skill installation, pass `--no-agent-skills` to `sentry cli setup`.
 

@@ -61,7 +61,10 @@ cli/                              # Repository root
 ├── .cursor/
 │   └── skills/
 │       └── sentry-cli/
-│           └── SKILL.md          # Symlink to plugins location
+│           ├── SKILL.md          # Symlink → plugins/.../SKILL.md
+│           └── references/       # Copies of per-command reference files
+│               ├── issue.md
+│               └── ...           # One .md per visible route (26 total)
 ├── plugins/
 │   ├── README.md                 # This file
 │   └── sentry-cli/
@@ -69,10 +72,15 @@ cli/                              # Repository root
 │       │   └── plugin.json       # Plugin manifest
 │       └── skills/
 │           └── sentry-cli/
-│               └── SKILL.md      # CLI usage skill (auto-generated)
+│               ├── SKILL.md      # CLI usage skill (auto-generated)
+│               └── references/   # Per-command reference files (canonical)
+│                   ├── issue.md
+│                   └── ...
 └── script/
-    └── generate-skill.ts         # Generates SKILL.md from CLI commands
+    └── generate-skill.ts         # Generates SKILL.md + references from CLI commands
 ```
+
+`SKILL.md` under `.cursor/skills/` is a symlink to the canonical `plugins/` location. The `references/` files are copies kept in sync by CI — the canonical source is `plugins/sentry-cli/skills/sentry-cli/references/`.
 
 ## Updating SKILL.md
 
