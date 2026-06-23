@@ -412,6 +412,7 @@ Work with debug information files
 
 - `sentry debug-files check <path>` — Inspect a debug information file
 - `sentry debug-files bundle-jvm <path>` — Create a JVM source bundle for source context
+- `sentry debug-files bundle-sources <path>` — Bundle a debug file's source files for source context
 
 → Full flags and examples: `references/debug-files.md`
 

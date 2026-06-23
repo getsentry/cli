@@ -7,7 +7,11 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { parseDebugFile, peekFormat } from "../../../src/lib/dif/index.js";
+import {
+  createSourceBundle,
+  parseDebugFile,
+  peekFormat,
+} from "../../../src/lib/dif/index.js";
 
 /** A minimal, valid Breakpad symbol file with a known debug id + code id. */
 const BREAKPAD_FIXTURE = [
@@ -16,6 +20,15 @@ const BREAKPAD_FIXTURE = [
   "FUNC 1000 10 0 main",
   "1000 10 42 1",
   "PUBLIC 2000 0 some_symbol",
+].join("\n");
+
+/** Breakpad file that references one source file (FILE 0) via a line record. */
+const BREAKPAD_WITH_SOURCE = [
+  "MODULE Linux x86_64 0F13A5DA412AFBF7C8662048F3294F3D0 example",
+  "INFO CODE_ID DAA5130F2A41F7FBC8662048F3294F3D439CA7FF",
+  "FILE 0 /src/example.c",
+  "FUNC 1000 10 0 main",
+  "1000 10 42 0",
 ].join("\n");
 
 function toBytes(s: string): Uint8Array {
@@ -80,5 +93,61 @@ describe("parseDebugFile", () => {
     expect(archive.objects[0]?.debugId).toBe(
       "00000000-0000-0000-0000-000000000000"
     );
+  });
+});
+
+describe("createSourceBundle", () => {
+  test("bundles a referenced source file supplied by the provider", () => {
+    const requested: string[] = [];
+    const result = createSourceBundle(
+      toBytes(BREAKPAD_WITH_SOURCE),
+      "example",
+      (path) => {
+        requested.push(path);
+        return toBytes(`// ${path}`);
+      }
+    );
+
+    expect(requested).toContain("/src/example.c");
+    expect(result.fileCount).toBe(1);
+    expect(result.debugId).toBe("0f13a5da-412a-fbf7-c866-2048f3294f3d");
+    expect(result.bundle).toBeInstanceOf(Uint8Array);
+    expect((result.bundle as Uint8Array).length).toBeGreaterThan(0);
+  });
+
+  test("produces no bundle when the provider supplies nothing", () => {
+    const result = createSourceBundle(
+      toBytes(BREAKPAD_WITH_SOURCE),
+      "example",
+      () => null
+    );
+    expect(result.fileCount).toBe(0);
+    expect(result.bundle).toBeNull();
+  });
+
+  test("produces no bundle when the object references no sources", () => {
+    const result = createSourceBundle(
+      toBytes(BREAKPAD_FIXTURE),
+      "example",
+      () => toBytes("unused")
+    );
+    expect(result.fileCount).toBe(0);
+    expect(result.bundle).toBeNull();
+  });
+
+  test("surfaces a provider error as a throw (not a silent partial bundle)", () => {
+    // The error crosses the wasm boundary, so the original message isn't
+    // preserved; what matters is that it throws rather than skipping silently.
+    expect(() =>
+      createSourceBundle(toBytes(BREAKPAD_WITH_SOURCE), "example", () => {
+        throw new Error("read failed");
+      })
+    ).toThrow();
+  });
+
+  test("throws on unrecognized data", () => {
+    expect(() =>
+      createSourceBundle(toBytes("not an object file"), "x", () => null)
+    ).toThrow();
   });
 });

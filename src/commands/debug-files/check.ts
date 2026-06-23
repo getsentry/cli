@@ -12,7 +12,6 @@
  * no useful features), mirroring the legacy `sentry-cli difutil check`.
  */
 
-import { readFile } from "node:fs/promises";
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { type DifArchiveInfo, parseDebugFile } from "../../lib/dif/index.js";
@@ -23,6 +22,7 @@ import {
   renderMarkdown,
 } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { readDebugFile } from "./read-file.js";
 
 const USAGE_HINT = "sentry debug-files check <path>";
 
@@ -78,30 +78,6 @@ function formatCheckResult(data: DebugFilesCheckResult): string {
     )}`;
   }
   return out;
-}
-
-/**
- * Read a file from disk with descriptive error handling.
- *
- * @throws {ValidationError} On ENOENT, EISDIR, or other read failures.
- */
-async function readDebugFile(path: string): Promise<Buffer> {
-  try {
-    return await readFile(path);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") {
-      throw new ValidationError(`File '${path}' does not exist.`, "path");
-    }
-    if (code === "EISDIR") {
-      throw new ValidationError(
-        `Path '${path}' is a directory, not a debug information file.`,
-        "path"
-      );
-    }
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new ValidationError(`Cannot read file '${path}': ${msg}`, "path");
-  }
 }
 
 /**
