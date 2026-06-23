@@ -17,8 +17,6 @@
  * - Any error occurs during patch download or application
  */
 
-import { unlinkSync } from "node:fs";
-
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 import { compare as semverCompare, valid as semverValid } from "semver";
@@ -29,7 +27,7 @@ import {
   isDowngrade,
   isNightlyVersion,
 } from "./binary.js";
-import { applyPatch } from "./bspatch.js";
+import { applyPatchChainInMemory } from "./bspatch.js";
 import { CLI_VERSION } from "./constants.js";
 import { customFetch } from "./custom-ca.js";
 import { formatBytes } from "./formatters/numbers.js";
@@ -1158,75 +1156,14 @@ async function resolveNightlyChainWithContext(
   );
 }
 
-/** Remove intermediate patching files, ignoring errors. */
-function cleanupIntermediates(destPath: string): void {
-  for (const suffix of [".patching.a", ".patching.b"]) {
-    try {
-      unlinkSync(`${destPath}${suffix}`);
-    } catch {
-      // Ignore cleanup errors
-    }
-  }
-}
-
 /**
- * Apply patches sequentially, alternating between two intermediate files.
+ * Apply a resolved patch chain and verify the result.
  *
- * Extracted to keep cognitive complexity manageable when the caller wraps
- * this in a tracing span.
- *
- * @returns SHA-256 hex of the final output
- */
-async function applyPatchesSequentially(
-  chain: PatchChain,
-  oldBinaryPath: string,
-  destPath: string
-): Promise<string> {
-  let currentOldPath = oldBinaryPath;
-  let sha256 = "";
-
-  // Alternate between two intermediate paths to avoid reading and writing
-  // the same file (mmap'd read + writer truncation = corruption).
-  const intermediateA = `${destPath}.patching.a`;
-  const intermediateB = `${destPath}.patching.b`;
-
-  try {
-    for (let i = 0; i < chain.patches.length; i++) {
-      const patch = chain.patches[i];
-      if (!patch) {
-        throw new Error(`Missing patch at index ${i}`);
-      }
-      const isLast = i === chain.patches.length - 1;
-      const intermediate = i % 2 === 0 ? intermediateA : intermediateB;
-      const outputPath = isLast ? destPath : intermediate;
-
-      sha256 = await withTracing(
-        `apply-patch-${i}`,
-        "upgrade.delta.apply",
-        () => applyPatch(currentOldPath, patch.data, outputPath)
-      );
-
-      if (!isLast) {
-        currentOldPath = outputPath;
-      }
-    }
-  } finally {
-    // Always clean up intermediate files, even on failure
-    if (chain.patches.length > 1) {
-      cleanupIntermediates(destPath);
-    }
-  }
-
-  return sha256;
-}
-
-/**
- * Apply a resolved patch chain sequentially and verify the result.
- *
- * For single-patch chains, applies directly from old binary to dest.
- * For multi-patch chains, alternates between two intermediate files
- * so that read and write never target the same path — writing to the
- * source would truncate it and corrupt the output.
+ * Delegates to {@link applyPatchChainInMemory}, which loads the base binary
+ * once, keeps every intermediate hop in memory (no per-hop disk writes,
+ * temp-copies, or SHA-256 passes), and streams only the final binary to
+ * `destPath`. Because reads and writes never target the same path, there is no
+ * read/write truncation hazard.
  *
  * Does **not** set executable permissions — the caller
  * (`downloadBinaryToTemp`) handles that uniformly for both delta
@@ -1257,9 +1194,9 @@ export function applyPatchChain(
         `Applying ${chain.patches.length} patch(es), expected SHA-256: ${chain.expectedSha256.slice(0, 12)}...`
       );
 
-      const sha256 = await applyPatchesSequentially(
-        chain,
+      const sha256 = await applyPatchChainInMemory(
         oldBinaryPath,
+        chain.patches.map((p) => p.data),
         destPath
       );
 

@@ -5,10 +5,21 @@
  * TRDIFF10 format (produced by zig-bsdiff with `--use-zstd`). Designed for
  * minimal memory usage during CLI self-upgrades:
  *
- * - Old binary: copy to temp file, then read via `readFile()` (~100 MB heap)
+ * - Old binary: copy to temp file, then read on demand via positional `read()`
+ *   (`pread`), so the base never sits fully in the JS heap — only the windows
+ *   actually referenced are pulled in, served from the OS page cache
  * - Diff/extra blocks: streamed via zstd `Transform` from `node:zlib`
  * - Output: written incrementally to disk via `createWriteStream()`
  * - Integrity: SHA-256 computed inline via `node:crypto`
+ *
+ * Multi-patch chains keep every intermediate result in memory and only persist
+ * (and hash) the final binary, avoiding the redundant disk write, temp-copy, and
+ * SHA-256 pass that a file-by-file chain would incur per hop. The running binary
+ * is the only input copied to a temp file. See {@link applyPatchChainInMemory}.
+ *
+ * The base ("old") bytes are accessed through an {@link OldReader} so the same
+ * transform serves both an fd-backed on-disk binary (first hop / single patch)
+ * and an in-memory intermediate buffer (subsequent hops).
  *
  * TRDIFF10 format (from zig-bsdiff):
  * ```
@@ -22,7 +33,7 @@
 
 import { createHash } from "node:crypto";
 import { constants, copyFileSync, createWriteStream } from "node:fs";
-import { readFile, unlink } from "node:fs/promises";
+import { type FileHandle, open, readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -239,25 +250,199 @@ function createZstdStreamReader(compressed: Uint8Array): BufferedStreamReader {
   );
 }
 
-/** Result of loading the old binary for patching */
-type OldFileHandle = {
-  /** In-memory view of the old binary */
-  data: Uint8Array;
-  /** Cleanup function to call after patching (removes temp copy, if any) */
-  cleanup: () => void | Promise<void>;
+/**
+ * Random-access view of the base ("old") binary during patching.
+ *
+ * Abstracts over an fd-backed on-disk file (read on demand via `pread`) and an
+ * in-memory buffer (a multi-patch intermediate), so {@link transformPatch} can
+ * source old bytes the same way regardless of where they live.
+ */
+type OldReader = {
+  /**
+   * Read exactly `len` bytes starting at `pos`.
+   *
+   * Positions outside `[0, size)` are zero-filled, matching the original
+   * `oldFile[oldpos + i] ?? 0` semantics (bsdiff seeks can reference offsets
+   * past the end, and a negative/oversized seek must read as zeros rather than
+   * fail). The returned buffer is always exactly `len` bytes.
+   */
+  read: (pos: number, len: number) => Promise<Uint8Array>;
+  /** Release any held resources (fd, temp copy). Safe to call more than once. */
+  close: () => Promise<void>;
 };
 
 /**
- * Load the old binary for read access during patching.
+ * {@link OldReader} backed by an in-memory buffer.
  *
- * Strategy: copy to temp file, then read into memory. The copy avoids
- * ETXTBSY (Linux) / AMFI SIGKILL (macOS) issues with reading the running
- * binary directly. On CoW filesystems (btrfs, xfs, APFS) the copy is a
- * metadata-only reflink (near-instant).
+ * Used for multi-patch intermediates, whose bytes already live in the JS heap
+ * and must stay there for the next hop's random access.
+ */
+class MemoryOldReader implements OldReader {
+  private readonly data: Uint8Array;
+
+  constructor(data: Uint8Array) {
+    this.data = data;
+  }
+
+  read(pos: number, len: number): Promise<Uint8Array> {
+    const out = new Uint8Array(len); // zero-filled
+    const start = Math.max(pos, 0);
+    const end = Math.min(pos + len, this.data.length);
+    if (end > start) {
+      out.set(this.data.subarray(start, end), start - pos);
+    }
+    return Promise.resolve(out);
+  }
+
+  close(): Promise<void> {
+    // Bytes live in the JS heap — nothing to release.
+    return Promise.resolve();
+  }
+}
+
+/**
+ * Size of {@link FileOldReader}'s read-ahead cache block (1 MiB).
+ *
+ * bsdiff references the base mostly forward in many small windows; caching a
+ * sliding block of this size collapses thousands of per-window positional reads
+ * into roughly `fileSize / BLOCK_SIZE` reads, at a bounded ~1 MiB memory cost.
+ */
+const OLD_READER_BLOCK_SIZE = 1024 * 1024;
+
+/**
+ * {@link OldReader} backed by an open file descriptor, read on demand via
+ * positional reads (`pread`) through a single-block read-ahead cache.
+ *
+ * Keeps the base binary out of the JS heap — only the referenced windows are
+ * pulled in, served from the OS page cache populated by the reflink copy. The
+ * cache coalesces the many small windowed reads bsdiff performs (mostly forward
+ * with occasional jumps) into a handful of block reads, avoiding a per-window
+ * syscall storm while staying bounded at {@link OLD_READER_BLOCK_SIZE}.
+ */
+class FileOldReader implements OldReader {
+  private closed = false;
+  private readonly handle: FileHandle;
+  private readonly size: number;
+  private readonly tempPath: string;
+
+  /** Read-ahead block buffer (allocated once, reused across refills). */
+  private readonly block: Buffer = Buffer.alloc(OLD_READER_BLOCK_SIZE);
+  /** File offset the cached block starts at, or -1 when the cache is empty. */
+  private blockStart = -1;
+  /** Number of valid bytes currently held in the block. */
+  private blockLen = 0;
+
+  constructor(handle: FileHandle, size: number, tempPath: string) {
+    this.handle = handle;
+    this.size = size;
+    this.tempPath = tempPath;
+  }
+
+  async read(pos: number, len: number): Promise<Uint8Array> {
+    const out = Buffer.alloc(len); // zero-filled; out-of-range stays zero
+    const start = Math.max(pos, 0);
+    const end = Math.min(pos + len, this.size);
+    if (end <= start) {
+      return out; // window is entirely out of range — all zeros
+    }
+
+    const need = end - start;
+    const outOffset = start - pos;
+
+    if (need > OLD_READER_BLOCK_SIZE) {
+      // Window larger than a cache block — read straight into the output and
+      // leave the cache untouched (caching it would blow the memory bound).
+      await this.readExact(out, outOffset, need, start);
+      return out;
+    }
+
+    if (!this.blockCovers(start, end)) {
+      await this.fillBlock(start);
+    }
+    out.set(
+      this.block.subarray(start - this.blockStart, end - this.blockStart),
+      outOffset
+    );
+    return out;
+  }
+
+  /** True when the cached block fully covers `[start, end)`. */
+  private blockCovers(start: number, end: number): boolean {
+    return (
+      this.blockStart >= 0 &&
+      start >= this.blockStart &&
+      end <= this.blockStart + this.blockLen
+    );
+  }
+
+  /**
+   * Refill the cache block starting at `start`. The length is clamped to the
+   * file size; callers only reach here when `[start, end)` fits in one block,
+   * and `start + len <= size`, so the read never crosses EOF.
+   */
+  private async fillBlock(start: number): Promise<void> {
+    const len = Math.min(OLD_READER_BLOCK_SIZE, this.size - start);
+    await this.readExact(this.block, 0, len, start);
+    this.blockStart = start;
+    this.blockLen = len;
+  }
+
+  /**
+   * Read exactly `length` bytes at file offset `filePos` into `buf` at `offset`,
+   * looping over short positional reads (possible across some filesystems).
+   */
+  private async readExact(
+    buf: Buffer,
+    offset: number,
+    length: number,
+    filePos: number
+  ): Promise<void> {
+    let read = 0;
+    while (read < length) {
+      const { bytesRead } = await this.handle.read(
+        buf,
+        offset + read,
+        length - read,
+        filePos + read
+      );
+      if (bytesRead === 0) {
+        break; // Unexpected EOF within bounds — leave remainder as-is
+      }
+      read += bytesRead;
+    }
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    try {
+      await this.handle.close();
+    } catch {
+      // fd may already be closed — safe to ignore
+    }
+    await unlink(this.tempPath).catch(() => {
+      /* Best-effort cleanup — OS will reclaim on reboot */
+    });
+  }
+}
+
+/**
+ * Open the old binary for on-demand read access during patching.
+ *
+ * Strategy: copy to a temp file, then read windows on demand via `pread`. The
+ * copy avoids ETXTBSY (Linux) / AMFI SIGKILL (macOS) issues with reading the
+ * running binary directly; on CoW filesystems (btrfs, xfs, APFS) it is a
+ * metadata-only reflink (near-instant). Reading on demand keeps the ~100 MB
+ * base out of the JS heap.
+ *
+ * Falls back to a full in-memory read of the original file if the copy or open
+ * fails (rare) — correctness over the memory optimization.
  */
 let loadCounter = 0;
 
-async function loadOldBinary(oldPath: string): Promise<OldFileHandle> {
+async function loadOldBinary(oldPath: string): Promise<OldReader> {
   loadCounter += 1;
   const tempCopy = join(
     tmpdir(),
@@ -267,78 +452,43 @@ async function loadOldBinary(oldPath: string): Promise<OldFileHandle> {
     // COPYFILE_FICLONE: attempt CoW reflink first (near-instant on btrfs/xfs/APFS),
     // silently falls back to regular copy on filesystems that don't support it.
     copyFileSync(oldPath, tempCopy, constants.COPYFILE_FICLONE);
-
-    return {
-      data: new Uint8Array(await readFile(tempCopy)),
-      cleanup: () =>
-        unlink(tempCopy).catch(() => {
-          /* Best-effort cleanup — OS will reclaim on reboot */
-        }),
-    };
+    const handle = await open(tempCopy, "r");
+    const { size } = await handle.stat();
+    return new FileOldReader(handle, size, tempCopy);
   } catch {
-    // Copy failed — read directly into JS heap
+    // Copy/open failed — fall back to a direct in-memory read of the original.
     await unlink(tempCopy).catch(() => {
       /* May not exist if copyFileSync failed */
     });
-    return {
-      data: new Uint8Array(await readFile(oldPath)),
-      cleanup: () => {
-        // Data is in JS heap — no temp file to clean up
-      },
-    };
-  }
-}
-
-/** Resources to clean up after patch application. */
-type PatchResources = {
-  writer: import("node:fs").WriteStream;
-  /** Returns the latest write error (live reference, not a snapshot). */
-  getWriteError: () => Error | undefined;
-  diffReader: BufferedStreamReader;
-  extraReader: BufferedStreamReader;
-  cleanupOldFile: () => void | Promise<void>;
-};
-
-/**
- * Clean up all patch resources: flush the output stream, cancel decompression
- * readers, and remove temp files. Each step runs regardless of prior failures.
- */
-async function cleanupPatchResources(r: PatchResources): Promise<void> {
-  try {
-    await new Promise<void>((resolve, reject) => {
-      r.writer.end((err?: Error | null) => {
-        const finalErr = err ?? r.getWriteError();
-        if (finalErr) {
-          reject(finalErr);
-        } else {
-          resolve();
-        }
-      });
-    });
-  } finally {
-    await Promise.all([r.diffReader.cancel(), r.extraReader.cancel()]);
-    await r.cleanupOldFile();
+    return new MemoryOldReader(await readFile(oldPath));
   }
 }
 
 /**
- * Apply a TRDIFF10 binary patch with streaming I/O for minimal memory usage.
+ * Core TRDIFF10 transform.
  *
- * Copies the old file to a temp path and reads it into memory. Streams
- * diff/extra blocks via `node:zlib` zstd decompressor, writes output via
- * `createWriteStream()`, and computes SHA-256 inline.
+ * Applies a patch to in-memory old bytes, emitting output chunks in order via
+ * `onChunk`. Handles header parsing, streaming zstd decompression of the diff
+ * and extra blocks, the wrapping-add reconstruction, and output-size validation.
  *
- * @param oldPath - Path to the existing (old) binary file
+ * The base bytes are pulled from `oldReader` one diff-window at a time (the
+ * algorithm only references the old binary during the diff step), so the caller
+ * decides whether they come from disk or memory. Output routing is likewise the
+ * caller's choice: `onChunk` writes to disk, hashes, and/or collects into a
+ * buffer. The diff/extra decompression readers are always cancelled before
+ * returning, even on error. `onChunk` may throw to abort the transform early
+ * (used to surface a streaming write failure).
+ *
+ * @param oldReader - Random-access view of the base ("old") binary
  * @param patchData - Complete TRDIFF10 patch file contents
- * @param destPath - Path to write the patched (new) binary
- * @returns SHA-256 hex digest of the written output
- * @throws {Error} On corrupt patch, I/O failure, or size mismatch
+ * @param onChunk - Receives each output chunk in order; may throw to abort
+ * @throws {Error} On corrupt patch, or when output size disagrees with the header
  */
-export async function applyPatch(
-  oldPath: string,
+async function transformPatch(
+  oldReader: OldReader,
   patchData: Uint8Array,
-  destPath: string
-): Promise<string> {
+  onChunk: (chunk: Uint8Array) => void
+): Promise<void> {
   const { controlLen, diffLen, newSize } = parsePatchHeader(patchData);
 
   // Slice compressed blocks from the patch buffer
@@ -357,21 +507,6 @@ export async function applyPatch(
   );
   const extraReader = createZstdStreamReader(patchData.subarray(extraStart));
 
-  // Load old binary via copy-then-read (or direct read as fallback).
-  const { data: oldFile, cleanup: cleanupOldFile } =
-    await loadOldBinary(oldPath);
-
-  // Streaming output: write directly to disk, compute SHA-256 inline
-  const writer = createWriteStream(destPath);
-  const hasher = createHash("sha256");
-
-  // Capture write errors early — without a listener, Node crashes with
-  // ERR_UNHANDLED_ERROR if a write fails (ENOSPC, EIO, etc.) during the loop.
-  let writeError: Error | undefined;
-  writer.on("error", (err) => {
-    writeError ??= err;
-  });
-
   let oldpos = 0;
   let newpos = 0;
 
@@ -382,9 +517,6 @@ export async function applyPatch(
       controlPos < controlBlock.byteLength;
       controlPos += 24
     ) {
-      if (writeError) {
-        break;
-      }
       const readDiffBy = offtin(controlBlock, controlPos);
       const readExtraBy = offtin(controlBlock, controlPos + 8);
       const seekBy = offtin(controlBlock, controlPos + 16);
@@ -392,16 +524,17 @@ export async function applyPatch(
       // Step 1: Read diff bytes and add to old file bytes (wrapping u8 add)
       if (readDiffBy > 0) {
         const diffChunk = await diffReader.read(readDiffBy);
+        // Pull exactly the old-file window this step references (zero-filled
+        // beyond the file's bounds — see OldReader.read).
+        const oldChunk = await oldReader.read(oldpos, readDiffBy);
         const outputChunk = new Uint8Array(readDiffBy);
 
         for (let i = 0; i < readDiffBy; i++) {
           // Wrapping unsigned byte addition, matching zig-bsdiff's @addWithOverflow
-          outputChunk[i] =
-            ((oldFile[oldpos + i] ?? 0) + (diffChunk[i] ?? 0)) % 256;
+          outputChunk[i] = ((oldChunk[i] ?? 0) + (diffChunk[i] ?? 0)) % 256;
         }
 
-        writer.write(outputChunk);
-        hasher.update(outputChunk);
+        onChunk(outputChunk);
         oldpos += readDiffBy;
         newpos += readDiffBy;
       }
@@ -409,8 +542,7 @@ export async function applyPatch(
       // Step 2: Copy extra bytes directly to output (new data)
       if (readExtraBy > 0) {
         const extraChunk = await extraReader.read(readExtraBy);
-        writer.write(extraChunk);
-        hasher.update(extraChunk);
+        onChunk(extraChunk);
         newpos += readExtraBy;
       }
 
@@ -418,13 +550,7 @@ export async function applyPatch(
       oldpos += seekBy;
     }
   } finally {
-    await cleanupPatchResources({
-      writer,
-      getWriteError: () => writeError,
-      diffReader,
-      extraReader,
-      cleanupOldFile,
-    });
+    await Promise.all([diffReader.cancel(), extraReader.cancel()]);
   }
 
   // Validate output size matches header
@@ -433,6 +559,187 @@ export async function applyPatch(
       `Output size mismatch: wrote ${newpos} bytes, expected ${newSize}`
     );
   }
+}
+
+/**
+ * Apply a patch to the base bytes from `oldReader`, streaming the result to
+ * `destPath` while computing its SHA-256.
+ *
+ * Used for the final hop of a chain (and single-patch upgrades), where the
+ * output must be persisted and verified.
+ *
+ * @param oldReader - Random-access view of the base ("old") binary
+ * @param patchData - Complete TRDIFF10 patch file contents
+ * @param destPath - Path to write the patched output
+ * @returns SHA-256 hex digest of the written output
+ * @throws {Error} On corrupt patch, I/O failure, or size mismatch
+ */
+async function applyReaderToFile(
+  oldReader: OldReader,
+  patchData: Uint8Array,
+  destPath: string
+): Promise<string> {
+  const writer = createWriteStream(destPath);
+  const hasher = createHash("sha256");
+
+  // Capture write errors early — without a listener, Node crashes with
+  // ERR_UNHANDLED_ERROR if a write fails (ENOSPC, EIO, etc.) during the loop.
+  let writeError: Error | undefined;
+  writer.on("error", (err) => {
+    writeError ??= err;
+  });
+
+  try {
+    await transformPatch(oldReader, patchData, (chunk) => {
+      // Abort the transform on the first I/O failure. Throwing here unwinds
+      // through transformPatch's reader cleanup; the writer is then flushed
+      // and the error re-surfaced in the finally below.
+      if (writeError) {
+        throw writeError;
+      }
+      writer.write(chunk);
+      hasher.update(chunk);
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      writer.end((err?: Error | null) => {
+        const finalErr = err ?? writeError;
+        if (finalErr) {
+          reject(finalErr);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
 
   return hasher.digest("hex");
+}
+
+/**
+ * Apply a patch to the base bytes from `oldReader`, returning the result as a
+ * new in-memory buffer.
+ *
+ * Used for the intermediate hops of a multi-patch chain: the output becomes the
+ * base for the next patch without ever touching disk, and no SHA-256 is computed
+ * (only the final binary is hashed and verified).
+ *
+ * @param oldReader - Random-access view of the base ("old") binary
+ * @param patchData - Complete TRDIFF10 patch file contents
+ * @returns The patched output bytes
+ * @throws {Error} On corrupt patch or size mismatch
+ */
+async function applyReaderToMemory(
+  oldReader: OldReader,
+  patchData: Uint8Array
+): Promise<Uint8Array> {
+  // Preallocate the exact output size from the header so chunks can be copied
+  // in place — avoids a final concat pass over ~100 MB of output.
+  const { newSize } = parsePatchHeader(patchData);
+  const output = new Uint8Array(newSize);
+  let offset = 0;
+
+  await transformPatch(oldReader, patchData, (chunk) => {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  });
+
+  return output;
+}
+
+/**
+ * Apply a patch to in-memory old bytes, returning the result as a new buffer.
+ *
+ * Convenience wrapper over the internal reader-based path for callers that
+ * already hold the base bytes in memory (e.g. tests). Production chains use
+ * {@link applyPatchChainInMemory}, which reads the on-disk base on demand.
+ *
+ * @param oldFile - Full contents of the base ("old") binary
+ * @param patchData - Complete TRDIFF10 patch file contents
+ * @returns The patched output bytes
+ * @throws {Error} On corrupt patch or size mismatch
+ */
+export function applyPatchToMemory(
+  oldFile: Uint8Array,
+  patchData: Uint8Array
+): Promise<Uint8Array> {
+  return applyReaderToMemory(new MemoryOldReader(oldFile), patchData);
+}
+
+/**
+ * Apply a sequence of TRDIFF10 patches, oldest first, writing the final binary
+ * to `destPath` and returning its SHA-256.
+ *
+ * The base binary at `oldPath` is loaded once (copied to a temp file to avoid
+ * reading the running executable in place — see {@link loadOldBinary}). Every
+ * intermediate result is kept in memory and fed straight into the next patch,
+ * so intermediates never hit disk and only the final binary is hashed. This
+ * eliminates the N−1 redundant disk writes, temp-copies, and SHA-256 passes a
+ * file-by-file chain would incur — and because reads and writes never target
+ * the same path, there is no risk of truncating a file that is being read.
+ *
+ * For a single-patch chain this is equivalent to applying that patch straight
+ * to `destPath`.
+ *
+ * @param oldPath - Path to the base ("old") binary
+ * @param patches - Patches to apply in order (oldest first); must be non-empty
+ * @param destPath - Path to write the final patched binary
+ * @returns SHA-256 hex digest of the final output
+ * @throws {Error} When `patches` is empty, or on corrupt patch / I/O / size mismatch
+ */
+export async function applyPatchChainInMemory(
+  oldPath: string,
+  patches: Uint8Array[],
+  destPath: string
+): Promise<string> {
+  if (patches.length === 0) {
+    throw new Error("Cannot apply an empty patch chain");
+  }
+
+  // First hop reads the on-disk base on demand (fd-backed). Subsequent hops
+  // read the previous in-memory output. Each reader is closed before the next
+  // replaces it; the active one is closed in the finally.
+  let reader = await loadOldBinary(oldPath);
+
+  try {
+    // Intermediate hops stay entirely in memory — no disk I/O, no hashing.
+    for (let i = 0; i < patches.length - 1; i++) {
+      const patch = patches[i];
+      if (!patch) {
+        throw new Error(`Missing patch at index ${i}`);
+      }
+      const next = await applyReaderToMemory(reader, patch);
+      await reader.close();
+      reader = new MemoryOldReader(next);
+    }
+
+    // Final hop streams to disk and computes the verification hash.
+    const finalPatch = patches.at(-1);
+    if (!finalPatch) {
+      throw new Error("Missing final patch");
+    }
+    return await applyReaderToFile(reader, finalPatch, destPath);
+  } finally {
+    await reader.close();
+  }
+}
+
+/**
+ * Apply a single TRDIFF10 binary patch and write the result to `destPath`.
+ *
+ * Thin wrapper over {@link applyPatchChainInMemory} for the common single-patch
+ * case; preserved as the documented entry point for one-shot patch application.
+ *
+ * @param oldPath - Path to the existing (old) binary file
+ * @param patchData - Complete TRDIFF10 patch file contents
+ * @param destPath - Path to write the patched (new) binary
+ * @returns SHA-256 hex digest of the written output
+ * @throws {Error} On corrupt patch, I/O failure, or size mismatch
+ */
+export function applyPatch(
+  oldPath: string,
+  patchData: Uint8Array,
+  destPath: string
+): Promise<string> {
+  return applyPatchChainInMemory(oldPath, [patchData], destPath);
 }
