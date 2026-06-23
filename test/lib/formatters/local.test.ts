@@ -587,6 +587,36 @@ describe("isItemIncluded", () => {
       expect(isItemIncluded("transaction", ai, payload)).toBe(true);
     });
 
+    test("matches a child span carrying only gen_ai.request.model", () => {
+      // No gen_ai.operation.name/tool/agent key, so inferSemanticOp would not
+      // return "gen_ai" — prefix-based detection is required to catch this.
+      const payload = {
+        contexts: { trace: { op: "http.server" } },
+        spans: [{ data: { "gen_ai.request.model": "gpt-4o" } }],
+      };
+      expect(isItemIncluded("transaction", ai, payload)).toBe(true);
+    });
+
+    test("matches a child span carrying only gen_ai.usage.input_tokens", () => {
+      const payload = {
+        contexts: { trace: { op: "http.server" } },
+        spans: [{ data: { "gen_ai.usage.input_tokens": 1234 } }],
+      };
+      expect(isItemIncluded("transaction", ai, payload)).toBe(true);
+    });
+
+    test("matches a trace root carrying only gen_ai.provider.name", () => {
+      const payload = {
+        contexts: {
+          trace: {
+            op: "http.server",
+            data: { "gen_ai.provider.name": "anthropic" },
+          },
+        },
+      };
+      expect(isItemIncluded("transaction", ai, payload)).toBe(true);
+    });
+
     test("excludes a plain HTTP transaction with no AI spans", () => {
       const payload = {
         contexts: { trace: { op: "http.server" } },

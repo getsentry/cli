@@ -7,6 +7,7 @@ import type { AttributeSource } from "./semantic-display.js";
 import {
   collectSpanAttributes,
   formatSemanticSpanDisplay,
+  hasAiAttributes,
   inferSemanticOp,
   mergeTransactionAttributes,
 } from "./semantic-display.js";
@@ -342,10 +343,16 @@ const SDK_ATTRIBUTE_PREFIXES = [
   "messaging.",
   "faas.",
   "cloud.",
+  "cloudevents.",
+  "aws.s3.",
+  "graphql.",
+  "feature_flag.",
+  "process.",
   "otel.",
   "thread.",
   "code.",
   "exception.",
+  "error.",
   "user_agent.",
 ];
 
@@ -840,15 +847,18 @@ export function isItemIncluded(
  * span attributes. The Vercel AI SDK and similar instrumentations attach
  * `gen_ai.*` attributes to child spans of an HTTP handler transaction (e.g.
  * `POST /api/ai/chat`), so root-only detection misses them.
+ *
+ * Detection matches the full `gen_ai.*`/`mcp.*` namespace by key prefix rather
+ * than only the op-defining keys ({@link inferSemanticOp}) — a span carrying
+ * just `gen_ai.request.model` or `gen_ai.usage.input_tokens` is still AI
+ * activity the filter must surface.
  */
 function transactionHasAiActivity(payload: Record<string, unknown>): boolean {
-  const rootOp = inferSemanticOp(mergeTransactionAttributes(payload));
-  if (rootOp === "gen_ai" || rootOp === "mcp") {
+  if (hasAiAttributes(mergeTransactionAttributes(payload))) {
     return true;
   }
   for (const spanAttrs of collectSpanAttributes(payload)) {
-    const op = inferSemanticOp(spanAttrs);
-    if (op === "gen_ai" || op === "mcp") {
+    if (hasAiAttributes(spanAttrs)) {
       return true;
     }
   }
