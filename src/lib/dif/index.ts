@@ -15,7 +15,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { Archive, initSync } from "@sentry/symbolic";
+import { Archive, initSync, SourceBundleWriter } from "@sentry/symbolic";
 import { logger } from "../logger.js";
 
 const log = logger.withTag("dif");
@@ -155,4 +155,69 @@ export function parseDebugFile(data: Uint8Array): DifArchiveInfo {
 export function peekFormat(data: Uint8Array): string {
   ensureInitialized();
   return Archive.peek(data) ?? "unknown";
+}
+
+/** Result of building a source bundle from a debug information file. */
+export type SourceBundleResult = {
+  /** The source bundle ZIP bytes, or `null` if the bundle would be empty. */
+  bundle: Uint8Array | null;
+  /** Debug id of the object the bundle was built for, or `null` if the file has no objects. */
+  debugId: string | null;
+  /** Number of source files included in the bundle. */
+  fileCount: number;
+  /** Total number of objects in the archive (a bundle is built for one of them). */
+  objectCount: number;
+};
+
+/**
+ * Build a source bundle (a ZIP archive) from the source files referenced by a
+ * debug information file.
+ *
+ * The object's debug info is walked for referenced source paths; for each,
+ * `readSource` is invoked to supply that file's contents. Return `null` from
+ * `readSource` to skip a path that isn't available locally. The bundle is built
+ * entirely in memory; nothing is read from disk by this function itself.
+ *
+ * The bundle is built for the first object that carries debug info (falling back
+ * to the first object), which matches the single-object debug files this is used
+ * for; fat archives with multiple debug-info slices are not split here.
+ *
+ * @param data - The full contents of the debug information file.
+ * @param objectName - Name stamped on the bundle (typically the input file name).
+ * @param readSource - Supplies source content for a referenced path, or `null` to skip.
+ *   Invoked synchronously, so it must read synchronously (e.g. `readFileSync`).
+ * @returns The bundle bytes (or `null` if empty), the object's debug id, and the
+ *   number of files included.
+ * @throws If the buffer cannot be parsed, or if `readSource` throws.
+ */
+export function createSourceBundle(
+  data: Uint8Array,
+  objectName: string,
+  readSource: (path: string) => Uint8Array | null
+): SourceBundleResult {
+  ensureInitialized();
+  const archive = new Archive(data);
+  const objects = archive.objects();
+  const objectCount = objects.length;
+  const object = objects.find((o) => o.hasDebugInfo) ?? objects[0];
+  if (!object) {
+    return { bundle: null, debugId: null, fileCount: 0, objectCount };
+  }
+
+  let fileCount = 0;
+  const writer = new SourceBundleWriter();
+  // The filter runs before each file; we include everything the object
+  // references and let the provider decide availability (returning null skips).
+  const filter = (_path: string): boolean => true;
+  const provider = (path: string): Uint8Array | null => {
+    const content = readSource(path);
+    if (content !== null) {
+      fileCount += 1;
+    }
+    return content;
+  };
+
+  const bundle =
+    writer.writeObject(object, objectName, filter, provider) ?? null;
+  return { bundle, debugId: object.debugId, fileCount, objectCount };
 }
