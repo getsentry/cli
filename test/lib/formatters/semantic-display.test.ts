@@ -8,6 +8,7 @@
 import { describe, expect, test } from "vitest";
 import {
   type AttributeSource,
+  collectSpanAttributes,
   formatDisplayPart,
   formatSemanticSpanDisplay,
   inferSemanticOp,
@@ -530,6 +531,33 @@ describe("mergeTransactionAttributes", () => {
     expect(mergeTransactionAttributes({})).toEqual({});
     expect(mergeTransactionAttributes({ contexts: {} })).toEqual({});
     expect(mergeTransactionAttributes({ contexts: { trace: {} } })).toEqual({});
+  });
+});
+
+describe("collectSpanAttributes", () => {
+  test("collects data from each child span", () => {
+    const event = {
+      spans: [
+        { data: { "http.request.method": "POST" } },
+        { data: { "gen_ai.operation.name": "chat" } },
+      ],
+    };
+    const collected = collectSpanAttributes(event);
+    expect(collected).toHaveLength(2);
+    expect(inferSemanticOp(collected[1])).toBe("gen_ai");
+  });
+
+  test("skips spans without a data object", () => {
+    const event = {
+      spans: [{}, { data: null }, { data: { "db.system.name": "postgresql" } }],
+    };
+    const collected = collectSpanAttributes(event);
+    expect(collected).toHaveLength(1);
+  });
+
+  test("returns empty array when no spans", () => {
+    expect(collectSpanAttributes({})).toEqual([]);
+    expect(collectSpanAttributes({ spans: "not-an-array" })).toEqual([]);
   });
 });
 

@@ -9,6 +9,8 @@
 import { describe, expect, test } from "vitest";
 import type { FilterValue } from "../../../src/lib/formatters/local.js";
 import {
+  extractTraceId,
+  formatAttributeTable,
   formatErrorItem,
   formatItem,
   formatItemJson,
@@ -133,6 +135,22 @@ describe("formatErrorItem", () => {
     const result = stripAnsi(formatErrorItem(event, serverHeader));
     expect(result).toContain("[src/app.ts:10]");
   });
+
+  test("surfaces a short trace ID when present", () => {
+    const event = {
+      timestamp: 1_700_000_000,
+      message: "boom",
+      contexts: { trace: { trace_id: "1a2b3c4d5e6f70819a2b3c4d5e6f7081" } },
+    };
+    const result = stripAnsi(formatErrorItem(event, serverHeader));
+    expect(result).toContain("[trace:1a2b3c4d]");
+  });
+
+  test("omits the trace token when no trace ID", () => {
+    const event = { timestamp: 1_700_000_000, message: "boom" };
+    const result = stripAnsi(formatErrorItem(event, serverHeader));
+    expect(result).not.toContain("[trace:");
+  });
 });
 
 describe("formatTransactionItem", () => {
@@ -207,6 +225,22 @@ describe("formatTransactionItem", () => {
     };
     const result = stripAnsi(formatTransactionItem(event, browserHeader));
     expect(result).toContain("Transaction");
+  });
+
+  test("surfaces a short trace ID when present", () => {
+    const event = {
+      timestamp: 1_700_000_001,
+      start_timestamp: 1_700_000_000,
+      transaction: "GET /",
+      contexts: {
+        trace: {
+          op: "http.server",
+          trace_id: "deadbeefcafebabe0123456789abcdef",
+        },
+      },
+    };
+    const result = stripAnsi(formatTransactionItem(event, browserHeader));
+    expect(result).toContain("[trace:deadbeef]");
   });
 
   describe("semantic display from OTel attributes", () => {
@@ -379,6 +413,48 @@ describe("formatSingleLog", () => {
     const result = stripAnsi(formatSingleLog({}, "[SERVER]  "));
     expect(result).toContain("[LOG]");
   });
+
+  test("renders user attributes in alphabetical order", () => {
+    const result = stripAnsi(
+      formatSingleLog(
+        {
+          level: "info",
+          body: "hello",
+          attributes: {
+            zeta: { value: 1 },
+            alpha: { value: 2 },
+            mid: { value: 3 },
+          },
+        },
+        "[SERVER]  "
+      )
+    );
+    const alphaIdx = result.indexOf("[alpha=2]");
+    const midIdx = result.indexOf("[mid=3]");
+    const zetaIdx = result.indexOf("[zeta=1]");
+    expect(alphaIdx).toBeGreaterThan(-1);
+    expect(alphaIdx).toBeLessThan(midIdx);
+    expect(midIdx).toBeLessThan(zetaIdx);
+  });
+
+  test("surfaces trace ID from sentry.trace.trace_id attribute", () => {
+    const result = stripAnsi(
+      formatSingleLog(
+        {
+          level: "info",
+          body: "hello",
+          attributes: {
+            "sentry.trace.trace_id": {
+              value: "abcdef0123456789abcdef0123456789",
+            },
+          },
+        },
+        "[SERVER]  "
+      )
+    );
+    expect(result).toContain("[trace:abcdef01]");
+    expect(result).not.toContain("sentry.trace.trace_id");
+  });
 });
 
 describe("formatItem", () => {
@@ -466,6 +542,83 @@ describe("isItemIncluded", () => {
     const filters = new Set<FilterValue>(["error"]);
     expect(isItemIncluded("attachment", filters)).toBe(false);
     expect(isItemIncluded(undefined, filters)).toBe(false);
+  });
+
+  describe("ai filter", () => {
+    const ai = new Set<FilterValue>(["ai"]);
+
+    test("matches transaction with gen_ai attributes on the trace root", () => {
+      const payload = {
+        contexts: {
+          trace: {
+            op: "gen_ai.chat",
+            data: { "gen_ai.operation.name": "chat" },
+          },
+        },
+      };
+      expect(isItemIncluded("transaction", ai, payload)).toBe(true);
+    });
+
+    test("matches Vercel AI transaction with gen_ai on a child span", () => {
+      // The /api/ai/chat HTTP handler is the transaction root; the GenAI
+      // generation lives on a child span, where gen_ai.* attributes are set.
+      const payload = {
+        transaction: "POST /api/ai/chat",
+        contexts: { trace: { op: "http.server" } },
+        spans: [
+          { op: "http.server", data: { "http.request.method": "POST" } },
+          {
+            op: "gen_ai.generate_text",
+            data: {
+              "gen_ai.operation.name": "chat",
+              "gen_ai.request.model": "gpt-4o",
+            },
+          },
+        ],
+      };
+      expect(isItemIncluded("transaction", ai, payload)).toBe(true);
+    });
+
+    test("matches transaction with mcp attributes on a child span", () => {
+      const payload = {
+        contexts: { trace: { op: "http.server" } },
+        spans: [{ data: { "mcp.method.name": "tools/call" } }],
+      };
+      expect(isItemIncluded("transaction", ai, payload)).toBe(true);
+    });
+
+    test("excludes a plain HTTP transaction with no AI spans", () => {
+      const payload = {
+        contexts: { trace: { op: "http.server" } },
+        spans: [{ data: { "http.request.method": "GET" } }],
+      };
+      expect(isItemIncluded("transaction", ai, payload)).toBe(false);
+    });
+
+    test("excludes errors and logs", () => {
+      expect(isItemIncluded("error", ai, {})).toBe(false);
+      expect(isItemIncluded("log", ai, {})).toBe(false);
+    });
+  });
+});
+
+describe("extractTraceId", () => {
+  test("returns the lowercase trace ID from contexts.trace", () => {
+    const event = {
+      contexts: { trace: { trace_id: "ABCDEF0123456789ABCDEF0123456789" } },
+    };
+    expect(extractTraceId(event)).toBe("abcdef0123456789abcdef0123456789");
+  });
+
+  test("returns undefined for a malformed trace ID", () => {
+    expect(
+      extractTraceId({ contexts: { trace: { trace_id: "nope" } } })
+    ).toBeUndefined();
+  });
+
+  test("returns undefined when absent", () => {
+    expect(extractTraceId({})).toBeUndefined();
+    expect(extractTraceId({ contexts: {} })).toBeUndefined();
   });
 });
 
@@ -606,6 +759,52 @@ describe("formatItemJson", () => {
     expect(parsed.type).toBe("error");
   });
 
+  test("includes trace_id for errors and transactions", () => {
+    const traceId = "1a2b3c4d5e6f70819a2b3c4d5e6f7081";
+    const errorLines = formatItemJson(
+      "error",
+      {
+        timestamp: 1_700_000_000,
+        message: "boom",
+        contexts: { trace: { trace_id: traceId } },
+      },
+      serverHeader
+    );
+    expect(JSON.parse(errorLines[0]).trace_id).toBe(traceId);
+
+    const txnLines = formatItemJson(
+      "transaction",
+      {
+        timestamp: 1_700_000_001,
+        start_timestamp: 1_700_000_000,
+        transaction: "GET /",
+        contexts: { trace: { op: "http.server", trace_id: traceId } },
+      },
+      serverHeader
+    );
+    expect(JSON.parse(txnLines[0]).trace_id).toBe(traceId);
+  });
+
+  test("includes trace_id for logs from sentry.trace.trace_id attribute", () => {
+    const traceId = "abcdef0123456789abcdef0123456789";
+    const lines = formatItemJson(
+      "log",
+      {
+        items: [
+          {
+            level: "info",
+            body: "hello",
+            attributes: {
+              "sentry.trace.trace_id": { value: traceId },
+            },
+          },
+        ],
+      },
+      serverHeader
+    );
+    expect(JSON.parse(lines[0]).trace_id).toBe(traceId);
+  });
+
   test("formats transaction with semantic attributes", () => {
     const event = {
       timestamp: 1_700_000_002,
@@ -694,5 +893,100 @@ describe("formatItemJson", () => {
     const lines = formatItemJson("error", event, browserHeader);
     const parsed = JSON.parse(lines[0]);
     expect(parsed.source).toBe("browser");
+  });
+
+  test("includes grouped attributes only when requested", () => {
+    const event = {
+      timestamp: 1_700_000_000,
+      contexts: { trace: { op: "http.server", data: { "user.id": "42" } } },
+    };
+    const without = JSON.parse(
+      formatItemJson("transaction", event, serverHeader)[0]
+    );
+    expect(without.attributes).toBeUndefined();
+    const withAttrs = JSON.parse(
+      formatItemJson("transaction", event, serverHeader, true)[0]
+    );
+    expect(withAttrs.attributes.user).toEqual({ "user.id": "42" });
+  });
+});
+
+describe("formatAttributeTable", () => {
+  test("returns no lines when the transaction has no attributes", () => {
+    expect(formatAttributeTable({ timestamp: 1 })).toEqual([]);
+  });
+
+  test("splits SDK-default attributes from user-custom ones", () => {
+    const event = {
+      contexts: {
+        trace: {
+          data: {
+            "gen_ai.request.model": "gpt-4",
+            "http.method": "POST",
+            order_id: "abc",
+          },
+        },
+      },
+    };
+    const out = formatAttributeTable(event).map(stripAnsi).join("\n");
+    expect(out).toContain("user attributes");
+    expect(out).toContain("order_id");
+    expect(out).toContain("sdk attributes");
+    expect(out).toContain("gen_ai.request.model");
+    expect(out).toContain("http.method");
+    // user group is rendered before the sdk group
+    expect(out.indexOf("user attributes")).toBeLessThan(
+      out.indexOf("sdk attributes")
+    );
+  });
+
+  test("merges child-span attributes with the trace root", () => {
+    const event = {
+      contexts: { trace: { data: { "service.name": "api" } } },
+      spans: [{ data: { "gen_ai.usage.input_tokens": 10, prompt: "hi" } }],
+    };
+    const out = formatAttributeTable(event).map(stripAnsi).join("\n");
+    expect(out).toContain("gen_ai.usage.input_tokens");
+    expect(out).toContain("prompt");
+  });
+
+  test("sorts keys alphabetically within a group", () => {
+    const event = {
+      contexts: { trace: { data: { zeta: 1, alpha: 2, mid: 3 } } },
+    };
+    const out = formatAttributeTable(event).map(stripAnsi).join("\n");
+    expect(out.indexOf("alpha")).toBeLessThan(out.indexOf("mid"));
+    expect(out.indexOf("mid")).toBeLessThan(out.indexOf("zeta"));
+  });
+
+  test("JSON-encodes object-valued attributes", () => {
+    const event = {
+      contexts: { trace: { data: { meta: { nested: true } } } },
+    };
+    const out = formatAttributeTable(event).map(stripAnsi).join("\n");
+    expect(out).toContain('{"nested":true}');
+  });
+});
+
+describe("formatItem with attributes", () => {
+  const serverHeader = { sdk: { name: "sentry.node" } };
+
+  test("appends the attribute table for transactions when enabled", () => {
+    const event = {
+      timestamp: 1_700_000_000,
+      transaction: "POST /api/ai/chat",
+      contexts: { trace: { op: "http.server", data: { tenant: "acme" } } },
+    };
+    const withoutAttrs = formatItem("transaction", event, serverHeader, "t");
+    expect(withoutAttrs).toHaveLength(1);
+    const withAttrs = formatItem("transaction", event, serverHeader, "t", true);
+    expect(withAttrs.length).toBeGreaterThan(1);
+    expect(withAttrs.map(stripAnsi).join("\n")).toContain("tenant");
+  });
+
+  test("does not append a table for errors even when enabled", () => {
+    const event = { timestamp: 1_700_000_000, message: "boom" };
+    const lines = formatItem("error", event, serverHeader, "e", true);
+    expect(lines).toHaveLength(1);
   });
 });

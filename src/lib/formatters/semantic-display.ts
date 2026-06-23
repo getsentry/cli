@@ -786,3 +786,29 @@ export function mergeTransactionAttributes(
   const data = trace?.data as Record<string, unknown> | undefined;
   return data ?? {};
 }
+
+/**
+ * Extract the `data` attribute object from each child span of a transaction.
+ *
+ * Child span attributes live in `span.data`. The Vercel AI SDK (and other
+ * instrumentations that wrap an HTTP handler) attach `gen_ai.*` attributes to
+ * child spans rather than the transaction root, so callers that need to detect
+ * AI activity must inspect these in addition to the trace-root attributes
+ * returned by {@link mergeTransactionAttributes}.
+ */
+export function collectSpanAttributes(
+  event: Record<string, unknown>
+): AttributeSource[] {
+  const spans = event.spans;
+  if (!Array.isArray(spans)) {
+    return [];
+  }
+  const result: AttributeSource[] = [];
+  for (const span of spans) {
+    const data = (span as Record<string, unknown> | null)?.data;
+    if (data && typeof data === "object") {
+      result.push(data as AttributeSource);
+    }
+  }
+  return result;
+}

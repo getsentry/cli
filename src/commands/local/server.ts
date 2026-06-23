@@ -86,6 +86,7 @@ type LocalFlags = {
   readonly quiet: boolean;
   readonly filter: FilterValue[];
   readonly format: FormatValue;
+  readonly attributes: boolean;
 };
 
 /**
@@ -407,6 +408,7 @@ type ConsumeSSEOptions = {
   signal: AbortSignal;
   quiet?: boolean;
   useJson?: boolean;
+  showAttributes?: boolean;
 };
 
 /** Check whether an error is an abort signal. */
@@ -438,7 +440,14 @@ async function sleepUnlessAborted(
  * using `Last-Event-ID` to resume from where the stream left off.
  */
 async function consumeSSE(opts: ConsumeSSEOptions): Promise<void> {
-  const { url, activeFilters, signal, quiet = false, useJson = false } = opts;
+  const {
+    url,
+    activeFilters,
+    signal,
+    quiet = false,
+    useJson = false,
+    showAttributes = false,
+  } = opts;
   let lastEventId: string | undefined;
   let retries = 0;
   let retryDelay = SSE_INITIAL_RETRY_MS;
@@ -451,6 +460,7 @@ async function consumeSSE(opts: ConsumeSSEOptions): Promise<void> {
       signal,
       quiet,
       useJson,
+      showAttributes,
       lastEventId,
       onId: (id) => {
         lastEventId = id;
@@ -528,6 +538,7 @@ type ConsumeSSEOnceOptions = {
   signal: AbortSignal;
   quiet: boolean;
   useJson: boolean;
+  showAttributes: boolean;
   lastEventId: string | undefined;
   onId: (id: string) => void;
   /** Called when the HTTP response is received (200 OK with body). */
@@ -546,6 +557,7 @@ async function consumeSSEOnce(opts: ConsumeSSEOnceOptions): Promise<boolean> {
     signal,
     quiet,
     useJson,
+    showAttributes,
     lastEventId,
     onId,
     onConnected,
@@ -582,7 +594,7 @@ async function consumeSSEOnce(opts: ConsumeSSEOnceOptions): Promise<boolean> {
       onId(id);
     }
     if (type === SENTRY_CONTENT_TYPE) {
-      processSSEEvent(data, activeFilters, useJson);
+      processSSEEvent(data, activeFilters, useJson, showAttributes);
     }
   };
 
@@ -606,7 +618,8 @@ async function consumeSSEOnce(opts: ConsumeSSEOnceOptions): Promise<boolean> {
 function processSSEEvent(
   data: string,
   activeFilters: ReadonlySet<FilterValue>,
-  useJson = false
+  useJson = false,
+  showAttributes = false
 ): void {
   try {
     const envelope = JSON.parse(data) as [
@@ -620,12 +633,13 @@ function processSSEEvent(
         continue;
       }
       const lines = useJson
-        ? formatItemJson(itemHeader.type, payload, header)
+        ? formatItemJson(itemHeader.type, payload, header, showAttributes)
         : formatItem(
             itemHeader.type,
             payload,
             header,
-            itemHeader.type ?? "envelope"
+            itemHeader.type ?? "envelope",
+            showAttributes
           );
       for (const line of lines) {
         logger.log(line);
@@ -682,6 +696,12 @@ export const serverCommand = buildCommand({
         brief: "Output format: human (default) or json (NDJSON)",
         default: "human",
       },
+      attributes: {
+        kind: "boolean",
+        brief:
+          "Show a grouped attribute table (user vs SDK) under each transaction",
+        default: false,
+      },
     },
     aliases: {
       p: "port",
@@ -689,6 +709,7 @@ export const serverCommand = buildCommand({
       q: "quiet",
       f: "filter",
       F: "format",
+      a: "attributes",
     },
   },
   auth: false,
@@ -715,6 +736,7 @@ export const serverCommand = buildCommand({
           signal: ac.signal,
           quiet: flags.quiet,
           useJson: flags.format === "json",
+          showAttributes: flags.attributes,
         });
       } catch (err: unknown) {
         if (!(err instanceof DOMException && err.name === "AbortError")) {
@@ -735,7 +757,11 @@ export const serverCommand = buildCommand({
       const formatFn = useJson ? formatEnvelopeLinesJson : formatEnvelopeLines;
       buffer.subscribe((container) => {
         try {
-          for (const line of formatFn(container, activeFilters)) {
+          for (const line of formatFn(
+            container,
+            activeFilters,
+            flags.attributes
+          )) {
             logger.log(line);
           }
         } catch (err) {
