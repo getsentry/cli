@@ -76,6 +76,22 @@ describe("sentry auth status", () => {
   });
 });
 
+describe("non-TTY auto-auth", () => {
+  // The auto-auth middleware now attempts the OAuth device flow regardless of
+  // TTY (the test subprocess has no TTY on stdin). The device-code request
+  // fails fast against the mock (no /oauth/device/code/ route → 404), so the
+  // command still exits 10 with the standard not-authenticated message — but
+  // only after attempting to start the login flow.
+  test("attempts login flow then exits not-authenticated", async () => {
+    const result = await ctx.run(["api", "organizations/"]);
+
+    const output = result.stdout + result.stderr;
+    expect(output).toMatch(/starting login flow/i);
+    expect(output).toMatch(/not authenticated|login/i);
+    expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
+  });
+});
+
 describe("sentry auth login --token", () => {
   test("stores valid API token", { timeout: 10_000 }, async () => {
     const result = await ctx.run([
