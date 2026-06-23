@@ -7,7 +7,11 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { hoistGlobalFlags } from "../../src/lib/argv-hoist.js";
+import {
+  hoistGlobalFlags,
+  isVersionRequest,
+  preprocessArgv,
+} from "../../src/lib/argv-hoist.js";
 
 describe("hoistGlobalFlags", () => {
   // -------------------------------------------------------------------------
@@ -338,5 +342,63 @@ describe("hoistGlobalFlags", () => {
       "date",
       "--verbose",
     ]);
+  });
+});
+
+describe("isVersionRequest", () => {
+  test("true for top-level --version", () => {
+    expect(isVersionRequest(["--version"])).toBe(true);
+  });
+
+  test("true for --version after a route group (sentry cli --version)", () => {
+    expect(isVersionRequest(["cli", "--version"])).toBe(true);
+  });
+
+  test("true for --version after a nested subcommand", () => {
+    expect(isVersionRequest(["issue", "list", "--version"])).toBe(true);
+  });
+
+  test("false when --version is absent", () => {
+    expect(isVersionRequest(["cli", "upgrade"])).toBe(false);
+    expect(isVersionRequest([])).toBe(false);
+  });
+
+  test("does not match the -v short alias (reserved for --verbose)", () => {
+    expect(isVersionRequest(["cli", "-v"])).toBe(false);
+  });
+
+  test("ignores --version after the -- escape (passed to wrapped command)", () => {
+    // `sentry monitor run <slug> -- mytool --version` must forward --version
+    // to the wrapped command, not print the Sentry CLI version.
+    expect(
+      isVersionRequest(["monitor", "run", "job", "--", "mytool", "--version"])
+    ).toBe(false);
+  });
+
+  test("does not match --version=foo (not a bare version flag)", () => {
+    expect(isVersionRequest(["cli", "--version=1.2.3"])).toBe(false);
+  });
+});
+
+describe("preprocessArgv", () => {
+  test("normalizes a route-scoped --version to a plain --version", () => {
+    expect(preprocessArgv(["cli", "--version"])).toEqual(["--version"]);
+    expect(preprocessArgv(["issue", "list", "--version"])).toEqual([
+      "--version",
+    ]);
+  });
+
+  test("hoists global flags when no --version is present", () => {
+    expect(preprocessArgv(["--verbose", "issue", "list"])).toEqual([
+      "issue",
+      "list",
+      "--verbose",
+    ]);
+  });
+
+  test("leaves a wrapped-command --version (after --) to hoisting, not version", () => {
+    expect(
+      preprocessArgv(["monitor", "run", "job", "--", "tool", "--version"])
+    ).toEqual(["monitor", "run", "job", "--", "tool", "--version"]);
   });
 });

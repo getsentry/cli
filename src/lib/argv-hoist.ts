@@ -149,6 +149,37 @@ function consumeFlag(
 }
 
 /**
+ * Detect a top-level `--version` request anywhere in the command path.
+ *
+ * Stricli only handles `--version` at the application proxy, so it works for
+ * `sentry --version` but not for `sentry cli --version` (the route map treats
+ * `--version` as an unknown subcommand) or `sentry <group> <sub> --version`.
+ * Callers use this to normalize such invocations to a plain `--version` so the
+ * app-level handler prints the version consistently.
+ *
+ * Only the long `--version` form is recognized: `-v` is the reserved short
+ * alias for `--verbose` (see {@link GLOBAL_FLAGS}). Tokens after a `--` escape
+ * separator are ignored so `sentry monitor run <slug> -- tool --version`
+ * forwards `--version` to the wrapped command instead of printing the CLI
+ * version. The `--version=value` form is not matched (no command defines a
+ * `--version` value flag).
+ *
+ * @param argv - Raw CLI arguments (e.g., `process.argv.slice(2)`)
+ * @returns true if a bare `--version` token appears before any `--` separator
+ */
+export function isVersionRequest(argv: readonly string[]): boolean {
+  for (const token of argv) {
+    if (token === "--") {
+      return false;
+    }
+    if (token === "--version") {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Move global flags from any position in argv to the end.
  *
  * Tokens after `--` are never touched. The relative order of both
@@ -186,4 +217,27 @@ export function hoistGlobalFlags(argv: readonly string[]): string[] {
   }
 
   return [...remaining, ...hoisted, ...positionalTail];
+}
+
+/**
+ * Preprocess raw CLI argv before Stricli dispatch.
+ *
+ * Composes the two argv transforms applied on every invocation:
+ * 1. A top-level `--version` (see {@link isVersionRequest}) is normalized to a
+ *    plain `["--version"]` so the application-level version handler prints it
+ *    regardless of how deep in the route tree it appeared.
+ * 2. Otherwise, global flags are hoisted to the tail (see
+ *    {@link hoistGlobalFlags}).
+ *
+ * Kept as a single entry point so callers apply one transform and stay under
+ * the cognitive-complexity budget.
+ *
+ * @param argv - Raw CLI arguments (e.g., `process.argv.slice(2)`)
+ * @returns The argv to hand to Stricli's `run`
+ */
+export function preprocessArgv(argv: readonly string[]): string[] {
+  if (isVersionRequest(argv)) {
+    return ["--version"];
+  }
+  return hoistGlobalFlags(argv);
 }
