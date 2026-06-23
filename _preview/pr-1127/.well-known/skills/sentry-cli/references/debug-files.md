@@ -24,6 +24,13 @@ Create a JVM source bundle for source context
 - `-d, --debug-id <value> - Debug ID (UUID) to stamp on the bundle`
 - `-e, --exclude <value>... - Additional directory names to exclude (repeatable)`
 
+### `sentry debug-files bundle-sources <path>`
+
+Bundle a debug file's source files for source context
+
+**Flags:**
+- `-o, --output <value> - Output path for the source bundle ZIP (default: <path>.src.zip)`
+
 **Examples:**
 
 ```bash
@@ -31,6 +38,10 @@ Create a JVM source bundle for source context
 sentry debug-files check ./libexample.so
 sentry debug-files check MyApp.dSYM/Contents/Resources/DWARF/MyApp
 sentry debug-files check ./app.pdb --json
+
+# Bundle a debug file's referenced source files (run on the build machine)
+sentry debug-files bundle-sources ./libexample.so
+sentry debug-files bundle-sources ./app.pdb --output ./app.src.zip
 
 # Bundle JVM sources with a debug ID
 sentry debug-files bundle-jvm --output ./out --debug-id <uuid> ./src
