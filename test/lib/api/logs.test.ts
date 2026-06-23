@@ -1,0 +1,167 @@
+/**
+ * Tests for listLogs and getLogs — guards against non-object SDK responses.
+ *
+ * CLI-20C: self-hosted instances can return non-object data (plain text, HTML)
+ * from the /events/?dataset=logs endpoint when the logs dataset is unsupported
+ * or a reverse proxy intercepts the request. Previously this crashed with an
+ * unhandled ZodError; now it throws a descriptive ApiError.
+ */
+
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { getLogs, listLogs } from "../../../src/lib/api/logs.js";
+import { setAuthToken } from "../../../src/lib/db/auth.js";
+import { ApiError } from "../../../src/lib/errors.js";
+import { mockFetch, useTestConfigDir } from "../../helpers.js";
+
+useTestConfigDir("logs-api-test-");
+
+let originalFetch: typeof globalThis.fetch;
+
+beforeEach(async () => {
+  originalFetch = globalThis.fetch;
+  await setAuthToken("fake-token-for-test", 3600);
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
+/**
+ * Mock fetch to return a fixed JSON body for all requests.
+ * The SDK parses the response via response.json(), so wrapping in
+ * JSON.stringify ensures the SDK receives the raw value as `data`.
+ */
+function mockOk(body: unknown) {
+  globalThis.fetch = mockFetch(
+    async () =>
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+  );
+}
+
+describe("listLogs", () => {
+  test("returns logs when API returns a valid response", async () => {
+    mockOk({
+      data: [
+        {
+          "sentry.item_id": "log-001",
+          timestamp: "2025-01-30T14:32:15+00:00",
+          timestamp_precise: 1_770_060_419_044_800_300,
+          message: "Test log message",
+          severity: "info",
+          trace: "abc123def456abc123def456abc12345",
+        },
+      ],
+      meta: { fields: {} },
+    });
+
+    const logs = await listLogs("test-org", "test-project");
+    expect(logs).toHaveLength(1);
+    expect(logs[0]["sentry.item_id"]).toBe("log-001");
+  });
+
+  test("throws ApiError when API returns a string instead of object", async () => {
+    mockOk("Proxy error: upstream not found");
+
+    await expect(listLogs("test-org", "test-project")).rejects.toThrow(
+      ApiError
+    );
+
+    try {
+      await listLogs("test-org", "test-project");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const apiError = error as ApiError;
+      expect(apiError.message).toContain("unexpected response format");
+      expect(apiError.detail).toContain("received string");
+    }
+  });
+
+  test("throws ApiError when API returns null", async () => {
+    mockOk(null);
+
+    await expect(listLogs("test-org", "test-project")).rejects.toThrow(
+      ApiError
+    );
+
+    try {
+      await listLogs("test-org", "test-project");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const apiError = error as ApiError;
+      expect(apiError.message).toContain("unexpected response format");
+      expect(apiError.detail).toContain("received null");
+    }
+  });
+
+  test("throws ApiError when response has wrong shape", async () => {
+    mockOk({ wrong: "shape" });
+
+    await expect(listLogs("test-org", "test-project")).rejects.toThrow(
+      ApiError
+    );
+
+    try {
+      await listLogs("test-org", "test-project");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).message).toContain(
+        "unexpected response format"
+      );
+    }
+  });
+});
+
+describe("getLogs", () => {
+  test("returns logs when API returns a valid detailed response", async () => {
+    mockOk({
+      data: [
+        {
+          "sentry.item_id": "log-001",
+          timestamp: "2025-01-30T14:32:15+00:00",
+          timestamp_precise: 1_770_060_419_044_800_300,
+          message: "Test log message",
+          severity: "info",
+          trace: "abc123def456abc123def456abc12345",
+          project: "test-project",
+          environment: "production",
+          release: "1.0.0",
+          "sdk.name": "sentry.javascript.node",
+          "sdk.version": "8.0.0",
+          span_id: "abc123def456abc1",
+          "code.function": "main",
+          "code.file.path": "/app/index.ts",
+          "code.line.number": "42",
+          "sentry.otel.kind": "INTERNAL",
+          "sentry.otel.status_code": "OK",
+          "sentry.otel.instrumentation_scope.name": "my-app",
+        },
+      ],
+      meta: { fields: {} },
+    });
+
+    const logs = await getLogs("test-org", "test-project", ["log-001"]);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]["sentry.item_id"]).toBe("log-001");
+  });
+
+  test("throws ApiError when API returns a string instead of object", async () => {
+    mockOk("<html><body>502 Bad Gateway</body></html>");
+
+    await expect(
+      getLogs("test-org", "test-project", ["log-001"])
+    ).rejects.toThrow(ApiError);
+
+    try {
+      await getLogs("test-org", "test-project", ["log-001"]);
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      const apiError = error as ApiError;
+      expect(apiError.message).toContain("unexpected response format");
+      expect(apiError.detail).toContain("received string");
+      expect(apiError.detail).toContain("self-hosted");
+    }
+  });
+});

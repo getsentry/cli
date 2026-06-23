@@ -11,8 +11,13 @@
     "@astrojs/starlight": "^0.39.2",
     "@sentry/astro": "^10.38.0",
     "@sentry/starlight-theme": "^0.7.0",
-    "astro": "^6.3.5",
+    "astro": "^6.4.6",
     "sharp": "^0.33.5",
     "shiki": "^3.21.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild@>=0.17.0 <0.28.1": "0.28.1"
+    }
   }
 }
