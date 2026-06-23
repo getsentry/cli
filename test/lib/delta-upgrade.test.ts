@@ -1537,21 +1537,18 @@ describe("applyPatchChain", () => {
     }
   });
 
-  test("applies multi-step chain via intermediate file", async () => {
-    // We only have one-step fixtures, but we can test the intermediate
-    // file path by using identity-like patches. Use the same patch twice:
-    // old → new → applying a second patch will likely fail in the real
-    // patcher (since new != old for the second patch), so we test that
-    // the cleanup logic works by checking intermediate files don't leak.
+  test("applies multi-step chains in memory without intermediate files", async () => {
+    // Intermediate hops are kept in memory, so the legacy `.patching.a`/`.b`
+    // scratch files must never be written. We only have one-step fixtures, so
+    // reuse the same patch twice: the first hop produces valid bytes, the
+    // second applies to mismatched bytes and fails final-hash verification —
+    // but either way no intermediate file should touch disk.
     const oldPath = join(fixturesDir, "small-old.bin");
     const destPath = tempFile("multi-chain-out.bin");
     const intermediateA = `${destPath}.patching.a`;
     const intermediateB = `${destPath}.patching.b`;
     const patchData = await readFile(join(fixturesDir, "small.trdiff10"));
 
-    // Create a chain where the first step succeeds but the second will fail
-    // (applying old→new patch to the "new" binary won't produce valid output,
-    // but we're testing the intermediate file handling)
     const chain: PatchChain = {
       patches: [
         {
@@ -1568,17 +1565,15 @@ describe("applyPatchChain", () => {
     };
 
     try {
-      // This may succeed or fail depending on whether the second patch
-      // application works, but either way intermediate files should be cleaned
       await applyPatchChain(chain, oldPath, destPath).catch(() => {
-        // Expected — second patch on mismatched binary
+        // Expected — second patch applied to mismatched bytes fails verification
       });
+
+      // The in-memory chain never creates scratch files on disk.
+      expect(existsSync(intermediateA)).toBe(false);
+      expect(existsSync(intermediateB)).toBe(false);
     } finally {
-      // Clean up any files that were created
-      if (existsSync(destPath)) {
-        unlinkSync(destPath);
-      }
-      for (const p of [intermediateA, intermediateB]) {
+      for (const p of [destPath, intermediateA, intermediateB]) {
         if (existsSync(p)) {
           unlinkSync(p);
         }

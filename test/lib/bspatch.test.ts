@@ -11,14 +11,103 @@
  */
 
 import { createHash } from "node:crypto";
-import { unlinkSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync, unlinkSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { zstdCompressSync } from "node:zlib";
 import { describe, expect, test } from "vitest";
-import { applyPatch, parsePatchHeader } from "../../src/lib/bspatch.js";
+import {
+  applyPatch,
+  applyPatchChainInMemory,
+  applyPatchToMemory,
+  parsePatchHeader,
+} from "../../src/lib/bspatch.js";
 
 const FIXTURES_DIR = join(import.meta.dirname, "../fixtures/patches");
+
+/**
+ * Write a non-negative integer as a little-endian i64, matching the
+ * sign-magnitude encoding that {@link offtin} reads (sign bit clear).
+ */
+function writeI64LE(buf: Uint8Array, offset: number, value: number): void {
+  const view = new DataView(buf.buffer, buf.byteOffset + offset, 8);
+  view.setUint32(0, value % 0x1_00_00_00_00, true);
+  view.setUint32(4, Math.floor(value / 0x1_00_00_00_00), true);
+}
+
+/**
+ * Build a minimal "diff-only" TRDIFF10 patch transforming `oldBytes` → `newBytes`
+ * (which must be equal length). Emits one or more control tuples, each copying
+ * up to `chunkSize` diff bytes (added to the old bytes), with no extra bytes and
+ * no seek. Splitting into many small tuples forces the patcher to issue many
+ * small windowed reads against the base — exercising {@link FileOldReader}'s
+ * block cache across boundaries. Lets chain/cache tests run in CI without the
+ * external zig-bsdiff encoder.
+ *
+ * @param chunkSize - Max diff bytes per control tuple (defaults to the whole file)
+ */
+function buildDiffOnlyPatch(
+  oldBytes: Uint8Array,
+  newBytes: Uint8Array,
+  chunkSize = newBytes.length
+): Uint8Array {
+  if (oldBytes.length !== newBytes.length) {
+    throw new Error("diff-only patch requires equal lengths");
+  }
+  const len = newBytes.length;
+
+  // One control tuple per chunk: readDiffBy=chunk, readExtraBy=0, seekBy=0.
+  const chunks: number[] = [];
+  for (let remaining = len; remaining > 0; ) {
+    const c = Math.min(chunkSize, remaining);
+    chunks.push(c);
+    remaining -= c;
+  }
+  const control = new Uint8Array(chunks.length * 24);
+  for (let t = 0; t < chunks.length; t++) {
+    writeI64LE(control, t * 24, chunks[t] ?? 0);
+    writeI64LE(control, t * 24 + 8, 0);
+    writeI64LE(control, t * 24 + 16, 0);
+  }
+
+  // diff[i] = (new[i] - old[i]) mod 256, so wrapping (old + diff) == new.
+  const diff = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    diff[i] = ((newBytes[i] ?? 0) - (oldBytes[i] ?? 0) + 256) % 256;
+  }
+
+  const controlZ = new Uint8Array(zstdCompressSync(control));
+  const diffZ = new Uint8Array(zstdCompressSync(diff));
+  const extraZ = new Uint8Array(zstdCompressSync(new Uint8Array(0)));
+
+  const patch = new Uint8Array(
+    32 + controlZ.length + diffZ.length + extraZ.length
+  );
+  patch.set(new TextEncoder().encode("TRDIFF10"), 0);
+  writeI64LE(patch, 8, controlZ.length);
+  writeI64LE(patch, 16, diffZ.length);
+  writeI64LE(patch, 24, len);
+  patch.set(controlZ, 32);
+  patch.set(diffZ, 32 + controlZ.length);
+  patch.set(extraZ, 32 + controlZ.length + diffZ.length);
+  return patch;
+}
+
+/**
+ * Generate deterministic pseudo-random bytes via a 32-bit LCG. Uses modular
+ * arithmetic (no bitwise ops) — intermediate products stay under 2^53.
+ */
+function makeBytes(seed: number, len: number): Uint8Array {
+  const modulus = 0x1_00_00_00_00;
+  const out = new Uint8Array(len);
+  let x = seed % modulus;
+  for (let i = 0; i < len; i++) {
+    x = (x * 1_664_525 + 1_013_904_223) % modulus;
+    out[i] = x % 256;
+  }
+  return out;
+}
 
 describe("parsePatchHeader: fixtures", () => {
   test("parses valid small fixture header", async () => {
@@ -154,5 +243,223 @@ describe("applyPatch", () => {
         // Ignore cleanup errors
       }
     }
+  });
+});
+
+describe("applyPatchChainInMemory", () => {
+  function tempFile(name: string): string {
+    return join(
+      tmpdir(),
+      `bspatch-chain-${Date.now()}-${Math.random().toString(36).slice(2)}-${name}`
+    );
+  }
+
+  test("applies a multi-hop chain in memory, writing only the final binary", async () => {
+    // old --p1--> mid --p2--> new. The first hop reads the on-disk base via the
+    // fd-backed reader; the second reads the in-memory intermediate. Exercises
+    // both reader paths plus the chaining loop without touching scratch files.
+    const oldBytes = makeBytes(1, 4096);
+    const midBytes = makeBytes(2, 4096);
+    const newBytes = makeBytes(3, 4096);
+    const p1 = buildDiffOnlyPatch(oldBytes, midBytes);
+    const p2 = buildDiffOnlyPatch(midBytes, newBytes);
+
+    const oldPath = tempFile("old.bin");
+    const destPath = tempFile("out.bin");
+    await writeFile(oldPath, oldBytes);
+
+    try {
+      const sha256 = await applyPatchChainInMemory(oldPath, [p1, p2], destPath);
+
+      const out = new Uint8Array(await readFile(destPath));
+      expect(out).toEqual(newBytes);
+      expect(sha256).toBe(createHash("sha256").update(newBytes).digest("hex"));
+
+      // Intermediates are held in memory — no scratch files on disk.
+      expect(existsSync(`${destPath}.patching.a`)).toBe(false);
+      expect(existsSync(`${destPath}.patching.b`)).toBe(false);
+    } finally {
+      for (const p of [oldPath, destPath]) {
+        if (existsSync(p)) {
+          unlinkSync(p);
+        }
+      }
+    }
+  });
+
+  test("single-element chain matches the on-disk patcher on a real fixture", async () => {
+    // Exercises the fd-backed reader against a real zig-bsdiff patch whose
+    // control entries include diff, extra, and seek operations.
+    const oldPath = join(FIXTURES_DIR, "large-old.bin");
+    const patchData = new Uint8Array(
+      await readFile(join(FIXTURES_DIR, "large.trdiff10"))
+    );
+    const destPath = tempFile("single-chain.bin");
+
+    try {
+      const sha256 = await applyPatchChainInMemory(
+        oldPath,
+        [patchData],
+        destPath
+      );
+      const expected = await readFile(join(FIXTURES_DIR, "large-new.bin"));
+      expect(new Uint8Array(await readFile(destPath))).toEqual(
+        new Uint8Array(expected)
+      );
+      expect(sha256).toBe(createHash("sha256").update(expected).digest("hex"));
+    } finally {
+      if (existsSync(destPath)) {
+        unlinkSync(destPath);
+      }
+    }
+  });
+
+  test("rejects an empty patch chain", async () => {
+    const oldPath = join(FIXTURES_DIR, "small-old.bin");
+    const destPath = tempFile("empty-chain.bin");
+
+    try {
+      await expect(
+        applyPatchChainInMemory(oldPath, [], destPath)
+      ).rejects.toThrow("empty patch chain");
+    } finally {
+      if (existsSync(destPath)) {
+        unlinkSync(destPath);
+      }
+    }
+  });
+});
+
+describe("applyPatchToMemory", () => {
+  function tempFile(name: string): string {
+    return join(
+      tmpdir(),
+      `bspatch-mem-${Date.now()}-${Math.random().toString(36).slice(2)}-${name}`
+    );
+  }
+
+  test("produces the same bytes and hash as the on-disk patcher", async () => {
+    // Cross-checks the memory-backed reader against the fd-backed reader on a
+    // real fixture patch (diff + extra + seek).
+    const oldPath = join(FIXTURES_DIR, "large-old.bin");
+    const oldBytes = new Uint8Array(await readFile(oldPath));
+    const patchData = new Uint8Array(
+      await readFile(join(FIXTURES_DIR, "large.trdiff10"))
+    );
+    const destPath = tempFile("disk.bin");
+
+    try {
+      const memOut = await applyPatchToMemory(oldBytes, patchData);
+      const diskSha = await applyPatch(oldPath, patchData, destPath);
+      const diskOut = new Uint8Array(await readFile(destPath));
+
+      expect(memOut).toEqual(diskOut);
+      expect(createHash("sha256").update(memOut).digest("hex")).toBe(diskSha);
+    } finally {
+      if (existsSync(destPath)) {
+        unlinkSync(destPath);
+      }
+    }
+  });
+});
+
+describe("FileOldReader block cache", () => {
+  const ONE_MIB = 1024 * 1024;
+
+  function tempFile(name: string): string {
+    return join(
+      tmpdir(),
+      `bspatch-cache-${Date.now()}-${Math.random().toString(36).slice(2)}-${name}`
+    );
+  }
+
+  /** SHA-256 hex of `bytes`. */
+  function sha(bytes: Uint8Array): string {
+    return createHash("sha256").update(bytes).digest("hex");
+  }
+
+  /**
+   * Apply `patch` to `oldBytes` via both the fd-backed reader (`applyPatch`,
+   * which uses the block cache) and the in-memory reader (`applyPatchToMemory`,
+   * cacheless), returning their result hashes plus `applyPatch`'s self-reported
+   * hash. Any cache offset/staleness bug shows up as a hash divergence.
+   *
+   * Compares via SHA-256 rather than `toEqual` — Vitest's deep-equality is far
+   * too slow on multi-MiB typed arrays (seconds per call), whereas native
+   * hashing is O(n) and fast.
+   */
+  async function runBothReaders(
+    oldBytes: Uint8Array,
+    patch: Uint8Array
+  ): Promise<{ fileSha: string; fileBytesSha: string; memSha: string }> {
+    const oldPath = tempFile("old.bin");
+    const destPath = tempFile("out.bin");
+    await writeFile(oldPath, oldBytes);
+    try {
+      const fileSha = await applyPatch(oldPath, patch, destPath);
+      const fileBytesSha = sha(new Uint8Array(await readFile(destPath)));
+      const memSha = sha(await applyPatchToMemory(oldBytes, patch));
+      return { fileSha, fileBytesSha, memSha };
+    } finally {
+      for (const p of [oldPath, destPath]) {
+        if (existsSync(p)) {
+          unlinkSync(p);
+        }
+      }
+    }
+  }
+
+  test("serves many small windows spanning multiple blocks", async () => {
+    // 3 MiB base read in ~100 KiB windows → reads cross the 1 MiB block
+    // boundaries repeatedly, forcing several cache refills.
+    const len = 3 * ONE_MIB + 12_345;
+    const oldBytes = makeBytes(11, len);
+    const newBytes = makeBytes(22, len);
+    const patch = buildDiffOnlyPatch(oldBytes, newBytes, 100 * 1024);
+
+    const expected = sha(newBytes);
+    const { fileSha, fileBytesSha, memSha } = await runBothReaders(
+      oldBytes,
+      patch
+    );
+    expect(fileSha).toBe(expected);
+    expect(fileBytesSha).toBe(expected);
+    expect(memSha).toBe(expected);
+  });
+
+  test("reads a single window larger than the cache block", async () => {
+    // One 1.5 MiB diff window > 1 MiB block → exercises the direct-read bypass.
+    const len = ONE_MIB + ONE_MIB / 2;
+    const oldBytes = makeBytes(33, len);
+    const newBytes = makeBytes(44, len);
+    const patch = buildDiffOnlyPatch(oldBytes, newBytes); // single tuple
+
+    const expected = sha(newBytes);
+    const { fileSha, fileBytesSha, memSha } = await runBothReaders(
+      oldBytes,
+      patch
+    );
+    expect(fileSha).toBe(expected);
+    expect(fileBytesSha).toBe(expected);
+    expect(memSha).toBe(expected);
+  });
+
+  test("handles windows landing exactly on a block boundary", async () => {
+    // Window size divides the block size evenly, so a read lands precisely at
+    // the 1 MiB boundary (start === blockStart + blockLen) — the off-by-one
+    // boundary case for blockCovers.
+    const len = 2 * ONE_MIB;
+    const oldBytes = makeBytes(55, len);
+    const newBytes = makeBytes(66, len);
+    const patch = buildDiffOnlyPatch(oldBytes, newBytes, ONE_MIB / 4);
+
+    const expected = sha(newBytes);
+    const { fileSha, fileBytesSha, memSha } = await runBothReaders(
+      oldBytes,
+      patch
+    );
+    expect(fileSha).toBe(expected);
+    expect(fileBytesSha).toBe(expected);
+    expect(memSha).toBe(expected);
   });
 });

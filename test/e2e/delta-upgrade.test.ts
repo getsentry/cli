@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { getPlatformBinaryName } from "../../src/lib/binary.js";
-import { applyPatch } from "../../src/lib/bspatch.js";
+import { applyPatch, applyPatchChainInMemory } from "../../src/lib/bspatch.js";
 
 // Restore real fetch for E2E tests (preload.ts mocks it globally)
 const realFetch = (globalThis as { __originalFetch?: typeof fetch })
@@ -56,6 +56,8 @@ describe.skipIf(!canRun)("e2e: delta upgrade", () => {
       const newPath = join(workDir, "new");
       const patchPath = join(workDir, "patch.trdiff10");
       const outputPath = join(workDir, "output");
+      const chainPatchPath = join(workDir, "patch2.trdiff10");
+      const chainOutputPath = join(workDir, "chain-output");
 
       try {
         // Download old and new binaries from GitHub Releases
@@ -93,9 +95,38 @@ describe.skipIf(!canRun)("e2e: delta upgrade", () => {
         const expectedBytes = new Uint8Array(await readFile(newPath));
         expect(outputBytes.byteLength).toBe(expectedBytes.byteLength);
         expect(outputBytes).toEqual(expectedBytes);
+
+        // Verify a real two-hop chain: old --p1--> new --p2--> new.
+        // p2 is a (near-identity) new→new patch, so the chain must still yield
+        // the new binary while keeping the intermediate entirely in memory.
+        execSync(
+          `${BSDIFF_PATH} ${newPath} ${newPath} ${chainPatchPath} --use-zstd`,
+          { stdio: "pipe" }
+        );
+        const p1 = new Uint8Array(await readFile(patchPath));
+        const p2 = new Uint8Array(await readFile(chainPatchPath));
+        const chainSha = await applyPatchChainInMemory(
+          oldPath,
+          [p1, p2],
+          chainOutputPath
+        );
+        expect(chainSha).toBe(expectedHash);
+        expect(new Uint8Array(await readFile(chainOutputPath))).toEqual(
+          expectedBytes
+        );
+        // Intermediates never touch disk.
+        expect(existsSync(`${chainOutputPath}.patching.a`)).toBe(false);
+        expect(existsSync(`${chainOutputPath}.patching.b`)).toBe(false);
       } finally {
         // Cleanup
-        for (const path of [oldPath, newPath, patchPath, outputPath]) {
+        for (const path of [
+          oldPath,
+          newPath,
+          patchPath,
+          outputPath,
+          chainPatchPath,
+          chainOutputPath,
+        ]) {
           try {
             unlinkSync(path);
           } catch {
