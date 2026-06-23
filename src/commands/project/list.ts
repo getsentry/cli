@@ -621,16 +621,23 @@ export async function handleProjectSearch(
 
   // When the caller provided an org (e.g. "org/My Project"), scope the
   // search to that org instead of all accessible orgs. This applies to both
-  // display-name searches and slug-based recovery lookups.
+  // display-name searches and slug-based recovery lookups. The slug-based
+  // lookup (findProjectsBySlug) fans out across every accessible org, so the
+  // recovered projects must be filtered too — otherwise a recovered slug that
+  // also exists in a different org could leak into a scoped result.
   const orgs =
     scopedOrg !== undefined
       ? foundOrgs.filter((o) => o.slug === scopedOrg)
       : foundOrgs;
+  const scopedProjects =
+    scopedOrg !== undefined
+      ? projects.filter((p) => p.orgSlug === scopedOrg)
+      : projects;
 
-  const filtered = filterByPlatform(projects, flags.platform);
+  const filtered = filterByPlatform(scopedProjects, flags.platform);
 
   if (filtered.length === 0) {
-    if (projects.length > 0 && flags.platform) {
+    if (scopedProjects.length > 0 && flags.platform) {
       return {
         items: [],
         hint: `No project '${projectSlug}' found matching platform '${flags.platform}'.`,

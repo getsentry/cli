@@ -36,7 +36,7 @@ vi.mock("../../src/lib/db/defaults.js", async (importOriginal) => {
 
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as defaults from "../../src/lib/db/defaults.js";
-import { setOrgRegion } from "../../src/lib/db/regions.js";
+import { setOrgRegion, setOrgRegions } from "../../src/lib/db/regions.js";
 import { ContextError, ResolutionError } from "../../src/lib/errors.js";
 
 vi.mock("../../src/lib/resolve-target.js", async (importOriginal) => {
@@ -56,6 +56,7 @@ import {
   resolveOrgProjectFromArg,
   resolveOrgProjectTarget,
   resolveOrgsForListing,
+  resolveTargetsFromParsedArg,
 } from "../../src/lib/resolve-target.js";
 
 const CWD = "/tmp/test-project";
@@ -367,5 +368,98 @@ describe("resolveOrgProjectFromArg", () => {
 
     const result = await resolveOrgProjectFromArg(undefined, CWD, "trace list");
     expect(result).toEqual({ org: "auto-org", project: "auto-proj" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveTargetsFromParsedArg — org scoping & DSN-style org resolution
+// ---------------------------------------------------------------------------
+
+describe("resolveTargetsFromParsedArg", () => {
+  let getProjectSpy: ReturnType<typeof spyOn>;
+  let listProjectsSpy: ReturnType<typeof spyOn>;
+  let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
+
+  const OPTS = { cwd: CWD, usageHint: "sentry issue list <org>/<project>" };
+
+  beforeEach(() => {
+    getProjectSpy = vi.spyOn(apiClient, "getProject");
+    listProjectsSpy = vi.spyOn(apiClient, "listProjects");
+    findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
+    // Seed both a normal slug and a DSN-style numeric ID mapping so
+    // resolveEffectiveOrg resolves from cache without hitting the API.
+    setOrgRegion("my-org", DEFAULT_SENTRY_URL);
+    setOrgRegions([
+      { slug: "real-org", regionUrl: DEFAULT_SENTRY_URL, orgId: "1081365" },
+    ]);
+  });
+
+  afterEach(() => {
+    getProjectSpy.mockRestore();
+    listProjectsSpy.mockRestore();
+    findProjectsBySlugSpy.mockRestore();
+  });
+
+  test("explicit: resolves DSN-style org id to the real slug", async () => {
+    getProjectSpy.mockResolvedValue({ id: "42", slug: "my-proj" });
+
+    const result = await resolveTargetsFromParsedArg(
+      { type: "explicit", org: "o1081365", project: "my-proj" },
+      OPTS
+    );
+
+    expect(result.targets).toHaveLength(1);
+    expect(result.targets[0]).toMatchObject({
+      org: "real-org",
+      project: "my-proj",
+      projectId: 42,
+    });
+    // The API lookup must use the resolved slug, not the raw DSN id.
+    expect(getProjectSpy).toHaveBeenCalledWith("real-org", "my-proj");
+  });
+
+  test("org-all: resolves DSN-style org id before listing projects", async () => {
+    listProjectsSpy.mockResolvedValue([
+      { id: "1", slug: "p1", name: "P1" },
+      { id: "2", slug: "p2", name: "P2" },
+    ]);
+
+    const result = await resolveTargetsFromParsedArg(
+      { type: "org-all", org: "o1081365" },
+      OPTS
+    );
+
+    expect(listProjectsSpy).toHaveBeenCalledWith("real-org");
+    expect(result.targets).toHaveLength(2);
+    for (const t of result.targets) {
+      expect(t.org).toBe("real-org");
+    }
+  });
+
+  test("project-search: scopes recovery to explicit org, ignoring a same-slug project in another org", async () => {
+    // A bare-slug lookup fans out across orgs and finds the slug in BOTH
+    // org-a (the requested scope) and org-b. The result must only include
+    // the org-a match — never leak org-b.
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [
+        { orgSlug: "org-b", slug: "my-proj", name: "My Project" },
+        { orgSlug: "my-org", slug: "my-proj", name: "My Project" },
+      ],
+      orgs: [
+        { slug: "org-b", name: "Org B" },
+        { slug: "my-org", name: "My Org" },
+      ],
+    });
+
+    const result = await resolveTargetsFromParsedArg(
+      { type: "project-search", projectSlug: "my-proj", org: "my-org" },
+      OPTS
+    );
+
+    expect(result.targets).toHaveLength(1);
+    expect(result.targets[0]).toMatchObject({
+      org: "my-org",
+      project: "my-proj",
+    });
   });
 });

@@ -757,6 +757,64 @@ describe("handleProjectSearch", () => {
     expect(result.hint).toContain("matching platform 'rust'");
   });
 
+  test("scopedOrg only returns the matched project from that org, not a same-slug project elsewhere", async () => {
+    setOrgRegion("org-a", DEFAULT_SENTRY_URL);
+    setOrgRegion("org-b", DEFAULT_SENTRY_URL);
+
+    // listOrganizations returns two orgs; each has a 'frontend' project. The
+    // bare-slug lookup fans out across both. With scopedOrg=org-a the result
+    // must only contain org-a's project, never org-b's.
+    // @ts-expect-error - partial mock
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      const url = req.url;
+
+      // getProject — /projects/{org}/{slug}/
+      const projMatch = url.match(/\/projects\/([^/]+)\/frontend\//);
+      if (projMatch) {
+        return new Response(
+          JSON.stringify({
+            id: projMatch[1] === "org-a" ? "1" : "2",
+            slug: "frontend",
+            name: "Frontend",
+            platform: "javascript",
+            dateCreated: "2024-01-01T00:00:00Z",
+            status: "active",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      // listOrganizations
+      if (
+        url.includes("/organizations/") &&
+        !url.includes("/projects/") &&
+        !url.includes("/issues/")
+      ) {
+        return new Response(
+          JSON.stringify([
+            { id: "10", slug: "org-a", name: "Org A" },
+            { id: "20", slug: "org-b", name: "Org B" },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    const result = await handleProjectSearch(
+      "frontend",
+      { limit: 30, json: false, fresh: false },
+      { scopedOrg: "org-a" }
+    );
+
+    expect(result.items.every((i) => i.orgSlug === "org-a")).toBe(true);
+    expect(result.items.some((i) => i.orgSlug === "org-b")).toBe(false);
+  });
+
   test("respects --limit flag", async () => {
     setOrgRegion("org-a", DEFAULT_SENTRY_URL);
     setOrgRegion("org-b", DEFAULT_SENTRY_URL);

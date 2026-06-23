@@ -785,7 +785,7 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
   // When the input is a display name (originalSlug set, contains spaces),
   // skip the slug-based API lookup and go straight to name-based matching.
   const isDisplayName = originalSlug !== undefined;
-  const { projects: matches, orgs: foundOrgs } = isDisplayName
+  const { projects: rawMatches, orgs: foundOrgs } = isDisplayName
     ? { projects: [], orgs: await listOrganizations() }
     : await withProgress(
         {
@@ -797,11 +797,18 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
 
   // When the caller provided an org (e.g. "org/My Project"), scope the
   // search to that org instead of all accessible orgs. This applies to both
-  // display-name searches and slug-based recovery lookups.
+  // display-name searches and slug-based recovery lookups. The slug-based
+  // lookup (findProjectsBySlug) fans out across every accessible org, so the
+  // matched projects must be filtered too — otherwise a recovered slug that
+  // also exists in a different org could leak into a scoped result.
   const orgs =
     scopedOrg !== undefined
       ? foundOrgs.filter((o) => o.slug === scopedOrg)
       : foundOrgs;
+  const matches =
+    scopedOrg !== undefined
+      ? rawMatches.filter((m) => m.orgSlug === scopedOrg)
+      : rawMatches;
 
   if (matches.length === 0) {
     // Skip triage on recovery attempts to prevent infinite recursion.

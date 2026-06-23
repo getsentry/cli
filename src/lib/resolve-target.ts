@@ -1647,16 +1647,23 @@ export async function resolveOrgProjectTarget(
         ? await resolveEffectiveOrg(parsed.org)
         : undefined;
 
-      const { projects, orgs: foundOrgs } = isDisplayName
+      const { projects: rawProjects, orgs: foundOrgs } = isDisplayName
         ? { projects: [], orgs: await listOrganizations() }
         : await findProjectsBySlug(parsed.projectSlug);
 
       // When the caller provided an org (e.g. "org/My Project"), scope the
-      // search to that org instead of all accessible orgs.
+      // search to that org instead of all accessible orgs. findProjectsBySlug
+      // fans out across every accessible org, so the matched projects must be
+      // filtered too — otherwise a slug that also exists in a different org
+      // could be returned (or flagged ambiguous) despite the explicit scope.
       const orgs =
         scopedOrg !== undefined
           ? foundOrgs.filter((o) => o.slug === scopedOrg)
           : foundOrgs;
+      const projects =
+        scopedOrg !== undefined
+          ? rawProjects.filter((p) => p.orgSlug === scopedOrg)
+          : rawProjects;
 
       if (projects.length === 0) {
         const outcome = await triageProjectNotFound(
@@ -1838,14 +1845,17 @@ export async function resolveTargetsFromParsedArg(
     }
 
     case "explicit": {
-      const projectId = await fetchProjectId(parsed.org, parsed.project);
+      // Resolve DSN-style org identifiers (e.g. "o1081365" → "my-org") before
+      // hitting the API, mirroring resolveOrgProjectTarget's explicit branch.
+      const org = await resolveEffectiveOrg(parsed.org);
+      const projectId = await fetchProjectId(org, parsed.project);
       return {
         targets: [
           {
-            org: parsed.org,
+            org,
             project: parsed.project,
             projectId,
-            orgDisplay: parsed.org,
+            orgDisplay: org,
             projectDisplay: parsed.project,
           },
         ],
@@ -1853,20 +1863,23 @@ export async function resolveTargetsFromParsedArg(
     }
 
     case "org-all": {
-      const projects = await listProjects(parsed.org);
+      // Resolve DSN-style org identifiers (e.g. "o1081365" → "my-org") before
+      // listing projects, so "o123/" works the same as "my-org/".
+      const org = await resolveEffectiveOrg(parsed.org);
+      const projects = await listProjects(org);
       const targets: ResolvedTarget[] = projects.map((p) => ({
-        org: parsed.org,
+        org,
         project: p.slug,
         projectId: toNumericId(p.id),
-        orgDisplay: parsed.org,
+        orgDisplay: org,
         projectDisplay: p.name,
       }));
 
       if (targets.length === 0) {
         throw new ResolutionError(
-          `Organization '${parsed.org}'`,
+          `Organization '${org}'`,
           "has no accessible projects",
-          `sentry project list ${parsed.org}/`,
+          `sentry project list ${org}/`,
           ["Check that you have access to projects in this organization"]
         );
       }
@@ -1875,7 +1888,7 @@ export async function resolveTargetsFromParsedArg(
         targets,
         footer:
           targets.length > 1
-            ? `Showing results from ${targets.length} projects in ${parsed.org}`
+            ? `Showing results from ${targets.length} projects in ${org}`
             : undefined,
       };
     }
@@ -1900,16 +1913,23 @@ export async function resolveTargetsFromParsedArg(
         ? await resolveEffectiveOrg(parsed.org)
         : undefined;
 
-      const { projects: matches, orgs: foundOrgs } = isDisplayName
+      const { projects: rawMatches, orgs: foundOrgs } = isDisplayName
         ? { projects: [], orgs: await listOrganizations() }
         : await findProjectsBySlug(parsed.projectSlug);
 
       // When the caller provided an org (e.g. "org/My Project"), scope the
-      // search to that org instead of all accessible orgs.
+      // search to that org instead of all accessible orgs. findProjectsBySlug
+      // fans out across every accessible org, so the matched projects must be
+      // filtered too — otherwise a slug that also exists in a different org
+      // could leak into a result that was explicitly scoped to one org.
       const orgs =
         scopedOrg !== undefined
           ? foundOrgs.filter((o) => o.slug === scopedOrg)
           : foundOrgs;
+      const matches =
+        scopedOrg !== undefined
+          ? rawMatches.filter((m) => m.orgSlug === scopedOrg)
+          : rawMatches;
 
       if (matches.length === 0) {
         const outcome = await triageProjectNotFound(

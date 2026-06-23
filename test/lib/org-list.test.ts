@@ -717,6 +717,35 @@ describe("handleProjectSearch", () => {
 
     expect(result.hint).toContain("2 organizations");
   });
+
+  test("scopes matches to the explicit org, ignoring a same-slug project in another org", async () => {
+    // findProjectsBySlug fans out across orgs and finds the slug in BOTH
+    // org-a (the requested scope) and org-b. With an explicit org the result
+    // must only fetch from org-a — never leak org-b.
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [
+        { orgSlug: "org-b", slug: "my-proj", id: "2", name: "My Project" },
+        { orgSlug: "org-a", slug: "my-proj", id: "1", name: "My Project" },
+      ],
+      orgs: [
+        { slug: "org-a", name: "Org A" },
+        { slug: "org-b", name: "Org B" },
+      ],
+    });
+    const listForOrg = vi.fn(() =>
+      Promise.resolve([{ id: "1", name: "Widget" }])
+    );
+    const config = makeConfig({ listForOrg });
+
+    const result = await handleProjectSearch(config, "my-proj", {
+      flags: { limit: 10, json: false },
+      org: "org-a",
+    });
+
+    expect(listForOrg).toHaveBeenCalledTimes(1);
+    expect(listForOrg).toHaveBeenCalledWith("org-a");
+    expect(result.items.every((i) => i.orgSlug === "org-a")).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
