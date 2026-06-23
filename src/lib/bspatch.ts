@@ -448,15 +448,26 @@ async function loadOldBinary(oldPath: string): Promise<OldReader> {
     tmpdir(),
     `sentry-patch-old-${process.pid}-${loadCounter}`
   );
+  // Tracked outside the try so the catch can release a handle that was opened
+  // before a later step (e.g. stat) failed — otherwise the fd would leak.
+  let handle: FileHandle | undefined;
   try {
     // COPYFILE_FICLONE: attempt CoW reflink first (near-instant on btrfs/xfs/APFS),
     // silently falls back to regular copy on filesystems that don't support it.
     copyFileSync(oldPath, tempCopy, constants.COPYFILE_FICLONE);
-    const handle = await open(tempCopy, "r");
+    handle = await open(tempCopy, "r");
     const { size } = await handle.stat();
     return new FileOldReader(handle, size, tempCopy);
   } catch {
-    // Copy/open failed — fall back to a direct in-memory read of the original.
+    // Roll back any partially-acquired resources, then fall back to a direct
+    // in-memory read of the original. Close the handle first (if open()
+    // succeeded but a later step threw) so it isn't leaked, then drop the
+    // temp copy.
+    if (handle) {
+      await handle.close().catch(() => {
+        /* Already closed or never fully opened */
+      });
+    }
     await unlink(tempCopy).catch(() => {
       /* May not exist if copyFileSync failed */
     });
