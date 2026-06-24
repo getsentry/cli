@@ -25,6 +25,17 @@ sentry debug-files bundle-jvm --output ./out --debug-id <uuid> --exclude generat
 
 # Output as JSON
 sentry debug-files bundle-jvm --output ./out --debug-id <uuid> --json ./src
+
+# Upload debug information files (scans directories recursively)
+sentry debug-files upload ./build
+sentry debug-files upload ./libexample.so --include-sources
+
+# Restrict by type or debug id, and wait for server-side processing
+sentry debug-files upload ./dsyms --type dsym --wait
+sentry debug-files upload ./build --id <debug-id> --require-all
+
+# Preview what would be uploaded without uploading (no credentials needed)
+sentry debug-files upload ./build --no-upload
 ```
 
 ## Important Notes
@@ -44,6 +55,16 @@ sentry debug-files bundle-jvm --output ./out --debug-id <uuid> --json ./src
   files that are not present locally are skipped; it exits non-zero (writing
   nothing) when none are found. The bundle defaults to `<path>.src.zip` and is
   uploaded via `sentry debug-files upload`.
+- `upload` scans each path (files or directories, walked recursively) for
+  native debug information files, parses them in-process, and uploads matching
+  files via the chunk-upload protocol. Use `--type`/`--id` to restrict which
+  files are sent, `--no-debug`/`--no-unwind`/`--no-sources` to drop files whose
+  only useful feature is the named one, and `--include-sources` to attach a
+  source bundle per file. `--no-upload` previews the selection without
+  credentials; `--wait`/`--wait-for` block on server-side processing and exit
+  non-zero if any file fails. `--require-all` fails if a requested `--id` was not
+  found. Scanning inside ZIP archives, `--symbol-maps`, `--il2cpp-mapping` line
+  mappings, and `--derived-data` are not yet supported.
 - Upload a JVM bundle separately via `sentry debug-files upload --type jvm`.
 - Supported JVM source file extensions: `.java`, `.kt`, `.scala`, `.sc`,
   `.groovy`, `.gvy`, `.gy`, `.gsh`, `.clj`, `.cljc`

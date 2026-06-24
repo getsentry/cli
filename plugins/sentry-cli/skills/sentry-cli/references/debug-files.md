@@ -15,6 +15,22 @@ Work with debug information files
 
 Inspect a debug information file
 
+### `sentry debug-files upload <path...>`
+
+Upload debug information files to Sentry
+
+**Flags:**
+- `-t, --type <value>... - Only upload files of this type (repeatable): dsym, elf, pe, pdb, portablepdb, wasm, breakpad, sourcebundle, jvm`
+- `--id <value>... - Only upload the object with this debug id (repeatable)`
+- `--require-all - Fail if any --id value was not found among scanned files`
+- `--no-debug - Do not upload files whose only feature is debug/symbol info`
+- `--no-unwind - Do not upload files whose only feature is unwind info`
+- `--no-sources - Do not upload files whose only feature is source info`
+- `--include-sources - Build and upload a source bundle for each file with debug info`
+- `--no-upload - Scan and print what would be uploaded without uploading`
+- `--wait - Wait for server-side processing and report any errors`
+- `--wait-for <value> - Wait up to this many seconds for server-side processing`
+
 ### `sentry debug-files print-sources <path>`
 
 List the source files a debug file references
@@ -59,6 +75,17 @@ sentry debug-files bundle-jvm --output ./out --debug-id <uuid> --exclude generat
 
 # Output as JSON
 sentry debug-files bundle-jvm --output ./out --debug-id <uuid> --json ./src
+
+# Upload debug information files (scans directories recursively)
+sentry debug-files upload ./build
+sentry debug-files upload ./libexample.so --include-sources
+
+# Restrict by type or debug id, and wait for server-side processing
+sentry debug-files upload ./dsyms --type dsym --wait
+sentry debug-files upload ./build --id <debug-id> --require-all
+
+# Preview what would be uploaded without uploading (no credentials needed)
+sentry debug-files upload ./build --no-upload
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
