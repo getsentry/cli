@@ -70,6 +70,7 @@ When creating your Sentry OAuth application:
   - `event:read`, `event:write`
   - `member:read`
   - `team:read`, `team:write`
+  - `alerts:read`, `alerts:write`
 <!-- GENERATED:END oauth-scopes -->
 
 ## Environment Variables
