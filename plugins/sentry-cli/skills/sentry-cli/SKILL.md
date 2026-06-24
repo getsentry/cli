@@ -411,8 +411,9 @@ Work with Dart/Flutter symbol maps
 Work with debug information files
 
 - `sentry debug-files check <path>` — Inspect a debug information file
-- `sentry debug-files bundle-jvm <path>` — Create a JVM source bundle for source context
+- `sentry debug-files print-sources <path>` — List the source files a debug file references
 - `sentry debug-files bundle-sources <path>` — Bundle a debug file's source files for source context
+- `sentry debug-files bundle-jvm <path>` — Create a JVM source bundle for source context
 
 → Full flags and examples: `references/debug-files.md`
 

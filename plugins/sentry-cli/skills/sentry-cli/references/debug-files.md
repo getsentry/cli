@@ -15,6 +15,17 @@ Work with debug information files
 
 Inspect a debug information file
 
+### `sentry debug-files print-sources <path>`
+
+List the source files a debug file references
+
+### `sentry debug-files bundle-sources <path>`
+
+Bundle a debug file's source files for source context
+
+**Flags:**
+- `-o, --output <value> - Output path for the source bundle ZIP (default: <path>.src.zip)`
+
 ### `sentry debug-files bundle-jvm <path>`
 
 Create a JVM source bundle for source context
@@ -24,13 +35,6 @@ Create a JVM source bundle for source context
 - `-d, --debug-id <value> - Debug ID (UUID) to stamp on the bundle`
 - `-e, --exclude <value>... - Additional directory names to exclude (repeatable)`
 
-### `sentry debug-files bundle-sources <path>`
-
-Bundle a debug file's source files for source context
-
-**Flags:**
-- `-o, --output <value> - Output path for the source bundle ZIP (default: <path>.src.zip)`
-
 **Examples:**
 
 ```bash
@@ -38,6 +42,10 @@ Bundle a debug file's source files for source context
 sentry debug-files check ./libexample.so
 sentry debug-files check MyApp.dSYM/Contents/Resources/DWARF/MyApp
 sentry debug-files check ./app.pdb --json
+
+# List the source files a debug file references (and whether they're available)
+sentry debug-files print-sources ./libexample.so
+sentry debug-files print-sources ./app.pdb --json
 
 # Bundle a debug file's referenced source files (run on the build machine)
 sentry debug-files bundle-sources ./libexample.so
