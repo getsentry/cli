@@ -533,9 +533,13 @@ async function handleProjectNotFound(
   projectSlug: string,
   orgs: { slug: string }[],
   flags: ListFlags,
-  options?: { originalSlug?: string; isRecoveryAttempt?: boolean }
+  options?: {
+    originalSlug?: string;
+    isRecoveryAttempt?: boolean;
+    scopedOrg?: string;
+  }
 ): Promise<ListResult<ProjectWithOrg>> {
-  const { originalSlug, isRecoveryAttempt = false } = options ?? {};
+  const { originalSlug, isRecoveryAttempt = false, scopedOrg } = options ?? {};
   const displaySlug = originalSlug ?? projectSlug;
 
   // Skip triage on recovery attempts to prevent infinite recursion.
@@ -563,36 +567,49 @@ async function handleProjectNotFound(
 
   if (outcome.kind === "fuzzy-match") {
     // Pass isRecoveryAttempt=true to prevent infinite recursion if the
-    // fuzzy-recovered slug also fails to resolve.
-    return handleProjectSearch(outcome.project, flags, undefined, true);
+    // fuzzy-recovered slug also fails to resolve. Preserve scopedOrg so
+    // the recovery lookup stays scoped to the user's specified org.
+    return handleProjectSearch(outcome.project, flags, {
+      isRecoveryAttempt: true,
+      scopedOrg,
+    });
   }
 
   // JSON mode returns empty array; human mode throws a helpful error
   if (flags.json) {
     return { items: [] };
   }
+  const fallback = scopedOrg
+    ? [
+        `No project with this name found in organization '${scopedOrg}'`,
+        `Check the organization slug or try: sentry project list ${scopedOrg}/`,
+      ]
+    : ["No project with this slug found in any accessible organization"];
   throw new ResolutionError(
     `Project '${displaySlug}'`,
     "not found",
     `sentry project list <org>/${projectSlug}`,
-    outcome.suggestions.length > 0
-      ? outcome.suggestions
-      : ["No project with this slug found in any accessible organization"]
+    outcome.suggestions.length > 0 ? outcome.suggestions : fallback
   );
 }
 
 export async function handleProjectSearch(
   projectSlug: string,
   flags: ListFlags,
-  /** Original user input before normalization — for clearer messages. */
-  originalSlug?: string,
-  /** @internal — prevents infinite recursion from fuzzy recovery. */
-  _isRecoveryAttempt = false
+  options?: {
+    /** Original user input before normalization — for clearer messages. */
+    originalSlug?: string;
+    /** @internal — prevents infinite recursion from fuzzy recovery. */
+    isRecoveryAttempt?: boolean;
+    /** Organization slug to scope the search to (e.g. from "org/My Project"). */
+    scopedOrg?: string;
+  }
 ): Promise<ListResult<ProjectWithOrg>> {
+  const { originalSlug, isRecoveryAttempt = false, scopedOrg } = options ?? {};
   // When the input is a display name (originalSlug set, contains spaces),
   // skip the slug-based API lookup and go straight to name-based matching.
   const isDisplayName = originalSlug !== undefined;
-  const { projects, orgs } = isDisplayName
+  const { projects, orgs: foundOrgs } = isDisplayName
     ? { projects: [], orgs: await listOrganizations() }
     : await withProgress(
         {
@@ -601,10 +618,26 @@ export async function handleProjectSearch(
         },
         () => findProjectsBySlug(projectSlug)
       );
-  const filtered = filterByPlatform(projects, flags.platform);
+
+  // When the caller provided an org (e.g. "org/My Project"), scope the
+  // search to that org instead of all accessible orgs. This applies to both
+  // display-name searches and slug-based recovery lookups. The slug-based
+  // lookup (findProjectsBySlug) fans out across every accessible org, so the
+  // recovered projects must be filtered too — otherwise a recovered slug that
+  // also exists in a different org could leak into a scoped result.
+  const orgs =
+    scopedOrg !== undefined
+      ? foundOrgs.filter((o) => o.slug === scopedOrg)
+      : foundOrgs;
+  const scopedProjects =
+    scopedOrg !== undefined
+      ? projects.filter((p) => p.orgSlug === scopedOrg)
+      : projects;
+
+  const filtered = filterByPlatform(scopedProjects, flags.platform);
 
   if (filtered.length === 0) {
-    if (projects.length > 0 && flags.platform) {
+    if (scopedProjects.length > 0 && flags.platform) {
       return {
         items: [],
         hint: `No project '${projectSlug}' found matching platform '${flags.platform}'.`,
@@ -613,7 +646,8 @@ export async function handleProjectSearch(
 
     return handleProjectNotFound(projectSlug, orgs, flags, {
       originalSlug,
-      isRecoveryAttempt: _isRecoveryAttempt,
+      isRecoveryAttempt,
+      scopedOrg,
     });
   }
 
@@ -731,11 +765,10 @@ export const listCommand = buildListCommand("project", {
           });
         },
         "project-search": (ctx) =>
-          handleProjectSearch(
-            ctx.parsed.projectSlug,
-            flags,
-            ctx.parsed.originalSlug
-          ),
+          handleProjectSearch(ctx.parsed.projectSlug, flags, {
+            originalSlug: ctx.parsed.originalSlug,
+            scopedOrg: ctx.parsed.org,
+          }),
       },
     });
 
