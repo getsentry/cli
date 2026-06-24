@@ -326,7 +326,11 @@ export function listSources(data: Uint8Array): DifSourcesInfo {
     } catch (err) {
       // One slice failing to enumerate must not abort the whole listing, but
       // the failure is recorded so callers can distinguish it from an object
-      // that simply references no sources.
+      // that simply references no sources. Discard any entries collected before
+      // the error so `files` stays empty when enumeration aborted (per the
+      // DifObjectSources contract) — a partial list paired with an error would
+      // mislead consumers and be hidden by the human formatter.
+      files.length = 0;
       enumerationError = err instanceof Error ? err.message : String(err);
       log.debug(`Failed to enumerate sources for ${object.debugId}`, err);
     }
