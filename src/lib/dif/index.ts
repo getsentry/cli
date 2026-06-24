@@ -157,6 +157,24 @@ export function peekFormat(data: Uint8Array): string {
   return Archive.peek(data) ?? "unknown";
 }
 
+/**
+ * Select the single object that source-bundling operates on: the first object
+ * that carries debug info, falling back to the first object in the archive.
+ *
+ * Fat archives (e.g. universal Mach-O) contain one object per arch slice, but
+ * {@link createSourceBundle} bundles only one slice. Both the bundler and the
+ * `print-sources` preview share this rule so they stay consistent about which
+ * slice is the canonical one.
+ *
+ * @param objects - Objects in the archive (in archive order).
+ * @returns The selected object, or `undefined` if the archive has no objects.
+ */
+export function selectBundledObject<T extends { hasDebugInfo: boolean }>(
+  objects: readonly T[]
+): T | undefined {
+  return objects.find((object) => object.hasDebugInfo) ?? objects[0];
+}
+
 /** Result of building a source bundle from a debug information file. */
 export type SourceBundleResult = {
   /** The source bundle ZIP bytes, or `null` if the bundle would be empty. */
@@ -178,9 +196,10 @@ export type SourceBundleResult = {
  * `readSource` to skip a path that isn't available locally. The bundle is built
  * entirely in memory; nothing is read from disk by this function itself.
  *
- * The bundle is built for the first object that carries debug info (falling back
- * to the first object), which matches the single-object debug files this is used
- * for; fat archives with multiple debug-info slices are not split here.
+ * The bundle is built for the single object chosen by {@link selectBundledObject}
+ * (first object with debug info, falling back to the first object), which matches
+ * the single-object debug files this is used for; fat archives with multiple
+ * debug-info slices are not split here.
  *
  * @param data - The full contents of the debug information file.
  * @param objectName - Name stamped on the bundle (typically the input file name).
@@ -199,7 +218,7 @@ export function createSourceBundle(
   const archive = new Archive(data);
   const objects = archive.objects();
   const objectCount = objects.length;
-  const object = objects.find((o) => o.hasDebugInfo) ?? objects[0];
+  const object = selectBundledObject(objects);
   if (!object) {
     return { bundle: null, debugId: null, fileCount: 0, objectCount };
   }
@@ -247,6 +266,12 @@ export type DifObjectSources = {
   debugId: string;
   /** The object file format (e.g. `elf`, `pdb`). */
   fileFormat: string;
+  /**
+   * Whether the object carries debug info. Mirrors the slice-selection used by
+   * {@link createSourceBundle} so callers can preview exactly the object that
+   * `bundle-sources` would bundle.
+   */
+  hasDebugInfo: boolean;
   /** Source files referenced by the object's debug info. */
   files: DifSourceFile[];
 };
@@ -296,6 +321,7 @@ export function listSources(data: Uint8Array): DifSourcesInfo {
     return {
       debugId: object.debugId,
       fileFormat: object.fileFormat,
+      hasDebugInfo: object.hasDebugInfo,
       files,
     };
   });

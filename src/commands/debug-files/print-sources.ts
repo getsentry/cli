@@ -14,7 +14,11 @@
 import { existsSync } from "node:fs";
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
-import { type DifSourcesInfo, listSources } from "../../lib/dif/index.js";
+import {
+  type DifSourcesInfo,
+  listSources,
+  selectBundledObject,
+} from "../../lib/dif/index.js";
 import { ValidationError } from "../../lib/errors.js";
 import {
   colorTag,
@@ -22,9 +26,12 @@ import {
   safeCodeSpan,
 } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { logger } from "../../lib/logger.js";
 import { readDebugFile } from "./read-file.js";
 
 const USAGE_HINT = "sentry debug-files print-sources <path>";
+
+const log = logger.withTag("debug-files.print-sources");
 
 /** A referenced source file augmented with local-disk availability. */
 type PrintSourcesFile = DifSourcesInfo["objects"][number]["files"][number] & {
@@ -140,6 +147,18 @@ export const printSourcesCommand = buildCommand({
         availableLocally: file.resolved ? null : existsSync(file.path),
       })),
     }));
+
+    // All slices are listed for inspection, but `bundle-sources` only bundles
+    // one of them. Warn (mirroring `bundle-sources`) so the preview does not
+    // imply every listed source would end up in the bundle.
+    const bundled = selectBundledObject(info.objects);
+    if (info.objects.length > 1 && bundled) {
+      log.warn(
+        `'${path}' contains ${info.objects.length} objects; ` +
+          `\`bundle-sources\` would bundle sources for ${bundled.debugId} only. ` +
+          "Other slices are not included."
+      );
+    }
 
     yield new CommandOutput<PrintSourcesResult>({ path, objects });
 

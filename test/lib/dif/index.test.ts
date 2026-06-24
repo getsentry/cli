@@ -12,6 +12,7 @@ import {
   listSources,
   parseDebugFile,
   peekFormat,
+  selectBundledObject,
 } from "../../../src/lib/dif/index.js";
 
 /** A minimal, valid Breakpad symbol file with a known debug id + code id. */
@@ -161,6 +162,7 @@ describe("listSources", () => {
     const object = info.objects[0];
     expect(object?.debugId).toBe("0f13a5da-412a-fbf7-c866-2048f3294f3d");
     expect(object?.fileFormat).toBe("breakpad");
+    expect(object?.hasDebugInfo).toBe(true);
     expect(object?.files).toHaveLength(1);
 
     const file = object?.files[0];
@@ -178,5 +180,28 @@ describe("listSources", () => {
 
   test("throws on unrecognized data", () => {
     expect(() => listSources(toBytes("not an object file"))).toThrow();
+  });
+});
+
+describe("selectBundledObject", () => {
+  test("prefers the first object that carries debug info", () => {
+    const objects = [
+      { hasDebugInfo: false, id: "a" },
+      { hasDebugInfo: true, id: "b" },
+      { hasDebugInfo: true, id: "c" },
+    ];
+    expect(selectBundledObject(objects)?.id).toBe("b");
+  });
+
+  test("falls back to the first object when none carry debug info", () => {
+    const objects = [
+      { hasDebugInfo: false, id: "a" },
+      { hasDebugInfo: false, id: "b" },
+    ];
+    expect(selectBundledObject(objects)?.id).toBe("a");
+  });
+
+  test("returns undefined for an empty archive", () => {
+    expect(selectBundledObject([])).toBeUndefined();
   });
 });
