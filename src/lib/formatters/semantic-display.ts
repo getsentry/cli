@@ -63,6 +63,32 @@ const SEMANTIC_SPAN_FORMATTERS: SpanDisplayFormatter[] = [
  */
 export type AttributeSource = Record<string, unknown>;
 
+/**
+ * Semantic-convention key prefixes that mark an attribute source as carrying
+ * GenAI or MCP activity. Used by the `-f ai` filter, which must match any
+ * GenAI/MCP attribute — not just the `gen_ai.operation.name`/tool/agent keys
+ * that {@link inferSemanticOp} keys off. Vercel-AI-style spans frequently
+ * carry only `gen_ai.request.model` or `gen_ai.usage.*`, so prefix matching
+ * is required to avoid missing them.
+ */
+const AI_ATTRIBUTE_PREFIXES = ["gen_ai.", "mcp."] as const;
+
+/**
+ * Whether an attribute source contains any GenAI or MCP attribute, detected by
+ * key prefix. Unlike {@link inferSemanticOp}, this matches the full GenAI/MCP
+ * namespace (e.g. `gen_ai.request.model`, `gen_ai.usage.input_tokens`,
+ * `mcp.tool.name`), not just the handful of op-defining keys.
+ */
+export function hasAiAttributes(attrs: AttributeSource): boolean {
+  for (const key of Object.keys(attrs)) {
+    const lower = key.toLowerCase();
+    if (AI_ATTRIBUTE_PREFIXES.some((prefix) => lower.startsWith(prefix))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Look up an attribute value by trying multiple keys in order. */
 function getAttr(
   attrs: AttributeSource,
@@ -785,4 +811,30 @@ export function mergeTransactionAttributes(
   const trace = contexts?.trace as Record<string, unknown> | undefined;
   const data = trace?.data as Record<string, unknown> | undefined;
   return data ?? {};
+}
+
+/**
+ * Extract the `data` attribute object from each child span of a transaction.
+ *
+ * Child span attributes live in `span.data`. The Vercel AI SDK (and other
+ * instrumentations that wrap an HTTP handler) attach `gen_ai.*` attributes to
+ * child spans rather than the transaction root, so callers that need to detect
+ * AI activity must inspect these in addition to the trace-root attributes
+ * returned by {@link mergeTransactionAttributes}.
+ */
+export function collectSpanAttributes(
+  event: Record<string, unknown>
+): AttributeSource[] {
+  const spans = event.spans;
+  if (!Array.isArray(spans)) {
+    return [];
+  }
+  const result: AttributeSource[] = [];
+  for (const span of spans) {
+    const data = (span as Record<string, unknown> | null)?.data;
+    if (data && typeof data === "object") {
+      result.push(data as AttributeSource);
+    }
+  }
+  return result;
 }

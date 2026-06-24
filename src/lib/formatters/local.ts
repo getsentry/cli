@@ -1,12 +1,18 @@
 /** Tail formatters for the local dev server. */
 
+import { logger } from "../logger.js";
 import { blue, bold, cyan, green, muted, red, yellow } from "./colors.js";
 import { stripAnsi } from "./plain-detect.js";
+import type { AttributeSource } from "./semantic-display.js";
 import {
+  collectSpanAttributes,
   formatSemanticSpanDisplay,
+  hasAiAttributes,
   inferSemanticOp,
   mergeTransactionAttributes,
 } from "./semantic-display.js";
+
+const log = logger.withTag("local-formatter");
 
 /**
  * Characters unsafe for JSON terminal display: C1 control characters
@@ -71,6 +77,47 @@ export function formatTime(timestamp?: number | string): string {
     return "??:??:??";
   }
   return date.toLocaleTimeString("en-US", { hour12: false });
+}
+
+/** 32-char lowercase-hex trace ID, as emitted by Sentry SDKs. */
+const TRACE_ID_RE = /^[0-9a-f]{32}$/i;
+
+/**
+ * Number of leading hex characters shown for a trace ID in human output.
+ * Eight characters is enough to visually group spans of the same trace while
+ * keeping the tail line compact; the full ID is preserved in JSON output.
+ */
+const TRACE_ID_SHORT_LEN = 8;
+
+/**
+ * Extract the full trace ID from an event item.
+ *
+ * The trace ID lives in `contexts.trace.trace_id` for errors and transactions.
+ * Returns undefined when absent or malformed so callers can omit the token
+ * rather than render garbage.
+ */
+export function extractTraceId(
+  event: Record<string, unknown>
+): string | undefined {
+  const trace = (event.contexts as Record<string, unknown> | undefined)
+    ?.trace as { trace_id?: unknown } | undefined;
+  const traceId = trace?.trace_id;
+  if (typeof traceId === "string" && TRACE_ID_RE.test(traceId)) {
+    return traceId.toLowerCase();
+  }
+  return;
+}
+
+/**
+ * Build a muted, bracketed short-trace-ID token for tail output, e.g.
+ * ` [trace:1a2b3c4d]`. Returns an empty string when no valid trace ID exists.
+ */
+export function formatTraceIdHint(event: Record<string, unknown>): string {
+  const traceId = extractTraceId(event);
+  if (!traceId) {
+    return "";
+  }
+  return ` ${muted(`[trace:${traceId.slice(0, TRACE_ID_SHORT_LEN)}]`)}`;
 }
 
 /** Level → color map for tail output. */
@@ -202,6 +249,8 @@ export function formatErrorItem(
     msg += formatFrameHint(frames);
   }
 
+  msg += formatTraceIdHint(event);
+
   const ts = formatTime(event.timestamp as number | undefined);
   return `${muted(ts)} ${formatType("error")} ${inferSource(header)} ${msg}`;
 }
@@ -265,8 +314,153 @@ export function formatTransactionItem(
     msg += ` ${muted(`[${spans.length} span${spans.length === 1 ? "" : "s"}]`)}`;
   }
 
+  msg += formatTraceIdHint(event);
+
   const ts = formatTime(event.timestamp as number | undefined);
   return `${muted(ts)} ${formatType("trace")} ${inferSource(header)} ${msg}`;
+}
+
+/**
+ * OTel/Sentry semantic-convention attribute prefixes considered "SDK-default".
+ *
+ * Attributes under these namespaces are emitted by the SDK or by standard
+ * instrumentation (HTTP, DB, GenAI, messaging, …) rather than supplied by the
+ * application. Grouping them separately keeps user-custom attributes — the ones
+ * a developer is usually debugging — visually distinct and easy to scan.
+ */
+const SDK_ATTRIBUTE_PREFIXES = [
+  "sentry.",
+  "gen_ai.",
+  "ai.",
+  "mcp.",
+  "db.",
+  "http.",
+  "url.",
+  "server.",
+  "client.",
+  "network.",
+  "rpc.",
+  "messaging.",
+  "faas.",
+  "cloud.",
+  "cloudevents.",
+  "aws.s3.",
+  "graphql.",
+  "feature_flag.",
+  "process.",
+  "otel.",
+  "thread.",
+  "code.",
+  "exception.",
+  "error.",
+  "user_agent.",
+];
+
+/** Two-space indent prefix for nested attribute-table lines. */
+const ATTR_INDENT = "  ";
+
+/**
+ * Whether an attribute key belongs to the SDK-default group rather than being
+ * a user-custom attribute. Matching is case-insensitive against the known
+ * semantic-convention prefixes in {@link SDK_ATTRIBUTE_PREFIXES}.
+ */
+function isSdkAttribute(key: string): boolean {
+  const lower = key.toLowerCase();
+  return SDK_ATTRIBUTE_PREFIXES.some((prefix) => lower.startsWith(prefix));
+}
+
+/**
+ * Render a primitive attribute value for the table. Objects and arrays are
+ * JSON-encoded; everything else is stringified. The result is sanitized so
+ * untrusted envelope data can't inject terminal escapes.
+ */
+function formatAttrValue(value: unknown): string {
+  if (value === null) {
+    return "null";
+  }
+  if (typeof value === "object") {
+    try {
+      return sanitize(JSON.stringify(value));
+    } catch (err) {
+      log.debug("Failed to JSON-encode attribute value", err);
+      return sanitize(String(value));
+    }
+  }
+  return sanitize(String(value));
+}
+
+/**
+ * Merge transaction-root attributes with all child-span attributes into a
+ * single flat map. Root attributes take precedence on key collision because
+ * they describe the transaction as a whole; span-level duplicates are
+ * lower-signal for a top-level scan.
+ */
+function collectAllAttributes(
+  event: Record<string, unknown>
+): Map<string, unknown> {
+  const merged = new Map<string, unknown>();
+  const sources: AttributeSource[] = [
+    ...collectSpanAttributes(event),
+    mergeTransactionAttributes(event),
+  ];
+  for (const source of sources) {
+    for (const [key, value] of Object.entries(source)) {
+      if (value !== undefined) {
+        merged.set(key, value);
+      }
+    }
+  }
+  return merged;
+}
+
+/**
+ * Build an aligned `key  value` table for a group of attributes, sorted
+ * alphabetically by key. Keys are padded to a common width so values line up
+ * column-for-column. Returns an empty array when the group has no entries.
+ */
+function formatAttrGroup(
+  title: string,
+  entries: [string, unknown][]
+): string[] {
+  if (entries.length === 0) {
+    return [];
+  }
+  const sorted = [...entries].sort(([a], [b]) => a.localeCompare(b));
+  const keyWidth = Math.max(...sorted.map(([k]) => sanitize(k).length));
+  const lines = [`${ATTR_INDENT}${muted(title)}`];
+  for (const [key, value] of sorted) {
+    const safeKey = sanitize(key);
+    const padded = safeKey.padEnd(keyWidth);
+    lines.push(
+      `${ATTR_INDENT}${ATTR_INDENT}${cyan(padded)}  ${formatAttrValue(value)}`
+    );
+  }
+  return lines;
+}
+
+/**
+ * Render a transaction's span/trace attributes as an indented, scannable
+ * table grouped into SDK-default vs user-custom sections. Within each group
+ * keys are sorted alphabetically and aligned. Returns an empty array when the
+ * transaction carries no attributes.
+ *
+ * Surfaced under `local serve --attributes`; correlate the rows with the
+ * one-liner above them via its `[trace:…]` token.
+ */
+export function formatAttributeTable(event: Record<string, unknown>): string[] {
+  const merged = collectAllAttributes(event);
+  if (merged.size === 0) {
+    return [];
+  }
+  const sdk: [string, unknown][] = [];
+  const user: [string, unknown][] = [];
+  for (const entry of merged) {
+    (isSdkAttribute(entry[0]) ? sdk : user).push(entry);
+  }
+  return [
+    ...formatAttrGroup("user attributes", user),
+    ...formatAttrGroup("sdk attributes", sdk),
+  ];
 }
 
 /** Shape of a single log entry inside a log envelope item. */
@@ -277,7 +471,38 @@ export type LogEntry = {
   attributes?: Record<string, { value?: unknown }>;
 };
 
-/** Format one log entry into a colored tail line. */
+/**
+ * Whether a log attribute key is an SDK-default (`sentry.*`) attribute rather
+ * than a user-supplied one. SDK-default attributes are hidden from the tail
+ * line to reduce noise; their content (e.g. trace ID) is surfaced separately.
+ */
+function isUserLogAttribute(key: string): boolean {
+  return !key.startsWith("sentry.");
+}
+
+/**
+ * Extract the trace ID from a log entry's attributes.
+ *
+ * Logs carry no `contexts.trace`; the trace ID lives in the SDK-default
+ * `sentry.trace.trace_id` attribute. Returns undefined when absent or
+ * malformed.
+ */
+function extractLogTraceId(logEntry: LogEntry): string | undefined {
+  const traceId = logEntry.attributes?.["sentry.trace.trace_id"]?.value;
+  if (typeof traceId === "string" && TRACE_ID_RE.test(traceId)) {
+    return traceId.toLowerCase();
+  }
+  return;
+}
+
+/**
+ * Format one log entry into a colored tail line.
+ *
+ * User-supplied attributes are rendered alphabetically by key so repeated log
+ * lines align column-for-column and are easy to scan. SDK-default `sentry.*`
+ * attributes are omitted from the inline list; the trace ID is surfaced as a
+ * compact `[trace:…]` token instead.
+ */
 export function formatSingleLog(logEntry: LogEntry, source: string): string {
   const level = logEntry.level ?? "log";
   let msg = sanitize(logEntry.body ?? "");
@@ -286,16 +511,22 @@ export function formatSingleLog(logEntry: LogEntry, source: string): string {
     const attrs = Object.entries(logEntry.attributes)
       .filter(
         ([k, v]) =>
-          !k.startsWith("sentry.") &&
+          isUserLogAttribute(k) &&
           v !== null &&
           v !== undefined &&
           v.value !== null &&
           v.value !== undefined
       )
+      .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => muted(`[${sanitize(k)}=${sanitize(String(v.value))}]`));
     if (attrs.length > 0) {
       msg += ` ${attrs.join(" ")}`;
     }
+  }
+
+  const traceId = extractLogTraceId(logEntry);
+  if (traceId) {
+    msg += ` ${muted(`[trace:${traceId.slice(0, TRACE_ID_SHORT_LEN)}]`)}`;
   }
 
   const ts = formatTime(logEntry.timestamp);
@@ -386,6 +617,7 @@ function formatErrorJson(
   return JSON.stringify({
     type: "error",
     timestamp: payload.timestamp,
+    trace_id: extractTraceId(payload),
     error_type: jsonSafe(first?.type) ?? "Error",
     message:
       jsonSafe(first?.value) ?? jsonSafe(payload.message) ?? "Unknown error",
@@ -397,10 +629,40 @@ function formatErrorJson(
   });
 }
 
-/** Format a transaction item as a JSON object. */
+/**
+ * Build the `{ user, sdk }` attribute split for JSON output. Each side is a
+ * sorted object of stringified values, omitted (undefined) when empty so the
+ * envelope stays compact when `--attributes` isn't requested.
+ */
+function buildJsonAttributes(payload: Record<string, unknown>): {
+  user?: Record<string, string>;
+  sdk?: Record<string, string>;
+} {
+  const merged = collectAllAttributes(payload);
+  const user: Record<string, string> = {};
+  const sdk: Record<string, string> = {};
+  for (const [key, value] of [...merged].sort(([a], [b]) =>
+    a.localeCompare(b)
+  )) {
+    const target = isSdkAttribute(key) ? sdk : user;
+    target[stripBidi(key)] = stripBidi(formatAttrValue(value));
+  }
+  return {
+    user: Object.keys(user).length > 0 ? user : undefined,
+    sdk: Object.keys(sdk).length > 0 ? sdk : undefined,
+  };
+}
+
+/**
+ * Format a transaction item as a JSON object.
+ *
+ * When `includeAttributes` is true, a grouped `attributes` object (`user` /
+ * `sdk`) is added so automation can inspect the full span attribute bag.
+ */
 function formatTransactionJson(
   payload: Record<string, unknown>,
-  header: Record<string, unknown>
+  header: Record<string, unknown>,
+  includeAttributes = false
 ): string {
   const trace = (payload.contexts as Record<string, unknown> | undefined)
     ?.trace as Record<string, unknown> | undefined;
@@ -418,6 +680,7 @@ function formatTransactionJson(
   return JSON.stringify({
     type: "transaction",
     timestamp: payload.timestamp,
+    trace_id: extractTraceId(payload),
     op: inferSemanticOp(attrs) ?? trace?.op,
     label: stripBidi(semantic.label),
     metadata:
@@ -427,6 +690,7 @@ function formatTransactionJson(
     duration_ms: durationMs,
     status: trace?.status,
     span_count: (payload.spans as unknown[] | undefined)?.length,
+    attributes: includeAttributes ? buildJsonAttributes(payload) : undefined,
     source: inferSourceName(header),
   });
 }
@@ -445,6 +709,7 @@ function formatLogJson(
     JSON.stringify({
       type: "log",
       timestamp: entry.timestamp,
+      trace_id: extractLogTraceId(entry),
       level: entry.level ?? "log",
       message: stripBidi(entry.body ?? ""),
       attributes: entry.attributes
@@ -452,12 +717,12 @@ function formatLogJson(
             Object.entries(entry.attributes)
               .filter(
                 ([k, v]) =>
-                  !k.startsWith("sentry.") &&
+                  isUserLogAttribute(k) &&
                   v?.value !== null &&
                   v?.value !== undefined
               )
               .map(([k, v]) => [
-                k,
+                stripBidi(k),
                 typeof v.value === "string" ? stripBidi(v.value) : v.value,
               ])
           )
@@ -484,13 +749,14 @@ function formatLogJson(
 export function formatItemJson(
   itemType: string | undefined,
   payload: Record<string, unknown>,
-  header: Record<string, unknown>
+  header: Record<string, unknown>,
+  showAttributes = false
 ): string[] {
   if (itemType && ERROR_TYPES.has(itemType)) {
     return [formatErrorJson(payload, header)];
   }
   if (itemType === "transaction") {
-    return [formatTransactionJson(payload, header)];
+    return [formatTransactionJson(payload, header, showAttributes)];
   }
   if (itemType === "log") {
     return formatLogJson(payload, header);
@@ -519,18 +785,29 @@ function inferSourceName(header: Record<string, unknown>): string {
   return "server";
 }
 
-/** Format a single envelope item into one or more output lines. */
+/**
+ * Format a single envelope item into one or more output lines.
+ *
+ * When `showAttributes` is true, transaction items are followed by an indented
+ * attribute table (see {@link formatAttributeTable}).
+ */
+// biome-ignore lint/nursery/useMaxParams: established 4-param shape; showAttributes is a defaulted display toggle
 export function formatItem(
   itemType: string | undefined,
   payload: Record<string, unknown>,
   header: Record<string, unknown>,
-  fallbackLabel: string
+  fallbackLabel: string,
+  showAttributes = false
 ): string[] {
   if (itemType && ERROR_TYPES.has(itemType)) {
     return [formatErrorItem(payload, header)];
   }
   if (itemType === "transaction") {
-    return [formatTransactionItem(payload, header)];
+    const lines = [formatTransactionItem(payload, header)];
+    if (showAttributes) {
+      lines.push(...formatAttributeTable(payload));
+    }
+    return lines;
   }
   if (itemType === "log") {
     return formatLogItem(payload, header);
@@ -558,9 +835,32 @@ export function isItemIncluded(
   }
   // The "ai" filter matches transactions with GenAI or MCP attributes.
   if (activeFilters.has("ai") && itemType === "transaction" && payload) {
-    const attrs = mergeTransactionAttributes(payload);
-    const op = inferSemanticOp(attrs);
-    return op === "gen_ai" || op === "mcp";
+    return transactionHasAiActivity(payload);
+  }
+  return false;
+}
+
+/**
+ * Whether a transaction carries GenAI or MCP activity.
+ *
+ * Checks the trace-root attributes first, then falls back to scanning child
+ * span attributes. The Vercel AI SDK and similar instrumentations attach
+ * `gen_ai.*` attributes to child spans of an HTTP handler transaction (e.g.
+ * `POST /api/ai/chat`), so root-only detection misses them.
+ *
+ * Detection matches the full `gen_ai.*`/`mcp.*` namespace by key prefix rather
+ * than only the op-defining keys ({@link inferSemanticOp}) — a span carrying
+ * just `gen_ai.request.model` or `gen_ai.usage.input_tokens` is still AI
+ * activity the filter must surface.
+ */
+function transactionHasAiActivity(payload: Record<string, unknown>): boolean {
+  if (hasAiAttributes(mergeTransactionAttributes(payload))) {
+    return true;
+  }
+  for (const spanAttrs of collectSpanAttributes(payload)) {
+    if (hasAiAttributes(spanAttrs)) {
+      return true;
+    }
   }
   return false;
 }
@@ -579,7 +879,8 @@ export function formatEnvelopeLinesJson(
     getContentType: () => string;
     getEventTypes: () => string[] | null;
   },
-  activeFilters: ReadonlySet<FilterValue>
+  activeFilters: ReadonlySet<FilterValue>,
+  showAttributes = false
 ): string[] {
   const parsed = container.getParsedEnvelope();
   if (!parsed) {
@@ -593,7 +894,9 @@ export function formatEnvelopeLinesJson(
     if (!isItemIncluded(itemHeader.type, activeFilters, payload)) {
       continue;
     }
-    lines.push(...formatItemJson(itemHeader.type, payload, header));
+    lines.push(
+      ...formatItemJson(itemHeader.type, payload, header, showAttributes)
+    );
   }
   return lines;
 }
@@ -613,7 +916,8 @@ export function formatEnvelopeLines(
     getContentType: () => string;
     getEventTypes: () => string[] | null;
   },
-  activeFilters: ReadonlySet<FilterValue>
+  activeFilters: ReadonlySet<FilterValue>,
+  showAttributes = false
 ): string[] {
   const parsed = container.getParsedEnvelope();
   if (!parsed) {
@@ -635,7 +939,8 @@ export function formatEnvelopeLines(
         itemHeader.type,
         payload,
         header,
-        itemHeader.type ?? container.getContentType()
+        itemHeader.type ?? container.getContentType(),
+        showAttributes
       )
     );
   }
