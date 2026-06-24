@@ -24,6 +24,33 @@ Inspect a debug information file
 | --- | --- |
 | `<path>` | Path to the debug information file |
 
+### `sentry debug-files upload <path...>`
+
+[Section titled “sentry debug-files upload <path...>”](#sentry-debug-files-upload-path)
+
+Upload debug information files to Sentry
+
+**Arguments:**
+
+| Argument | Description |
+| --- | --- |
+| `<path...>` | Files or directories to scan for debug information files |
+
+**Options:**
+
+| Option | Description |
+| --- | --- |
+| `-t, --type <type>...` | Only upload files of this type (repeatable): dsym, elf, pe, pdb, portablepdb, wasm, breakpad, sourcebundle, jvm |
+| `--id <id>...` | Only upload the object with this debug id (repeatable) |
+| `--require-all` | Fail if any --id value was not found among scanned files |
+| `--no-debug` | Do not upload files whose only feature is debug/symbol info |
+| `--no-unwind` | Do not upload files whose only feature is unwind info |
+| `--no-sources` | Do not upload files whose only feature is source info |
+| `--include-sources` | Build and upload a source bundle for each file with debug info |
+| `--no-upload` | Scan and print what would be uploaded without uploading |
+| `--wait` | Wait for server-side processing and report any errors |
+| `--wait-for <wait-for>` | Wait up to this many seconds for server-side processing |
+
 ### `sentry debug-files print-sources <path>`
 
 [Section titled “sentry debug-files print-sources <path>”](#sentry-debug-files-print-sources-path)
@@ -88,4 +115,7 @@ Terminal window
 # Bundle JVM sources with a debug IDsentry debug-files bundle-jvm --output ./out --debug-id <uuid> ./src
 # Exclude additional directoriessentry debug-files bundle-jvm --output ./out --debug-id <uuid> --exclude generated --exclude build-tools ./src
 # Output as JSONsentry debug-files bundle-jvm --output ./out --debug-id <uuid> --json ./src
+# Upload debug information files (scans directories recursively)sentry debug-files upload ./buildsentry debug-files upload ./libexample.so --include-sources
+# Restrict by type or debug id, and wait for server-side processingsentry debug-files upload ./dsyms --type dsym --waitsentry debug-files upload ./build --id <debug-id> --require-all
+# Preview what would be uploaded without uploading (no credentials needed)sentry debug-files upload ./build --no-upload
 ```
