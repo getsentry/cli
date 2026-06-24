@@ -190,8 +190,10 @@ export const printSourcesCommand = buildCommand({
     }
     const total = objects.reduce((sum, object) => sum + object.files.length, 0);
     if (total === 0) {
-      // Distinguish a genuine "no sources" from an all-slices-failed read.
-      if (failed.length === objects.length) {
+      // If any slice failed to enumerate, "no sources" is not a safe
+      // conclusion — even when other slices genuinely reference none — so the
+      // hint must not contradict the per-slice enumeration warnings.
+      if (failed.length > 0) {
         return {
           hint: `Could not read referenced sources from '${path}'. Re-run with --log-level=debug for details.`,
         };
