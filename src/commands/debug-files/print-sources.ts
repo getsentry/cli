@@ -43,6 +43,14 @@ type PrintSourcesFile = DifSourcesInfo["objects"][number]["files"][number] & {
 type PrintSourcesObject = {
   debugId: string;
   fileFormat: string;
+  /**
+   * Whether this object carries debug info. Exposed so `--json` consumers can
+   * apply the same `selectBundledObject` rule `bundle-sources` uses to pick the
+   * single slice it bundles.
+   */
+  hasDebugInfo: boolean;
+  /** Error message if enumerating this object's sources failed, else `null`. */
+  enumerationError: string | null;
   files: PrintSourcesFile[];
 };
 
@@ -74,6 +82,9 @@ function formatPrintSources(data: PrintSourcesResult): string {
 
   const sections = data.objects.map((object) => {
     const header = `${object.fileFormat} ${safeCodeSpan(object.debugId)}`;
+    if (object.enumerationError !== null) {
+      return `${header} — ${colorTag("muted", `could not read sources: ${object.enumerationError}`)}`;
+    }
     if (object.files.length === 0) {
       return `${header} — ${colorTag("muted", "no referenced sources")}`;
     }
@@ -141,12 +152,24 @@ export const printSourcesCommand = buildCommand({
     const objects: PrintSourcesObject[] = info.objects.map((object) => ({
       debugId: object.debugId,
       fileFormat: object.fileFormat,
+      hasDebugInfo: object.hasDebugInfo,
+      enumerationError: object.enumerationError,
       files: object.files.map((file) => ({
         ...file,
         // Local availability only matters for files that aren't embedded/linked.
         availableLocally: file.resolved ? null : existsSync(file.path),
       })),
     }));
+
+    // Surface objects whose source enumeration failed: their empty file list is
+    // a degraded result, not a genuine "no sources" — warn so it isn't read as
+    // the latter (the command still exits zero since the file itself parsed).
+    const failed = objects.filter((object) => object.enumerationError !== null);
+    for (const object of failed) {
+      log.warn(
+        `Could not enumerate sources for ${object.debugId} in '${path}': ${object.enumerationError}`
+      );
+    }
 
     // All slices are listed for inspection, but `bundle-sources` only bundles
     // one of them. Warn (mirroring `bundle-sources`) so the preview does not
@@ -162,8 +185,17 @@ export const printSourcesCommand = buildCommand({
 
     yield new CommandOutput<PrintSourcesResult>({ path, objects });
 
+    if (objects.length === 0) {
+      return { hint: `No objects found in '${path}'. Try: ${USAGE_HINT}` };
+    }
     const total = objects.reduce((sum, object) => sum + object.files.length, 0);
     if (total === 0) {
+      // Distinguish a genuine "no sources" from an all-slices-failed read.
+      if (failed.length === objects.length) {
+        return {
+          hint: `Could not read referenced sources from '${path}'. Re-run with --log-level=debug for details.`,
+        };
+      }
       return {
         hint: `No referenced sources found in '${path}'. Try: ${USAGE_HINT}`,
       };

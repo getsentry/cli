@@ -120,6 +120,10 @@ describe("sentry debug-files print-sources", () => {
 
     expect(parsed.objects).toHaveLength(1);
     expect(parsed.objects[0].debugId).toBe(KNOWN_DEBUG_ID);
+    // Exposed so JSON consumers can apply the same bundled-slice rule as
+    // `bundle-sources` and distinguish a failed read from "no sources".
+    expect(parsed.objects[0].hasDebugInfo).toBe(true);
+    expect(parsed.objects[0].enumerationError).toBeNull();
     expect(parsed.objects[0].files[0].path).toBe(sourcePath);
     expect(parsed.objects[0].files[0].availableLocally).toBe(true);
   });

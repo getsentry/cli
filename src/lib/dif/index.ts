@@ -274,6 +274,13 @@ export type DifObjectSources = {
   hasDebugInfo: boolean;
   /** Source files referenced by the object's debug info. */
   files: DifSourceFile[];
+  /**
+   * Error message if opening the object's debug session or enumerating its
+   * source files failed, otherwise `null`. When set, `files` is empty because
+   * enumeration aborted — this is distinct from an object that genuinely
+   * references no sources (where this stays `null`).
+   */
+  enumerationError: string | null;
 };
 
 /** All objects and the source files they reference, for a debug file. */
@@ -297,6 +304,7 @@ export function listSources(data: Uint8Array): DifSourcesInfo {
   const archive = new Archive(data);
   const objects = archive.objects().map((object) => {
     const files: DifSourceFile[] = [];
+    let enumerationError: string | null = null;
     try {
       const session = object.debugSession();
       for (const file of session.files()) {
@@ -316,6 +324,10 @@ export function listSources(data: Uint8Array): DifSourcesInfo {
         });
       }
     } catch (err) {
+      // One slice failing to enumerate must not abort the whole listing, but
+      // the failure is recorded so callers can distinguish it from an object
+      // that simply references no sources.
+      enumerationError = err instanceof Error ? err.message : String(err);
       log.debug(`Failed to enumerate sources for ${object.debugId}`, err);
     }
     return {
@@ -323,6 +335,7 @@ export function listSources(data: Uint8Array): DifSourcesInfo {
       fileFormat: object.fileFormat,
       hasDebugInfo: object.hasDebugInfo,
       files,
+      enumerationError,
     };
   });
   return { objects };

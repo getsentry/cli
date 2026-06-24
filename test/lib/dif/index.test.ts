@@ -163,6 +163,7 @@ describe("listSources", () => {
     expect(object?.debugId).toBe("0f13a5da-412a-fbf7-c866-2048f3294f3d");
     expect(object?.fileFormat).toBe("breakpad");
     expect(object?.hasDebugInfo).toBe(true);
+    expect(object?.enumerationError).toBeNull();
     expect(object?.files).toHaveLength(1);
 
     const file = object?.files[0];
