@@ -710,7 +710,13 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          # Pin exact patch: Node 24.17.0 (and 22.23.0) shipped CVE-2026-48931's
+          # http.Agent fix, which added a `data` listener on idle sockets that
+          # makes keep-alive fetch reuse throw false ERR_STREAM_PREMATURE_CLOSE.
+          # This surfaces as "Premature close" in the skill-eval planner's HTTP
+          # calls. Fixed in 24.18.0 (nodejs/node#64004). A floating "24" silently
+          # reuses the runner's pre-cached buggy 24.17.0, so pin the exact patch.
+          node-version: "24.18.0"
       - uses: actions/cache@v5
         id: cache
         with:
