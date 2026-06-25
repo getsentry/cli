@@ -11,6 +11,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "@stricli/core";
+import { zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { app } from "../../../src/app.js";
 import type { SentryContext } from "../../../src/context.js";
@@ -70,6 +71,16 @@ afterEach(async () => {
 async function writeBreakpad(name = "example.sym"): Promise<string> {
   const path = join(tempDir, name);
   await writeFile(path, BREAKPAD_FIXTURE);
+  return path;
+}
+
+/** Write a `.zip` containing one Breakpad symbol file; return its path. */
+async function writeBreakpadZip(name = "symbols.zip"): Promise<string> {
+  const path = join(tempDir, name);
+  await writeFile(
+    path,
+    zipSync({ "example.sym": new TextEncoder().encode(BREAKPAD_FIXTURE) })
+  );
   return path;
 }
 
@@ -453,5 +464,32 @@ describe("sentry debug-files upload", () => {
     const { exitCode } = await runUpload([tempDir]);
     expect(spy).not.toHaveBeenCalled();
     expect(exitCode).toBe(0);
+  });
+
+  // ── ZIP scanning ─────────────────────────────────────────────────
+
+  test("finds a debug file inside a .zip by default", async () => {
+    await writeBreakpadZip();
+    const { output, exitCode } = await runUpload([
+      tempDir,
+      "--no-upload",
+      "--json",
+    ]);
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(output);
+    expect(parsed.files).toHaveLength(1);
+    expect(parsed.files[0].debugId).toBe(KNOWN_DEBUG_ID);
+  });
+
+  test("--no-zips ignores debug files inside archives", async () => {
+    await writeBreakpadZip();
+    const { output, exitCode } = await runUpload([
+      tempDir,
+      "--no-zips",
+      "--no-upload",
+      "--json",
+    ]);
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(output).files).toHaveLength(0);
   });
 });

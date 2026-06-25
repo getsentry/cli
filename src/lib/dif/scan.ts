@@ -8,6 +8,10 @@
  * separated from the I/O ({@link scanPaths}, {@link prepareDifs}) so the matching
  * logic can be property-tested without touching the filesystem.
  *
+ * `.zip` archives encountered during a scan are expanded in memory (see
+ * {@link ./zip.js}) and their entries run through the same filter pipeline,
+ * unless ZIP scanning is disabled via {@link PrepareDifsOptions.scanZips}.
+ *
  * Type matching maps the user-facing `--type` value to the canonical object
  * file format reported by the parser (e.g. `dsym`/`macho` → `macho`,
  * `jvm` → `sourcebundle`). This is format-level matching: `--type dsym` and
@@ -25,6 +29,7 @@ import {
   peekFormat,
   selectBundledObject,
 } from "./index.js";
+import { readZipDifEntries } from "./zip.js";
 
 const log = logger.withTag("dif.scan");
 
@@ -384,6 +389,12 @@ export type PrepareDifsOptions = {
    * legacy `dif_upload` `valid_size` check.
    */
   maxFileSize?: number;
+  /**
+   * Whether to look inside `.zip` archives for debug files. Defaults to `true`
+   * (matching the legacy tool); set to `false` for `--no-zips`. Nested archives
+   * are never recursed regardless of this setting.
+   */
+  scanZips?: boolean;
 };
 
 /** Result of {@link prepareDifs}: the uploadable files plus skip telemetry. */
@@ -423,39 +434,113 @@ export async function prepareDifs(
 ): Promise<PrepareDifsResult> {
   const prepared: PreparedDif[] = [];
   const maxFileSize = options.maxFileSize ?? 0;
+  const scanZips = options.scanZips ?? true;
   let oversizedCount = 0;
 
   for (const path of paths) {
-    const peeked = await peekHeader(path);
-    if (!peeked) {
-      continue;
-    }
-    // Apply the cheap, header-derivable `--type` (format) filter before the
-    // size gate. This keeps `oversizedCount` aligned with the requested type
-    // so an oversized file of an unrequested format never triggers an
-    // "all matched files too large" outcome. Per-object `--id`/feature filters
-    // still require a full parse and run in {@link readMatchedDif}.
-    if (!formatMatches(peeked.format, filters.formats)) {
-      continue;
-    }
-    // Gate on size before the full read so an oversized file is never buffered.
-    // Only recognised debug files of a requested format reach here, so an
-    // oversized skip means a real, requested DIF was too large.
-    if (maxFileSize > 0 && peeked.size > maxFileSize) {
-      oversizedCount += 1;
-      log.warn(
-        `Skipping ${path}: size ${peeked.size} exceeds maximum file size ${maxFileSize}`
-      );
-      continue;
+    // A `.zip` archive is expanded in place; its entries replace the container,
+    // which is itself never parsed as a DIF. `null` means "not a zip" — fall
+    // through to normal file handling.
+    if (scanZips) {
+      const zipResult = await prepareZipDifs(path, filters, maxFileSize);
+      if (zipResult) {
+        prepared.push(...zipResult.prepared);
+        oversizedCount += zipResult.oversizedCount;
+        continue;
+      }
     }
 
-    const dif = await readMatchedDif(path, filters);
+    const { dif, oversized } = await prepareFileDif(path, filters, maxFileSize);
+    if (oversized) {
+      oversizedCount += 1;
+    }
     if (dif) {
       prepared.push(dif);
     }
   }
 
   return { prepared, oversizedCount };
+}
+
+/**
+ * Peek, format-gate, size-gate, and (when matching) read a single on-disk
+ * candidate file into a {@link PreparedDif}.
+ *
+ * The cheap, header-derivable `--type` (format) filter runs before the size
+ * gate so `oversized` is reported only for files of a requested format — an
+ * oversized file of an unrequested type never triggers an "all matched files
+ * too large" outcome. Per-object `--id`/feature filters require a full parse
+ * and run in {@link readMatchedDif}.
+ *
+ * @param path - The candidate file path.
+ * @param filters - The resolved filter set.
+ * @param maxFileSize - Size gate in bytes (`0` disables it).
+ * @returns The prepared DIF (or `null`) and whether it was skipped for size.
+ */
+async function prepareFileDif(
+  path: string,
+  filters: DifFilters,
+  maxFileSize: number
+): Promise<{ dif: PreparedDif | null; oversized: boolean }> {
+  const peeked = await peekHeader(path);
+  if (!(peeked && formatMatches(peeked.format, filters.formats))) {
+    return { dif: null, oversized: false };
+  }
+  // Gate on size before the full read so an oversized file is never buffered.
+  // Only recognised debug files of a requested format reach here, so an
+  // oversized skip means a real, requested DIF was too large.
+  if (maxFileSize > 0 && peeked.size > maxFileSize) {
+    log.warn(
+      `Skipping ${path}: size ${peeked.size} exceeds maximum file size ${maxFileSize}`
+    );
+    return { dif: null, oversized: true };
+  }
+  return { dif: await readMatchedDif(path, filters), oversized: false };
+}
+
+/**
+ * Parse an in-memory object buffer and return it as a {@link PreparedDif} when
+ * at least one contained object passes the per-object filters, or `null` when
+ * the buffer is empty, unparseable, or has no matching object. Pure (no I/O);
+ * parse failures are logged at debug level. Shared by the on-disk path
+ * ({@link readMatchedDif}) and in-memory ZIP entries
+ * ({@link difFromCandidateBuffer}).
+ *
+ * @param displayPath - Path used for naming and logs (an on-disk path or a
+ *   synthetic `"<zip>/<entry>"` path).
+ * @param content - The object bytes.
+ * @param filters - The resolved filter set.
+ */
+function difFromBuffer(
+  displayPath: string,
+  content: Buffer,
+  filters: DifFilters
+): PreparedDif | null {
+  if (content.length === 0) {
+    return null;
+  }
+
+  let archive: DifArchiveInfo;
+  try {
+    archive = parseDebugFile(new Uint8Array(content));
+  } catch (err) {
+    log.debug(`Skipping unparseable file: ${displayPath}`, err);
+    return null;
+  }
+
+  const matched = archive.objects.filter((obj) =>
+    objectPassesFilters(obj, filters)
+  );
+  if (matched.length === 0) {
+    return null;
+  }
+
+  return {
+    path: displayPath,
+    content,
+    debugId: selectBundledObject(matched)?.debugId,
+    objects: matched,
+  };
 }
 
 /**
@@ -479,29 +564,68 @@ async function readMatchedDif(
     log.debug(`Skipping unreadable file: ${path}`, err);
     return null;
   }
+  return difFromBuffer(path, content, filters);
+}
+
+/**
+ * Format-gate and parse an in-memory ZIP entry into a {@link PreparedDif}.
+ *
+ * Applies the cheap, header-derivable `--type` (format) filter before invoking
+ * the full parser, mirroring the on-disk peek optimization so non-matching
+ * entries are not handed to the WASM parser. Returns `null` for unrecognised,
+ * non-matching, or non-object entries.
+ *
+ * @param displayPath - Synthetic `"<zip>/<entry>"` path for naming and logs.
+ * @param content - The decompressed entry bytes (already size-gated).
+ * @param filters - The resolved filter set.
+ */
+function difFromCandidateBuffer(
+  displayPath: string,
+  content: Buffer,
+  filters: DifFilters
+): PreparedDif | null {
   if (content.length === 0) {
     return null;
   }
-
-  let archive: DifArchiveInfo;
-  try {
-    archive = parseDebugFile(new Uint8Array(content));
-  } catch (err) {
-    log.debug(`Skipping unparseable file: ${path}`, err);
+  const header =
+    content.length > PEEK_HEADER_BYTES
+      ? new Uint8Array(content.subarray(0, PEEK_HEADER_BYTES))
+      : new Uint8Array(content);
+  const format = peekFormat(header);
+  if (format === "unknown" || !formatMatches(format, filters.formats)) {
     return null;
   }
+  return difFromBuffer(displayPath, content, filters);
+}
 
-  const matched = archive.objects.filter((obj) =>
-    objectPassesFilters(obj, filters)
-  );
-  if (matched.length === 0) {
+/**
+ * Expand a `.zip` archive at `path` into prepared debug files.
+ *
+ * Returns `null` when `path` is not a ZIP (the caller then handles it as a
+ * normal file). Otherwise extracts each entry (bounded by `maxFileSize`, see
+ * {@link readZipDifEntries}) and runs it through {@link difFromCandidateBuffer}.
+ * Nested archives are not recursed.
+ *
+ * @param path - The candidate path (possibly a `.zip`).
+ * @param filters - The resolved filter set.
+ * @param maxFileSize - Size gate passed through to entry extraction.
+ * @returns Matched entries plus oversized telemetry, or `null` when not a ZIP.
+ */
+async function prepareZipDifs(
+  path: string,
+  filters: DifFilters,
+  maxFileSize: number
+): Promise<{ prepared: PreparedDif[]; oversizedCount: number } | null> {
+  const zip = await readZipDifEntries(path, { maxFileSize });
+  if (!zip) {
     return null;
   }
-
-  return {
-    path,
-    content,
-    debugId: selectBundledObject(matched)?.debugId,
-    objects: matched,
-  };
+  const prepared: PreparedDif[] = [];
+  for (const entry of zip.entries) {
+    const dif = difFromCandidateBuffer(entry.path, entry.content, filters);
+    if (dif) {
+      prepared.push(dif);
+    }
+  }
+  return { prepared, oversizedCount: zip.oversizedCount };
 }

@@ -28,6 +28,7 @@ Upload debug information files to Sentry
 - `--no-sources - Do not upload files whose only feature is source info`
 - `--include-sources - Build and upload a source bundle for each file with debug info`
 - `--derived-data - Also scan Xcode's DerivedData folder (macOS only)`
+- `--no-zips - Do not scan inside .zip archives`
 - `--no-upload - Scan and print what would be uploaded without uploading`
 - `--wait - Wait for server-side processing and report any errors`
 - `--wait-for <value> - Wait up to this many seconds for server-side processing`
@@ -80,6 +81,10 @@ sentry debug-files bundle-jvm --output ./out --debug-id <uuid> --json ./src
 # Upload debug information files (scans directories recursively)
 sentry debug-files upload ./build
 sentry debug-files upload ./libexample.so --include-sources
+
+# .zip archives are scanned in place; use --no-zips to skip them
+sentry debug-files upload ./symbols.zip
+sentry debug-files upload ./build --no-zips
 
 # Restrict by type or debug id, and wait for server-side processing
 sentry debug-files upload ./dsyms --type dsym --wait
