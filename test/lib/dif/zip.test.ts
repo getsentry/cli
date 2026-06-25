@@ -63,6 +63,21 @@ describe("readZipDifEntries", () => {
     expect(await readZipDifEntries(path)).toBeNull();
   });
 
+  test("does not treat a source bundle (SYSB header) as a container", async () => {
+    // symbolic source bundles (incl. JVM bundles, .src.zip) are a ZIP archive
+    // preceded by an 8-byte `SYSB`+version header, so they start with `SYSB`,
+    // not `PK`. They must fall through to the DIF parser and upload as-is, never
+    // get expanded into their inner source files.
+    const path = join(tempDir, "bundle.src.zip");
+    const header = new Uint8Array([0x53, 0x59, 0x53, 0x42, 0x02, 0, 0, 0]); // "SYSB" + v2
+    const inner = zipSync({ "example.sym": BREAKPAD_BYTES });
+    await writeFile(
+      path,
+      Buffer.concat([Buffer.from(header), Buffer.from(inner)])
+    );
+    expect(await readZipDifEntries(path)).toBeNull();
+  });
+
   test("returns null for a malformed (truncated) zip", async () => {
     const path = join(tempDir, "broken.zip");
     // Valid local-header magic, then garbage — fflate throws, we skip.
