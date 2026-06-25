@@ -8,15 +8,23 @@
  * Org/project are resolved via the standard cascade (DSN auto-detection, env
  * vars, config defaults), so `--no-upload` (dry-run) needs no credentials.
  *
- * This is the first stage of `debug-files upload` parity. ZIP scanning,
- * `--symbol-maps`, `--il2cpp-mapping` line mappings, and `--derived-data` are
- * deferred to follow-up PRs (see the command's full description).
+ * Honors the server-advertised `max_file_size` (oversized files are skipped)
+ * and `max_wait` (clamps the processing wait). `--derived-data` additionally
+ * scans Xcode's DerivedData folder on macOS. ZIP scanning, `--symbol-maps`,
+ * and `--il2cpp-mapping` line mappings are deferred to follow-up PRs (see the
+ * command's full description).
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 import type { SentryContext } from "../../context.js";
+import {
+  type ChunkServerOptions,
+  DEFAULT_MAX_DIF_SIZE,
+  getChunkUploadOptions,
+} from "../../lib/api/chunk-upload.js";
 import {
   DEBUG_FILES_MAX_WAIT_MS,
   type DebugFileUpload,
@@ -45,6 +53,40 @@ import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 const log = logger.withTag("debug-files.upload");
 
 const USAGE_HINT = "sentry debug-files upload <path>...";
+
+/** Relative path to Xcode's DerivedData folder under the user's home dir. */
+const DERIVED_DATA_SUBPATH = "Library/Developer/Xcode/DerivedData";
+
+/**
+ * Resolve the effective scan paths, optionally appending Xcode's DerivedData
+ * folder when `--derived-data` is set.
+ *
+ * DerivedData only exists on macOS; on other platforms the flag is a no-op
+ * (with a warning). The folder is appended only when it actually exists, so the
+ * stricter `scanPaths` existence check (which throws on a missing explicit
+ * path) is never tripped by an absent DerivedData directory.
+ *
+ * @param paths - Positional paths supplied on the command line.
+ * @param derivedData - Whether `--derived-data` was passed.
+ * @returns The effective list of paths to scan.
+ */
+function collectScanPaths(paths: string[], derivedData: boolean): string[] {
+  if (!derivedData) {
+    return paths;
+  }
+  if (process.platform !== "darwin") {
+    log.warn("--derived-data is only supported on macOS; ignoring it.");
+    return paths;
+  }
+  const derivedDataPath = join(homedir(), DERIVED_DATA_SUBPATH);
+  if (!existsSync(derivedDataPath)) {
+    log.warn(
+      `Xcode DerivedData folder not found at ${derivedDataPath}; ignoring --derived-data.`
+    );
+    return paths;
+  }
+  return [...paths, derivedDataPath];
+}
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -83,6 +125,7 @@ type UploadFlags = {
   "no-unwind"?: boolean;
   "no-sources"?: boolean;
   "include-sources"?: boolean;
+  "derived-data"?: boolean;
   "no-upload"?: boolean;
   wait?: boolean;
   "wait-for"?: number;
@@ -253,10 +296,14 @@ function resolveWaitMode(flags: UploadFlags): {
  */
 function* doDryRun(
   setExitCode: (code: number) => void,
-  difs: DebugFileUpload[],
-  missingIds: string[],
-  requireAll: boolean
+  params: {
+    difs: DebugFileUpload[];
+    missingIds: string[];
+    requireAll: boolean;
+    oversizedCount: number;
+  }
 ) {
+  const { difs, missingIds, requireAll, oversizedCount } = params;
   yield new CommandOutput<DebugFilesUploadResult>({
     uploaded: false,
     files: difs.map((d) => ({ name: d.name, debugId: d.debugId })),
@@ -266,11 +313,20 @@ function* doDryRun(
     setExitCode(1);
     return { hint: `Missing requested debug id(s): ${missingIds.join(", ")}` };
   }
+  if (difs.length > 0) {
+    return {
+      hint: `Would upload ${difs.length} debug file(s). Remove --no-upload to upload.`,
+    };
+  }
+  // Distinguish "nothing matched" from "files were skipped for size" so a
+  // dry-run does not misleadingly report an empty scan. The count reflects
+  // size-skipped files of a requested type; it does not claim that was the
+  // only reason nothing would upload.
   return {
     hint:
-      difs.length === 0
-        ? `No debug information files found. Try: ${USAGE_HINT}`
-        : `Would upload ${difs.length} debug file(s). Remove --no-upload to upload.`,
+      oversizedCount > 0
+        ? `${oversizedCount} file(s) would be skipped for exceeding the maximum file size.`
+        : `No debug information files found. Try: ${USAGE_HINT}`,
   };
 }
 
@@ -280,19 +336,35 @@ function* doDryRun(
  */
 function* doNothingToUpload(
   setExitCode: (code: number) => void,
-  missingIds: string[],
-  requireAll: boolean
+  params: {
+    missingIds: string[];
+    requireAll: boolean;
+    oversizedCount: number;
+    maxFileSize: number;
+  }
 ) {
-  log.warn("No debug information files found.");
+  const { missingIds, requireAll, oversizedCount, maxFileSize } = params;
   yield new CommandOutput<DebugFilesUploadResult>({
     uploaded: false,
     files: [],
     filesUploaded: 0,
   });
+  // --require-all takes precedence: a requested id that wasn't found is the
+  // most actionable failure, regardless of why the queue ended up empty.
   if (missingIds.length > 0 && requireAll) {
     setExitCode(1);
     return { hint: `Missing requested debug id(s): ${missingIds.join(", ")}` };
   }
+  // Files of a requested type were found but skipped for size. Fail non-zero
+  // with an accurate count (this does not claim it was the *only* reason the
+  // queue is empty — other candidates may have failed id/feature filters).
+  if (oversizedCount > 0) {
+    setExitCode(1);
+    return {
+      hint: `No debug files were uploaded: ${oversizedCount} file(s) exceeded the maximum file size (${maxFileSize} bytes).`,
+    };
+  }
+  log.warn("No debug information files found.");
   return { hint: `No debug information files found. Try: ${USAGE_HINT}` };
 }
 
@@ -311,6 +383,7 @@ async function* doUpload(
     maxWaitMs: number;
     missingRequestedIds: string[];
     requireAll: boolean;
+    serverOptions?: ChunkServerOptions;
   }
 ) {
   const results = await uploadDebugFiles(params);
@@ -374,15 +447,17 @@ export const uploadCommand = buildCommand({
       "             sourcebundle, jvm\n" +
       "  --id       Only upload the object with the given debug id (repeatable)\n" +
       "  --no-debug / --no-unwind / --no-sources   Drop files whose only\n" +
-      "             useful feature is the named one\n\n" +
+      "             useful feature is the named one\n" +
+      "  --derived-data   Also scan Xcode's DerivedData folder (macOS only)\n\n" +
       "Usage:\n" +
       "  sentry debug-files upload ./build\n" +
       "  sentry debug-files upload ./libexample.so --include-sources\n" +
       "  sentry debug-files upload ./dsyms --type dsym --wait\n" +
+      "  sentry debug-files upload --derived-data --no-upload\n" +
       "  sentry debug-files upload ./build --no-upload\n\n" +
       "Not yet supported (planned): scanning inside ZIP archives, " +
-      "--symbol-maps (BCSymbolMap resolution), --il2cpp-mapping line " +
-      "mappings, and --derived-data.",
+      "--symbol-maps (BCSymbolMap resolution), and --il2cpp-mapping line " +
+      "mappings.",
   },
   output: {
     human: formatUploadResult,
@@ -443,6 +518,12 @@ export const uploadCommand = buildCommand({
         optional: true,
         default: false,
       },
+      "derived-data": {
+        kind: "boolean",
+        brief: "Also scan Xcode's DerivedData folder (macOS only)",
+        optional: true,
+        default: false,
+      },
       "no-upload": {
         kind: "boolean",
         brief: "Scan and print what would be uploaded without uploading",
@@ -467,10 +548,15 @@ export const uploadCommand = buildCommand({
     },
   },
   async *func(this: SentryContext, flags: UploadFlags, ...paths: string[]) {
-    if (paths.length === 0) {
+    const scanTargets = collectScanPaths(paths, Boolean(flags["derived-data"]));
+    if (scanTargets.length === 0) {
       throw new ContextError("Debug file path(s)", USAGE_HINT, []);
     }
     const { wait, maxWaitMs } = resolveWaitMode(flags);
+    const requireAll = Boolean(flags["require-all"]);
+    const setExitCode = (c: number) => {
+      this.process.exitCode = c;
+    };
 
     const filters = buildDifFilters({
       types: flags.type,
@@ -479,56 +565,72 @@ export const uploadCommand = buildCommand({
       noUnwind: flags["no-unwind"],
       noSources: flags["no-sources"],
     });
-    const files = await scanPaths(paths);
-    const prepared = await prepareDifs(files, filters);
+
+    // For a real upload, resolve org/project and fetch the server's upload
+    // options up front. The server's advertised `maxFileSize` then gates the
+    // scan, so a file the server would reject is never read into memory.
+    // `--no-upload` stays auth-free and uses the generous default cap.
+    let resolved: Awaited<ReturnType<typeof resolveOrgAndProject>> = null;
+    let serverOptions: ChunkServerOptions | undefined;
+    let maxFileSize = DEFAULT_MAX_DIF_SIZE;
+    if (!flags["no-upload"]) {
+      resolved = await resolveOrgAndProject({
+        cwd: this.cwd,
+        usageHint: USAGE_HINT,
+      });
+      if (!resolved) {
+        throw new ContextError("Organization and project", USAGE_HINT);
+      }
+      serverOptions = await getChunkUploadOptions(resolved.org);
+      if (serverOptions.maxFileSize && serverOptions.maxFileSize > 0) {
+        maxFileSize = serverOptions.maxFileSize;
+      }
+    }
+
+    const files = await scanPaths(scanTargets);
+    const { prepared, oversizedCount } = await prepareDifs(files, filters, {
+      maxFileSize,
+    });
     const difs = dedupeDifs(
       buildDifList(prepared, Boolean(flags["include-sources"]))
     );
     const missingIds = missingRequestedIds(flags.id, prepared);
-    const requireAll = Boolean(flags["require-all"]);
 
+    // Dry-run is purely informational: report what would upload (and surface
+    // size skips) without erroring.
     if (flags["no-upload"]) {
-      return yield* doDryRun(
-        (c) => {
-          this.process.exitCode = c;
-        },
+      return yield* doDryRun(setExitCode, {
         difs,
         missingIds,
-        requireAll
-      );
+        requireAll,
+        oversizedCount,
+      });
     }
 
     if (difs.length === 0) {
-      return yield* doNothingToUpload(
-        (c) => {
-          this.process.exitCode = c;
-        },
+      return yield* doNothingToUpload(setExitCode, {
         missingIds,
-        requireAll
-      );
+        requireAll,
+        oversizedCount,
+        maxFileSize,
+      });
     }
 
-    const resolved = await resolveOrgAndProject({
-      cwd: this.cwd,
-      usageHint: USAGE_HINT,
-    });
+    // `resolved` is guaranteed set here: the non-dry-run branch above resolved
+    // it or threw.
     if (!resolved) {
       throw new ContextError("Organization and project", USAGE_HINT);
     }
 
-    return yield* doUpload(
-      (c) => {
-        this.process.exitCode = c;
-      },
-      {
-        org: resolved.org,
-        project: resolved.project,
-        difs,
-        wait,
-        maxWaitMs,
-        missingRequestedIds: missingIds,
-        requireAll,
-      }
-    );
+    return yield* doUpload(setExitCode, {
+      org: resolved.org,
+      project: resolved.project,
+      serverOptions,
+      difs,
+      wait,
+      maxWaitMs,
+      missingRequestedIds: missingIds,
+      requireAll,
+    });
   },
 });

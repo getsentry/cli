@@ -330,25 +330,43 @@ export async function scanPaths(paths: string[]): Promise<string[]> {
 
 const PEEK_HEADER_BYTES = 4096;
 
+/** A candidate file's recognised format and total size in bytes. */
+type PeekResult = {
+  /**
+   * The container format detected from the header (canonical name, e.g.
+   * `elf`, `macho`, `pe`). Never `unknown` (those return `null`).
+   */
+  format: string;
+  /** Total file size in bytes (from the open descriptor's `stat`). */
+  size: number;
+};
+
 /**
  * Peek at a file's header bytes for format detection — avoids reading the
- * whole file for large non-DIF data. Returns `null` when the file is
- * unreadable, empty, or in an unrecognised format.
+ * whole file for large non-DIF data. Also reports the total file size (from
+ * the open descriptor, so no extra `stat` syscall) so callers can gate on
+ * format and size before fully reading the file. Returns `null` when the file
+ * is unreadable, empty, or in an unrecognised format.
  */
-async function peekHeader(path: string): Promise<Uint8Array | null> {
+async function peekHeader(path: string): Promise<PeekResult | null> {
   try {
     const fd = await open(path, "r");
     try {
+      const { size } = await fd.stat();
       const buf = Buffer.alloc(PEEK_HEADER_BYTES);
       const { bytesRead } = await fd.read(buf, 0, PEEK_HEADER_BYTES, 0);
       const header =
         bytesRead < PEEK_HEADER_BYTES
           ? new Uint8Array(buf.subarray(0, bytesRead))
           : new Uint8Array(buf);
-      if (header.length === 0 || peekFormat(header) === "unknown") {
+      if (header.length === 0) {
         return null;
       }
-      return header;
+      const format = peekFormat(header);
+      if (format === "unknown") {
+        return null;
+      }
+      return { format, size };
     } finally {
       await fd.close();
     }
@@ -357,6 +375,28 @@ async function peekHeader(path: string): Promise<Uint8Array | null> {
     return null;
   }
 }
+
+/** Options controlling {@link prepareDifs} behavior. */
+export type PrepareDifsOptions = {
+  /**
+   * Maximum size, in bytes, of a file to keep. Files larger than this are
+   * skipped with a warning. `0` or omitted means no size gate. Mirrors the
+   * legacy `dif_upload` `valid_size` check.
+   */
+  maxFileSize?: number;
+};
+
+/** Result of {@link prepareDifs}: the uploadable files plus skip telemetry. */
+export type PrepareDifsResult = {
+  /** The files to upload, each with its matched objects and primary id. */
+  prepared: PreparedDif[];
+  /**
+   * Number of recognised debug files skipped solely because they exceeded
+   * `maxFileSize`. Lets callers distinguish "nothing found" from "everything
+   * found was too large" so they can fail with an accurate message.
+   */
+  oversizedCount: number;
+};
 
 /**
  * Read, parse, and filter candidate files into uploadable debug files.
@@ -372,53 +412,96 @@ async function peekHeader(path: string): Promise<Uint8Array | null> {
  *
  * @param paths - Candidate file paths (from {@link scanPaths}).
  * @param filters - The resolved filter set.
- * @returns The files to upload, each with its matched objects and primary id.
+ * @param options - Optional size gate (see {@link PrepareDifsOptions}).
+ * @returns The uploadable files plus the count of size-skipped files
+ *   (see {@link PrepareDifsResult}).
  */
 export async function prepareDifs(
   paths: string[],
-  filters: DifFilters
-): Promise<PreparedDif[]> {
+  filters: DifFilters,
+  options: PrepareDifsOptions = {}
+): Promise<PrepareDifsResult> {
   const prepared: PreparedDif[] = [];
+  const maxFileSize = options.maxFileSize ?? 0;
+  let oversizedCount = 0;
 
   for (const path of paths) {
-    if (!(await peekHeader(path))) {
+    const peeked = await peekHeader(path);
+    if (!peeked) {
+      continue;
+    }
+    // Apply the cheap, header-derivable `--type` (format) filter before the
+    // size gate. This keeps `oversizedCount` aligned with the requested type
+    // so an oversized file of an unrequested format never triggers an
+    // "all matched files too large" outcome. Per-object `--id`/feature filters
+    // still require a full parse and run in {@link readMatchedDif}.
+    if (!formatMatches(peeked.format, filters.formats)) {
+      continue;
+    }
+    // Gate on size before the full read so an oversized file is never buffered.
+    // Only recognised debug files of a requested format reach here, so an
+    // oversized skip means a real, requested DIF was too large.
+    if (maxFileSize > 0 && peeked.size > maxFileSize) {
+      oversizedCount += 1;
+      log.warn(
+        `Skipping ${path}: size ${peeked.size} exceeds maximum file size ${maxFileSize}`
+      );
       continue;
     }
 
-    let content: Buffer;
-    try {
-      content = await readFile(path);
-    } catch (err) {
-      log.debug(`Skipping unreadable file: ${path}`, err);
-      continue;
+    const dif = await readMatchedDif(path, filters);
+    if (dif) {
+      prepared.push(dif);
     }
-    if (content.length === 0) {
-      continue;
-    }
-
-    const data = new Uint8Array(content);
-    let archive: DifArchiveInfo;
-    try {
-      archive = parseDebugFile(data);
-    } catch (err) {
-      log.debug(`Skipping unparseable file: ${path}`, err);
-      continue;
-    }
-
-    const matched = archive.objects.filter((obj) =>
-      objectPassesFilters(obj, filters)
-    );
-    if (matched.length === 0) {
-      continue;
-    }
-
-    prepared.push({
-      path,
-      content,
-      debugId: selectBundledObject(matched)?.debugId,
-      objects: matched,
-    });
   }
 
-  return prepared;
+  return { prepared, oversizedCount };
+}
+
+/**
+ * Fully read and parse a single candidate file, returning it as a
+ * {@link PreparedDif} when at least one contained object passes the per-object
+ * filters, or `null` when the file is unreadable, unparseable, empty, or has no
+ * matching object. Read/parse failures are logged at debug level — a scanned
+ * tree contains many non-object files.
+ *
+ * @param path - The candidate file path (already format- and size-gated).
+ * @param filters - The resolved filter set.
+ */
+async function readMatchedDif(
+  path: string,
+  filters: DifFilters
+): Promise<PreparedDif | null> {
+  let content: Buffer;
+  try {
+    content = await readFile(path);
+  } catch (err) {
+    log.debug(`Skipping unreadable file: ${path}`, err);
+    return null;
+  }
+  if (content.length === 0) {
+    return null;
+  }
+
+  let archive: DifArchiveInfo;
+  try {
+    archive = parseDebugFile(new Uint8Array(content));
+  } catch (err) {
+    log.debug(`Skipping unparseable file: ${path}`, err);
+    return null;
+  }
+
+  const matched = archive.objects.filter((obj) =>
+    objectPassesFilters(obj, filters)
+  );
+  if (matched.length === 0) {
+    return null;
+  }
+
+  return {
+    path,
+    content,
+    debugId: selectBundledObject(matched)?.debugId,
+    objects: matched,
+  };
 }

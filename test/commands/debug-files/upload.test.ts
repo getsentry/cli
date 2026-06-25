@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { app } from "../../../src/app.js";
 import type { SentryContext } from "../../../src/context.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as chunkUpload from "../../../src/lib/api/chunk-upload.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as debugFilesApi from "../../../src/lib/api/debug-files.js";
 import { useTestConfigDir } from "../../helpers.js";
 
@@ -39,6 +41,17 @@ beforeEach(async () => {
     SENTRY_ORG: process.env.SENTRY_ORG,
     SENTRY_PROJECT: process.env.SENTRY_PROJECT,
   };
+  // The real-upload path fetches chunk-upload options before scanning to gate
+  // on the server's max file size. Stub it so tests need no network.
+  vi.spyOn(chunkUpload, "getChunkUploadOptions").mockResolvedValue({
+    url: "https://us.sentry.io/api/0/chunk-upload/",
+    chunkSize: 8192,
+    chunksPerRequest: 64,
+    maxRequestSize: 1_048_576,
+    hashAlgorithm: "sha1",
+    concurrency: 8,
+    compression: ["gzip"],
+  } as Awaited<ReturnType<typeof chunkUpload.getChunkUploadOptions>>);
 });
 
 afterEach(async () => {
@@ -123,6 +136,30 @@ describe("sentry debug-files upload", () => {
     ]);
     expect(exitCode).not.toBe(0);
   });
+
+  // ── --derived-data ───────────────────────────────────────────────
+
+  test("--derived-data is additive: explicit paths still scan", async () => {
+    await writeBreakpad();
+    const { output, exitCode } = await runUpload([
+      tempDir,
+      "--derived-data",
+      "--no-upload",
+      "--json",
+    ]);
+    expect(exitCode).toBe(0);
+    // The explicit tempDir fixture is found regardless of whether a
+    // DerivedData folder exists on this platform.
+    expect(JSON.parse(output).files).toHaveLength(1);
+  });
+
+  test.skipIf(process.platform === "darwin")(
+    "--derived-data alone on non-macOS exits non-zero (no scan targets)",
+    async () => {
+      const { exitCode } = await runUpload(["--derived-data", "--no-upload"]);
+      expect(exitCode).not.toBe(0);
+    }
+  );
 
   // ── --no-upload (dry-run) ────────────────────────────────────────
 
@@ -267,7 +304,35 @@ describe("sentry debug-files upload", () => {
     expect(callArgs?.difs).toHaveLength(1);
     expect(callArgs?.difs[0]?.debugId).toBe(KNOWN_DEBUG_ID);
     expect(callArgs?.difs[0]?.content).toBeInstanceOf(Buffer);
+    // The server options fetched for the scan gate are threaded through so
+    // uploadDebugFiles does not re-fetch them.
+    expect(callArgs?.serverOptions).toBeDefined();
     expect(exitCode).toBe(0);
+  });
+
+  test("server maxFileSize gating all files exits non-zero with a clear error", async () => {
+    process.env.SENTRY_ORG = "test-org";
+    process.env.SENTRY_PROJECT = "test-project";
+    await writeBreakpad();
+    // Advertise a 10-byte cap; the fixture is well over that, so it is skipped
+    // during the scan and never reaches uploadDebugFiles. Because a real DIF
+    // was found but dropped for size, the command must fail loudly rather than
+    // reporting "nothing found".
+    vi.spyOn(chunkUpload, "getChunkUploadOptions").mockResolvedValue({
+      url: "https://us.sentry.io/api/0/chunk-upload/",
+      chunkSize: 8192,
+      chunksPerRequest: 64,
+      maxRequestSize: 1_048_576,
+      maxFileSize: 10,
+      hashAlgorithm: "sha1",
+      concurrency: 8,
+      compression: ["gzip"],
+    } as Awaited<ReturnType<typeof chunkUpload.getChunkUploadOptions>>);
+    const spy = vi.spyOn(debugFilesApi, "uploadDebugFiles");
+
+    const { exitCode } = await runUpload([tempDir]);
+    expect(spy).not.toHaveBeenCalled();
+    expect(exitCode).not.toBe(0);
   });
 
   test("wait mode surfaces processing errors with a non-zero exit", async () => {
@@ -332,6 +397,26 @@ describe("sentry debug-files upload", () => {
       "--require-all",
     ]);
     expect(spy).toHaveBeenCalledTimes(1);
+    expect(exitCode).toBe(1);
+    expect(output).toContain("11111111-1111-1111-1111-111111111111");
+  });
+
+  test("--require-all is honored when the queue is empty (real upload)", async () => {
+    process.env.SENTRY_ORG = "test-org";
+    process.env.SENTRY_PROJECT = "test-project";
+    await writeBreakpad();
+    const spy = vi.spyOn(debugFilesApi, "uploadDebugFiles");
+
+    // The only --id requested doesn't match the fixture, so the queue is empty.
+    // doNothingToUpload must still honor --require-all and report the missing
+    // id (exit 1) rather than skipping the check.
+    const { exitCode, output } = await runUpload([
+      tempDir,
+      "--id",
+      "11111111-1111-1111-1111-111111111111",
+      "--require-all",
+    ]);
+    expect(spy).not.toHaveBeenCalled();
     expect(exitCode).toBe(1);
     expect(output).toContain("11111111-1111-1111-1111-111111111111");
   });
