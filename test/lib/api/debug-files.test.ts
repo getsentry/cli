@@ -8,6 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { getChunkUploadOptions } from "../../../src/lib/api/chunk-upload.js";
 import {
   type DebugFileUpload,
   uploadDebugFiles,
@@ -73,9 +74,31 @@ const SOLE = {
   project: "app",
 };
 
+/** Base server options the mock returns unless a test overrides it. */
+const BASE_SERVER_OPTIONS = {
+  url: "https://us.sentry.io/api/0/chunk-upload/",
+  chunkSize: 8192,
+  chunksPerRequest: 64,
+  maxRequestSize: 1_048_576,
+  hashAlgorithm: "sha1",
+  concurrency: 8,
+  compression: ["gzip"],
+};
+
+/** Override the chunk-upload server options for the current test. */
+function setServerOptions(overrides: Record<string, unknown>): void {
+  vi.mocked(getChunkUploadOptions).mockResolvedValue({
+    ...BASE_SERVER_OPTIONS,
+    ...overrides,
+  } as Awaited<ReturnType<typeof getChunkUploadOptions>>);
+}
+
 beforeEach(() => {
   apiRequestToRegionMock.mockReset();
   uploadMissingBufferChunksMock.mockClear();
+  vi.mocked(getChunkUploadOptions).mockResolvedValue(
+    BASE_SERVER_OPTIONS as Awaited<ReturnType<typeof getChunkUploadOptions>>
+  );
 });
 
 afterEach(() => {
@@ -348,5 +371,95 @@ describe("uploadDebugFiles", () => {
     const passedMissing = firstCall?.missingChecksums as Set<string>;
     // Must contain the file's chunk checksums, not be empty.
     expect(passedMissing.size).toBeGreaterThan(0);
+  });
+
+  test("drops files larger than the server maxFileSize before assembling", async () => {
+    setServerOptions({ maxFileSize: 5 });
+    apiRequestToRegionMock.mockImplementationOnce(
+      async (_url: string, _endpoint: string, init: { body: object }) => {
+        const body = init.body as Record<string, unknown>;
+        const data: Record<string, { state: string }> = {};
+        for (const key of Object.keys(body)) {
+          data[key] = { state: "ok" };
+        }
+        return { data };
+      }
+    );
+
+    const results = await uploadDebugFiles({
+      ...SOLE,
+      // "small" is 5 bytes (<= cap), "this-one-is-too-long" exceeds it.
+      difs: [
+        makeDif("small.so", "small", "id-ok"),
+        makeDif("big.so", "this-one-is-too-long", "id-big"),
+      ],
+      wait: false,
+      maxWaitMs: 1000,
+    });
+
+    const body = lastAssembleBody();
+    const names = Object.values(body).map((e) => e.name);
+    expect(names).toEqual(["small.so"]);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.name).toBe("small.so");
+  });
+
+  test("throws when every file exceeds the server maxFileSize", async () => {
+    setServerOptions({ maxFileSize: 1 });
+
+    await expect(
+      uploadDebugFiles({
+        ...SOLE,
+        difs: [makeDif("big.so", "way too large", "id-big")],
+        wait: false,
+        maxWaitMs: 1000,
+      })
+    ).rejects.toThrow(/exceed the maximum file size/);
+    expect(apiRequestToRegionMock).not.toHaveBeenCalled();
+  });
+
+  test("clamps the wait to the server maxWait (reflected in the timeout)", async () => {
+    setServerOptions({ maxWait: 1 });
+    vi.useFakeTimers();
+    // Always "assembling" → never terminal. The clamped 1s deadline trips
+    // well before the requested 60s.
+    apiRequestToRegionMock.mockImplementation(
+      async (_url: string, _endpoint: string, init: { body: object }) => {
+        const key = Object.keys(init.body as object)[0] as string;
+        return { data: { [key]: { state: "assembling" } } };
+      }
+    );
+
+    const promise = uploadDebugFiles({
+      ...SOLE,
+      difs: [makeDif("slow.so", "debug bytes", "id-slow")],
+      wait: true,
+      maxWaitMs: 60_000,
+    }).catch((caught: unknown) => caught);
+    await vi.runAllTimersAsync();
+    const err = await promise;
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).detail).toContain("within 1s");
+  });
+
+  test("does not clamp when the server advertises no maxWait (0)", async () => {
+    setServerOptions({ maxWait: 0 });
+    const dif = makeDif("ok.so", "debug bytes", "id-ok");
+    apiRequestToRegionMock.mockImplementationOnce(
+      async (_url: string, _endpoint: string, init: { body: object }) => {
+        const key = Object.keys(init.body as object)[0] as string;
+        return { data: { [key]: { state: "ok" } } };
+      }
+    );
+
+    const results = await uploadDebugFiles({
+      ...SOLE,
+      difs: [dif],
+      wait: true,
+      maxWaitMs: 60_000,
+    });
+
+    expect(results[0]?.state).toBe("ok");
   });
 });

@@ -48,6 +48,19 @@ export const ChunkServerOptionsSchema = z.object({
   chunksPerRequest: z.number(),
   /** Maximum total request body size in bytes. */
   maxRequestSize: z.number(),
+  /**
+   * Maximum size of a single uploaded file in bytes. Omitted or `0` means the
+   * server advertises no per-file cap, in which case the client falls back to
+   * {@link DEFAULT_MAX_DIF_SIZE}.
+   */
+  maxFileSize: z.number().optional(),
+  /**
+   * Maximum time, in seconds, the server is willing to spend assembling an
+   * upload. Omitted or `0` means no server-imposed cap; a non-zero value clamps
+   * the caller's requested wait. Mirrors the legacy `dif_upload` `max_wait`
+   * semantics.
+   */
+  maxWait: z.number().optional(),
   /** Hash algorithm for chunk checksums (always "sha1"). */
   hashAlgorithm: z.string(),
   /** Maximum concurrent upload requests. */
@@ -86,6 +99,12 @@ export const ASSEMBLE_POLL_INTERVAL_MS = 1000;
 
 /** Maximum time to wait for assembly. */
 export const ASSEMBLE_MAX_WAIT_MS = 300_000;
+
+/**
+ * Fallback per-file size cap (2 GiB) used when the server advertises no
+ * `maxFileSize` (i.e. reports `0`). Matches the legacy `DEFAULT_MAX_DIF_SIZE`.
+ */
+export const DEFAULT_MAX_DIF_SIZE = 2 * 1024 * 1024 * 1024;
 
 /**
  * Codecs the CLI knows how to emit, in order of preference.

@@ -19,7 +19,7 @@
  */
 
 import { z } from "zod";
-import { ApiError } from "../errors.js";
+import { ApiError, ValidationError } from "../errors.js";
 import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import {
@@ -29,6 +29,7 @@ import {
   AssembleResponseSchema,
   type ChunkInfo,
   type ChunkServerOptions,
+  DEFAULT_MAX_DIF_SIZE,
   getChunkUploadOptions,
   hashBuffer,
   pickUploadEncoding,
@@ -71,6 +72,12 @@ export type DebugFilesUploadOptions = {
   wait: boolean;
   /** Maximum time to wait for assembly/processing, in milliseconds. */
   maxWaitMs: number;
+  /**
+   * Pre-fetched chunk-upload server options. When provided, the internal
+   * `getChunkUploadOptions` call is skipped (the caller already fetched them,
+   * e.g. to size-gate the scan against the server's `maxFileSize`).
+   */
+  serverOptions?: ChunkServerOptions;
 };
 
 /** Per-file result of a debug information file upload. */
@@ -293,6 +300,54 @@ function buildResults(
 // ── API Functions ───────────────────────────────────────────────────
 
 /**
+ * Drop files larger than the server-advertised per-file cap.
+ *
+ * @param difs - Files queued for upload.
+ * @param maxFileSize - Server's per-file byte cap; `0` disables the gate.
+ * @returns The subset within the cap. Oversized files are logged at `warn`.
+ */
+function filterBySize(
+  difs: DebugFileUpload[],
+  maxFileSize: number
+): DebugFileUpload[] {
+  if (maxFileSize <= 0) {
+    return difs;
+  }
+  const accepted: DebugFileUpload[] = [];
+  for (const dif of difs) {
+    if (dif.content.length > maxFileSize) {
+      log.warn(
+        `Skipping ${dif.name}: size ${dif.content.length} exceeds server maximum file size ${maxFileSize}`
+      );
+      continue;
+    }
+    accepted.push(dif);
+  }
+  return accepted;
+}
+
+/**
+ * Clamp the caller's requested wait to the server's advertised maximum.
+ *
+ * @param requestedMs - The caller's requested wait in milliseconds.
+ * @param serverMaxWaitSec - Server's max wait in seconds; `0` means no cap.
+ * @returns The effective wait in milliseconds.
+ */
+function clampMaxWait(requestedMs: number, serverMaxWaitSec: number): number {
+  if (serverMaxWaitSec <= 0) {
+    return requestedMs;
+  }
+  const serverMaxMs = serverMaxWaitSec * 1000;
+  if (serverMaxMs < requestedMs) {
+    log.debug(
+      `Clamping assembly wait from ${requestedMs}ms to server maximum ${serverMaxMs}ms`
+    );
+    return serverMaxMs;
+  }
+  return requestedMs;
+}
+
+/**
  * Upload debug information files to Sentry via the DIF chunk-upload protocol.
  *
  * Each file's raw bytes are chunked directly (no ZIP wrapping) and all files
@@ -300,10 +355,13 @@ function buildResults(
  * The server re-parses each uploaded file and indexes every contained object
  * slice itself; `debugId` is advisory.
  *
+ * Files larger than the server-advertised `maxFileSize` are dropped with a
+ * warning, and the caller's `maxWaitMs` is clamped to the server's `maxWait`.
+ *
  * @param options - Upload configuration (org, project, files, wait mode).
  * @returns Per-file terminal/last-observed assembly state.
  * @throws {ApiError} If chunk upload fails, or (wait mode only) assembly does
- *   not complete within `maxWaitMs`.
+ *   not complete within the effective (clamped) wait.
  */
 export async function uploadDebugFiles(
   options: DebugFilesUploadOptions
@@ -314,10 +372,32 @@ export async function uploadDebugFiles(
     return [];
   }
 
-  const serverOptions = await getChunkUploadOptions(org);
+  const serverOptions =
+    options.serverOptions ?? (await getChunkUploadOptions(org));
   const encoding = pickUploadEncoding(serverOptions.compression);
 
-  const chunked: ChunkedDif[] = difs.map((dif) => {
+  // Honor the per-file cap. Use the server-advertised `maxFileSize`, falling
+  // back to `DEFAULT_MAX_DIF_SIZE` when the server omits it (`0`) — the same
+  // fallback the scan gate uses, so in-memory `--include-sources` bundles
+  // (which bypass the scan gate) are still capped here.
+  const effectiveMaxFileSize =
+    serverOptions.maxFileSize && serverOptions.maxFileSize > 0
+      ? serverOptions.maxFileSize
+      : DEFAULT_MAX_DIF_SIZE;
+  const accepted = filterBySize(difs, effectiveMaxFileSize);
+
+  // `difs` is non-empty (checked above), so an empty `accepted` means every
+  // file was dropped by the size gate. Fail loudly instead of silently
+  // reporting success with nothing uploaded.
+  if (accepted.length === 0) {
+    throw new ValidationError(
+      `All ${difs.length} debug file(s) exceed the maximum file size ` +
+        `(${effectiveMaxFileSize} bytes). Nothing was uploaded.`,
+      "file"
+    );
+  }
+
+  const chunked: ChunkedDif[] = accepted.map((dif) => {
     const { chunks, overallChecksum } = hashBuffer(
       dif.content,
       serverOptions.chunkSize
@@ -329,7 +409,13 @@ export async function uploadDebugFiles(
   const endpoint = `projects/${org}/${project}/files/difs/assemble/`;
   const body = buildAssembleBody(chunked);
 
-  const deadline = Date.now() + maxWaitMs;
+  // Clamp the caller's requested wait to the server's advertised maximum.
+  // Only in wait mode — in no-wait mode `maxWaitMs` is purely a hang guard for
+  // the chunk-delivery loop, not a processing budget, so it is left untouched.
+  const effectiveMaxWaitMs = wait
+    ? clampMaxWait(maxWaitMs, serverOptions.maxWait ?? 0)
+    : maxWaitMs;
+  const deadline = Date.now() + effectiveMaxWaitMs;
   let response = await postAssemble(regionUrl, endpoint, body);
   let evaluation = evaluateAssembly(response, chunked, wait);
   await uploadMissing({
@@ -346,7 +432,7 @@ export async function uploadDebugFiles(
         throw new ApiError(
           "Debug file assembly timed out",
           408,
-          `Assembly did not complete within ${Math.round(maxWaitMs / 1000)}s`,
+          `Assembly did not complete within ${Math.round(effectiveMaxWaitMs / 1000)}s`,
           endpoint
         );
       }
