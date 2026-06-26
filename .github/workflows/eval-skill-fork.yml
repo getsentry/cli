@@ -9,6 +9,15 @@ permissions:
   statuses: write
   pull-requests: write
 
+env:
+  # Pin Node to the exact patched release rather than floating on the runner's
+  # pre-cached major. Node 24.17.0 (CVE-2026-48931's http.Agent fix) added a
+  # `data` listener on idle agent sockets that makes keep-alive fetch reuse
+  # throw a false ERR_STREAM_PREMATURE_CLOSE — exactly the failure the
+  # skill-eval planner hits talking to external APIs. Fixed in 24.18.0
+  # (nodejs/node#64004). Keep in sync with NODE_VERSION_24 in ci.yml.
+  NODE_VERSION_24: "24.18.0"
+
 jobs:
   remove-labels-on-sync:
     name: Reset eval labels
@@ -37,6 +46,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION_24 }}
 
       - uses: actions/cache@v5
         id: cache
