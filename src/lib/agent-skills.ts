@@ -61,13 +61,17 @@ export function getSkillInstallPath(
  * skills by globbing the skills tree for `SKILL.md` files and parsing their
  * frontmatter. A plain in-place `writeFile` truncates the file before
  * rewriting it; an agent scanning during that window reads empty frontmatter
- * and silently drops the skill. The rename eliminates that race.
+ * and silently drops the skill. On POSIX the rename eliminates that race.
+ * (On Windows the replace still works, but can fail with a sharing violation
+ * if a reader holds the destination open — a transient, best-effort outcome.)
  *
- * The temp file is named `.SKILL.md.<pid>.<rand>.tmp` so it never matches the
- * `SKILL.md` glob agents look for, even while it exists.
+ * The temp file is named `.<basename>.<pid>.<rand>.tmp` (e.g.
+ * `.SKILL.md.1234.ab12.tmp`) so it never matches the `SKILL.md`/`*.md` globs
+ * agents look for, even while it exists.
  *
- * On failure the temp file is removed (best-effort) and the original error is
- * re-thrown for the caller to handle.
+ * Precondition: `dirname(destPath)` must already exist; callers create the
+ * directory before invoking this helper. On failure the temp file is removed
+ * (best-effort) and the original error is re-thrown for the caller to handle.
  */
 async function atomicWriteFile(
   destPath: string,
