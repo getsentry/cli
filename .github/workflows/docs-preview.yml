@@ -27,6 +27,13 @@ concurrency:
   group: docs-preview-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Pin Node to an exact patched version (single source of truth). A floating
+  # "24" can reuse the runner's pre-cached 24.17.0, which carries the
+  # ERR_STREAM_PREMATURE_CLOSE regression on keep-alive fetch reuse
+  # (nodejs/node#64004, fixed in 24.18.0).
+  NODE_VERSION_24: "24.18.0"
+
 jobs:
   preview:
     runs-on: ubuntu-latest
@@ -35,11 +42,12 @@ jobs:
 
       - uses: pnpm/action-setup@v4
 
-      # Astro 6 requires Node >= 22.12. Pin an explicit version so the docs
-      # build doesn't rely on whatever ships on the runner image.
+      # Astro 6 requires Node >= 22.12. Pin an exact patched version (see
+      # NODE_VERSION_24) so the docs build doesn't rely on the runner image's
+      # default.
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: ${{ env.NODE_VERSION_24 }}
 
       - uses: actions/cache@v5
         id: cache
