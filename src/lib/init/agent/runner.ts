@@ -14,6 +14,7 @@ import { WizardError } from "../../errors.js";
 import type { WizardOutput } from "../types.js";
 import type { SpinnerHandle, WizardUI } from "../ui/types.js";
 import { canUseInitAgentTool } from "./permissions.js";
+import { resolveClaudeExecutable } from "./runtime.js";
 import { loadAgentSdk, type SdkMessage } from "./sdk-loader.js";
 import { createSentryToolsServer, SENTRY_TOOL_NAMES } from "./tools.js";
 
@@ -207,10 +208,17 @@ export async function runInitAgent({
   spin.start("Configuring Sentry with Claude...");
 
   try {
+    const pathToClaudeCodeExecutable = await resolveClaudeExecutable({
+      onDownload: () =>
+        spin.message(
+          "Downloading the init agent runtime (~62 MB, one-time)..."
+        ),
+    });
     const response = query({
       prompt,
       options: {
         model: resolveModel(),
+        pathToClaudeCodeExecutable,
         cwd: workingDirectory,
         additionalDirectories: [workingDirectory],
         permissionMode: "acceptEdits",

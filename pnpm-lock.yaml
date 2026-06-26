@@ -25,14 +25,10 @@ patchedDependencies:
 importers:
 
   .:
-    dependencies:
+    devDependencies:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.191
-        version: 0.3.191(@anthropic-ai/sdk@0.39.0)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(zod@3.25.76)
-      xcode:
-        specifier: ^3.0.1
-        version: 3.0.1
-    devDependencies:
+        version: 0.3.191(@anthropic-ai/sdk@0.39.0)(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))(zod@3.25.76)
       '@anthropic-ai/sdk':
         specifier: ^0.39.0
         version: 0.39.0
@@ -174,6 +170,9 @@ importers:
       wrap-ansi:
         specifier: ^10.0.0
         version: 10.0.0
+      xcode:
+        specifier: ^3.0.1
+        version: 3.0.1
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -2344,7 +2343,7 @@ snapshots:
   '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.191':
     optional: true
 
-  '@anthropic-ai/claude-agent-sdk@0.3.191(@anthropic-ai/sdk@0.39.0)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(zod@3.25.76)':
+  '@anthropic-ai/claude-agent-sdk@0.3.191(@anthropic-ai/sdk@0.39.0)(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))(zod@3.25.76)':
     dependencies:
       '@anthropic-ai/sdk': 0.39.0
       '@modelcontextprotocol/sdk': 1.29.0(zod@4.4.3)
