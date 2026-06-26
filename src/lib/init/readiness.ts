@@ -9,7 +9,7 @@ import { customFetch } from "../custom-ca.js";
 import { getAuthToken } from "../db/auth.js";
 import { WizardError } from "../errors.js";
 import { logger } from "../logger.js";
-import { MASTRA_API_URL } from "./constants.js";
+import { SENTRY_INIT_GATEWAY_URL } from "./constants.js";
 import type { WizardUI } from "./ui/types.js";
 
 /** Timeout for the health check fetch (5 seconds). */
@@ -25,7 +25,7 @@ export async function checkReadiness(ui: WizardUI): Promise<void> {
 
   const [authResult, apiResult] = await Promise.allSettled([
     checkAuth(),
-    checkMastraApi(),
+    checkGatewayApi(),
   ]);
 
   const authOk = authResult.status === "fulfilled" && authResult.value;
@@ -65,17 +65,17 @@ async function checkAuth(): Promise<boolean> {
   return token !== undefined && token !== "";
 }
 
-async function checkMastraApi(): Promise<boolean> {
+async function checkGatewayApi(): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
   try {
-    const resp = await customFetch(`${MASTRA_API_URL}/health`, {
+    const resp = await customFetch(`${SENTRY_INIT_GATEWAY_URL}/health`, {
       signal: controller.signal,
       method: "GET",
     });
     return resp.ok;
   } catch (error) {
-    logger.withTag("readiness").debug("Mastra API health check failed", error);
+    logger.withTag("readiness").debug("Gateway health check failed", error);
     return false;
   } finally {
     clearTimeout(timer);
