@@ -4,8 +4,9 @@
  * Provides two things:
  *
  * 1. **Silencing rules** — `OutputError`, `ContextError` (a required value the
- *    user omitted), expected-state `AuthError`, and 401–499 `ApiError` are not
- *    sent to Sentry as issues. A `cli.error.silenced` metric preserves volume +
+ *    user omitted), expected-state `AuthError`, 401–499 `ApiError`, and 400
+ *    `ApiError`s that report an unparseable user search query are not sent to
+ *    Sentry as issues. A `cli.error.silenced` metric preserves volume +
  *    user/org context.
  *
  * 2. **Grouping tags** — enriches every error event with `cli_error.*` tags
@@ -47,7 +48,35 @@ type SilenceReason =
   | "output_error"
   | "context_missing"
   | "auth_expected"
-  | "api_user_error";
+  | "api_user_error"
+  | "api_query_error";
+
+/**
+ * Sentry's search-query parser emits a 400 whose detail begins with this
+ * phrase when the user's `--query` cannot be parsed (e.g. `is:403`,
+ * `lastSeen:>=-24h`, an empty `status:`). The server is telling us the
+ * user-supplied query is malformed — definitionally a user input error, not
+ * the CLI constructing a bad request — so these 400s are silenced.
+ */
+const SEARCH_QUERY_PARSE_MARKER = "Error parsing search query";
+
+/**
+ * Whether an `ApiError` is a Sentry search-query parse failure (HTTP 400 whose
+ * detail reports an unparseable query). Used to silence query-syntax mistakes
+ * that would otherwise be captured by the "400 = CLI bug" default.
+ *
+ * The CLI preserves the server's detail when re-wrapping list errors (see
+ * `enrichIssueListError` in `issue/list.ts`, which prepends the original
+ * detail), so a substring match is robust to that wrapping.
+ *
+ * @internal Exported for testing.
+ */
+export function isSearchQueryParseError(error: ApiError): boolean {
+  return (
+    error.status === 400 &&
+    (error.detail?.includes(SEARCH_QUERY_PARSE_MARKER) ?? false)
+  );
+}
 
 /**
  * Classify whether an error should be silenced.
@@ -77,6 +106,14 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   }
   if (error instanceof ApiError && error.status > 400 && error.status < 500) {
     return "api_user_error";
+  }
+  // A 400 normally signals a malformed request the CLI built (a code defect),
+  // so it is captured by default. The exception: when the server reports it
+  // could not parse the user's search query, the `--query` syntax is wrong
+  // (CLI-FA: ~450 users across issue/explore/trace list). That is a user input
+  // error, and the API already returns an actionable message, so silence it.
+  if (error instanceof ApiError && isSearchQueryParseError(error)) {
+    return "api_query_error";
   }
   return null;
 }
