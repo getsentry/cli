@@ -29,7 +29,7 @@ import {
   peekFormat,
   selectBundledObject,
 } from "./index.js";
-import { readZipDifEntries } from "./zip.js";
+import { DEFAULT_MAX_ZIP_TOTAL_SIZE, readZipDifEntries } from "./zip.js";
 
 const log = logger.withTag("dif.scan");
 
@@ -395,6 +395,12 @@ export type PrepareDifsOptions = {
    * are never recursed regardless of this setting.
    */
   scanZips?: boolean;
+  /**
+   * Cumulative uncompressed-extraction budget per `.zip` archive (and the
+   * maximum container size), in bytes. Bounds peak decompression memory.
+   * Defaults to {@link DEFAULT_MAX_ZIP_TOTAL_SIZE}; `0` disables the budget.
+   */
+  maxZipTotalSize?: number;
 };
 
 /** Result of {@link prepareDifs}: the uploadable files plus skip telemetry. */
@@ -402,9 +408,12 @@ export type PrepareDifsResult = {
   /** The files to upload, each with its matched objects and primary id. */
   prepared: PreparedDif[];
   /**
-   * Number of recognised debug files skipped solely because they exceeded
-   * `maxFileSize`. Lets callers distinguish "nothing found" from "everything
-   * found was too large" so they can fail with an accurate message.
+   * Number of recognised, format-matched **on-disk** debug files skipped solely
+   * because they exceeded `maxFileSize`. Lets callers distinguish "nothing
+   * found" from "everything found was too large" so they can fail with an
+   * accurate message. Oversized entries inside `.zip` archives are deliberately
+   * excluded — their format is unknown until decompression, so they warn
+   * individually instead of driving this count.
    */
   oversizedCount: number;
 };
@@ -435,17 +444,30 @@ export async function prepareDifs(
   const prepared: PreparedDif[] = [];
   const maxFileSize = options.maxFileSize ?? 0;
   const scanZips = options.scanZips ?? true;
+  const maxZipTotalSize = options.maxZipTotalSize ?? DEFAULT_MAX_ZIP_TOTAL_SIZE;
   let oversizedCount = 0;
 
   for (const path of paths) {
     // A `.zip` archive is expanded in place; its entries replace the container,
-    // which is itself never parsed as a DIF. `null` means "not a zip" — fall
-    // through to normal file handling.
+    // which is itself never parsed as a DIF. A non-null result (even empty)
+    // means the path was a `.zip` and is fully handled. `null` means "not a
+    // zip" — fall through to normal file handling.
     if (scanZips) {
-      const zipResult = await prepareZipDifs(path, filters, maxFileSize);
-      if (zipResult) {
-        prepared.push(...zipResult.prepared);
-        oversizedCount += zipResult.oversizedCount;
+      const zipPrepared = await prepareZipDifs(
+        path,
+        filters,
+        maxFileSize,
+        maxZipTotalSize
+      );
+      // Oversized zip entries are advisory only — they warn per entry and
+      // intentionally do NOT feed `oversizedCount`. That counter gates the
+      // command's exit code, and a compressed entry's format is unknown until
+      // it is inflated, so it cannot be attributed to the requested `--type`
+      // the way the format-accurate on-disk gate below can. Counting them would
+      // turn an unrelated oversized asset inside a `.zip` into a false
+      // "all matched files too large" failure.
+      if (zipPrepared) {
+        prepared.push(...zipPrepared);
         continue;
       }
     }
@@ -602,21 +624,28 @@ function difFromCandidateBuffer(
  * Expand a `.zip` archive at `path` into prepared debug files.
  *
  * Returns `null` when `path` is not a ZIP (the caller then handles it as a
- * normal file). Otherwise extracts each entry (bounded by `maxFileSize`, see
- * {@link readZipDifEntries}) and runs it through {@link difFromCandidateBuffer}.
- * Nested archives are not recursed.
+ * normal file) or when the container is skipped wholesale (too large / malformed
+ * — see {@link readZipDifEntries}). Otherwise extracts each entry (bounded by
+ * `maxFileSize` and `maxTotalSize`) and runs it through
+ * {@link difFromCandidateBuffer}. Nested archives are not recursed.
+ *
+ * Oversized entries are not surfaced here: they warn per entry inside
+ * {@link readZipDifEntries} and are deliberately excluded from the exit-driving
+ * oversized count (their format is unknown pre-decompression).
  *
  * @param path - The candidate path (possibly a `.zip`).
  * @param filters - The resolved filter set.
- * @param maxFileSize - Size gate passed through to entry extraction.
- * @returns Matched entries plus oversized telemetry, or `null` when not a ZIP.
+ * @param maxFileSize - Per-entry size gate passed through to entry extraction.
+ * @param maxTotalSize - Cumulative extraction budget / container size cap.
+ * @returns The matched debug files (possibly empty), or `null` when not a ZIP.
  */
 async function prepareZipDifs(
   path: string,
   filters: DifFilters,
-  maxFileSize: number
-): Promise<{ prepared: PreparedDif[]; oversizedCount: number } | null> {
-  const zip = await readZipDifEntries(path, { maxFileSize });
+  maxFileSize: number,
+  maxTotalSize: number
+): Promise<PreparedDif[] | null> {
+  const zip = await readZipDifEntries(path, { maxFileSize, maxTotalSize });
   if (!zip) {
     return null;
   }
@@ -627,5 +656,5 @@ async function prepareZipDifs(
       prepared.push(dif);
     }
   }
-  return { prepared, oversizedCount: zip.oversizedCount };
+  return prepared;
 }

@@ -2,9 +2,12 @@
  * Unit tests for ZIP archive scanning in the DIF scanner.
  *
  * Covers {@link readZipDifEntries} directly (magic/extension detection, the
- * size gate, malformed input) and the end-to-end `prepareDifs` integration
- * (entries found, no nested-archive recursion, `scanZips` toggle). Archives are
- * built in memory with `fflate.zipSync` so no binary fixtures are needed.
+ * per-entry / cumulative / container size gates, unsupported-compression
+ * handling, malformed input) and the end-to-end `prepareDifs` integration
+ * (entries found, no nested-archive recursion, `scanZips` toggle, advisory
+ * oversized accounting). Archives are built in memory with `fflate.zipSync`
+ * (with a header-patching helper for unsupported compression) so no binary
+ * fixtures are needed.
  */
 
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -48,6 +51,58 @@ async function writeZip(
   const path = join(tempDir, name);
   await writeFile(path, zipSync(entries));
   return path;
+}
+
+/**
+ * Overwrite the 2-byte compression-method field of `targetName` (in both its
+ * local file header and central directory record) with `method`, producing an
+ * archive fflate cannot inflate for that one entry. Offsets follow the ZIP
+ * spec: LFH method @+8 / fnLen @+26 / name @+30; CDH method @+10 / fnLen @+28 /
+ * name @+46.
+ */
+function corruptCompressionMethod(
+  zip: Uint8Array,
+  targetName: string,
+  method: number
+): Uint8Array {
+  const out = new Uint8Array(zip);
+  const target = new TextEncoder().encode(targetName);
+  const nameMatchesAt = (start: number): boolean => {
+    if (start + target.length > out.length) {
+      return false;
+    }
+    for (let k = 0; k < target.length; k++) {
+      if (out[start + k] !== target[k]) {
+        return false;
+      }
+    }
+    return true;
+  };
+  // Little-endian 16-bit read/write via arithmetic (Biome bans bitwise ops).
+  const readU16 = (offset: number): number =>
+    (out[offset] ?? 0) + (out[offset + 1] ?? 0) * 256;
+  const setMethod = (offset: number) => {
+    out[offset] = method % 256;
+    out[offset + 1] = Math.floor(method / 256) % 256;
+  };
+  for (let i = 0; i + 4 <= out.length; i++) {
+    if (out[i] !== 0x50 || out[i + 1] !== 0x4b) {
+      continue;
+    }
+    if (out[i + 2] === 0x03 && out[i + 3] === 0x04) {
+      if (readU16(i + 26) === target.length && nameMatchesAt(i + 30)) {
+        setMethod(i + 8);
+      }
+    } else if (
+      out[i + 2] === 0x01 &&
+      out[i + 3] === 0x02 &&
+      readU16(i + 28) === target.length &&
+      nameMatchesAt(i + 46)
+    ) {
+      setMethod(i + 10);
+    }
+  }
+  return out;
 }
 
 describe("readZipDifEntries", () => {
@@ -105,6 +160,39 @@ describe("readZipDifEntries", () => {
     expect(result?.entries).toHaveLength(0);
     expect(result?.oversizedCount).toBe(1);
   });
+
+  test("skips an unsupported-compression entry without discarding the archive", async () => {
+    // fflate throws on any method other than store/deflate; returning it from
+    // the filter would discard the whole archive and its valid siblings. The
+    // unsupported entry must be dropped while its sibling DIF still extracts.
+    const raw = zipSync(
+      { "good.sym": BREAKPAD_BYTES, "bad.bin": new Uint8Array([1, 2, 3, 4]) },
+      { level: 0 }
+    );
+    const path = join(tempDir, "mixed.zip");
+    await writeFile(path, corruptCompressionMethod(raw, "bad.bin", 99));
+    const result = await readZipDifEntries(path);
+    expect(result).not.toBeNull();
+    expect(result?.entries.map((e) => e.path)).toEqual([`${path}/good.sym`]);
+  });
+
+  test("skips a container whose compressed size exceeds the total budget", async () => {
+    // The whole archive is larger than 1 byte, so it is skipped wholesale
+    // rather than buffered into memory.
+    const path = await writeZip("syms.zip", { "example.sym": BREAKPAD_BYTES });
+    expect(await readZipDifEntries(path, { maxTotalSize: 1 })).toBeNull();
+  });
+
+  test("caps cumulative extraction via maxTotalSize", async () => {
+    // Two highly-compressible entries: the container (compressed) stays under
+    // the budget so it is read, but the second entry would push cumulative
+    // *uncompressed* extraction past it and is skipped.
+    const big = new Uint8Array(10_000);
+    const path = await writeZip("syms.zip", { "a.bin": big, "b.bin": big });
+    const result = await readZipDifEntries(path, { maxTotalSize: 15_000 });
+    expect(result?.entries).toHaveLength(1);
+    expect(result?.entries[0]?.path).toBe(`${path}/a.bin`);
+  });
 });
 
 describe("prepareDifs ZIP scanning", () => {
@@ -152,7 +240,13 @@ describe("prepareDifs ZIP scanning", () => {
     expect(prepared).toHaveLength(0);
   });
 
-  test("propagates the oversized count from skipped zip entries", async () => {
+  test("oversized zip entries are advisory and do not drive the exit count", async () => {
+    // A compressed entry's format is unknown until it is inflated, so an
+    // oversized zip entry cannot be attributed to the requested --type the way
+    // an on-disk file can. It is skipped (and warned per entry) but must not
+    // inflate `oversizedCount`, which gates the command's exit code — otherwise
+    // an unrelated large asset inside a .zip would cause a false
+    // "all matched files too large" failure.
     const path = await writeZip("syms.zip", {
       "example.sym": BREAKPAD_BYTES,
     });
@@ -163,7 +257,7 @@ describe("prepareDifs ZIP scanning", () => {
       { maxFileSize: 1 }
     );
     expect(prepared).toHaveLength(0);
-    expect(oversizedCount).toBe(1);
+    expect(oversizedCount).toBe(0);
   });
 
   test("falls back to normal parsing for a .zip-named non-archive", async () => {
