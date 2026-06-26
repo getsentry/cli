@@ -527,12 +527,16 @@ describe("isUserError", () => {
 });
 
 describe("isNetworkError", () => {
-  test("true for ApiError with status 0", () => {
-    expect(isNetworkError(new ApiError("Network error", 0))).toBe(true);
-  });
-
   test("true for a raw 'fetch failed' TypeError (undici network failure)", () => {
     expect(isNetworkError(new TypeError("fetch failed"))).toBe(true);
+  });
+
+  test("false for ApiError status 0 (shared with TLS cert errors)", () => {
+    // status 0 is also used for TLS cert errors, which must stay actionable.
+    expect(isNetworkError(new ApiError("Network error", 0))).toBe(false);
+    expect(isNetworkError(new ApiError("TLS certificate error", 0))).toBe(
+      false
+    );
   });
 
   test("false for an ApiError with an HTTP status", () => {

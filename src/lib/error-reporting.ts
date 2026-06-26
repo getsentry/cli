@@ -64,11 +64,11 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   if (error instanceof OutputError) {
     return "output_error";
   }
-  // Network-level failures (offline, DNS, connection refused/timeout, proxy)
-  // mean the CLI could not reach Sentry at all. There is nothing actionable in
-  // a "user is offline" report, so drop it — same rationale as EPIPE/EBADF OS
-  // noise in `beforeSend`. Covers both the wrapped ApiError(status 0) and a raw
-  // `TypeError: "fetch failed"` that escaped before wrapping (CLI-16W).
+  // A raw `TypeError: "fetch failed"` (CLI-16W) means the CLI could not reach
+  // Sentry at all (offline, DNS, connection refused/timeout). There is nothing
+  // actionable in a "user is offline" report, so drop it — same rationale as
+  // EPIPE/EBADF OS noise in `beforeSend`. Note: TLS cert errors are wrapped as
+  // ApiError(status 0), NOT matched here, so they stay captured/actionable.
   if (isNetworkError(error)) {
     return "network_error";
   }

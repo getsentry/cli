@@ -239,16 +239,18 @@ describe("classifySilenced", () => {
     expect(classifySilenced(new ApiError("bad", 400))).toBeNull();
   });
 
-  test("silences ApiError with status 0 (network failure)", () => {
-    expect(classifySilenced(new ApiError("Network error", 0))).toBe(
-      "network_error"
-    );
-  });
-
   test("silences a raw 'fetch failed' TypeError (network failure)", () => {
     expect(classifySilenced(new TypeError("fetch failed"))).toBe(
       "network_error"
     );
+  });
+
+  test("does NOT silence a TLS cert error wrapped as ApiError(0)", () => {
+    // status 0 is shared by network failures and TLS cert errors; the latter
+    // are actionable (missing CA) and must stay captured.
+    expect(
+      classifySilenced(new ApiError("TLS certificate error", 0))
+    ).toBeNull();
   });
 
   test("does NOT silence an unrelated TypeError", () => {
@@ -623,7 +625,7 @@ describe("reportCliError integration", () => {
   });
 
   test("silences a network error and emits metric", () => {
-    reportCliError(new ApiError("Network error", 0));
+    reportCliError(new TypeError("fetch failed"));
     expect(captureSpy).not.toHaveBeenCalled();
     expect(metricSpy).toHaveBeenCalledWith(
       "cli.error.silenced",
