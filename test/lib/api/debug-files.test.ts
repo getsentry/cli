@@ -373,7 +373,7 @@ describe("uploadDebugFiles", () => {
     expect(passedMissing.size).toBeGreaterThan(0);
   });
 
-  test("drops files larger than the server maxFileSize before assembling", async () => {
+  test("does not assemble oversized files but reports them as failures", async () => {
     setServerOptions({ maxFileSize: 5 });
     apiRequestToRegionMock.mockImplementationOnce(
       async (_url: string, _endpoint: string, init: { body: object }) => {
@@ -397,11 +397,19 @@ describe("uploadDebugFiles", () => {
       maxWaitMs: 1000,
     });
 
+    // Only the in-cap file is actually assembled.
     const body = lastAssembleBody();
     const names = Object.values(body).map((e) => e.name);
     expect(names).toEqual(["small.so"]);
-    expect(results).toHaveLength(1);
-    expect(results[0]?.name).toBe("small.so");
+
+    // But the oversized file is surfaced as an `error` result so a partial
+    // drop yields a non-zero exit instead of a silent success.
+    expect(results).toHaveLength(2);
+    const small = results.find((r) => r.name === "small.so");
+    const big = results.find((r) => r.name === "big.so");
+    expect(small?.state).toBe("ok");
+    expect(big?.state).toBe("error");
+    expect(big?.detail).toMatch(/maximum file size/);
   });
 
   test("throws when every file exceeds the server maxFileSize", async () => {
