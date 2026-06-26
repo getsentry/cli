@@ -9,9 +9,10 @@
  * vars, config defaults), so `--no-upload` (dry-run) needs no credentials.
  *
  * Honors the server-advertised `max_file_size` (oversized files are skipped)
- * and `max_wait` (clamps the processing wait). `--derived-data` additionally
- * scans Xcode's DerivedData folder on macOS. ZIP scanning, `--symbol-maps`,
- * and `--il2cpp-mapping` line mappings are deferred to follow-up PRs (see the
+ * and `max_wait` (clamps the processing wait). `.zip` archives are scanned in
+ * place (disable with `--no-zips`); `--derived-data` additionally scans Xcode's
+ * DerivedData folder on macOS. `--symbol-maps` (BCSymbolMap resolution) and
+ * `--il2cpp-mapping` line mappings are deferred to follow-up PRs (see the
  * command's full description).
  */
 
@@ -126,6 +127,7 @@ type UploadFlags = {
   "no-sources"?: boolean;
   "include-sources"?: boolean;
   "derived-data"?: boolean;
+  "no-zips"?: boolean;
   "no-upload"?: boolean;
   wait?: boolean;
   "wait-for"?: number;
@@ -448,16 +450,19 @@ export const uploadCommand = buildCommand({
       "  --id       Only upload the object with the given debug id (repeatable)\n" +
       "  --no-debug / --no-unwind / --no-sources   Drop files whose only\n" +
       "             useful feature is the named one\n" +
-      "  --derived-data   Also scan Xcode's DerivedData folder (macOS only)\n\n" +
+      "  --derived-data   Also scan Xcode's DerivedData folder (macOS only)\n" +
+      "  --no-zips        Do not scan inside .zip archives\n\n" +
+      ".zip archives are scanned in place by default; nested archives are not " +
+      "recursed.\n\n" +
       "Usage:\n" +
       "  sentry debug-files upload ./build\n" +
+      "  sentry debug-files upload ./symbols.zip\n" +
       "  sentry debug-files upload ./libexample.so --include-sources\n" +
       "  sentry debug-files upload ./dsyms --type dsym --wait\n" +
       "  sentry debug-files upload --derived-data --no-upload\n" +
-      "  sentry debug-files upload ./build --no-upload\n\n" +
-      "Not yet supported (planned): scanning inside ZIP archives, " +
-      "--symbol-maps (BCSymbolMap resolution), and --il2cpp-mapping line " +
-      "mappings.",
+      "  sentry debug-files upload ./build --no-zips --no-upload\n\n" +
+      "Not yet supported (planned): --symbol-maps (BCSymbolMap resolution) " +
+      "and --il2cpp-mapping line mappings.",
   },
   output: {
     human: formatUploadResult,
@@ -521,6 +526,12 @@ export const uploadCommand = buildCommand({
       "derived-data": {
         kind: "boolean",
         brief: "Also scan Xcode's DerivedData folder (macOS only)",
+        optional: true,
+        default: false,
+      },
+      "no-zips": {
+        kind: "boolean",
+        brief: "Do not scan inside .zip archives",
         optional: true,
         default: false,
       },
@@ -590,6 +601,7 @@ export const uploadCommand = buildCommand({
     const files = await scanPaths(scanTargets);
     const { prepared, oversizedCount } = await prepareDifs(files, filters, {
       maxFileSize,
+      scanZips: !flags["no-zips"],
     });
     const difs = dedupeDifs(
       buildDifList(prepared, Boolean(flags["include-sources"]))

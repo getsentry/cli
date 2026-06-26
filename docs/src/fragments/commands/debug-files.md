@@ -30,6 +30,10 @@ sentry debug-files bundle-jvm --output ./out --debug-id <uuid> --json ./src
 sentry debug-files upload ./build
 sentry debug-files upload ./libexample.so --include-sources
 
+# .zip archives are scanned in place; use --no-zips to skip them
+sentry debug-files upload ./symbols.zip
+sentry debug-files upload ./build --no-zips
+
 # Restrict by type or debug id, and wait for server-side processing
 sentry debug-files upload ./dsyms --type dsym --wait
 sentry debug-files upload ./build --id <debug-id> --require-all
@@ -60,14 +64,16 @@ sentry debug-files upload ./build --no-upload
   files via the chunk-upload protocol. Use `--type`/`--id` to restrict which
   files are sent, `--no-debug`/`--no-unwind`/`--no-sources` to drop files whose
   only useful feature is the named one, and `--include-sources` to attach a
-  source bundle per file. `--derived-data` additionally scans Xcode's
+  source bundle per file. `.zip` archives are scanned in place by default (their
+  entries run through the same filters; nested archives are not recursed) — pass
+  `--no-zips` to skip them. `--derived-data` additionally scans Xcode's
   `~/Library/Developer/Xcode/DerivedData` folder (macOS only). `--no-upload`
   previews the selection without credentials; `--wait`/`--wait-for` block on
   server-side processing and exit non-zero if any file fails. `--require-all`
   fails if a requested `--id` was not found. The server-advertised maximum file
   size and maximum processing wait are honored automatically (oversized files
-  are skipped with a warning). Scanning inside ZIP archives, `--symbol-maps`,
-  and `--il2cpp-mapping` line mappings are not yet supported.
+  are skipped with a warning). `--symbol-maps` (BCSymbolMap resolution) and
+  `--il2cpp-mapping` line mappings are not yet supported.
 - Upload a JVM bundle separately via `sentry debug-files upload --type jvm`.
 - Supported JVM source file extensions: `.java`, `.kt`, `.scala`, `.sc`,
   `.groovy`, `.gvy`, `.gy`, `.gsh`, `.clj`, `.cljc`
