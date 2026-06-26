@@ -781,6 +781,27 @@ export function isSearchQueryParseError(error: ApiError): boolean {
 }
 
 /**
+ * Whether an error is a raw network-level fetch failure — the CLI could not
+ * reach the Sentry API at all (offline, DNS failure, connection
+ * refused/timeout). Node's `fetch` (undici) rejects with exactly
+ * `TypeError: "fetch failed"` for every such failure (the real errno is in
+ * `cause`).
+ *
+ * This reflects the user's environment, not a CLI bug, so it is treated as a
+ * user error (no upgrade nudge) and is not reported to Sentry — the same
+ * rationale as dropping EPIPE/EBADF OS noise in `beforeSend`.
+ *
+ * NOTE: This deliberately does NOT match `ApiError` with `status === 0`. That
+ * status is shared by genuine connectivity failures AND TLS certificate errors,
+ * and the latter are actionable user-configuration issues (e.g. a missing CA
+ * cert) that must stay visible. Callers that want the "user environment, not a
+ * CLI bug" treatment for `status === 0` check it explicitly.
+ */
+export function isNetworkError(error: unknown): boolean {
+  return error instanceof TypeError && error.message === "fetch failed";
+}
+
+/**
  * Classify errors caused by user input, configuration, auth state, or account
  * settings. These errors already tell the user what to fix, so upgrade nudges
  * should use the neutral update banner instead of implying a CLI bug fix.
@@ -789,14 +810,21 @@ export function isSearchQueryParseError(error: ApiError): boolean {
  * Explicit non-user subclasses must be checked before that fallback.
  */
 export function isUserError(error: unknown): boolean {
+  // A raw "fetch failed" TypeError is a network-level failure — the user's
+  // environment, not a CLI bug.
+  if (isNetworkError(error)) {
+    return true;
+  }
+
   if (error instanceof ApiError) {
-    // Status 0 = network-level failure (DNS, ECONNREFUSED) — user environment,
-    // not a CLI bug. 400 usually means the CLI constructed a bad request, so it
-    // is treated as a CLI bug — except when the server reports the user's search
-    // query was unparseable, which is a user input mistake.
+    // Status 0 = no HTTP response (network failure or TLS cert error) — the
+    // user's environment/config, not a CLI bug.
     if (error.status === 0) {
       return true;
     }
+    // 400 usually means the CLI constructed a bad request, so it is treated as
+    // a CLI bug — except when the server reports the user's search query was
+    // unparseable, which is a user input mistake.
     if (isSearchQueryParseError(error)) {
       return true;
     }

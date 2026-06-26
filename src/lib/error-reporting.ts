@@ -3,11 +3,11 @@
  *
  * Provides two things:
  *
- * 1. **Silencing rules** — `OutputError`, `ContextError` (a required value the
- *    user omitted), expected-state `AuthError`, 401–499 `ApiError`, and 400
- *    `ApiError`s that report an unparseable user search query are not sent to
- *    Sentry as issues. A `cli.error.silenced` metric preserves volume +
- *    user/org context.
+ * 1. **Silencing rules** — `OutputError`, network failures (offline/DNS/proxy),
+ *    `ContextError` (a required value the user omitted), expected-state
+ *    `AuthError`, 401–499 `ApiError`, and 400 `ApiError`s that report an
+ *    unparseable user search query are not sent to Sentry as issues. A
+ *    `cli.error.silenced` metric preserves volume + user/org context.
  *
  * 2. **Grouping tags** — enriches every error event with `cli_error.*` tags
  *    that Sentry's server-side fingerprint rules use for stable grouping.
@@ -27,6 +27,7 @@ import {
   ContextError,
   DeviceFlowError,
   HostScopeError,
+  isNetworkError,
   isSearchQueryParseError,
   OutputError,
   ResolutionError,
@@ -50,7 +51,8 @@ type SilenceReason =
   | "context_missing"
   | "auth_expected"
   | "api_user_error"
-  | "api_query_error";
+  | "api_query_error"
+  | "network_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -61,6 +63,14 @@ type SilenceReason =
 export function classifySilenced(error: unknown): SilenceReason | null {
   if (error instanceof OutputError) {
     return "output_error";
+  }
+  // A raw `TypeError: "fetch failed"` (CLI-16W) means the CLI could not reach
+  // Sentry at all (offline, DNS, connection refused/timeout). There is nothing
+  // actionable in a "user is offline" report, so drop it — same rationale as
+  // EPIPE/EBADF OS noise in `beforeSend`. Note: TLS cert errors are wrapped as
+  // ApiError(status 0), NOT matched here, so they stay captured/actionable.
+  if (isNetworkError(error)) {
+    return "network_error";
   }
   // A ContextError always means the user omitted a required value (no
   // org/project could be resolved, a required ID was not provided, etc.). It is

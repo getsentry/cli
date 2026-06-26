@@ -11,6 +11,7 @@ import {
   formatError,
   getExitCode,
   HostScopeError,
+  isNetworkError,
   isSearchQueryParseError,
   isUserError,
   OutputError,
@@ -499,6 +500,11 @@ describe("isUserError", () => {
     ["SeerError", new SeerError("not_enabled"), true],
     ["WizardError", new WizardError("wizard failed"), true],
     ["ApiError 0 (network)", new ApiError("network error", 0), true],
+    [
+      "raw fetch failed TypeError (network)",
+      new TypeError("fetch failed"),
+      true,
+    ],
     ["ApiError 400", new ApiError("bad request", 400), false],
     [
       "ApiError 400 (search query parse)",
@@ -517,6 +523,35 @@ describe("isUserError", () => {
     ["null", null, false],
   ])("classifies %s", (_label, errorValue, expected) => {
     expect(isUserError(errorValue)).toBe(expected);
+  });
+});
+
+describe("isNetworkError", () => {
+  test("true for a raw 'fetch failed' TypeError (undici network failure)", () => {
+    expect(isNetworkError(new TypeError("fetch failed"))).toBe(true);
+  });
+
+  test("false for ApiError status 0 (shared with TLS cert errors)", () => {
+    // status 0 is also used for TLS cert errors, which must stay actionable.
+    expect(isNetworkError(new ApiError("Network error", 0))).toBe(false);
+    expect(isNetworkError(new ApiError("TLS certificate error", 0))).toBe(
+      false
+    );
+  });
+
+  test("false for an ApiError with an HTTP status", () => {
+    expect(isNetworkError(new ApiError("bad", 400))).toBe(false);
+    expect(isNetworkError(new ApiError("server", 500))).toBe(false);
+  });
+
+  test("false for an unrelated TypeError", () => {
+    expect(isNetworkError(new TypeError("x is not a function"))).toBe(false);
+  });
+
+  test("false for non-error values", () => {
+    expect(isNetworkError(new Error("boom"))).toBe(false);
+    expect(isNetworkError("fetch failed")).toBe(false);
+    expect(isNetworkError(null)).toBe(false);
   });
 });
 
