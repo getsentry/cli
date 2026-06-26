@@ -22,6 +22,8 @@ import { createSentryToolsServer, SENTRY_TOOL_NAMES } from "./tools.js";
 const STATUS_RE = /^\[STATUS\]\s*(.+)$/u;
 const ABORT_RE = /^\[ABORT\]\s*(.+)$/mu;
 const AGENT_MODEL = "anthropic/claude-sonnet-4.6";
+/** Bound runaway sessions: the SDK has no built-in wall-clock timeout. */
+const AGENT_MAX_TURNS = 80;
 
 /**
  * Resolve the model id. Defaults to the Vercel-gateway-style slug; overridable
@@ -95,6 +97,12 @@ function buildAgentEnv(
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     CLAUDE_CODE_AUTO_CONNECT_IDE: "false",
     ENABLE_TOOL_SEARCH: "auto:0",
+    // Isolate the spawned CLI from the user's own Claude Code setup: keep its
+    // config/transcripts in our scratch dir (not ~/.claude) and don't auto-load
+    // the user's CLAUDE.md memory (which loads regardless of settingSources and
+    // would be a prompt-injection vector).
+    CLAUDE_CONFIG_DIR: agentTempDir,
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
     TMP: agentTempDir,
     TEMP: agentTempDir,
     TMPDIR: agentTempDir,
@@ -219,6 +227,7 @@ export async function runInitAgent({
       prompt,
       options: {
         model: resolveModel(),
+        maxTurns: AGENT_MAX_TURNS,
         pathToClaudeCodeExecutable,
         cwd: workingDirectory,
         additionalDirectories: [workingDirectory],
