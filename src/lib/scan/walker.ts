@@ -235,6 +235,18 @@ async function* walkFilesImpl(opts: WalkOptions): AsyncGenerator<WalkEntry> {
   };
   const startedAt = cfg.clock();
   const visitedInodes = new Set<string>();
+  // Seed the root's inode so a descendant symlink pointing back at the scan
+  // root is treated as a cycle. The root frame is pushed directly (below)
+  // rather than through `maybeDescend`, which is the only place inodes are
+  // otherwise recorded — so without this seed a symlink → root would re-list
+  // the root's entire subtree under a second path prefix. Only relevant when
+  // following symlinks; the default walk never re-enters a directory.
+  if (cfg.followSymlinks) {
+    const rootKey = await inodeKey(cfg.cwd);
+    if (rootKey) {
+      visitedInodes.add(rootKey);
+    }
+  }
   const stack: DirFrame[] = [{ absDir: cfg.cwd, depth: 0 }];
   const ctx: WalkContext = {
     cfg,

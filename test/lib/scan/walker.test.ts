@@ -693,6 +693,24 @@ describe("walkFiles — followSymlinks", () => {
       cleanup();
     }
   });
+
+  test("followSymlinks: true does not re-list the tree via a symlink to the scan root", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "top.ts": "a",
+      "sub/nested.ts": "b",
+    });
+    try {
+      // A symlink pointing back at the scan root. The root frame is pushed
+      // directly (not via maybeDescend), so unless its inode is seeded into
+      // the visited set the walker would re-list the whole tree under
+      // `sub/root-link/...`. Asserting the exact set guards that seeding.
+      symlinkSync(cwd, join(cwd, "sub", "root-link"));
+      const files = await collect({ cwd, followSymlinks: true });
+      expect(files.sort()).toEqual(["sub/nested.ts", "top.ts"]);
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 describe("walkFiles — parallel walker (concurrency > 1)", () => {
