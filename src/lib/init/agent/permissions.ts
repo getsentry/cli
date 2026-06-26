@@ -13,7 +13,11 @@ export type PermissionResult =
   | { behavior: "allow"; updatedInput: Record<string, unknown> }
   | { behavior: "deny"; message: string };
 
-const ENV_FILE_RE = /(^|[/\\])\.env(?:\.|$)/;
+// Matches .env, .env.<x>, and .envrc (direnv) as a real path segment.
+const ENV_FILE_RE = /(^|[/\\])\.env(rc)?(?:\.|$)/;
+// Glob-aware variant: also catches patterns like `**/.env*`, `.env*`, `*.env`
+// passed to Grep's glob/include so they can't surface .env contents.
+const ENV_GLOB_RE = /(^|[/\\*])\.env/i;
 const DANGEROUS_BASH_RE =
   /(?:^|\s)(?:rm\s+-rf|git\s+reset|git\s+checkout|sudo|chmod\s+-R|chown\s+-R)(?:\s|$)/i;
 const SAFE_REDIRECT_RE = /\s+2>\/dev\/null\s*$/u;
@@ -74,8 +78,11 @@ function deny(message: string): PermissionResult {
   return { behavior: "deny", message };
 }
 
-function isEnvPath(value: unknown): boolean {
-  return typeof value === "string" && ENV_FILE_RE.test(value);
+function referencesEnvFile(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    (ENV_FILE_RE.test(value) || ENV_GLOB_RE.test(value))
+  );
 }
 
 function inputPath(input: Record<string, unknown>): string | undefined {
@@ -106,9 +113,9 @@ export function canUseInitAgentTool(
   input: Record<string, unknown>
 ): PermissionResult {
   if (toolName === "Read" || toolName === "Write" || toolName === "Edit") {
-    if (isEnvPath(inputPath(input))) {
+    if (referencesEnvFile(inputPath(input))) {
       return deny(
-        "Do not directly read or write .env files. Sentry auth tokens and real secrets must stay out of the agent context. Reference env vars by name instead."
+        "Do not directly read or write .env / .envrc files. Sentry auth tokens and real secrets must stay out of the agent context. Reference env vars by name instead."
       );
     }
     return allow(input);
@@ -116,11 +123,11 @@ export function canUseInitAgentTool(
 
   if (toolName === "Grep") {
     if (
-      isEnvPath(input.path) ||
-      isEnvPath(input.glob) ||
-      isEnvPath(input.include)
+      referencesEnvFile(input.path) ||
+      referencesEnvFile(input.glob) ||
+      referencesEnvFile(input.include)
     ) {
-      return deny("Do not grep .env files.");
+      return deny("Do not grep .env / .envrc files.");
     }
     return allow(input);
   }

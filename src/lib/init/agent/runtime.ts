@@ -93,7 +93,7 @@ function cacheDir(key: string): string {
   );
 }
 
-type TarballMeta = { tarball: string; integrity?: string };
+type TarballMeta = { tarball: string; integrity?: string; shasum?: string };
 
 async function fetchTarballMeta(pkg: string): Promise<TarballMeta> {
   const res = await customFetch(
@@ -106,27 +106,49 @@ async function fetchTarballMeta(pkg: string): Promise<TarballMeta> {
     );
   }
   const json = (await res.json()) as {
-    dist?: { tarball?: string; integrity?: string };
+    dist?: { tarball?: string; integrity?: string; shasum?: string };
   };
   if (!json.dist?.tarball) {
     throw new WizardError(
       `No download URL found for ${pkg}@${CLAUDE_AGENT_SDK_VERSION}.`
     );
   }
-  return { tarball: json.dist.tarball, integrity: json.dist.integrity };
+  return {
+    tarball: json.dist.tarball,
+    integrity: json.dist.integrity,
+    shasum: json.dist.shasum,
+  };
 }
 
-function verifyIntegrity(buffer: Buffer, integrity: string | undefined): void {
-  if (!integrity?.startsWith("sha512-")) {
+/**
+ * Verify the downloaded tarball before we extract and execute a native binary
+ * from it. Prefer the registry's sha512 `integrity`, fall back to the legacy
+ * sha1 `shasum`, and refuse to run if neither is available rather than
+ * executing unverified bytes.
+ */
+function verifyDownload(buffer: Buffer, meta: TarballMeta): void {
+  if (meta.integrity?.startsWith("sha512-")) {
+    const expected = meta.integrity.slice("sha512-".length);
+    const actual = createHash("sha512").update(buffer).digest("base64");
+    if (actual !== expected) {
+      throw new WizardError(
+        "The init agent runtime download failed its integrity check. Please try again."
+      );
+    }
     return;
   }
-  const expected = integrity.slice("sha512-".length);
-  const actual = createHash("sha512").update(buffer).digest("base64");
-  if (actual !== expected) {
-    throw new WizardError(
-      "The init agent runtime download failed its integrity check. Please try again."
-    );
+  if (meta.shasum) {
+    const actual = createHash("sha1").update(buffer).digest("hex");
+    if (actual !== meta.shasum) {
+      throw new WizardError(
+        "The init agent runtime download failed its checksum verification. Please try again."
+      );
+    }
+    return;
   }
+  throw new WizardError(
+    "The init agent runtime could not be verified (registry provided no integrity hash); refusing to run it."
+  );
 }
 
 async function downloadAndExtract(pkg: string, dest: string): Promise<void> {
@@ -140,7 +162,7 @@ async function downloadAndExtract(pkg: string, dest: string): Promise<void> {
     );
   }
   const buffer = Buffer.from(await res.arrayBuffer());
-  verifyIntegrity(buffer, meta.integrity);
+  verifyDownload(buffer, meta);
 
   const scratch = mkdtempSync(path.join(tmpdir(), "sentry-claude-dl-"));
   const tgz = path.join(scratch, "runtime.tgz");

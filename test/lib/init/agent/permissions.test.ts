@@ -16,8 +16,29 @@ describe("canUseInitAgentTool", () => {
     expect(result.behavior).toBe("allow");
   });
 
-  test("blocks grepping .env files", () => {
+  test("blocks reading .envrc (direnv) files", () => {
+    expect(canUseInitAgentTool("Read", { file_path: ".envrc" }).behavior).toBe(
+      "deny"
+    );
+    expect(
+      canUseInitAgentTool("Edit", { file_path: "config/.envrc" }).behavior
+    ).toBe("deny");
+  });
+
+  test("blocks grepping .env files, including via glob/include patterns", () => {
     expect(canUseInitAgentTool("Grep", { path: ".env" }).behavior).toBe("deny");
+    expect(
+      canUseInitAgentTool("Grep", { pattern: "KEY", glob: "**/.env*" }).behavior
+    ).toBe("deny");
+    expect(
+      canUseInitAgentTool("Grep", { pattern: "KEY", include: ".env.local" })
+        .behavior
+    ).toBe("deny");
+    // A normal source glob is still allowed.
+    expect(
+      canUseInitAgentTool("Grep", { pattern: "x", glob: "src/**/*.ts" })
+        .behavior
+    ).toBe("allow");
   });
 
   test("allows safe package-manager install commands", () => {
