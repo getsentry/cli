@@ -3,9 +3,10 @@
  *
  * Provides two things:
  *
- * 1. **Silencing rules** — `OutputError`, expected-state `AuthError`, and
- *    401–499 `ApiError` are not sent to Sentry as issues. A
- *    `cli.error.silenced` metric preserves volume + user/org context.
+ * 1. **Silencing rules** — `OutputError`, `ContextError` (a required value the
+ *    user omitted), expected-state `AuthError`, and 401–499 `ApiError` are not
+ *    sent to Sentry as issues. A `cli.error.silenced` metric preserves volume +
+ *    user/org context.
  *
  * 2. **Grouping tags** — enriches every error event with `cli_error.*` tags
  *    that Sentry's server-side fingerprint rules use for stable grouping.
@@ -42,7 +43,11 @@ import {
  * Reasons an error may be silenced (not sent to Sentry as an issue).
  * Exposed as the `reason` attribute on the `cli.error.silenced` metric.
  */
-type SilenceReason = "output_error" | "auth_expected" | "api_user_error";
+type SilenceReason =
+  | "output_error"
+  | "context_missing"
+  | "auth_expected"
+  | "api_user_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -53,6 +58,16 @@ type SilenceReason = "output_error" | "auth_expected" | "api_user_error";
 export function classifySilenced(error: unknown): SilenceReason | null {
   if (error instanceof OutputError) {
     return "output_error";
+  }
+  // A ContextError always means the user omitted a required value (no
+  // org/project could be resolved, a required ID was not provided, etc.). It is
+  // never a CLI bug — unlike ResolutionError, where a *provided* value that
+  // can't be matched may signal a product/access issue worth observing. There
+  // is nothing per-instance to investigate, so silence the whole class; the
+  // `cli.error.silenced` metric (keyed by `error_class` + `resource`) preserves
+  // the volume and which value was missing. (CLI-3B: ~2000 users.)
+  if (error instanceof ContextError) {
+    return "context_missing";
   }
   if (
     error instanceof AuthError &&
@@ -77,6 +92,12 @@ function recordSilencedError(error: unknown, reason: SilenceReason): void {
   }
   if (error instanceof AuthError) {
     attributes.auth_reason = error.reason;
+  }
+  // Preserve which required value was missing so the silenced-volume metric
+  // keeps sub-grouping context (e.g. "Organization and project" vs "Event ID").
+  // ContextError resources are a small fixed set, so cardinality stays low.
+  if (error instanceof ContextError) {
+    attributes.resource = error.resource;
   }
 
   try {

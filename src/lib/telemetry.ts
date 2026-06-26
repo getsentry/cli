@@ -226,14 +226,15 @@ export async function withTelemetry<T>(
       }
     );
   } catch (e) {
-    // Route through reportCliError so silencing (OutputError, expected-auth
-    // AuthError, 401–499 ApiError) and fingerprint normalization are applied
-    // consistently. Silenced errors emit a `cli.error.silenced` metric +
-    // optional structured log instead of creating a Sentry issue.
+    // Route through reportCliError so silencing (OutputError, ContextError,
+    // expected-auth AuthError, 401–499 ApiError) and fingerprint normalization
+    // are applied consistently. Silenced errors emit a `cli.error.silenced`
+    // metric + optional structured log instead of creating a Sentry issue.
     reportCliError(e);
     // Only mark session crashed for errors that weren't silenced.
-    // Silenced errors (OutputError, expected AuthError, user 4xx ApiError)
-    // are expected states — marking them crashed would skew release-health.
+    // Silenced errors (OutputError, ContextError, expected AuthError, user 4xx
+    // ApiError) are expected states — marking them crashed would skew
+    // release-health.
     if (!classifySilenced(e)) {
       markSessionCrashed();
     }
