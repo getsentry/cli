@@ -11,6 +11,7 @@ import {
   formatError,
   getExitCode,
   HostScopeError,
+  isSearchQueryParseError,
   isUserError,
   OutputError,
   ResolutionError,
@@ -499,6 +500,11 @@ describe("isUserError", () => {
     ["WizardError", new WizardError("wizard failed"), true],
     ["ApiError 0 (network)", new ApiError("network error", 0), true],
     ["ApiError 400", new ApiError("bad request", 400), false],
+    [
+      "ApiError 400 (search query parse)",
+      new ApiError("bad", 400, "Error parsing search query: invalid status"),
+      true,
+    ],
     ["ApiError 401", new ApiError("unauthorized", 401), true],
     ["ApiError 418", new ApiError("teapot", 418), true],
     ["ApiError 499", new ApiError("client closed", 499), true],
@@ -511,6 +517,39 @@ describe("isUserError", () => {
     ["null", null, false],
   ])("classifies %s", (_label, errorValue, expected) => {
     expect(isUserError(errorValue)).toBe(expected);
+  });
+});
+
+describe("isSearchQueryParseError", () => {
+  test("true for a 400 whose detail reports an unparseable query", () => {
+    expect(
+      isSearchQueryParseError(
+        new ApiError("bad", 400, "Error parsing search query: invalid status")
+      )
+    ).toBe(true);
+  });
+
+  test("true when the parser detail is prepended by error enrichment", () => {
+    const detail =
+      "Error parsing search query: Empty string after 'status:'\n\nSuggestions:";
+    expect(isSearchQueryParseError(new ApiError("wrapped", 400, detail))).toBe(
+      true
+    );
+  });
+
+  test("false for a 400 without a query parse detail", () => {
+    expect(
+      isSearchQueryParseError(new ApiError("bad", 400, "Other failure"))
+    ).toBe(false);
+    expect(isSearchQueryParseError(new ApiError("no detail", 400))).toBe(false);
+  });
+
+  test("false when status is not 400 (other 4xx handled elsewhere)", () => {
+    expect(
+      isSearchQueryParseError(
+        new ApiError("x", 422, "Error parsing search query: ...")
+      )
+    ).toBe(false);
   });
 });
 

@@ -26,6 +26,7 @@ import {
   ConfigError,
   ContextError,
   HostScopeError,
+  isSearchQueryParseError,
   OutputError,
   ResolutionError,
   SeerError,
@@ -236,6 +237,42 @@ describe("classifySilenced", () => {
 
   test("does NOT silence ApiError 400 (CLI bug)", () => {
     expect(classifySilenced(new ApiError("bad", 400))).toBeNull();
+  });
+
+  test("silences ApiError 400 with a search-query parse detail", () => {
+    expect(
+      classifySilenced(
+        new ApiError(
+          "Failed to list issues: 400 Bad Request",
+          400,
+          "Error parsing search query: invalid status value of '403'"
+        )
+      )
+    ).toBe("api_query_error");
+  });
+
+  test("silences a wrapped issue-list query 400 (detail prepended)", () => {
+    // enrichIssueListError prepends the server detail, then appends CLI hints.
+    const detail =
+      "Error parsing search query: Empty string after 'status:'\n\n" +
+      "Suggestions:\n  • Check your --query syntax";
+    expect(
+      classifySilenced(new ApiError("Failed to fetch issues", 400, detail))
+    ).toBe("api_query_error");
+  });
+
+  test("does NOT silence a 400 whose detail is not a query parse error", () => {
+    expect(
+      classifySilenced(
+        new ApiError("bad", 400, "Invalid dashboard widget configuration")
+      )
+    ).toBeNull();
+  });
+
+  test("does NOT treat a 4xx-with-query-marker as a query 400", () => {
+    // status must be exactly 400; other 4xx already silence via api_user_error.
+    const err = new ApiError("x", 422, "Error parsing search query: ...");
+    expect(isSearchQueryParseError(err)).toBe(false);
   });
 
   test.each([

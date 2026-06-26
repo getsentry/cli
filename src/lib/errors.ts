@@ -755,6 +755,32 @@ export function getExitCode(error: unknown): number {
 }
 
 /**
+ * Sentry's search-query parser emits a 400 whose detail begins with this phrase
+ * when the user's `--query` cannot be parsed (e.g. `is:403`, `lastSeen:>=-24h`,
+ * an empty `status:`). The server is telling us the user-supplied query is
+ * malformed — a user input error, not the CLI constructing a bad request.
+ */
+const SEARCH_QUERY_PARSE_MARKER = "Error parsing search query";
+
+/**
+ * Whether an {@link ApiError} is a Sentry search-query parse failure (HTTP 400
+ * whose detail reports an unparseable query). The CLI preserves the server's
+ * detail when re-wrapping list errors (`enrichIssueListError` in
+ * `commands/issue/list.ts` prepends the original detail), so a substring match
+ * is robust to that wrapping.
+ *
+ * Shared by the three 4xx classifiers so they agree on these 400s:
+ * `classifySilenced` (Sentry capture), {@link isUserError} (upgrade nudge), and
+ * `isUserApiError` (span attribution).
+ */
+export function isSearchQueryParseError(error: ApiError): boolean {
+  return (
+    error.status === 400 &&
+    (error.detail?.includes(SEARCH_QUERY_PARSE_MARKER) ?? false)
+  );
+}
+
+/**
  * Classify errors caused by user input, configuration, auth state, or account
  * settings. These errors already tell the user what to fix, so upgrade nudges
  * should use the neutral update banner instead of implying a CLI bug fix.
@@ -765,9 +791,13 @@ export function getExitCode(error: unknown): number {
 export function isUserError(error: unknown): boolean {
   if (error instanceof ApiError) {
     // Status 0 = network-level failure (DNS, ECONNREFUSED) — user environment,
-    // not a CLI bug. 400 usually means the CLI constructed a bad request.
-    // Other 4xx statuses are user/account/API-state problems.
+    // not a CLI bug. 400 usually means the CLI constructed a bad request, so it
+    // is treated as a CLI bug — except when the server reports the user's search
+    // query was unparseable, which is a user input mistake.
     if (error.status === 0) {
+      return true;
+    }
+    if (isSearchQueryParseError(error)) {
       return true;
     }
     return error.status > 400 && error.status < 500;
