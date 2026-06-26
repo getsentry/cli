@@ -48,6 +48,7 @@ Upload debug information files to Sentry
 | `--no-sources` | Do not upload files whose only feature is source info |
 | `--include-sources` | Build and upload a source bundle for each file with debug info |
 | `--derived-data` | Also scan Xcode's DerivedData folder (macOS only) |
+| `--no-zips` | Do not scan inside .zip archives |
 | `--no-upload` | Scan and print what would be uploaded without uploading |
 | `--wait` | Wait for server-side processing and report any errors |
 | `--wait-for <wait-for>` | Wait up to this many seconds for server-side processing |
@@ -117,6 +118,7 @@ Terminal window
 # Exclude additional directoriessentry debug-files bundle-jvm --output ./out --debug-id <uuid> --exclude generated --exclude build-tools ./src
 # Output as JSONsentry debug-files bundle-jvm --output ./out --debug-id <uuid> --json ./src
 # Upload debug information files (scans directories recursively)sentry debug-files upload ./buildsentry debug-files upload ./libexample.so --include-sources
+# .zip archives are scanned in place; use --no-zips to skip themsentry debug-files upload ./symbols.zipsentry debug-files upload ./build --no-zips
 # Restrict by type or debug id, and wait for server-side processingsentry debug-files upload ./dsyms --type dsym --waitsentry debug-files upload ./build --id <debug-id> --require-all
 # Preview what would be uploaded without uploading (no credentials needed)sentry debug-files upload ./build --no-upload
 ```
