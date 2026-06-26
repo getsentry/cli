@@ -5,7 +5,7 @@
  * embedded skill installation across detected agent roots.
  */
 
-import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -115,6 +115,22 @@ describe("agent-skills", () => {
       expect(
         existsSync(join(testDir, ".claude", "skills", "sentry-cli", "SKILL.md"))
       ).toBe(false);
+    });
+
+    test("leaves no temp files behind (atomic writes clean up)", async () => {
+      mkdirSync(join(testDir, ".agents"), { recursive: true });
+
+      const result = await installAgentSkills(testDir);
+      expect(result).not.toBeNull();
+
+      // Atomic writes go through `.<name>.<pid>.<rand>.tmp` files that must be
+      // renamed away; a leftover temp file means the rename/cleanup regressed.
+      const skillDir = join(testDir, ".agents", "skills", "sentry-cli");
+      const leftovers = [
+        ...readdirSync(skillDir),
+        ...readdirSync(join(skillDir, "references")),
+      ].filter((name) => name.endsWith(".tmp"));
+      expect(leftovers).toEqual([]);
     });
 
     test("installs to both ~/.agents/ and ~/.claude/ when both roots exist", async () => {
