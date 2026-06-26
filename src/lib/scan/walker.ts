@@ -235,6 +235,18 @@ async function* walkFilesImpl(opts: WalkOptions): AsyncGenerator<WalkEntry> {
   };
   const startedAt = cfg.clock();
   const visitedInodes = new Set<string>();
+  // Seed the root's inode so a descendant symlink pointing back at the scan
+  // root is treated as a cycle. The root frame is pushed directly (below)
+  // rather than through `maybeDescend`, which is the only place inodes are
+  // otherwise recorded — so without this seed a symlink → root would re-list
+  // the root's entire subtree under a second path prefix. Only relevant when
+  // following symlinks; the default walk never re-enters a directory.
+  if (cfg.followSymlinks) {
+    const rootKey = await inodeKey(cfg.cwd);
+    if (rootKey) {
+      visitedInodes.add(rootKey);
+    }
+  }
   const stack: DirFrame[] = [{ absDir: cfg.cwd, depth: 0 }];
   const ctx: WalkContext = {
     cfg,
@@ -742,23 +754,29 @@ async function tryYieldFile(
  * Classify a file as binary via extension fast-path or 8 KB NUL sniff.
  *
  * Skip the sniff for:
- *   (a) callers that provided an `extensions` allowlist — the file
+ *   (a) callers that opted out via `classifyBinary: false` — they ignore
+ *       `isBinary`, so no read is worth doing;
+ *   (b) callers that provided an `extensions` allowlist — the file
  *       already passed it, so by construction the caller considers
  *       its extension text-bearing;
- *   (b) known text extensions (`TEXT_EXTENSIONS`);
- *   (c) empty files.
+ *   (c) known text extensions (`TEXT_EXTENSIONS`);
+ *   (d) empty files.
  *
- * Ordering matters: (a) runs first so we never re-compute
- * `path.extname` + `Set.has` for the hot DSN-scan path where
- * `processEntry` has already matched the extension.
+ * Ordering matters: (a)/(b) run first so we never read file contents (or
+ * even re-compute `path.extname` + `Set.has`) for the hot DSN-scan path
+ * where `processEntry` has already matched the extension.
  */
 async function classifyFile(
   absPath: string,
   size: number,
   cfg: NormalizedOptions
 ): Promise<boolean> {
+  if (!cfg.classifyBinary) {
+    // (a) caller ignores `isBinary` — skip all classification work.
+    return false;
+  }
   if (cfg.extensions !== undefined) {
-    // (a) caller filtered — skip re-classification.
+    // (b) caller filtered — skip re-classification.
     return false;
   }
   const byExt = classifyByExtension(absPath, TEXT_EXTENSIONS);
@@ -911,6 +929,7 @@ type NormalizedOptions = {
   timeBudgetMs: number;
   clock: () => number;
   recordMtimes: boolean;
+  classifyBinary: boolean;
   onDirectoryVisit: ((absDir: string, mtimeMs: number) => void) | undefined;
 };
 
@@ -939,6 +958,7 @@ function normalizeOptions(opts: WalkOptions): NormalizedOptions {
     timeBudgetMs: opts.timeBudgetMs ?? Number.POSITIVE_INFINITY,
     clock: opts.clock ?? (() => performance.now()),
     recordMtimes: opts.recordMtimes ?? false,
+    classifyBinary: opts.classifyBinary ?? true,
     onDirectoryVisit: opts.onDirectoryVisit,
   };
 }

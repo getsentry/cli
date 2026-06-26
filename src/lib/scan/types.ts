@@ -180,6 +180,20 @@ export type WalkOptions = {
    */
   recordMtimes?: boolean;
   /**
+   * Classify each yielded file as binary, populating `WalkEntry.isBinary`.
+   * Default: `true`.
+   *
+   * When `true` (and no `extensions` allowlist is set), files with an
+   * unknown extension are sniffed by reading their first 8 KB and looking
+   * for a NUL byte. Consumers that ignore `isBinary` and walk large
+   * binary-heavy trees (e.g. the debug-information-file scanner) should
+   * pass `false` to skip that per-file head-read entirely — every entry is
+   * then reported with `isBinary: false` without touching file contents.
+   * Has no effect when `extensions` is set (classification is already
+   * skipped for allowlisted files).
+   */
+  classifyBinary?: boolean;
+  /**
    * Observer invoked once per directory the walker enters, with the
    * directory's absolute path and its floored `stat.mtimeMs`. Fires
    * after the directory's entries are read but before any children
