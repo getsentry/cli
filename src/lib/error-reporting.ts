@@ -4,10 +4,10 @@
  * Provides two things:
  *
  * 1. **Silencing rules** — `OutputError`, network failures (offline/DNS/proxy),
- *    `ContextError` (a required value the user omitted), expected-state
- *    `AuthError`, 401–499 `ApiError`, and 400 `ApiError`s that report an
- *    unparseable user search query are not sent to Sentry as issues. A
- *    `cli.error.silenced` metric preserves volume + user/org context.
+ *    `ContextError` (a required value the user omitted), `AuthError` (expected
+ *    auth states the user must act on), 401–499 `ApiError`, and 400 `ApiError`s
+ *    that report an unparseable user search query are not sent to Sentry as
+ *    issues. A `cli.error.silenced` metric preserves volume + user/org context.
  *
  * 2. **Grouping tags** — enriches every error event with `cli_error.*` tags
  *    that Sentry's server-side fingerprint rules use for stable grouping.
@@ -82,10 +82,13 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   if (error instanceof ContextError) {
     return "context_missing";
   }
-  if (
-    error instanceof AuthError &&
-    (error.reason === "not_authenticated" || error.reason === "expired")
-  ) {
+  // All AuthError reasons are expected auth states the user must act on, not
+  // CLI bugs: `not_authenticated` (no token), `expired` (token aged out), and
+  // `invalid` (a bad/insufficiently-scoped token the user supplied). `invalid`
+  // is now only thrown for a genuine 401/403 (see auth/login.ts) — transient
+  // network/server failures no longer masquerade as it — so it is safe to
+  // silence alongside the others (CLI-19).
+  if (error instanceof AuthError) {
     return "auth_expected";
   }
   if (error instanceof ApiError && error.status > 400 && error.status < 500) {
