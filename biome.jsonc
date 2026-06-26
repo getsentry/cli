@@ -18,7 +18,13 @@
       "!docs",
       "!test/init-eval/templates",
       "!dist-build",
-      "!!src/lib/custom-ca.ts"
+      "!!src/lib/custom-ca.ts",
+      // Vendored verbatim from the `xcode` package (Apache-2.0) with the
+      // child_process-dependent require stripped. Kept as-is, not linted.
+      "!src/lib/init/agent/framework/pbxWriter.vendor.mjs",
+      // Hand-maintained ambient type declaration for the untyped `xcode`
+      // package; mirrors upstream shapes, not subject to our style rules.
+      "!src/types/xcode.d.ts"
     ]
   },
   "javascript": {},
@@ -40,6 +46,23 @@
     }
   },
   "overrides": [
+    {
+      // Faithful ports of the (previously server-side) deterministic Sentry
+      // docs navigation and Xcode pbxproj transforms. Kept structurally close
+      // to their source for reviewability, so the cognitive-complexity cap is
+      // relaxed here rather than restructuring proven logic.
+      "includes": [
+        "src/lib/init/docs/**/*.ts",
+        "src/lib/init/agent/framework/**/*.ts"
+      ],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off"
+          }
+        }
+      }
+    },
     {
       // The React-hook lint rules infer "this is a hook" from the
       // `use*` naming convention. We have a couple of test helpers

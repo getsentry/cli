@@ -1,10 +1,22 @@
-export const DEFAULT_MASTRA_API_URL =
+/**
+ * Sentry init gateway. A thin authenticated Cloudflare Worker that forwards
+ * model traffic to the Vercel AI Gateway. The local Claude Agent SDK points
+ * its `ANTHROPIC_BASE_URL` at `${gateway}${SENTRY_INIT_ANTHROPIC_PATH}` and
+ * authenticates with the user's Sentry token.
+ */
+export const SENTRY_INIT_GATEWAY_URL =
+  process.env.SENTRY_INIT_GATEWAY_URL ??
+  process.env.MASTRA_API_URL ??
   "https://sentry-init-agent.getsentry.workers.dev";
 
-export const MASTRA_API_URL =
-  process.env.MASTRA_API_URL ?? DEFAULT_MASTRA_API_URL;
+/** Path on the gateway that proxies the Anthropic Messages API. */
+export const SENTRY_INIT_ANTHROPIC_PATH = "/anthropic";
 
-export const WORKFLOW_ID = "sentry-wizard";
+/** Full base URL the Claude Agent SDK should use for model requests. */
+export const SENTRY_INIT_ANTHROPIC_BASE_URL = new URL(
+  SENTRY_INIT_ANTHROPIC_PATH,
+  SENTRY_INIT_GATEWAY_URL
+).href;
 
 export const SENTRY_DOCS_URL = "https://docs.sentry.io/platforms/";
 
