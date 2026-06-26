@@ -30,6 +30,17 @@ env:
   # don't fully support it, causing SIGABRT in Node.js processes.
   # See: https://github.com/actions/runner-images/issues/13602
   UV_USE_IO_URING: "0"
+  # CI Node.js versions, pinned to exact patches and used as the single source
+  # of truth for every actions/setup-node step (referenced as
+  # ${{ env.NODE_VERSION_xx }}). Node 24.17.0 / 22.23.0 (CVE-2026-48931's
+  # http.Agent fix) added a `data` listener on idle agent sockets that makes
+  # keep-alive fetch reuse throw false ERR_STREAM_PREMATURE_CLOSE
+  # ("Premature close" — hit by the skill-eval planner talking to external
+  # APIs). Fixed in 24.18.0 / 22.23.1 (nodejs/node#64004). A floating major
+  # ("24"/"22") silently reuses the runner's pre-cached buggy patch, so pin the
+  # exact patched versions here and bump them in one place.
+  NODE_VERSION_22: "22.23.1"
+  NODE_VERSION_24: "24.18.0"
 
 jobs:
   changes:
@@ -128,7 +139,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION_22 }}
       - uses: actions/cache@v5
         id: cache
         with:
@@ -183,7 +194,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION_22 }}
       - uses: actions/cache@v5
         id: cache
         with:
@@ -214,7 +225,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: ${{ env.NODE_VERSION_24 }}
       - uses: actions/cache@v5
         id: cache
         with:
@@ -249,7 +260,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION_22 }}
       - uses: actions/cache@v5
         id: cache
         with:
@@ -710,13 +721,10 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          # Pin exact patch: Node 24.17.0 (and 22.23.0) shipped CVE-2026-48931's
-          # http.Agent fix, which added a `data` listener on idle sockets that
-          # makes keep-alive fetch reuse throw false ERR_STREAM_PREMATURE_CLOSE.
-          # This surfaces as "Premature close" in the skill-eval planner's HTTP
-          # calls. Fixed in 24.18.0 (nodejs/node#64004). A floating "24" silently
-          # reuses the runner's pre-cached buggy 24.17.0, so pin the exact patch.
-          node-version: "24.18.0"
+          # Pinned to a patched 24 — the skill-eval planner makes keep-alive
+          # HTTPS calls and would hit the ERR_STREAM_PREMATURE_CLOSE regression
+          # on a floating "24". See NODE_VERSION_24 in the top-level env block.
+          node-version: ${{ env.NODE_VERSION_24 }}
       - uses: actions/cache@v5
         id: cache
         with:
@@ -755,7 +763,10 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node }}
+          # Matrix entries stay bare majors ("22"/"24") for the job name and the
+          # `matrix.node == '22'` artifact guard below; map each to its exact
+          # patched version from the central env block here.
+          node-version: ${{ matrix.node == '24' && env.NODE_VERSION_24 || env.NODE_VERSION_22 }}
       - uses: actions/cache@v5
         id: cache
         with:
@@ -818,7 +829,7 @@ jobs:
       # build doesn't rely on whatever ships on the runner image.
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: ${{ env.NODE_VERSION_24 }}
       - uses: actions/cache@v5
         id: cache
         with:
