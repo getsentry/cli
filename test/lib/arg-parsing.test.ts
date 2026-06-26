@@ -342,6 +342,49 @@ describe("parseIssueArg", () => {
     });
   });
 
+  // Multi-line input (CLI-1G1): agents and shells pass identifiers with
+  // internal newlines (command substitution capturing extra output, an
+  // appended note, or several newline-separated IDs). A bare trim() leaves the
+  // internal newline, which previously threw a cryptic "contains a newline"
+  // ValidationError. We keep the first non-blank line instead.
+  describe("multi-line and whitespace input (CLI-1G1)", () => {
+    const expected = {
+      type: "explicit",
+      org: "sentry",
+      project: "cli",
+      suffix: "G",
+    };
+
+    test("strips a trailing newline (CLI-16M regression)", () => {
+      expect(parseIssueArg("sentry/cli-G\n")).toEqual(expected);
+    });
+
+    test("skips leading blank lines", () => {
+      expect(parseIssueArg("\n\n  sentry/cli-G")).toEqual(expected);
+    });
+
+    test("keeps the first line when a note is appended after a newline", () => {
+      expect(parseIssueArg("sentry/cli-G\nthe auth-token error")).toEqual(
+        expected
+      );
+    });
+
+    test("keeps the first identifier when several are newline-separated", () => {
+      expect(parseIssueArg("sentry/cli-G\nsentry/cli-H")).toEqual(expected);
+    });
+
+    test("handles CRLF line endings", () => {
+      expect(parseIssueArg("sentry/cli-G\r\ntrailing line")).toEqual(expected);
+    });
+
+    test("throws a clear error when input is only blank lines", () => {
+      expect(() => parseIssueArg("\n   \n\t\n")).toThrow(ValidationError);
+      expect(() => parseIssueArg("\n   \n\t\n")).toThrow(
+        /empty after trimming/
+      );
+    });
+  });
+
   // Error cases - verify specific error messages
   describe("error cases", () => {
     test("org/-suffix throws error", () => {

@@ -66,6 +66,9 @@ function looksLikeDisplayName(input: string): boolean {
  */
 const ISSUE_SHORT_ID_PATTERN = /^[A-Z][A-Z0-9]*(-[A-Z][A-Z0-9]*)*-[A-Z0-9]+$/;
 
+/** Splits a string into lines on LF or CRLF boundaries. */
+const LINE_SPLIT_PATTERN = /\r?\n/;
+
 /**
  * Check if a string looks like a Sentry issue short ID.
  *
@@ -1084,8 +1087,22 @@ export function parseSlashSeparatedArg(
 }
 
 export function parseIssueArg(arg: string): ParsedIssueArg {
-  // Trim whitespace — agents may pass trailing newlines (CLI-16M)
-  const input = arg.trim();
+  // Take the first non-blank line. A bare `.trim()` only strips leading and
+  // trailing whitespace, so multi-line input (command substitution that
+  // captured extra output, an identifier with an appended note, or several
+  // newline-separated IDs) left an *internal* newline that reached
+  // validateResourceId and threw a cryptic "contains a newline" error
+  // (CLI-1G1, 116+ users). An issue identifier is always a single line, so the
+  // first non-blank line is the intended value. Unlike `sentry api`, which
+  // rejoins wrapped URLs (CLI-FR), identifiers are atomic tokens — joining
+  // lines would produce garbage, so we keep only the first line.
+  // Splitting on `\n` (a control char) never breaks project display names with
+  // spaces (#1116), since those are rejected as control chars anyway.
+  const input =
+    arg
+      .split(LINE_SPLIT_PATTERN)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) ?? "";
 
   if (!input) {
     throw new ValidationError(
