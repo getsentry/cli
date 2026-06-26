@@ -6,7 +6,7 @@
  */
 
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
@@ -199,6 +199,22 @@ describe("agent-skills", () => {
       );
       expect(leftovers).toEqual([]);
       expect(existsSync(join(skillDir, "SKILL.md"))).toBe(false);
+    });
+
+    test("still fails to null when temp cleanup also fails after a rename error", async () => {
+      mkdirSync(join(testDir, ".agents"), { recursive: true });
+
+      // Both the rename and the subsequent best-effort `rm` of the temp file
+      // fail. The cleanup error must be swallowed (captured, not thrown) so the
+      // original rename error is what propagates — exercising the inner
+      // catch of atomicWriteFile.
+      vi.mocked(rename).mockRejectedValueOnce(new Error("rename failed"));
+      vi.mocked(rm).mockRejectedValueOnce(new Error("cleanup failed"));
+
+      const result = await installAgentSkills(testDir);
+
+      expect(result).toBeNull();
+      expect(vi.mocked(rm)).toHaveBeenCalled();
     });
 
     test("installs to both ~/.agents/ and ~/.claude/ when both roots exist", async () => {
