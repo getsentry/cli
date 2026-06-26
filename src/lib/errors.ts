@@ -474,18 +474,33 @@ export class ContextError extends CliError {
  * @param headline - Short phrase describing the failure (e.g., "not found", "is ambiguous", "could not be resolved")
  * @param hint - Primary usage example or suggestion (shown under "Try:")
  * @param suggestions - Additional help bullets shown under "Or:" (defaults to empty)
+ * @param options - Optional behavior overrides
+ * @param options.expected - When `true`, marks this failure as an expected,
+ *   user-driven miss (e.g. a looked-up event/issue ID that genuinely doesn't
+ *   exist) so it is silenced rather than captured as a Sentry issue. Defaults
+ *   to `false`: by default resolution failures are still captured for
+ *   product/CLI observability. Silencing is opt-in per call site, never
+ *   class-wide — see `classifySilenced` in `error-reporting.ts`.
  */
 export class ResolutionError extends CliError {
   readonly resource: string;
   readonly headline: string;
   readonly hint: string;
   readonly suggestions: string[];
+  /**
+   * Whether this resolution failure is an expected user-driven miss that
+   * should be silenced (no Sentry issue, no crashed session). Opt-in per
+   * call site; defaults to `false` so failures remain observable.
+   */
+  readonly expected: boolean;
 
+  // biome-ignore lint/nursery/useMaxParams: established 4-param shape; options is a defaulted extension
   constructor(
     resource: string,
     headline: string,
     hint: string,
-    suggestions: string[] = []
+    suggestions: string[] = [],
+    options: { expected?: boolean } = {}
   ) {
     super(
       buildResolutionMessage(resource, headline, hint, suggestions),
@@ -496,6 +511,7 @@ export class ResolutionError extends CliError {
     this.headline = headline;
     this.hint = hint;
     this.suggestions = suggestions;
+    this.expected = options.expected ?? false;
   }
 
   override format(): string {

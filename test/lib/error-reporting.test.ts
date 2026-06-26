@@ -2,7 +2,7 @@
  * Unit tests for the central error reporting helper.
  *
  * Covers:
- * - Silencing rules (OutputError / expected AuthError / 401–499 ApiError)
+ * - Silencing rules (OutputError / ResolutionError / expected AuthError / 401–499 ApiError)
  * - Grouping tag extraction (extractResourceKind)
  * - Tag enrichment in beforeSend (enrichEventWithGroupingTags)
  * - End-to-end behavior of reportCliError (metric emission + capture)
@@ -244,9 +244,24 @@ describe("classifySilenced", () => {
     expect(classifySilenced(new ApiError("x", status))).toBeNull();
   });
 
+  test("silences ResolutionError only when expected:true", () => {
+    expect(
+      classifySilenced(
+        new ResolutionError(
+          "Event 'abc'",
+          "not found",
+          "sentry event view <org>/<project> abc",
+          [],
+          { expected: true }
+        )
+      )
+    ).toBe("user_input_error");
+  });
+
   test.each([
     ["ContextError", new ContextError("Organization", "sentry org view <x>")],
     [
+      // Plain (non-expected) resolution failures stay captured for observability.
       "ResolutionError",
       new ResolutionError("Project 'x'", "not found", "sentry issue list"),
     ],
@@ -447,7 +462,7 @@ describe("reportCliError integration", () => {
     expect(traceErr["cli_error.kind"]).not.toBe(eventErr["cli_error.kind"]);
   });
 
-  test("captures ResolutionError", () => {
+  test("captures plain ResolutionError (not expected)", () => {
     const err = new ResolutionError(
       "Project 'x'",
       "not found",
@@ -455,6 +470,31 @@ describe("reportCliError integration", () => {
     );
     reportCliError(err);
     expect(captureSpy).toHaveBeenCalledWith(err);
+    expect(metricSpy).not.toHaveBeenCalled();
+  });
+
+  test("silences expected ResolutionError and emits metric with resource_kind", () => {
+    reportCliError(
+      new ResolutionError(
+        "Event 'abc' in organization \"my-org\"",
+        "not found",
+        "sentry event view my-org/<project> abc",
+        [],
+        { expected: true }
+      )
+    );
+    expect(captureSpy).not.toHaveBeenCalled();
+    expect(metricSpy).toHaveBeenCalledWith(
+      "cli.error.silenced",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          error_class: "ResolutionError",
+          reason: "user_input_error",
+          resource_kind: "Event",
+        }),
+      })
+    );
   });
 
   test("captures SeerError (marketing dashboard)", () => {
