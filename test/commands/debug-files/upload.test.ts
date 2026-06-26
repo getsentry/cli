@@ -346,6 +346,52 @@ describe("sentry debug-files upload", () => {
     expect(exitCode).not.toBe(0);
   });
 
+  test("a partial size-drop still uploads the rest but exits non-zero", async () => {
+    process.env.SENTRY_ORG = "test-org";
+    process.env.SENTRY_PROJECT = "test-project";
+    // One in-cap file and one valid-header file well over the cap.
+    await writeBreakpad("small.sym");
+    const bigBody = `${[
+      "MODULE Linux x86_64 1A23B5DA412AFBF7C8662048F3294F3D0 big",
+      "INFO CODE_ID DAA5130F2A41F7FBC8662048F3294F3D439CA7FF",
+    ].join("\n")}\n${Array.from(
+      { length: 500 },
+      (_, i) => `PUBLIC ${i.toString(16)} 0 sym_${i}`
+    ).join("\n")}`;
+    await writeFile(join(tempDir, "big.sym"), bigBody);
+
+    // Cap between the two sizes: the small file passes the scan gate, the big
+    // one is dropped (counted in oversizedCount) before it is ever read fully.
+    vi.spyOn(chunkUpload, "getChunkUploadOptions").mockResolvedValue({
+      url: "https://us.sentry.io/api/0/chunk-upload/",
+      chunkSize: 8192,
+      chunksPerRequest: 64,
+      maxRequestSize: 1_048_576,
+      maxFileSize: 1000,
+      hashAlgorithm: "sha1",
+      concurrency: 8,
+      compression: ["gzip"],
+    } as Awaited<ReturnType<typeof chunkUpload.getChunkUploadOptions>>);
+
+    const spy = vi.spyOn(debugFilesApi, "uploadDebugFiles").mockResolvedValue([
+      {
+        name: "small.sym",
+        debugId: KNOWN_DEBUG_ID,
+        checksum: "a".repeat(40),
+        state: "ok",
+        detail: null,
+      },
+    ]);
+
+    const { exitCode } = await runUpload([tempDir]);
+    // The in-cap file is still uploaded...
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]?.difs).toHaveLength(1);
+    // ...but the dropped oversized file makes the command fail loudly rather
+    // than reporting a clean success.
+    expect(exitCode).toBe(1);
+  });
+
   test("wait mode surfaces processing errors with a non-zero exit", async () => {
     process.env.SENTRY_ORG = "test-org";
     process.env.SENTRY_PROJECT = "test-project";
