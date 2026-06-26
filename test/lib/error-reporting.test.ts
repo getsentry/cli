@@ -16,7 +16,6 @@ import {
   enrichEventWithGroupingTags,
   extractMessagePrefix,
   extractResourceKind,
-  isSearchQueryParseError,
   normalizeEndpoint,
   reportCliError,
 } from "../../src/lib/error-reporting.js";
@@ -27,6 +26,7 @@ import {
   ConfigError,
   ContextError,
   HostScopeError,
+  isSearchQueryParseError,
   OutputError,
   ResolutionError,
   SeerError,

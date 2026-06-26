@@ -320,6 +320,14 @@ describe("isUserApiError", () => {
     expect(isUserApiError(new ApiError("Bad request", 400))).toBe(false);
   });
 
+  test("returns true for 400 search-query parse error (user input)", () => {
+    expect(
+      isUserApiError(
+        new ApiError("bad", 400, "Error parsing search query: invalid status")
+      )
+    ).toBe(true);
+  });
+
   test("returns true for 401 Unauthorized", () => {
     expect(isUserApiError(new ApiError("Unauthorized", 401))).toBe(true);
   });

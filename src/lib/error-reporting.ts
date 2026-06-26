@@ -27,6 +27,7 @@ import {
   ContextError,
   DeviceFlowError,
   HostScopeError,
+  isSearchQueryParseError,
   OutputError,
   ResolutionError,
   SeerError,
@@ -50,33 +51,6 @@ type SilenceReason =
   | "auth_expected"
   | "api_user_error"
   | "api_query_error";
-
-/**
- * Sentry's search-query parser emits a 400 whose detail begins with this
- * phrase when the user's `--query` cannot be parsed (e.g. `is:403`,
- * `lastSeen:>=-24h`, an empty `status:`). The server is telling us the
- * user-supplied query is malformed — definitionally a user input error, not
- * the CLI constructing a bad request — so these 400s are silenced.
- */
-const SEARCH_QUERY_PARSE_MARKER = "Error parsing search query";
-
-/**
- * Whether an `ApiError` is a Sentry search-query parse failure (HTTP 400 whose
- * detail reports an unparseable query). Used to silence query-syntax mistakes
- * that would otherwise be captured by the "400 = CLI bug" default.
- *
- * The CLI preserves the server's detail when re-wrapping list errors (see
- * `enrichIssueListError` in `issue/list.ts`, which prepends the original
- * detail), so a substring match is robust to that wrapping.
- *
- * @internal Exported for testing.
- */
-export function isSearchQueryParseError(error: ApiError): boolean {
-  return (
-    error.status === 400 &&
-    (error.detail?.includes(SEARCH_QUERY_PARSE_MARKER) ?? false)
-  );
-}
 
 /**
  * Classify whether an error should be silenced.

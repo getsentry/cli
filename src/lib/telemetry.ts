@@ -37,7 +37,7 @@ import {
   enrichEventWithGroupingTags,
   reportCliError,
 } from "./error-reporting.js";
-import { ApiError } from "./errors.js";
+import { ApiError, isSearchQueryParseError } from "./errors.js";
 import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { makeCompressedTransport } from "./telemetry/zstd-transport.js";
@@ -347,8 +347,10 @@ export function isEbadfError(event: Sentry.ErrorEvent): boolean {
  * Check if an error is a user-caused (401–499) API error.
  *
  * 401–499 errors are user errors — wrong issue IDs, no access, rate limited —
- * not CLI bugs. 400 Bad Request is **excluded** because it indicates the CLI
- * constructed a malformed API request, which is a code defect.
+ * not CLI bugs. 400 Bad Request is **excluded** because it usually indicates
+ * the CLI constructed a malformed API request, which is a code defect — except
+ * when the server reports the user's search query was unparseable, which is a
+ * user input mistake (kept in sync with `classifySilenced` / `isUserError`).
  *
  * These should be recorded as span attributes for volume-spike detection in
  * Discover, but should NOT be captured as Sentry exceptions.
@@ -356,7 +358,12 @@ export function isEbadfError(event: Sentry.ErrorEvent): boolean {
  * @internal Exported for testing
  */
 export function isUserApiError(error: unknown): boolean {
-  return error instanceof ApiError && error.status > 400 && error.status < 500;
+  if (!(error instanceof ApiError)) {
+    return false;
+  }
+  return (
+    isSearchQueryParseError(error) || (error.status > 400 && error.status < 500)
+  );
 }
 
 /**
