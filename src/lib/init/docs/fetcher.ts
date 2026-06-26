@@ -13,6 +13,7 @@ const FETCH_TIMEOUT_MS = 15_000;
 
 const TRAILING_MD_RE = /\.md$/;
 const TRAILING_SLASHES_RE = /\/+$/;
+const HTTP_URL_RE = /^https?:\/\//i;
 
 const cache = new Map<string, string>();
 const inflight = new Map<string, Promise<string>>();
@@ -55,8 +56,15 @@ function cachedFetch(url: string): Promise<string> {
  */
 export function normalizeDocPath(path: string): string {
   let p = path.trim();
-  if (p.startsWith(BASE_URL)) {
-    p = p.slice(BASE_URL.length);
+  // If a full URL is passed, keep only its path component. We always refetch
+  // against BASE_URL, so any host in the input is discarded (and we avoid a
+  // substring host check, which static analysis flags as unsafe).
+  if (HTTP_URL_RE.test(p)) {
+    try {
+      p = new URL(p).pathname;
+    } catch {
+      // Not a valid URL; fall through and treat the input as a path.
+    }
   }
   p = p.replace(TRAILING_MD_RE, "");
   p = p.replace(TRAILING_SLASHES_RE, "");

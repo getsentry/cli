@@ -15,6 +15,7 @@ import type { WizardOutput } from "../types.js";
 import type { SpinnerHandle, WizardUI } from "../ui/types.js";
 import { canUseInitAgentTool } from "./permissions.js";
 import { resolveClaudeExecutable } from "./runtime.js";
+import { buildAgentSandbox } from "./sandbox.js";
 import { loadAgentSdk, type SdkMessage } from "./sdk-loader.js";
 import { createSentryToolsServer, SENTRY_TOOL_NAMES } from "./tools.js";
 
@@ -225,6 +226,7 @@ export async function runInitAgent({
         settingSources: [],
         mcpServers: { sentry: toolsServer },
         allowedTools: buildAllowedTools(dryRun),
+        sandbox: buildAgentSandbox(workingDirectory, agentTempDir),
         canUseTool: (toolName: string, input: Record<string, unknown>) =>
           Promise.resolve(canUseInitAgentTool(toolName, input)),
         systemPrompt: {

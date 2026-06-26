@@ -10,9 +10,9 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
 import { z } from "zod";
 import { getDocsByKeywords } from "../docs/keyword-lookup.js";
+import { safePath } from "../tools/shared.js";
 import { buildPbxprojCodemod } from "./framework/ios-spm.js";
 import { patchReactNativeXcode } from "./framework/react-native-xcode.js";
 import { loadAgentSdk, type SdkToolResult } from "./sdk-loader.js";
@@ -30,20 +30,8 @@ function textResult(text: string): SdkToolResult {
   return { content: [{ type: "text" as const, text }] };
 }
 
-function resolveUnderRoot(root: string, relativePath: string): string {
-  const resolved = path.resolve(root, relativePath);
-  const normalizedRoot = path.resolve(root);
-  if (
-    resolved !== normalizedRoot &&
-    !resolved.startsWith(`${normalizedRoot}${path.sep}`)
-  ) {
-    throw new Error(`Path escapes the project directory: ${relativePath}`);
-  }
-  return resolved;
-}
-
 function applyIosSpmTool(root: string, relativePath: string): string {
-  const absolute = resolveUnderRoot(root, relativePath);
+  const absolute = safePath(root, relativePath);
   const content = readFileSync(absolute, "utf8");
   const codemod = buildPbxprojCodemod(content, relativePath);
   if (!codemod) {
@@ -54,7 +42,7 @@ function applyIosSpmTool(root: string, relativePath: string): string {
 }
 
 function patchRnXcodeTool(root: string, relativePath: string): string {
-  const absolute = resolveUnderRoot(root, relativePath);
+  const absolute = safePath(root, relativePath);
   const content = readFileSync(absolute, "utf8");
   const patched = patchReactNativeXcode(content);
   if (!patched) {

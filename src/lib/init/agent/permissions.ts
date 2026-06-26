@@ -17,7 +17,10 @@ const ENV_FILE_RE = /(^|[/\\])\.env(?:\.|$)/;
 const DANGEROUS_BASH_RE =
   /(?:^|\s)(?:rm\s+-rf|git\s+reset|git\s+checkout|sudo|chmod\s+-R|chown\s+-R)(?:\s|$)/i;
 const SAFE_REDIRECT_RE = /\s+2>\/dev\/null\s*$/u;
-const SHELL_OPERATOR_RE = /[;&`$()]/;
+// Block command chaining/substitution/redirection/piping. The OS sandbox is the
+// primary egress/write containment; this is the fallback gate on hosts where
+// the sandbox is unavailable. The safe `2>/dev/null` tail is stripped first.
+const SHELL_OPERATOR_RE = /[;&|<>`$()\n\r]/;
 
 const SAFE_BASH_PREFIXES = [
   "npm install",
