@@ -742,23 +742,29 @@ async function tryYieldFile(
  * Classify a file as binary via extension fast-path or 8 KB NUL sniff.
  *
  * Skip the sniff for:
- *   (a) callers that provided an `extensions` allowlist — the file
+ *   (a) callers that opted out via `classifyBinary: false` — they ignore
+ *       `isBinary`, so no read is worth doing;
+ *   (b) callers that provided an `extensions` allowlist — the file
  *       already passed it, so by construction the caller considers
  *       its extension text-bearing;
- *   (b) known text extensions (`TEXT_EXTENSIONS`);
- *   (c) empty files.
+ *   (c) known text extensions (`TEXT_EXTENSIONS`);
+ *   (d) empty files.
  *
- * Ordering matters: (a) runs first so we never re-compute
- * `path.extname` + `Set.has` for the hot DSN-scan path where
- * `processEntry` has already matched the extension.
+ * Ordering matters: (a)/(b) run first so we never read file contents (or
+ * even re-compute `path.extname` + `Set.has`) for the hot DSN-scan path
+ * where `processEntry` has already matched the extension.
  */
 async function classifyFile(
   absPath: string,
   size: number,
   cfg: NormalizedOptions
 ): Promise<boolean> {
+  if (!cfg.classifyBinary) {
+    // (a) caller ignores `isBinary` — skip all classification work.
+    return false;
+  }
   if (cfg.extensions !== undefined) {
-    // (a) caller filtered — skip re-classification.
+    // (b) caller filtered — skip re-classification.
     return false;
   }
   const byExt = classifyByExtension(absPath, TEXT_EXTENSIONS);
@@ -911,6 +917,7 @@ type NormalizedOptions = {
   timeBudgetMs: number;
   clock: () => number;
   recordMtimes: boolean;
+  classifyBinary: boolean;
   onDirectoryVisit: ((absDir: string, mtimeMs: number) => void) | undefined;
 };
 
@@ -939,6 +946,7 @@ function normalizeOptions(opts: WalkOptions): NormalizedOptions {
     timeBudgetMs: opts.timeBudgetMs ?? Number.POSITIVE_INFINITY,
     clock: opts.clock ?? (() => performance.now()),
     recordMtimes: opts.recordMtimes ?? false,
+    classifyBinary: opts.classifyBinary ?? true,
     onDirectoryVisit: opts.onDirectoryVisit,
   };
 }

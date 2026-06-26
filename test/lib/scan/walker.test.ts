@@ -279,6 +279,37 @@ describe("walkFiles — binary detection", () => {
       cleanup();
     }
   });
+
+  test("classifyBinary: false yields files without sniffing (isBinary=false)", async () => {
+    const { cwd, cleanup } = makeSandbox({});
+    try {
+      // A NUL-containing blob that the default sniff classifies as binary.
+      const bin = new Uint8Array(256);
+      bin[10] = 0;
+      writeFileSync(join(cwd, "blob.bin"), bin);
+
+      const findBlob = async (
+        opts: Parameters<typeof walkFiles>[0]
+      ): Promise<WalkEntry | undefined> => {
+        for await (const e of walkFiles(opts)) {
+          if (e.relativePath === "blob.bin") {
+            return e;
+          }
+        }
+        return;
+      };
+
+      // By default the blob sniffs as binary; with classification disabled the
+      // same file is still yielded but reported non-binary (the 8 KB head-read
+      // is skipped entirely).
+      expect((await findBlob({ cwd }))?.isBinary).toBe(true);
+      expect((await findBlob({ cwd, classifyBinary: false }))?.isBinary).toBe(
+        false
+      );
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 describe("walkFiles — mtime recording", () => {
