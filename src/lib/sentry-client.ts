@@ -25,7 +25,12 @@ import {
 } from "./custom-ca.js";
 import { applyCustomHeaders } from "./custom-headers.js";
 import { getAuthToken, refreshToken } from "./db/auth.js";
-import { ApiError, HostScopeError, TimeoutError } from "./errors.js";
+import {
+  ApiError,
+  HostScopeError,
+  isNetworkError,
+  TimeoutError,
+} from "./errors.js";
 import { logger } from "./logger.js";
 import {
   clearLastCacheHitAge,
@@ -349,6 +354,21 @@ function handleFetchError(
       error: new TimeoutError(
         `Request timed out after ${seconds}s.`,
         "The Sentry API did not respond in time. Try again; if the problem persists, check https://status.sentry.io."
+      ),
+    };
+  }
+  // Network-level failure (DNS, connection refused/timeout, offline, proxy):
+  // Node's fetch rejects with a raw `TypeError: "fetch failed"`. After retries
+  // are exhausted, wrap it in a clear ApiError(status 0) instead of surfacing
+  // the cryptic TypeError (CLI-16W). status 0 marks it as a non-CLI-bug network
+  // error for `isUserError`/`classifySilenced`, mirroring `throwApiError`.
+  if (isNetworkError(error) && isLastAttempt) {
+    return {
+      action: "throw",
+      error: new ApiError(
+        "Network error",
+        0,
+        "Unable to reach the Sentry API. Check your internet connection (or proxy/VPN) and try again."
       ),
     };
   }

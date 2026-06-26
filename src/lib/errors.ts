@@ -781,6 +781,27 @@ export function isSearchQueryParseError(error: ApiError): boolean {
 }
 
 /**
+ * Whether an error is a network-level failure — the CLI could not reach the
+ * Sentry API at all (offline, DNS failure, connection refused/timeout, proxy).
+ *
+ * Two shapes occur:
+ * - An {@link ApiError} with `status === 0`, produced when the SDK/raw paths
+ *   wrap a fetch rejection (see `throwApiError` / `handleFetchError`).
+ * - A raw `TypeError: "fetch failed"` — Node's `fetch` (undici) uses this exact
+ *   message for every network-level failure (the real errno is in `cause`).
+ *
+ * These reflect the user's environment, not a CLI bug, so they are treated as
+ * user errors (no upgrade nudge) and are not reported to Sentry as issues —
+ * the same rationale as dropping EPIPE/EBADF OS noise in `beforeSend`.
+ */
+export function isNetworkError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return error.status === 0;
+  }
+  return error instanceof TypeError && error.message === "fetch failed";
+}
+
+/**
  * Classify errors caused by user input, configuration, auth state, or account
  * settings. These errors already tell the user what to fix, so upgrade nudges
  * should use the neutral update banner instead of implying a CLI bug fix.
@@ -789,14 +810,16 @@ export function isSearchQueryParseError(error: ApiError): boolean {
  * Explicit non-user subclasses must be checked before that fallback.
  */
 export function isUserError(error: unknown): boolean {
+  // Network failures (ApiError status 0 or a raw "fetch failed" TypeError) are
+  // the user's environment, not a CLI bug.
+  if (isNetworkError(error)) {
+    return true;
+  }
+
   if (error instanceof ApiError) {
-    // Status 0 = network-level failure (DNS, ECONNREFUSED) — user environment,
-    // not a CLI bug. 400 usually means the CLI constructed a bad request, so it
-    // is treated as a CLI bug — except when the server reports the user's search
-    // query was unparseable, which is a user input mistake.
-    if (error.status === 0) {
-      return true;
-    }
+    // 400 usually means the CLI constructed a bad request, so it is treated as
+    // a CLI bug — except when the server reports the user's search query was
+    // unparseable, which is a user input mistake.
     if (isSearchQueryParseError(error)) {
       return true;
     }

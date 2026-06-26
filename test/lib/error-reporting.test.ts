@@ -239,6 +239,22 @@ describe("classifySilenced", () => {
     expect(classifySilenced(new ApiError("bad", 400))).toBeNull();
   });
 
+  test("silences ApiError with status 0 (network failure)", () => {
+    expect(classifySilenced(new ApiError("Network error", 0))).toBe(
+      "network_error"
+    );
+  });
+
+  test("silences a raw 'fetch failed' TypeError (network failure)", () => {
+    expect(classifySilenced(new TypeError("fetch failed"))).toBe(
+      "network_error"
+    );
+  });
+
+  test("does NOT silence an unrelated TypeError", () => {
+    expect(classifySilenced(new TypeError("x is not a function"))).toBeNull();
+  });
+
   test("silences ApiError 400 with a search-query parse detail", () => {
     expect(
       classifySilenced(
@@ -602,6 +618,18 @@ describe("reportCliError integration", () => {
       1,
       expect.objectContaining({
         attributes: expect.objectContaining({ reason: "output_error" }),
+      })
+    );
+  });
+
+  test("silences a network error and emits metric", () => {
+    reportCliError(new ApiError("Network error", 0));
+    expect(captureSpy).not.toHaveBeenCalled();
+    expect(metricSpy).toHaveBeenCalledWith(
+      "cli.error.silenced",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({ reason: "network_error" }),
       })
     );
   });
