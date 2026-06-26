@@ -245,7 +245,13 @@ describe("classifySilenced", () => {
   });
 
   test.each([
-    ["ContextError", new ContextError("Organization", "sentry org view <x>")],
+    ["auto-detect failure", new ContextError("Organization and project", "x")],
+    ["missing ID", new ContextError("Event ID", "sentry event view <id>", [])],
+  ])("silences ContextError (%s)", (_label, err) => {
+    expect(classifySilenced(err)).toBe("context_missing");
+  });
+
+  test.each([
     [
       "ResolutionError",
       new ResolutionError("Project 'x'", "not found", "sentry issue list"),
@@ -402,12 +408,22 @@ describe("reportCliError integration", () => {
     return { tags, contexts };
   }
 
-  test("captures ContextError with scope (tags applied)", () => {
-    const err = new ContextError("Organization", "sentry org view <slug>");
-    reportCliError(err);
-    expect(captureSpy).toHaveBeenCalledWith(err);
-    expect(withScopeSpy).toHaveBeenCalled();
-    expect(metricSpy).not.toHaveBeenCalled();
+  test("silences ContextError and emits metric with resource", () => {
+    reportCliError(
+      new ContextError("Organization and project", "sentry org view <slug>")
+    );
+    expect(captureSpy).not.toHaveBeenCalled();
+    expect(metricSpy).toHaveBeenCalledWith(
+      "cli.error.silenced",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          error_class: "ContextError",
+          reason: "context_missing",
+          resource: "Organization and project",
+        }),
+      })
+    );
   });
 
   test("ValidationError with field uses field as kind", () => {

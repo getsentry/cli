@@ -289,7 +289,7 @@ describe("withTelemetry", () => {
       captureSpy.mockRestore();
     });
 
-    test("captures ContextError with fingerprint (no silencing)", async () => {
+    test("silences ContextError (missing user input, not a crash)", async () => {
       const captureSpy = vi.spyOn(Sentry, "captureException");
       const metricSpy = vi.spyOn(Sentry.metrics, "distribution");
       const { ContextError } = await import("../../src/lib/errors.js");
@@ -302,12 +302,13 @@ describe("withTelemetry", () => {
           throw error;
         })
       ).rejects.toThrow(error);
-      expect(captureSpy).toHaveBeenCalledWith(error);
-      // No silencing metric for captured errors
+      // ContextError is an expected "missing input" error — not reported as a
+      // Sentry issue; volume is preserved via the cli.error.silenced metric.
+      expect(captureSpy).not.toHaveBeenCalled();
       const silencedCall = metricSpy.mock.calls.find(
         (c) => c[0] === "cli.error.silenced"
       );
-      expect(silencedCall).toBeUndefined();
+      expect(silencedCall).toBeDefined();
       captureSpy.mockRestore();
       metricSpy.mockRestore();
     });
