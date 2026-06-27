@@ -22,6 +22,7 @@ import {
 import {
   AuthError,
   stringifyUnknown,
+  toSearchQueryError,
   ValidationError,
 } from "../../lib/errors.js";
 import {
@@ -180,6 +181,9 @@ async function executeSingleFetch(
     ...timeRangeToApiParams(timeRange),
     sort: flags.sort,
     extraFields: flags.fields,
+  }).catch((error: unknown): never => {
+    // An unparseable user --query is a user input mistake, not a CLI bug.
+    throw toSearchQueryError(error, flags.query);
   });
 
   const periodLabel =

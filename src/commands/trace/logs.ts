@@ -13,6 +13,7 @@ import {
 } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
+import { toSearchQueryError } from "../../lib/errors.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { formatLogTable } from "../../lib/formatters/log.js";
 import { CommandOutput, formatFooter } from "../../lib/formatters/output.js";
@@ -207,6 +208,9 @@ export const logsCommand = buildCommand({
           limit: flags.limit,
           query,
           sort: flags.sort,
+        }).catch((error: unknown): never => {
+          // An unparseable user --query is a user input mistake, not a CLI bug.
+          throw toSearchQueryError(error, flags.query);
         })
     );
 
