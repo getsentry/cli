@@ -25,6 +25,7 @@ import {
 } from "./hex-id-recovery.js";
 import { logger } from "./logger.js";
 import {
+  guideOrgProjectFailure,
   resolveOrg,
   resolveOrgAndProject,
   resolveProjectBySlug,
@@ -444,14 +445,12 @@ export async function resolveTraceOrgProject(
       ]);
 
     case "auto-detect": {
-      // resolveOrgAndProject already sets telemetry context
-      const resolved = await resolveOrgAndProject({
-        cwd,
-        usageHint,
-      });
-      if (!resolved) {
-        throw new ContextError("Organization and project", usageHint);
-      }
+      // resolveOrgAndProject already sets telemetry context. On a failed
+      // auto-detect, guideOrgProjectFailure offers an interactive picker (TTY)
+      // or an actionable error listing the user's accessible orgs.
+      const resolved =
+        (await resolveOrgAndProject({ cwd, usageHint })) ??
+        (await guideOrgProjectFailure({ usageHint }));
       return {
         traceId: parsed.traceId,
         org: resolved.org,

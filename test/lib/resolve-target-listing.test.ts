@@ -36,6 +36,20 @@ vi.mock("../../src/lib/db/defaults.js", async (importOriginal) => {
 
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as defaults from "../../src/lib/db/defaults.js";
+
+vi.mock("../../src/lib/db/auth.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/lib/db/auth.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([k, v]) => [
+      k,
+      typeof v === "function" ? vi.fn(v) : v,
+    ])
+  );
+});
+
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as auth from "../../src/lib/db/auth.js";
 import { setOrgRegion, setOrgRegions } from "../../src/lib/db/regions.js";
 import { ContextError, ResolutionError } from "../../src/lib/errors.js";
 
@@ -54,6 +68,7 @@ vi.mock("../../src/lib/resolve-target.js", async (importOriginal) => {
 import * as resolveTargetModule from "../../src/lib/resolve-target.js";
 import {
   resolveOrgProjectFromArg,
+  resolveOrgProjectOrGuide,
   resolveOrgProjectTarget,
   resolveOrgsForListing,
   resolveTargetsFromParsedArg,
@@ -166,6 +181,7 @@ describe("resolveOrgsForListing", () => {
 describe("resolveOrgProjectTarget", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
+  let listOrganizationsSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
@@ -173,6 +189,11 @@ describe("resolveOrgProjectTarget", () => {
       resolveTargetModule,
       "resolveOrgAndProject"
     );
+    // No accessible orgs by default so the authenticated account fallback in
+    // resolveOrgProjectOrGuide can't resolve and makes no real HTTP calls.
+    listOrganizationsSpy = vi
+      .spyOn(apiClient, "listOrganizations")
+      .mockResolvedValue([]);
     // Pre-populate org region cache so resolveEffectiveOrg doesn't fetch
     setOrgRegion("my-org", DEFAULT_SENTRY_URL);
   });
@@ -180,6 +201,7 @@ describe("resolveOrgProjectTarget", () => {
   afterEach(() => {
     findProjectsBySlugSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
+    listOrganizationsSpy.mockRestore();
   });
 
   test("returns org and project for explicit type", async () => {
@@ -461,5 +483,92 @@ describe("resolveTargetsFromParsedArg", () => {
       org: "my-org",
       project: "my-proj",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveOrgProjectOrGuide (authenticated account fallback)
+// ---------------------------------------------------------------------------
+
+describe("resolveOrgProjectOrGuide", () => {
+  let isAuthenticatedSpy: ReturnType<typeof spyOn>;
+  let listOrganizationsSpy: ReturnType<typeof spyOn>;
+  let listProjectsSpy: ReturnType<typeof spyOn>;
+  let getDefaultOrgSpy: ReturnType<typeof spyOn>;
+  let getDefaultProjectSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    isAuthenticatedSpy = vi.spyOn(auth, "isAuthenticated");
+    listOrganizationsSpy = vi.spyOn(apiClient, "listOrganizations");
+    listProjectsSpy = vi.spyOn(apiClient, "listProjects");
+    // Force the cascade to miss config defaults so it reaches the account
+    // fallback (CWD has no DSN/config either).
+    getDefaultOrgSpy = vi
+      .spyOn(defaults, "getDefaultOrganization")
+      .mockReturnValue(null);
+    getDefaultProjectSpy = vi
+      .spyOn(defaults, "getDefaultProject")
+      .mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    isAuthenticatedSpy.mockRestore();
+    listOrganizationsSpy.mockRestore();
+    listProjectsSpy.mockRestore();
+    getDefaultOrgSpy.mockRestore();
+    getDefaultProjectSpy.mockRestore();
+  });
+
+  test("auto-selects the sole org/project for a single-org account", async () => {
+    isAuthenticatedSpy.mockReturnValue(true);
+    listOrganizationsSpy.mockResolvedValue([
+      { slug: "solo", name: "Solo Inc" },
+    ]);
+    listProjectsSpy.mockResolvedValue([
+      { id: "42", slug: "only-proj", name: "Only Project" },
+    ]);
+
+    const result = await resolveOrgProjectOrGuide({
+      cwd: CWD,
+      usageHint: "sentry issue list <org>/<project>",
+      interactive: false,
+    });
+
+    expect(result).toMatchObject({ org: "solo", project: "only-proj" });
+  });
+
+  test("throws a ContextError listing accessible orgs for a multi-org account", async () => {
+    isAuthenticatedSpy.mockReturnValue(true);
+    listOrganizationsSpy.mockResolvedValue([
+      { slug: "org-a", name: "Org A" },
+      { slug: "org-b", name: "Org B" },
+    ]);
+
+    try {
+      await resolveOrgProjectOrGuide({
+        cwd: CWD,
+        usageHint: "sentry issue list <org>/<project>",
+        interactive: false,
+      });
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ContextError);
+      expect((err as Error).message).toContain("org-a");
+      expect((err as Error).message).toContain("org-b");
+    }
+  });
+
+  test("throws a generic ContextError when unauthenticated", async () => {
+    isAuthenticatedSpy.mockReturnValue(false);
+
+    await expect(
+      resolveOrgProjectOrGuide({
+        cwd: CWD,
+        usageHint: "sentry issue list <org>/<project>",
+        interactive: false,
+      })
+    ).rejects.toBeInstanceOf(ContextError);
+    // Unauthenticated path must not attempt to list orgs.
+    expect(listOrganizationsSpy).not.toHaveBeenCalled();
   });
 });
