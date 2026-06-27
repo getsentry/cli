@@ -20,6 +20,7 @@ import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo, setUserInfo } from "../../lib/db/user.js";
 import { getEnv } from "../../lib/env.js";
 import {
+  ApiError,
   AuthError,
   HostScopeError,
   ValidationError,
@@ -356,6 +357,32 @@ async function handleExistingAuth(force: boolean): Promise<boolean> {
   return true;
 }
 
+/**
+ * Handle a failure while validating a user-supplied `--token` via
+ * {@link getUserRegions}. A 401/403 means the token itself is rejected (invalid
+ * or insufficiently scoped) — clear it and raise a user-facing {@link AuthError}.
+ * Any other failure (network, 5xx, parse) is NOT a token problem, so the token
+ * is kept and the original error is re-thrown: surfacing "Invalid API token"
+ * would mislead the user and discard the real cause, and clearing a
+ * possibly-valid token on a transient blip is hostile (CLI-19).
+ *
+ * @throws {AuthError} for a 401/403 (after clearing the stored token)
+ * @throws the original error for any other failure
+ */
+async function handleTokenValidationError(error: unknown): Promise<never> {
+  if (
+    error instanceof ApiError &&
+    (error.status === 401 || error.status === 403)
+  ) {
+    await clearAuth();
+    throw new AuthError(
+      "invalid",
+      "Invalid API token. Please check your token and try again."
+    );
+  }
+  throw error;
+}
+
 export const loginCommand = buildCommand({
   auth: false,
   skipRcUrlCheck: true,
@@ -461,12 +488,8 @@ export const loginCommand = buildCommand({
 
       try {
         await getUserRegions();
-      } catch {
-        await clearAuth();
-        throw new AuthError(
-          "invalid",
-          "Invalid API token. Please check your token and try again."
-        );
+      } catch (error) {
+        await handleTokenValidationError(error);
       }
 
       persistLoginUrlAsDefault(flags.url, effectiveHost);

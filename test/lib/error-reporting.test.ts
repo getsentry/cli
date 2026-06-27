@@ -225,8 +225,10 @@ describe("classifySilenced", () => {
     expect(classifySilenced(new AuthError("expired"))).toBe("auth_expected");
   });
 
-  test("does NOT silence AuthError(invalid)", () => {
-    expect(classifySilenced(new AuthError("invalid"))).toBeNull();
+  test("silences AuthError(invalid)", () => {
+    // `invalid` is only thrown for a genuine 401/403 (a bad/insufficient token
+    // the user supplied), so it is an expected auth state like the others.
+    expect(classifySilenced(new AuthError("invalid"))).toBe("auth_expected");
   });
 
   test.each([
@@ -534,9 +536,19 @@ describe("reportCliError integration", () => {
     expect(metricSpy).not.toHaveBeenCalled();
   });
 
-  test("captures AuthError(invalid)", () => {
+  test("silences AuthError(invalid) and emits metric", () => {
     reportCliError(new AuthError("invalid"));
-    expect(captureSpy).toHaveBeenCalled();
+    expect(captureSpy).not.toHaveBeenCalled();
+    expect(metricSpy).toHaveBeenCalledWith(
+      "cli.error.silenced",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          reason: "auth_expected",
+          auth_reason: "invalid",
+        }),
+      })
+    );
   });
 
   test("captures ApiError(400) with normalized endpoint tag", () => {

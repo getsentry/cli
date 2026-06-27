@@ -128,7 +128,11 @@ vi.mock("../../../src/lib/db/user.js", async (importOriginal) => {
 
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbUser from "../../../src/lib/db/user.js";
-import { AuthError, ValidationError } from "../../../src/lib/errors.js";
+import {
+  ApiError,
+  AuthError,
+  ValidationError,
+} from "../../../src/lib/errors.js";
 
 vi.mock("../../../src/lib/interactive-login.js", async (importOriginal) => {
   const actual =
@@ -361,10 +365,10 @@ describe("loginCommand.func --token path", () => {
     expect(out).toContain("x@y.com");
   });
 
-  test("--token: invalid token clears auth and throws AuthError", async () => {
+  test("--token: 401 from validation clears auth and throws AuthError", async () => {
     isAuthenticatedSpy.mockReturnValue(false);
     setAuthTokenSpy.mockReturnValue(undefined);
-    getUserRegionsSpy.mockRejectedValue(new Error("401 Unauthorized"));
+    getUserRegionsSpy.mockRejectedValue(new ApiError("Unauthorized", 401));
     clearAuthSpy.mockResolvedValue(undefined);
 
     const { context } = createContext();
@@ -373,6 +377,24 @@ describe("loginCommand.func --token path", () => {
     ).rejects.toBeInstanceOf(AuthError);
 
     expect(clearAuthSpy).toHaveBeenCalled();
+    expect(getCurrentUserSpy).not.toHaveBeenCalled();
+  });
+
+  test("--token: non-401 validation failure keeps token and re-throws cause", async () => {
+    // A network/server failure during validation is not a token problem:
+    // surface the real error and do NOT clear a possibly-valid token (CLI-19).
+    isAuthenticatedSpy.mockReturnValue(false);
+    setAuthTokenSpy.mockReturnValue(undefined);
+    const cause = new ApiError("Server error", 503);
+    getUserRegionsSpy.mockRejectedValue(cause);
+    clearAuthSpy.mockResolvedValue(undefined);
+
+    const { context } = createContext();
+    await expect(
+      func.call(context, { token: "maybe-good", force: false, timeout: 900 })
+    ).rejects.toBe(cause);
+
+    expect(clearAuthSpy).not.toHaveBeenCalled();
     expect(getCurrentUserSpy).not.toHaveBeenCalled();
   });
 
