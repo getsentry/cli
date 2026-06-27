@@ -65,6 +65,7 @@ import {
   withAuthGuard,
 } from "./errors.js";
 import { fuzzyMatch } from "./fuzzy.js";
+import { interactivePromptsAllowed } from "./interactive-prompts.js";
 import { logger } from "./logger.js";
 import { resolveEffectiveOrg } from "./region.js";
 import { CONFIG_FILENAME, loadSentryCliRc } from "./sentryclirc.js";
@@ -1430,15 +1431,16 @@ async function resolveSoleAccountTarget(): Promise<ResolvedTarget | null> {
 
 /**
  * Whether an interactive org/project picker may be shown. When `override` is
- * provided (e.g. derived from `--json`) it wins; otherwise the picker is only
- * offered when **both** stdin and stdout are TTYs, so piped or redirected
- * invocations never block on a prompt or corrupt machine-readable output.
+ * provided (e.g. derived from `--json`) it wins. Otherwise the picker is only
+ * offered when JSON output is not active (so it never blocks a scripted run or
+ * corrupts stdout JSON) **and** both stdin and stdout are TTYs (so piped or
+ * redirected invocations never block on a prompt).
  */
 function canPromptForTarget(override?: boolean): boolean {
   if (override !== undefined) {
     return override;
   }
-  return isatty(0) && isatty(1);
+  return interactivePromptsAllowed() && isatty(0) && isatty(1);
 }
 
 /**
@@ -1582,6 +1584,8 @@ async function buildAccountContextError(
  * search) keep working — this is only invoked on the explicit failure path.
  *
  * @throws {ContextError} When the target cannot be resolved or chosen.
+ * @throws {ResolutionError} When the interactively-selected organization has no
+ *   accessible projects.
  */
 export async function guideOrgProjectFailure(
   options: Pick<ResolveOptions, "usageHint" | "interactive">
@@ -2107,10 +2111,15 @@ export async function resolveTargetsFromParsedArg(
   switch (parsed.type) {
     case "auto-detect": {
       const result = await resolveAllTargets({ cwd, usageHint });
-      if (result.targets.length === 0) {
-        // Auto-detection found nothing. Offer an interactive picker (TTY) or an
-        // actionable error listing the user's accessible orgs, and let a
-        // single-org/single-project account resolve automatically (CLI-3B).
+      // Only guide when there is genuinely no context. If DSNs WERE found but
+      // could not be resolved (self-hosted / no access), `skippedSelfHosted` is
+      // set — preserve the empty result so the caller surfaces the
+      // inaccessible-DSN error instead of silently resolving a different
+      // org/project (which would mask the real problem).
+      if (result.targets.length === 0 && !result.skippedSelfHosted) {
+        // Offer an interactive picker (TTY) or an actionable error listing the
+        // user's accessible orgs, and let a single-org/single-project account
+        // resolve automatically (CLI-3B).
         result.targets = [await resolveOrgProjectOrGuide({ cwd, usageHint })];
       }
       if (enrichProjectIds) {
