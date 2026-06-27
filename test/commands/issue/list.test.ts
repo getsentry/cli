@@ -286,6 +286,80 @@ describe("issue list: error propagation", () => {
       expect(apiErr.detail).toBeDefined();
     }
   });
+
+  test("converts a search-query parse 400 to a ValidationError when --query is set", async () => {
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
+      if (req.url.includes("/issues/")) {
+        return new Response(
+          JSON.stringify({
+            detail: "Error parsing search query: invalid status value of '403'",
+          }),
+          { status: 400 }
+        );
+      }
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const { context } = createContext();
+
+    try {
+      await func.call(context, {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: false,
+        query: "is:403",
+      });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).field).toBe("query");
+      expect((error as Error).message).toContain("Error parsing search query");
+    }
+  });
+
+  test("keeps a search-query parse 400 as a reported ApiError when no --query is set", async () => {
+    // No user --query means the CLI built the bad query — a real bug that must
+    // stay a reported ApiError(400), not get reclassified as user input.
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
+      if (req.url.includes("/issues/")) {
+        return new Response(
+          JSON.stringify({
+            detail: "Error parsing search query: invalid status value of '403'",
+          }),
+          { status: 400 }
+        );
+      }
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const { context } = createContext();
+
+    try {
+      await func.call(context, {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: false,
+      });
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).status).toBe(400);
+    }
+  });
 });
 
 describe("issue list: org-as-project detection", () => {

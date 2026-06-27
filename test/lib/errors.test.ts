@@ -19,6 +19,7 @@ import {
   SeerError,
   stringifyUnknown,
   TimeoutError,
+  toSearchQueryError,
   UpgradeError,
   ValidationError,
   WizardError,
@@ -507,9 +508,12 @@ describe("isUserError", () => {
     ],
     ["ApiError 400", new ApiError("bad request", 400), false],
     [
+      // A user's unparseable --query becomes a ValidationError at the command
+      // boundary (toSearchQueryError); a raw search-query 400 reaching here is
+      // a CLI-built bad request — a CLI bug, not a user error.
       "ApiError 400 (search query parse)",
       new ApiError("bad", 400, "Error parsing search query: invalid status"),
-      true,
+      false,
     ],
     ["ApiError 401", new ApiError("unauthorized", 401), true],
     ["ApiError 418", new ApiError("teapot", 418), true],
@@ -585,6 +589,54 @@ describe("isSearchQueryParseError", () => {
         new ApiError("x", 422, "Error parsing search query: ...")
       )
     ).toBe(false);
+  });
+});
+
+describe("toSearchQueryError", () => {
+  const parseError = () =>
+    new ApiError(
+      "Failed to fetch issues",
+      400,
+      "Error parsing search query: bad"
+    );
+
+  test("converts a parse 400 to a ValidationError when the user supplied --query", () => {
+    const result = toSearchQueryError(parseError(), "is:403");
+    expect(result).toBeInstanceOf(ValidationError);
+    expect((result as ValidationError).field).toBe("query");
+  });
+
+  test("includes the server detail and a search-syntax suggestion in the message", () => {
+    const result = toSearchQueryError(
+      parseError(),
+      "is:403"
+    ) as ValidationError;
+    expect(result.message).toContain("Error parsing search query: bad");
+    expect(result.message).toContain("Sentry search reference");
+  });
+
+  test("appends command-specific extra suggestions", () => {
+    const result = toSearchQueryError(parseError(), "is:403", [
+      "Try a shorter time range",
+    ]) as ValidationError;
+    expect(result.message).toContain("Try a shorter time range");
+  });
+
+  test("returns the original error untouched when the user supplied no --query", () => {
+    // No user query → the CLI built the bad query → keep it a reported 400.
+    const error = parseError();
+    expect(toSearchQueryError(error, undefined)).toBe(error);
+    expect(toSearchQueryError(error, "")).toBe(error);
+  });
+
+  test("returns the original error for non-search-query 400s", () => {
+    const error = new ApiError("bad", 400, "Invalid widget configuration");
+    expect(toSearchQueryError(error, "is:403")).toBe(error);
+  });
+
+  test("returns the original error for non-ApiError values", () => {
+    const error = new Error("boom");
+    expect(toSearchQueryError(error, "is:403")).toBe(error);
   });
 });
 

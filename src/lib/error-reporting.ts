@@ -28,7 +28,6 @@ import {
   DeviceFlowError,
   HostScopeError,
   isNetworkError,
-  isSearchQueryParseError,
   OutputError,
   ResolutionError,
   SeerError,
@@ -51,7 +50,6 @@ type SilenceReason =
   | "context_missing"
   | "auth_expected"
   | "api_user_error"
-  | "api_query_error"
   | "network_error";
 
 /**
@@ -94,14 +92,11 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   if (error instanceof ApiError && error.status > 400 && error.status < 500) {
     return "api_user_error";
   }
-  // A 400 normally signals a malformed request the CLI built (a code defect),
-  // so it is captured by default. The exception: when the server reports it
-  // could not parse the user's search query, the `--query` syntax is wrong
-  // (CLI-FA: ~450 users across issue/explore/trace list). That is a user input
-  // error, and the API already returns an actionable message, so silence it.
-  if (error instanceof ApiError && isSearchQueryParseError(error)) {
-    return "api_query_error";
-  }
+  // A 400 (Bad Request) signals a malformed request the CLI built — a code
+  // defect — so it is always captured. A user's unparseable `--query` is NOT a
+  // 400 here: it is converted to a ValidationError at the command boundary
+  // (toSearchQueryError) so the user gets an actionable message and the bug
+  // signal for CLI-authored bad queries is preserved (CLI-FA).
   return null;
 }
 

@@ -40,6 +40,7 @@ import { createDsnFingerprint } from "../../lib/dsn/index.js";
 import {
   ApiError,
   ContextError,
+  toSearchQueryError,
   ValidationError,
   withAuthGuard,
 } from "../../lib/errors.js";
@@ -901,6 +902,13 @@ function enrichIssueListError(
   error: unknown,
   flags: Pick<ListFlags, "query" | "period" | "sort">
 ): never {
+  // A user-supplied --query the server cannot parse is a user input mistake,
+  // not a CLI bug: surface it as a ValidationError. A 400 with no user --query
+  // (the CLI built a bad query) falls through and stays a reported ApiError.
+  const queryError = toSearchQueryError(error, flags.query);
+  if (queryError !== error) {
+    throw queryError;
+  }
   if (error instanceof ApiError) {
     if (error.status === 400) {
       throw new ApiError(
@@ -1118,6 +1126,14 @@ async function handleResolvedTargets(
     // biome-ignore lint/style/noNonNullAssertion: guarded by failures.length > 0
     const { error: first } = failures[0]!;
     const prefix = `Failed to fetch issues from ${targets.length} project(s)`;
+
+    // A user-supplied --query the server cannot parse is a user input mistake,
+    // not a CLI bug — surface it as a ValidationError before wrapping as a
+    // multi-project ApiError. CLI-authored 400s fall through and stay reported.
+    const queryError = toSearchQueryError(first, flags.query);
+    if (queryError !== first) {
+      throw queryError;
+    }
 
     // Propagate ApiError so telemetry sees the original status code.
     // For 400 errors, append actionable suggestions since the user's query
