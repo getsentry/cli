@@ -326,8 +326,13 @@ describe("viewCommand.func", () => {
     ).rejects.toThrow(ContextError);
   });
 
-  test("throws ContextError when auto-detect returns null", async () => {
+  test("throws ContextError when auto-detect cannot resolve a target", async () => {
+    // Auto-detect returns null, then guideOrgProjectFailure (picker/enriched
+    // error) also cannot resolve a target.
     resolveOrgAndProjectSpy.mockResolvedValue(null);
+    vi.spyOn(resolveTarget, "guideOrgProjectFailure").mockRejectedValue(
+      new ContextError("Organization and project", "sentry trace view <id>")
+    );
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();

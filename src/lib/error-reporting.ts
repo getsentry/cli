@@ -4,10 +4,15 @@
  * Provides two things:
  *
  * 1. **Silencing rules** — `OutputError`, network failures (offline/DNS/proxy),
- *    `ContextError` (a required value the user omitted), `AuthError` (expected
- *    auth states the user must act on), 401–499 `ApiError`, and 400 `ApiError`s
- *    that report an unparseable user search query are not sent to Sentry as
- *    issues. A `cli.error.silenced` metric preserves volume + user/org context.
+ *    `AuthError` (expected auth states the user must act on), 401–499 `ApiError`,
+ *    and 400 `ApiError`s that report an unparseable user search query are not
+ *    sent to Sentry as issues. A `cli.error.silenced` metric preserves volume +
+ *    user/org context.
+ *
+ *    `ContextError` (a required value the user omitted) is deliberately NOT
+ *    silenced: its volume is the signal driving auto-detection/UX improvements
+ *    (e.g. single-org auto-select, the interactive picker), so it must stay
+ *    visible (CLI-3B).
  *
  * 2. **Grouping tags** — enriches every error event with `cli_error.*` tags
  *    that Sentry's server-side fingerprint rules use for stable grouping.
@@ -48,7 +53,6 @@ import {
  */
 type SilenceReason =
   | "output_error"
-  | "context_missing"
   | "auth_expected"
   | "api_user_error"
   | "api_query_error"
@@ -72,16 +76,14 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   if (isNetworkError(error)) {
     return "network_error";
   }
-  // A ContextError always means the user omitted a required value (no
-  // org/project could be resolved, a required ID was not provided, etc.). It is
-  // never a CLI bug — unlike ResolutionError, where a *provided* value that
-  // can't be matched may signal a product/access issue worth observing. There
-  // is nothing per-instance to investigate, so silence the whole class; the
-  // `cli.error.silenced` metric (keyed by `error_class` + `resource`) preserves
-  // the volume and which value was missing. (CLI-3B: ~2000 users.)
-  if (error instanceof ContextError) {
-    return "context_missing";
-  }
+  // A ContextError means the user omitted a required value (no org/project
+  // could be resolved, a required ID was not provided, etc.). It is NOT
+  // silenced: the volume of these is the signal we use to drive auto-detection
+  // and UX improvements (single-org auto-select, the interactive picker, the
+  // enriched error). Silencing it hid that signal AND skipped the fix, so it
+  // stays captured (CLI-3B). The accompanying `resolveOrgProjectOrGuide`
+  // changes aim to drive this volume down by helping users succeed instead.
+  //
   // All AuthError reasons are expected auth states the user must act on, not
   // CLI bugs: `not_authenticated` (no token), `expired` (token aged out), and
   // `invalid` (a bad/insufficiently-scoped token the user supplied). `invalid`
@@ -116,12 +118,6 @@ function recordSilencedError(error: unknown, reason: SilenceReason): void {
   }
   if (error instanceof AuthError) {
     attributes.auth_reason = error.reason;
-  }
-  // Preserve which required value was missing so the silenced-volume metric
-  // keeps sub-grouping context (e.g. "Organization and project" vs "Event ID").
-  // ContextError resources are a small fixed set, so cardinality stays low.
-  if (error instanceof ContextError) {
-    attributes.resource = error.resource;
   }
 
   try {

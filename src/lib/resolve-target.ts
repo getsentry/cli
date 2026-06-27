@@ -15,8 +15,9 @@
  */
 
 import { basename } from "node:path";
+import { isatty } from "node:tty";
 import pLimit from "p-limit";
-import type { SentryProject } from "../types/index.js";
+import type { SentryOrganization, SentryProject } from "../types/index.js";
 import {
   findProjectByDsnKey,
   findProjectsByPattern,
@@ -31,7 +32,13 @@ import {
   type ParsedOrgProject,
   parseOrgProjectArg,
 } from "./arg-parsing.js";
-import { getDefaultOrganization, getDefaultProject } from "./db/defaults.js";
+import { isAuthenticated } from "./db/auth.js";
+import {
+  getDefaultOrganization,
+  getDefaultProject,
+  setDefaultOrganization,
+  setDefaultProject,
+} from "./db/defaults.js";
 import { getCachedDsn, setCachedDsn } from "./db/dsn-cache.js";
 import {
   getCachedProject,
@@ -58,6 +65,7 @@ import {
   withAuthGuard,
 } from "./errors.js";
 import { fuzzyMatch } from "./fuzzy.js";
+import { interactivePromptsAllowed } from "./interactive-prompts.js";
 import { logger } from "./logger.js";
 import { resolveEffectiveOrg } from "./region.js";
 import { CONFIG_FILENAME, loadSentryCliRc } from "./sentryclirc.js";
@@ -152,6 +160,13 @@ export type ResolveOptions = {
   cwd: string;
   /** Usage hint shown when only one of org/project is provided */
   usageHint?: string;
+  /**
+   * Whether an interactive org/project picker may be shown when auto-detection
+   * fails. Only consulted by {@link resolveOrgProjectOrGuide}. When omitted, it
+   * is inferred from whether stdin **and** stdout are TTYs (so piped/`--json`
+   * invocations never block on a prompt).
+   */
+  interactive?: boolean;
 };
 
 /**
@@ -1309,6 +1324,18 @@ export async function resolveOrgAndProject(
       const inferred = await inferFromDirectoryName(cwd);
       const [first] = inferred.targets;
       if (!first) {
+        // 7. Authenticated last resort: if the account has exactly one
+        //    accessible org with exactly one project, that pair is the only
+        //    possible target — use it instead of failing. This removes the
+        //    "Could not auto-detect organization and project" dead-end for
+        //    single-org/single-project accounts (CLI-3B). Callers that rely on
+        //    a null return (e.g. event view's cross-org search) are unaffected:
+        //    this only ever turns a null into a uniquely-determined target.
+        const sole = await resolveSoleAccountTarget();
+        if (sole) {
+          span.setAttribute("resolve.method", "account_sole");
+          return withTelemetryContext(sole);
+        }
         span.setAttribute("resolve.method", "none");
         return null;
       }
@@ -1325,6 +1352,253 @@ export async function resolveOrgAndProject(
     },
     { "resolve.mode": "single" }
   );
+}
+
+/**
+ * Build a {@link ResolvedTarget} from an org/project pair, filling display
+ * names and the numeric project ID from the fetched API objects.
+ */
+function toAccountTarget(
+  org: SentryOrganization,
+  project: SentryProject,
+  detectedFrom: string
+): ResolvedTarget {
+  return {
+    org: org.slug,
+    project: project.slug,
+    projectId: toNumericId(project.id),
+    orgDisplay: org.name || org.slug,
+    projectDisplay: project.name || project.slug,
+    projectData: project,
+    detectedFrom,
+  };
+}
+
+/**
+ * Last-resort resolution for authenticated users: when the account has exactly
+ * one accessible organization containing exactly one project, that pair is the
+ * only possible target, so return it instead of failing auto-detection.
+ *
+ * Returns `null` when not authenticated, when a lookup fails, or when there is
+ * more than one (or zero) org/project — in those cases the choice is genuinely
+ * ambiguous and must be made explicitly or via {@link resolveOrgProjectOrGuide}.
+ *
+ * This never throws and never prompts, so it is safe to call from the shared
+ * {@link resolveOrgAndProject} cascade without affecting callers that depend on
+ * a `null` return.
+ */
+async function resolveSoleAccountTarget(): Promise<ResolvedTarget | null> {
+  if (!isAuthenticated()) {
+    return null;
+  }
+  try {
+    const orgs = await listOrganizations();
+    const org = orgs.length === 1 ? orgs[0] : undefined;
+    if (!org) {
+      return null;
+    }
+    const projects = await listProjects(org.slug);
+    const project = projects.length === 1 ? projects[0] : undefined;
+    if (!project) {
+      return null;
+    }
+    return toAccountTarget(org, project, "your only accessible org/project");
+  } catch (error) {
+    log.debug("Account-based auto-detect failed", error);
+    return null;
+  }
+}
+
+/**
+ * Whether an interactive org/project picker may be shown. When `override` is
+ * provided (e.g. derived from `--json`) it wins. Otherwise the picker is only
+ * offered when JSON output is not active (so it never blocks a scripted run or
+ * corrupts stdout JSON) **and** both stdin and stdout are TTYs (so piped or
+ * redirected invocations never block on a prompt).
+ */
+function canPromptForTarget(override?: boolean): boolean {
+  if (override !== undefined) {
+    return override;
+  }
+  return interactivePromptsAllowed() && isatty(0) && isatty(1);
+}
+
+/**
+ * Prompt the user (consola) to pick a value from a list, returning the selected
+ * value or `null` if cancelled. A single-element list is auto-selected without
+ * prompting.
+ */
+async function promptSelect(
+  message: string,
+  options: { label: string; value: string }[]
+): Promise<string | null> {
+  const sole = options[0];
+  if (options.length === 1 && sole) {
+    return sole.value;
+  }
+  const response = await log.prompt(message, { type: "select", options });
+  // consola returns Symbol(clack:cancel) on Ctrl+C — a truthy non-string.
+  return typeof response === "string" ? response : null;
+}
+
+/**
+ * Interactively resolve an org/project for authenticated users and persist the
+ * choice as the default. Returns `null` when not authenticated, when the
+ * account has no accessible orgs/projects, or when the user cancels.
+ */
+async function promptForOrgProject(): Promise<ResolvedTarget | null> {
+  if (!isAuthenticated()) {
+    return null;
+  }
+
+  let orgs: SentryOrganization[];
+  try {
+    orgs = await listOrganizations();
+  } catch (error) {
+    log.debug("Failed to list organizations for interactive picker", error);
+    return null;
+  }
+  if (orgs.length === 0) {
+    return null;
+  }
+
+  const orgSlug = await promptSelect(
+    "Select an organization:",
+    orgs.map((o) => ({ label: o.name || o.slug, value: o.slug }))
+  );
+  if (!orgSlug) {
+    return null;
+  }
+  const org = orgs.find((o) => o.slug === orgSlug);
+  if (!org) {
+    return null;
+  }
+
+  let projects: SentryProject[];
+  try {
+    projects = await listProjects(orgSlug);
+  } catch (error) {
+    log.debug("Failed to list projects for interactive picker", error);
+    return null;
+  }
+  if (projects.length === 0) {
+    throw new ResolutionError(
+      `Organization '${orgSlug}'`,
+      "has no accessible projects",
+      `sentry project list ${orgSlug}/`
+    );
+  }
+
+  const projectSlug = await promptSelect(
+    "Select a project:",
+    projects.map((p) => ({ label: p.name || p.slug, value: p.slug }))
+  );
+  if (!projectSlug) {
+    return null;
+  }
+  const project = projects.find((p) => p.slug === projectSlug);
+  if (!project) {
+    return null;
+  }
+
+  // Persist as the default so the user is not prompted again. Best-effort: a
+  // read-only DB must not fail the command after a successful selection.
+  try {
+    setDefaultOrganization(orgSlug);
+    setDefaultProject(projectSlug);
+    log.info(
+      `Saved ${orgSlug}/${projectSlug} as your default. Change it with: sentry cli defaults org <slug>`
+    );
+  } catch (error) {
+    log.debug("Failed to persist selected org/project as default", error);
+  }
+
+  return toAccountTarget(org, project, "interactive selection");
+}
+
+/**
+ * Build an actionable {@link ContextError} for authenticated users whose
+ * org/project could not be auto-detected. Lists the accessible organizations so
+ * the next command is copy-pasteable, instead of the generic "run org list"
+ * guidance shown to logged-out users.
+ */
+async function buildAccountContextError(
+  usageHint: string
+): Promise<ContextError> {
+  try {
+    const orgs = await listOrganizations();
+    if (orgs.length > 0) {
+      const shown = orgs.slice(0, 10).map((o) => `  ${o.slug}`);
+      const more =
+        orgs.length > shown.length
+          ? `  …and ${orgs.length - shown.length} more`
+          : "";
+      const orgList = [...shown, more].filter(Boolean).join("\n");
+      return new ContextError("Organization and project", usageHint, [
+        `Specify one of your organizations:\n${orgList}`,
+        "List a project: sentry project list <org>/",
+        "Save a default: sentry cli defaults org <slug>",
+      ]);
+    }
+  } catch (error) {
+    log.debug("Failed to list organizations for context error", error);
+  }
+  // Fall back to the standard auto-detect guidance.
+  return new ContextError("Organization and project", usageHint);
+}
+
+/**
+ * Guide the user to a target after auto-detection has already failed.
+ *
+ * Call this only when `resolveOrgAndProject` (or `resolveAllTargets`) returned
+ * no target. In order it:
+ *
+ * 1. Offers an interactive org/project picker (TTY only; saves the choice as a
+ *    default), then
+ * 2. For authenticated users, throws a {@link ContextError} listing their
+ *    accessible organizations, otherwise
+ * 3. Throws the standard auto-detect {@link ContextError}.
+ *
+ * Kept separate from {@link resolveOrgAndProject} so callers that mock the
+ * resolver in tests (and rely on its `null` return, e.g. event view's cross-org
+ * search) keep working — this is only invoked on the explicit failure path.
+ *
+ * @throws {ContextError} When the target cannot be resolved or chosen.
+ * @throws {ResolutionError} When the interactively-selected organization has no
+ *   accessible projects.
+ */
+export async function guideOrgProjectFailure(
+  options: Pick<ResolveOptions, "usageHint" | "interactive">
+): Promise<ResolvedTarget> {
+  const usageHint = options.usageHint ?? "sentry <command> <org>/<project>";
+
+  if (canPromptForTarget(options.interactive)) {
+    const picked = await promptForOrgProject();
+    if (picked) {
+      return withTelemetryContext(picked);
+    }
+  }
+
+  if (isAuthenticated()) {
+    throw await buildAccountContextError(usageHint);
+  }
+  throw new ContextError("Organization and project", usageHint);
+}
+
+/**
+ * Resolve an org/project target, guiding the user when auto-detection fails.
+ *
+ * Drop-in replacement for the `resolveOrgAndProject(...)` + "throw
+ * `ContextError` on null" pattern, combining {@link resolveOrgAndProject} with
+ * {@link guideOrgProjectFailure}.
+ *
+ * @throws {ContextError} When the target cannot be resolved or chosen.
+ */
+export async function resolveOrgProjectOrGuide(
+  options: ResolveOptions
+): Promise<ResolvedTarget> {
+  const resolved = await resolveOrgAndProject(options);
+  return resolved ?? (await guideOrgProjectFailure(options));
 }
 
 /**
@@ -1726,14 +2000,10 @@ export async function resolveOrgProjectTarget(
     }
 
     case "auto-detect": {
-      // resolveOrgAndProject already sets telemetry context
-      const resolved = await resolveOrgAndProject({
-        cwd,
-        usageHint,
-      });
-      if (!resolved) {
-        throw new ContextError("Organization and project", usageHint);
-      }
+      // resolveOrgProjectOrGuide sets telemetry context and, when
+      // auto-detection fails, offers an interactive picker (TTY) or an
+      // actionable error listing the user's accessible orgs.
+      const resolved = await resolveOrgProjectOrGuide({ cwd, usageHint });
       return { org: resolved.org, project: resolved.project };
     }
 
@@ -1821,6 +2091,17 @@ export async function resolveTargetsFromParsedArg(
   switch (parsed.type) {
     case "auto-detect": {
       const result = await resolveAllTargets({ cwd, usageHint });
+      // Only guide when there is genuinely no context. If DSNs WERE found but
+      // could not be resolved (self-hosted / no access), `skippedSelfHosted` is
+      // set — preserve the empty result so the caller surfaces the
+      // inaccessible-DSN error instead of silently resolving a different
+      // org/project (which would mask the real problem).
+      if (result.targets.length === 0 && !result.skippedSelfHosted) {
+        // Offer an interactive picker (TTY) or an actionable error listing the
+        // user's accessible orgs, and let a single-org/single-project account
+        // resolve automatically (CLI-3B).
+        result.targets = [await resolveOrgProjectOrGuide({ cwd, usageHint })];
+      }
       if (enrichProjectIds) {
         result.targets = await Promise.all(
           result.targets.map(async (t) => {
