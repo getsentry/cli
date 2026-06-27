@@ -781,6 +781,63 @@ export function isSearchQueryParseError(error: ApiError): boolean {
 }
 
 /**
+ * Standard actionable hint shown when a user-supplied search query is rejected.
+ * Exported so command boundaries can reuse it alongside command-specific hints.
+ */
+export const SEARCH_QUERY_HELP =
+  "Check your --query syntax (Sentry search reference: https://docs.sentry.io/concepts/search/)";
+
+/**
+ * Convert a Sentry search-query parse failure into a {@link ValidationError}
+ * when the user actually supplied the query; otherwise return the error
+ * unchanged.
+ *
+ * HTTP 400 means the server rejected our request as malformed, which has two
+ * very different causes that are only distinguishable at the command boundary
+ * (where `flags.query` is in scope):
+ *
+ * - **The user typed an invalid `--query`** — a user input mistake. We surface
+ *   a clean, actionable {@link ValidationError} (correct exit code, no "CLI
+ *   bug" upgrade nudge) instead of a raw "400 Bad Request".
+ * - **The CLI built the query itself** (no user `--query`) — a genuine CLI
+ *   defect. The original {@link ApiError} (status 400) is returned untouched so
+ *   it stays reported to Sentry as the bug it is.
+ *
+ * This is why search-query 400s are no longer special-cased in the error
+ * classifiers (`classifySilenced`, {@link isUserError}, `isUserApiError`):
+ * silencing every "Error parsing search query" 400 also hid the CLI-authored
+ * ones, papering over real bugs.
+ *
+ * @param error - The error thrown by a list/search API call
+ * @param userQuery - The user-supplied search query (`flags.query`), if any
+ * @param extraSuggestions - Optional command-specific hints appended after the
+ *   standard search-syntax help
+ * @returns A {@link ValidationError} for user-query mistakes, else `error`
+ */
+export function toSearchQueryError(
+  error: unknown,
+  userQuery: string | undefined,
+  extraSuggestions: readonly string[] = []
+): unknown {
+  if (
+    userQuery &&
+    error instanceof ApiError &&
+    isSearchQueryParseError(error)
+  ) {
+    const lines: string[] = [];
+    if (error.detail) {
+      lines.push(error.detail, "");
+    }
+    lines.push("Suggestions:");
+    for (const suggestion of [SEARCH_QUERY_HELP, ...extraSuggestions]) {
+      lines.push(`  • ${suggestion}`);
+    }
+    return new ValidationError(lines.join("\n"), "query");
+  }
+  return error;
+}
+
+/**
  * Whether an error is a raw network-level fetch failure — the CLI could not
  * reach the Sentry API at all (offline, DNS failure, connection
  * refused/timeout). Node's `fetch` (undici) rejects with exactly
@@ -822,12 +879,10 @@ export function isUserError(error: unknown): boolean {
     if (error.status === 0) {
       return true;
     }
-    // 400 usually means the CLI constructed a bad request, so it is treated as
-    // a CLI bug — except when the server reports the user's search query was
-    // unparseable, which is a user input mistake.
-    if (isSearchQueryParseError(error)) {
-      return true;
-    }
+    // 400 means the CLI constructed a bad request, which is a CLI bug — not a
+    // user error. (A user's unparseable `--query` is converted to a
+    // ValidationError at the command boundary via toSearchQueryError, so it
+    // never reaches here as an ApiError.)
     return error.status > 400 && error.status < 500;
   }
 

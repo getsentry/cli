@@ -20,7 +20,7 @@ import {
   hasPreviousPage,
   resolveCursor,
 } from "../lib/db/pagination.js";
-import { ValidationError } from "../lib/errors.js";
+import { toSearchQueryError, ValidationError } from "../lib/errors.js";
 import { filterFields } from "../lib/formatters/json.js";
 import { buildMetaColumns } from "../lib/formatters/meta-table.js";
 import { CommandOutput } from "../lib/formatters/output.js";
@@ -792,7 +792,13 @@ export const exploreCommand = buildListCommand("explore", {
         message: `Querying ${dataset} in ${project ? `${org}/${project}` : org}...`,
         json: flags.json,
       },
-      () => config.fetch({ cursor, limit: flags.limit, timeRange })
+      () =>
+        config
+          .fetch({ cursor, limit: flags.limit, timeRange })
+          .catch((error: unknown): never => {
+            // An unparseable user --query is a user input mistake, not a CLI bug.
+            throw toSearchQueryError(error, flags.query);
+          })
     );
 
     advancePaginationState(PAGINATION_KEY, contextKey, direction, nextCursor);

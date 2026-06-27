@@ -13,6 +13,7 @@ import {
   hasPreviousPage,
   resolveCursor,
 } from "../../lib/db/pagination.js";
+import { toSearchQueryError } from "../../lib/errors.js";
 import { formatTraceTable } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
@@ -289,6 +290,9 @@ export const listCommand = buildListCommand("trace", {
           sort: flags.sort,
           cursor,
           ...timeRangeToApiParams(timeRange),
+        }).catch((error: unknown): never => {
+          // An unparseable user --query is a user input mistake, not a CLI bug.
+          throw toSearchQueryError(error, flags.query);
         })
     );
 

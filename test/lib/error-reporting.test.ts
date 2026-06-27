@@ -26,7 +26,6 @@ import {
   ConfigError,
   ContextError,
   HostScopeError,
-  isSearchQueryParseError,
   OutputError,
   ResolutionError,
   SeerError,
@@ -259,7 +258,11 @@ describe("classifySilenced", () => {
     expect(classifySilenced(new TypeError("x is not a function"))).toBeNull();
   });
 
-  test("silences ApiError 400 with a search-query parse detail", () => {
+  test("does NOT silence a raw ApiError 400 with a search-query parse detail", () => {
+    // A user's unparseable --query is converted to a ValidationError at the
+    // command boundary (toSearchQueryError). A search-query 400 reaching the
+    // classifier therefore means the CLI built a bad query itself — a real bug
+    // that must stay reported (CLI-FA: stop papering over root causes).
     expect(
       classifySilenced(
         new ApiError(
@@ -268,31 +271,16 @@ describe("classifySilenced", () => {
           "Error parsing search query: invalid status value of '403'"
         )
       )
-    ).toBe("api_query_error");
+    ).toBeNull();
   });
 
-  test("silences a wrapped issue-list query 400 (detail prepended)", () => {
-    // enrichIssueListError prepends the server detail, then appends CLI hints.
-    const detail =
-      "Error parsing search query: Empty string after 'status:'\n\n" +
-      "Suggestions:\n  • Check your --query syntax";
-    expect(
-      classifySilenced(new ApiError("Failed to fetch issues", 400, detail))
-    ).toBe("api_query_error");
-  });
-
-  test("does NOT silence a 400 whose detail is not a query parse error", () => {
+  test("does NOT silence any 400 regardless of detail", () => {
     expect(
       classifySilenced(
         new ApiError("bad", 400, "Invalid dashboard widget configuration")
       )
     ).toBeNull();
-  });
-
-  test("does NOT treat a 4xx-with-query-marker as a query 400", () => {
-    // status must be exactly 400; other 4xx already silence via api_user_error.
-    const err = new ApiError("x", 422, "Error parsing search query: ...");
-    expect(isSearchQueryParseError(err)).toBe(false);
+    expect(classifySilenced(new ApiError("bad", 400))).toBeNull();
   });
 
   test.each([

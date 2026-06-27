@@ -320,12 +320,15 @@ describe("isUserApiError", () => {
     expect(isUserApiError(new ApiError("Bad request", 400))).toBe(false);
   });
 
-  test("returns true for 400 search-query parse error (user input)", () => {
+  test("returns false for a 400 search-query parse error (CLI-built bad query)", () => {
+    // A user's unparseable --query is converted to a ValidationError at the
+    // command boundary, so a search-query 400 reaching here is a CLI-built bad
+    // request — a CLI bug, not a user API error.
     expect(
       isUserApiError(
         new ApiError("bad", 400, "Error parsing search query: invalid status")
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 
   test("returns true for 401 Unauthorized", () => {
