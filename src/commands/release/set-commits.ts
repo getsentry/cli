@@ -41,8 +41,9 @@ function setCommitsFromLocal(
   org: string,
   version: string,
   cwd: string,
-  depth: number
+  options: { depth: number; paths?: string[] }
 ): Promise<SentryRelease> {
+  const { depth, paths } = options;
   const shallow = isShallowRepository(cwd);
   if (shallow) {
     log.warn(
@@ -51,7 +52,13 @@ function setCommitsFromLocal(
     );
   }
 
-  const commits = getCommitLog(cwd, { depth });
+  const commits = getCommitLog(cwd, { depth, paths });
+  if (commits.length === 0 && paths && paths.length > 0) {
+    log.warn(
+      `No commits found touching ${paths.join(", ")} within the last ${depth} commits. ` +
+        "Check the path(s) or increase --initial-depth."
+    );
+  }
   const repoName = getRepositoryName(cwd);
   const commitsWithRepo = commits.map((c) => ({
     ...c,
@@ -128,7 +135,7 @@ async function setCommitsDefault(
 ): Promise<SentryRelease> {
   // Fast path: cached "no repos" — skip the API call entirely
   if (hasNoRepoIntegration(org)) {
-    return setCommitsFromLocal(org, version, cwd, depth);
+    return setCommitsFromLocal(org, version, cwd, { depth });
   }
 
   try {
@@ -152,14 +159,14 @@ async function setCommitsDefault(
         "Could not auto-discover commits (no repository integration). " +
           "Falling back to local git history."
       );
-      return setCommitsFromLocal(org, version, cwd, depth);
+      return setCommitsFromLocal(org, version, cwd, { depth });
     }
     if (error instanceof ValidationError && error.field === "repository") {
       log.warn(
         `Auto-discovery failed: ${error.message}. ` +
           "Falling back to local git history."
       );
-      return setCommitsFromLocal(org, version, cwd, depth);
+      return setCommitsFromLocal(org, version, cwd, { depth });
     }
     throw error;
   }
@@ -185,10 +192,14 @@ export const setCommitsCommand = buildCommand({
       "(requires a local git checkout — matches the origin remote against Sentry repos),\n" +
       "or --local to read commits from the local git history.\n" +
       "With no flag, tries --auto first and falls back to --local on failure.\n\n" +
+      "For monorepos, --path restricts commits to one or more subtrees\n" +
+      "(comma-separated). It implies --local and cannot be combined with\n" +
+      "--auto or --commit, whose ranges are expanded server-side.\n\n" +
       "Examples:\n" +
       "  sentry release set-commits 1.0.0 --auto\n" +
       "  sentry release set-commits my-org/1.0.0 --local\n" +
       "  sentry release set-commits 1.0.0 --local --initial-depth 50\n" +
+      "  sentry release set-commits 1.0.0 --path apps/mobile,packages/shared-ui\n" +
       "  sentry release set-commits 1.0.0 --commit owner/repo@abc123..def456\n" +
       "  sentry release set-commits 1.0.0 --clear",
   },
@@ -230,6 +241,13 @@ export const setCommitsCommand = buildCommand({
           "Explicit commit as REPO@SHA or REPO@PREV..SHA (comma-separated)",
         optional: true,
       },
+      path: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Filter commits to these paths (comma-separated). Implies --local.",
+        optional: true,
+      },
       "initial-depth": {
         kind: "parsed",
         parse: numberParser,
@@ -245,6 +263,7 @@ export const setCommitsCommand = buildCommand({
       readonly local: boolean;
       readonly clear: boolean;
       readonly commit?: string;
+      readonly path?: string;
       readonly "initial-depth": number;
       readonly json: boolean;
       readonly fields?: string[];
@@ -274,6 +293,29 @@ export const setCommitsCommand = buildCommand({
       throw new ValidationError(
         "Only one of --auto, --local, or --commit can be used at a time.",
         "commit"
+      );
+    }
+
+    // --path filters local git history by pathspec. It only works in local
+    // mode: --auto and --commit hand a SHA range to Sentry, which expands it
+    // into commits server-side, so the CLI can't filter those by path.
+    const paths =
+      flags.path === undefined
+        ? []
+        : flags.path
+            .split(",")
+            .map((p) => p.trim())
+            .filter(Boolean);
+    if (flags.path !== undefined && paths.length === 0) {
+      throw new ValidationError(
+        "--path requires at least one non-empty path.",
+        "path"
+      );
+    }
+    if (paths.length > 0 && (flags.auto || flags.commit)) {
+      throw new ValidationError(
+        "--path cannot be combined with --auto or --commit (their commit ranges are expanded server-side). Use --path with local mode.",
+        "path"
       );
     }
 
@@ -311,14 +353,12 @@ export const setCommitsCommand = buildCommand({
 
     let release: SentryRelease;
 
-    if (flags.local) {
-      // Explicit --local: use local git only
-      release = await setCommitsFromLocal(
-        org,
-        version,
-        cwd,
-        flags["initial-depth"]
-      );
+    if (flags.local || paths.length > 0) {
+      // Explicit --local, or --path (which implies local): use local git only
+      release = await setCommitsFromLocal(org, version, cwd, {
+        depth: flags["initial-depth"],
+        paths,
+      });
     } else if (flags.auto) {
       // Explicit --auto: use repo integration, fail hard on error
       release = await setCommitsAuto(org, version, cwd);
