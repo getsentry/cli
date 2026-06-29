@@ -9,9 +9,8 @@
  * Prompt methods (`select`, `multiselect`, `confirm`) throw a
  * `LoggingUIPromptError`. Callers MUST resolve all interactive choices
  * (org, project, team, features, confirmations) up-front through CLI
- * flags or `--yes` defaults before invoking any UI prompt method. This
- * mirrors PostHog wizard's approach: in CI, the I/O layer cannot fall
- * back to stdin reads.
+ * flags or `--yes` defaults before invoking any UI prompt method: in CI,
+ * the I/O layer cannot fall back to stdin reads.
  *
  * The spinner is a no-op shape — `start`/`message`/`stop` log key
  * transitions but do not render an animated indicator. This keeps CI

@@ -1,12 +1,11 @@
 /**
  * Permission gate for the local init agent (the SDK `canUseTool` callback).
  *
- * Mirrors PostHog's wizard guardrails: block direct reads/writes of `.env`
- * files (Sentry auth tokens and real secrets must stay out of the agent
- * context) and restrict Bash to a safe allowlist of package-manager, build,
- * lint, typecheck, and test commands. Everything else - the built-in
- * Read/Write/Edit/Glob/Grep tools and the in-process Sentry MCP tools - is
- * allowed.
+ * Block direct reads/writes of `.env` files (Sentry auth tokens and real
+ * secrets must stay out of the agent context) and restrict Bash to a safe
+ * allowlist of package-manager, build, lint, typecheck, and test commands.
+ * Everything else - the built-in Read/Write/Edit/Glob/Grep tools and the
+ * in-process Sentry MCP tools - is allowed.
  */
 
 export type PermissionResult =

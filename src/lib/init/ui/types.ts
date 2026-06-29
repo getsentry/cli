@@ -5,10 +5,12 @@
  * provide the actual rendering:
  *
  * - `InkUI`       — Ink-based React UI. Default for interactive runs on
- *                   both the Bun binary and the npm/Node distribution.
- *                   The Bun binary embeds Ink via `with { type: "file" }`;
- *                   the npm package ships a self-contained ESM sidecar
- *                   (`dist/ink-app.js`) loaded via dynamic `import()`.
+ *                   both the Node SEA single binary and the npm/Node
+ *                   distribution. The single binary embeds the Ink sidecar
+ *                   as a SEA asset (extracted at runtime via
+ *                   `node:sea.getAsset()`); the npm package ships a
+ *                   self-contained ESM sidecar (`dist/ink-app.js`) loaded
+ *                   via dynamic `import()`.
  * - `LoggingUI`   — plain stdout/stderr writes for CI, `--yes`, non-TTY
  *                   environments, and the `--no-tui` escape hatch.
  *                   Prompts throw — non-interactive callers must supply
@@ -23,9 +25,8 @@
  *      implementations can signal cancellation uniformly. Callers wrap
  *      prompt results with `abortIfCancelled()` (in `clack-utils.ts`)
  *      which re-throws as `WizardCancelledError`.
- *   3. Stay lean — visual look-and-feel inspiration from PostHog wizard's
- *      `WizardUI` pattern, without the screen router / nanostore / health
- *      check overlays.
+ *   3. Stay lean — a minimal `WizardUI` pattern without the screen router /
+ *      nanostore / health-check overlays.
  */
 
 import type { InitFeedbackOutcome } from "../feedback.js";

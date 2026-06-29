@@ -1,12 +1,11 @@
 /**
  * In-process MCP server exposing Sentry-specific tools to the local agent.
  *
- * Tools are defined with the SDK's `tool()` + `createSdkMcpServer()` (the same
- * pattern PostHog's wizard uses) and run in the CLI process - no subprocess,
- * no remote service. The docs tool is the agent's source of truth for SDK
- * setup and is meant to be called repeatedly throughout the run; the framework
- * tools apply deterministic Xcode transforms the agent can reach for when it
- * detects a native iOS / React Native project.
+ * Tools are defined with the SDK's `tool()` + `createSdkMcpServer()` and run
+ * in the CLI process - no subprocess, no remote service. The docs tool is the
+ * agent's source of truth for SDK setup and is meant to be called repeatedly
+ * throughout the run; the framework tools apply deterministic Xcode transforms
+ * the agent can reach for when it detects a native iOS / React Native project.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";

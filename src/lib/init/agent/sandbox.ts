@@ -1,13 +1,14 @@
 /**
- * OS sandbox configuration for the Claude Agent SDK, mirroring how PostHog's
- * wizard contains the agent: restrict filesystem writes to the project (plus
- * package-manager caches and temp) and restrict network egress to package
- * registries, GitHub, the model gateway, and docs.sentry.io. This is the
- * primary defense against a prompt-injected agent exfiltrating data or writing
- * outside the project; `canUseTool` and `safePath` are belt-and-suspenders.
+ * OS sandbox configuration for the Claude Agent SDK: restrict filesystem
+ * writes to the project (plus package-manager caches and temp) and restrict
+ * network egress to package registries, GitHub, the model gateway, and
+ * docs.sentry.io.
  *
- * `failIfUnavailable: false` so hosts without sandbox support (e.g. Linux
- * without bubblewrap) degrade gracefully rather than aborting the run.
+ * This is defense-in-depth layered on top of the always-on `canUseTool`
+ * permission gate and `safePath` containment, which remain the primary
+ * boundary: `failIfUnavailable: false` lets hosts without sandbox support
+ * (e.g. Linux without bubblewrap) degrade gracefully rather than abort the
+ * run, so the OS sandbox is best-effort and not guaranteed to be active.
  */
 
 import { existsSync } from "node:fs";
