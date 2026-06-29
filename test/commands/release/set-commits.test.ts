@@ -366,3 +366,144 @@ describe("release set-commits (default mode)", () => {
     expect(setCommitsLocalSpy).toHaveBeenCalled();
   });
 });
+
+describe("release set-commits --path", () => {
+  let setCommitsAutoSpy: ReturnType<typeof spyOn>;
+  let setCommitsLocalSpy: ReturnType<typeof spyOn>;
+  let resolveOrgSpy: ReturnType<typeof spyOn>;
+
+  // Use the actual repo root as cwd so getCommitLog can read git history
+  const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
+    /\/$/,
+    ""
+  );
+
+  beforeEach(() => {
+    setCommitsAutoSpy = vi.spyOn(apiClient, "setCommitsAuto");
+    setCommitsLocalSpy = vi.spyOn(apiClient, "setCommitsLocal");
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
+  });
+
+  afterEach(() => {
+    setCommitsAutoSpy.mockRestore();
+    setCommitsLocalSpy.mockRestore();
+    resolveOrgSpy.mockRestore();
+  });
+
+  test("implies local mode (no --auto needed)", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    setCommitsLocalSpy.mockResolvedValue(sampleRelease);
+
+    const { context } = createMockContext(repoRoot);
+    const func = await setCommitsCommand.loader();
+    await func.call(
+      context,
+      {
+        auto: false,
+        local: false,
+        clear: false,
+        commit: undefined,
+        path: "src",
+        "initial-depth": 20,
+        json: true,
+      },
+      "1.0.0"
+    );
+
+    expect(setCommitsLocalSpy).toHaveBeenCalled();
+    expect(setCommitsAutoSpy).not.toHaveBeenCalled();
+  });
+
+  test("accepts comma-separated paths in local mode", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    setCommitsLocalSpy.mockResolvedValue(sampleRelease);
+
+    const { context } = createMockContext(repoRoot);
+    const func = await setCommitsCommand.loader();
+    await func.call(
+      context,
+      {
+        auto: false,
+        local: false,
+        clear: false,
+        commit: undefined,
+        path: "src,test",
+        "initial-depth": 20,
+        json: true,
+      },
+      "1.0.0"
+    );
+
+    expect(setCommitsLocalSpy).toHaveBeenCalled();
+    expect(setCommitsAutoSpy).not.toHaveBeenCalled();
+  });
+
+  test("throws when --path has only empty/whitespace tokens", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+
+    const { context } = createMockContext(repoRoot);
+    const func = await setCommitsCommand.loader();
+
+    await expect(
+      func.call(
+        context,
+        {
+          auto: false,
+          local: false,
+          clear: false,
+          commit: undefined,
+          path: " , ",
+          "initial-depth": 20,
+          json: false,
+        },
+        "1.0.0"
+      )
+    ).rejects.toThrow("--path requires at least one non-empty path");
+  });
+
+  test("throws when --path used with --auto", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+
+    const { context } = createMockContext(repoRoot);
+    const func = await setCommitsCommand.loader();
+
+    await expect(
+      func.call(
+        context,
+        {
+          auto: true,
+          local: false,
+          clear: false,
+          commit: undefined,
+          path: "apps/mobile",
+          "initial-depth": 20,
+          json: false,
+        },
+        "1.0.0"
+      )
+    ).rejects.toThrow("--path cannot be combined with --auto or --commit");
+  });
+
+  test("throws when --path used with --commit", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+
+    const { context } = createMockContext(repoRoot);
+    const func = await setCommitsCommand.loader();
+
+    await expect(
+      func.call(
+        context,
+        {
+          auto: false,
+          local: false,
+          clear: false,
+          commit: "repo@a..b",
+          path: "apps/mobile",
+          "initial-depth": 20,
+          json: false,
+        },
+        "1.0.0"
+      )
+    ).rejects.toThrow("--path cannot be combined with --auto or --commit");
+  });
+});
