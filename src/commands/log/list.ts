@@ -10,6 +10,7 @@
 import * as Sentry from "@sentry/node-core/light";
 import type { SentryContext } from "../../context.js";
 import {
+  API_MAX_PER_PAGE,
   type LogSortDirection,
   listLogs,
   listTraceLogs,
@@ -196,7 +197,8 @@ async function executeSingleFetch(
     };
   }
 
-  const hasMore = logs.length >= flags.limit;
+  const effectivePerPage = Math.min(flags.limit, API_MAX_PER_PAGE);
+  const hasMore = logs.length >= effectivePerPage;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"}.`;
   const tip = hasMore ? " Use --limit to show more, or -f to follow." : "";
 
@@ -501,7 +503,8 @@ async function executeTraceSingleFetch(
     };
   }
 
-  const hasMore = logs.length >= flags.limit;
+  const effectivePerPage = Math.min(flags.limit, API_MAX_PER_PAGE);
+  const hasMore = logs.length >= effectivePerPage;
   const countText = `Showing ${logs.length} log${logs.length === 1 ? "" : "s"} for trace ${traceId}.`;
   const tip = hasMore ? " Use --limit to show more." : "";
 
