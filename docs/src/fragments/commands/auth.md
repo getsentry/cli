@@ -20,16 +20,39 @@ sentry auth login
 sentry auth login --token YOUR_SENTRY_API_TOKEN
 ```
 
-### Self-hosted Sentry
+### Read-only login
 
 ```bash
-SENTRY_URL=https://sentry.example.com sentry auth login
+# Request only read scopes (project:read, org:read, event:read, etc.)
+sentry auth login --read-only
+```
+
+### Custom scopes
+
+```bash
+# Request specific OAuth scopes (comma-separated or repeated)
+sentry auth login --scope project:read --scope org:read
+sentry auth login --scope project:read,org:read,event:read
+```
+
+### Self-hosted Sentry
+
+Use `--url` to register your instance as a trusted host (recommended):
+
+```bash
+sentry auth login --url https://sentry.example.com
+```
+
+Or set the host via environment variable:
+
+```bash
+SENTRY_HOST=https://sentry.example.com sentry auth login
 ```
 
 For token-based auth with self-hosted:
 
 ```bash
-SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
+sentry auth login --url https://sentry.example.com --token YOUR_TOKEN
 ```
 
 See [Self-Hosted Sentry](../self-hosted/) for details.
