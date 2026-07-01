@@ -345,28 +345,54 @@ describe("injectDebugId", () => {
     expect(mapResult.sources).toEqual(["src/lib/utils.ts", "src/bin.ts"]);
   });
 
-  test("debug ID is deterministic based on sourcemap content", async () => {
-    // Create two different JS files with the same sourcemap content
+  test("distinct minified files with identical sourcemaps get distinct debug IDs (regression #3350)", async () => {
+    // Two DIFFERENT JS chunks that share a byte-identical (empty) sourcemap —
+    // the exact esbuild code-splitting scenario from getsentry/sentry-cli#3350.
+    // The debug ID identifies the minified artifact, so distinct artifacts must
+    // NOT collide onto a single ID.
     const jsPath1 = join(tmpDir, "a.js");
     const mapPath1 = join(tmpDir, "a.js.map");
     const jsPath2 = join(tmpDir, "b.js");
     const mapPath2 = join(tmpDir, "b.js.map");
 
+    const emptyMap = '{"version":3,"sources":[],"names":[],"mappings":""}';
+
+    await writeFile(jsPath1, "console.log(1)\n");
+    await writeFile(mapPath1, emptyMap);
+    await writeFile(jsPath2, "console.log(22)\n");
+    await writeFile(mapPath2, emptyMap);
+
+    const result1 = await injectDebugId(jsPath1, mapPath1);
+    const result2 = await injectDebugId(jsPath2, mapPath2);
+
+    // Different minified content → different debug ID, even with identical maps.
+    expect(result1.debugId).not.toBe(result2.debugId);
+  });
+
+  test("byte-identical (JS, map) pairs get the same debug ID (determinism preserved)", async () => {
+    // Two artifacts that are byte-identical in BOTH JS and map are genuinely
+    // interchangeable, so sharing a debug ID is correct and expected.
+    const jsPath1 = join(tmpDir, "a.js");
+    const mapPath1 = join(tmpDir, "a.js.map");
+    const jsPath2 = join(tmpDir, "b.js");
+    const mapPath2 = join(tmpDir, "b.js.map");
+
+    const jsContent = "console.log(1)\n";
     const mapContent = JSON.stringify({
       version: 3,
       sources: ["input.ts"],
       mappings: "AAAA",
     });
 
-    await writeFile(jsPath1, "var x = 1;\n");
+    await writeFile(jsPath1, jsContent);
     await writeFile(mapPath1, mapContent);
-    await writeFile(jsPath2, "var y = 2;\n");
+    await writeFile(jsPath2, jsContent);
     await writeFile(mapPath2, mapContent);
 
     const result1 = await injectDebugId(jsPath1, mapPath1);
     const result2 = await injectDebugId(jsPath2, mapPath2);
 
-    // Same sourcemap content → same debug ID
+    // Identical JS + identical map → same debug ID.
     expect(result1.debugId).toBe(result2.debugId);
   });
 });
