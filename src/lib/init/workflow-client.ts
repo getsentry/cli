@@ -120,6 +120,58 @@ function toWorkflowRunResult(
   return { status: "suspended", suspended: [] };
 }
 
+const MAX_ERROR_DETAIL_LEN = 500;
+const HTML_BODY_RE = /<html|<!doctype/i;
+const ERROR_LINE_RE = /\b[A-Z]\w*Error\b[^<\n]*/;
+const WHITESPACE_RE = /\s+/g;
+
+/**
+ * Reduce an error response body to a short, human-useful message.
+ *
+ * The server may return JSON (`{ "error": "..." }`), a plain string, or — when a
+ * dev server crashes — a large HTML error page (e.g. Bun's fallback overlay). We
+ * never surface the raw HTML/markup, so extract the meaningful bit and cap the
+ * length.
+ */
+function extractErrorDetail(body: string): string {
+  const trimmed = body.trim();
+  if (!trimmed) {
+    return "(empty response)";
+  }
+
+  // JSON error envelope from our own API.
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as { error?: unknown };
+      if (typeof parsed.error === "string" && parsed.error) {
+        return truncate(parsed.error);
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // HTML error page (e.g. a crashed dev server) — pull the first meaningful
+  // "<Something>Error: message" line out of the markup instead of dumping it.
+  if (HTML_BODY_RE.test(trimmed)) {
+    const match = trimmed.match(ERROR_LINE_RE);
+    return truncate(
+      match
+        ? match[0]
+        : "server returned an HTML error page (is the dev server crashing?)"
+    );
+  }
+
+  return truncate(trimmed);
+}
+
+function truncate(s: string): string {
+  const oneLine = s.replace(WHITESPACE_RE, " ").trim();
+  return oneLine.length > MAX_ERROR_DETAIL_LEN
+    ? `${oneLine.slice(0, MAX_ERROR_DETAIL_LEN)}…`
+    : oneLine;
+}
+
 /** One-line description of a run state for debug logs. */
 function describeRunState(state: RunStatePayload): string {
   const parts = [`status=${state.status}`];
@@ -155,9 +207,10 @@ export function createWorkflowClient(options: WorkflowClientOptions): {
       signal: abortSignal,
     });
     if (!res.ok) {
-      const errorBody = await res.text();
-      log.debug(`POST ${path} failed: ${res.status}`, errorBody);
-      throw new Error(`HTTP error! status: ${res.status} - ${errorBody}`);
+      const rawBody = await res.text();
+      const detail = extractErrorDetail(rawBody);
+      log.debug(`POST ${path} failed: ${res.status}`, detail);
+      throw new Error(`HTTP error! status: ${res.status} - ${detail}`);
     }
     log.debug(`POST ${path} -> ${res.status}`);
     return (await res.json()) as Record<string, unknown>;
@@ -171,9 +224,9 @@ export function createWorkflowClient(options: WorkflowClientOptions): {
       signal: abortSignal,
     });
     if (!res.ok) {
-      const errorBody = await res.text();
-      log.debug(`GET /api/run failed: ${res.status}`, errorBody);
-      throw new Error(`HTTP error! status: ${res.status} - ${errorBody}`);
+      const detail = extractErrorDetail(await res.text());
+      log.debug(`GET /api/run failed: ${res.status}`, detail);
+      throw new Error(`HTTP error! status: ${res.status} - ${detail}`);
     }
     const state = (await res.json()) as RunStatePayload;
     log.debug(`GET /api/run -> ${describeRunState(state)}`);
