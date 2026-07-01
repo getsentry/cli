@@ -139,6 +139,9 @@ export const ORG_ONLY_COMMANDS = new Set([
   "team list",
   "repo list",
   "monitor list",
+  "token create",
+  "token delete",
+  "token list",
   "trial list",
   "trial start",
 ]);
