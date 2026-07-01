@@ -38,6 +38,10 @@ sentry debug-files upload ./build --no-zips
 sentry debug-files upload ./dsyms --type dsym --wait
 sentry debug-files upload ./build --id <debug-id> --require-all
 
+# Unity: upload IL2CPP line mappings (optionally with referenced C# sources)
+sentry debug-files upload ./build --il2cpp-mapping
+sentry debug-files upload ./build --il2cpp-mapping --include-sources
+
 # Preview what would be uploaded without uploading (no credentials needed)
 sentry debug-files upload ./build --no-upload
 ```
@@ -72,8 +76,14 @@ sentry debug-files upload ./build --no-upload
   server-side processing and exit non-zero if any file fails. `--require-all`
   fails if a requested `--id` was not found. The server-advertised maximum file
   size and maximum processing wait are honored automatically (oversized files
-  are skipped with a warning). `--symbol-maps` (BCSymbolMap resolution) and
-  `--il2cpp-mapping` line mappings are not yet supported.
+  are skipped with a warning). `--symbol-maps` (BCSymbolMap resolution) is not
+  yet supported.
+- Managed .NET PE assemblies that embed a Portable PDB have it extracted and
+  uploaded automatically as a separate `<name>.pdb` debug file (no flag needed).
+- `--il2cpp-mapping` computes Unity IL2CPP C++→C# line mappings from each file's
+  referenced generated C++ sources and uploads them as separate `il2cpp` debug
+  files. Combine with `--include-sources` to also bundle the referenced C#
+  source files.
 - Upload a JVM bundle separately via `sentry debug-files upload --type jvm`.
 - Supported JVM source file extensions: `.java`, `.kt`, `.scala`, `.sc`,
   `.groovy`, `.gvy`, `.gy`, `.gsh`, `.clj`, `.cljc`
