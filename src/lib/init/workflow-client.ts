@@ -21,10 +21,14 @@
  * (runId, seq) plus the Bearer auth is what authorizes the resume.
  */
 
+import { logger } from "../logger.js";
 import type { SuspendPayload, WorkflowRunResult } from "./types.js";
 
 const POLL_INTERVAL_MS = 1000;
 const POLL_TIMEOUT_MS = 300_000;
+
+/** Scoped diagnostic logger. Surfaced with `--verbose` / `--log-level=debug`. */
+const log = logger.withTag("wizard-client");
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -116,10 +120,26 @@ function toWorkflowRunResult(
   return { status: "suspended", suspended: [] };
 }
 
+/** One-line description of a run state for debug logs. */
+function describeRunState(state: RunStatePayload): string {
+  const parts = [`status=${state.status}`];
+  if (state.seq !== undefined) {
+    parts.push(`seq=${state.seq}`);
+  }
+  if (state.request?.type === "tool") {
+    parts.push(`op=${state.request.operation}`);
+  } else if (state.request?.type === "interactive") {
+    parts.push(`kind=${state.request.kind}`);
+  }
+  return parts.join(" ");
+}
+
 export function createWorkflowClient(options: WorkflowClientOptions): {
   getWorkflow(id: string): WorkflowHandle;
 } {
   const { baseUrl, headers = {}, fetch, abortSignal } = options;
+
+  log.debug(`workflow client targeting ${baseUrl}`);
 
   const jsonHeaders = { "content-type": "application/json", ...headers };
 
@@ -127,6 +147,7 @@ export function createWorkflowClient(options: WorkflowClientOptions): {
     path: string,
     body: unknown
   ): Promise<Record<string, unknown>> {
+    log.debug(`POST ${baseUrl}${path}`);
     const res = await fetch(`${baseUrl}${path}`, {
       method: "POST",
       headers: jsonHeaders,
@@ -134,24 +155,29 @@ export function createWorkflowClient(options: WorkflowClientOptions): {
       signal: abortSignal,
     });
     if (!res.ok) {
-      throw new Error(
-        `HTTP error! status: ${res.status} - ${await res.text()}`
-      );
+      const errorBody = await res.text();
+      log.debug(`POST ${path} failed: ${res.status}`, errorBody);
+      throw new Error(`HTTP error! status: ${res.status} - ${errorBody}`);
     }
+    log.debug(`POST ${path} -> ${res.status}`);
     return (await res.json()) as Record<string, unknown>;
   }
 
   async function getRunState(runId: string): Promise<RunStatePayload> {
-    const res = await fetch(
-      `${baseUrl}/api/run?runId=${encodeURIComponent(runId)}`,
-      { method: "GET", headers, signal: abortSignal }
-    );
+    const url = `${baseUrl}/api/run?runId=${encodeURIComponent(runId)}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: abortSignal,
+    });
     if (!res.ok) {
-      throw new Error(
-        `HTTP error! status: ${res.status} - ${await res.text()}`
-      );
+      const errorBody = await res.text();
+      log.debug(`GET /api/run failed: ${res.status}`, errorBody);
+      throw new Error(`HTTP error! status: ${res.status} - ${errorBody}`);
     }
-    return (await res.json()) as RunStatePayload;
+    const state = (await res.json()) as RunStatePayload;
+    log.debug(`GET /api/run -> ${describeRunState(state)}`);
+    return state;
   }
 
   /**
@@ -163,13 +189,20 @@ export function createWorkflowClient(options: WorkflowClientOptions): {
     seqRef: { current: number }
   ): Promise<WorkflowRunResult> {
     const deadline = Date.now() + POLL_TIMEOUT_MS;
+    let polls = 0;
     for (;;) {
       const state = await getRunState(runId);
       if (state.status !== "running") {
+        log.debug(
+          `run ${runId} settled as "${state.status}" after ${polls} poll(s)`
+        );
         return toWorkflowRunResult(state, seqRef);
       }
+      polls += 1;
       if (Date.now() > deadline) {
-        throw new Error("Workflow polling timed out");
+        throw new Error(
+          `Workflow polling timed out after ${polls} poll(s) (run ${runId})`
+        );
       }
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     }
@@ -192,10 +225,12 @@ export function createWorkflowClient(options: WorkflowClientOptions): {
           ...(initialState ?? {}),
         });
         runId = String(started.runId);
+        log.debug(`workflow started, run ${runId}`);
         return pollUntilSettled(runId, seqRef);
       },
       async resumeAsync({ resumeData }) {
         const token = `wizard:${runId}:${seqRef.current}`;
+        log.debug(`resuming run ${runId} with token ${token}`);
         await post("/api/resume", { token, result: resumeData });
         return pollUntilSettled(runId, seqRef);
       },

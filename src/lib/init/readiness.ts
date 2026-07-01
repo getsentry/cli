@@ -66,16 +66,22 @@ async function checkAuth(): Promise<boolean> {
 }
 
 async function checkMastraApi(): Promise<boolean> {
+  const log = logger.withTag("readiness");
+  const url = `${MASTRA_API_URL}/health`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
   try {
-    const resp = await customFetch(`${MASTRA_API_URL}/health`, {
+    log.debug(`health check GET ${url}`);
+    const resp = await customFetch(url, {
       signal: controller.signal,
       method: "GET",
     });
+    if (!resp.ok) {
+      log.debug(`health check returned ${resp.status} for ${url}`);
+    }
     return resp.ok;
   } catch (error) {
-    logger.withTag("readiness").debug("Mastra API health check failed", error);
+    log.debug(`health check failed for ${url}`, error);
     return false;
   } finally {
     clearTimeout(timer);
