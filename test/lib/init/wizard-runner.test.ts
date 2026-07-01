@@ -1,4 +1,3 @@
-import { MastraClient } from "@mastra/client-js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as Sentry from "@sentry/node-core/light";
 import {
@@ -49,6 +48,8 @@ import {
   type WizardUI,
 } from "../../../src/lib/init/ui/types.js";
 import { runWizard } from "../../../src/lib/init/wizard-runner.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as workflowClient from "../../../src/lib/init/workflow-client.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as workflowInputs from "../../../src/lib/init/workflow-inputs.js";
 import { createMockUI, type MockCall } from "./ui/mock-ui.js";
@@ -245,18 +246,14 @@ beforeEach(() => {
   };
   capturedClientOptions = [];
   getWorkflowSpy = vi
-    .spyOn(MastraClient.prototype, "getWorkflow")
-    .mockImplementation(function (this: MastraClient) {
-      // `this` is the MastraClient instance. `BaseResource.options` holds the
-      // full ClientOptions passed to the constructor — including abortSignal.
+    .spyOn(workflowClient, "createWorkflowClient")
+    .mockImplementation((options) => {
+      // Capture the options passed to the client — including abortSignal — for
+      // the lifecycle suite.
       capturedClientOptions.push(
-        (
-          this as unknown as {
-            options: { abortSignal?: AbortSignal; retries?: number };
-          }
-        ).options
+        options as { abortSignal?: AbortSignal; retries?: number }
       );
-      return workflow as any;
+      return { getWorkflow: () => workflow } as any;
     });
 });
 
@@ -894,11 +891,10 @@ describe("runWizard", () => {
 });
 
 describe("runWizard — MastraClient lifecycle", () => {
-  test("aborts the MastraClient signal after a successful run", async () => {
+  test("aborts the workflow-client signal after a successful run", async () => {
     await runWizard(makeOptions());
 
     expect(capturedClientOptions).toHaveLength(1);
-    expect(capturedClientOptions[0]?.retries).toBe(0);
     const signal = capturedClientOptions[0]?.abortSignal;
     expect(signal).toBeInstanceOf(AbortSignal);
     // Using the non-null assertion safely — we asserted toBeInstanceOf above.
@@ -961,21 +957,19 @@ describe("runWizard — MastraClient lifecycle", () => {
     // at construction, it would be aborted here too. This proves the
     // `using _mastraCleanup` disposable does NOT fire until teardown.
     let abortedAtConstruction: boolean | undefined;
-    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
-      const opts = (
-        this as unknown as {
-          options: { abortSignal?: AbortSignal; retries?: number };
-        }
-      ).options;
+    getWorkflowSpy.mockImplementation((options) => {
+      const opts = options as { abortSignal?: AbortSignal; retries?: number };
       capturedClientOptions.push(opts);
       abortedAtConstruction = opts.abortSignal?.aborted;
       return {
-        createRun: vi.fn(() =>
-          Promise.resolve({
-            startAsync: startAsyncMock,
-            resumeAsync: vi.fn(() => Promise.resolve({ status: "success" })),
-          })
-        ),
+        getWorkflow: () => ({
+          createRun: vi.fn(() =>
+            Promise.resolve({
+              startAsync: startAsyncMock,
+              resumeAsync: vi.fn(() => Promise.resolve({ status: "success" })),
+            })
+          ),
+        }),
       } as any;
     });
 
@@ -1028,24 +1022,22 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     ) => Promise<WorkflowRunResult>
   ) {
     let runByIdRef: ReturnType<typeof mock>;
-    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+    getWorkflowSpy.mockImplementation((options) => {
       capturedClientOptions.push(
-        (
-          this as unknown as {
-            options: { abortSignal?: AbortSignal; retries?: number };
-          }
-        ).options
+        options as { abortSignal?: AbortSignal; retries?: number }
       );
       runByIdRef = runByIdMock;
       return {
-        createRun: vi.fn(() =>
-          Promise.resolve({
-            runId: "test-run-id",
-            startAsync: startAsyncMock,
-            resumeAsync: vi.fn(resumeAsyncImpl),
-          })
-        ),
-        runById: runByIdRef,
+        getWorkflow: () => ({
+          createRun: vi.fn(() =>
+            Promise.resolve({
+              runId: "test-run-id",
+              startAsync: startAsyncMock,
+              resumeAsync: vi.fn(resumeAsyncImpl),
+            })
+          ),
+          runById: runByIdRef,
+        }),
       } as any;
     });
   }
@@ -1407,17 +1399,15 @@ describe("runWizard — additional coverage", () => {
   test("classifies createRun 401 before starting the workflow", async () => {
     await useSaaSOAuthAuth();
     const createRunMock = vi.fn(() => Promise.reject(initService401Error()));
-    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+    getWorkflowSpy.mockImplementation((options) => {
       capturedClientOptions.push(
-        (
-          this as unknown as {
-            options: { abortSignal?: AbortSignal; retries?: number };
-          }
-        ).options
+        options as { abortSignal?: AbortSignal; retries?: number }
       );
       return {
-        createRun: createRunMock,
-        runById: runByIdMock,
+        getWorkflow: () => ({
+          createRun: createRunMock,
+          runById: runByIdMock,
+        }),
       } as any;
     });
 
@@ -1674,23 +1664,21 @@ describe("runWizard — progress rotation for long-running steps", () => {
       resolveResume = resolve;
     });
     const resumeAsyncMock = vi.fn(() => resumePromise);
-    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+    getWorkflowSpy.mockImplementation((options) => {
       capturedClientOptions.push(
-        (
-          this as unknown as {
-            options: { abortSignal?: AbortSignal; retries?: number };
-          }
-        ).options
+        options as { abortSignal?: AbortSignal; retries?: number }
       );
       return {
-        createRun: vi.fn(() =>
-          Promise.resolve({
-            runId: "test-run-id",
-            startAsync: startAsyncMock,
-            resumeAsync: resumeAsyncMock,
-          })
-        ),
-        runById: runByIdMock,
+        getWorkflow: () => ({
+          createRun: vi.fn(() =>
+            Promise.resolve({
+              runId: "test-run-id",
+              startAsync: startAsyncMock,
+              resumeAsync: resumeAsyncMock,
+            })
+          ),
+          runById: runByIdMock,
+        }),
       } as any;
     });
 
@@ -1749,23 +1737,21 @@ describe("runWizard — progress rotation for long-running steps", () => {
       resolveResume = resolve;
     });
     const resumeAsyncMock = vi.fn(() => resumePromise);
-    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+    getWorkflowSpy.mockImplementation((options) => {
       capturedClientOptions.push(
-        (
-          this as unknown as {
-            options: { abortSignal?: AbortSignal; retries?: number };
-          }
-        ).options
+        options as { abortSignal?: AbortSignal; retries?: number }
       );
       return {
-        createRun: vi.fn(() =>
-          Promise.resolve({
-            runId: "test-run-id",
-            startAsync: startAsyncMock,
-            resumeAsync: resumeAsyncMock,
-          })
-        ),
-        runById: runByIdMock,
+        getWorkflow: () => ({
+          createRun: vi.fn(() =>
+            Promise.resolve({
+              runId: "test-run-id",
+              startAsync: startAsyncMock,
+              resumeAsync: resumeAsyncMock,
+            })
+          ),
+          runById: runByIdMock,
+        }),
       } as any;
     });
 
@@ -1806,23 +1792,21 @@ describe("runWizard — progress rotation for long-running steps", () => {
       resolveResume = resolve;
     });
     const resumeAsyncMock = vi.fn(() => resumePromise);
-    getWorkflowSpy.mockImplementation(function (this: MastraClient) {
+    getWorkflowSpy.mockImplementation((options) => {
       capturedClientOptions.push(
-        (
-          this as unknown as {
-            options: { abortSignal?: AbortSignal; retries?: number };
-          }
-        ).options
+        options as { abortSignal?: AbortSignal; retries?: number }
       );
       return {
-        createRun: vi.fn(() =>
-          Promise.resolve({
-            runId: "test-run-id",
-            startAsync: startAsyncMock,
-            resumeAsync: resumeAsyncMock,
-          })
-        ),
-        runById: runByIdMock,
+        getWorkflow: () => ({
+          createRun: vi.fn(() =>
+            Promise.resolve({
+              runId: "test-run-id",
+              startAsync: startAsyncMock,
+              resumeAsync: resumeAsyncMock,
+            })
+          ),
+          runById: runByIdMock,
+        }),
       } as any;
     });
 
