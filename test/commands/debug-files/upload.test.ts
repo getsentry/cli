@@ -7,6 +7,7 @@
  * on `uploadDebugFiles`.
  */
 
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -81,6 +82,19 @@ async function writeBreakpadZip(name = "symbols.zip"): Promise<string> {
     path,
     zipSync({ "example.sym": new TextEncoder().encode(BREAKPAD_FIXTURE) })
   );
+  return path;
+}
+
+/** Debug id of the managed PE fixture (shared by its embedded Portable PDB). */
+const EMBEDDED_PE_DEBUG_ID = "d8eb7dca-4883-4b10-a1f7-048ea1ea388b-cfb0fc89";
+
+/** Copy a committed binary DIF fixture into `tempDir` under `name`. */
+async function writeDifFixture(fixture: string, name: string): Promise<string> {
+  const bytes = readFileSync(
+    new URL(`../../fixtures/dif/${fixture}`, import.meta.url)
+  );
+  const path = join(tempDir, name);
+  await writeFile(path, bytes);
   return path;
 }
 
@@ -491,5 +505,84 @@ describe("sentry debug-files upload", () => {
     ]);
     expect(exitCode).toBe(0);
     expect(JSON.parse(output).files).toHaveLength(0);
+  });
+
+  // ── Embedded Portable PDB extraction ─────────────────────────────
+
+  test("extracts an embedded PPDB as a separate .pdb DIF (dry-run)", async () => {
+    // The managed PE carries no native debug features of its own, so only the
+    // extracted Portable PDB is queued, named after the PE.
+    await writeDifFixture("embedded-ppdb.dll", "App.dll");
+    const { output, exitCode } = await runUpload([
+      tempDir,
+      "--no-upload",
+      "--json",
+    ]);
+    expect(exitCode).toBe(0);
+    const files = JSON.parse(output).files as {
+      name: string;
+      debugId?: string;
+    }[];
+    expect(files).toHaveLength(1);
+    expect(files[0]?.name).toBe("App.pdb");
+    expect(files[0]?.debugId).toBe(EMBEDDED_PE_DEBUG_ID);
+  });
+
+  test("--type portablepdb extracts a PE's embedded Portable PDB", async () => {
+    // Even though the `pe` format is excluded by the filter, the PE is still
+    // read so its embedded (portablepdb) companion can be extracted.
+    await writeDifFixture("embedded-ppdb.dll", "App.dll");
+    const { output, exitCode } = await runUpload([
+      tempDir,
+      "--type",
+      "portablepdb",
+      "--no-upload",
+      "--json",
+    ]);
+    expect(exitCode).toBe(0);
+    const files = JSON.parse(output).files as { name: string }[];
+    expect(files).toHaveLength(1);
+    expect(files[0]?.name).toBe("App.pdb");
+  });
+
+  test("--type elf ignores a PE with an embedded PPDB", async () => {
+    await writeDifFixture("embedded-ppdb.dll", "App.dll");
+    const { output, exitCode } = await runUpload([
+      tempDir,
+      "--type",
+      "elf",
+      "--no-upload",
+      "--json",
+    ]);
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(output).files).toHaveLength(0);
+  });
+
+  test("a PE without an embedded PPDB yields nothing", async () => {
+    await writeDifFixture("pe-no-ppdb.dll", "Plain.dll");
+    const { output, exitCode } = await runUpload([
+      tempDir,
+      "--no-upload",
+      "--json",
+    ]);
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(output).files).toHaveLength(0);
+  });
+
+  test("passes the extracted PPDB through to uploadDebugFiles", async () => {
+    process.env.SENTRY_ORG = "test-org";
+    process.env.SENTRY_PROJECT = "test-project";
+    await writeDifFixture("embedded-ppdb.dll", "App.dll");
+    const spy = vi
+      .spyOn(debugFilesApi, "uploadDebugFiles")
+      .mockResolvedValue([]);
+
+    await runUpload([tempDir]);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const difs = spy.mock.calls[0]?.[0]?.difs ?? [];
+    expect(difs).toHaveLength(1);
+    expect(difs[0]?.name).toBe("App.pdb");
+    expect(difs[0]?.debugId).toBe(EMBEDDED_PE_DEBUG_ID);
+    expect(difs[0]?.content).toBeInstanceOf(Buffer);
   });
 });
