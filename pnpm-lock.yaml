@@ -54,8 +54,8 @@ importers:
         specifier: ^1.0.1
         version: 1.0.1(react@19.2.7)
       '@sentry/symbolic':
-        specifier: 13.5.0
-        version: 13.5.0
+        specifier: 13.7.0
+        version: 13.7.0
       '@spotlightjs/spotlight':
         specifier: ^4.11.7
         version: 4.11.7(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(hono-rate-limiter@0.4.2(hono@4.12.27))
@@ -812,8 +812,8 @@ packages:
       react:
         optional: true
 
-  '@sentry/symbolic@13.5.0':
-    resolution: {integrity: sha512-92buXpApwcFs5TsglryoPudQJBBQxF9ASOU//iJQSHlGjAVmk38KsqW0xshe//TTXjFdrDkXCQosR7eUV+1Z5Q==}
+  '@sentry/symbolic@13.7.0':
+    resolution: {integrity: sha512-FR8CESwUVeMlJgiCHQrV8hWj1bPA/d9Sq2dYHtDDpGakBq7C0BNE1jAtyD41lleVvrKlrAY89NiZJ+JnCftFpA==}
 
   '@sindresorhus/merge-streams@4.0.0':
     resolution: {integrity: sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ==}
@@ -3282,7 +3282,7 @@ snapshots:
     optionalDependencies:
       react: 19.2.7
 
-  '@sentry/symbolic@13.5.0': {}
+  '@sentry/symbolic@13.7.0': {}
 
   '@sindresorhus/merge-streams@4.0.0': {}
 
