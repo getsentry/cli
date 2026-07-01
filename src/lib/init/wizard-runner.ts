@@ -1,7 +1,7 @@
 /**
  * Wizard Runner
  *
- * Main suspend/resume loop that drives the remote Mastra workflow.
+ * Main suspend/resume loop that drives the remote wizard workflow.
  * Each iteration: check status → if suspended, perform tool or
  * interactive prompt → resume with result → repeat.
  *
@@ -14,7 +14,6 @@
 import { randomBytes } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
-import { MastraClient } from "@mastra/client-js";
 import {
   addBreadcrumb,
   captureException,
@@ -60,7 +59,6 @@ import {
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
 import { checkReadiness } from "./readiness.js";
-
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
   ResolvedInitContext,
@@ -74,6 +72,11 @@ import { getUIAsync } from "./ui/factory.js";
 import { LoggingUIPromptError } from "./ui/logging-ui.js";
 import type { SpinnerHandle, WelcomeOptions, WizardUI } from "./ui/types.js";
 import { verifySetup } from "./verify-setup.js";
+import {
+  createWorkflowClient,
+  type WorkflowHandle,
+  type WorkflowRun,
+} from "./workflow-client.js";
 import {
   precomputeDirListing,
   precomputeSentryDetection,
@@ -598,13 +601,8 @@ const RUN_STATE_RECOVERY_MAX_WAIT_MS = 120_000;
 const RUN_STATE_RECOVERY_TIMEOUT_MS = 10_000;
 
 type ResumeRetryArgs = {
-  run: {
-    resumeAsync: (args: Record<string, unknown>) => Promise<unknown>;
-    readonly runId: string;
-  };
-  workflow: {
-    runById: (runId: string, opts?: { fields?: string[] }) => Promise<unknown>;
-  };
+  run: Pick<WorkflowRun, "resumeAsync" | "runId">;
+  workflow: Pick<WorkflowHandle, "runById">;
   stepId: string;
   payload: SuspendPayload;
   resumeData: Record<string, unknown>;
@@ -615,10 +613,9 @@ type ResumeRetryArgs = {
 };
 
 /**
- * Detect Mastra's "not suspended" conflict — means the server already
- * processed this step (our previous request succeeded but the response was
- * dropped before we received it). The MastraClientError message embeds the
- * server body, e.g.:
+ * Detect a "not suspended" conflict — means the server already processed this
+ * step (our previous request succeeded but the response was dropped before we
+ * received it). The client error message embeds the server body, e.g.:
  *   "HTTP error! status: 500 - {"error":"This workflow step 'X' was not suspended..."}"
  * or:
  *   "HTTP error! status: 500 - {"error":"This workflow run was not suspended"}"
@@ -873,7 +870,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   assertHostedInitServiceAcceptsTokenHost();
   const token = context.authToken;
 
-  // AbortController bound to the MastraClient lifecycle. Aborting on
+  // AbortController bound to the workflow-client lifecycle. Aborting on
   // teardown (success OR failure, via `using` below) cancels any in-flight
   // fetches — releasing keep-alive sockets so the event loop drains and
   // `sentry init` returns to the shell promptly. Without this, a stuck or
@@ -887,16 +884,14 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     },
   };
 
-  const client = new MastraClient({
+  const client = createWorkflowClient({
     baseUrl: MASTRA_API_URL,
-    retries: 0,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     abortSignal: abortController.signal,
-    fetch: ((url, init) => {
+    fetch: ((url: string, init?: RequestInit) => {
       const traceData = getTraceData();
-      // Preserve `init.signal` via the spread — MastraClient may pass its
-      // own per-request signal, and the client-level `abortSignal` is
-      // forwarded through the same channel.
+      // Preserve `init.signal` via the spread — the client-level `abortSignal`
+      // is forwarded through the same channel.
       return customFetch(url, {
         ...init,
         headers: {
@@ -907,7 +902,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           ...(traceData.baggage && { baggage: traceData.baggage }),
         },
       });
-    }) as typeof fetch,
+    }) as (url: string, init?: RequestInit) => Promise<Response>,
   });
   const workflow = client.getWorkflow(WORKFLOW_ID);
 
