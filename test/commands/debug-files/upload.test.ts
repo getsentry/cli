@@ -98,6 +98,23 @@ async function writeDifFixture(fixture: string, name: string): Promise<string> {
   return path;
 }
 
+/**
+ * Write a Breakpad file referencing an on-disk generated C++ source that carries
+ * an IL2CPP `source_info` marker, so `--il2cpp-mapping` can resolve a mapping.
+ */
+async function writeIl2cppFixture(): Promise<void> {
+  const cppPath = join(tempDir, "Game.cpp");
+  await writeFile(cppPath, "//<source_info:Game.cs:42>\nint generated = 0;\n");
+  const sym = [
+    "MODULE Linux x86_64 0F13A5DA412AFBF7C8662048F3294F3D0 example",
+    "INFO CODE_ID DAA5130F2A41F7FBC8662048F3294F3D439CA7FF",
+    `FILE 0 ${cppPath}`,
+    "FUNC 1000 10 0 main",
+    "1000 10 42 0",
+  ].join("\n");
+  await writeFile(join(tempDir, "example.sym"), sym);
+}
+
 /** Run `debug-files upload` and capture stdout + exit code. */
 async function runUpload(
   args: string[]
@@ -584,5 +601,45 @@ describe("sentry debug-files upload", () => {
     expect(difs[0]?.name).toBe("App.pdb");
     expect(difs[0]?.debugId).toBe(EMBEDDED_PE_DEBUG_ID);
     expect(difs[0]?.content).toBeInstanceOf(Buffer);
+  });
+
+  // ── IL2CPP line mappings ─────────────────────────────────────────
+
+  test("--il2cpp-mapping produces a separate il2cpp DIF (dry-run)", async () => {
+    await writeIl2cppFixture();
+    const { output, exitCode } = await runUpload([
+      tempDir,
+      "--il2cpp-mapping",
+      "--no-upload",
+      "--json",
+    ]);
+    expect(exitCode).toBe(0);
+    const files = JSON.parse(output).files as { name: string }[];
+    expect(files.some((f) => f.name === "example.sym")).toBe(true);
+    expect(files.some((f) => f.name === "example.sym.il2cpp")).toBe(true);
+  });
+
+  test("no il2cpp DIF is produced without --il2cpp-mapping", async () => {
+    await writeIl2cppFixture();
+    const { output } = await runUpload([tempDir, "--no-upload", "--json"]);
+    const files = JSON.parse(output).files as { name: string }[];
+    expect(files.some((f) => f.name.endsWith(".il2cpp"))).toBe(false);
+  });
+
+  test("--il2cpp-mapping threads the mapping DIF through to uploadDebugFiles", async () => {
+    process.env.SENTRY_ORG = "test-org";
+    process.env.SENTRY_PROJECT = "test-project";
+    await writeIl2cppFixture();
+    const spy = vi
+      .spyOn(debugFilesApi, "uploadDebugFiles")
+      .mockResolvedValue([]);
+
+    await runUpload([tempDir, "--il2cpp-mapping"]);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const difs = spy.mock.calls[0]?.[0]?.difs ?? [];
+    const il2cpp = difs.find((d) => d.name === "example.sym.il2cpp");
+    expect(il2cpp).toBeDefined();
+    expect(il2cpp?.debugId).toBe(KNOWN_DEBUG_ID);
+    expect(il2cpp?.content).toBeInstanceOf(Buffer);
   });
 });
