@@ -52,6 +52,13 @@ export type WorkflowRun = {
     resumeData: Record<string, unknown>;
     tracingOptions?: Record<string, unknown>;
   }): Promise<WorkflowRunResult>;
+  /**
+   * Sync the run's internal suspend-point sequence counter from a recovered
+   * result. Called after `workflow.runById()` fetches state through its own
+   * isolated `seqRef` — without this, the next `resumeAsync` would build a
+   * stale token targeting the wrong hook.
+   */
+  updateSeq(seq: number): void;
 };
 
 export type WorkflowHandle = {
@@ -102,6 +109,7 @@ function toWorkflowRunResult(
       suspended: [[stepId]],
       suspendPayload: state.request,
       steps: { [stepId]: { suspendPayload: state.request } },
+      _seq: seqRef.current,
     };
   }
   // "running" — represented as suspended-less; the caller keeps polling.
@@ -190,6 +198,9 @@ export function createWorkflowClient(options: WorkflowClientOptions): {
         const token = `wizard:${runId}:${seqRef.current}`;
         await post("/api/resume", { token, result: resumeData });
         return pollUntilSettled(runId, seqRef);
+      },
+      updateSeq(seq: number) {
+        seqRef.current = seq;
       },
     };
     return run;

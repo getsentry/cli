@@ -601,7 +601,7 @@ const RUN_STATE_RECOVERY_MAX_WAIT_MS = 120_000;
 const RUN_STATE_RECOVERY_TIMEOUT_MS = 10_000;
 
 type ResumeRetryArgs = {
-  run: Pick<WorkflowRun, "resumeAsync" | "runId">;
+  run: Pick<WorkflowRun, "resumeAsync" | "runId" | "updateSeq">;
   workflow: Pick<WorkflowHandle, "runById">;
   stepId: string;
   payload: SuspendPayload;
@@ -723,6 +723,19 @@ async function tryRecoverCurrentRunState(
   return null;
 }
 
+/**
+ * After `workflow.runById()` recovers the current run state, sync the seq
+ * counter back into the run so the next `resumeAsync` builds the correct token.
+ */
+function syncSeqFromRecovery(
+  run: Pick<WorkflowRun, "updateSeq">,
+  recovered: WorkflowRunResult
+): void {
+  if (typeof recovered._seq === "number") {
+    run.updateSeq(recovered._seq);
+  }
+}
+
 async function resumeWithRecovery(
   args: ResumeRetryArgs
 ): Promise<WorkflowRunResult> {
@@ -758,6 +771,7 @@ async function resumeWithRecovery(
         payload
       );
       if (recovered) {
+        syncSeqFromRecovery(run, recovered);
         addBreadcrumb({
           category: "wizard",
           message: `stale-step recovery succeeded for ${stepId}`,
@@ -796,6 +810,7 @@ async function resumeWithRecovery(
     );
     ui.clearOverlay?.();
     if (recovered) {
+      syncSeqFromRecovery(run, recovered);
       addBreadcrumb({
         category: "wizard",
         message: `resume state recovery succeeded for ${stepId}`,
