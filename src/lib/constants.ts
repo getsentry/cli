@@ -13,8 +13,8 @@ declare const SENTRY_CLI_VERSION: string | undefined;
  * During the build, esbuild's `define` replaces this identifier with a
  * placeholder UUID string literal. After esbuild finishes, the build
  * script replaces the placeholder with the real debug ID (derived from
- * the sourcemap content hash). The same-length swap keeps sourcemap
- * character positions valid.
+ * the minified JS + sourcemap content hash). The same-length swap keeps
+ * sourcemap character positions valid.
  */
 declare const __SENTRY_DEBUG_ID__: string | undefined;
 

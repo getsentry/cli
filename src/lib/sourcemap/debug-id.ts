@@ -9,6 +9,14 @@
  * The UUID algorithm and runtime snippet are byte-for-byte compatible
  * with `@sentry/bundler-plugin-core`'s `stringToUUID` and
  * `getDebugIdSnippet` — see ECMA-426 (Source Map Format) for the spec.
+ *
+ * The debug ID is derived from the minified JS content combined with its
+ * sourcemap content, so distinct minified artifacts never collide onto a
+ * single ID even when their sourcemaps are byte-identical
+ * (getsentry/sentry-cli#3350). The `stringToUUID` compatibility concerns the
+ * hash-to-UUID function itself, not its input; the CLI's `inject` and the
+ * bundler plugin run in mutually exclusive workflows, so their debug IDs need
+ * not match.
  */
 
 import { createHash } from "node:crypto";
@@ -134,8 +142,16 @@ export async function injectDebugId(
     return { debugId: existingMatch[1], wasInjected: false };
   }
 
-  // Generate debug ID from the sourcemap content (deterministic)
-  const debugId = contentToDebugId(mapContent);
+  // Derive the debug ID from the minified JS content combined with the
+  // sourcemap content. Hashing both guarantees that distinct minified
+  // artifacts receive distinct debug IDs even when their sourcemaps are
+  // byte-identical — e.g. esbuild's empty
+  // `{"version":3,"sources":[],"names":[],"mappings":""}` maps for
+  // helper/re-export-only chunks (getsentry/sentry-cli#3350). A `\0`
+  // separator can't occur in JS/JSON text, so the two inputs can't bleed
+  // across the boundary. Collisions now require both files to be
+  // byte-identical, in which case sharing an ID is correct.
+  const debugId = contentToDebugId(`${jsContent}\0${mapContent}`);
   const skipSnippet = options?.skipSnippet ?? false;
 
   // --- Mutate JS file ---
@@ -249,7 +265,12 @@ export async function injectInlineDebugId(
   // rewritten in place.
   const jsContent = await readFile(jsPath, "utf-8");
 
-  const debugId = contentToDebugId(decoded.json);
+  // Derive from the minified JS content combined with the (decoded) inline
+  // sourcemap, mirroring the external path so distinct chunks that share a
+  // byte-identical inline map still get distinct debug IDs
+  // (getsentry/sentry-cli#3350). `jsContent` already embeds the inline map,
+  // so this is belt-and-suspenders, but keeps the two paths symmetric.
+  const debugId = contentToDebugId(`${jsContent}\0${decoded.json}`);
 
   // Idempotent: if already injected, return the existing ID without writing.
   const existingMatch = jsContent.match(EXISTING_DEBUGID_RE);

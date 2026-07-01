@@ -349,3 +349,80 @@ describe("injectDirectory — inline sourcemaps", () => {
     expect(names).toEqual(["good.js"]);
   });
 });
+
+describe("injectDirectory — debug ID uniqueness (regression #3350)", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "sentry-inject-dbid-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** The empty sourcemap esbuild emits for helper/re-export-only chunks. */
+  const EMPTY_MAP = '{"version":3,"sources":[],"names":[],"mappings":""}';
+
+  /** Build a `data:` URL for a sourcemap object. */
+  function toDataUrl(map: unknown): string {
+    const b64 = Buffer.from(JSON.stringify(map)).toString("base64");
+    return `data:application/json;base64,${b64}`;
+  }
+
+  /** Map results back to a `basename → debugId` object. */
+  function debugIdsByName(
+    results: Awaited<ReturnType<typeof injectDirectory>>
+  ): Record<string, string> {
+    return Object.fromEntries(
+      results.map((r) => [r.jsPath.slice(dir.length + 1), r.debugId])
+    );
+  }
+
+  test("external: distinct chunks with byte-identical empty maps get distinct debug IDs", async () => {
+    // Exact scenario from getsentry/sentry-cli#3350: two different minified
+    // chunks whose sourcemaps are the byte-identical empty map. Companion
+    // `.map` files are auto-discovered by the `<name>.map` convention.
+    writeFileSync(join(dir, "a.js"), "console.log(1)\n");
+    writeFileSync(join(dir, "a.js.map"), EMPTY_MAP);
+    writeFileSync(join(dir, "b.js"), "console.log(22)\n");
+    writeFileSync(join(dir, "b.js.map"), EMPTY_MAP);
+
+    const ids = debugIdsByName(await injectDirectory(dir));
+    expect(ids["a.js"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(ids["b.js"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(ids["a.js"]).not.toBe(ids["b.js"]);
+  });
+
+  test("inline: distinct chunks with identical inline maps get distinct debug IDs", async () => {
+    const emptyInline = JSON.parse(EMPTY_MAP);
+    writeFileSync(
+      join(dir, "a.js"),
+      `console.log(1)\n//# sourceMappingURL=${toDataUrl(emptyInline)}\n`
+    );
+    writeFileSync(
+      join(dir, "b.js"),
+      `console.log(22)\n//# sourceMappingURL=${toDataUrl(emptyInline)}\n`
+    );
+
+    const ids = debugIdsByName(await injectDirectory(dir));
+    expect(ids["a.js"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(ids["b.js"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(ids["a.js"]).not.toBe(ids["b.js"]);
+  });
+
+  test("byte-identical (JS, map) artifacts share a debug ID (determinism preserved)", async () => {
+    const map = JSON.stringify({
+      version: 3,
+      sources: ["input.ts"],
+      mappings: "AAAA",
+    });
+    writeFileSync(join(dir, "a.js"), "console.log(1)\n");
+    writeFileSync(join(dir, "a.js.map"), map);
+    writeFileSync(join(dir, "b.js"), "console.log(1)\n");
+    writeFileSync(join(dir, "b.js.map"), map);
+
+    const ids = debugIdsByName(await injectDirectory(dir));
+    expect(ids["a.js"]).toBe(ids["b.js"]);
+  });
+});

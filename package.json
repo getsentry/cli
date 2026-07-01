@@ -109,7 +109,7 @@
     "lint": "biome check --no-errors-on-unmatched --max-diagnostics=none ./",
     "lint:fix": "biome check --write --no-errors-on-unmatched --max-diagnostics=none ./",
     "test": "pnpm run test:unit",
-    "test:unit": "pnpm run generate:docs && pnpm run generate:sdk && vitest run test/lib test/commands test/types --coverage",
+    "test:unit": "pnpm run generate:docs && pnpm run generate:sdk && vitest run test/lib test/commands test/types test/script --coverage",
     "test:changed": "pnpm run generate:docs && pnpm run generate:sdk && vitest run --changed",
     "test:e2e": "pnpm run generate:docs && pnpm run generate:sdk && vitest run test/e2e",
     "test:init-eval": "vitest run test/init-eval --testTimeout 600000",
