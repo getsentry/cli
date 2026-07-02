@@ -1,0 +1,231 @@
+/**
+ * sentry build upload <paths...>
+ *
+ * Upload mobile builds to Sentry for preprod size analysis. Each build is
+ * normalized into a deterministic wrapper ZIP and uploaded via the
+ * chunk-upload + preprod-artifacts assemble protocol.
+ *
+ * This PR supports Android APK/AAB. iOS XCArchive/IPA is ported separately;
+ * git/VCS metadata collection is added in a follow-up. Sentry SaaS only.
+ */
+
+import { readFile, stat } from "node:fs/promises";
+import type { SentryContext } from "../../context.js";
+import {
+  type BuildUploadMetadata,
+  uploadBuild,
+} from "../../lib/api/preprod-artifacts.js";
+import {
+  detectBuildFormat,
+  normalizeBuildFile,
+  parsePluginFromPipeline,
+} from "../../lib/build/index.js";
+import { buildCommand } from "../../lib/command.js";
+import { ContextError, ValidationError } from "../../lib/errors.js";
+import {
+  colorTag,
+  mdKvTable,
+  renderMarkdown,
+} from "../../lib/formatters/markdown.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
+import { logger } from "../../lib/logger.js";
+import { resolveOrgAndProject } from "../../lib/resolve-target.js";
+
+const log = logger.withTag("build.upload");
+
+const USAGE_HINT = "sentry build upload <path>";
+
+/** Flags accepted by `build upload`. */
+type UploadFlags = {
+  "build-configuration"?: string;
+  "release-notes"?: string;
+  "install-group"?: string[];
+};
+
+/** Result for a single uploaded path. */
+type BuildUploadEntry = {
+  /** The build file path. */
+  path: string;
+  /** The assembled artifact URL, or `null` if this path failed. */
+  artifactUrl: string | null;
+  /** Failure reason, or `null` on success. */
+  error: string | null;
+};
+
+/** Structured result for `build upload`. */
+type BuildUploadResult = {
+  /** Per-path outcomes. */
+  builds: BuildUploadEntry[];
+  /** Number of builds successfully uploaded. */
+  uploadedCount: number;
+};
+
+/** Human-readable formatter for the upload result. */
+function formatUploadResult(data: BuildUploadResult): string {
+  const rows = data.builds.map((entry): [string, string] => [
+    entry.path,
+    entry.error
+      ? colorTag("error", entry.error)
+      : (entry.artifactUrl ?? colorTag("muted", "uploaded")),
+  ]);
+  const header =
+    data.uploadedCount === data.builds.length
+      ? `Uploaded ${data.uploadedCount} build(s)`
+      : `Uploaded ${data.uploadedCount} of ${data.builds.length} build(s)`;
+  return renderMarkdown(`${header}\n\n${mdKvTable(rows)}`);
+}
+
+/**
+ * Normalize and upload a single build path.
+ *
+ * @throws {ValidationError} When the path is unreadable or an unsupported format.
+ */
+async function uploadOne(
+  ctx: SentryContext,
+  path: string,
+  org: string,
+  project: string,
+  metadata: BuildUploadMetadata
+): Promise<string> {
+  let info: Awaited<ReturnType<typeof stat>>;
+  try {
+    info = await stat(path);
+  } catch (err) {
+    log.debug(`Failed to stat build path ${path}`, err);
+    throw new ValidationError(`Path does not exist: ${path}`, "path");
+  }
+
+  // XCArchive is a directory; iOS support is ported separately.
+  if (info.isDirectory()) {
+    throw new ValidationError(
+      `iOS XCArchive upload is not yet supported: ${path}`,
+      "path"
+    );
+  }
+
+  // NOTE: the build is read fully into memory (and normalized into a second
+  // buffer). Fine for typical mobile builds, but files above Node's ~2 GiB
+  // Buffer cap will throw. A follow-up can stream normalization to a temp file
+  // and use the file-based chunk path; the legacy CLI memory-maps instead.
+  const content = await readFile(path);
+  const format = detectBuildFormat(content);
+
+  if (format === "ipa" || format === "xcarchive") {
+    throw new ValidationError(
+      `iOS ${format.toUpperCase()} upload is not yet supported: ${path}`,
+      "path"
+    );
+  }
+  if (format !== "apk" && format !== "aab") {
+    throw new ValidationError(
+      `Unsupported build format (expected APK or AAB): ${path}`,
+      "path"
+    );
+  }
+
+  const plugin = parsePluginFromPipeline(ctx.env.SENTRY_PIPELINE);
+  const normalized = normalizeBuildFile(path, content, plugin);
+  return await uploadBuild({ org, project, content: normalized, metadata });
+}
+
+export const uploadCommand = buildCommand({
+  docs: {
+    brief: "Upload builds to a project",
+    fullDescription:
+      "Upload mobile builds to Sentry for preprod size analysis. Each build " +
+      "is wrapped in a deterministic ZIP and uploaded via the chunk-upload + " +
+      "assemble protocol.\n\n" +
+      "Supported formats: Android APK and AAB. (iOS XCArchive/IPA is not yet " +
+      "supported.) This feature only works with Sentry SaaS.\n\n" +
+      "Usage:\n" +
+      "  sentry build upload ./app-release.apk\n" +
+      "  sentry build upload ./app.aab --build-configuration Release\n" +
+      "  sentry build upload ./app.aab --install-group qa --install-group beta",
+  },
+  output: {
+    human: formatUploadResult,
+  },
+  parameters: {
+    positional: {
+      kind: "array",
+      parameter: {
+        brief: "Path(s) to the build(s) to upload (APK or AAB)",
+        parse: String,
+        placeholder: "path",
+      },
+    },
+    flags: {
+      "build-configuration": {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Build configuration for the upload (defaults to the current version)",
+        optional: true,
+      },
+      "release-notes": {
+        kind: "parsed",
+        parse: String,
+        brief: "Release notes for the build",
+        optional: true,
+      },
+      "install-group": {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Install group(s) for this build (repeatable); builds sharing a group show updates for each other",
+        optional: true,
+        variadic: true,
+      },
+    },
+  },
+  async *func(this: SentryContext, flags: UploadFlags, ...paths: string[]) {
+    if (paths.length === 0) {
+      throw new ValidationError("At least one build path is required", "path");
+    }
+
+    const resolved = await resolveOrgAndProject({
+      cwd: this.cwd,
+      usageHint: USAGE_HINT,
+    });
+    if (!resolved) {
+      throw new ContextError("Organization and project", USAGE_HINT);
+    }
+    const { org, project } = resolved;
+
+    const metadata: BuildUploadMetadata = {
+      buildConfiguration: flags["build-configuration"],
+      releaseNotes: flags["release-notes"],
+      installGroups: flags["install-group"],
+    };
+
+    const builds: BuildUploadEntry[] = [];
+    for (const path of paths) {
+      try {
+        const artifactUrl = await uploadOne(this, path, org, project, metadata);
+        builds.push({ path, artifactUrl, error: null });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.debug(`Failed to upload build ${path}`, err);
+        builds.push({ path, artifactUrl: null, error: message });
+      }
+    }
+
+    const uploadedCount = builds.filter((b) => b.error === null).length;
+    yield new CommandOutput<BuildUploadResult>({ builds, uploadedCount });
+
+    // Deliberate deviation from the legacy CLI, which only exits non-zero when
+    // *every* build fails: we fail loud on *any* failure so CI/agents never
+    // mistake a partial upload for a clean success.
+    if (uploadedCount === 0) {
+      this.process.exitCode = 1;
+      return { hint: "No builds were uploaded. See the errors above." };
+    }
+    if (uploadedCount < builds.length) {
+      this.process.exitCode = 1;
+      return {
+        hint: `Uploaded ${uploadedCount} of ${builds.length} build(s); some failed.`,
+      };
+    }
+    return { hint: "View your builds in Sentry to see the size analysis." };
+  },
+});

@@ -21,6 +21,16 @@ import { getAuthToken } from "../db/auth.js";
 import { ApiError, ValidationError } from "../errors.js";
 import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
+import {
+  ASSEMBLE_MAX_WAIT_MS,
+  ASSEMBLE_POLL_INTERVAL_MS,
+  AssembleResponseSchema,
+  type ChunkServerOptions,
+  getChunkUploadOptions,
+  hashBuffer,
+  pickUploadEncoding,
+  uploadMissingBufferChunks,
+} from "./chunk-upload.js";
 import { apiRequestToRegion } from "./infrastructure.js";
 
 const log = logger.withTag("api.preprod-artifacts");
@@ -148,5 +158,143 @@ export async function downloadBuildArtifact(
   await pipeline(
     Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]),
     createWriteStream(destPath)
+  );
+}
+
+/** Optional metadata sent with a build assemble request. */
+export type BuildUploadMetadata = {
+  /** Build configuration name (e.g. `Release`). */
+  buildConfiguration?: string;
+  /** Release notes for the build. */
+  releaseNotes?: string;
+  /** Install group(s) this build belongs to. */
+  installGroups?: string[];
+};
+
+/** Options for {@link uploadBuild}. */
+export type BuildUploadOptions = {
+  /** Organization slug. */
+  org: string;
+  /** Project slug. */
+  project: string;
+  /** Normalized wrapper-ZIP bytes to upload. */
+  content: Buffer;
+  /** Optional build metadata folded into the assemble body. */
+  metadata: BuildUploadMetadata;
+  /** Pre-fetched chunk upload options (fetched if omitted). */
+  serverOptions?: ChunkServerOptions;
+};
+
+/**
+ * Build assemble response — the shared assemble shape plus `artifactUrl`, which
+ * is populated once the build has been fully assembled.
+ */
+const BuildAssembleResponseSchema = AssembleResponseSchema.extend({
+  artifactUrl: z.string().nullable().optional(),
+});
+
+/** Construct the single-object assemble request body for a build. */
+function buildAssembleBody(
+  checksum: string,
+  chunkShas: string[],
+  metadata: BuildUploadMetadata
+): Record<string, unknown> {
+  const body: Record<string, unknown> = { checksum, chunks: chunkShas };
+  if (metadata.buildConfiguration) {
+    body.build_configuration = metadata.buildConfiguration;
+  }
+  if (metadata.releaseNotes) {
+    body.release_notes = metadata.releaseNotes;
+  }
+  if (metadata.installGroups?.length) {
+    body.install_groups = metadata.installGroups;
+  }
+  return body;
+}
+
+/**
+ * Upload a normalized build via the chunk-upload + preprod-artifacts assemble
+ * protocol, polling until the server finishes assembling.
+ *
+ * Unlike DIF uploads there is no no-wait mode: assembly always runs to
+ * completion (or {@link ASSEMBLE_MAX_WAIT_MS}) because the artifact URL is only
+ * known once the build is assembled.
+ *
+ * @param options - Upload configuration.
+ * @returns The assembled artifact's URL.
+ * @throws {ApiError} On an assembly error or timeout.
+ */
+export async function uploadBuild(
+  options: BuildUploadOptions
+): Promise<string> {
+  const { org, project, content, metadata } = options;
+  const serverOptions =
+    options.serverOptions ?? (await getChunkUploadOptions(org));
+  const encoding = pickUploadEncoding(serverOptions.compression);
+  const { chunks, overallChecksum } = hashBuffer(
+    content,
+    serverOptions.chunkSize
+  );
+  const regionUrl = await resolveOrgRegion(org);
+  const endpoint = `projects/${org}/${project}/files/preprodartifacts/assemble/`;
+
+  const body = buildAssembleBody(
+    overallChecksum,
+    chunks.map((chunk) => chunk.sha1),
+    metadata
+  );
+
+  const deadline = Date.now() + ASSEMBLE_MAX_WAIT_MS;
+  while (Date.now() < deadline) {
+    const { data } = await apiRequestToRegion(regionUrl, endpoint, {
+      method: "POST",
+      body,
+      schema: BuildAssembleResponseSchema,
+    });
+
+    if (data.state === "error") {
+      throw new ApiError(
+        "Build assembly failed",
+        500,
+        data.detail ?? "Unknown error",
+        endpoint
+      );
+    }
+    if (data.artifactUrl) {
+      return data.artifactUrl;
+    }
+    // A finished ("ok") state without an artifact URL is terminal — fail fast
+    // rather than polling to the deadline (matches the legacy loop).
+    if (data.state === "ok") {
+      throw new ApiError(
+        "Build assembled but no artifact URL was returned",
+        500,
+        data.detail ?? "",
+        endpoint
+      );
+    }
+
+    const missing = new Set(data.missingChunks ?? []);
+    if (missing.size > 0) {
+      await uploadMissingBufferChunks({
+        chunks,
+        missingChecksums: missing,
+        content,
+        serverOptions,
+        encoding,
+        regionUrl,
+      });
+    }
+
+    // Always pace between assemble POSTs (matches the legacy poll loop and
+    // avoids a busy loop should the server keep reporting the same chunks).
+    await new Promise((r) => setTimeout(r, ASSEMBLE_POLL_INTERVAL_MS));
+  }
+
+  throw new ApiError(
+    "Build assembly timed out",
+    408,
+    `Assembly did not complete within ${ASSEMBLE_MAX_WAIT_MS / 1000}s`,
+    endpoint
   );
 }

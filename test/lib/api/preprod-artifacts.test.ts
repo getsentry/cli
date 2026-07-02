@@ -13,12 +13,17 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { ApiError, ValidationError } from "../../../src/lib/errors.js";
 
-const { customFetchMock, apiRequestToRegionMock, getAuthTokenMock } =
-  vi.hoisted(() => ({
-    customFetchMock: vi.fn(),
-    apiRequestToRegionMock: vi.fn(),
-    getAuthTokenMock: vi.fn<() => string | undefined>(() => "secret-token"),
-  }));
+const {
+  customFetchMock,
+  apiRequestToRegionMock,
+  getAuthTokenMock,
+  uploadMissingBufferChunksMock,
+} = vi.hoisted(() => ({
+  customFetchMock: vi.fn(),
+  apiRequestToRegionMock: vi.fn(),
+  getAuthTokenMock: vi.fn<() => string | undefined>(() => "secret-token"),
+  uploadMissingBufferChunksMock: vi.fn(() => Promise.resolve()),
+}));
 
 vi.mock("../../../src/lib/region.js", () => ({
   resolveOrgRegion: vi.fn(async () => "https://us.sentry.io"),
@@ -32,12 +37,32 @@ vi.mock("../../../src/lib/custom-ca.js", () => ({
 vi.mock("../../../src/lib/db/auth.js", () => ({
   getAuthToken: getAuthTokenMock,
 }));
+vi.mock("../../../src/lib/api/chunk-upload.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../src/lib/api/chunk-upload.js")
+    >();
+  return {
+    ...actual,
+    getChunkUploadOptions: vi.fn(async () => ({
+      url: "https://us.sentry.io/api/0/chunk-upload/",
+      chunkSize: 8192,
+      chunksPerRequest: 64,
+      maxRequestSize: 1_048_576,
+      hashAlgorithm: "sha1",
+      concurrency: 8,
+      compression: ["gzip"],
+    })),
+    uploadMissingBufferChunks: uploadMissingBufferChunksMock,
+  };
+});
 
 import {
   buildFormatFromUrl,
   downloadBuildArtifact,
   getBuildInstallDetails,
   toBinaryDownloadUrl,
+  uploadBuild,
 } from "../../../src/lib/api/preprod-artifacts.js";
 
 describe("toBinaryDownloadUrl", () => {
@@ -167,5 +192,127 @@ describe("downloadBuildArtifact", () => {
         join(tmpDir, "o4.ipa")
       )
     ).rejects.toThrow(ApiError);
+  });
+});
+
+describe("uploadBuild", () => {
+  const content = Buffer.from("normalized-build-zip-bytes");
+
+  beforeEach(() => {
+    apiRequestToRegionMock.mockReset();
+    uploadMissingBufferChunksMock.mockClear();
+  });
+
+  test("returns the artifactUrl and folds metadata into the assemble body", async () => {
+    apiRequestToRegionMock.mockResolvedValue({
+      data: { state: "ok", artifactUrl: "https://sentry.io/artifact/1" },
+      headers: new Headers(),
+    });
+
+    const url = await uploadBuild({
+      org: "my-org",
+      project: "my-project",
+      content,
+      metadata: {
+        buildConfiguration: "Release",
+        releaseNotes: "notes",
+        installGroups: ["qa", "beta"],
+      },
+    });
+
+    expect(url).toBe("https://sentry.io/artifact/1");
+    const call = apiRequestToRegionMock.mock.calls.at(-1);
+    expect(call?.[1]).toBe(
+      "projects/my-org/my-project/files/preprodartifacts/assemble/"
+    );
+    const body = call?.[2]?.body as Record<string, unknown>;
+    expect(body.checksum).toEqual(expect.any(String));
+    expect(Array.isArray(body.chunks)).toBe(true);
+    expect(body.build_configuration).toBe("Release");
+    expect(body.release_notes).toBe("notes");
+    expect(body.install_groups).toEqual(["qa", "beta"]);
+    // No missing chunks on the first (and only) response.
+    expect(uploadMissingBufferChunksMock).not.toHaveBeenCalled();
+  });
+
+  test("uploads missing chunks then returns the artifactUrl", async () => {
+    vi.useFakeTimers();
+    try {
+      apiRequestToRegionMock
+        .mockResolvedValueOnce({
+          data: { state: "created", missingChunks: ["deadbeef"] },
+          headers: new Headers(),
+        })
+        .mockResolvedValueOnce({
+          data: { state: "ok", artifactUrl: "https://sentry.io/artifact/2" },
+          headers: new Headers(),
+        });
+
+      const promise = uploadBuild({
+        org: "my-org",
+        project: "my-project",
+        content,
+        metadata: {},
+      });
+      // Advance past the inter-poll sleep so the second assemble POST runs.
+      await vi.advanceTimersByTimeAsync(1000);
+
+      await expect(promise).resolves.toBe("https://sentry.io/artifact/2");
+      expect(uploadMissingBufferChunksMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("omits optional metadata fields when unset", async () => {
+    apiRequestToRegionMock.mockResolvedValue({
+      data: { state: "ok", artifactUrl: "https://sentry.io/artifact/3" },
+      headers: new Headers(),
+    });
+
+    await uploadBuild({
+      org: "my-org",
+      project: "my-project",
+      content,
+      metadata: {},
+    });
+
+    const body = apiRequestToRegionMock.mock.calls.at(-1)?.[2]?.body as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(body).sort()).toEqual(["checksum", "chunks"]);
+  });
+
+  test("throws ApiError when assembly reports an error", async () => {
+    apiRequestToRegionMock.mockResolvedValue({
+      data: { state: "error", detail: "bad build" },
+      headers: new Headers(),
+    });
+
+    await expect(
+      uploadBuild({
+        org: "my-org",
+        project: "my-project",
+        content,
+        metadata: {},
+      })
+    ).rejects.toThrow(ApiError);
+  });
+
+  test("fails fast when finished (ok) without an artifact URL", async () => {
+    apiRequestToRegionMock.mockResolvedValue({
+      data: { state: "ok" },
+      headers: new Headers(),
+    });
+
+    await expect(
+      uploadBuild({
+        org: "my-org",
+        project: "my-project",
+        content,
+        metadata: {},
+      })
+    ).rejects.toThrow(/no artifact URL/i);
   });
 });
