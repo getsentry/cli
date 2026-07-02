@@ -134,7 +134,9 @@ function ensureInitialized(): void {
  */
 export function parseDebugFile(data: Uint8Array): DifArchiveInfo {
   ensureInitialized();
-  const archive = new Archive(data);
+  // `using` frees the WASM handle when this returns; the mapped result holds
+  // only plain values, so the archive is safe to release here.
+  using archive = new Archive(data);
   return {
     fileFormat: archive.fileFormat,
     objects: archive.objects().map((o) => ({
@@ -195,9 +197,9 @@ export function extractEmbeddedPpdb(
   data: Uint8Array
 ): EmbeddedPpdbResult | null {
   ensureInitialized();
-  const archive = new Archive(data);
+  using archive = new Archive(data);
   for (const object of archive.objects()) {
-    const pe = object.asPe();
+    using pe = object.asPe();
     if (!pe) {
       continue;
     }
@@ -279,7 +281,7 @@ export function createSourceBundle(
   options?: { collectIl2cppSources?: boolean }
 ): SourceBundleResult {
   ensureInitialized();
-  const archive = new Archive(data);
+  using archive = new Archive(data);
   const objects = archive.objects();
   const objectCount = objects.length;
   const object = selectBundledObject(objects);
@@ -350,7 +352,7 @@ export function createIl2cppLineMapping(
   targetDebugId?: string
 ): Il2cppMappingResult | null {
   ensureInitialized();
-  const archive = new Archive(data);
+  using archive = new Archive(data);
   const objects = archive.objects();
   // Map the caller's targeted object so the mapping content always corresponds
   // to the debug id the DIF advertises; without this a fat archive plus `--id`
@@ -432,7 +434,7 @@ export type DifSourcesInfo = {
  */
 export function listSources(data: Uint8Array): DifSourcesInfo {
   ensureInitialized();
-  const archive = new Archive(data);
+  using archive = new Archive(data);
   const objects = archive.objects().map((object) => {
     const files: DifSourceFile[] = [];
     let enumerationError: string | null = null;
