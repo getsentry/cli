@@ -11,6 +11,17 @@ requires:
 
 Manage and compare snapshots
 
+### `sentry snapshots diff <base-dir> <head-dir>`
+
+Compare two directories of snapshot images
+
+**Flags:**
+- `-o, --output <value> - Directory for diff mask images (default: ./diff-output/)`
+- `--threshold <value> - Pixel color difference threshold (0.0-1.0) - (default: "0.01")`
+- `--no-antialiasing - Disable antialiasing detection`
+- `--fail-on-diff - Exit non-zero if any diffs (changed/added/removed/errored) are found`
+- `--selective - Treat images missing from head as skipped instead of removed`
+
 ### `sentry snapshots download`
 
 Download baseline snapshot images
@@ -24,6 +35,12 @@ Download baseline snapshot images
 **Examples:**
 
 ```bash
+# Compare two directories of snapshot images locally
+sentry snapshots diff ./baseline ./head
+
+# Fail (non-zero exit) if any images changed, with a custom threshold
+sentry snapshots diff ./baseline ./head --fail-on-diff --threshold 0.02
+
 # Download a specific baseline snapshot by ID
 sentry snapshots download --snapshot-id 1234567890
 

@@ -12,6 +12,29 @@ Manage and compare snapshots
 
 [Section titled “Commands”](#commands)
 
+### `sentry snapshots diff <base-dir> <head-dir>`
+
+[Section titled “sentry snapshots diff <base-dir> <head-dir>”](#sentry-snapshots-diff-base-dir-head-dir)
+
+Compare two directories of snapshot images
+
+**Arguments:**
+
+| Argument | Description |
+| --- | --- |
+| `<base-dir>` | Path to the baseline image directory |
+| `<head-dir>` | Path to the head image directory |
+
+**Options:**
+
+| Option | Description |
+| --- | --- |
+| `-o, --output <output>` | Directory for diff mask images (default: ./diff-output/) |
+| `--threshold <threshold>` | Pixel color difference threshold (0.0-1.0) (default: "0.01") |
+| `--no-antialiasing` | Disable antialiasing detection |
+| `--fail-on-diff` | Exit non-zero if any diffs (changed/added/removed/errored) are found |
+| `--selective` | Treat images missing from head as skipped instead of removed |
+
 ### `sentry snapshots download`
 
 [Section titled “sentry snapshots download”](#sentry-snapshots-download)
@@ -35,6 +58,8 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 Terminal window
 
 ```
+# Compare two directories of snapshot images locallysentry snapshots diff ./baseline ./head
+# Fail (non-zero exit) if any images changed, with a custom thresholdsentry snapshots diff ./baseline ./head --fail-on-diff --threshold 0.02
 # Download a specific baseline snapshot by IDsentry snapshots download --snapshot-id 1234567890
 # Download the latest baseline for an app, filtered by branchsentry snapshots download --app-id my-app --branch main
 # Extract images to a specific directorysentry snapshots download --app-id my-app --output ./baseline/
@@ -45,6 +70,11 @@ Terminal window
 
 [Section titled “Important Notes”](#important-notes)
 
+- `snapshots diff` compares two local image directories (PNG/JPEG) perceptually
+  — anti-aliasing aware, with a per-pixel `--threshold` (0.0–1.0) — and writes a
+  PNG diff mask per changed image. It makes **no network requests**. Use
+  `--fail-on-diff` to exit non-zero when any images changed/added/removed, and
+  `--selective` to treat images missing from head as skipped rather than removed.
 - `snapshots download` fetches baseline snapshot images from Sentry's preprod
   system and extracts them to a local directory. **Sentry SaaS only.**
 - Provide exactly one of `--snapshot-id` (a direct artifact ID) or `--app-id`
