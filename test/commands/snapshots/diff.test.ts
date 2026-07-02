@@ -37,14 +37,23 @@ function png(rgb: [number, number, number]): Buffer {
 }
 
 function createContext() {
+  const writes: string[] = [];
   return {
     context: {
-      stdout: { write: () => true },
+      stdout: {
+        write: (data: string | Uint8Array) => {
+          writes.push(
+            typeof data === "string" ? data : new TextDecoder().decode(data)
+          );
+          return true;
+        },
+      },
       stderr: { write: () => true },
       cwd: tmpDir,
       env: {} as NodeJS.ProcessEnv,
       process: { ...process, exitCode: undefined } as typeof process,
     },
+    output: () => writes.join(""),
     get exitCode() {
       return this.context.process.exitCode;
     },
@@ -113,6 +122,81 @@ describe("snapshots diff", () => {
     );
 
     expect(harness.exitCode ?? 0).toBe(0);
+  });
+
+  test("reports added and removed images", async () => {
+    writeFileSync(join(baseDir, "shared.png"), png([7, 7, 7]));
+    writeFileSync(join(headDir, "shared.png"), png([7, 7, 7]));
+    writeFileSync(join(baseDir, "gone.png"), png([1, 2, 3]));
+    writeFileSync(join(headDir, "new.png"), png([4, 5, 6]));
+
+    const harness = createContext();
+    const func = await diffCommand.loader();
+    await func.call(harness.context, { output: outDir }, baseDir, headDir);
+
+    const out = harness.output();
+    expect(out).toContain("new.png");
+    expect(out).toContain("gone.png");
+  });
+
+  test("--selective treats base-only images as skipped (no failure)", async () => {
+    writeFileSync(join(baseDir, "only-in-base.png"), png([1, 1, 1]));
+
+    // Without --selective, a base-only image is a removal → fail-on-diff exits 1.
+    const removedHarness = createContext();
+    const func = await diffCommand.loader();
+    await func.call(
+      removedHarness.context,
+      { output: outDir, "fail-on-diff": true },
+      baseDir,
+      headDir
+    );
+    expect(removedHarness.exitCode).toBe(1);
+
+    // With --selective, it's skipped instead → clean exit.
+    const skippedHarness = createContext();
+    await func.call(
+      skippedHarness.context,
+      { output: outDir, "fail-on-diff": true, selective: true },
+      baseDir,
+      headDir
+    );
+    expect(skippedHarness.exitCode ?? 0).toBe(0);
+  });
+
+  test("records an error entry for an undecodable image without aborting", async () => {
+    // Differing (so not byte-identical) but undecodable bytes.
+    writeFileSync(join(baseDir, "bad.png"), Buffer.from("not a png AAAA"));
+    writeFileSync(join(headDir, "bad.png"), Buffer.from("not a png BBBB"));
+
+    const harness = createContext();
+    const func = await diffCommand.loader();
+    await func.call(
+      harness.context,
+      { output: outDir, "fail-on-diff": true },
+      baseDir,
+      headDir
+    );
+
+    // Errored images count toward --fail-on-diff, and the run still completes.
+    expect(harness.exitCode).toBe(1);
+    expect(harness.output()).toContain("bad.png");
+  });
+
+  test("--no-antialiasing runs and still writes masks", async () => {
+    writeFileSync(join(baseDir, "a.png"), png([0, 0, 0]));
+    writeFileSync(join(headDir, "a.png"), png([255, 255, 255]));
+
+    const harness = createContext();
+    const func = await diffCommand.loader();
+    await func.call(
+      harness.context,
+      { output: outDir, "no-antialiasing": true },
+      baseDir,
+      headDir
+    );
+
+    expect(existsSync(join(outDir, "a.png"))).toBe(true);
   });
 
   test("rejects a missing base directory", async () => {

@@ -43,6 +43,7 @@ type ImageStatus =
 type ImageResult = {
   name: string;
   status: ImageStatus;
+  /** Percentage of differing pixels (0–100); set only for `changed`. */
   diffPercentage?: number;
   diffPixelCount?: number;
   diffMaskPath?: string;
@@ -186,10 +187,10 @@ function summarize(images: ImageResult[]): DiffSummary {
 /** Short per-image detail for the human summary (diff %, error, or blank). */
 function notableDetail(img: ImageResult): string {
   if (img.status === "changed" && img.diffPercentage !== undefined) {
-    return `${(img.diffPercentage * 100).toFixed(2)}%`;
+    return `${img.diffPercentage.toFixed(2)}%`;
   }
   if (img.error) {
-    return colorTag("error", img.error);
+    return colorTag("red", img.error);
   }
   return "";
 }

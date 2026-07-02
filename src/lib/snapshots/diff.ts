@@ -99,7 +99,9 @@ export type ImageDiff =
   | { kind: "layout" }
   | {
       kind: "changed";
+      /** Number of differing pixels. */
       diffCount: number;
+      /** Percentage of differing pixels (0–100), matching the legacy odiff output. */
       diffPercentage: number;
       mask: Buffer;
     };
@@ -158,7 +160,7 @@ export function compareImages(
   return {
     kind: "changed",
     diffCount,
-    diffPercentage: diffCount / (width * height),
+    diffPercentage: (diffCount / (width * height)) * 100,
     mask: PNG.sync.write(png),
   };
 }

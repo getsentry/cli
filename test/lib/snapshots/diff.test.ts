@@ -7,6 +7,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { encode as encodeJpeg } from "jpeg-js";
 import { PNG } from "pngjs";
 import { afterEach, describe, expect, test } from "vitest";
 import {
@@ -29,6 +30,22 @@ function png(
     image.data[i + 3] = 255;
   }
   return PNG.sync.write(image);
+}
+
+/** Build a solid-color JPEG (RGBA in, JPEG out). */
+function jpeg(
+  width: number,
+  height: number,
+  rgb: [number, number, number]
+): Buffer {
+  const data = Buffer.alloc(width * height * 4);
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = rgb[0];
+    data[i + 1] = rgb[1];
+    data[i + 2] = rgb[2];
+    data[i + 3] = 255;
+  }
+  return Buffer.from(encodeJpeg({ data, width, height }, 100).data);
 }
 
 const OPTS = { threshold: 0.1, antialiasing: true };
@@ -54,7 +71,8 @@ describe("compareImages", () => {
     expect(result.kind).toBe("changed");
     if (result.kind === "changed") {
       expect(result.diffCount).toBe(16);
-      expect(result.diffPercentage).toBe(1);
+      // Percentage (0–100), matching legacy odiff output — all 16 px differ.
+      expect(result.diffPercentage).toBe(100);
       expect(result.mask.length).toBeGreaterThan(0);
     }
   });
@@ -67,6 +85,27 @@ describe("compareImages", () => {
       OPTS
     );
     expect(result.kind).toBe("layout");
+  });
+
+  test("decodes JPEG inputs (identical → match)", () => {
+    const result = compareImages(
+      jpeg(4, 4, [20, 40, 60]),
+      jpeg(4, 4, [20, 40, 60]),
+      "a.jpg",
+      OPTS
+    );
+    expect(result.kind).toBe("match");
+  });
+
+  test("throws on undecodable image data", () => {
+    expect(() =>
+      compareImages(
+        Buffer.from("not a real png"),
+        png(4, 4, [0, 0, 0]),
+        "a.png",
+        OPTS
+      )
+    ).toThrow();
   });
 });
 
