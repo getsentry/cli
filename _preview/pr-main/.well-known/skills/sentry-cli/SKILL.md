@@ -376,6 +376,14 @@ Manage Sentry alert rules
 
 → Full flags and examples: `references/alert.md`
 
+### Build
+
+Manage mobile build artifacts
+
+- `sentry build download <build-id>` — Download a build artifact
+
+→ Full flags and examples: `references/build.md`
+
 ### CLI
 
 CLI-related commands
