@@ -3,6 +3,15 @@
 ## Examples
 
 ```bash
+# Upload an Android build (APK or AAB) for size analysis
+sentry build upload ./app-release.apk
+
+# Upload with a build configuration and release notes
+sentry build upload ./app.aab --build-configuration Release --release-notes "Nightly"
+
+# Tag a build with install groups (repeatable)
+sentry build upload ./app.aab --install-group qa --install-group beta
+
 # Download a build artifact by ID
 sentry build download 1234567890
 
@@ -15,6 +24,10 @@ sentry build download 1234567890 --json
 
 ## Important Notes
 
+- `build upload` supports **Android APK and AAB**. iOS XCArchive/IPA upload is
+  not yet supported. **Sentry SaaS only.**
+- Multiple paths may be uploaded at once; the command exits non-zero if any
+  build fails to upload.
 - `build download` fetches a mobile build artifact (APK or IPA) previously
   uploaded to Sentry's preprod system for size analysis. **Sentry SaaS only.**
 - The build must be installable. Builds that are still processing — or that have

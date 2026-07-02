@@ -1,15 +1,17 @@
 /**
  * `sentry build` — manage mobile build artifacts for preprod size analysis.
  *
- * Currently exposes `download`. Upload (APK/AAB, and iOS XCArchive/IPA) is
- * ported separately.
+ * Exposes `upload` (Android APK/AAB) and `download`. iOS XCArchive/IPA upload
+ * is ported separately.
  */
 
 import { buildRouteMap } from "../../lib/route-map.js";
 import { downloadCommand } from "./download.js";
+import { uploadCommand } from "./upload.js";
 
 export const buildRoute = buildRouteMap({
   routes: {
+    upload: uploadCommand,
     download: downloadCommand,
   },
   docs: {

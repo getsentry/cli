@@ -54,7 +54,7 @@ cli/
 │   ├── commands/       # CLI commands
 │   │   ├── alert/       # create, delete, edit, list, view
 │   │   ├── auth/        # login, logout, refresh, status, token, whoami
-│   │   ├── build/       # download
+│   │   ├── build/       # download, upload
 │   │   ├── cli/         # defaults, feedback, fix, import, setup, uninstall, upgrade
 │   │   ├── code-mappings/# upload
 │   │   ├── dart-symbol-map/# upload

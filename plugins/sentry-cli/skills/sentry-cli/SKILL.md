@@ -380,6 +380,7 @@ Manage Sentry alert rules
 
 Manage mobile build artifacts
 
+- `sentry build upload <path...>` — Upload builds to a project
 - `sentry build download <build-id>` — Download a build artifact
 
 → Full flags and examples: `references/build.md`
