@@ -300,30 +300,61 @@ function buildResults(
 // ── API Functions ───────────────────────────────────────────────────
 
 /**
- * Drop files larger than the server-advertised per-file cap.
+ * Split files into those within the server-advertised per-file cap and those
+ * over it.
  *
  * @param difs - Files queued for upload.
  * @param maxFileSize - Server's per-file byte cap; `0` disables the gate.
- * @returns The subset within the cap. Oversized files are logged at `warn`.
+ * @returns `{ accepted, dropped }`. Oversized files are logged at `warn` and
+ *   returned in `dropped` so the caller can report them as failures rather
+ *   than silently discarding them.
  */
 function filterBySize(
   difs: DebugFileUpload[],
   maxFileSize: number
-): DebugFileUpload[] {
+): { accepted: DebugFileUpload[]; dropped: DebugFileUpload[] } {
   if (maxFileSize <= 0) {
-    return difs;
+    return { accepted: difs, dropped: [] };
   }
   const accepted: DebugFileUpload[] = [];
+  const dropped: DebugFileUpload[] = [];
   for (const dif of difs) {
     if (dif.content.length > maxFileSize) {
       log.warn(
         `Skipping ${dif.name}: size ${dif.content.length} exceeds server maximum file size ${maxFileSize}`
       );
+      dropped.push(dif);
       continue;
     }
     accepted.push(dif);
   }
-  return accepted;
+  return { accepted, dropped };
+}
+
+/**
+ * Build failed result entries for files dropped by the size gate.
+ *
+ * Oversized files are never chunked or assembled, so the server never returns a
+ * state for them. They are reported as `error` results — not silently skipped —
+ * so the command surfaces a non-zero exit and lists them. A partial size-drop
+ * (some files accepted, some over the cap) must not look like a clean success,
+ * mirroring the all-dropped case which throws.
+ *
+ * @param dropped - Files that exceeded `maxFileSize`.
+ * @param maxFileSize - The effective per-file cap, for the detail message.
+ * @returns One `error` result per dropped file (empty `checksum`, never hashed).
+ */
+function buildOversizeResults(
+  dropped: DebugFileUpload[],
+  maxFileSize: number
+): DebugFileUploadResult[] {
+  return dropped.map((dif) => ({
+    name: dif.name,
+    debugId: dif.debugId,
+    checksum: "",
+    state: "error" as const,
+    detail: `Exceeds server maximum file size of ${maxFileSize} bytes (was ${dif.content.length} bytes)`,
+  }));
 }
 
 /**
@@ -355,8 +386,10 @@ function clampMaxWait(requestedMs: number, serverMaxWaitSec: number): number {
  * The server re-parses each uploaded file and indexes every contained object
  * slice itself; `debugId` is advisory.
  *
- * Files larger than the server-advertised `maxFileSize` are dropped with a
- * warning, and the caller's `maxWaitMs` is clamped to the server's `maxWait`.
+ * Files larger than the server-advertised `maxFileSize` are not uploaded and
+ * are returned as `error` results (so a partial drop yields a non-zero exit
+ * rather than a misleading success); the caller's `maxWaitMs` is clamped to the
+ * server's `maxWait`.
  *
  * @param options - Upload configuration (org, project, files, wait mode).
  * @returns Per-file terminal/last-observed assembly state.
@@ -384,7 +417,7 @@ export async function uploadDebugFiles(
     serverOptions.maxFileSize && serverOptions.maxFileSize > 0
       ? serverOptions.maxFileSize
       : DEFAULT_MAX_DIF_SIZE;
-  const accepted = filterBySize(difs, effectiveMaxFileSize);
+  const { accepted, dropped } = filterBySize(difs, effectiveMaxFileSize);
 
   // `difs` is non-empty (checked above), so an empty `accepted` means every
   // file was dropped by the size gate. Fail loudly instead of silently
@@ -456,7 +489,12 @@ export async function uploadDebugFiles(
     });
   }
 
-  return buildResults(chunked, response);
+  // Append oversized files (dropped before assembly) as failed results so a
+  // partial size-drop produces a non-zero exit instead of a silent success.
+  return [
+    ...buildResults(chunked, response),
+    ...buildOversizeResults(dropped, effectiveMaxFileSize),
+  ];
 }
 
 /** Default maximum wait for server-side DIF processing (`--wait`). */

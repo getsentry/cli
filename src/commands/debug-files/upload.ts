@@ -426,7 +426,11 @@ function* doNothingToUpload(
 
 /**
  * Perform the upload, yield the result, and return a hint. Non-terminal states
- * (error, not_found) set the exit code and return a descriptive hint.
+ * (error, not_found) set the exit code and return a descriptive hint. Files
+ * skipped for exceeding the maximum file size — at scan time (`oversizedCount`)
+ * or at upload time (returned as `error` results by `uploadDebugFiles`) — also
+ * set a non-zero exit, so a partial size-drop is never reported as a clean
+ * success (consistent with the all-dropped path in `doNothingToUpload`).
  * Also honors `--require-all` against the requested `--id` values.
  */
 async function* doUpload(
@@ -439,6 +443,8 @@ async function* doUpload(
     maxWaitMs: number;
     missingRequestedIds: string[];
     requireAll: boolean;
+    oversizedCount: number;
+    maxFileSize: number;
     serverOptions?: ChunkServerOptions;
   }
 ) {
@@ -457,6 +463,14 @@ async function* doUpload(
     filesUploaded: results.length,
   });
 
+  // Scan-time oversized files were dropped before the queue was built, so they
+  // never appear in `results`. Note them on any failure hint and treat them as
+  // a failure in their own right below.
+  const scanOversize =
+    params.oversizedCount > 0
+      ? ` ${params.oversizedCount} file(s) were skipped for exceeding the maximum file size (${params.maxFileSize} bytes).`
+      : "";
+
   const failures = results.filter(
     (r) => r.state === "error" || r.state === "not_found"
   );
@@ -469,7 +483,14 @@ async function* doUpload(
       )
       .join("; ");
     return {
-      hint: `${failures.length === 1 ? "1 file" : `${failures.length} files`} had failures: ${details}`,
+      hint: `${failures.length === 1 ? "1 file" : `${failures.length} files`} had failures: ${details}.${scanOversize}`,
+    };
+  }
+
+  if (params.oversizedCount > 0) {
+    setExitCode(1);
+    return {
+      hint: `Uploaded ${results.length} debug file(s) to ${params.org}/${params.project}, but ${params.oversizedCount} file(s) were skipped for exceeding the maximum file size (${params.maxFileSize} bytes).`,
     };
   }
 
@@ -713,6 +734,8 @@ export const uploadCommand = buildCommand({
       maxWaitMs,
       missingRequestedIds: missingIds,
       requireAll,
+      oversizedCount,
+      maxFileSize,
     });
   },
 });
