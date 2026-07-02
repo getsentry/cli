@@ -28,7 +28,7 @@ Upload builds to a project
 - `--base-ref <value> - Base branch/reference (defaults to the merge-base tracking ref)`
 - `--pr-number <value> - Pull request number (auto-detected in pull_request GitHub Actions runs)`
 - `--force-git-metadata - Force collecting git metadata even outside CI (conflicts with --no-git-metadata)`
-- `--no-git-metadata - Disable collecting/sending git metadata`
+- `--no-git-metadata - Disable automatic git metadata collection`
 
 ### `sentry build download <build-id>`
 
