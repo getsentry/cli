@@ -15,7 +15,12 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { Archive, initSync, SourceBundleWriter } from "@sentry/symbolic";
+import {
+  Archive,
+  il2cppLineMapping,
+  initSync,
+  SourceBundleWriter,
+} from "@sentry/symbolic";
 import { logger } from "../logger.js";
 
 const log = logger.withTag("dif");
@@ -259,6 +264,10 @@ export type SourceBundleResult = {
  * @param objectName - Name stamped on the bundle (typically the input file name).
  * @param readSource - Supplies source content for a referenced path, or `null` to skip.
  *   Invoked synchronously, so it must read synchronously (e.g. `readFileSync`).
+ * @param options - Optional behavior flags.
+ * @param options.collectIl2cppSources - When `true`, also include the C# source
+ *   files referenced by Unity IL2CPP `source_info` markers in the object's
+ *   generated C++ (used together with `--il2cpp-mapping`).
  * @returns The bundle bytes (or `null` if empty), the object's debug id, and the
  *   number of files included.
  * @throws If the buffer cannot be parsed, or if `readSource` throws.
@@ -266,7 +275,8 @@ export type SourceBundleResult = {
 export function createSourceBundle(
   data: Uint8Array,
   objectName: string,
-  readSource: (path: string) => Uint8Array | null
+  readSource: (path: string) => Uint8Array | null,
+  options?: { collectIl2cppSources?: boolean }
 ): SourceBundleResult {
   ensureInitialized();
   const archive = new Archive(data);
@@ -279,6 +289,10 @@ export function createSourceBundle(
 
   let fileCount = 0;
   const writer = new SourceBundleWriter();
+  // Must be set before the one-shot writeObject() consumes the writer.
+  if (options?.collectIl2cppSources) {
+    writer.collectIl2cppSources = true;
+  }
   // The filter runs before each file; we include everything the object
   // references and let the provider decide availability (returning null skips).
   const filter = (_path: string): boolean => true;
@@ -293,6 +307,56 @@ export function createSourceBundle(
   const bundle =
     writer.writeObject(object, objectName, filter, provider) ?? null;
   return { bundle, debugId: object.debugId, fileCount, objectCount };
+}
+
+/** Result of computing a Unity IL2CPP line mapping for a debug information file. */
+export type Il2cppMappingResult = {
+  /** The serialized IL2CPP C++→C# line-mapping JSON document bytes. */
+  mapping: Uint8Array;
+  /** Debug id of the object the mapping was computed for. */
+  debugId: string;
+};
+
+/**
+ * Compute a Unity IL2CPP C++→C# line mapping for a debug information file.
+ *
+ * Unity's IL2CPP transpiles C# to C++, embedding `//<source_info:File.cs:line>`
+ * markers in the generated C++. This enumerates the C++ source files referenced
+ * by the object's debug info; for each, `readSource` supplies that file's
+ * contents (return `null` to skip a path not available locally). The markers are
+ * parsed into a C++→C# mapping serialized as a JSON document — the format Sentry
+ * consumes for IL2CPP symbolication — which can be uploaded as a separate DIF.
+ *
+ * The mapping is computed for the single object chosen by
+ * {@link selectBundledObject}, matching {@link createSourceBundle}. Nothing is
+ * read from disk by this function itself; `readSource` performs all I/O.
+ *
+ * @param data - The full contents of the debug information file.
+ * @param readSource - Supplies C++ source content for a referenced path, or
+ *   `null` to skip. Invoked synchronously (e.g. `readFileSync`).
+ * @returns The serialized mapping bytes plus the object's debug id, or `null`
+ *   when the archive has no objects or the object references no IL2CPP
+ *   `source_info` markers (an empty mapping).
+ * @throws If the buffer cannot be parsed, or if `readSource` throws.
+ */
+export function createIl2cppLineMapping(
+  data: Uint8Array,
+  readSource: (path: string) => Uint8Array | null
+): Il2cppMappingResult | null {
+  ensureInitialized();
+  const archive = new Archive(data);
+  const object = selectBundledObject(archive.objects());
+  if (!object) {
+    return null;
+  }
+  const mapping = il2cppLineMapping(
+    object,
+    (path: string) => readSource(path) ?? undefined
+  );
+  if (!mapping) {
+    return null;
+  }
+  return { mapping, debugId: object.debugId };
 }
 
 /** A source file referenced by an object, with any resolved descriptor metadata. */

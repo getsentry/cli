@@ -12,9 +12,10 @@
  * and `max_wait` (clamps the processing wait). `.zip` archives are scanned in
  * place (disable with `--no-zips`); `--derived-data` additionally scans Xcode's
  * DerivedData folder on macOS. Managed PE assemblies that embed a Portable PDB
- * have it extracted and uploaded automatically as a separate DIF. `--symbol-maps`
- * (BCSymbolMap resolution) and `--il2cpp-mapping` line mappings are deferred to
- * follow-up PRs (see the command's full description).
+ * have it extracted and uploaded automatically as a separate DIF, and
+ * `--il2cpp-mapping` uploads Unity IL2CPP line mappings. `--symbol-maps`
+ * (BCSymbolMap resolution) is deferred to a follow-up PR (see the command's
+ * full description).
  */
 
 import { createHash } from "node:crypto";
@@ -34,7 +35,10 @@ import {
   uploadDebugFiles,
 } from "../../lib/api/debug-files.js";
 import { buildCommand } from "../../lib/command.js";
-import { createSourceBundle } from "../../lib/dif/index.js";
+import {
+  createIl2cppLineMapping,
+  createSourceBundle,
+} from "../../lib/dif/index.js";
 import {
   buildDifFilters,
   debugIdMatches,
@@ -127,6 +131,7 @@ type UploadFlags = {
   "no-unwind"?: boolean;
   "no-sources"?: boolean;
   "include-sources"?: boolean;
+  "il2cpp-mapping"?: boolean;
   "derived-data"?: boolean;
   "no-zips"?: boolean;
   "no-upload"?: boolean;
@@ -171,8 +176,54 @@ function difKey(dif: DebugFileUpload): string {
 }
 
 /**
- * Convert prepared files into the DIF upload list, optionally appending a
- * source bundle per file when `--include-sources` is set.
+ * Read a source file from disk for source-bundle/IL2CPP resolution, returning
+ * `null` (and logging at debug level) when it is not available locally.
+ */
+function readSourceFile(sourcePath: string): Uint8Array | null {
+  try {
+    return readFileSync(sourcePath);
+  } catch (err) {
+    log.debug(`Source file not available, skipping: ${sourcePath}`, err);
+    return null;
+  }
+}
+
+/**
+ * Compute a Unity IL2CPP line mapping for a prepared file and, when non-empty,
+ * append it as a separate `il2cpp` DIF carrying the file's debug id.
+ *
+ * The generated C++ source files the object references are read from disk;
+ * files not present locally are skipped. Failures (or a file with no IL2CPP
+ * data) are swallowed (logged at debug level) so they never abort the upload.
+ */
+function appendIl2cppMapping(difs: DebugFileUpload[], file: PreparedDif): void {
+  let result: ReturnType<typeof createIl2cppLineMapping>;
+  try {
+    result = createIl2cppLineMapping(
+      new Uint8Array(file.content),
+      readSourceFile
+    );
+  } catch (err) {
+    log.debug(`Could not compute IL2CPP line mapping for ${file.path}`, err);
+    return;
+  }
+  if (!result) {
+    return;
+  }
+  difs.push({
+    name: `${basename(file.path)}.il2cpp`,
+    debugId: file.debugId ?? result.debugId,
+    content: Buffer.from(result.mapping),
+  });
+}
+
+/**
+ * Convert prepared files into the DIF upload list.
+ *
+ * For each prepared file this queues the main DIF, then optionally a Unity
+ * IL2CPP line-mapping DIF (`--il2cpp-mapping`) and a per-file source bundle
+ * (`--include-sources`). Combining both also bundles the C# sources referenced
+ * by IL2CPP `source_info` markers (`collectIl2cppSources`).
  *
  * Embedded Portable PDBs (extracted from managed PE assemblies during scanning)
  * arrive here as ordinary prepared DIFs, so no special handling is needed.
@@ -183,8 +234,9 @@ function difKey(dif: DebugFileUpload): string {
  */
 function buildDifList(
   prepared: PreparedDif[],
-  includeSources: boolean
+  options: { includeSources: boolean; il2cppMapping: boolean }
 ): DebugFileUpload[] {
+  const { includeSources, il2cppMapping } = options;
   const difs: DebugFileUpload[] = [];
   for (const file of prepared) {
     difs.push({
@@ -192,6 +244,10 @@ function buildDifList(
       debugId: file.debugId,
       content: file.content,
     });
+
+    if (il2cppMapping) {
+      appendIl2cppMapping(difs, file);
+    }
 
     if (!includeSources) {
       continue;
@@ -202,17 +258,8 @@ function buildDifList(
       result = createSourceBundle(
         new Uint8Array(file.content),
         basename(file.path),
-        (sourcePath) => {
-          try {
-            return readFileSync(sourcePath);
-          } catch (err) {
-            log.debug(
-              `Source file not available, skipping: ${sourcePath}`,
-              err
-            );
-            return null;
-          }
-        }
+        readSourceFile,
+        { collectIl2cppSources: il2cppMapping }
       );
     } catch (err) {
       log.debug(`Could not build source bundle for ${file.path}`, err);
@@ -460,15 +507,19 @@ export const uploadCommand = buildCommand({
       "recursed.\n\n" +
       "Managed PE assemblies (.NET) that embed a Portable PDB have it extracted " +
       "and uploaded automatically as a separate <name>.pdb debug file.\n\n" +
+      "With --il2cpp-mapping, Unity IL2CPP C++->C# line mappings are computed " +
+      "from each file's referenced generated C++ sources and uploaded as " +
+      "separate il2cpp debug files; combine with --include-sources to also " +
+      "bundle the referenced C# source files.\n\n" +
       "Usage:\n" +
       "  sentry debug-files upload ./build\n" +
       "  sentry debug-files upload ./symbols.zip\n" +
       "  sentry debug-files upload ./libexample.so --include-sources\n" +
       "  sentry debug-files upload ./dsyms --type dsym --wait\n" +
+      "  sentry debug-files upload ./build --il2cpp-mapping --include-sources\n" +
       "  sentry debug-files upload --derived-data --no-upload\n" +
       "  sentry debug-files upload ./build --no-zips --no-upload\n\n" +
-      "Not yet supported (planned): --symbol-maps (BCSymbolMap resolution) " +
-      "and --il2cpp-mapping line mappings.",
+      "Not yet supported (planned): --symbol-maps (BCSymbolMap resolution).",
   },
   output: {
     human: formatUploadResult,
@@ -526,6 +577,13 @@ export const uploadCommand = buildCommand({
       "include-sources": {
         kind: "boolean",
         brief: "Build and upload a source bundle for each file with debug info",
+        optional: true,
+        default: false,
+      },
+      "il2cpp-mapping": {
+        kind: "boolean",
+        brief:
+          "Compute and upload Unity IL2CPP line mappings for each scanned file",
         optional: true,
         default: false,
       },
@@ -610,7 +668,10 @@ export const uploadCommand = buildCommand({
       scanZips: !flags["no-zips"],
     });
     const difs = dedupeDifs(
-      buildDifList(prepared, Boolean(flags["include-sources"]))
+      buildDifList(prepared, {
+        includeSources: Boolean(flags["include-sources"]),
+        il2cppMapping: Boolean(flags["il2cpp-mapping"]),
+      })
     );
     const missingIds = missingRequestedIds(flags.id, prepared);
 
