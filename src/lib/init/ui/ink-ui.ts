@@ -53,7 +53,7 @@ import { ReadStream } from "node:tty";
 const _require = createRequire(import.meta.url);
 
 import { setTag } from "@sentry/node-core/light";
-import { bannerLinesForWidth } from "../../banner.js";
+import { FULL_BANNER_LINES } from "../../banner.js";
 import { CLI_VERSION } from "../../constants.js";
 import { stripAnsi } from "../../formatters/plain-detect.js";
 import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
@@ -263,7 +263,9 @@ export async function createInkUI(
 
   const store = new WizardStore({
     cliVersion: CLI_VERSION,
-    bannerRows: bannerLinesForWidth(process.stdout.columns ?? 80),
+    // Seed with the full banner; IntroScreen re-fits it to the live terminal
+    // width on every render (shrinking or growing) so it never wraps.
+    bannerRows: FULL_BANNER_LINES,
   });
   const initialWelcome = opts.initialWelcome
     ? createPendingWelcome()

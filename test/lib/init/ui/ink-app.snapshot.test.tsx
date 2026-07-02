@@ -307,6 +307,27 @@ describe("Ink App snapshot", () => {
     expect(hasForcedWhiteForeground(withoutFeedbackBanner(frame))).toBe(false);
   });
 
+  test("intro banner shrinks to fit narrow terminals (never wraps)", async () => {
+    // A banner wider than the narrow terminal; distinctive marker so we can tell
+    // whether it was rendered verbatim or replaced by a fitting variant.
+    const wideRow = "Z".repeat(78);
+    const makeStore = () =>
+      new WizardStore({
+        bannerRows: [{ content: wideRow, color: "#B4A4DE" }],
+        layout: "intro",
+      });
+
+    // Wide terminal: the provided rows fit, so they render as-is.
+    const wide = (await renderApp(makeStore(), 120)).allOutput();
+    expect(wide).toContain("Z".repeat(40));
+
+    // Narrow terminal (e.g. split pane): the too-wide rows are replaced by the
+    // widest fitting variant (the block wordmark), so nothing wraps.
+    const narrow = (await renderApp(makeStore(), 60)).allOutput();
+    expect(narrow).not.toContain("Z".repeat(20));
+    expect(narrow).toContain("████");
+  });
+
   test("intro preflight prompts stay centered and standalone", async () => {
     const store = new WizardStore({
       bannerRows: TEST_BANNER_ROWS,

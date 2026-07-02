@@ -12,7 +12,7 @@ import chalk from "chalk";
 
 /**
  * Full banner: Sentry arch mark + SENTRY wordmark, transcribed from the Sentry
- * logo using quadrant block glyphs (U+2580–U+259F). Max width 78 cols.
+ * logo using Block Elements glyphs (U+2580–U+259F). Max width 78 cols.
  */
 const BANNER_ROWS_FULL = [
   "         ▗▟▙             ▄███████████▌▐█████▖ ███▌█████████████▝▜█████▖▗▄████▛",
@@ -72,6 +72,13 @@ function colorize(rows: readonly string[]): BannerLine[] {
     color: BANNER_GRADIENT[i] ?? BANNER_GRADIENT[0] ?? "#b4a4de",
   }));
 }
+
+/**
+ * The full (widest) banner variant with gradient colors applied. Consumers that
+ * re-fit on resize (the Ink wizard) should seed with this so they can grow back
+ * to the full banner as the terminal widens, not just shrink.
+ */
+export const FULL_BANNER_LINES: BannerLine[] = colorize(BANNER_ROWS_FULL);
 
 /**
  * Widest display width (in code points) among a set of banner lines.
