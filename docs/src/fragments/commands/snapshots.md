@@ -3,6 +3,12 @@
 ## Examples
 
 ```bash
+# Compare two directories of snapshot images locally
+sentry snapshots diff ./baseline ./head
+
+# Fail (non-zero exit) if any images changed, with a custom threshold
+sentry snapshots diff ./baseline ./head --fail-on-diff --threshold 0.02
+
 # Download a specific baseline snapshot by ID
 sentry snapshots download --snapshot-id 1234567890
 
@@ -15,6 +21,11 @@ sentry snapshots download --app-id my-app --output ./baseline/
 
 ## Important Notes
 
+- `snapshots diff` compares two local image directories (PNG/JPEG) perceptually
+  — anti-aliasing aware, with a per-pixel `--threshold` (0.0–1.0) — and writes a
+  PNG diff mask per changed image. It makes **no network requests**. Use
+  `--fail-on-diff` to exit non-zero when any images changed/added/removed, and
+  `--selective` to treat images missing from head as skipped rather than removed.
 - `snapshots download` fetches baseline snapshot images from Sentry's preprod
   system and extracts them to a local directory. **Sentry SaaS only.**
 - Provide exactly one of `--snapshot-id` (a direct artifact ID) or `--app-id`
