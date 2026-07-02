@@ -18,10 +18,10 @@ function stripAnsi(str: string): string {
 }
 
 describe("formatBanner", () => {
-  test("returns 13 rows matching the SENTRY ASCII art", () => {
+  test("returns 8 rows matching the SENTRY ASCII art", () => {
     const banner = formatBanner();
     const rows = banner.split("\n");
-    expect(rows).toHaveLength(13);
+    expect(rows).toHaveLength(8);
   });
 
   test("contains the SENTRY block characters", () => {
