@@ -538,10 +538,9 @@ async function prepareFileDif(
     );
     return { difs: [], oversized: false };
   }
-  return {
-    difs: await readMatchedDif(path, filters, maxFileSize),
-    oversized: false,
-  };
+  // readMatchedDif reports an oversized embedded PPDB (of a requested type) so
+  // it too drives the exit code, matching the on-disk size gate above.
+  return await readMatchedDif(path, filters, maxFileSize);
 }
 
 /**
@@ -605,13 +604,26 @@ function matchedDif(
  * @param content - The PE object bytes.
  * @param filters - The resolved filter set (applied to the extracted PPDB).
  * @param maxFileSize - Size gate in bytes for the extracted PPDB (`0` disables).
+ * @returns The extracted PPDB DIF (or `null`) and whether it was skipped for
+ *   exceeding the size cap while a Portable PDB was a requested type (so the
+ *   caller can fold it into the exit-driving oversized count).
  */
 function embeddedPpdbDif(
   displayPath: string,
   content: Buffer,
   filters: DifFilters,
   maxFileSize: number
-): PreparedDif | null {
+): { dif: PreparedDif | null; oversized: boolean } {
+  // Only PE images can embed a Portable PDB. Cheap-gate on the header so the
+  // vast majority of scanned files (ELF/Mach-O/Breakpad/...) skip the full
+  // second parse that extraction would otherwise perform on every buffer.
+  const header =
+    content.length > PEEK_HEADER_BYTES
+      ? new Uint8Array(content.subarray(0, PEEK_HEADER_BYTES))
+      : new Uint8Array(content);
+  if (peekFormat(header) !== "pe") {
+    return { dif: null, oversized: false };
+  }
   let extracted: ReturnType<typeof extractEmbeddedPpdb>;
   try {
     extracted = extractEmbeddedPpdb(new Uint8Array(content));
@@ -620,20 +632,29 @@ function embeddedPpdbDif(
       `Could not extract embedded Portable PDB from ${displayPath}`,
       err
     );
-    return null;
+    return { dif: null, oversized: false };
   }
   if (!extracted) {
-    return null;
+    return { dif: null, oversized: false };
   }
   if (maxFileSize > 0 && extracted.ppdb.byteLength > maxFileSize) {
     log.warn(
       `Skipping embedded Portable PDB from ${displayPath}: size ${extracted.ppdb.byteLength} exceeds maximum file size ${maxFileSize}`
     );
-    return null;
+    // Only count toward the oversized total when a Portable PDB is actually a
+    // requested type; otherwise it would never have been uploaded anyway, so it
+    // must not turn an empty queue into a spurious "files too large" failure.
+    return {
+      dif: null,
+      oversized: formatMatches("portablepdb", filters.formats),
+    };
   }
   const ext = extname(displayPath);
   const ppdbPath = `${displayPath.slice(0, displayPath.length - ext.length)}.pdb`;
-  return matchedDif(ppdbPath, Buffer.from(extracted.ppdb), filters);
+  return {
+    dif: matchedDif(ppdbPath, Buffer.from(extracted.ppdb), filters),
+    oversized: false,
+  };
 }
 
 /**
@@ -647,46 +668,50 @@ function embeddedPpdbDif(
  * @param content - The object bytes.
  * @param filters - The resolved filter set.
  * @param maxFileSize - Size gate for any extracted embedded PPDB (`0` disables).
+ * @returns The prepared DIFs plus whether an extracted embedded PPDB of a
+ *   requested type was skipped for size.
  */
 function difFromBuffer(
   displayPath: string,
   content: Buffer,
   filters: DifFilters,
   maxFileSize: number
-): PreparedDif[] {
+): { difs: PreparedDif[]; oversized: boolean } {
   const difs: PreparedDif[] = [];
   const main = matchedDif(displayPath, content, filters);
   if (main) {
     difs.push(main);
   }
   const ppdb = embeddedPpdbDif(displayPath, content, filters, maxFileSize);
-  if (ppdb) {
-    difs.push(ppdb);
+  if (ppdb.dif) {
+    difs.push(ppdb.dif);
   }
-  return difs;
+  return { difs, oversized: ppdb.oversized };
 }
 
 /**
  * Fully read and parse a single candidate file into uploadable debug files (the
- * main DIF plus any embedded Portable PDB), or an empty array when the file is
+ * main DIF plus any embedded Portable PDB), or an empty result when the file is
  * unreadable, unparseable, empty, or has no matching object. Read/parse failures
  * are logged at debug level — a scanned tree contains many non-object files.
  *
  * @param path - The candidate file path (already format- and size-gated).
  * @param filters - The resolved filter set.
  * @param maxFileSize - Size gate for any extracted embedded PPDB (`0` disables).
+ * @returns The prepared DIFs plus whether an extracted embedded PPDB of a
+ *   requested type was skipped for size.
  */
 async function readMatchedDif(
   path: string,
   filters: DifFilters,
   maxFileSize: number
-): Promise<PreparedDif[]> {
+): Promise<{ difs: PreparedDif[]; oversized: boolean }> {
   let content: Buffer;
   try {
     content = await readFile(path);
   } catch (err) {
     log.debug(`Skipping unreadable file: ${path}`, err);
-    return [];
+    return { difs: [], oversized: false };
   }
   return difFromBuffer(path, content, filters, maxFileSize);
 }
@@ -729,7 +754,9 @@ function difFromCandidateBuffer(
   if (!(formatOk || readForPpdb)) {
     return [];
   }
-  return difFromBuffer(displayPath, content, filters, maxFileSize);
+  // A ZIP entry's oversized embedded PPDB stays advisory (not counted), matching
+  // how oversized ZIP entries are handled elsewhere in this file.
+  return difFromBuffer(displayPath, content, filters, maxFileSize).difs;
 }
 
 /**
