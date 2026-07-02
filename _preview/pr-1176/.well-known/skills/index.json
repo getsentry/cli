@@ -1,0 +1,40 @@
+{
+  "skills": [
+    {
+      "name": "sentry-cli",
+      "description": "Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.",
+      "files": [
+        "SKILL.md",
+        "references/alert.md",
+        "references/api.md",
+        "references/auth.md",
+        "references/build.md",
+        "references/cli.md",
+        "references/code-mappings.md",
+        "references/dart-symbol-map.md",
+        "references/dashboard.md",
+        "references/debug-files.md",
+        "references/event.md",
+        "references/explore.md",
+        "references/init.md",
+        "references/issue.md",
+        "references/local.md",
+        "references/log.md",
+        "references/monitor.md",
+        "references/org.md",
+        "references/proguard.md",
+        "references/project.md",
+        "references/release.md",
+        "references/replay.md",
+        "references/repo.md",
+        "references/schema.md",
+        "references/snapshots.md",
+        "references/sourcemap.md",
+        "references/span.md",
+        "references/team.md",
+        "references/trace.md",
+        "references/trial.md"
+      ]
+    }
+  ]
+}
