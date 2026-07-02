@@ -309,8 +309,14 @@ export async function uploadBuild(
   );
 }
 
-/** Trailing slashes, stripped from a region URL before manual URL building. */
-const TRAILING_SLASHES_RE = /\/+$/;
+/** Strip trailing slashes without a regex (avoids ReDoS heuristics). */
+function stripTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") {
+    end -= 1;
+  }
+  return url.slice(0, end);
+}
 
 /** Poll interval while waiting for a snapshot archive to build. */
 export const SNAPSHOT_ARCHIVE_POLL_MS = 2000;
@@ -464,10 +470,7 @@ export async function downloadSnapshotArchive(
   org: string,
   snapshotId: string
 ): Promise<Buffer> {
-  const regionUrl = (await resolveOrgRegion(org)).replace(
-    TRAILING_SLASHES_RE,
-    ""
-  );
+  const regionUrl = stripTrailingSlashes(await resolveOrgRegion(org));
   const url = `${regionUrl}/api/0/${snapshotArchiveEndpoint(
     org,
     snapshotId
