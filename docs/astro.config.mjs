@@ -49,8 +49,10 @@ export default defineConfig({
       title: "Sentry CLI",
       favicon: "/favicon.svg",
       logo: {
-        light: "./src/assets/logo-light.svg",
-        dark: "./src/assets/logo-dark.svg",
+        // The site is dark-only (the theme maps light + dark to the same dark
+        // palette), so a single white logo is used for both — a dark-marks
+        // variant would be invisible on the always-dark header.
+        src: "./src/assets/logo.svg",
         replacesTitle: true,
       },
       social: [
