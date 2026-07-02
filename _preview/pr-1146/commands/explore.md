@@ -36,7 +36,7 @@ Query aggregate event data (Explore)
 | `-s, --sort <sort>` | Sort field (prefix with - for desc, e.g., "-count()") |
 | `-e, --environment <environment>...` | Replay environment filter for --dataset replays (repeatable, comma-separated) |
 | `-n, --limit <limit>` | Number of rows (1-1000) (default: "25") |
-| `-t, --period <period>` | Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01" (default: "24h") |
+| `-t, --period <period>` | Time range: "7d", "2026-06-01..2026-07-01", ">=2026-06-01" (default: "24h") |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 | `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 

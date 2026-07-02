@@ -32,7 +32,7 @@ List recent Session Replays
 | `-q, --query <query>` | Search query (Sentry replay search syntax) |
 | `-e, --environment <environment>...` | Filter by environment (repeatable, comma-separated) |
 | `-s, --sort <sort>` | Sort by: date, oldest, duration, errors, activity, or a raw replay sort field (default: "date") |
-| `-t, --period <period>` | Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01" (default: "7d") |
+| `-t, --period <period>` | Time range: "7d", "2026-06-01..2026-07-01", ">=2026-06-01" (default: "7d") |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 | `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
