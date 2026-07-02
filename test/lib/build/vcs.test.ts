@@ -52,9 +52,11 @@ describe("isCi", () => {
     expect(isCi({ CI: "1" })).toBe(true);
   });
 
-  test("false with no CI variables (and ignores empty values)", () => {
+  test("false with no CI variables (and ignores opt-out values)", () => {
     expect(isCi({})).toBe(false);
     expect(isCi({ CI: "" })).toBe(false);
+    expect(isCi({ CI: "false" })).toBe(false);
+    expect(isCi({ CI: "0" })).toBe(false);
   });
 });
 
@@ -185,6 +187,22 @@ describe("collectVcsMetadata", () => {
       true
     );
     expect(vcs.baseSha).toBe("d".repeat(40));
+  });
+
+  test("computes base_sha via merge-base with an explicit --base-ref", () => {
+    gitMock.getMergeBase.mockReturnValueOnce("e".repeat(40));
+    const vcs = collectVcsMetadata(
+      { "base-ref": "release/2.0" },
+      "/repo",
+      {},
+      true
+    );
+    expect(vcs.baseRef).toBe("release/2.0");
+    expect(vcs.baseSha).toBe("e".repeat(40));
+    expect(gitMock.getMergeBase).toHaveBeenCalledWith(
+      "origin/release/2.0",
+      "/repo"
+    );
   });
 
   test("derives provider from an SCP-style remote and GHE hosts", () => {

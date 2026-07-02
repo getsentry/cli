@@ -82,7 +82,17 @@ const CI_ENV_VARS = [
  * @param env - Environment variables (defaults to `process.env`).
  */
 export function isCi(env: NodeJS.ProcessEnv = process.env): boolean {
-  return CI_ENV_VARS.some((name) => env[name] !== undefined && env[name] !== "");
+  return CI_ENV_VARS.some((name) => {
+    const value = env[name];
+    // Treat explicit opt-out values ("", "false", "0") as not-in-CI so a local
+    // `CI=false` does not silently enable git-metadata collection.
+    return (
+      value !== undefined &&
+      value !== "" &&
+      value !== "false" &&
+      value !== "0"
+    );
+  });
 }
 
 /** A 40-character lowercase hex SHA-1. */
@@ -236,10 +246,15 @@ function resolveHeadRepoName(
 
 /**
  * Resolve the base SHA: explicit flag (present, even if empty) → GitHub event
- * payload → merge-base of HEAD with the remote's default branch.
+ * payload → merge-base of HEAD with the base ref (when known) or the remote's
+ * default branch.
+ *
+ * @param baseRef - The resolved base ref (from flag/env/default); when set, the
+ *   merge-base is computed against it so a user-supplied `--base-ref` is honored.
  */
 function resolveBaseSha(
   flags: VcsFlags,
+  baseRef: string | undefined,
   cwd: string,
   env: NodeJS.ProcessEnv,
   auto: boolean
@@ -250,10 +265,16 @@ function resolveBaseSha(
   if (!auto) {
     return undefined;
   }
-  return (
-    readGithubEventSha("base", env) ??
-    normalizeSha(getMergeBase("refs/remotes/origin/HEAD", cwd))
-  );
+  const fromEvent = readGithubEventSha("base", env);
+  if (fromEvent) {
+    return fromEvent;
+  }
+  // Prefer the known base ref (try the remote-tracking ref first, then the bare
+  // name); fall back to the remote's default branch head.
+  const mergeBase = baseRef
+    ? (getMergeBase(`origin/${baseRef}`, cwd) ?? getMergeBase(baseRef, cwd))
+    : getMergeBase("refs/remotes/origin/HEAD", cwd);
+  return normalizeSha(mergeBase);
 }
 
 /**
@@ -289,7 +310,7 @@ export function collectVcsMetadata(
     (autoCollect
       ? githubBaseRef(env) || getRemoteDefaultBranch(cwd)
       : undefined);
-  let baseSha = resolveBaseSha(flags, cwd, env, autoCollect);
+  let baseSha = resolveBaseSha(flags, baseRef, cwd, env, autoCollect);
 
   // If base == head and both were auto-inferred, the PR comparison is
   // meaningless — drop base_sha/base_ref but keep head_sha (matches legacy).
