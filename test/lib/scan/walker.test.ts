@@ -279,6 +279,37 @@ describe("walkFiles — binary detection", () => {
       cleanup();
     }
   });
+
+  test("classifyBinary: false yields files without sniffing (isBinary=false)", async () => {
+    const { cwd, cleanup } = makeSandbox({});
+    try {
+      // A NUL-containing blob that the default sniff classifies as binary.
+      const bin = new Uint8Array(256);
+      bin[10] = 0;
+      writeFileSync(join(cwd, "blob.bin"), bin);
+
+      const findBlob = async (
+        opts: Parameters<typeof walkFiles>[0]
+      ): Promise<WalkEntry | undefined> => {
+        for await (const e of walkFiles(opts)) {
+          if (e.relativePath === "blob.bin") {
+            return e;
+          }
+        }
+        return;
+      };
+
+      // By default the blob sniffs as binary; with classification disabled the
+      // same file is still yielded but reported non-binary (the 8 KB head-read
+      // is skipped entirely).
+      expect((await findBlob({ cwd }))?.isBinary).toBe(true);
+      expect((await findBlob({ cwd, classifyBinary: false }))?.isBinary).toBe(
+        false
+      );
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 describe("walkFiles — mtime recording", () => {
@@ -658,6 +689,24 @@ describe("walkFiles — followSymlinks", () => {
       symlinkSync(join(cwd, "nonexistent"), join(cwd, "broken.ts"));
       const files = await collect({ cwd, followSymlinks: true });
       expect(files).toEqual(["real.ts"]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("followSymlinks: true does not re-list the tree via a symlink to the scan root", async () => {
+    const { cwd, cleanup } = makeSandbox({
+      "top.ts": "a",
+      "sub/nested.ts": "b",
+    });
+    try {
+      // A symlink pointing back at the scan root. The root frame is pushed
+      // directly (not via maybeDescend), so unless its inode is seeded into
+      // the visited set the walker would re-list the whole tree under
+      // `sub/root-link/...`. Asserting the exact set guards that seeding.
+      symlinkSync(cwd, join(cwd, "sub", "root-link"));
+      const files = await collect({ cwd, followSymlinks: true });
+      expect(files.sort()).toEqual(["sub/nested.ts", "top.ts"]);
     } finally {
       cleanup();
     }

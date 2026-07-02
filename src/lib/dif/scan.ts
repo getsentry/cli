@@ -18,10 +18,11 @@
  * `--type macho` are equivalent here, and the feature filters narrow further.
  */
 
-import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { open, readFile, stat } from "node:fs/promises";
+import { extname, resolve } from "node:path";
 import { ValidationError } from "../errors.js";
 import { logger } from "../logger.js";
+import { type WalkEntry, walkFiles } from "../scan/index.js";
 import {
   type DifArchiveInfo,
   type DifObjectInfo,
@@ -244,94 +245,121 @@ export function objectPassesFilters(
 }
 
 /**
- * Recursively collect every regular file under a path, with cycle-safe
- * symlink-following via visited realpath tracking.
+ * Recursively scan paths for candidate files.
+ *
+ * Each argument may be a file (kept as-is) or a directory. Directories are
+ * walked recursively by the shared, well-tested {@link walkFiles} walker —
+ * the same traversal foundation the DSN code-scanner uses. The walker is
+ * configured to preserve this command's contract, which differs from the
+ * walker's DSN-tuned defaults: debug files are large binaries that typically
+ * live in `.gitignore`d build output (`build/`, `target/`, Xcode
+ * `DerivedData`), so gitignore handling and the default build-output
+ * skip-dirs are disabled, the 256 KB default size cap is lifted (size gating
+ * happens later in {@link prepareDifs}, after the cheap format peek, so it can
+ * accurately drive `oversizedCount`), and the unused `isBinary` classification
+ * is turned off to avoid an extra head-read per file. Symlinks are followed;
+ * cycles are detected by the walker via a visited inode set.
+ *
+ * Duplicate file paths (e.g. overlapping directory arguments, or a file passed
+ * both explicitly and reached via a directory walk) are collapsed by absolute
+ * path so each file is read and parsed at most once.
+ *
+ * A path that does not exist (or is unreadable) throws {@link ValidationError}.
+ * Failures deep inside a directory tree are swallowed by the walker (a scanned
+ * tree legitimately contains many unreadable/odd entries).
+ *
+ * @param paths - Files and/or directories to scan.
+ * @returns File paths in scan order (absolute for walked entries; as-given for
+ *   explicit file arguments), de-duplicated by absolute path.
+ * @throws {ValidationError} If an explicit path does not exist or cannot be
+ *   accessed.
  */
-async function collectFiles(
-  path: string,
-  out: string[],
-  visited: Set<string>
-): Promise<void> {
-  let info: Awaited<ReturnType<typeof stat>>;
+export async function scanPaths(paths: string[]): Promise<string[]> {
+  const files: string[] = [];
+  const seen = new Set<string>();
+  const add = (filePath: string): void => {
+    const key = resolve(filePath);
+    if (!seen.has(key)) {
+      seen.add(key);
+      files.push(filePath);
+    }
+  };
+
+  for (const path of paths) {
+    const info = await statExplicitPath(path);
+    if (info.isFile()) {
+      add(path);
+    } else if (info.isDirectory()) {
+      for await (const entry of walkDebugFileDir(path)) {
+        add(entry.absolutePath);
+      }
+    } else {
+      // Sockets, FIFOs, devices, etc. are not debug files — skip them.
+      log.debug(`Skipping non-file, non-directory path: ${path}`);
+    }
+  }
+
+  return files;
+}
+
+/**
+ * `stat` an explicit, user-supplied path argument, translating filesystem
+ * errors into a {@link ValidationError}. Unlike entries discovered deep inside
+ * a directory walk (which are silently skipped), a path the user named
+ * explicitly must exist and be accessible.
+ *
+ * @param path - The explicit path argument.
+ * @returns The path's `Stats`.
+ * @throws {ValidationError} If the path does not exist or cannot be accessed.
+ */
+async function statExplicitPath(
+  path: string
+): Promise<Awaited<ReturnType<typeof stat>>> {
   try {
-    info = await stat(path);
+    return await stat(path);
   } catch (err) {
-    log.debug(`Skipping unreadable path: ${path}`, err);
-    return;
-  }
-
-  if (info.isDirectory()) {
-    let real: string;
-    try {
-      real = await realpath(path);
-    } catch {
-      log.debug(`Could not resolve real path for directory: ${path}`);
-      return;
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      throw new ValidationError(`Path '${path}' does not exist.`, "path");
     }
-    if (visited.has(real)) {
-      log.debug(`Skipping already-visited directory (symlink cycle?): ${path}`);
-      return;
+    if (code === "EACCES" || code === "EPERM") {
+      throw new ValidationError(
+        `Path '${path}' is not readable: ${code}.`,
+        "path"
+      );
     }
-    visited.add(real);
-
-    let entries: string[];
-    try {
-      entries = await readdir(path);
-    } catch (err) {
-      log.debug(`Skipping unreadable directory: ${path}`, err);
-      return;
-    }
-    for (const entry of entries) {
-      await collectFiles(join(path, entry), out, visited);
-    }
-    return;
-  }
-
-  if (info.isFile()) {
-    out.push(path);
+    throw new ValidationError(
+      `Cannot access path '${path}': ${code ?? "unknown error"}.`,
+      "path"
+    );
   }
 }
 
 /**
- * Recursively scan paths for candidate files.
+ * Walk a directory for every regular file, using the shared {@link walkFiles}
+ * walker configured for debug-file scanning.
  *
- * Each argument may be a file (kept as-is) or a directory (walked
- * recursively). Unreadable entries are skipped with a debug log. Symlinks
- * are followed; cycle-safe via visited-realpath tracking. A path that does
- * not exist at all throws {@link ValidationError} (unlike a walk failure
- * inside a tree, which is silently skipped).
+ * The options intentionally diverge from the walker's DSN-tuned defaults:
+ * debug files are large binaries that typically live in `.gitignore`d build
+ * output (`build/`, `target/`, Xcode `DerivedData`), so gitignore handling and
+ * the default build-output skip-dirs are disabled, the 256 KB default size cap
+ * is lifted (size gating happens later in {@link prepareDifs}, after the cheap
+ * format peek, so it can accurately drive `oversizedCount`), and the unused
+ * `isBinary` classification is turned off to avoid an extra head-read per file.
+ * Symlinks are followed; the walker detects cycles via a visited inode set.
  *
- * @param paths - Files and/or directories to scan.
- * @returns Absolute-or-relative file paths in scan order.
- * @throws {ValidationError} If an explicit path does not exist or cannot be
- *   accessed. Walk-internal failures (entries deep inside a tree) are still
- *   silently skipped.
+ * @param dir - Absolute or relative directory path to walk.
+ * @returns An async iterable of every file found beneath `dir`.
  */
-export async function scanPaths(paths: string[]): Promise<string[]> {
-  const files: string[] = [];
-  const visited = new Set<string>();
-  for (const path of paths) {
-    try {
-      await stat(path);
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") {
-        throw new ValidationError(`Path '${path}' does not exist.`, "path");
-      }
-      if (code === "EACCES" || code === "EPERM") {
-        throw new ValidationError(
-          `Path '${path}' is not readable: ${code}.`,
-          "path"
-        );
-      }
-      throw new ValidationError(
-        `Cannot access path '${path}': ${code ?? "unknown error"}.`,
-        "path"
-      );
-    }
-    await collectFiles(path, files, visited);
-  }
-  return files;
+function walkDebugFileDir(dir: string): AsyncIterable<WalkEntry> {
+  return walkFiles({
+    cwd: resolve(dir),
+    respectGitignore: false,
+    alwaysSkipDirs: [],
+    maxFileSize: Number.POSITIVE_INFINITY,
+    followSymlinks: true,
+    classifyBinary: false,
+  });
 }
 
 const PEEK_HEADER_BYTES = 4096;
