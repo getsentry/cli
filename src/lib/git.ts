@@ -195,6 +195,76 @@ export function getRepositoryName(cwd?: string): string | undefined {
   }
 }
 
+/**
+ * Get the raw URL of the "origin" remote.
+ *
+ * @param cwd - Working directory
+ * @returns The remote URL, or undefined when there is no origin remote
+ */
+export function getRemoteUrl(cwd?: string): string | undefined {
+  try {
+    return git(["remote", "get-url", "origin"], cwd);
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Get the current branch name.
+ *
+ * @param cwd - Working directory
+ * @returns The branch name, or undefined when detached (HEAD) or not a repo
+ */
+export function getCurrentBranch(cwd?: string): string | undefined {
+  try {
+    const ref = git(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
+    return ref && ref !== "HEAD" ? ref : undefined;
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Compute the merge-base SHA of HEAD and the given ref.
+ *
+ * @param ref - The ref to find the common ancestor with (e.g. a base branch)
+ * @param cwd - Working directory
+ * @returns The merge-base commit SHA, or undefined when it can't be determined
+ *   (unknown ref, shallow clone, not a repo).
+ */
+export function getMergeBase(ref: string, cwd?: string): string | undefined {
+  // Reject option-like refs (a leading "-" would be parsed by git as a flag).
+  if (ref.startsWith("-")) {
+    return;
+  }
+  try {
+    return git(["merge-base", "HEAD", ref], cwd) || undefined;
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Get the short name of the "origin" remote's default branch.
+ *
+ * Reads `refs/remotes/origin/HEAD` (populated by `git clone`/`git remote set-head`).
+ *
+ * @param cwd - Working directory
+ * @returns The default branch name (e.g. "main"), or undefined when unknown
+ *   (not set, shallow clone, or not a repo).
+ */
+export function getRemoteDefaultBranch(cwd?: string): string | undefined {
+  try {
+    const ref = git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd);
+    const prefix = "refs/remotes/origin/";
+    return ref.startsWith(prefix)
+      ? ref.slice(prefix.length) || undefined
+      : undefined;
+  } catch {
+    return;
+  }
+}
+
 /** SSH remote URL pattern: git@host:owner/repo.git */
 const SSH_REMOTE_RE = /:([^/][^:]+?)(?:\.git)?$/;
 

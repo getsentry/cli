@@ -264,6 +264,30 @@ describe("uploadBuild", () => {
     }
   });
 
+  test("flattens vcs fields into the top level of the assemble body", async () => {
+    apiRequestToRegionMock.mockResolvedValue({
+      data: { state: "ok", artifactUrl: "https://sentry.io/artifact/9" },
+      headers: new Headers(),
+    });
+
+    await uploadBuild({
+      org: "my-org",
+      project: "my-project",
+      content,
+      metadata: { vcs: { head_sha: "abc", provider: "github", pr_number: 3 } },
+    });
+
+    const body = apiRequestToRegionMock.mock.calls.at(-1)?.[2]?.body as Record<
+      string,
+      unknown
+    >;
+    // Flattened alongside checksum/chunks — not nested under a "vcs" key.
+    expect(body.head_sha).toBe("abc");
+    expect(body.provider).toBe("github");
+    expect(body.pr_number).toBe(3);
+    expect(body).not.toHaveProperty("vcs");
+  });
+
   test("omits optional metadata fields when unset", async () => {
     apiRequestToRegionMock.mockResolvedValue({
       data: { state: "ok", artifactUrl: "https://sentry.io/artifact/3" },

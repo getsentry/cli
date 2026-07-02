@@ -142,6 +142,29 @@ describe("build upload", () => {
     expect(meta.metadata.installGroups).toEqual(["qa", "beta"]);
   });
 
+  test("folds explicit git-metadata flags into the assemble body", async () => {
+    const apk = await writeApk();
+    const harness = createContext();
+    const func = await uploadCommand.loader();
+
+    const sha = "abcdef01".repeat(5); // 40 hex chars
+    await func.call(
+      harness.context,
+      { "head-sha": sha, "head-ref": "main", "pr-number": 9 },
+      apk
+    );
+
+    const meta = uploadSpy.mock.calls[0]?.[0] as {
+      metadata: { vcs?: Record<string, unknown> };
+    };
+    // env has no CI vars, so only explicit flags are collected.
+    expect(meta.metadata.vcs).toEqual({
+      head_sha: sha,
+      head_ref: "main",
+      pr_number: 9,
+    });
+  });
+
   test("rejects an unsupported file with a non-zero exit", async () => {
     const bad = join(tmpDir, "notes.txt");
     await writeFile(bad, "not a build");

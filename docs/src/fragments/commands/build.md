@@ -12,6 +12,9 @@ sentry build upload ./app.aab --build-configuration Release --release-notes "Nig
 # Tag a build with install groups (repeatable)
 sentry build upload ./app.aab --install-group qa --install-group beta
 
+# Attach explicit git metadata (otherwise auto-collected in CI)
+sentry build upload ./app.aab --head-sha "$GIT_SHA" --pr-number 42 --base-ref main
+
 # Download a build artifact by ID
 sentry build download 1234567890
 
@@ -28,6 +31,11 @@ sentry build download 1234567890 --json
   not yet supported. **Sentry SaaS only.**
 - Multiple paths may be uploaded at once; the command exits non-zero if any
   build fails to upload.
+- Git metadata (commit, branch, PR number, repo) is **auto-collected in CI**
+  (GitHub Actions env vars + the local git repo). Use `--no-git-metadata` to
+  disable it, `--force-git-metadata` to collect outside CI, or the explicit
+  `--head-sha` / `--base-sha` / `--head-ref` / `--base-ref` / `--pr-number` /
+  `--vcs-provider` / `--head-repo-name` / `--base-repo-name` flags to override.
 - `build download` fetches a mobile build artifact (APK or IPA) previously
   uploaded to Sentry's preprod system for size analysis. **Sentry SaaS only.**
 - The build must be installable. Builds that are still processing — or that have

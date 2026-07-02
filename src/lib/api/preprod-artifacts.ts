@@ -169,6 +169,11 @@ export type BuildUploadMetadata = {
   releaseNotes?: string;
   /** Install group(s) this build belongs to. */
   installGroups?: string[];
+  /**
+   * Pre-flattened VCS fields (snake_case, e.g. `head_sha`, `provider`) merged
+   * into the assemble body. Built via `vcsInfoToBody` in the build/vcs module.
+   */
+  vcs?: Record<string, unknown>;
 };
 
 /** Options for {@link uploadBuild}. */
@@ -209,6 +214,8 @@ function buildAssembleBody(
   if (metadata.installGroups?.length) {
     body.install_groups = metadata.installGroups;
   }
+  // VCS fields are flattened into the assemble body (server flattens `VcsInfo`).
+  Object.assign(body, metadata.vcs ?? {});
   return body;
 }
 

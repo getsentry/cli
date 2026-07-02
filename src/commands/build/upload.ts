@@ -20,6 +20,12 @@ import {
   normalizeBuildFile,
   parsePluginFromPipeline,
 } from "../../lib/build/index.js";
+import {
+  collectVcsMetadata,
+  isCi,
+  type VcsFlags,
+  vcsInfoToBody,
+} from "../../lib/build/vcs.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import {
@@ -35,12 +41,21 @@ const log = logger.withTag("build.upload");
 
 const USAGE_HINT = "sentry build upload <path>";
 
+/** Parse `--pr-number` as a non-negative integer. */
+function parsePrNumber(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error("PR number must be a non-negative integer");
+  }
+  return parsed;
+}
+
 /** Flags accepted by `build upload`. */
 type UploadFlags = {
   "build-configuration"?: string;
   "release-notes"?: string;
   "install-group"?: string[];
-};
+} & VcsFlags;
 
 /** Result for a single uploaded path. */
 type BuildUploadEntry = {
@@ -176,6 +191,67 @@ export const uploadCommand = buildCommand({
         optional: true,
         variadic: true,
       },
+      "head-sha": {
+        kind: "parsed",
+        parse: String,
+        brief: "VCS commit SHA (defaults to the current commit)",
+        optional: true,
+      },
+      "base-sha": {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "VCS base commit SHA (defaults to the merge-base with the base ref)",
+        optional: true,
+      },
+      "vcs-provider": {
+        kind: "parsed",
+        parse: String,
+        brief: "VCS provider (defaults to the current remote's provider)",
+        optional: true,
+      },
+      "head-repo-name": {
+        kind: "parsed",
+        parse: String,
+        brief: "Head repository name, e.g. owner/repo (defaults to the current)",
+        optional: true,
+      },
+      "base-repo-name": {
+        kind: "parsed",
+        parse: String,
+        brief: "Base repository name, e.g. owner/repo (for forks)",
+        optional: true,
+      },
+      "head-ref": {
+        kind: "parsed",
+        parse: String,
+        brief: "Head branch/reference (defaults to the current branch)",
+        optional: true,
+      },
+      "base-ref": {
+        kind: "parsed",
+        parse: String,
+        brief: "Base branch/reference (defaults to the merge-base tracking ref)",
+        optional: true,
+      },
+      "pr-number": {
+        kind: "parsed",
+        parse: parsePrNumber,
+        brief:
+          "Pull request number (auto-detected in pull_request GitHub Actions runs)",
+        optional: true,
+      },
+      "force-git-metadata": {
+        kind: "boolean",
+        brief:
+          "Force collecting git metadata even outside CI (conflicts with --no-git-metadata)",
+        optional: true,
+      },
+      "no-git-metadata": {
+        kind: "boolean",
+        brief: "Disable automatic git metadata collection",
+        optional: true,
+      },
     },
   },
   async *func(this: SentryContext, flags: UploadFlags, ...paths: string[]) {
@@ -192,10 +268,28 @@ export const uploadCommand = buildCommand({
     }
     const { org, project } = resolved;
 
+    if (flags["force-git-metadata"] && flags["no-git-metadata"]) {
+      throw new ValidationError(
+        "--force-git-metadata and --no-git-metadata cannot be used together",
+        "force-git-metadata"
+      );
+    }
+    // Collect git metadata automatically in CI (unless disabled), or when forced.
+    const shouldCollectVcs =
+      Boolean(flags["force-git-metadata"]) ||
+      (!flags["no-git-metadata"] && isCi(this.env));
+    const vcs = collectVcsMetadata(
+      flags,
+      this.cwd,
+      this.env,
+      shouldCollectVcs
+    );
+
     const metadata: BuildUploadMetadata = {
       buildConfiguration: flags["build-configuration"],
       releaseNotes: flags["release-notes"],
       installGroups: flags["install-group"],
+      vcs: vcsInfoToBody(vcs),
     };
 
     const builds: BuildUploadEntry[] = [];
