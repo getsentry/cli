@@ -52,7 +52,29 @@ const patches = pkg.pnpm?.patchedDependencies ?? {};
 const warnings: string[] = [];
 const errors: string[] = [];
 
-for (const [name, patchPath] of Object.entries(patches)) {
+/**
+ * Split a patchedDependencies key into its bare package name and optional
+ * version selector. pnpm supports both name-only keys (`@sentry/core`) and
+ * exact-version keys (`@sentry/core@10.50.0`); the latter scopes a patch to a
+ * single version so pnpm never attempts to apply it to mismatched nested copies
+ * (e.g. a transitive `@sentry/core@10.60.0`), which otherwise emits a
+ * "Could not apply patch" warning.
+ *
+ * Scoped names begin with `@`, so only an `@` after index 0 delimits a version.
+ *
+ * @param key - A patchedDependencies key, versioned or not.
+ * @returns The bare package name and the version selector (undefined if absent).
+ */
+function parsePatchKey(key: string): { name: string; version?: string } {
+  const atIndex = key.lastIndexOf("@");
+  if (atIndex > 0) {
+    return { name: key.slice(0, atIndex), version: key.slice(atIndex + 1) };
+  }
+  return { name: key };
+}
+
+for (const [key, patchPath] of Object.entries(patches)) {
+  const { name } = parsePatchKey(key);
   // Extract version from patch path: "patches/@stricli%2Fcore@1.2.5.patch" → "1.2.5"
   // Handles pre-release versions like "1.2.3-beta.1" by matching everything after @M.N.P until .patch
   const versionMatch = patchPath.match(/@(\d+\.\d+\.\d+[^@]*)\.patch$/);

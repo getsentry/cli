@@ -83,9 +83,9 @@
   "packageManager": "pnpm@10.11.0",
   "pnpm": {
     "patchedDependencies": {
-      "@stricli/core": "patches/@stricli%2Fcore@1.2.7.patch",
-      "@sentry/node-core": "patches/@sentry%2Fnode-core@10.50.0.patch",
-      "@sentry/core": "patches/@sentry%2Fcore@10.50.0.patch"
+      "@stricli/core@1.2.7": "patches/@stricli%2Fcore@1.2.7.patch",
+      "@sentry/node-core@10.50.0": "patches/@sentry%2Fnode-core@10.50.0.patch",
+      "@sentry/core@10.50.0": "patches/@sentry%2Fcore@10.50.0.patch"
     },
     "overrides": {
       "esbuild@>=0.17.0 <0.28.1": "0.28.1",
