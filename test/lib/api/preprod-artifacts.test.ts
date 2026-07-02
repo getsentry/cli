@@ -16,11 +16,13 @@ import { ApiError, ValidationError } from "../../../src/lib/errors.js";
 const {
   customFetchMock,
   apiRequestToRegionMock,
+  apiRequestToRegionNoContentMock,
   getAuthTokenMock,
   uploadMissingBufferChunksMock,
 } = vi.hoisted(() => ({
   customFetchMock: vi.fn(),
   apiRequestToRegionMock: vi.fn(),
+  apiRequestToRegionNoContentMock: vi.fn(() => Promise.resolve()),
   getAuthTokenMock: vi.fn<() => string | undefined>(() => "secret-token"),
   uploadMissingBufferChunksMock: vi.fn(() => Promise.resolve()),
 }));
@@ -30,6 +32,7 @@ vi.mock("../../../src/lib/region.js", () => ({
 }));
 vi.mock("../../../src/lib/api/infrastructure.js", () => ({
   apiRequestToRegion: apiRequestToRegionMock,
+  apiRequestToRegionNoContent: apiRequestToRegionNoContentMock,
 }));
 vi.mock("../../../src/lib/custom-ca.js", () => ({
   customFetch: customFetchMock,
@@ -60,9 +63,12 @@ vi.mock("../../../src/lib/api/chunk-upload.js", async (importOriginal) => {
 import {
   buildFormatFromUrl,
   downloadBuildArtifact,
+  downloadSnapshotArchive,
   getBuildInstallDetails,
+  getLatestBaseSnapshot,
   toBinaryDownloadUrl,
   uploadBuild,
+  waitForSnapshotArchive,
 } from "../../../src/lib/api/preprod-artifacts.js";
 
 describe("toBinaryDownloadUrl", () => {
@@ -338,5 +344,84 @@ describe("uploadBuild", () => {
         metadata: {},
       })
     ).rejects.toThrow(/no artifact URL/i);
+  });
+});
+
+describe("snapshots", () => {
+  beforeEach(() => {
+    apiRequestToRegionMock.mockReset();
+    apiRequestToRegionNoContentMock.mockClear();
+    customFetchMock.mockReset();
+  });
+
+  test("getLatestBaseSnapshot returns the resolved baseline", async () => {
+    apiRequestToRegionMock.mockResolvedValue({
+      data: { headArtifactId: "art-1", imageCount: 5 },
+      headers: new Headers(),
+    });
+
+    await expect(getLatestBaseSnapshot("my-org", "my-app")).resolves.toEqual({
+      headArtifactId: "art-1",
+      imageCount: 5,
+    });
+    // app_id (and optional branch/project) go through as query params.
+    const params = apiRequestToRegionMock.mock.calls.at(-1)?.[2]?.params;
+    expect(params).toMatchObject({ app_id: "my-app" });
+  });
+
+  test("getLatestBaseSnapshot returns null on 404", async () => {
+    apiRequestToRegionMock.mockRejectedValue(
+      new ApiError("not found", 404, "", "endpoint")
+    );
+    await expect(
+      getLatestBaseSnapshot("my-org", "missing")
+    ).resolves.toBeNull();
+  });
+
+  test("waitForSnapshotArchive triggers a build then resolves when ready", async () => {
+    apiRequestToRegionMock
+      .mockResolvedValueOnce({ data: { ready: false }, headers: new Headers() })
+      .mockResolvedValueOnce({ data: { ready: true }, headers: new Headers() });
+    const onBuild = vi.fn();
+
+    await waitForSnapshotArchive("my-org", "snap-1", onBuild);
+
+    expect(apiRequestToRegionNoContentMock).toHaveBeenCalledTimes(1);
+    expect(onBuild).toHaveBeenCalledTimes(1);
+  });
+
+  test("waitForSnapshotArchive skips the build when already ready", async () => {
+    apiRequestToRegionMock.mockResolvedValue({
+      data: { ready: true },
+      headers: new Headers(),
+    });
+    const onBuild = vi.fn();
+
+    await waitForSnapshotArchive("my-org", "snap-1", onBuild);
+
+    expect(apiRequestToRegionNoContentMock).not.toHaveBeenCalled();
+    expect(onBuild).not.toHaveBeenCalled();
+  });
+
+  test("downloadSnapshotArchive returns the archive bytes", async () => {
+    customFetchMock.mockResolvedValue({
+      ok: true,
+      arrayBuffer: () =>
+        Promise.resolve(new TextEncoder().encode("zip-bytes").buffer),
+    });
+
+    const buf = await downloadSnapshotArchive("my-org", "snap-1");
+    expect(buf.toString()).toBe("zip-bytes");
+  });
+
+  test("downloadSnapshotArchive throws on a non-2xx response", async () => {
+    customFetchMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: "Server Error",
+    });
+    await expect(downloadSnapshotArchive("my-org", "snap-1")).rejects.toThrow(
+      ApiError
+    );
   });
 });

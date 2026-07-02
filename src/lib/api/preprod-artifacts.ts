@@ -18,7 +18,7 @@ import { pipeline } from "node:stream/promises";
 import { z } from "zod";
 import { customFetch } from "../custom-ca.js";
 import { getAuthToken } from "../db/auth.js";
-import { ApiError, ValidationError } from "../errors.js";
+import { ApiError, TimeoutError, ValidationError } from "../errors.js";
 import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import {
@@ -31,7 +31,10 @@ import {
   pickUploadEncoding,
   uploadMissingBufferChunks,
 } from "./chunk-upload.js";
-import { apiRequestToRegion } from "./infrastructure.js";
+import {
+  apiRequestToRegion,
+  apiRequestToRegionNoContent,
+} from "./infrastructure.js";
 
 const log = logger.withTag("api.preprod-artifacts");
 
@@ -304,4 +307,164 @@ export async function uploadBuild(
     `Assembly did not complete within ${ASSEMBLE_MAX_WAIT_MS / 1000}s`,
     endpoint
   );
+}
+
+/** Poll interval while waiting for a snapshot archive to build. */
+export const SNAPSHOT_ARCHIVE_POLL_MS = 2000;
+/** Maximum time to wait for a snapshot archive to build. */
+export const SNAPSHOT_ARCHIVE_TIMEOUT_MS = 300_000;
+
+/** The latest baseline snapshot resolved for an app. */
+export const LatestBaseSnapshotSchema = z.object({
+  /** Artifact ID of the baseline snapshot. */
+  headArtifactId: z.string(),
+  /** Number of images in the snapshot. */
+  imageCount: z.number(),
+});
+
+/** Latest baseline snapshot for an app. */
+export type LatestBaseSnapshot = z.infer<typeof LatestBaseSnapshotSchema>;
+
+/** Build the `.../snapshots/{id}/archive/` endpoint path. */
+function snapshotArchiveEndpoint(org: string, snapshotId: string): string {
+  return `organizations/${org}/preprodartifacts/snapshots/${encodeURIComponent(
+    snapshotId
+  )}/archive/`;
+}
+
+/**
+ * Resolve the latest baseline snapshot for an app.
+ *
+ * @param org - Organization slug.
+ * @param appId - App identifier (e.g. `sentry-frontend`).
+ * @param opts - Optional `branch` filter and `project` (numeric ID, required
+ *   with org auth tokens).
+ * @returns The latest baseline snapshot, or `null` when none exists.
+ * @throws {ApiError} On a non-2xx response other than 404.
+ */
+export async function getLatestBaseSnapshot(
+  org: string,
+  appId: string,
+  opts: { branch?: string; project?: string } = {}
+): Promise<LatestBaseSnapshot | null> {
+  const regionUrl = await resolveOrgRegion(org);
+  try {
+    const { data } = await apiRequestToRegion(
+      regionUrl,
+      `organizations/${org}/preprodartifacts/snapshots/latest-base/`,
+      {
+        params: { app_id: appId, branch: opts.branch, project: opts.project },
+        schema: LatestBaseSnapshotSchema.nullable(),
+      }
+    );
+    return data;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+const SnapshotArchiveStatusSchema = z.object({ ready: z.boolean() });
+
+/**
+ * Check whether a snapshot's downloadable archive has been built.
+ *
+ * @throws {ApiError} On a non-2xx response.
+ */
+export async function getSnapshotArchiveReady(
+  org: string,
+  snapshotId: string
+): Promise<boolean> {
+  const regionUrl = await resolveOrgRegion(org);
+  const { data } = await apiRequestToRegion(
+    regionUrl,
+    snapshotArchiveEndpoint(org, snapshotId),
+    { schema: SnapshotArchiveStatusSchema }
+  );
+  return data.ready;
+}
+
+/**
+ * Trigger a build of a snapshot's downloadable archive.
+ *
+ * @throws {ApiError} On a non-2xx response.
+ */
+export async function triggerSnapshotArchiveBuild(
+  org: string,
+  snapshotId: string
+): Promise<void> {
+  const regionUrl = await resolveOrgRegion(org);
+  await apiRequestToRegionNoContent(
+    regionUrl,
+    snapshotArchiveEndpoint(org, snapshotId),
+    { method: "POST" }
+  );
+}
+
+/**
+ * Ensure a snapshot's archive is built, triggering a build and polling if needed.
+ *
+ * @param onBuildStarted - Invoked once when a build is triggered (for progress
+ *   messaging); the API layer does no user-facing output itself.
+ * @throws {TimeoutError} When the archive is not ready within the timeout.
+ * @throws {ApiError} On a non-2xx response.
+ */
+export async function waitForSnapshotArchive(
+  org: string,
+  snapshotId: string,
+  onBuildStarted?: () => void
+): Promise<void> {
+  if (await getSnapshotArchiveReady(org, snapshotId)) {
+    return;
+  }
+  await triggerSnapshotArchiveBuild(org, snapshotId);
+  onBuildStarted?.();
+
+  const deadline = Date.now() + SNAPSHOT_ARCHIVE_TIMEOUT_MS;
+  while (!(await getSnapshotArchiveReady(org, snapshotId))) {
+    if (Date.now() >= deadline) {
+      throw new TimeoutError(
+        `Snapshot archive was not ready after ${
+          SNAPSHOT_ARCHIVE_TIMEOUT_MS / 1000
+        }s. The build may still be running; try again shortly.`
+      );
+    }
+    await new Promise((r) => setTimeout(r, SNAPSHOT_ARCHIVE_POLL_MS));
+  }
+}
+
+/**
+ * Download a snapshot's archive ZIP into memory.
+ *
+ * The archive endpoint redirects to storage; `customFetch` follows the redirect
+ * and drops the auth header cross-origin.
+ *
+ * @throws {ApiError} On a non-2xx response.
+ */
+export async function downloadSnapshotArchive(
+  org: string,
+  snapshotId: string
+): Promise<Buffer> {
+  const regionUrl = await resolveOrgRegion(org);
+  const url = `${regionUrl}/api/0/${snapshotArchiveEndpoint(
+    org,
+    snapshotId
+  )}?download`;
+  const headers: Record<string, string> = {};
+  const token = getAuthToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const response = await customFetch(url, { headers });
+  if (!response.ok) {
+    throw new ApiError(
+      "Failed to download snapshot archive",
+      response.status,
+      response.statusText || "Download failed",
+      url
+    );
+  }
+  return Buffer.from(await response.arrayBuffer());
 }
