@@ -7,7 +7,8 @@
 :root[data-theme="dark"],
 :root[data-theme="light"] {
   /* Compat: existing components reference this var */
-  --sl-color-accent-rgb: 139 92 246;
+  /* Sentry brand purple (#7553FF), the mid-anchor of the CLI banner gradient */
+  --sl-color-accent-rgb: 117 83 255;
 
   /* CLI uses Inter + JetBrains Mono */
   --sl-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -594,7 +595,7 @@ pre.table-box * {
   border-radius: 6px;
   font-family: var(--sl-font-mono);
   font-size: 0.85em;
-  color: #a78bfa;
+  color: #9e86ff;
   cursor: pointer;
   pointer-events: auto;
 }

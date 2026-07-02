@@ -47,8 +47,11 @@ export default defineConfig({
     }),
     starlight({
       title: "Sentry CLI",
-      favicon: "/favicon.png",
+      favicon: "/favicon.svg",
       logo: {
+        // The site is dark-only (the theme maps light + dark to the same dark
+        // palette), so a single white logo is used for both — a dark-marks
+        // variant would be invisible on the always-dark header.
         src: "./src/assets/logo.svg",
         replacesTitle: true,
       },
@@ -65,6 +68,17 @@ export default defineConfig({
         PageTitle: "./src/components/PageTitle.astro",
       },
       head: [
+        // PNG favicon fallback for browsers without SVG-favicon support.
+        // (Starlight's `favicon` option emits the SVG link; this adds the raster.)
+        {
+          tag: "link",
+          attrs: {
+            rel: "icon",
+            href: "/favicon.png",
+            type: "image/png",
+            sizes: "256x256",
+          },
+        },
         // Overscroll easter egg - bottom of page, only on /cli route
         {
           tag: "script",
