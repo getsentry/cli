@@ -520,6 +520,14 @@ Work with Sentry cron monitors
 
 → Full flags and examples: `references/monitor.md`
 
+### Snapshots
+
+Manage and compare snapshots
+
+- `sentry snapshots download` — Download baseline snapshot images
+
+→ Full flags and examples: `references/snapshots.md`
+
 ### Sourcemap
 
 Manage sourcemaps

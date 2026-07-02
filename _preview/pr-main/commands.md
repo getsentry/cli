@@ -34,6 +34,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`explore`](https://cli.sentry.dev/_preview/pr-main/commands/explore.md) | Query aggregate event data (Explore) |
 | [`log`](https://cli.sentry.dev/_preview/pr-main/commands/log.md) | View Sentry logs |
 | [`monitor`](https://cli.sentry.dev/_preview/pr-main/commands/monitor.md) | Work with Sentry cron monitors |
+| [`snapshots`](https://cli.sentry.dev/_preview/pr-main/commands/snapshots.md) | Manage and compare snapshots |
 | [`sourcemap`](https://cli.sentry.dev/_preview/pr-main/commands/sourcemap.md) | Manage sourcemaps |
 | [`span`](https://cli.sentry.dev/_preview/pr-main/commands/span.md) | List and view spans in projects or traces |
 | [`trace`](https://cli.sentry.dev/_preview/pr-main/commands/trace.md) | View distributed traces |
@@ -104,6 +105,7 @@ sentry issue view PROJ-123 -w
 - [replay](https://cli.sentry.dev/_preview/pr-main/commands/replay.md)
 - [repo](https://cli.sentry.dev/_preview/pr-main/commands/repo.md)
 - [schema](https://cli.sentry.dev/_preview/pr-main/commands/schema.md)
+- [snapshots](https://cli.sentry.dev/_preview/pr-main/commands/snapshots.md)
 - [sourcemap](https://cli.sentry.dev/_preview/pr-main/commands/sourcemap.md)
 - [span](https://cli.sentry.dev/_preview/pr-main/commands/span.md)
 - [team](https://cli.sentry.dev/_preview/pr-main/commands/team.md)
