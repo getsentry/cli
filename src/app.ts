@@ -43,6 +43,7 @@ import { listCommand as repoListCommand } from "./commands/repo/list.js";
 import { schemaCommand } from "./commands/schema.js";
 import { sendEnvelopeCommand } from "./commands/send-envelope.js";
 import { sendEventCommand } from "./commands/send-event.js";
+import { snapshotsRoute } from "./commands/snapshots/index.js";
 import { sourcemapRoute } from "./commands/sourcemap/index.js";
 import { spanRoute } from "./commands/span/index.js";
 import { listCommand as spanListCommand } from "./commands/span/list.js";
@@ -117,6 +118,7 @@ export const routes = buildRouteMap({
     explore: exploreCommand,
     log: logRoute,
     monitor: monitorRoute,
+    snapshots: snapshotsRoute,
     sourcemap: sourcemapRoute,
     sourcemaps: sourcemapRoute,
     span: spanRoute,
