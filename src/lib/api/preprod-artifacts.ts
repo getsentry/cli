@@ -263,6 +263,16 @@ export async function uploadBuild(
     if (data.artifactUrl) {
       return data.artifactUrl;
     }
+    // A finished ("ok") state without an artifact URL is terminal — fail fast
+    // rather than polling to the deadline (matches the legacy loop).
+    if (data.state === "ok") {
+      throw new ApiError(
+        "Build assembled but no artifact URL was returned",
+        500,
+        data.detail ?? "",
+        endpoint
+      );
+    }
 
     const missing = new Set(data.missingChunks ?? []);
     if (missing.size > 0) {
@@ -274,13 +284,6 @@ export async function uploadBuild(
         encoding,
         regionUrl,
       });
-    } else if (data.state === "ok") {
-      throw new ApiError(
-        "Build assembled but no artifact URL was returned",
-        500,
-        data.detail ?? "",
-        endpoint
-      );
     }
 
     // Always pace between assemble POSTs (matches the legacy poll loop and

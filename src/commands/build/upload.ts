@@ -103,6 +103,10 @@ async function uploadOne(
     );
   }
 
+  // NOTE: the build is read fully into memory (and normalized into a second
+  // buffer). Fine for typical mobile builds, but files above Node's ~2 GiB
+  // Buffer cap will throw. A follow-up can stream normalization to a temp file
+  // and use the file-based chunk path; the legacy CLI memory-maps instead.
   const content = await readFile(path);
   const format = detectBuildFormat(content);
 
@@ -169,6 +173,7 @@ export const uploadCommand = buildCommand({
         parse: String,
         brief:
           "Install group(s) for this build (repeatable); builds sharing a group show updates for each other",
+        optional: true,
         variadic: true,
       },
     },
@@ -208,8 +213,10 @@ export const uploadCommand = buildCommand({
     const uploadedCount = builds.filter((b) => b.error === null).length;
     yield new CommandOutput<BuildUploadResult>({ builds, uploadedCount });
 
+    // Deliberate deviation from the legacy CLI, which only exits non-zero when
+    // *every* build fails: we fail loud on *any* failure so CI/agents never
+    // mistake a partial upload for a clean success.
     if (uploadedCount === 0) {
-      // Every build failed — surface a non-zero exit like the legacy CLI.
       this.process.exitCode = 1;
       return { hint: "No builds were uploaded. See the errors above." };
     }

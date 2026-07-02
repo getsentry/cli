@@ -264,6 +264,26 @@ describe("uploadBuild", () => {
     }
   });
 
+  test("omits optional metadata fields when unset", async () => {
+    apiRequestToRegionMock.mockResolvedValue({
+      data: { state: "ok", artifactUrl: "https://sentry.io/artifact/3" },
+      headers: new Headers(),
+    });
+
+    await uploadBuild({
+      org: "my-org",
+      project: "my-project",
+      content,
+      metadata: {},
+    });
+
+    const body = apiRequestToRegionMock.mock.calls.at(-1)?.[2]?.body as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(body).sort()).toEqual(["checksum", "chunks"]);
+  });
+
   test("throws ApiError when assembly reports an error", async () => {
     apiRequestToRegionMock.mockResolvedValue({
       data: { state: "error", detail: "bad build" },
@@ -278,5 +298,21 @@ describe("uploadBuild", () => {
         metadata: {},
       })
     ).rejects.toThrow(ApiError);
+  });
+
+  test("fails fast when finished (ok) without an artifact URL", async () => {
+    apiRequestToRegionMock.mockResolvedValue({
+      data: { state: "ok" },
+      headers: new Headers(),
+    });
+
+    await expect(
+      uploadBuild({
+        org: "my-org",
+        project: "my-project",
+        content,
+        metadata: {},
+      })
+    ).rejects.toThrow(/no artifact URL/i);
   });
 });

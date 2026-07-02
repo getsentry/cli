@@ -11,6 +11,12 @@
  * the wrapper would cost CPU for ~no size win — and a fixed modification time so
  * the output does not vary run to run.
  *
+ * Note: the legacy Rust CLI compresses the wrapper with Zstd. STORE is chosen
+ * here deliberately (simpler, no method-93 ZIP writer needed, avoids
+ * double-compression). The tradeoff is that wrapper bytes differ from the Rust
+ * CLI's, so chunks are not deduplicated across the two CLIs — only within this
+ * one, which is what matters for repeated uploads from the same tool.
+ *
  * Only Android APK/AAB is handled here; iOS XCArchive/IPA is ported separately.
  */
 

@@ -7,17 +7,23 @@
  * resolution are spied so no network is touched.
  */
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { mkdir } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { run } from "@stricli/core";
 import { strToU8, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { app } from "../../../src/app.js";
 import { uploadCommand } from "../../../src/commands/build/upload.js";
+import type { SentryContext } from "../../../src/context.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as preprod from "../../../src/lib/api/preprod-artifacts.js";
+import { setAuthToken } from "../../../src/lib/db/auth.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+import { useTestConfigDir } from "../../helpers.js";
+
+useTestConfigDir("build-upload-cmd-");
 
 let tmpDir: string;
 
@@ -52,11 +58,40 @@ async function writeApk(name = "app-release.apk"): Promise<string> {
   return path;
 }
 
+/**
+ * Run the command through the real Stricli parser + router (unlike the
+ * `loader()` tests, this exercises flag arity). Returns captured stderr +
+ * exit code.
+ */
+async function runViaApp(
+  args: string[]
+): Promise<{ stderr: string; exitCode: number | undefined }> {
+  let stderr = "";
+  const context: SentryContext = {
+    process: { ...process, exitCode: undefined } as typeof process,
+    env: {} as NodeJS.ProcessEnv,
+    cwd: tmpDir,
+    homeDir: tmpDir,
+    configDir: tmpDir,
+    stdout: { write: () => true },
+    stderr: {
+      write: (data: string | Uint8Array) => {
+        stderr += typeof data === "string" ? data : new TextDecoder().decode(data);
+        return true;
+      },
+    },
+    stdin: process.stdin,
+  };
+  await run(app, ["build", "upload", ...args], context);
+  return { stderr, exitCode: context.process.exitCode };
+}
+
 describe("build upload", () => {
   let uploadSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "build-upload-"));
+    setAuthToken("test-token", 3600);
     vi.spyOn(resolveTarget, "resolveOrgAndProject").mockResolvedValue({
       org: "test-org",
       project: "test-project",
@@ -144,5 +179,20 @@ describe("build upload", () => {
 
     expect(uploadSpy).toHaveBeenCalledTimes(1);
     expect(harness.exitCode).toBe(1);
+  });
+
+  // Regression guard: --install-group must be OPTIONAL. Declared variadic
+  // without `optional: true`, Stricli treats it as required and the common
+  // `build upload <path>` invocation fails at parse time. This drives the real
+  // parser (the loader() tests above bypass it), so it catches flag arity.
+  test("accepts a build with no --install-group (flag is optional)", async () => {
+    const apk = await writeApk();
+
+    const { stderr, exitCode } = await runViaApp([apk]);
+
+    // Parsing succeeded and dispatched to the command (which uploaded).
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    expect(exitCode ?? 0).toBe(0);
+    expect(stderr).not.toMatch(/install-group/i);
   });
 });
