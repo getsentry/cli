@@ -13,9 +13,11 @@
  * place (disable with `--no-zips`); `--derived-data` additionally scans Xcode's
  * DerivedData folder on macOS. Managed PE assemblies that embed a Portable PDB
  * have it extracted and uploaded automatically as a separate DIF, and
- * `--il2cpp-mapping` uploads Unity IL2CPP line mappings. `--symbol-maps`
- * (BCSymbolMap resolution) is deferred to a follow-up PR (see the command's
- * full description).
+ * `--il2cpp-mapping` uploads Unity IL2CPP line mappings. BCSymbolMap
+ * resolution (legacy `--symbol-maps`) is intentionally not supported: it only
+ * applies to Apple Bitcode, which Apple has deprecated and the App Store no
+ * longer accepts. Projects that still need it can use the legacy Rust
+ * `sentry-cli`.
  */
 
 import { createHash } from "node:crypto";
@@ -553,7 +555,9 @@ export const uploadCommand = buildCommand({
       "  sentry debug-files upload ./build --il2cpp-mapping --include-sources\n" +
       "  sentry debug-files upload --derived-data --no-upload\n" +
       "  sentry debug-files upload ./build --no-zips --no-upload\n\n" +
-      "Not yet supported (planned): --symbol-maps (BCSymbolMap resolution).",
+      "BCSymbolMap resolution (legacy --symbol-maps) is not supported: it " +
+      "only applies to Apple Bitcode, which Apple has deprecated. Use the " +
+      "legacy Rust sentry-cli if you still need it.",
   },
   output: {
     human: formatUploadResult,

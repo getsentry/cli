@@ -76,8 +76,10 @@ sentry debug-files upload ./build --no-upload
   server-side processing and exit non-zero if any file fails. `--require-all`
   fails if a requested `--id` was not found. The server-advertised maximum file
   size and maximum processing wait are honored automatically (oversized files
-  are skipped with a warning). `--symbol-maps` (BCSymbolMap resolution) is not
-  yet supported.
+  are skipped with a warning). BCSymbolMap resolution (the legacy
+  `--symbol-maps` flag) is intentionally unsupported — it only applies to Apple
+  Bitcode, which Apple has deprecated and the App Store no longer accepts. Use
+  the legacy Rust `sentry-cli` if you still need it.
 - Managed .NET PE assemblies that embed a Portable PDB have it extracted and
   uploaded automatically as a separate `<name>.pdb` debug file (no flag needed).
 - `--il2cpp-mapping` computes Unity IL2CPP C++→C# line mappings from each file's
