@@ -53,6 +53,7 @@ import { ReadStream } from "node:tty";
 const _require = createRequire(import.meta.url);
 
 import { setTag } from "@sentry/node-core/light";
+import { FULL_BANNER_LINES } from "../../banner.js";
 import { CLI_VERSION } from "../../constants.js";
 import { stripAnsi } from "../../formatters/plain-detect.js";
 import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
@@ -86,25 +87,6 @@ type PendingWelcome = {
 
 /** Tip rotation cadence in the sidebar — slow enough to read each tip. */
 const TIP_ROTATE_INTERVAL_MS = 15_000;
-
-/** Sentry brand purple — matches `src/lib/banner.ts`. */
-const BANNER_GRADIENT = [
-  "#B4A4DE",
-  "#9C84D4",
-  "#8468C8",
-  "#6C4EBA",
-  "#5538A8",
-  "#432B8A",
-];
-
-const BANNER_ROWS = [
-  "  ███████╗███████╗███╗   ██╗████████╗██████╗ ██╗   ██╗",
-  "  ██╔════╝██╔════╝████╗  ██║╚══██╔══╝██╔══██╗╚██╗ ██╔╝",
-  "  ███████╗█████╗  ██╔██╗ ██║   ██║   ██████╔╝ ╚████╔╝ ",
-  "  ╚════██║██╔══╝  ██║╚██╗██║   ██║   ██╔══██╗  ╚██╔╝  ",
-  "  ███████║███████╗██║ ╚████║   ██║   ██║  ██║   ██║   ",
-  "  ╚══════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝   ",
-];
 
 function sanitizeWelcomeOptions(opts: WelcomeOptions): WelcomeOptions {
   return {
@@ -281,10 +263,9 @@ export async function createInkUI(
 
   const store = new WizardStore({
     cliVersion: CLI_VERSION,
-    bannerRows: BANNER_ROWS.map((content, i) => ({
-      content,
-      color: BANNER_GRADIENT[i] ?? BANNER_GRADIENT[0] ?? "#FFFFFF",
-    })),
+    // Seed with the full banner; IntroScreen re-fits it to the live terminal
+    // width on every render (shrinking or growing) so it never wraps.
+    bannerRows: FULL_BANNER_LINES,
   });
   const initialWelcome = opts.initialWelcome
     ? createPendingWelcome()

@@ -36,6 +36,11 @@ import {
   useSyncExternalStore,
 } from "react";
 import {
+  type BannerLine,
+  bannerLinesForWidth,
+  bannerLinesWidth,
+} from "../../banner.js";
+import {
   buildFileTree,
   buildReadTree,
   type FileTreeRow,
@@ -604,7 +609,7 @@ function IntroScreen({
   spinner,
   width,
 }: {
-  bannerRows: { content: string; color: string }[];
+  bannerRows: BannerLine[];
   logs: LogEntry[];
   prompt: ActivePrompt | null;
   spinner: SpinnerState;
@@ -613,6 +618,13 @@ function IntroScreen({
   const welcomePrompt = prompt?.kind === "welcome" ? prompt : null;
   const options = welcomePrompt?.options ?? DEFAULT_WELCOME_OPTIONS;
   const bodyWidth = Math.min(width, 84);
+  // Use the provided banner rows if they fit; if they're too wide for the
+  // current terminal, downsize to the widest variant that fits so the banner
+  // never wraps on resize. An explicitly-empty list means "no banner".
+  const banner =
+    bannerRows.length === 0 || bannerLinesWidth(bannerRows) <= bodyWidth
+      ? bannerRows
+      : bannerLinesForWidth(bodyWidth);
 
   return (
     <Box alignItems="center" flexDirection="column" width={bodyWidth}>
@@ -621,7 +633,7 @@ function IntroScreen({
         flexDirection="column"
         marginBottom={welcomePrompt ? 2 : 1}
       >
-        {bannerRows.map((row, i) => (
+        {banner.map((row, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: positional banner rows
           <Text color={row.color} key={i}>
             {row.content}
