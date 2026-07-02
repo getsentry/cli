@@ -461,6 +461,65 @@ describe("sentry debug-files upload", () => {
     expect(exitCode).toBe(1);
   });
 
+  test("filesUploaded excludes failed/dropped results", async () => {
+    process.env.SENTRY_ORG = "test-org";
+    process.env.SENTRY_PROJECT = "test-project";
+    await writeBreakpad();
+
+    vi.spyOn(debugFilesApi, "uploadDebugFiles").mockResolvedValue([
+      {
+        name: "ok.sym",
+        debugId: KNOWN_DEBUG_ID,
+        checksum: "a".repeat(40),
+        state: "ok",
+        detail: null,
+      },
+      {
+        name: "toobig.sym",
+        debugId: "22222222-2222-2222-2222-222222222222",
+        checksum: "",
+        state: "error",
+        detail: "Exceeds server maximum file size",
+      },
+    ]);
+
+    const { output } = await runUpload([tempDir, "--json"]);
+    const parsed = JSON.parse(output);
+    // Both results are listed, but only the non-failed one counts as uploaded.
+    expect(parsed.files).toHaveLength(2);
+    expect(parsed.filesUploaded).toBe(1);
+  });
+
+  test("--require-all note is preserved alongside an upload failure", async () => {
+    process.env.SENTRY_ORG = "test-org";
+    process.env.SENTRY_PROJECT = "test-project";
+    await writeBreakpad();
+
+    vi.spyOn(debugFilesApi, "uploadDebugFiles").mockResolvedValue([
+      {
+        name: "example.sym",
+        debugId: KNOWN_DEBUG_ID,
+        checksum: "a".repeat(40),
+        state: "error",
+        detail: "could not process",
+      },
+    ]);
+
+    const { exitCode, output } = await runUpload([
+      tempDir,
+      "--id",
+      KNOWN_DEBUG_ID,
+      "--id",
+      "11111111-1111-1111-1111-111111111111",
+      "--require-all",
+    ]);
+    expect(exitCode).toBe(1);
+    // The failure hint must still surface the missing required id — the
+    // --require-all feedback must not be swallowed by the earlier failure exit.
+    expect(output).toContain("had failures");
+    expect(output).toContain("11111111-1111-1111-1111-111111111111");
+  });
+
   test("--require-all on a real upload fails when an --id is missing", async () => {
     process.env.SENTRY_ORG = "test-org";
     process.env.SENTRY_PROJECT = "test-project";
