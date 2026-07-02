@@ -88,6 +88,15 @@ export const FULL_BANNER_LINES: BannerLine[] = colorize(BANNER_ROWS_FULL);
 /**
  * Widest display width (in code points) among a set of banner lines.
  * Used to decide whether a pre-built banner fits the current terminal.
+ *
+ * Known limitation: width is counted in code points, which assumes each Block
+ * Elements glyph (U+2580–U+259F) occupies one terminal cell. Those glyphs have
+ * East Asian *Ambiguous* width, so a terminal configured to render ambiguous
+ * characters as wide (some CJK setups) draws them double-width and the banner
+ * can wrap. This is not portably detectable — and width libraries such as
+ * `string-width` also treat ambiguous characters as narrow by default, so they
+ * would report the same value — so it is an accepted limitation of the block-art
+ * banner. The plain ASCII text mark is unaffected.
  */
 export function bannerLinesWidth(lines: readonly BannerLine[]): number {
   let max = 0;
@@ -102,13 +111,14 @@ export function bannerLinesWidth(lines: readonly BannerLine[]): number {
 
 /**
  * Select the widest banner variant that fits within `columns`:
- * - `>= 78` cols → full arch mark + wordmark
- * - `>= 58` cols → wordmark only
+ * - `>= 66` cols → full arch mark + wordmark
+ * - `>= 52` cols → wordmark only
  * - `>= 6` cols → compact "sentry" text mark
  * - otherwise → no banner (empty)
  *
- * This guarantees the banner never exceeds the terminal width, so it never
- * wraps into a broken layout on narrow or split-pane terminals.
+ * This guarantees the banner never exceeds the terminal width, so it never wraps
+ * into a broken layout on narrow or split-pane terminals (assuming single-width
+ * block glyphs — see the note on {@link bannerLinesWidth}).
  */
 export function bannerLinesForWidth(columns: number): BannerLine[] {
   if (columns >= FULL_WIDTH) {
