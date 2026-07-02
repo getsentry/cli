@@ -201,7 +201,8 @@ function appendIl2cppMapping(difs: DebugFileUpload[], file: PreparedDif): void {
   try {
     result = createIl2cppLineMapping(
       new Uint8Array(file.content),
-      readSourceFile
+      readSourceFile,
+      file.debugId
     );
   } catch (err) {
     log.debug(`Could not compute IL2CPP line mapping for ${file.path}`, err);
@@ -212,7 +213,9 @@ function appendIl2cppMapping(difs: DebugFileUpload[], file: PreparedDif): void {
   }
   difs.push({
     name: `${basename(file.path)}.il2cpp`,
-    debugId: file.debugId ?? result.debugId,
+    // Use the mapped object's own debug id so the DIF's id always matches its
+    // contents (createIl2cppLineMapping maps the object with file.debugId).
+    debugId: result.debugId,
     content: Buffer.from(result.mapping),
   });
 }
