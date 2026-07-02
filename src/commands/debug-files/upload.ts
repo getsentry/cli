@@ -11,9 +11,10 @@
  * Honors the server-advertised `max_file_size` (oversized files are skipped)
  * and `max_wait` (clamps the processing wait). `.zip` archives are scanned in
  * place (disable with `--no-zips`); `--derived-data` additionally scans Xcode's
- * DerivedData folder on macOS. `--symbol-maps` (BCSymbolMap resolution) and
- * `--il2cpp-mapping` line mappings are deferred to follow-up PRs (see the
- * command's full description).
+ * DerivedData folder on macOS. Managed PE assemblies that embed a Portable PDB
+ * have it extracted and uploaded automatically as a separate DIF. `--symbol-maps`
+ * (BCSymbolMap resolution) and `--il2cpp-mapping` line mappings are deferred to
+ * follow-up PRs (see the command's full description).
  */
 
 import { createHash } from "node:crypto";
@@ -172,6 +173,9 @@ function difKey(dif: DebugFileUpload): string {
 /**
  * Convert prepared files into the DIF upload list, optionally appending a
  * source bundle per file when `--include-sources` is set.
+ *
+ * Embedded Portable PDBs (extracted from managed PE assemblies during scanning)
+ * arrive here as ordinary prepared DIFs, so no special handling is needed.
  *
  * Source files are read synchronously from the paths recorded in each object's
  * debug info; files not present locally are skipped. A bundle is only added
@@ -454,6 +458,8 @@ export const uploadCommand = buildCommand({
       "  --no-zips        Do not scan inside .zip archives\n\n" +
       ".zip archives are scanned in place by default; nested archives are not " +
       "recursed.\n\n" +
+      "Managed PE assemblies (.NET) that embed a Portable PDB have it extracted " +
+      "and uploaded automatically as a separate <name>.pdb debug file.\n\n" +
       "Usage:\n" +
       "  sentry debug-files upload ./build\n" +
       "  sentry debug-files upload ./symbols.zip\n" +

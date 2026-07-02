@@ -157,6 +157,60 @@ export function peekFormat(data: Uint8Array): string {
   return Archive.peek(data) ?? "unknown";
 }
 
+/** An embedded Portable PDB extracted from a managed PE object. */
+export type EmbeddedPpdbResult = {
+  /** The decompressed, standalone Portable PDB bytes. */
+  ppdb: Uint8Array;
+  /** Debug id of the PE the Portable PDB was embedded in (its advisory id). */
+  debugId: string;
+};
+
+/**
+ * Extract a Portable PDB embedded inside a managed Windows PE (.NET assembly).
+ *
+ * Managed PE images can carry their Portable PDB debug companion inline (debug
+ * directory entry type 17, deflate-compressed). This narrows each object in the
+ * archive to a PE via `ObjectFile.asPe()` and, for the first PE that embeds a
+ * Portable PDB, decompresses and returns those bytes together with that PE's
+ * debug id. The returned bytes are themselves a standalone Portable PDB that can
+ * be parsed and uploaded as a separate debug information file.
+ *
+ * Non-PE objects (and PEs without an embedded PPDB) are skipped, so this is safe
+ * to call unconditionally on any object file. A decompression/extraction error
+ * for an individual object is swallowed (logged at debug level) and treated as
+ * "no embedded PPDB", mirroring legacy `sentry-cli`, where a failed extraction
+ * never aborts the surrounding upload.
+ *
+ * @param data - The full contents of the object file (archive).
+ * @returns The embedded Portable PDB bytes plus the PE's debug id, or `null`
+ *   when no object in the archive embeds a Portable PDB.
+ * @throws If the buffer cannot be parsed as a known object format.
+ */
+export function extractEmbeddedPpdb(
+  data: Uint8Array
+): EmbeddedPpdbResult | null {
+  ensureInitialized();
+  const archive = new Archive(data);
+  for (const object of archive.objects()) {
+    const pe = object.asPe();
+    if (!pe) {
+      continue;
+    }
+    try {
+      const ppdb = pe.embeddedPpdb();
+      if (ppdb) {
+        return { ppdb, debugId: object.debugId };
+      }
+    } catch (err) {
+      log.debug(
+        `Failed to extract embedded Portable PDB for ${object.debugId}`,
+        err
+      );
+    }
+  }
+  return null;
+}
+
 /**
  * Select the single object that source-bundling operates on: the first object
  * that carries debug info, falling back to the first object in the archive.
