@@ -204,9 +204,14 @@ export function printCustomHelp(): string {
 
   // Skip banner for non-TTY to avoid wasting tokens in agent loops
   if (process.stdout.isTTY) {
-    lines.push("");
-    lines.push(formatBanner());
-    lines.push("");
+    // formatBanner sizes itself to the terminal width; it returns "" only when
+    // the terminal is too narrow for even the compact mark.
+    const banner = formatBanner();
+    if (banner) {
+      lines.push("");
+      lines.push(banner);
+      lines.push("");
+    }
   }
 
   // Tagline

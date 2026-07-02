@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { formatBanner } from "../../src/lib/banner.js";
+import { bannerLinesForWidth, formatBanner } from "../../src/lib/banner.js";
 import { introspectAllCommands, printCustomHelp } from "../../src/lib/help.js";
 import { useTestConfigDir } from "../helpers.js";
 
@@ -17,21 +17,50 @@ function stripAnsi(str: string): string {
   return str.replace(ANSI_RE, "");
 }
 
+/** Widest line (in code points) in a rendered banner, ignoring ANSI codes. */
+function maxLineWidth(banner: string): number {
+  return Math.max(
+    0,
+    ...stripAnsi(banner)
+      .split("\n")
+      .map((line) => [...line].length)
+  );
+}
+
 describe("formatBanner", () => {
-  test("returns 8 rows matching the SENTRY ASCII art", () => {
-    const banner = formatBanner();
-    const rows = banner.split("\n");
-    expect(rows).toHaveLength(8);
+  test("renders the full arch + wordmark on wide terminals", () => {
+    const banner = formatBanner(120);
+    expect(banner.split("\n")).toHaveLength(8);
+    expect(stripAnsi(banner)).toContain("███████");
   });
 
-  test("contains the SENTRY block characters", () => {
-    const banner = stripAnsi(formatBanner());
-    // The ASCII art spells out SENTRY using box-drawing chars
-    expect(banner).toContain("███████");
+  test("falls back to the wordmark on medium terminals", () => {
+    const banner = formatBanner(64);
+    expect(banner.split("\n")).toHaveLength(8);
+    // Wordmark still contains the block run but is narrower than the full banner.
+    expect(stripAnsi(banner)).toContain("███████");
+    expect(maxLineWidth(formatBanner(64))).toBeLessThanOrEqual(64);
+  });
+
+  test("falls back to a compact text mark on narrow terminals", () => {
+    expect(stripAnsi(formatBanner(40))).toBe("sentry");
+  });
+
+  test("renders nothing when the terminal is too narrow for any mark", () => {
+    expect(formatBanner(4)).toBe("");
+    expect(bannerLinesForWidth(4)).toEqual([]);
+  });
+
+  // Core invariant: the banner must never exceed the terminal width (it would
+  // wrap into a broken layout otherwise). Regression test for split-pane widths.
+  test("never exceeds the terminal width", () => {
+    for (let columns = 6; columns <= 200; columns++) {
+      expect(maxLineWidth(formatBanner(columns))).toBeLessThanOrEqual(columns);
+    }
   });
 
   test("is deterministic across calls", () => {
-    expect(formatBanner()).toBe(formatBanner());
+    expect(formatBanner(120)).toBe(formatBanner(120));
   });
 });
 
