@@ -376,13 +376,14 @@ async function handleServerMessage(
 function connectOnce(args: {
   url: string;
   token?: string;
-  sendStart: boolean;
+  /** Shared across reconnects: `start` is sent exactly once, on the FIRST open. */
+  startState: { sent: boolean };
   context: ResolvedInitContext;
   ui: WizardUI;
   spin: SpinnerHandle;
   spinState: SpinState;
 }): Promise<Record<string, unknown>> {
-  const { url, token, sendStart, context, ui, spin, spinState } = args;
+  const { url, token, startState, context, ui, spin, spinState } = args;
   return new Promise<Record<string, unknown>>((resolve, reject) => {
     const ws = new WebSocket(
       url,
@@ -419,7 +420,12 @@ function connectOnce(args: {
       if (spinState.running) {
         spin.message("Analyzing your project...");
       }
-      if (sendStart) {
+      // Send `start` exactly once — on the first socket that actually opens.
+      // A reconnect after a successful start relies on the DO re-sending its
+      // pending request, so we must NOT resend start; but if the first connect
+      // failed before opening, start was never sent and must go out now.
+      if (!startState.sent) {
+        startState.sent = true;
         ws.send(
           JSON.stringify({
             type: "start",
@@ -489,7 +495,9 @@ async function driveWithReconnect(args: {
 }): Promise<Record<string, unknown>> {
   const { url, context, ui, spin, spinState } = args;
   const token = context.authToken;
-  let started = false;
+  // `start` is sent exactly once, on the first socket that opens (tracked here so
+  // an early connect failure before `open` doesn't skip it on the retry).
+  const startState = { sent: false };
   let attempt = 0;
 
   for (;;) {
@@ -497,7 +505,7 @@ async function driveWithReconnect(args: {
       const output = await connectOnce({
         url,
         token,
-        sendStart: !started,
+        startState,
         context,
         ui,
         spin,
@@ -508,9 +516,6 @@ async function driveWithReconnect(args: {
       if (!(err instanceof ReconnectSignal)) {
         throw err;
       }
-      // The DO holds the run state; on reconnect it re-sends any pending
-      // request, so we never re-send `start` after the first connection.
-      started = true;
       attempt += 1;
       if (attempt > MAX_RECONNECT_ATTEMPTS) {
         throw new WizardError(
