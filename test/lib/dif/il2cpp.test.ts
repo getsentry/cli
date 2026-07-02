@@ -53,6 +53,26 @@ describe("createIl2cppLineMapping", () => {
     expect(doc[CPP_PATH]?.[CS_PATH]).toBeDefined();
   });
 
+  test("returns the mapped object's own debug id when targeting by id", () => {
+    // The returned debug id must always describe the object the mapping came
+    // from, so the uploaded DIF can be stamped with a matching id.
+    const result = createIl2cppLineMapping(
+      bytes(BREAKPAD_WITH_CPP),
+      () => bytes(CPP_WITH_SOURCE_INFO),
+      KNOWN_DEBUG_ID
+    );
+    expect(result?.debugId).toBe(KNOWN_DEBUG_ID);
+  });
+
+  test("falls back to the primary object when targetDebugId is not found", () => {
+    const result = createIl2cppLineMapping(
+      bytes(BREAKPAD_WITH_CPP),
+      () => bytes(CPP_WITH_SOURCE_INFO),
+      "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    );
+    expect(result?.debugId).toBe(KNOWN_DEBUG_ID);
+  });
+
   test("returns null when no referenced source is available", () => {
     expect(
       createIl2cppLineMapping(bytes(BREAKPAD_WITH_CPP), () => null)

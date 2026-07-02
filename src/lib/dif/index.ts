@@ -327,25 +327,38 @@ export type Il2cppMappingResult = {
  * parsed into a C++→C# mapping serialized as a JSON document — the format Sentry
  * consumes for IL2CPP symbolication — which can be uploaded as a separate DIF.
  *
- * The mapping is computed for the single object chosen by
+ * The mapping is computed for the object identified by `targetDebugId` when
+ * given (so the returned debug id always matches the object the mapping
+ * describes), otherwise for the single object chosen by
  * {@link selectBundledObject}, matching {@link createSourceBundle}. Nothing is
  * read from disk by this function itself; `readSource` performs all I/O.
  *
  * @param data - The full contents of the debug information file.
  * @param readSource - Supplies C++ source content for a referenced path, or
  *   `null` to skip. Invoked synchronously (e.g. `readFileSync`).
- * @returns The serialized mapping bytes plus the object's debug id, or `null`
- *   when the archive has no objects or the object references no IL2CPP
+ * @param targetDebugId - Debug id of the specific object to map (typically the
+ *   filter-matched primary). When omitted or not found, falls back to
+ *   {@link selectBundledObject}.
+ * @returns The serialized mapping bytes plus the mapped object's debug id, or
+ *   `null` when the archive has no objects or the object references no IL2CPP
  *   `source_info` markers (an empty mapping).
  * @throws If the buffer cannot be parsed, or if `readSource` throws.
  */
 export function createIl2cppLineMapping(
   data: Uint8Array,
-  readSource: (path: string) => Uint8Array | null
+  readSource: (path: string) => Uint8Array | null,
+  targetDebugId?: string
 ): Il2cppMappingResult | null {
   ensureInitialized();
   const archive = new Archive(data);
-  const object = selectBundledObject(archive.objects());
+  const objects = archive.objects();
+  // Map the caller's targeted object so the mapping content always corresponds
+  // to the debug id the DIF advertises; without this a fat archive plus `--id`
+  // could stamp one slice's id onto another slice's line mappings.
+  const object =
+    (targetDebugId
+      ? objects.find((candidate) => candidate.debugId === targetDebugId)
+      : undefined) ?? selectBundledObject(objects);
   if (!object) {
     return null;
   }
