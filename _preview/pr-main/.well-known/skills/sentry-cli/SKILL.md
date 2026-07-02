@@ -524,6 +524,7 @@ Work with Sentry cron monitors
 
 Manage and compare snapshots
 
+- `sentry snapshots diff <base-dir> <head-dir>` — Compare two directories of snapshot images
 - `sentry snapshots download` — Download baseline snapshot images
 
 → Full flags and examples: `references/snapshots.md`
