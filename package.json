@@ -13,13 +13,13 @@
     "@hono/node-server": "^2.0.6",
     "@mastra/client-js": "^1.26.0",
     "@sentry/api": "^0.180.0",
-    "@sentry/core": "10.50.0",
-    "@sentry/node-core": "10.50.0",
+    "@sentry/core": "10.63.0",
+    "@sentry/node-core": "10.63.0",
     "@sentry/sqlish": "^1.0.1",
     "@sentry/symbolic": "13.7.0",
     "@spotlightjs/spotlight": "^4.11.7",
     "@stricli/auto-complete": "^1.2.8",
-    "@stricli/core": "1.2.7",
+    "@stricli/core": "1.2.8",
     "@types/http-cache-semantics": "^4.2.0",
     "@types/node": "^22.20.0",
     "@types/picomatch": "^4.0.3",
@@ -83,9 +83,9 @@
   "packageManager": "pnpm@10.11.0",
   "pnpm": {
     "patchedDependencies": {
-      "@stricli/core@1.2.7": "patches/@stricli%2Fcore@1.2.7.patch",
-      "@sentry/node-core@10.50.0": "patches/@sentry%2Fnode-core@10.50.0.patch",
-      "@sentry/core@10.50.0": "patches/@sentry%2Fcore@10.50.0.patch"
+      "@stricli/core@1.2.8": "patches/@stricli%2Fcore@1.2.8.patch",
+      "@sentry/node-core@10.63.0": "patches/@sentry%2Fnode-core@10.63.0.patch",
+      "@sentry/core@10.63.0": "patches/@sentry%2Fcore@10.63.0.patch"
     },
     "overrides": {
       "esbuild@>=0.17.0 <0.28.1": "0.28.1",
