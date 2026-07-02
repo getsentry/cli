@@ -450,6 +450,12 @@ async function* doUpload(
 ) {
   const results = await uploadDebugFiles(params);
 
+  // Files the server (or the local size gate) rejected come back as
+  // error/not_found results; they must not be counted as uploaded.
+  const failures = results.filter(
+    (r) => r.state === "error" || r.state === "not_found"
+  );
+
   yield new CommandOutput<DebugFilesUploadResult>({
     org: params.org,
     project: params.project,
@@ -460,7 +466,7 @@ async function* doUpload(
       state: r.state,
       detail: r.detail,
     })),
-    filesUploaded: results.length,
+    filesUploaded: results.length - failures.length,
   });
 
   // Scan-time oversized files were dropped before the queue was built, so they
@@ -471,9 +477,13 @@ async function* doUpload(
       ? ` ${params.oversizedCount} file(s) were skipped for exceeding the maximum file size (${params.maxFileSize} bytes).`
       : "";
 
-  const failures = results.filter(
-    (r) => r.state === "error" || r.state === "not_found"
-  );
+  // Appended to whichever hint returns first so `--require-all` feedback is
+  // never lost behind an upload failure or a size-drop (all already exit 1).
+  const requireAllNote =
+    params.requireAll && params.missingRequestedIds.length > 0
+      ? ` Missing requested debug id(s): ${params.missingRequestedIds.join(", ")}.`
+      : "";
+
   if (failures.length > 0) {
     setExitCode(1);
     const details = failures
@@ -483,14 +493,14 @@ async function* doUpload(
       )
       .join("; ");
     return {
-      hint: `${failures.length === 1 ? "1 file" : `${failures.length} files`} had failures: ${details}.${scanOversize}`,
+      hint: `${failures.length === 1 ? "1 file" : `${failures.length} files`} had failures: ${details}.${scanOversize}${requireAllNote}`,
     };
   }
 
   if (params.oversizedCount > 0) {
     setExitCode(1);
     return {
-      hint: `Uploaded ${results.length} debug file(s) to ${params.org}/${params.project}, but ${params.oversizedCount} file(s) were skipped for exceeding the maximum file size (${params.maxFileSize} bytes).`,
+      hint: `Uploaded ${results.length} debug file(s) to ${params.org}/${params.project}, but ${params.oversizedCount} file(s) were skipped for exceeding the maximum file size (${params.maxFileSize} bytes).${requireAllNote}`,
     };
   }
 
