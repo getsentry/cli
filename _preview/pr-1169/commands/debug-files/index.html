@@ -391,8 +391,10 @@ previews the selection without credentials; <code dir="auto">--wait</code>/<code
 server-side processing and exit non-zero if any file fails. <code dir="auto">--require-all</code>
 fails if a requested <code dir="auto">--id</code> was not found. The server-advertised maximum file
 size and maximum processing wait are honored automatically (oversized files
-are skipped with a warning). <code dir="auto">--symbol-maps</code> (BCSymbolMap resolution) is not
-yet supported.</li>
+are skipped with a warning). BCSymbolMap resolution (the legacy
+<code dir="auto">--symbol-maps</code> flag) is intentionally unsupported — it only applies to Apple
+Bitcode, which Apple has deprecated and the App Store no longer accepts. Use
+the legacy Rust <code dir="auto">sentry-cli</code> if you still need it.</li>
 <li>Managed .NET PE assemblies that embed a Portable PDB have it extracted and
 uploaded automatically as a separate <code dir="auto">&#x3C;name>.pdb</code> debug file (no flag needed).</li>
 <li><code dir="auto">--il2cpp-mapping</code> computes Unity IL2CPP C++→C# line mappings from each file's
