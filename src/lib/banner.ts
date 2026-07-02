@@ -11,52 +11,57 @@
 import chalk from "chalk";
 
 /**
- * Full banner: Sentry arch mark + SENTRY wordmark, transcribed from the Sentry
- * logo using Block Elements glyphs (U+2580–U+259F). Max width 78 cols.
+ * Full banner: Sentry arch mark + SENTRY wordmark, from the official Sentry
+ * brand assets, rendered with Block Elements glyphs (U+2580–U+259F).
+ * Max width 66 cols.
  */
 const BANNER_ROWS_FULL = [
-  "         ▗▟▙             ▄███████████▌▐█████▖ ███▌█████████████▝▜█████▖▗▄████▛",
-  "        ▗█▀▀█▖          ▐████████████ ▐██████ ███▌█████████████ ▐██████▐█████",
-  "       ▟█▘  ▝█▄        ▐████▌   ▄▄▄▄▄▄▐██████████▌ ▀▀▜███▀▀▀▀▀▀   ▝████████▛",
-  "       ▝▜█▖  ▝▜▙        ▝████▄  ███▀▀▀▐███▛▜█████▌   ▐███ ▐████████▙▀▜████▛",
-  "    ▗▟█▄ ▝▜▙▖  ▜▙▖        ████▌ █████ ▐███▌ █████▌   ▐███ ▐███  ▐███▌▐████",
-  "    █▌ ▀█▖ ▜█▖  ▜█▖   ███▌ ████ ███▀▀ ▝▀▀▀▘  ▀▀▀▀▘   ▐███ ▐████████▀ ▐████",
-  "   ▄ ▜▙ ▝█▖ ▜▙   ▜█▖  ▜████████ ████████████████████▌▐███ ▐███▌▜██▙▖  ████▖",
-  "  ▟█▄▄█▌ ▐█▄▟█▌ ▐██▛  ▝▜██████▀ ████████████████████▌▐███ ▐███▌▝███▙▖ ████▌",
+  "       ▄▖            ▄▄▄▄▄▄▄▄▄▖▗▄▄▄▖  ▄▄▄            ▗▄▄▄▄▖",
+  "      ▟██▄        ▗▟██████████▘▐████▖ ███ ██████████▌ ▜████▖▗████▘",
+  "    ▗▟▛ ▝▜▙       ▐███▘  ▗▄▄▄▄▖▐█████▄███ ██████████▌  ▝████████▘",
+  "    ▝▜▙▖  ▜▙▖     ▝███▙  ▐██▛▀▘▐██▛██████   ▐██▌▗▄▄▄▄▄▄▄▄▜█████▘",
+  "  ▗█▄ ▝█▄  ▜█▖     ▝▜███▖▐██▙▖ ███▌ ▜████   ▐██▌▐██▛ ▝███▌▜███▌",
+  " ▗█▘▀█▖▝▜▙  ▜█▖ ▐██▌ ▐██▙▐██▀▘ ▀▀▀▘  ▀▀▀▀   ▐██▌▐██████▀▀ ▐███▌",
+  "▗▄▝▙▖▝█▖▝█▌  ▜█▖▝███████▛▐█████████████████▌▐██▌▐██▌▝██▙▖ ▐███▌",
+  "▟▙▄▟▙ ▐█▄██ ▐██▛  ▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘▝▀▀▘▝▀▀▀ ▝▀▀▀▘▝▀▀▀▘",
 ];
 
 /**
  * Fallback banner for narrower terminals: the SENTRY wordmark without the arch
- * mark. Max width 58 cols.
+ * mark. Max width 52 cols.
  */
 const BANNER_ROWS_WORDMARK = [
-  "     ▄███████████▌▐█████▖ ███▌█████████████▝▜█████▖▗▄████▛",
-  "    ▐████████████ ▐██████ ███▌█████████████ ▐██████▐█████",
-  "   ▐████▌   ▄▄▄▄▄▄▐██████████▌ ▀▀▜███▀▀▀▀▀▀   ▝████████▛",
-  "    ▝████▄  ███▀▀▀▐███▛▜█████▌   ▐███ ▐████████▙▀▜████▛",
-  "      ████▌ █████ ▐███▌ █████▌   ▐███ ▐███  ▐███▌▐████",
-  "  ███▌ ████ ███▀▀ ▝▀▀▀▘  ▀▀▀▀▘   ▐███ ▐████████▀ ▐████",
-  "  ▜████████ ████████████████████▌▐███ ▐███▌▜██▙▖  ████▖",
-  "  ▝▜██████▀ ████████████████████▌▐███ ▐███▌▝███▙▖ ████▌",
+  "       ▄▄▄▄▄▄▄▄▄▖▗▄▄▄▖  ▄▄▄            ▗▄▄▄▄▖",
+  "    ▗▟██████████▘▐████▖ ███ ██████████▌ ▜████▖▗████▘",
+  "    ▐███▘  ▗▄▄▄▄▖▐█████▄███ ██████████▌  ▝████████▘",
+  "    ▝███▙  ▐██▛▀▘▐██▛██████   ▐██▌▗▄▄▄▄▄▄▄▄▜█████▘",
+  "     ▝▜███▖▐██▙▖ ███▌ ▜████   ▐██▌▐██▛ ▝███▌▜███▌",
+  "  ▐██▌ ▐██▙▐██▀▘ ▀▀▀▘  ▀▀▀▀   ▐██▌▐██████▀▀ ▐███▌",
+  "  ▝███████▛▐█████████████████▌▐██▌▐██▌▝██▙▖ ▐███▌",
+  "    ▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘▝▀▀▘▝▀▀▀ ▝▀▀▀▘▝▀▀▀▘",
 ];
 
 /** One-line text mark for terminals too narrow for any block art. */
 const BANNER_TEXT = "sentry";
 
 /** Minimum columns required to render each variant without wrapping. */
-const FULL_WIDTH = 78;
-const WORDMARK_WIDTH = 58;
+const FULL_WIDTH = 66;
+const WORDMARK_WIDTH = 52;
 
-/** Purple gradient colors from bright to dark (Sentry brand-inspired) */
+/**
+ * Sentry brand purple gradient, bright to dark. Anchored at #9E86FF (top),
+ * #7553FF (middle) and #583FC1 (bottom) per the brand team; the intermediate
+ * stops are linearly interpolated between those anchors.
+ */
 const BANNER_GRADIENT = [
-  "#b4a4de",
-  "#a493d2",
-  "#9481c6",
-  "#8470ba",
-  "#735fae",
-  "#634ea2",
-  "#533c96",
-  "#432b8a",
+  "#9e86ff",
+  "#9277ff",
+  "#8769ff",
+  "#7b5aff",
+  "#7150f6",
+  "#694ae4",
+  "#6045d3",
+  "#583fc1",
 ];
 
 /** A single banner row paired with its gradient color. */
