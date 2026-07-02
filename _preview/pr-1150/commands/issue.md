@@ -31,7 +31,7 @@ List issues in a project
 | `-q, --query <query>` | Search query (Sentry syntax, implicit AND, no OR operator) |
 | `-n, --limit <limit>` | Maximum number of issues to list (default: "25") |
 | `-s, --sort <sort>` | Sort by: recommended, date, new, freq, user (default: recommended on sentry.io, else date) |
-| `-t, --period <period>` | Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01" (default: "90d") |
+| `-t, --period <period>` | Time range: "7d", "2026-06-01..2026-07-01", ">=2026-06-01" (default: "90d") |
 | `-c, --cursor <cursor>` | Pagination cursor (use "next" for next page, "prev" for previous) |
 | `--compact` | Single-line rows for compact output (auto-detects if omitted) |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
@@ -55,7 +55,7 @@ List events for a specific issue
 | `-n, --limit <limit>` | Number of events (1-1000) (default: "25") |
 | `-q, --query <query>` | Search query (Sentry search syntax) |
 | `--full` | Include full event body (stacktraces) |
-| `-t, --period <period>` | Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01" (default: "7d") |
+| `-t, --period <period>` | Time range: "7d", "2026-06-01..2026-07-01", ">=2026-06-01" (default: "7d") |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 | `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
