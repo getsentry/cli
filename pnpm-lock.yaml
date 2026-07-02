@@ -12,13 +12,13 @@ overrides:
   vite: 8.0.16
 
 patchedDependencies:
-  '@sentry/core':
+  '@sentry/core@10.50.0':
     hash: 2351f28c53bf19ae9eb2f6d741b6cb880bc9c6e60bf7ddd14fde6a0e25bde762
     path: patches/@sentry%2Fcore@10.50.0.patch
-  '@sentry/node-core':
+  '@sentry/node-core@10.50.0':
     hash: 70711b63f77a0c4b4fe10c70350be7126dc05b220ea303cda74090bce733f467
     path: patches/@sentry%2Fnode-core@10.50.0.patch
-  '@stricli/core':
+  '@stricli/core@1.2.7':
     hash: 402d573df36b19c62010d4ff41e49826f69d5c47212b8052ee7b042df34f973f
     path: patches/@stricli%2Fcore@1.2.7.patch
 
@@ -3209,7 +3209,7 @@ snapshots:
 
   '@sentry/core@10.50.0(patch_hash=2351f28c53bf19ae9eb2f6d741b6cb880bc9c6e60bf7ddd14fde6a0e25bde762)': {}
 
-  '@sentry/core@10.60.0(patch_hash=2351f28c53bf19ae9eb2f6d741b6cb880bc9c6e60bf7ddd14fde6a0e25bde762)': {}
+  '@sentry/core@10.60.0': {}
 
   '@sentry/node-core@10.50.0(patch_hash=70711b63f77a0c4b4fe10c70350be7126dc05b220ea303cda74090bce733f467)(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.41.1)':
     dependencies:
@@ -3223,10 +3223,10 @@ snapshots:
       '@opentelemetry/sdk-trace-base': 2.8.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/semantic-conventions': 1.41.1
 
-  '@sentry/node-core@10.60.0(patch_hash=70711b63f77a0c4b4fe10c70350be7126dc05b220ea303cda74090bce733f467)(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.1))':
+  '@sentry/node-core@10.60.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.1))':
     dependencies:
       '@sentry/conventions': 0.12.0
-      '@sentry/core': 10.60.0(patch_hash=2351f28c53bf19ae9eb2f6d741b6cb880bc9c6e60bf7ddd14fde6a0e25bde762)
+      '@sentry/core': 10.60.0
       '@sentry/opentelemetry': 10.60.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.1))
       import-in-the-middle: 3.2.0
     optionalDependencies:
@@ -3241,8 +3241,8 @@ snapshots:
       '@opentelemetry/instrumentation': 0.214.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/sdk-trace-base': 2.8.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/semantic-conventions': 1.41.1
-      '@sentry/core': 10.60.0(patch_hash=2351f28c53bf19ae9eb2f6d741b6cb880bc9c6e60bf7ddd14fde6a0e25bde762)
-      '@sentry/node-core': 10.60.0(patch_hash=70711b63f77a0c4b4fe10c70350be7126dc05b220ea303cda74090bce733f467)(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.1))
+      '@sentry/core': 10.60.0
+      '@sentry/node-core': 10.60.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.1))
       '@sentry/opentelemetry': 10.60.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.1))
       '@sentry/server-utils': 10.60.0
       import-in-the-middle: 3.2.0
@@ -3265,7 +3265,7 @@ snapshots:
       '@opentelemetry/core': 2.8.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/sdk-trace-base': 2.8.0(@opentelemetry/api@1.9.1)
       '@sentry/conventions': 0.12.0
-      '@sentry/core': 10.60.0(patch_hash=2351f28c53bf19ae9eb2f6d741b6cb880bc9c6e60bf7ddd14fde6a0e25bde762)
+      '@sentry/core': 10.60.0
 
   '@sentry/server-utils@10.60.0':
     dependencies:
@@ -3273,7 +3273,7 @@ snapshots:
       '@apm-js-collab/code-transformer-bundler-plugins': 0.5.0
       '@apm-js-collab/tracing-hooks': 0.10.0
       '@sentry/conventions': 0.12.0
-      '@sentry/core': 10.60.0(patch_hash=2351f28c53bf19ae9eb2f6d741b6cb880bc9c6e60bf7ddd14fde6a0e25bde762)
+      '@sentry/core': 10.60.0
       magic-string: 0.30.21
     transitivePeerDependencies:
       - supports-color
@@ -3326,11 +3326,11 @@ snapshots:
 
   '@stricli/auto-complete@1.2.8':
     dependencies:
-      '@stricli/core': 1.2.8(patch_hash=402d573df36b19c62010d4ff41e49826f69d5c47212b8052ee7b042df34f973f)
+      '@stricli/core': 1.2.8
 
   '@stricli/core@1.2.7(patch_hash=402d573df36b19c62010d4ff41e49826f69d5c47212b8052ee7b042df34f973f)': {}
 
-  '@stricli/core@1.2.8(patch_hash=402d573df36b19c62010d4ff41e49826f69d5c47212b8052ee7b042df34f973f)': {}
+  '@stricli/core@1.2.8': {}
 
   '@trpc/server@11.18.0(typescript@5.9.3)':
     dependencies:
