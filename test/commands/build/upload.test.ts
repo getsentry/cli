@@ -147,9 +147,10 @@ describe("build upload", () => {
     const harness = createContext();
     const func = await uploadCommand.loader();
 
+    const sha = "abcdef01".repeat(5); // 40 hex chars
     await func.call(
       harness.context,
-      { "head-sha": "ABCDEF", "head-ref": "main", "pr-number": 9 },
+      { "head-sha": sha, "head-ref": "main", "pr-number": 9 },
       apk
     );
 
@@ -158,7 +159,7 @@ describe("build upload", () => {
     };
     // env has no CI vars, so only explicit flags are collected.
     expect(meta.metadata.vcs).toEqual({
-      head_sha: "abcdef",
+      head_sha: sha,
       head_ref: "main",
       pr_number: 9,
     });

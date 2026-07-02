@@ -41,6 +41,15 @@ const log = logger.withTag("build.upload");
 
 const USAGE_HINT = "sentry build upload <path>";
 
+/** Parse `--pr-number` as a non-negative integer. */
+function parsePrNumber(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error("PR number must be a non-negative integer");
+  }
+  return parsed;
+}
+
 /** Flags accepted by `build upload`. */
 type UploadFlags = {
   "build-configuration"?: string;
@@ -227,7 +236,7 @@ export const uploadCommand = buildCommand({
       },
       "pr-number": {
         kind: "parsed",
-        parse: Number,
+        parse: parsePrNumber,
         brief:
           "Pull request number (auto-detected in pull_request GitHub Actions runs)",
         optional: true,
@@ -240,7 +249,7 @@ export const uploadCommand = buildCommand({
       },
       "no-git-metadata": {
         kind: "boolean",
-        brief: "Disable collecting/sending git metadata",
+        brief: "Disable automatic git metadata collection",
         optional: true,
       },
     },
@@ -259,6 +268,12 @@ export const uploadCommand = buildCommand({
     }
     const { org, project } = resolved;
 
+    if (flags["force-git-metadata"] && flags["no-git-metadata"]) {
+      throw new ValidationError(
+        "--force-git-metadata and --no-git-metadata cannot be used together",
+        "force-git-metadata"
+      );
+    }
     // Collect git metadata automatically in CI (unless disabled), or when forced.
     const shouldCollectVcs =
       Boolean(flags["force-git-metadata"]) ||

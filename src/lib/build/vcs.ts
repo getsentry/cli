@@ -11,10 +11,13 @@
  * (empty values omitted), matching the server's flattened `VcsInfo` shape.
  */
 
+import { readFileSync } from "node:fs";
+import { ValidationError } from "../errors.js";
 import {
   getCurrentBranch,
   getHeadCommit,
   getMergeBase,
+  getRemoteDefaultBranch,
   getRemoteUrl,
   getRepositoryName,
 } from "../git.js";
@@ -82,10 +85,64 @@ export function isCi(env: NodeJS.ProcessEnv = process.env): boolean {
   return CI_ENV_VARS.some((name) => env[name] !== undefined && env[name] !== "");
 }
 
-/** Normalize a SHA flag: empty/whitespace → undefined, else lowercased. */
+/** A 40-character lowercase hex SHA-1. */
+const SHA1_RE = /^[0-9a-f]{40}$/;
+
+/**
+ * Normalize an already-trusted SHA (from git/event payload): lowercase and
+ * accept only a valid 40-char hex SHA-1, else undefined.
+ */
 function normalizeSha(sha: string | undefined): string | undefined {
-  const trimmed = sha?.trim();
-  return trimmed ? trimmed.toLowerCase() : undefined;
+  const trimmed = sha?.trim().toLowerCase();
+  return trimmed && SHA1_RE.test(trimmed) ? trimmed : undefined;
+}
+
+/**
+ * Validate a user-supplied `--head-sha`/`--base-sha` value. An empty string is
+ * an explicit "clear" (returns undefined, suppressing auto-inference at the
+ * call site); a non-empty value must be a 40-char hex SHA-1.
+ *
+ * @throws {ValidationError} When a non-empty value is not a valid SHA-1.
+ */
+function validateShaFlag(value: string, flagName: string): string | undefined {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (!SHA1_RE.test(trimmed)) {
+    throw new ValidationError(
+      `Invalid --${flagName}: expected a 40-character hex SHA-1`,
+      flagName
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * Read the PR head/base SHA from the GitHub Actions event payload.
+ *
+ * On `pull_request` runs `actions/checkout` checks out the ephemeral merge
+ * commit, so `git rev-parse HEAD` is NOT the PR head — the event payload's
+ * `pull_request.{head,base}.sha` is authoritative (matches the legacy CLI).
+ */
+function readGithubEventSha(
+  kind: "head" | "base",
+  env: NodeJS.ProcessEnv
+): string | undefined {
+  const eventPath = env.GITHUB_EVENT_PATH;
+  if (!eventPath) {
+    return undefined;
+  }
+  try {
+    const payload = JSON.parse(readFileSync(eventPath, "utf8")) as {
+      pull_request?: { head?: { sha?: unknown }; base?: { sha?: unknown } };
+    };
+    const sha = payload.pull_request?.[kind]?.sha;
+    return typeof sha === "string" ? normalizeSha(sha) : undefined;
+  } catch (err) {
+    log.debug(`Could not read ${kind} SHA from GITHUB_EVENT_PATH`, err);
+    return undefined;
+  }
 }
 
 /** Extract a provider name (e.g. `github`) from a git remote URL's host. */
@@ -95,13 +152,17 @@ function providerFromRemoteUrl(url: string): string | undefined {
     host = new URL(url).hostname;
   } catch {
     // SCP-style (git@host:owner/repo) — pull the host between "@" and ":".
-    const match = url.match(/@([^:/]+)[:/]/);
-    host = match?.[1];
+    host = url.match(/@([^:/]+)[:/]/)?.[1];
   }
   if (!host) {
     return undefined;
   }
-  // Drop the TLD: github.com → github, gitlab.example.com → gitlab (best effort).
+  host = host.replace(/\.$/, "").toLowerCase();
+  if (host.endsWith(".ghe.com")) {
+    return "github_enterprise";
+  }
+  // Best effort for the general case: drop the TLD (github.com → github);
+  // self-hosted hosts yield their second-level label (e.g. git.acme.com → acme).
   const labels = host.split(".");
   return labels.length >= 2 ? labels.at(-2) : host;
 }
@@ -135,58 +196,64 @@ function githubPrNumber(env: NodeJS.ProcessEnv): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-/** Resolve the head SHA (flag → git HEAD). */
-function resolveHeadSha(
-  flags: VcsFlags,
-  cwd: string,
-  auto: boolean
-): string | undefined {
-  const fromFlag = normalizeSha(flags["head-sha"]);
-  if (fromFlag) {
-    return fromFlag;
-  }
-  if (!auto) {
-    return undefined;
-  }
+/** Read git HEAD, swallowing "not a repo" into undefined. */
+function tryGitHeadSha(cwd: string): string | undefined {
   try {
-    return getHeadCommit(cwd).toLowerCase();
+    return normalizeSha(getHeadCommit(cwd));
   } catch (err) {
     log.debug("Could not determine HEAD commit", err);
     return undefined;
   }
 }
 
-/** Resolve the head repo name (flag → GitHub env → git remote). */
-function resolveHeadRepoName(
+/**
+ * Resolve the head SHA: explicit flag (present, even if empty) → GitHub event
+ * payload → git HEAD. A present-but-empty flag suppresses auto-inference.
+ */
+function resolveHeadSha(
   flags: VcsFlags,
+  cwd: string,
   env: NodeJS.ProcessEnv,
-  cwd: string,
   auto: boolean
 ): string | undefined {
-  return (
-    flags["head-repo-name"] ||
-    (auto ? env.GITHUB_REPOSITORY || getRepositoryName(cwd) : undefined)
-  );
-}
-
-/** Resolve the base SHA (flag → merge-base with base ref). */
-function resolveBaseSha(
-  flags: VcsFlags,
-  baseRef: string | undefined,
-  cwd: string,
-  auto: boolean
-): string | undefined {
-  const fromFlag = normalizeSha(flags["base-sha"]);
-  if (fromFlag) {
-    return fromFlag;
+  if (flags["head-sha"] !== undefined) {
+    return validateShaFlag(flags["head-sha"], "head-sha");
   }
-  if (!(auto && baseRef)) {
+  if (!auto) {
     return undefined;
   }
-  // Best effort: try the remote-tracking ref first, then the bare name.
-  const sha =
-    getMergeBase(`origin/${baseRef}`, cwd) ?? getMergeBase(baseRef, cwd);
-  return sha?.toLowerCase();
+  return readGithubEventSha("head", env) ?? tryGitHeadSha(cwd);
+}
+
+/** Resolve the head repo name (flag → git remote), matching the legacy CLI. */
+function resolveHeadRepoName(
+  flags: VcsFlags,
+  cwd: string,
+  auto: boolean
+): string | undefined {
+  return flags["head-repo-name"] || (auto ? getRepositoryName(cwd) : undefined);
+}
+
+/**
+ * Resolve the base SHA: explicit flag (present, even if empty) → GitHub event
+ * payload → merge-base of HEAD with the remote's default branch.
+ */
+function resolveBaseSha(
+  flags: VcsFlags,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  auto: boolean
+): string | undefined {
+  if (flags["base-sha"] !== undefined) {
+    return validateShaFlag(flags["base-sha"], "base-sha");
+  }
+  if (!auto) {
+    return undefined;
+  }
+  return (
+    readGithubEventSha("base", env) ??
+    normalizeSha(getMergeBase("refs/remotes/origin/HEAD", cwd))
+  );
 }
 
 /**
@@ -205,11 +272,11 @@ export function collectVcsMetadata(
 ): VcsInfo {
   const remoteUrl = autoCollect ? getRemoteUrl(cwd) : undefined;
 
-  const headSha = resolveHeadSha(flags, cwd, autoCollect);
+  const headSha = resolveHeadSha(flags, cwd, env, autoCollect);
   const vcsProvider =
     flags["vcs-provider"] ||
     (autoCollect && remoteUrl ? providerFromRemoteUrl(remoteUrl) : undefined);
-  const headRepoName = resolveHeadRepoName(flags, env, cwd, autoCollect);
+  const headRepoName = resolveHeadRepoName(flags, cwd, autoCollect);
   const headRef =
     flags["head-ref"] ||
     (autoCollect ? githubHeadRef(env) || getCurrentBranch(cwd) : undefined);
@@ -218,8 +285,11 @@ export function collectVcsMetadata(
   const baseRefFromUser = flags["base-ref"] !== undefined;
   const baseShaFromUser = flags["base-sha"] !== undefined;
   let baseRef =
-    flags["base-ref"] || (autoCollect ? githubBaseRef(env) : undefined);
-  let baseSha = resolveBaseSha(flags, baseRef, cwd, autoCollect);
+    flags["base-ref"] ||
+    (autoCollect
+      ? githubBaseRef(env) || getRemoteDefaultBranch(cwd)
+      : undefined);
+  let baseSha = resolveBaseSha(flags, cwd, env, autoCollect);
 
   // If base == head and both were auto-inferred, the PR comparison is
   // meaningless — drop base_sha/base_ref but keep head_sha (matches legacy).

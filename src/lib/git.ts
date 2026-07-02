@@ -233,8 +233,33 @@ export function getCurrentBranch(cwd?: string): string | undefined {
  *   (unknown ref, shallow clone, not a repo).
  */
 export function getMergeBase(ref: string, cwd?: string): string | undefined {
+  // Reject option-like refs (a leading "-" would be parsed by git as a flag).
+  if (ref.startsWith("-")) {
+    return;
+  }
   try {
     return git(["merge-base", "HEAD", ref], cwd) || undefined;
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Get the short name of the "origin" remote's default branch.
+ *
+ * Reads `refs/remotes/origin/HEAD` (populated by `git clone`/`git remote set-head`).
+ *
+ * @param cwd - Working directory
+ * @returns The default branch name (e.g. "main"), or undefined when unknown
+ *   (not set, shallow clone, or not a repo).
+ */
+export function getRemoteDefaultBranch(cwd?: string): string | undefined {
+  try {
+    const ref = git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd);
+    const prefix = "refs/remotes/origin/";
+    return ref.startsWith(prefix)
+      ? ref.slice(prefix.length) || undefined
+      : undefined;
   } catch {
     return;
   }
