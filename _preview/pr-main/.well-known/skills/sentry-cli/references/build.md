@@ -11,6 +11,15 @@ requires:
 
 Manage mobile build artifacts
 
+### `sentry build upload <path...>`
+
+Upload builds to a project
+
+**Flags:**
+- `--build-configuration <value> - Build configuration for the upload (defaults to the current version)`
+- `--release-notes <value> - Release notes for the build`
+- `--install-group <value>... - Install group(s) for this build (repeatable); builds sharing a group show updates for each other`
+
 ### `sentry build download <build-id>`
 
 Download a build artifact
@@ -21,6 +30,15 @@ Download a build artifact
 **Examples:**
 
 ```bash
+# Upload an Android build (APK or AAB) for size analysis
+sentry build upload ./app-release.apk
+
+# Upload with a build configuration and release notes
+sentry build upload ./app.aab --build-configuration Release --release-notes "Nightly"
+
+# Tag a build with install groups (repeatable)
+sentry build upload ./app.aab --install-group qa --install-group beta
+
 # Download a build artifact by ID
 sentry build download 1234567890
 
