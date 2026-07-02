@@ -68,6 +68,17 @@ export default defineConfig({
         PageTitle: "./src/components/PageTitle.astro",
       },
       head: [
+        // PNG favicon fallback for browsers without SVG-favicon support.
+        // (Starlight's `favicon` option emits the SVG link; this adds the raster.)
+        {
+          tag: "link",
+          attrs: {
+            rel: "icon",
+            href: "/favicon.png",
+            type: "image/png",
+            sizes: "256x256",
+          },
+        },
         // Overscroll easter egg - bottom of page, only on /cli route
         {
           tag: "script",
