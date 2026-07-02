@@ -27,6 +27,7 @@ Upload debug information files to Sentry
 - `--no-unwind - Do not upload files whose only feature is unwind info`
 - `--no-sources - Do not upload files whose only feature is source info`
 - `--include-sources - Build and upload a source bundle for each file with debug info`
+- `--il2cpp-mapping - Compute and upload Unity IL2CPP line mappings for each scanned file`
 - `--derived-data - Also scan Xcode's DerivedData folder (macOS only)`
 - `--no-zips - Do not scan inside .zip archives`
 - `--no-upload - Scan and print what would be uploaded without uploading`
@@ -89,6 +90,10 @@ sentry debug-files upload ./build --no-zips
 # Restrict by type or debug id, and wait for server-side processing
 sentry debug-files upload ./dsyms --type dsym --wait
 sentry debug-files upload ./build --id <debug-id> --require-all
+
+# Unity: upload IL2CPP line mappings (optionally with referenced C# sources)
+sentry debug-files upload ./build --il2cpp-mapping
+sentry debug-files upload ./build --il2cpp-mapping --include-sources
 
 # Preview what would be uploaded without uploading (no credentials needed)
 sentry debug-files upload ./build --no-upload
