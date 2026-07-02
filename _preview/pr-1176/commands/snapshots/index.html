@@ -202,8 +202,8 @@
 system and extracts them to a local directory. <strong>Sentry SaaS only.</strong></li>
 <li>Provide exactly one of <code dir="auto">--snapshot-id</code> (a direct artifact ID) or <code dir="auto">--app-id</code>
 (resolves the latest baseline). <code dir="auto">--branch</code> only applies with <code dir="auto">--app-id</code>.</li>
-<li>With org auth tokens, resolving by <code dir="auto">--app-id</code> requires <code dir="auto">--project</code> with a
-numeric project ID.</li>
+<li>With org auth tokens, resolving by <code dir="auto">--app-id</code> requires <code dir="auto">--project</code> (a project
+ID or slug).</li>
 <li>If the downloadable archive has not been built yet, the command triggers a
 build and waits for it (up to 5 minutes).</li>
 <li>Images are extracted to <code dir="auto">./snapshots-base/</code> by default; override with
