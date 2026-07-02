@@ -10,7 +10,7 @@
  */
 
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
 import { ValidationError } from "../../lib/errors.js";
@@ -109,11 +109,13 @@ function assertDirectory(path: string, label: string): void {
   );
 }
 
-/** The diff mask path for an image, with a `.png` extension. */
+/**
+ * The diff mask path for an image (always a PNG). PNG sources keep their name;
+ * non-PNG sources append `.png` (e.g. `a.jpg` → `a.jpg.png`) so a `.png` and a
+ * `.jpg` with the same stem don't collide on the same mask file.
+ */
 function diffMaskRelPath(rel: string): string {
-  const stem = basename(rel, extname(rel));
-  const dir = dirname(rel);
-  return dir === "." ? `${stem}.png` : join(dir, `${stem}.png`);
+  return extname(rel).toLowerCase() === ".png" ? rel : `${rel}.png`;
 }
 
 /** The base/head/output directories for a diff run. */
@@ -340,18 +342,23 @@ export const diffCommand = buildCommand({
       images,
     });
 
+    // Masks are written only for pixel-`changed` images — not layout_changed,
+    // added, or removed — so only claim mask output when some were written.
+    const masksWritten = images.some((img) => img.diffMaskPath !== undefined);
+    const maskNote = masksWritten ? ` Diff masks written to ${outputDir}.` : "";
+
     const failures =
       summary.changed + summary.added + summary.removed + summary.errored;
     if (flags["fail-on-diff"] && failures > 0) {
       this.process.exitCode = 1;
       return {
-        hint: `${failures} image(s) differed from baseline; diff masks written to ${outputDir}`,
+        hint: `${failures} image(s) differed from baseline.${maskNote}`,
       };
     }
     return {
       hint:
-        summary.changed > 0
-          ? `Diff masks written to ${outputDir}`
+        failures > 0
+          ? `${failures} image(s) differed from baseline.${maskNote}`
           : "No changes detected.",
     };
   },
