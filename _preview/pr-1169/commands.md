@@ -16,6 +16,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | --- | --- |
 | [`alert`](https://cli.sentry.dev/_preview/pr-1169/commands/alert.md) | Manage Sentry alert rules |
 | [`auth`](https://cli.sentry.dev/_preview/pr-1169/commands/auth.md) | Authenticate with Sentry |
+| [`build`](https://cli.sentry.dev/_preview/pr-1169/commands/build.md) | Manage mobile build artifacts |
 | [`cli`](https://cli.sentry.dev/_preview/pr-1169/commands/cli.md) | CLI-related commands |
 | [`code-mappings`](https://cli.sentry.dev/_preview/pr-1169/commands/code-mappings.md) | Manage code mappings for stack trace linking |
 | [`dart-symbol-map`](https://cli.sentry.dev/_preview/pr-1169/commands/dart-symbol-map.md) | Work with Dart/Flutter symbol maps |
@@ -83,6 +84,7 @@ sentry issue view PROJ-123 -w
 - [alert](https://cli.sentry.dev/_preview/pr-1169/commands/alert.md)
 - [api](https://cli.sentry.dev/_preview/pr-1169/commands/api.md)
 - [auth](https://cli.sentry.dev/_preview/pr-1169/commands/auth.md)
+- [build](https://cli.sentry.dev/_preview/pr-1169/commands/build.md)
 - [cli](https://cli.sentry.dev/_preview/pr-1169/commands/cli.md)
 - [code-mappings](https://cli.sentry.dev/_preview/pr-1169/commands/code-mappings.md)
 - [dart-symbol-map](https://cli.sentry.dev/_preview/pr-1169/commands/dart-symbol-map.md)
