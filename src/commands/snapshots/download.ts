@@ -18,6 +18,7 @@ import {
   waitForSnapshotArchive,
 } from "../../lib/api/preprod-artifacts.js";
 import { buildCommand } from "../../lib/command.js";
+import { getDefaultProject } from "../../lib/db/defaults.js";
 import {
   ContextError,
   ResolutionError,
@@ -67,14 +68,13 @@ function formatDownloadResult(data: SnapshotDownloadResult): string {
 }
 
 /**
- * Resolve the snapshot ID to download from the mutually exclusive
- * `--snapshot-id` / `--app-id` flags.
+ * Validate the mutually exclusive `--snapshot-id` / `--app-id` flags (and
+ * `--branch`'s dependency on `--app-id`) before any I/O.
+ *
+ * @throws {ValidationError} On conflicting/misused flags.
+ * @throws {ContextError} When neither ID flag is provided.
  */
-async function resolveSnapshotId(
-  org: string,
-  flags: DownloadFlags,
-  project: string | undefined
-): Promise<string> {
+function validateSnapshotFlags(flags: DownloadFlags): void {
   const appId = flags["app-id"];
   const snapshotId = flags["snapshot-id"];
 
@@ -90,14 +90,40 @@ async function resolveSnapshotId(
       "branch"
     );
   }
+  if (!(appId || snapshotId)) {
+    throw new ContextError("Snapshot", USAGE_HINT, []);
+  }
+}
 
+/**
+ * Resolve the optional project (for `--app-id` with org auth tokens) from
+ * `SENTRY_PROJECT` (honoring `<org>/<project>` combo notation) then the
+ * configured default project.
+ */
+function resolveOptionalProject(env: NodeJS.ProcessEnv): string | undefined {
+  const raw = env.SENTRY_PROJECT?.trim();
+  if (raw) {
+    const parts = raw.split("/");
+    return parts.length === 2 ? parts[1] : raw;
+  }
+  return getDefaultProject() ?? undefined;
+}
+
+/**
+ * Resolve the snapshot ID to download. Assumes {@link validateSnapshotFlags}
+ * has run, so exactly one of `--snapshot-id` / `--app-id` is set.
+ */
+async function resolveSnapshotId(
+  org: string,
+  flags: DownloadFlags,
+  project: string | undefined
+): Promise<string> {
+  const snapshotId = flags["snapshot-id"];
   if (snapshotId) {
     return snapshotId;
   }
-  if (!appId) {
-    throw new ContextError("Snapshot", USAGE_HINT, []);
-  }
 
+  const appId = flags["app-id"] as string;
   log.info(`Resolving latest baseline snapshot for app '${appId}'...`);
   const latest = await getLatestBaseSnapshot(org, appId, {
     branch: flags.branch,
@@ -126,7 +152,7 @@ export const downloadCommand = buildCommand({
       "local directory.\n\n" +
       "Use --snapshot-id to download a specific snapshot, or --app-id to " +
       "resolve the latest baseline (org auth tokens require --project with a " +
-      "numeric project ID for --app-id).\n\n" +
+      "project ID or slug for --app-id).\n\n" +
       "This feature only works with Sentry SaaS.\n\n" +
       "Usage:\n" +
       "  sentry snapshots download --snapshot-id 1234567890\n" +
@@ -169,12 +195,15 @@ export const downloadCommand = buildCommand({
     },
   },
   async *func(this: SentryContext, flags: DownloadFlags) {
+    // Validate flag combinations before any I/O so bad usage fails fast.
+    validateSnapshotFlags(flags);
+
     const resolved = await resolveOrg({ cwd: this.cwd });
     if (!resolved) {
       throw new ContextError("Organization", USAGE_HINT);
     }
     const { org } = resolved;
-    const project = this.env.SENTRY_PROJECT?.trim() || undefined;
+    const project = resolveOptionalProject(this.env);
 
     const snapshotId = await resolveSnapshotId(org, flags, project);
 

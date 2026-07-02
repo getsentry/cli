@@ -41,18 +41,25 @@ describe("extractZipToDir", () => {
     expect(readFileSync(join(out, "sub", "b.png"), "utf8")).toBe("B");
   });
 
-  test("skips entries that would escape the output directory (Zip Slip)", () => {
+  test("skips traversal, absolute, and empty entries but keeps safe names", () => {
     const zip = zipSync({
       "../evil.png": strToU8("X"),
+      "a/../../evil2.png": strToU8("X"),
+      "/etc/evil3.png": strToU8("X"),
+      "": strToU8("X"),
+      // Legitimate name that merely starts with ".." — must NOT be skipped.
+      "..config.png": strToU8("C"),
       "ok.png": strToU8("Y"),
     });
     const out = tempDir();
 
     const count = extractZipToDir(zip, out);
 
-    expect(count).toBe(1);
+    expect(count).toBe(2); // "..config.png" + "ok.png"
     expect(existsSync(join(out, "ok.png"))).toBe(true);
-    // The traversal entry was not written above the output dir.
+    expect(readFileSync(join(out, "..config.png"), "utf8")).toBe("C");
+    // No traversal entry escaped the output dir.
     expect(existsSync(join(out, "..", "evil.png"))).toBe(false);
+    expect(existsSync(join(out, "..", "..", "evil2.png"))).toBe(false);
   });
 });

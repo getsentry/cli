@@ -7,7 +7,7 @@
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { unzipSync } from "fflate";
 import { logger } from "../logger.js";
 
@@ -31,13 +31,17 @@ export function extractZipToDir(zip: Uint8Array, outDir: string): number {
   let written = 0;
   for (const [name, bytes] of Object.entries(entries)) {
     // fflate represents directories as zero-length entries with a trailing "/".
-    if (name.endsWith("/")) {
+    // Skip those and any empty name (which would resolve to `root` itself).
+    if (!name || name.endsWith("/")) {
       continue;
     }
 
     const dest = resolve(root, name);
     const rel = relative(root, dest);
-    if (rel.startsWith("..") || isAbsolute(rel)) {
+    // Segment-aware traversal check: reject entries that escape `root` (rel is
+    // ".." or begins "../") or resolve to an absolute path — without rejecting
+    // legitimate names that merely start with ".." (e.g. "..config.png").
+    if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
       log.warn(`Skipping unsafe archive entry: ${name}`);
       continue;
     }

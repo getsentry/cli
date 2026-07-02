@@ -309,21 +309,31 @@ export async function uploadBuild(
   );
 }
 
+/** Trailing slashes, stripped from a region URL before manual URL building. */
+const TRAILING_SLASHES_RE = /\/+$/;
+
 /** Poll interval while waiting for a snapshot archive to build. */
 export const SNAPSHOT_ARCHIVE_POLL_MS = 2000;
 /** Maximum time to wait for a snapshot archive to build. */
 export const SNAPSHOT_ARCHIVE_TIMEOUT_MS = 300_000;
 
-/** The latest baseline snapshot resolved for an app. */
+/**
+ * Raw latest-baseline response. The server returns snake_case fields (no
+ * `camelCase` rename on the Rust `LatestBaseSnapshotResponse`); callers get the
+ * camelCase {@link LatestBaseSnapshot} after mapping.
+ */
 export const LatestBaseSnapshotSchema = z.object({
   /** Artifact ID of the baseline snapshot. */
-  headArtifactId: z.string(),
+  head_artifact_id: z.string(),
   /** Number of images in the snapshot. */
-  imageCount: z.number(),
+  image_count: z.number(),
 });
 
-/** Latest baseline snapshot for an app. */
-export type LatestBaseSnapshot = z.infer<typeof LatestBaseSnapshotSchema>;
+/** Latest baseline snapshot for an app (camelCase, for callers). */
+export type LatestBaseSnapshot = {
+  headArtifactId: string;
+  imageCount: number;
+};
 
 /** Build the `.../snapshots/{id}/archive/` endpoint path. */
 function snapshotArchiveEndpoint(org: string, snapshotId: string): string {
@@ -357,7 +367,9 @@ export async function getLatestBaseSnapshot(
         schema: LatestBaseSnapshotSchema.nullable(),
       }
     );
-    return data;
+    return data
+      ? { headArtifactId: data.head_artifact_id, imageCount: data.image_count }
+      : null;
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       return null;
@@ -438,8 +450,13 @@ export async function waitForSnapshotArchive(
 /**
  * Download a snapshot's archive ZIP into memory.
  *
- * The archive endpoint redirects to storage; `customFetch` follows the redirect
- * and drops the auth header cross-origin.
+ * The endpoint streams the ZIP directly from the region origin (no redirect), so
+ * the auth token is only ever sent to the region host. Should the server ever
+ * 302 to third-party storage, undici strips `Authorization` cross-origin.
+ *
+ * The whole archive is buffered and later extracted in memory (see
+ * {@link extractZipToDir}); acceptable for typical screenshot baselines, but a
+ * very large archive (the server caps at ~1 GB) would need streaming extraction.
  *
  * @throws {ApiError} On a non-2xx response.
  */
@@ -447,7 +464,10 @@ export async function downloadSnapshotArchive(
   org: string,
   snapshotId: string
 ): Promise<Buffer> {
-  const regionUrl = await resolveOrgRegion(org);
+  const regionUrl = (await resolveOrgRegion(org)).replace(
+    TRAILING_SLASHES_RE,
+    ""
+  );
   const url = `${regionUrl}/api/0/${snapshotArchiveEndpoint(
     org,
     snapshotId

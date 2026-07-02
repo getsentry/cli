@@ -66,6 +66,7 @@ import {
   downloadSnapshotArchive,
   getBuildInstallDetails,
   getLatestBaseSnapshot,
+  LatestBaseSnapshotSchema,
   toBinaryDownloadUrl,
   uploadBuild,
   waitForSnapshotArchive,
@@ -354,19 +355,43 @@ describe("snapshots", () => {
     customFetchMock.mockReset();
   });
 
-  test("getLatestBaseSnapshot returns the resolved baseline", async () => {
+  test("LatestBaseSnapshotSchema expects snake_case (server contract)", () => {
+    // The server returns snake_case; the schema must accept it and reject
+    // camelCase, guarding against the C1 regression.
+    expect(
+      LatestBaseSnapshotSchema.safeParse({
+        head_artifact_id: "art-1",
+        image_count: 5,
+      }).success
+    ).toBe(true);
+    expect(
+      LatestBaseSnapshotSchema.safeParse({
+        headArtifactId: "art-1",
+        imageCount: 5,
+      }).success
+    ).toBe(false);
+  });
+
+  test("getLatestBaseSnapshot maps the response and forwards params", async () => {
+    // apiRequestToRegion returns schema-validated snake_case data.
     apiRequestToRegionMock.mockResolvedValue({
-      data: { headArtifactId: "art-1", imageCount: 5 },
+      data: { head_artifact_id: "art-1", image_count: 5 },
       headers: new Headers(),
     });
 
-    await expect(getLatestBaseSnapshot("my-org", "my-app")).resolves.toEqual({
-      headArtifactId: "art-1",
-      imageCount: 5,
-    });
-    // app_id (and optional branch/project) go through as query params.
+    await expect(
+      getLatestBaseSnapshot("my-org", "my-app", {
+        branch: "main",
+        project: "proj-1",
+      })
+    ).resolves.toEqual({ headArtifactId: "art-1", imageCount: 5 });
+    // app_id + optional branch/project go through as query params.
     const params = apiRequestToRegionMock.mock.calls.at(-1)?.[2]?.params;
-    expect(params).toMatchObject({ app_id: "my-app" });
+    expect(params).toEqual({
+      app_id: "my-app",
+      branch: "main",
+      project: "proj-1",
+    });
   });
 
   test("getLatestBaseSnapshot returns null on 404", async () => {

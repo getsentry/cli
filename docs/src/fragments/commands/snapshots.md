@@ -19,8 +19,8 @@ sentry snapshots download --app-id my-app --output ./baseline/
   system and extracts them to a local directory. **Sentry SaaS only.**
 - Provide exactly one of `--snapshot-id` (a direct artifact ID) or `--app-id`
   (resolves the latest baseline). `--branch` only applies with `--app-id`.
-- With org auth tokens, resolving by `--app-id` requires `--project` with a
-  numeric project ID.
+- With org auth tokens, resolving by `--app-id` requires `--project` (a project
+  ID or slug).
 - If the downloadable archive has not been built yet, the command triggers a
   build and waits for it (up to 5 minutes).
 - Images are extracted to `./snapshots-base/` by default; override with
