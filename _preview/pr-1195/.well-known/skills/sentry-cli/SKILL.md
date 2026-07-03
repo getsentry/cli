@@ -271,6 +271,15 @@ When querying the Events API (directly or via `sentry api`), valid dataset value
 
 The CLI must be installed and authenticated before use.
 
+### Installation
+
+```bash
+curl https://cli.sentry.dev/install -fsS | bash
+curl https://cli.sentry.dev/install -fsS | bash -s -- --version nightly
+
+# Or install via npm/pnpm/bun
+npm install -g sentry
+```
 
 ### Authentication
 
