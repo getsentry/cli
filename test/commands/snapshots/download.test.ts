@@ -47,6 +47,14 @@ function snapshotZip(): Buffer {
   );
 }
 
+/** Yield a buffer as a chunked async stream (a fresh generator per call). */
+async function* streamOf(buffer: Uint8Array): AsyncIterable<Uint8Array> {
+  const chunkSize = 8;
+  for (let offset = 0; offset < buffer.length; offset += chunkSize) {
+    yield buffer.subarray(offset, offset + chunkSize);
+  }
+}
+
 describe("snapshots download", () => {
   let downloadSpy: ReturnType<typeof vi.spyOn>;
   let latestSpy: ReturnType<typeof vi.spyOn>;
@@ -60,9 +68,16 @@ describe("snapshots download", () => {
     waitSpy = vi
       .spyOn(preprod, "waitForSnapshotArchive")
       .mockResolvedValue(undefined);
+    // Fresh streamable body per call (an async generator is single-use).
     downloadSpy = vi
-      .spyOn(preprod, "downloadSnapshotArchive")
-      .mockResolvedValue(snapshotZip());
+      .spyOn(preprod, "openSnapshotArchive")
+      .mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          body: streamOf(snapshotZip()),
+        } as unknown as Response)
+      );
     latestSpy = vi.spyOn(preprod, "getLatestBaseSnapshot").mockResolvedValue({
       headArtifactId: "resolved-art",
       imageCount: 2,

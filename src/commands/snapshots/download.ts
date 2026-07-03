@@ -13,13 +13,14 @@
 import { resolve } from "node:path";
 import type { SentryContext } from "../../context.js";
 import {
-  downloadSnapshotArchive,
   getLatestBaseSnapshot,
+  openSnapshotArchive,
   waitForSnapshotArchive,
 } from "../../lib/api/preprod-artifacts.js";
 import { buildCommand } from "../../lib/command.js";
 import { getDefaultProject } from "../../lib/db/defaults.js";
 import {
+  ApiError,
   ContextError,
   ResolutionError,
   ValidationError,
@@ -28,7 +29,7 @@ import { mdKvTable, renderMarkdown } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
-import { extractZipToDir } from "../../lib/snapshots/archive.js";
+import { extractZipStream } from "../../lib/snapshots/archive.js";
 
 const log = logger.withTag("snapshots.download");
 
@@ -212,10 +213,26 @@ export const downloadCommand = buildCommand({
     );
 
     log.info(`Downloading snapshot ${snapshotId}...`);
-    const zip = await downloadSnapshotArchive(org, snapshotId);
+    const response = await openSnapshotArchive(org, snapshotId);
+    if (!response.body) {
+      throw new ApiError(
+        "Snapshot archive response had no body",
+        response.status,
+        "Empty response body",
+        `snapshots/${snapshotId}/archive/`
+      );
+    }
 
     const output = resolve(this.cwd, flags.output ?? DEFAULT_OUTPUT);
-    const imageCount = extractZipToDir(zip, output);
+    const imageCount = await extractZipStream(
+      response.body as unknown as AsyncIterable<Uint8Array>,
+      output
+    );
+    if (imageCount === 0) {
+      log.warn(
+        `No images were extracted from snapshot ${snapshotId} — the archive may be empty or corrupt.`
+      );
+    }
 
     yield new CommandOutput<SnapshotDownloadResult>({
       org,
