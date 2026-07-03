@@ -23,12 +23,13 @@
  * intentionally skipped (see `normalizeBuildDirectory`).
  */
 
-import { readFile } from "node:fs/promises";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { lstat, readdir, readFile, readlink } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { strToU8, unzipSync, type Zippable, zipSync } from "fflate";
 import { CLI_VERSION } from "../constants.js";
+import { ValidationError } from "../errors.js";
 import { logger } from "../logger.js";
-import { walkFiles } from "../scan/walker.js";
 
 const log = logger.withTag("build.normalize");
 
@@ -183,17 +184,135 @@ export function normalizeBuildFile(
 /** Deterministic STORE + fixed-mtime options for a normalized ZIP entry. */
 const ENTRY_OPTIONS = { level: 0 as const, mtime: FIXED_MTIME };
 
+/** `os` = 3 (Unix) — required for `attrs` to carry Unix mode bits in a ZIP. */
+const ZIP_OS_UNIX = 3;
+
+/**
+ * Recursively find `.app` bundle directories under `dir` (does not descend into
+ * a `.app` once found), mirroring the legacy CLI's `Products/**` + `*.app` glob.
+ */
+function findAppBundles(dir: string): string[] {
+  const found: string[] = [];
+  for (const dirent of readdirSync(dir, { withFileTypes: true })) {
+    if (!dirent.isDirectory()) {
+      continue;
+    }
+    const full = join(dir, dirent.name);
+    if (dirent.name.endsWith(".app")) {
+      found.push(full);
+    } else {
+      found.push(...findAppBundles(full));
+    }
+  }
+  return found;
+}
+
+/**
+ * Validate that a directory is a real XCArchive before it is zipped and
+ * uploaded — mirrors the legacy CLI's `validate_xcarchive_directory`.
+ *
+ * Guards against accidentally uploading an arbitrary directory (e.g. a project
+ * root, which would sweep up `.git/`, `node_modules/`, and `.env` secrets).
+ * Requires a root `Info.plist`, a `Products/` directory, and at least one
+ * `.app` bundle (each with its own `Info.plist`).
+ *
+ * @throws {ValidationError} If the directory is not a valid XCArchive.
+ */
+export function validateXcarchiveDirectory(dirPath: string): void {
+  const root = resolve(dirPath);
+  if (!existsSync(join(root, "Info.plist"))) {
+    throw new ValidationError(
+      "Invalid XCArchive: missing Info.plist at the archive root",
+      "path"
+    );
+  }
+  const products = join(root, "Products");
+  if (!(existsSync(products) && statSync(products).isDirectory())) {
+    throw new ValidationError(
+      "Invalid XCArchive: missing Products/ directory",
+      "path"
+    );
+  }
+  const apps = findAppBundles(products);
+  if (apps.length === 0) {
+    throw new ValidationError(
+      "Invalid XCArchive: no .app bundles found under Products/",
+      "path"
+    );
+  }
+  for (const app of apps) {
+    if (!existsSync(join(app, "Info.plist"))) {
+      throw new ValidationError(
+        `Invalid XCArchive: missing Info.plist in .app bundle: ${basename(app)}`,
+        "path"
+      );
+    }
+  }
+}
+
+/** A collected archive entry: its relative path, bytes, and ZIP attrs. */
+type ArchiveEntry = { relPath: string; content: Uint8Array; attrs: number };
+
+/**
+ * Recursively collect an XCArchive's entries, preserving symlinks and Unix
+ * permissions (via ZIP external attributes) exactly as the legacy CLI does.
+ *
+ * A custom walk (rather than the shared file walker) is used because fidelity
+ * matters here: symlinks are stored as symlink entries (their target string as
+ * content, `S_IFLNK` in the mode) — NOT followed — so Apple framework/dSYM
+ * bundles aren't restructured or their binaries duplicated, which would corrupt
+ * the server's size analysis. Symlinked directories are recorded as links and
+ * not descended into, matching the Rust `WalkDir` (follow_links = false).
+ */
+async function collectArchiveEntries(root: string): Promise<ArchiveEntry[]> {
+  const entries: ArchiveEntry[] = [];
+
+  const walk = async (dir: string, prefix: string): Promise<void> => {
+    const dirents = await readdir(dir, { withFileTypes: true });
+    for (const dirent of dirents) {
+      const full = join(dir, dirent.name);
+      const relPath = prefix ? `${prefix}/${dirent.name}` : dirent.name;
+
+      if (dirent.isDirectory()) {
+        await walk(full, relPath);
+        continue;
+      }
+
+      let content: Uint8Array;
+      if (dirent.isSymbolicLink()) {
+        content = strToU8(await readlink(full));
+      } else if (dirent.isFile()) {
+        content = await readFile(full);
+      } else {
+        // Skip sockets, FIFOs, and other special files.
+        continue;
+      }
+
+      // Encode the full Unix mode (type + permission bits) into the upper 16
+      // bits of the ZIP external attributes so symlinks and exec bits survive.
+      const { mode } = await lstat(full);
+      const attrs = ((mode & 0xff_ff) << 16) >>> 0;
+      entries.push({ relPath, content, attrs });
+    }
+  };
+
+  await walk(root, "");
+  entries.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0));
+  return entries;
+}
+
 /**
  * Wrap an XCArchive directory into a deterministic normalized ZIP for upload.
  *
  * Every file under `dirPath` is stored under `<dir-basename>/<relative-path>`
  * (STORE, fixed mtime, sorted for byte-stability) alongside a root
  * `.sentry-cli-metadata.txt`, mirroring the legacy CLI's `normalize_directory`.
+ * Symlinks and Unix permissions are preserved (see {@link collectArchiveEntries});
+ * validate the directory first with {@link validateXcarchiveDirectory}.
  *
- * Fidelity gaps (documented): symlinks are followed and stored as their target
- * content (not preserved as symlink entries), Unix permissions are not
- * preserved (a `zipSync` limitation), and `Assets.car` asset catalogs are not
- * parsed into per-asset images (that required native macOS frameworks).
+ * Documented gap: `Assets.car` asset catalogs are not parsed into per-asset
+ * images (that required native macOS frameworks), so no `ParsedAssets/` tree is
+ * added — the raw `.car` is uploaded as-is.
  *
  * The whole directory is read into memory; a very large XCArchive (e.g. with
  * dSYMs) could exceed Node's ~2 GiB Buffer cap — streaming is a follow-up.
@@ -209,24 +328,12 @@ export async function normalizeBuildDirectory(
   const root = resolve(dirPath);
   const dirName = basename(root);
 
-  // Collect relative paths first so we can sort for deterministic output.
-  const relativePaths: string[] = [];
-  for await (const entry of walkFiles({
-    cwd: root,
-    respectGitignore: false,
-    alwaysSkipDirs: [],
-    maxFileSize: Number.POSITIVE_INFINITY,
-    followSymlinks: true,
-    classifyBinary: false,
-  })) {
-    relativePaths.push(entry.relativePath);
-  }
-  relativePaths.sort();
-
   const entries: Zippable = {};
-  for (const relativePath of relativePaths) {
-    const content = await readFile(join(root, relativePath));
-    entries[`${dirName}/${relativePath}`] = [content, ENTRY_OPTIONS];
+  for (const entry of await collectArchiveEntries(root)) {
+    entries[`${dirName}/${entry.relPath}`] = [
+      entry.content,
+      { level: 0, mtime: FIXED_MTIME, os: ZIP_OS_UNIX, attrs: entry.attrs },
+    ];
   }
   entries[METADATA_FILENAME] = [
     strToU8(buildMetadataFile(plugin)),
@@ -307,7 +414,9 @@ export function normalizeIpa(
     const stripped = name.startsWith("Payload/")
       ? name.slice("Payload/".length)
       : null;
-    if (stripped) {
+    // Skip path-traversal entries (a `..` segment) defensively, matching the
+    // legacy CLI's `enclosed_name()` guard.
+    if (stripped && !stripped.split("/").includes("..")) {
       entries[`${archiveDir}/Products/Applications/${stripped}`] = [
         bytes,
         ENTRY_OPTIONS,

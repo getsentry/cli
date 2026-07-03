@@ -5,7 +5,13 @@
  * APK/AAB" is just a ZIP carrying the marker entry names the detector keys on.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { strToU8, unzipSync, zipSync } from "fflate";
@@ -17,6 +23,7 @@ import {
   normalizeBuildFile,
   normalizeIpa,
   parsePluginFromPipeline,
+  validateXcarchiveDirectory,
 } from "../../../src/lib/build/index.js";
 
 function fakeApk(): Uint8Array {
@@ -163,6 +170,84 @@ describe("normalizeBuildDirectory", () => {
     const b = await normalizeBuildDirectory(xc, null);
     expect(a.equals(b)).toBe(true);
   });
+
+  // Symlinks require privileges on Windows; the unit suite runs on Linux.
+  test.skipIf(process.platform === "win32")(
+    "preserves symlinks as entries (stores the target path, not followed content)",
+    async () => {
+      const base = mkdtempSync(join(tmpdir(), "xc-sym-"));
+      dirs.push(base);
+      const xc = join(base, "App.xcarchive");
+      mkdirSync(xc, { recursive: true });
+      writeFileSync(join(xc, "real.txt"), "REAL");
+      symlinkSync("real.txt", join(xc, "link.txt"));
+
+      const entries = unzipSync(await normalizeBuildDirectory(xc, null));
+      // The symlink entry stores its target path — proof it was NOT followed
+      // (following would store "REAL", the target's file content).
+      expect(new TextDecoder().decode(entries["App.xcarchive/link.txt"])).toBe(
+        "real.txt"
+      );
+      expect(new TextDecoder().decode(entries["App.xcarchive/real.txt"])).toBe(
+        "REAL"
+      );
+    }
+  );
+});
+
+describe("validateXcarchiveDirectory", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    while (dirs.length > 0) {
+      const d = dirs.pop();
+      if (d) {
+        rmSync(d, { recursive: true, force: true });
+      }
+    }
+  });
+
+  function makeArchive(build: (xc: string) => void): string {
+    const base = mkdtempSync(join(tmpdir(), "xc-val-"));
+    dirs.push(base);
+    const xc = join(base, "MyApp.xcarchive");
+    mkdirSync(xc, { recursive: true });
+    build(xc);
+    return xc;
+  }
+
+  test("accepts a valid XCArchive", () => {
+    const xc = makeArchive((dir) => {
+      const app = join(dir, "Products", "Applications", "MyApp.app");
+      mkdirSync(app, { recursive: true });
+      writeFileSync(join(dir, "Info.plist"), "<plist/>");
+      writeFileSync(join(app, "Info.plist"), "<app/>");
+    });
+    expect(() => validateXcarchiveDirectory(xc)).not.toThrow();
+  });
+
+  test("rejects a directory missing the root Info.plist", () => {
+    const xc = makeArchive((dir) => {
+      mkdirSync(join(dir, "Products"), { recursive: true });
+    });
+    expect(() => validateXcarchiveDirectory(xc)).toThrow("Info.plist");
+  });
+
+  test("rejects a directory missing Products/", () => {
+    const xc = makeArchive((dir) => {
+      writeFileSync(join(dir, "Info.plist"), "<plist/>");
+    });
+    expect(() => validateXcarchiveDirectory(xc)).toThrow("Products/");
+  });
+
+  test("rejects when a .app bundle has no Info.plist", () => {
+    const xc = makeArchive((dir) => {
+      writeFileSync(join(dir, "Info.plist"), "<plist/>");
+      mkdirSync(join(dir, "Products", "Applications", "MyApp.app"), {
+        recursive: true,
+      });
+    });
+    expect(() => validateXcarchiveDirectory(xc)).toThrow(".app bundle");
+  });
 });
 
 describe("extractIpaAppName", () => {
@@ -216,6 +301,33 @@ describe("normalizeIpa", () => {
     expect(
       entries["archive.xcarchive/Products/Applications/MyApp.app/Assets.car"]
     ).toEqual(strToU8("carbytes"));
+  });
+
+  test("remaps nested framework entries under the app", () => {
+    const ipa = zipSync({
+      "Payload/MyApp.app/Info.plist": strToU8("<app/>"),
+      "Payload/MyApp.app/Frameworks/X.framework/X": strToU8("fw"),
+    });
+    const entries = unzipSync(normalizeIpa(ipa, null));
+    expect(
+      entries[
+        "archive.xcarchive/Products/Applications/MyApp.app/Frameworks/X.framework/X"
+      ]
+    ).toEqual(strToU8("fw"));
+  });
+
+  test("skips path-traversal entries", () => {
+    const ipa = zipSync({
+      "Payload/MyApp.app/Info.plist": strToU8("<app/>"),
+      "Payload/MyApp.app/../../evil": strToU8("x"),
+    });
+    const names = Object.keys(unzipSync(normalizeIpa(ipa, null)));
+    expect(names.some((n) => n.includes("evil"))).toBe(false);
+  });
+
+  test("is deterministic (identical IPA → identical bytes)", () => {
+    const ipa = fakeIpaBytes();
+    expect(normalizeIpa(ipa, null).equals(normalizeIpa(ipa, null))).toBe(true);
   });
 
   test("throws when the IPA has no single .app", () => {

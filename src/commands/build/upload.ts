@@ -21,6 +21,7 @@ import {
   normalizeBuildFile,
   normalizeIpa,
   parsePluginFromPipeline,
+  validateXcarchiveDirectory,
 } from "../../lib/build/index.js";
 import {
   collectVcsMetadata,
@@ -114,8 +115,11 @@ async function uploadOne(
 
   const plugin = parsePluginFromPipeline(ctx.env.SENTRY_PIPELINE);
 
-  // An XCArchive is a directory; zip it into the normalized layout.
+  // An XCArchive is a directory; validate its structure, then zip it. The
+  // validation refuses arbitrary directories so a stray `sentry build upload ./`
+  // can't sweep up source, .git/, or secrets.
   if (info.isDirectory()) {
+    validateXcarchiveDirectory(path);
     const normalized = await normalizeBuildDirectory(path, plugin);
     return await uploadBuild({ org, project, content: normalized, metadata });
   }
@@ -125,15 +129,9 @@ async function uploadOne(
   // Buffer cap will throw. A follow-up can stream normalization to a temp file
   // and use the file-based chunk path; the legacy CLI memory-maps instead.
   const content = await readFile(path);
+  // detectBuildFormat only classifies files (apk/aab/ipa); XCArchive is a
+  // directory, handled above.
   const format = detectBuildFormat(content);
-
-  if (format === "xcarchive") {
-    // XCArchive is only ever a directory; a file can't be one.
-    throw new ValidationError(
-      `Expected an XCArchive directory, not a file: ${path}`,
-      "path"
-    );
-  }
 
   let normalized: Buffer;
   if (format === "ipa") {
