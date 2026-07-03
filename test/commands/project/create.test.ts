@@ -500,6 +500,29 @@ describe("project create", () => {
     });
   });
 
+  test("crammed name on the 403 fallback path also gives actionable guidance", async () => {
+    // Team-scoped create 403s → org-scoped fallback runs, which itself 400s on
+    // the crammed name. The fallback must map it to the same guidance.
+    createProjectWithDsnSpy.mockRejectedValue(
+      new ApiError("Forbidden", 403, "You do not have permission")
+    );
+    createProjectWithAutoTeamSpy.mockRejectedValue(
+      new ApiError(
+        "Bad Request",
+        400,
+        "Ensure this field has no more than 50 characters."
+      )
+    );
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    const err = await func
+      .call(context, { json: false }, "web api worker", "node")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.message).toContain("separate argument");
+    expect(err.message).toContain("sentry project create web api worker node");
+  });
+
   test("surfaces policy error when org has disabled member project creation", async () => {
     // Both paths 403: team-based creation fails, and the fallback returns
     // the org-level policy error ("disabled this feature").

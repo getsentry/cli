@@ -316,6 +316,9 @@ async function createProjectWithAutoTeamFallback(opts: {
             `View it: sentry project view ${orgSlug}/${slug}`
         );
       }
+      if (expError.status === 400 && WHITESPACE_RE.test(name)) {
+        throw crammedNamesError(name, orgSlug, platform);
+      }
     }
     throw expError;
   }
