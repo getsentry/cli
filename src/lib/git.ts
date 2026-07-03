@@ -162,6 +162,17 @@ export function getCommitLog(
 ): GitCommit[] {
   const { from, depth, paths } = options;
 
+  // Reject option-like refs so a `from` such as "--format=x" can't be parsed
+  // as a git option (arg injection). Git refs cannot start with "-" anyway.
+  // This is version-independent, unlike `--end-of-options` (git >= 2.24).
+  // Mirrors the guard in getMergeBase.
+  if (from?.startsWith("-")) {
+    throw new ValidationError(
+      `Invalid git ref '${from}': must not start with '-'.`,
+      "from"
+    );
+  }
+
   // Format: hash, subject, author name, author email, author date (ISO)
   // %x00 is git's hex escape for NUL — avoids literal NUL in the command string
   const format = "%H%x00%s%x00%aN%x00%aE%x00%aI";
@@ -173,18 +184,8 @@ export function getCommitLog(
   // Pathspecs go after `--`; each path is a discrete argv entry (no shell), so
   // there is no escaping/injection concern.
   const pathspec = paths && paths.length > 0 ? ["--", ...paths] : [];
-  // `--end-of-options` forces git to treat the range as a revision, not an
-  // option, so a caller-supplied `from` that looks like a flag (e.g.
-  // `--format=x`) can't inject a git option. See getMergeBase for the same intent.
   const raw = git(
-    [
-      "log",
-      `--format=${format}`,
-      ...maxCount,
-      "--end-of-options",
-      range,
-      ...pathspec,
-    ],
+    ["log", `--format=${format}`, ...maxCount, range, ...pathspec],
     cwd
   );
 
