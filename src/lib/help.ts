@@ -22,6 +22,7 @@ import {
   type RouteMapEntry,
   resolveCommandPath,
 } from "./introspect.js";
+import { sixelBanner } from "./sixel.js";
 
 const TAGLINE = "The command-line interface for Sentry";
 
@@ -204,9 +205,11 @@ export function printCustomHelp(): string {
 
   // Skip banner for non-TTY to avoid wasting tokens in agent loops
   if (process.stdout.isTTY) {
-    // formatBanner sizes itself to the terminal width; it returns "" only when
-    // the terminal is too narrow for even the compact mark.
-    const banner = formatBanner();
+    const cols = process.stdout.columns ?? 80;
+    // Prefer a real sixel image on capable terminals; otherwise fall back to the
+    // block-art banner sized to the terminal width (returns "" only when the
+    // terminal is too narrow for even the compact mark).
+    const banner = sixelBanner(cols) ?? formatBanner(cols);
     if (banner) {
       lines.push("");
       lines.push(banner);
