@@ -115,7 +115,6 @@ export async function putObject(
     headers: {
       ...authHeaders(config),
       [EXPIRATION_HEADER]: config.expirationPolicy,
-      "content-type": "application/octet-stream",
     },
     body,
   });
