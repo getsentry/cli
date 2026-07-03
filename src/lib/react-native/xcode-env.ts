@@ -17,6 +17,9 @@ const log = logger.withTag("react-native.xcode-env");
 /** Matches runs of whitespace (splitting preprocessor flag/definition tokens). */
 const WHITESPACE = /\s+/;
 
+/** Splits command output into lines, tolerating CRLF endings. */
+const LINE_SPLIT = /\r?\n/;
+
 /** Bundle identity extracted from an `Info.plist` or the build environment. */
 export type InfoPlist = {
   /** `CFBundleName` / `PRODUCT_NAME`. */
@@ -291,7 +294,7 @@ function getBuildVars(
   if (!out) {
     return vars;
   }
-  for (const line of out.split("\n")) {
+  for (const line of out.split(LINE_SPLIT)) {
     if (!line.startsWith("    ")) {
       continue;
     }

@@ -246,7 +246,8 @@ describe("discoverInfoPlist: xcodebuild discovery (outside Xcode)", () => {
         });
       }
       if (args?.includes("-showBuildSettings")) {
-        return `    INFOPLIST_FILE = MyApp/Info.plist\n    PROJECT_DIR = ${dir}\n`;
+        // CRLF endings must not leak a trailing \r into the parsed values.
+        return `    INFOPLIST_FILE = MyApp/Info.plist\r\n    PROJECT_DIR = ${dir}\r\n`;
       }
       return "";
     });
