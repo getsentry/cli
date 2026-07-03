@@ -21,6 +21,7 @@ import { eventRoute } from "./commands/event/index.js";
 import { listCommand as eventListCommand } from "./commands/event/list.js";
 import { exploreCommand } from "./commands/explore.js";
 import { helpCommand } from "./commands/help.js";
+import { infoCommand } from "./commands/info.js";
 import { initCommand } from "./commands/init.js";
 import { issueRoute } from "./commands/issue/index.js";
 import { listCommand as issueListCommand } from "./commands/issue/list.js";
@@ -125,6 +126,7 @@ export const routes = buildRouteMap({
     trace: traceRoute,
     trial: trialRoute,
     init: initCommand,
+    info: infoCommand,
     local: localRoute,
     api: apiCommand,
     schema: schemaCommand,
