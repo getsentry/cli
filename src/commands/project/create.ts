@@ -63,7 +63,7 @@ import { slugify } from "../../lib/utils.js";
 const log = logger.withTag("project.create");
 
 /** Full usage hint shown in errors and help text. */
-const USAGE_HINT = "sentry project create <org>/<name> <platform>";
+const USAGE_HINT = "sentry project create [<org>/]<name...> <platform>";
 
 /** Matches any internal whitespace — used to detect crammed multi-name args. */
 const WHITESPACE_RE = /\s+/;
@@ -343,10 +343,9 @@ function crammedNamesError(
   const parts = name.trim().split(WHITESPACE_RE).filter(Boolean);
   return new CliError(
     `Failed to create project '${name}' in ${orgSlug}: that name isn't valid.\n\n` +
-      "Project names can't span multiple words. To create several projects,\n" +
-      "pass each name as a separate argument:\n" +
+      "If you meant several projects, pass each name as a separate argument:\n" +
       `  sentry project create ${parts.join(" ")} ${platform}\n\n` +
-      "For a single project, use a slug (letters, numbers, hyphens)."
+      "If you meant one project, use a shorter slug (letters, numbers, hyphens)."
   );
 }
 
