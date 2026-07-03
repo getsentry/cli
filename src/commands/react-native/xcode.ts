@@ -16,6 +16,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -34,7 +35,6 @@ import {
   resolveReleaseAndDist,
 } from "../../lib/react-native/xcode-env.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
-import { injectDebugId } from "../../lib/sourcemap/debug-id.js";
 
 const log = logger.withTag("react-native.xcode");
 
@@ -126,7 +126,8 @@ function runScript(
   env: NodeJS.ProcessEnv
 ): number {
   const rv = spawnSync(script, args, { stdio: "inherit", env });
-  return rv.status ?? (rv.error ? 1 : 0);
+  // A signal-killed child has `status === null`; treat that as a failure.
+  return rv.status ?? (rv.signal !== null || rv.error ? 1 : 0);
 }
 
 /** Poll a URL until it responds or the timeout elapses. */
@@ -166,8 +167,20 @@ async function fetchFromPackager(
   const bundleRes = await fetch(
     `${url}/index.ios.bundle?platform=ios&dev=true`
   );
+  if (!bundleRes.ok) {
+    throw new ValidationError(
+      `Packager returned ${bundleRes.status} for the bundle.`,
+      "fetch-from"
+    );
+  }
   writeFileSync(bundle, Buffer.from(await bundleRes.arrayBuffer()));
   const mapRes = await fetch(`${url}/index.ios.map?platform=ios&dev=true`);
+  if (!mapRes.ok) {
+    throw new ValidationError(
+      `Packager returned ${mapRes.status} for the sourcemap.`,
+      "fetch-from"
+    );
+  }
   writeFileSync(sourcemap, Buffer.from(await mapRes.arrayBuffer()));
   return { bundle, sourcemap };
 }
@@ -226,13 +239,29 @@ function runWrappedBuild(
   };
 }
 
-/** Inject a debug id and upload the bundle/sourcemap pair. */
+/** Read the debug id already present in a sourcemap (from the Metro plugin). */
+async function readSourcemapDebugId(
+  mapPath: string
+): Promise<string | undefined> {
+  try {
+    const map = JSON.parse(await readFile(mapPath, "utf-8")) as {
+      debugId?: string;
+      debug_id?: string;
+    };
+    return map.debugId ?? map.debug_id;
+  } catch (err) {
+    log.debug("Could not read debug id from sourcemap", err);
+    return;
+  }
+}
+
+/** Upload the bundle/sourcemap pair using the sourcemap's existing debug id. */
 async function uploadPair(
   pair: BundlePair,
   ctx: SentryContext,
   flags: XcodeFlags
 ): Promise<{
-  debugId: string;
+  debugId?: string;
   release?: string;
   dist: string[];
   uploads: number;
@@ -246,18 +275,29 @@ async function uploadPair(
   }
   const { org, project } = resolved;
 
-  const { debugId } = await injectDebugId(pair.bundle, pair.sourcemap);
+  // The RN Metro/Sentry plugin injects the debug id into the bundle + sourcemap
+  // at build time, and the wrapper copies it into the Hermes sourcemap. We must
+  // NOT re-inject: a release bundle may be Hermes bytecode, which a JS snippet
+  // would corrupt. Read the existing debug id from the sourcemap instead.
+  const debugId = await readSourcemapDebugId(pair.sourcemap);
+  if (!debugId) {
+    log.warn(
+      "No debug id found in the sourcemap; uploading without one. Ensure the " +
+        "Sentry React Native Metro plugin is configured."
+    );
+  }
+  const debugIdField = debugId ? { debugId } : {};
   const files: ArtifactFile[] = [
     {
       path: pair.bundle,
-      debugId,
+      ...debugIdField,
       type: "minified_source",
       url: `~/${basename(pair.bundle)}`,
       sourcemapFilename: basename(pair.sourcemap),
     },
     {
       path: pair.sourcemap,
-      debugId,
+      ...debugIdField,
       type: "source_map",
       url: `~/${basename(pair.sourcemap)}`,
     },
@@ -287,6 +327,54 @@ async function uploadPair(
     uploads = 1;
   }
   return { debugId, release, dist: dists, uploads };
+}
+
+/** Either a resolved pair to upload, or a terminal (no-upload) outcome. */
+type PrepareResult =
+  | {
+      kind: "terminal";
+      result: XcodeResult;
+      hint: string;
+      exitCode?: number;
+    }
+  | { kind: "pair"; mode: "fetch" | "wrap"; pair: BundlePair };
+
+/** Resolve the bundle/sourcemap pair via the packager (fetch) or a wrapped build. */
+async function preparePair(
+  ctx: SentryContext,
+  script: string,
+  scriptArgs: string[],
+  fetchUrl: string | undefined
+): Promise<PrepareResult> {
+  const tempDir = mkdtempSync(join(tmpdir(), "sentry-rn-xcode-"));
+  if (fetchUrl) {
+    log.info(`Fetching sourcemaps from ${fetchUrl}`);
+    return {
+      kind: "pair",
+      mode: "fetch",
+      pair: await fetchFromPackager(fetchUrl, tempDir),
+    };
+  }
+  const result = runWrappedBuild(script, scriptArgs, ctx, tempDir);
+  // A failed build must not publish artifacts (matches the legacy CLI, which
+  // exits on a non-zero build status before uploading).
+  if (result.status !== 0) {
+    return {
+      kind: "terminal",
+      result: { mode: "wrap", uploads: 0 },
+      hint: "React Native build failed; skipped upload.",
+      exitCode: result.status,
+    };
+  }
+  if (!result.pair) {
+    log.warn("Build produced no packager sourcemaps.");
+    return {
+      kind: "terminal",
+      result: { mode: "wrap", uploads: 0 },
+      hint: "No sourcemaps were produced by the build.",
+    };
+  }
+  return { kind: "pair", mode: "wrap", pair: result.pair };
 }
 
 export const xcodeCommand = buildCommand({
@@ -386,28 +474,17 @@ export const xcodeCommand = buildCommand({
       return { hint: "Ran the React Native build script (debug mode)." };
     }
 
-    const tempDir = mkdtempSync(join(tmpdir(), "sentry-rn-xcode-"));
-    let mode: "fetch" | "wrap";
-    let pair: BundlePair | null;
-    if (fetchUrl) {
-      mode = "fetch";
-      log.info(`Fetching sourcemaps from ${fetchUrl}`);
-      pair = await fetchFromPackager(fetchUrl, tempDir);
-    } else {
-      mode = "wrap";
-      const result = runWrappedBuild(script, scriptArgs, this, tempDir);
-      if (result.status !== 0) {
-        this.process.exitCode = result.status;
+    const prep = await preparePair(this, script, scriptArgs, fetchUrl);
+    if (prep.kind === "terminal") {
+      if (prep.exitCode !== undefined) {
+        this.process.exitCode = prep.exitCode;
       }
-      pair = result.pair;
-      if (!pair) {
-        log.warn("Build produced no packager sourcemaps.");
-        yield new CommandOutput<XcodeResult>({ mode, uploads: 0 });
-        return { hint: "No sourcemaps were produced by the build." };
-      }
+      yield new CommandOutput<XcodeResult>(prep.result);
+      return { hint: prep.hint };
     }
 
     log.info("Processing React Native sourcemaps for Sentry upload.");
+    const { pair, mode } = prep;
     const { debugId, release, dist, uploads } = await uploadPair(
       pair,
       this,
@@ -423,6 +500,10 @@ export const xcodeCommand = buildCommand({
       dist: dist.length > 0 ? dist : undefined,
       uploads,
     });
-    return { hint: `Uploaded sourcemaps with debug ID ${debugId}.` };
+    return {
+      hint: debugId
+        ? `Uploaded sourcemaps with debug ID ${debugId}.`
+        : "Uploaded sourcemaps.",
+    };
   },
 });

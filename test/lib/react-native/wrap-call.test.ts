@@ -106,6 +106,24 @@ describe("wrapCall", () => {
     expect(readReport().hermes_sourcemap_path).toBe(hermesMap);
   });
 
+  test("reports a non-zero status when the child is killed by a signal", () => {
+    spawnMock.mockReturnValueOnce({
+      status: null,
+      signal: "SIGTERM",
+      stdout: "",
+      stderr: "",
+      pid: 1,
+      output: [],
+      // biome-ignore lint/suspicious/noExplicitAny: partial SpawnSyncReturns for the test
+    } as any);
+    setArgs(["cli.js", "bundle", "--bundle-output", "/build/app.jsbundle"]);
+    const status = wrapCall({
+      SENTRY_RN_SOURCEMAP_REPORT: reportPath,
+      SENTRY_RN_REAL_NODE_BINARY: "node",
+    });
+    expect(status).not.toBe(0);
+  });
+
   test("respects SENTRY_RN_NO_DEBUG_ID", () => {
     const pkgMap = join(dir, "packager.map");
     const hermesMap = join(dir, "hermes.map");

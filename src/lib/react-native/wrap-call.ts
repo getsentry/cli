@@ -143,6 +143,40 @@ function copyDebugId(report: SourceMapReport): void {
  *
  * @returns The exit code of the wrapped process.
  */
+/** Whether the invocation is the Hermes combine-source-maps script. */
+function isComposeCommand(args: string[], env: NodeJS.ProcessEnv): boolean {
+  const first = args[0];
+  if (first === undefined || args.length <= 1) {
+    return false;
+  }
+  return (
+    first.endsWith("compose-source-maps.js") ||
+    (Boolean(env.COMPOSE_SOURCEMAP_PATH) &&
+      first === env.COMPOSE_SOURCEMAP_PATH)
+  );
+}
+
+/** Classify the wrapped invocation, recording paths into `report`. */
+function classifyInvocation(
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  report: SourceMapReport
+): { executeHermes: boolean; shouldCopyDebugId: boolean } {
+  if (isBundleCommand(args, env.SENTRY_RN_BUNDLE_COMMAND)) {
+    handleBundle(args, report);
+    return { executeHermes: false, shouldCopyDebugId: false };
+  }
+  if (args.length > 1 && args[0] === "-emit-binary") {
+    report.hermes_bundle_path = extractArg(args, "-out");
+    return { executeHermes: true, shouldCopyDebugId: false };
+  }
+  if (isComposeCommand(args, env)) {
+    report.hermes_sourcemap_path = extractArg(args, "-o");
+    return { executeHermes: false, shouldCopyDebugId: true };
+  }
+  return { executeHermes: false, shouldCopyDebugId: false };
+}
+
 export function wrapCall(env: NodeJS.ProcessEnv = process.env): number {
   const reportPath = env.SENTRY_RN_SOURCEMAP_REPORT;
   if (!reportPath) {
@@ -152,24 +186,11 @@ export function wrapCall(env: NodeJS.ProcessEnv = process.env): number {
   const args = getWrapArgs();
   const noDebugId = env.SENTRY_RN_NO_DEBUG_ID === "1";
 
-  let executeHermes = false;
-  let shouldCopyDebugId = false;
-
-  const first = args[0];
-  const isCompose =
-    first !== undefined &&
-    (first.endsWith("compose-source-maps.js") ||
-      (Boolean(env.COMPOSE_SOURCEMAP_PATH) &&
-        first === env.COMPOSE_SOURCEMAP_PATH));
-  if (isBundleCommand(args, env.SENTRY_RN_BUNDLE_COMMAND)) {
-    handleBundle(args, report);
-  } else if (args.length > 1 && first === "-emit-binary") {
-    executeHermes = true;
-    report.hermes_bundle_path = extractArg(args, "-out");
-  } else if (args.length > 1 && isCompose) {
-    report.hermes_sourcemap_path = extractArg(args, "-o");
-    shouldCopyDebugId = true;
-  }
+  const { executeHermes, shouldCopyDebugId } = classifyInvocation(
+    args,
+    env,
+    report
+  );
 
   const executable = executeHermes
     ? env.SENTRY_RN_REAL_HERMES_CLI_PATH
@@ -181,7 +202,8 @@ export function wrapCall(env: NodeJS.ProcessEnv = process.env): number {
   }
 
   const rv = spawnSync(executable, args, { stdio: "inherit" });
-  const status = rv.status ?? (rv.error ? 1 : 0);
+  // A signal-killed child has `status === null`; treat that as a failure.
+  const status = rv.status ?? (rv.signal !== null || rv.error ? 1 : 0);
 
   if (!noDebugId && shouldCopyDebugId) {
     copyDebugId(report);

@@ -16,8 +16,6 @@ import { xcodeCommand } from "../../../src/commands/react-native/xcode.js";
 import * as sourcemaps from "../../../src/lib/api/sourcemaps.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
-// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
-import * as debugId from "../../../src/lib/sourcemap/debug-id.js";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
@@ -59,10 +57,6 @@ beforeEach(() => {
   vi.spyOn(resolveTarget, "resolveOrgAndProject").mockResolvedValue({
     org: "acme",
     project: "mobile",
-  });
-  vi.spyOn(debugId, "injectDebugId").mockResolvedValue({
-    debugId: "dead-beef",
-    wasInjected: true,
   });
   vi.spyOn(sourcemaps, "uploadSourcemaps").mockResolvedValue(undefined);
 });
@@ -119,13 +113,15 @@ describe("react-native xcode", () => {
       }
     );
 
+    // The sourcemap already carries a debug id (from the Metro plugin).
+    writeFileSync(map, JSON.stringify({ version: 3, debugId: "dead-beef" }));
+
     await runXcode({
       CONFIGURATION: "Release",
       SENTRY_RELEASE: "app@1.0.0",
       SENTRY_DIST: "42",
     });
 
-    expect(debugId.injectDebugId).toHaveBeenCalledWith(bundle, map);
     expect(sourcemaps.uploadSourcemaps).toHaveBeenCalledTimes(1);
     const opts = vi.mocked(sourcemaps.uploadSourcemaps).mock
       .calls[0][0] as sourcemaps.UploadOptions;
@@ -139,6 +135,21 @@ describe("react-native xcode", () => {
       "~/main.jsbundle",
       "~/main.jsbundle.map",
     ]);
+    // The debug id comes from the sourcemap — the bundle is never mutated.
+    expect(opts.files.every((f) => f.debugId === "dead-beef")).toBe(true);
+  });
+
+  test("does not upload when the wrapped build fails", async () => {
+    spawnMock.mockReturnValue({
+      status: 1,
+      stdout: "",
+      stderr: "",
+      pid: 1,
+      output: [],
+      signal: null,
+    });
+    await runXcode({ CONFIGURATION: "Release" });
+    expect(sourcemaps.uploadSourcemaps).not.toHaveBeenCalled();
   });
 
   test("warns and skips upload when the build produced no sourcemaps", async () => {
