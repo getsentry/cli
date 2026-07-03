@@ -23,6 +23,20 @@ Upload a React Native bundle + sourcemap (Gradle build step)
 - `--wait - Accepted for compatibility (the CLI always waits for assembly)`
 - `--wait-for <value> - Accepted for compatibility (the CLI always waits for assembly)`
 
+### `sentry react-native xcode <script-arg...>`
+
+Upload React Native sourcemaps (Xcode build step)
+
+**Flags:**
+- `-f, --force - Run even in a debug configuration`
+- `--allow-fetch - Fetch sourcemaps from the packager on simulator builds`
+- `--fetch-from <value> - Packager URL to fetch from (default: http://127.0.0.1:8081/)`
+- `--build-script <value> - Path to the react-native-xcode.sh build script`
+- `--dist <value>... - Distribution(s) to publish (repeatable)`
+- `--wait - Accepted for compatibility (the CLI always waits for assembly)`
+- `--wait-for <value> - Accepted for compatibility (the CLI always waits for assembly)`
+- `--no-auto-release - Don't read the release from Xcode project files`
+
 **Examples:**
 
 ```bash
@@ -37,6 +51,9 @@ sentry react-native gradle \
   --sourcemap index.android.bundle.map \
   --release com.example.app@1.0.0 \
   --dist 1000
+
+# Xcode build phase (usually added automatically to your build script)
+../node_modules/.bin/sentry-cli react-native xcode
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

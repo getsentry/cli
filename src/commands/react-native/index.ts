@@ -6,10 +6,12 @@
 
 import { buildRouteMap } from "../../lib/route-map.js";
 import { gradleCommand } from "./gradle.js";
+import { xcodeCommand } from "./xcode.js";
 
 export const reactNativeRoute = buildRouteMap({
   routes: {
     gradle: gradleCommand,
+    xcode: xcodeCommand,
   },
   docs: {
     brief: "Upload React Native sourcemaps from build steps",
