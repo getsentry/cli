@@ -228,6 +228,11 @@ export const downloadCommand = buildCommand({
       response.body as unknown as AsyncIterable<Uint8Array>,
       output
     );
+    if (imageCount === 0) {
+      log.warn(
+        `No images were extracted from snapshot ${snapshotId} — the archive may be empty or corrupt.`
+      );
+    }
 
     yield new CommandOutput<SnapshotDownloadResult>({
       org,
