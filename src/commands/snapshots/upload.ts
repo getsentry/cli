@@ -132,6 +132,66 @@ async function resolveAllImageNames(
   return;
 }
 
+/**
+ * Validate the git-metadata flags and collect VCS info for the manifest.
+ *
+ * @throws {ValidationError} On conflicting flags or a PR number without a base SHA.
+ */
+function collectVcs(
+  flags: UploadFlags,
+  cwd: string,
+  env: NodeJS.ProcessEnv
+): VcsInfo {
+  if (flags["force-git-metadata"] && flags["no-git-metadata"]) {
+    throw new ValidationError(
+      "--force-git-metadata and --no-git-metadata cannot be used together",
+      "force-git-metadata"
+    );
+  }
+  const shouldCollect =
+    Boolean(flags["force-git-metadata"]) ||
+    (!flags["no-git-metadata"] && isCi(env));
+  const vcs = collectVcsMetadata(flags, cwd, env, shouldCollect);
+  if (vcs.prNumber !== undefined && !vcs.baseSha) {
+    throw new ValidationError(
+      "A PR number was provided but no base SHA could be determined. " +
+        "Pass --base-sha explicitly or ensure your CI exposes the merge base.",
+      "pr-number"
+    );
+  }
+  return vcs;
+}
+
+/**
+ * Resolve the selective-upload settings and validate that every collected image
+ * is present in `--all-image-file-names` (when provided).
+ *
+ * @throws {ValidationError} When an uploaded image is not in the provided list.
+ */
+async function resolveSelective(
+  flags: UploadFlags,
+  images: CollectedImage[]
+): Promise<{ selective: boolean; allImageNames?: string[] }> {
+  const allImageNames = await resolveAllImageNames(flags);
+  const selective = Boolean(flags.selective) || allImageNames !== undefined;
+  if (allImageNames) {
+    const known = new Set(allImageNames);
+    const unknown = images
+      .map((img) => img.relativePath)
+      .filter((key) => !known.has(key))
+      .sort();
+    if (unknown.length > 0) {
+      throw new ValidationError(
+        `The following uploaded images are not in --all-image-file-names: ${unknown.join(
+          ", "
+        )}`,
+        "all-image-file-names"
+      );
+    }
+  }
+  return { selective, allImageNames };
+}
+
 /** Run `fn` over `items` with bounded concurrency. */
 async function runPooled<T>(
   items: T[],
@@ -412,29 +472,13 @@ export const uploadCommand = buildCommand({
     }
     const { org, project } = resolved;
 
-    if (flags["force-git-metadata"] && flags["no-git-metadata"]) {
-      throw new ValidationError(
-        "--force-git-metadata and --no-git-metadata cannot be used together",
-        "force-git-metadata"
-      );
-    }
     if (flags["all-image-file-names"] && flags["all-image-file-names-file"]) {
       throw new ValidationError(
         "--all-image-file-names and --all-image-file-names-file cannot be used together",
         "all-image-file-names"
       );
     }
-    const shouldCollectVcs =
-      Boolean(flags["force-git-metadata"]) ||
-      (!flags["no-git-metadata"] && isCi(this.env));
-    const vcs = collectVcsMetadata(flags, this.cwd, this.env, shouldCollectVcs);
-    if (vcs.prNumber !== undefined && !vcs.baseSha) {
-      throw new ValidationError(
-        "A PR number was provided but no base SHA could be determined. " +
-          "Pass --base-sha explicitly or ensure your CI exposes the merge base.",
-        "pr-number"
-      );
-    }
+    const vcs = collectVcs(flags, this.cwd, this.env);
 
     const images = await collectImages(path);
     if (images.length === 0) {
@@ -448,23 +492,7 @@ export const uploadCommand = buildCommand({
     }
     validateImageSizes(images);
 
-    const allImageNames = await resolveAllImageNames(flags);
-    const selective = Boolean(flags.selective) || allImageNames !== undefined;
-    if (allImageNames) {
-      const known = new Set(allImageNames);
-      const unknown = images
-        .map((img) => img.relativePath)
-        .filter((key) => !known.has(key))
-        .sort();
-      if (unknown.length > 0) {
-        throw new ValidationError(
-          `The following uploaded images are not in --all-image-file-names: ${unknown.join(
-            ", "
-          )}`,
-          "all-image-file-names"
-        );
-      }
-    }
+    const { selective, allImageNames } = await resolveSelective(flags, images);
 
     log.info(`Uploading ${images.length} image(s)...`);
     const { entries, uploaded, skipped } = await uploadImages(
