@@ -13,7 +13,10 @@ import { readFile, stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import type { SentryContext } from "../../context.js";
 import type { ArtifactFile } from "../../lib/api/sourcemaps.js";
-import { uploadSourcemaps } from "../../lib/api/sourcemaps.js";
+import {
+  resolveUploadWait,
+  uploadSourcemaps,
+} from "../../lib/api/sourcemaps.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { mdKvTable, renderMarkdown } from "../../lib/formatters/markdown.js";
@@ -124,8 +127,9 @@ export const gradleCommand = buildCommand({
       "convention.\n\n" +
       "Without `--release`, files are matched by debug ID. With `--release`, " +
       "they are also uploaded for each `--dist`.\n\n" +
-      "Note: the CLI always waits for server-side assembly; `--wait`/" +
-      "`--wait-for` are accepted for compatibility.",
+      "Use `--wait`/`--wait-for` to block until the server finishes processing " +
+      "the upload. Indexed/file RAM bundles (a pre-Hermes format) are not " +
+      "supported; use a plain or Hermes bundle.",
   },
   output: {
     human: formatGradleResult,
@@ -157,13 +161,13 @@ export const gradleCommand = buildCommand({
       },
       wait: {
         kind: "boolean",
-        brief: "Accepted for compatibility (the CLI always waits for assembly)",
+        brief: "Wait for the server to fully process the uploaded files",
         optional: true,
       },
       "wait-for": {
         kind: "parsed",
         parse: Number,
-        brief: "Accepted for compatibility (the CLI always waits for assembly)",
+        brief: "Wait for processing, but at most this many seconds",
         optional: true,
       },
     },
@@ -188,6 +192,7 @@ export const gradleCommand = buildCommand({
     const { debugId } = await injectDebugId(bundlePath, sourcemapPath);
     const files = buildArtifacts(bundlePath, sourcemapPath, debugId);
 
+    const { wait, maxWaitMs } = resolveUploadWait(flags);
     const dists = flags.dist ?? [];
     let uploads = 0;
     if (flags.release && dists.length > 0) {
@@ -201,11 +206,20 @@ export const gradleCommand = buildCommand({
           release: flags.release,
           dist,
           files,
+          wait,
+          maxWaitMs,
         });
         uploads += 1;
       }
     } else {
-      await uploadSourcemaps({ org, project, release: flags.release, files });
+      await uploadSourcemaps({
+        org,
+        project,
+        release: flags.release,
+        files,
+        wait,
+        maxWaitMs,
+      });
       uploads = 1;
     }
 

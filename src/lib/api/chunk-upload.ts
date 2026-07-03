@@ -467,14 +467,17 @@ export async function uploadMissingBufferChunks(params: {
  * Poll an assemble endpoint until the server reports completion.
  *
  * Re-sends the same assemble body on each poll (the server uses
- * the checksum to look up existing assembly state). Returns when
- * the state is `"ok"` or `"created"`. Throws on `"error"` or timeout.
+ * the checksum to look up existing assembly state). By default returns when
+ * the state is `"ok"` or `"created"`; set `waitForOk` to block until the server
+ * finishes processing (`"ok"` only). Throws on `"error"` or timeout.
  *
  * @param params.regionUrl - Region base URL
  * @param params.endpoint - The endpoint path to POST to
  * @param params.body - The request body to send on each poll
  * @param params.entityName - Human-readable name for error messages
  * @param params.schema - Zod schema for the response (defaults to {@link AssembleResponseSchema})
+ * @param params.waitForOk - Keep polling on `"created"`, returning only on `"ok"`
+ * @param params.deadlineMs - Override the default poll timeout window
  */
 export async function pollAssembly(params: {
   regionUrl: string;
@@ -482,6 +485,8 @@ export async function pollAssembly(params: {
   body: unknown;
   entityName: string;
   schema?: z.ZodType<AssembleResponse>;
+  waitForOk?: boolean;
+  deadlineMs?: number;
 }): Promise<void> {
   const {
     regionUrl,
@@ -489,8 +494,10 @@ export async function pollAssembly(params: {
     body,
     entityName,
     schema = AssembleResponseSchema,
+    waitForOk = false,
+    deadlineMs = ASSEMBLE_MAX_WAIT_MS,
   } = params;
-  const deadline = Date.now() + ASSEMBLE_MAX_WAIT_MS;
+  const deadline = Date.now() + deadlineMs;
 
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, ASSEMBLE_POLL_INTERVAL_MS));
@@ -505,7 +512,13 @@ export async function pollAssembly(params: {
       }
     );
 
-    if (pollResult.state === "ok" || pollResult.state === "created") {
+    if (pollResult.state === "ok") {
+      return;
+    }
+
+    // When not waiting for full processing, an accepted ("created") bundle is
+    // sufficient; otherwise keep polling until it flips to "ok".
+    if (pollResult.state === "created" && !waitForOk) {
       return;
     }
 
@@ -517,13 +530,13 @@ export async function pollAssembly(params: {
         endpoint
       );
     }
-    // "not_found" or "assembling" — keep polling
+    // "not_found", "assembling", or ("created" while waiting) — keep polling
   }
 
   throw new ApiError(
     `${entityName} assembly timed out`,
     408,
-    `Assembly did not complete within ${ASSEMBLE_MAX_WAIT_MS / 1000}s`,
+    `Assembly did not complete within ${deadlineMs / 1000}s`,
     endpoint
   );
 }

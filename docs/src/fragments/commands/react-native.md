@@ -31,12 +31,10 @@ build phase. It has three modes:
 
 Release/distribution come from `SENTRY_RELEASE`/`SENTRY_DIST` or the app's
 `Info.plist` (`<CFBundleIdentifier>@<CFBundleShortVersionString>+<CFBundleVersion>`),
-unless `--no-auto-release` is set. Pass extra build-script arguments after the
-flags.
-
-Limitations vs. the legacy CLI: `Info.plist` C preprocessing
-(`INFOPLIST_PREPROCESS`) and `xcodebuild`-based discovery outside an Xcode build
-are not supported — set `SENTRY_RELEASE`/`SENTRY_DIST` in those cases.
+unless `--no-auto-release` is set. When run outside an Xcode build phase the
+release is discovered via `xcodebuild`; `--allow-xcode-infoplist-preprocessing`
+enables `cc`-based `INFOPLIST_PREPROCESS` handling. Pass extra build-script
+arguments after the flags.
 
 ## Important Notes
 
@@ -47,6 +45,6 @@ are not supported — set `SENTRY_RELEASE`/`SENTRY_DIST` in those cases.
   them under the `~/<filename>` convention. Without `--release` the files are
   matched by debug ID; with `--release` they are also uploaded for each
   `--dist`.
-- Indexed RAM bundles are not supported — use a plain or Hermes bundle.
-- The CLI always waits for server-side assembly; `--wait`/`--wait-for` are
-  accepted for backward compatibility but do not change behavior.
+- `--wait`/`--wait-for` block until the server finishes processing the upload.
+- Indexed/file RAM bundles (a pre-Hermes format that React Native has since
+  deprecated) are not supported — use a plain or Hermes bundle.

@@ -114,8 +114,7 @@ describe("wrapCall", () => {
       stderr: "",
       pid: 1,
       output: [],
-      // biome-ignore lint/suspicious/noExplicitAny: partial SpawnSyncReturns for the test
-    } as any);
+    } as unknown as ReturnType<typeof spawnSync>);
     setArgs(["cli.js", "bundle", "--bundle-output", "/build/app.jsbundle"]);
     const status = wrapCall({
       SENTRY_RN_SOURCEMAP_REPORT: reportPath,

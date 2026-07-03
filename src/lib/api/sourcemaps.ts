@@ -19,7 +19,7 @@
 import { readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError } from "../errors.js";
+import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import { type ZipCompression, ZipWriter } from "../sourcemap/zip.js";
 import {
@@ -99,7 +99,42 @@ export type UploadOptions = {
   dist?: string;
   /** Files to upload (must already have debug IDs injected). */
   files: ArtifactFile[];
+  /**
+   * Block until the server finishes processing the uploaded bundle (state
+   * `"ok"`), not just accepting it (`"created"`). Defaults to `false`, which
+   * returns as soon as the chunks are assembled.
+   */
+  wait?: boolean;
+  /** Cap on the {@link wait} poll, in milliseconds. Ignored unless `wait`. */
+  maxWaitMs?: number;
 };
+
+/** Default cap on server-side processing wait (5 minutes), matching the legacy CLI. */
+export const DEFAULT_UPLOAD_MAX_WAIT_MS = 300_000;
+
+/**
+ * Translate `--wait`/`--wait-for` flags into {@link UploadOptions} wait config.
+ *
+ * `--wait` blocks until fully processed; `--wait-for <secs>` does the same but
+ * caps the poll. Either flag enables waiting.
+ */
+export function resolveUploadWait(flags: {
+  wait?: boolean;
+  "wait-for"?: number;
+}): { wait: boolean; maxWaitMs: number } {
+  const waitFor = flags["wait-for"];
+  if (waitFor !== undefined && (!Number.isFinite(waitFor) || waitFor <= 0)) {
+    throw new ValidationError(
+      "--wait-for must be a positive number of seconds.",
+      "wait-for"
+    );
+  }
+  return {
+    wait: flags.wait === true || waitFor !== undefined,
+    maxWaitMs:
+      waitFor !== undefined ? waitFor * 1000 : DEFAULT_UPLOAD_MAX_WAIT_MS,
+  };
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -207,7 +242,7 @@ export async function buildArtifactBundle(
  * @throws {ApiError} If the upload or assembly fails
  */
 export async function uploadSourcemaps(options: UploadOptions): Promise<void> {
-  const { org, project, release, dist, files } = options;
+  const { org, project, release, dist, files, wait, maxWaitMs } = options;
 
   // Step 1: Get chunk upload configuration
   const serverOptions = await getChunkUploadOptions(org);
@@ -239,6 +274,8 @@ export async function uploadSourcemaps(options: UploadOptions): Promise<void> {
       dist,
       serverOptions,
       encoding,
+      wait: wait ?? false,
+      maxWaitMs: maxWaitMs ?? DEFAULT_UPLOAD_MAX_WAIT_MS,
     });
   } finally {
     // Always clean up the temp file
@@ -263,9 +300,20 @@ async function uploadArtifactBundle(opts: {
   dist: string | undefined;
   serverOptions: ChunkServerOptions;
   encoding: UploadEncoding | undefined;
+  wait: boolean;
+  maxWaitMs: number;
 }): Promise<void> {
-  const { tmpZipPath, org, project, release, dist, serverOptions, encoding } =
-    opts;
+  const {
+    tmpZipPath,
+    org,
+    project,
+    release,
+    dist,
+    serverOptions,
+    encoding,
+    wait,
+    maxWaitMs,
+  } = opts;
   // Step 3: Split into chunks, hash each chunk + compute overall checksum
   const { chunks, overallChecksum } = await hashChunks(
     tmpZipPath,
@@ -294,11 +342,6 @@ async function uploadArtifactBundle(opts: {
     }
   );
 
-  // If already assembled, we're done
-  if (firstAssemble.state === "ok" || firstAssemble.state === "created") {
-    return;
-  }
-
   // Fail fast on server-side assembly error
   if (firstAssemble.state === "error") {
     throw new ApiError(
@@ -309,7 +352,18 @@ async function uploadArtifactBundle(opts: {
     );
   }
 
-  // Step 5: Upload missing chunks in parallel
+  // Fully assembled — nothing more to do regardless of wait.
+  if (firstAssemble.state === "ok") {
+    return;
+  }
+
+  // Accepted but not yet processed. Without --wait we're done; with --wait we
+  // fall through to poll for full processing.
+  if (firstAssemble.state === "created" && !wait) {
+    return;
+  }
+
+  // Step 5: Upload missing chunks in parallel (a no-op when none are missing).
   await uploadMissingChunks({
     chunks,
     missingChecksums: new Set(firstAssemble.missingChunks ?? []),
@@ -319,11 +373,14 @@ async function uploadArtifactBundle(opts: {
     regionUrl,
   });
 
-  // Step 6: Poll assemble endpoint until done
+  // Step 6: Poll assemble endpoint. With --wait, block until fully processed
+  // ("ok"); otherwise return as soon as the chunks are accepted ("created").
   await pollAssembly({
     regionUrl,
     endpoint: assembleEndpoint,
     body: assembleBody,
     entityName: "Artifact bundle",
+    waitForOk: wait,
+    deadlineMs: maxWaitMs,
   });
 }

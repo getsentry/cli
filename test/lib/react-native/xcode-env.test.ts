@@ -2,10 +2,11 @@
  * Tests for Xcode build-environment helpers.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   discoverInfoPlist,
   expandXcodeVars,
@@ -15,7 +16,25 @@ import {
   resolveReleaseAndDist,
 } from "../../../src/lib/react-native/xcode-env.js";
 
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, execFileSync: vi.fn(() => "") };
+});
+const execMock = vi.mocked(execFileSync);
+
+/** A complete four-key Info.plist XML body. */
+const PLIST_XML = `<plist><dict>
+  <key>CFBundleName</key><string>NAME</string>
+  <key>CFBundleIdentifier</key><string>BUNDLE</string>
+  <key>CFBundleShortVersionString</key><string>VERSION</string>
+  <key>CFBundleVersion</key><string>BUILD</string>
+</dict></plist>`;
+
 const dirs: string[] = [];
+beforeEach(() => {
+  execMock.mockReset();
+  execMock.mockReturnValue("");
+});
 afterEach(() => {
   while (dirs.length > 0) {
     const d = dirs.pop();
@@ -152,5 +171,106 @@ describe("resolveReleaseAndDist", () => {
     await expect(resolveReleaseAndDist({}, "/tmp", false)).rejects.toThrow(
       /Could not determine release/
     );
+  });
+});
+
+describe("discoverInfoPlist: INFOPLIST_PREPROCESS", () => {
+  test("runs cc when preprocessing is allowed and requested", async () => {
+    execMock.mockReturnValue(
+      PLIST_XML.replace("NAME", "Pre")
+        .replace("BUNDLE", "com.pre.app")
+        .replace("VERSION", "9.9")
+        .replace("BUILD", "99")
+    );
+    const plist = await discoverInfoPlist(
+      {
+        XCODE_VERSION_ACTUAL: "1500",
+        INFOPLIST_FILE: "Info.plist",
+        INFOPLIST_PREPROCESS: "YES",
+        INFOPLIST_PREPROCESSOR_DEFINITIONS: "DEBUG=1",
+      },
+      "/tmp",
+      true
+    );
+    expect(plist).toEqual({
+      name: "Pre",
+      bundleId: "com.pre.app",
+      version: "9.9",
+      build: "99",
+    });
+    expect(execMock).toHaveBeenCalledWith(
+      "cc",
+      expect.arrayContaining(["-xc", "-P", "-E", "-DDEBUG=1"]),
+      expect.anything()
+    );
+  });
+
+  test("does not run cc when preprocessing is not allowed", async () => {
+    const plist = await discoverInfoPlist(
+      {
+        XCODE_VERSION_ACTUAL: "1500",
+        INFOPLIST_FILE: "Info.plist",
+        INFOPLIST_PREPROCESS: "YES",
+        // Fallback env vars so discovery still succeeds.
+        PRODUCT_NAME: "Fallback",
+        PRODUCT_BUNDLE_IDENTIFIER: "com.fallback.app",
+        MARKETING_VERSION: "1.0",
+        CURRENT_PROJECT_VERSION: "1",
+      },
+      "/does-not-exist",
+      false
+    );
+    expect(execMock).not.toHaveBeenCalled();
+    expect(plist).toMatchObject({ bundleId: "com.fallback.app" });
+  });
+});
+
+describe("discoverInfoPlist: xcodebuild discovery (outside Xcode)", () => {
+  test("resolves the release via xcodebuild when not in an Xcode build", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rn-xcodeproj-"));
+    dirs.push(dir);
+    mkdirSync(join(dir, "MyApp.xcodeproj"));
+    mkdirSync(join(dir, "MyApp"));
+    writeFileSync(
+      join(dir, "MyApp", "Info.plist"),
+      PLIST_XML.replace("NAME", "MyApp")
+        .replace("BUNDLE", "com.xcbuild.app")
+        .replace("VERSION", "4.2.0")
+        .replace("BUILD", "7")
+    );
+
+    execMock.mockImplementation((_cmd: string, args?: readonly string[]) => {
+      if (args?.includes("-list")) {
+        return JSON.stringify({
+          project: { targets: ["MyApp"], configurations: ["Debug", "Release"] },
+        });
+      }
+      if (args?.includes("-showBuildSettings")) {
+        // CRLF endings must not leak a trailing \r into the parsed values.
+        return `    INFOPLIST_FILE = MyApp/Info.plist\r\n    PROJECT_DIR = ${dir}\r\n`;
+      }
+      return "";
+    });
+
+    const plist = await discoverInfoPlist({}, dir);
+    expect(plist).toEqual({
+      name: "MyApp",
+      bundleId: "com.xcbuild.app",
+      version: "4.2.0",
+      build: "7",
+    });
+    // Used the Release configuration.
+    expect(execMock).toHaveBeenCalledWith(
+      "xcodebuild",
+      expect.arrayContaining(["-configuration", "Release"]),
+      expect.anything()
+    );
+  });
+
+  test("returns null when there is no .xcodeproj", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rn-empty-"));
+    dirs.push(dir);
+    expect(await discoverInfoPlist({}, dir)).toBeNull();
+    expect(execMock).not.toHaveBeenCalled();
   });
 });
