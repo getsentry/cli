@@ -8,7 +8,9 @@
    headings fall back to Rubik for any missing glyphs (e.g. / * \ | ^ _ `). */
 @font-face {
   font-family: "Dammit Sans";
-  src: url("/fonts/dammit-sans-v0.3-bold.otf") format("opentype");
+  /* Relative URL so Vite bundles + hashes it and respects the site `base`
+     (root-absolute paths break under the PR-preview base, e.g. /_preview/pr-N). */
+  src: url("../fonts/dammit-sans-v0.3-bold.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
