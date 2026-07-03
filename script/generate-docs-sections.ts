@@ -498,12 +498,25 @@ const PLATFORM_ROWS: readonly [string, string, string][] = [
 /** Generate the platform support table for getting-started.mdx. */
 function generatePlatformSupport(): string {
   const lines: string[] = [
-    "| OS | Architectures | Notes |",
-    "|----|---------------|-------|",
+    "<table>",
+    "  <thead>",
+    "    <tr>",
+    "      <th>OS</th>",
+    "      <th>Architectures</th>",
+    "      <th>Notes</th>",
+    "    </tr>",
+    "  </thead>",
+    "  <tbody>",
   ];
   for (const [os, archs, notes] of PLATFORM_ROWS) {
-    lines.push(`| **${os}** | ${archs} | ${notes} |`);
+    lines.push("    <tr>");
+    lines.push(`      <td><strong>${os}</strong></td>`);
+    lines.push(`      <td>${archs}</td>`);
+    lines.push(`      <td>${notes}</td>`);
+    lines.push("    </tr>");
   }
+  lines.push("  </tbody>");
+  lines.push("</table>");
   return lines.join("\n");
 }
 
