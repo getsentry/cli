@@ -50,6 +50,23 @@ describe("getCommitLog pathspec argv", () => {
     expect(sepIdx).toBeGreaterThan(rangeIdx);
   });
 
+  test("adds --max-count when a positive depth is given", () => {
+    getCommitLog("/repo", { depth: 50 });
+    expect(lastGitArgs()).toContain("--max-count=50");
+  });
+
+  test("omits --max-count when depth is not provided (whole range)", () => {
+    getCommitLog("/repo", { from: "abc123" });
+    const args = lastGitArgs();
+    expect(args.some((a) => a.startsWith("--max-count="))).toBe(false);
+    expect(args).toContain("abc123..HEAD");
+  });
+
+  test("omits --max-count for a non-positive depth", () => {
+    getCommitLog("/repo", { depth: 0 });
+    expect(lastGitArgs().some((a) => a.startsWith("--max-count="))).toBe(false);
+  });
+
   test("parses NUL-delimited git output into commits", () => {
     execFileSyncMock.mockReturnValue(
       "abc\x00subject\x00Jane\x00jane@example.com\x002026-01-01T00:00:00Z"
