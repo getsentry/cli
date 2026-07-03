@@ -28,7 +28,10 @@ import { ContextError, ValidationError } from "../../lib/errors.js";
 import { mdKvTable, renderMarkdown } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
-import type { SourceMapReport } from "../../lib/react-native/wrap-call.js";
+import {
+  isSea,
+  type SourceMapReport,
+} from "../../lib/react-native/wrap-call.js";
 import {
   findHermesc,
   findNode,
@@ -185,6 +188,27 @@ async function fetchFromPackager(
   return { bundle, sourcemap };
 }
 
+/**
+ * Resolve the command RN should invoke in place of `NODE_BINARY`/`HERMES_CLI_PATH`.
+ *
+ * A SEA binary's `process.execPath` is the CLI itself. Under an npm install
+ * `process.execPath` is Node and `argv[1]` is the CLI script, so RN's
+ * `$NODE_BINARY <args>` would run plain Node and never re-enter the wrapper;
+ * generate a small shim that re-invokes the CLI instead. (macOS/Xcode only.)
+ */
+function resolveSelfInvocation(ctx: SentryContext, tempDir: string): string {
+  const execPath = ctx.process.execPath;
+  if (isSea()) {
+    return execPath;
+  }
+  const script = ctx.process.argv[1] ?? "";
+  const shim = join(tempDir, "sentry-rn-node.sh");
+  writeFileSync(shim, `#!/bin/sh\nexec "${execPath}" "${script}" "$@"\n`, {
+    mode: 0o755,
+  });
+  return shim;
+}
+
 /** Run the wrapped build and read the produced bundle/sourcemap paths. */
 function runWrappedBuild(
   script: string,
@@ -196,7 +220,7 @@ function runWrappedBuild(
   writeFileSync(reportPath, "{}");
   const node = findNode(ctx.env);
   const hermesc = findHermesc(ctx.env);
-  const self = ctx.process.execPath;
+  const self = resolveSelfInvocation(ctx, tempDir);
 
   const env: NodeJS.ProcessEnv = {
     ...ctx.env,

@@ -29,7 +29,7 @@ export type SourceMapReport = {
 };
 
 /** Whether this process is a Node Single Executable Application. */
-function isSea(): boolean {
+export function isSea(): boolean {
   try {
     const req = createRequire(import.meta.url);
     const sea = req("node:sea") as { isSea?: () => boolean };
