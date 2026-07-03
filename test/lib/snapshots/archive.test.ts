@@ -2,7 +2,13 @@
  * Tests for streaming snapshot archive extraction, including Zip-Slip protection.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { strToU8, zipSync } from "fflate";
@@ -82,5 +88,36 @@ describe("extractZipStream", () => {
 
     expect(count).toBe(1);
     expect(readFileSync(join(out, "big.png"), "utf8")).toBe(big);
+  });
+
+  test("extracts stored (uncompressed, method 0) entries", async () => {
+    const body = "A".repeat(4000);
+    // level: 0 → STORE, exercising the UnzipPassThrough decoder.
+    const zip = zipSync({ "img.png": [strToU8(body), { level: 0 }] });
+    const out = tempDir();
+
+    const count = await extractZipStream(streamOf(zip, 128), out);
+
+    expect(count).toBe(1);
+    expect(readFileSync(join(out, "img.png"), "utf8")).toBe(body);
+  });
+
+  test("surfaces a write error without emitting unhandled rejections", async () => {
+    const out = tempDir();
+    // Pre-create the entry's destination as a directory → write fails (EISDIR).
+    mkdirSync(join(out, "a.png"));
+    const zip = zipSync({ "a.png": strToU8("A"), "b.png": strToU8("B") });
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await expect(extractZipStream(streamOf(zip), out)).rejects.toThrow();
+      // Let any stray microtasks/timers surface a rejection if one leaked.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 });

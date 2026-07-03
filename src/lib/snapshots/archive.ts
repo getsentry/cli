@@ -36,10 +36,11 @@ function safeEntryDest(root: string, name: string): string | null {
 /**
  * Stream-extract a ZIP archive to a directory.
  *
- * Entries are decompressed and written to disk as their chunks arrive, so peak
- * memory is bounded by the in-flight entry rather than the archive size. Only
- * stored (0) and DEFLATE (8) entries are supported — the formats Sentry's
- * snapshot archives use.
+ * Entries are decompressed and written to disk as their chunks arrive rather
+ * than buffering the whole archive (or all decompressed entries) at once. Peak
+ * memory is bounded by the decompressed output of one source chunk plus the
+ * write stream's pending backlog — not the archive size. Only stored (0) and
+ * DEFLATE (8) entries are supported — the formats Sentry's snapshot archives use.
  *
  * @param chunks - The raw ZIP bytes as an async stream of chunks.
  * @param outDir - Destination directory (created if missing).
@@ -70,11 +71,19 @@ export async function extractZipStream(
 
     mkdirSync(dirname(dest), { recursive: true });
     const stream = createWriteStream(dest);
-    written += 1;
+    // Never reject: a write error mid-loop must not become an unhandled
+    // rejection (no handler is attached until Promise.all below). Record the
+    // first error and resolve; it is surfaced after all writes settle.
     writes.push(
-      new Promise<void>((resolveWrite, rejectWrite) => {
-        stream.on("finish", resolveWrite);
-        stream.on("error", rejectWrite);
+      new Promise<void>((resolveWrite) => {
+        stream.on("finish", () => {
+          written += 1;
+          resolveWrite();
+        });
+        stream.on("error", (err) => {
+          failure ??= err;
+          resolveWrite();
+        });
       })
     );
 
@@ -98,21 +107,26 @@ export async function extractZipStream(
   unzip.register(UnzipPassThrough);
 
   // Push chunks, flagging the last one by peeking one chunk ahead. Yielding to
-  // the event loop between pushes lets write streams flush (bounds memory).
+  // the event loop between pushes lets write streams flush.
   const iterator = chunks[Symbol.asyncIterator]();
-  let pushedAny = false;
-  let current = await iterator.next();
-  while (!current.done) {
-    const chunk = current.value;
-    current = await iterator.next();
-    unzip.push(chunk, current.done === true);
-    pushedAny = true;
-  }
-  if (!pushedAny) {
-    unzip.push(new Uint8Array(0), true);
+  try {
+    let pushedAny = false;
+    let current = await iterator.next();
+    while (!current.done) {
+      const chunk = current.value;
+      current = await iterator.next();
+      unzip.push(chunk, current.done === true);
+      pushedAny = true;
+    }
+    if (!pushedAny) {
+      unzip.push(new Uint8Array(0), true);
+    }
+    await Promise.all(writes);
+  } finally {
+    // Cancel the source (e.g. the HTTP body) so a partial read doesn't leak.
+    await iterator.return?.();
   }
 
-  await Promise.all(writes);
   if (failure) {
     throw failure;
   }
