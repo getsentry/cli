@@ -335,7 +335,11 @@ async function createProjectWithAutoTeamFallback(opts: {
  * The API rejects the resulting name/slug with a cryptic 400. Point them at
  * the variadic form instead.
  */
-function crammedNamesError(name: string, orgSlug: string, platform: string) {
+function crammedNamesError(
+  name: string,
+  orgSlug: string,
+  platform: string
+): CliError {
   const parts = name.trim().split(WHITESPACE_RE).filter(Boolean);
   return new CliError(
     `Failed to create project '${name}' in ${orgSlug}: that name isn't valid.\n\n` +
