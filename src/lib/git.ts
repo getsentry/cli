@@ -26,6 +26,17 @@ export type GitCommit = {
 };
 
 /**
+ * Upper bound on captured git stdout (100 MB).
+ *
+ * `execFileSync` defaults to a 1 MB `maxBuffer` and throws
+ * `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` once exceeded. Uncapped `git log`
+ * (e.g. `getCommitLog` with `--from` and no `--max-count`) can emit far more
+ * than 1 MB on a large `from..HEAD` range, so raise the limit to avoid
+ * crashing on big histories. ~200 bytes/commit → this allows ~500k commits.
+ */
+const GIT_MAX_BUFFER = 100 * 1024 * 1024;
+
+/**
  * Run a git command and return trimmed stdout.
  *
  * Uses `execFileSync` (no shell) to avoid shell injection risks.
@@ -41,6 +52,7 @@ function git(args: string[], cwd?: string): string {
     cwd,
     encoding: "utf-8",
     stdio: ["pipe", "pipe", "pipe"],
+    maxBuffer: GIT_MAX_BUFFER,
   }).trim();
 }
 

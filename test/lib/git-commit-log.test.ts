@@ -67,6 +67,15 @@ describe("getCommitLog pathspec argv", () => {
     expect(lastGitArgs().some((a) => a.startsWith("--max-count="))).toBe(false);
   });
 
+  // Uncapped `--from` ranges can emit >1 MB, so git() must raise maxBuffer
+  // above execFileSync's 1 MB default to avoid crashing on large histories.
+  test("passes a large maxBuffer to execFileSync", () => {
+    getCommitLog("/repo", { from: "abc123" });
+    const call = execFileSyncMock.mock.calls.at(-1);
+    const options = call?.[2] as { maxBuffer?: number } | undefined;
+    expect(options?.maxBuffer).toBeGreaterThanOrEqual(100 * 1024 * 1024);
+  });
+
   test("parses NUL-delimited git output into commits", () => {
     execFileSyncMock.mockReturnValue(
       "abc\x00subject\x00Jane\x00jane@example.com\x002026-01-01T00:00:00Z"
