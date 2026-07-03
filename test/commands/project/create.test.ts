@@ -835,6 +835,31 @@ describe("project create", () => {
     expect(output).toContain("node");
   });
 
+  test("dry-run: multi-project empty org previews one shared team", async () => {
+    listTeamsSpy.mockResolvedValue([]);
+    const { context, stdoutWrite } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(
+      context,
+      { json: false, "dry-run": true },
+      "web",
+      "api",
+      "worker",
+      "node"
+    );
+
+    // Dry-run never creates teams or projects.
+    expect(createTeamSpy).not.toHaveBeenCalled();
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+
+    // Every project previews the SAME team (first project's slug), matching a
+    // real run that creates one team and reuses it — not one team per project.
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).toContain("Would create team 'web'");
+    expect(output).not.toContain("Would create team 'api'");
+    expect(output).not.toContain("Would create team 'worker'");
+  });
+
   test("dry-run still validates platform", async () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();

@@ -526,15 +526,22 @@ async function createOneProject(opts: {
   platform: string;
   flags: CreateFlags;
   detectedFrom?: string;
+  /**
+   * Slug to use when auto-creating a team in an org with no teams. Shared
+   * across a multi-project batch so every project lands in (or previews) the
+   * one team the first project creates — rather than each resolving its own.
+   */
+  teamAutoCreateSlug?: string;
 }): Promise<ProjectCreatedResult> {
   const { orgSlug, name, platform, flags, detectedFrom } = opts;
   const expectedSlug = slugify(name);
+  const autoCreateSlug = opts.teamAutoCreateSlug ?? expectedSlug;
 
   if (flags["dry-run"]) {
     const team = await resolveDryRunTeam(orgSlug, {
       team: flags.team,
       detectedFrom,
-      autoCreateSlug: expectedSlug,
+      autoCreateSlug,
     });
     return {
       project: { id: "", slug: expectedSlug, name, platform },
@@ -559,7 +566,7 @@ async function createOneProject(opts: {
       team: flags.team,
       detectedFrom,
       usageHint: USAGE_HINT,
-      autoCreateSlug: expectedSlug,
+      autoCreateSlug,
     });
     teamSlug = team.slug;
     teamSource = team.source;
@@ -680,6 +687,11 @@ export const createCommand = buildCommand({
     }
     const orgSlug = resolved.org;
 
+    // If the org has no teams, the first project auto-creates one and the rest
+    // reuse it. Pin that team slug up front so a real run and a --dry-run
+    // preview agree (dry-run never actually creates the team).
+    const teamAutoCreateSlug = slugify(parsed[0]?.name ?? "");
+
     // Create sequentially so partial progress is visible and rate limits are
     // respected. A failure throws with an actionable message; projects created
     // before it remain created.
@@ -690,6 +702,7 @@ export const createCommand = buildCommand({
         platform,
         flags,
         detectedFrom: resolved.detectedFrom,
+        teamAutoCreateSlug,
       });
       yield new CommandOutput(result);
     }
