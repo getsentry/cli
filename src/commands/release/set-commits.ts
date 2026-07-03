@@ -445,10 +445,10 @@ export const setCommitsCommand = buildCommand({
 
     if (flags.local || paths.length > 0 || from) {
       // Explicit --local, or --path/--from (which imply local): local git only.
-      // An explicit --from range is self-bounding, so drop the depth cap and
+      // An explicit --from range is self-bounding, so pass depth 0 (no cap) to
       // read every commit in <ref>..HEAD; otherwise walk back --initial-depth.
       release = await setCommitsFromLocal(org, version, cwd, {
-        depth: from ? undefined : flags["initial-depth"],
+        depth: from ? 0 : flags["initial-depth"],
         paths,
         from,
       });

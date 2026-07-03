@@ -608,10 +608,10 @@ describe("release set-commits --from", () => {
 
     expect(setCommitsLocalSpy).toHaveBeenCalled();
     expect(setCommitsAutoSpy).not.toHaveBeenCalled();
-    // A range is self-bounding, so no depth cap is passed.
+    // A range is self-bounding, so depth 0 (no cap) is passed.
     expect(getCommitLogSpy).toHaveBeenCalledWith(
       repoRoot,
-      expect.objectContaining({ from: "HEAD~1", depth: undefined, paths: [] })
+      expect.objectContaining({ from: "HEAD~1", depth: 0, paths: [] })
     );
   });
 

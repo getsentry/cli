@@ -148,9 +148,11 @@ const NUL = "\x00";
  * @param cwd - Working directory
  * @param options - Log options
  * @param options.from - Only include commits after this ref (uses `from..HEAD`)
- * @param options.depth - Maximum number of commits to return. Omit (or pass a
- *   non-positive value) to read the whole range — appropriate when `from` is
- *   set, since a `from..HEAD` range is already self-bounding.
+ * @param options.depth - Maximum number of commits to return (default 20). Pass
+ *   a non-positive value (e.g. 0) to read the whole range without a cap —
+ *   appropriate when `from` is set, since a `from..HEAD` range is already
+ *   self-bounding. The default guards callers that omit it from accidentally
+ *   walking the entire history.
  * @param options.paths - Restrict the log to commits touching these pathspecs
  *   (appended after `--`). Use for monorepos to scope a release to one subtree.
  *   With `--max-count`, the depth bounds commits *matching* the paths.
@@ -160,7 +162,7 @@ export function getCommitLog(
   cwd?: string,
   options: { from?: string; depth?: number; paths?: string[] } = {}
 ): GitCommit[] {
-  const { from, depth, paths } = options;
+  const { from, depth = 20, paths } = options;
 
   // Reject option-like refs so a `from` such as "--format=x" can't be parsed
   // as a git option (arg injection). Git refs cannot start with "-" anyway.
@@ -177,10 +179,9 @@ export function getCommitLog(
   // %x00 is git's hex escape for NUL — avoids literal NUL in the command string
   const format = "%H%x00%s%x00%aN%x00%aE%x00%aI";
   const range = from ? `${from}..HEAD` : "HEAD";
-  // Only cap the commit count when a positive depth is provided. A `from..HEAD`
-  // range bounds itself, so range callers omit depth to read every commit.
-  const maxCount =
-    depth !== undefined && depth > 0 ? [`--max-count=${depth}`] : [];
+  // Only cap the commit count for a positive depth. A non-positive depth (used
+  // by range callers) reads the whole self-bounding `from..HEAD` range.
+  const maxCount = depth > 0 ? [`--max-count=${depth}`] : [];
   // Pathspecs go after `--`; each path is a discrete argv entry (no shell), so
   // there is no escaping/injection concern.
   const pathspec = paths && paths.length > 0 ? ["--", ...paths] : [];
