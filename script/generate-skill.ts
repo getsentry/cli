@@ -253,7 +253,7 @@ async function loadPrerequisites(): Promise<string> {
   lines.push("");
   lines.push("The CLI must be installed and authenticated before use.");
   lines.push("");
-  const installSection = extractSection(content, "Installation");
+  const installSection = extractSection(content, "Install Script");
   if (installSection) {
     lines.push(...generateInstallSection(installSection, rawContent));
   }
