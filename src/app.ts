@@ -35,6 +35,7 @@ import { listCommand as orgListCommand } from "./commands/org/list.js";
 import { proguardRoute } from "./commands/proguard/index.js";
 import { projectRoute } from "./commands/project/index.js";
 import { listCommand as projectListCommand } from "./commands/project/list.js";
+import { reactNativeRoute } from "./commands/react-native/index.js";
 import { releaseRoute } from "./commands/release/index.js";
 import { listCommand as releaseListCommand } from "./commands/release/list.js";
 import { replayRoute } from "./commands/replay/index.js";
@@ -109,6 +110,7 @@ export const routes = buildRouteMap({
     org: orgRoute,
     project: projectRoute,
     proguard: proguardRoute,
+    "react-native": reactNativeRoute,
     replay: replayRoute,
     release: releaseRoute,
     repo: repoRoute,
