@@ -7,6 +7,7 @@
  */
 
 import { readFile, stat } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { SentryContext } from "../../context.js";
 import {
   type CreateSnapshotResponse,
@@ -458,7 +459,9 @@ export const uploadCommand = buildCommand({
     },
   },
   async *func(this: SentryContext, flags: UploadFlags, path: string) {
-    const info = await stat(path).catch(() => null);
+    // Resolve against the command's cwd; the walker requires an absolute path.
+    const dir = resolve(this.cwd, path);
+    const info = await stat(dir).catch(() => null);
     if (!info?.isDirectory()) {
       throw new ValidationError(`Path is not a directory: ${path}`, "path");
     }
@@ -480,7 +483,7 @@ export const uploadCommand = buildCommand({
     }
     const vcs = collectVcs(flags, this.cwd, this.env);
 
-    const images = await collectImages(path);
+    const images = await collectImages(dir);
     if (images.length === 0) {
       yield new CommandOutput<SnapshotUploadResult>({
         imagesFound: 0,

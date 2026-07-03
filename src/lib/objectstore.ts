@@ -26,6 +26,11 @@ const EXPIRATION_HEADER = "x-sn-expiration";
 /** Matches one or more trailing slashes (for base-URL normalization). */
 const TRAILING_SLASHES = /\/+$/;
 
+/** Timeout for a HEAD existence check. */
+const HEAD_TIMEOUT_MS = 30_000;
+/** Timeout for uploading a single object. */
+const PUT_TIMEOUT_MS = 120_000;
+
 /**
  * Objectstore upload configuration, as returned (camelCase) by the Sentry
  * `snapshots/upload-options/` endpoint.
@@ -80,6 +85,7 @@ export async function objectExists(
   const response = await customFetch(url, {
     method: "HEAD",
     headers: authHeaders(config),
+    signal: AbortSignal.timeout(HEAD_TIMEOUT_MS),
   });
   if (response.status === 404) {
     return false;
@@ -117,6 +123,7 @@ export async function putObject(
       [EXPIRATION_HEADER]: config.expirationPolicy,
     },
     body,
+    signal: AbortSignal.timeout(PUT_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new ApiError(

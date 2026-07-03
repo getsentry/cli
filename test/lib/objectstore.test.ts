@@ -53,6 +53,7 @@ describe("objectExists", () => {
     );
     expect(init.method).toBe("HEAD");
     expect(init.headers["x-os-auth"]).toBe("Bearer jwt-token");
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
   test("returns false on a 404", async () => {
@@ -89,6 +90,7 @@ describe("putObject", () => {
     expect(init.headers["x-os-auth"]).toBe("Bearer jwt-token");
     expect(init.headers["x-sn-expiration"]).toBe("ttl:30d");
     expect(init.body).toBe(body);
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
   test("throws on a non-2xx response", async () => {

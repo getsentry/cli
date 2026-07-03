@@ -176,6 +176,17 @@ describe("snapshots upload", () => {
     ).rejects.toThrow(ValidationError);
   });
 
+  test("resolves a relative folder path against the command cwd", async () => {
+    await writeShots(); // creates <cwd>/shots
+    const harness = createContext(); // cwd === tmpDir
+    const func = await uploadCommand.loader();
+
+    await func.call(harness.context, { "app-id": "app" }, "shots");
+
+    expect(putSpy).toHaveBeenCalledTimes(2);
+    expect(createSpy).toHaveBeenCalledTimes(1);
+  });
+
   test("skips objects already present in objectstore", async () => {
     const dir = await writeShots();
     // First image already exists, second does not.
