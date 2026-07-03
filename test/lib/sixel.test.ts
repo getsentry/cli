@@ -111,6 +111,32 @@ describe("sixelBanner", () => {
     // sixel is emitted — the caller falls back to block art.
     expect(sixelBanner(200)).toBeUndefined();
   });
+
+  test("suppresses the image when opted out even with a TTY", () => {
+    const saved = {
+      stdout: process.stdout.isTTY,
+      stdin: process.stdin.isTTY,
+      noSixel: process.env.SENTRY_NO_SIXEL,
+    };
+    try {
+      // TTY on both ends, but SENTRY_NO_SIXEL forces opt-out: the emit-path
+      // guard must return undefined without emitting (and without probing).
+      process.stdout.isTTY = true;
+      process.stdin.isTTY = true;
+      process.env.SENTRY_NO_SIXEL = "1";
+      __resetSixelCache();
+      expect(sixelBanner(200)).toBeUndefined();
+    } finally {
+      process.stdout.isTTY = saved.stdout;
+      process.stdin.isTTY = saved.stdin;
+      if (saved.noSixel === undefined) {
+        delete process.env.SENTRY_NO_SIXEL;
+      } else {
+        process.env.SENTRY_NO_SIXEL = saved.noSixel;
+      }
+      __resetSixelCache();
+    }
+  });
 });
 
 describe("BANNER_SIXEL (generated)", () => {

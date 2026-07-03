@@ -198,6 +198,13 @@ export function detectSixelCaps(): SixelCaps {
 export function sixelBanner(
   columns: number = process.stdout.columns ?? 80
 ): string | undefined {
+  // Re-evaluate the cheap, I/O-free gates on every call. detectSixelCaps caches
+  // the probe result, so this ensures a later opt-out (NO_COLOR,
+  // SENTRY_PLAIN_OUTPUT, SENTRY_NO_SIXEL, or a non-TTY stream) still suppresses
+  // the image even if capabilities were cached as supported earlier.
+  if (optedOut()) {
+    return;
+  }
   const caps = detectSixelCaps();
   return sixelFits(caps, columns, BANNER_SIXEL.width)
     ? BANNER_SIXEL.data
