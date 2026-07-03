@@ -114,6 +114,26 @@ describe("react-native gradle", () => {
     }
   });
 
+  test("threads --wait / --wait-for into the upload", async () => {
+    const func = await gradleCommand.loader();
+
+    await func.call(createContext().context, { bundle, sourcemap });
+    expect(uploadSpy.mock.calls[0][0]).toMatchObject({ wait: false });
+
+    await func.call(createContext().context, { bundle, sourcemap, wait: true });
+    expect(uploadSpy.mock.calls[1][0]).toMatchObject({ wait: true });
+
+    await func.call(createContext().context, {
+      bundle,
+      sourcemap,
+      "wait-for": 30,
+    });
+    expect(uploadSpy.mock.calls[2][0]).toMatchObject({
+      wait: true,
+      maxWaitMs: 30_000,
+    });
+  });
+
   test("rejects a missing bundle", async () => {
     const func = await gradleCommand.loader();
     await expect(

@@ -6,9 +6,34 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   buildArtifactBundle,
   ChunkServerOptionsSchema,
+  DEFAULT_UPLOAD_MAX_WAIT_MS,
   encodeChunk,
   pickUploadEncoding,
+  resolveUploadWait,
 } from "../../../src/lib/api/sourcemaps.js";
+
+describe("resolveUploadWait", () => {
+  test("no flags → do not wait, default cap", () => {
+    expect(resolveUploadWait({})).toEqual({
+      wait: false,
+      maxWaitMs: DEFAULT_UPLOAD_MAX_WAIT_MS,
+    });
+  });
+
+  test("--wait → wait with default cap", () => {
+    expect(resolveUploadWait({ wait: true })).toEqual({
+      wait: true,
+      maxWaitMs: DEFAULT_UPLOAD_MAX_WAIT_MS,
+    });
+  });
+
+  test("--wait-for <secs> → wait with a custom cap (enables waiting)", () => {
+    expect(resolveUploadWait({ "wait-for": 45 })).toEqual({
+      wait: true,
+      maxWaitMs: 45_000,
+    });
+  });
+});
 
 describe("pickUploadEncoding", () => {
   test("prefers zstd when both zstd and gzip are advertised", () => {

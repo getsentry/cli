@@ -33,9 +33,10 @@ Upload React Native sourcemaps (Xcode build step)
 - `--fetch-from <value> - Packager URL to fetch from (default: http://127.0.0.1:8081/)`
 - `--build-script <value> - Path to the react-native-xcode.sh build script`
 - `--dist <value>... - Distribution(s) to publish (repeatable)`
-- `--wait - Accepted for compatibility (the CLI always waits for assembly)`
-- `--wait-for <value> - Accepted for compatibility (the CLI always waits for assembly)`
+- `--wait - Wait for the server to fully process the uploaded files`
+- `--wait-for <value> - Wait for processing, but at most this many seconds`
 - `--no-auto-release - Don't read the release from Xcode project files`
+- `--allow-xcode-infoplist-preprocessing - Run the C preprocessor over Info.plist (INFOPLIST_PREPROCESS)`
 
 **Examples:**
 

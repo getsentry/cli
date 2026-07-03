@@ -6,8 +6,16 @@
  * release/distribution from the build environment or the project `Info.plist`.
  */
 
+import { execFileSync } from "node:child_process";
+import { readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { logger } from "../logger.js";
+
+const log = logger.withTag("react-native.xcode-env");
+
+/** Matches runs of whitespace (splitting preprocessor flag/definition tokens). */
+const WHITESPACE = /\s+/;
 
 /** Bundle identity extracted from an `Info.plist` or the build environment. */
 export type InfoPlist = {
@@ -121,50 +129,243 @@ function plistComplete(p: Partial<InfoPlist>): p is InfoPlist {
   return Boolean(p.name && p.bundleId && p.version && p.build);
 }
 
-/**
- * Discover the app's bundle identity from the Xcode build environment.
- *
- * Handles the common case of running inside an Xcode build phase
- * (`XCODE_VERSION_ACTUAL` set): reads `INFOPLIST_FILE` (expanding `$(VAR)`
- * references from the environment) and falls back to build-setting env vars.
- * Returns `null` when the identity cannot be determined.
- *
- * Not supported (returns `null` / falls back): `INFOPLIST_PREPROCESS` C
- * preprocessing, and discovery via `xcodebuild` when run outside Xcode.
- */
-export async function discoverInfoPlist(
-  env: Env,
-  cwd: string
-): Promise<InfoPlist | null> {
-  if (!env.XCODE_VERSION_ACTUAL) {
+/** Run a command, returning stdout or `null` if it fails / is unavailable. */
+function runCapture(cmd: string, args: string[]): string | null {
+  try {
+    return execFileSync(cmd, args, {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch (err) {
+    log.debug(`${cmd} invocation failed`, err);
     return null;
   }
-  const filename = env.INFOPLIST_FILE;
-  if (!filename) {
-    return fromEnvVars(env);
-  }
-  const path = join(cwd, env.PROJECT_DIR ?? ".", filename);
-  let raw: Record<string, string>;
-  try {
-    raw = parseInfoPlistStrings(await readFile(path, "utf-8"));
-  } catch {
-    return fromEnvVars(env);
-  }
-  const parsed: Partial<InfoPlist> = {
+}
+
+/** Extract the four CFBundle* fields from a parsed plist string map. */
+function toPartialPlist(raw: Record<string, string>): Partial<InfoPlist> {
+  return {
     name: raw.CFBundleName,
     bundleId: raw.CFBundleIdentifier,
     version: raw.CFBundleShortVersionString,
     build: raw.CFBundleVersion,
   };
-  if (!plistComplete(parsed)) {
-    return fromEnvVars(env);
+}
+
+/**
+ * Run the C preprocessor over an `Info.plist` (`INFOPLIST_PREPROCESS=YES`),
+ * mirroring the legacy `cc -xc -P -E` invocation with the project's
+ * preprocessor flags/definitions. Returns the parsed strings or `null`.
+ */
+function preprocessPlist(
+  path: string,
+  vars: Env
+): Record<string, string> | null {
+  const args = ["-xc", "-P", "-E"];
+  const other = vars.INFOPLIST_OTHER_PREPROCESSOR_FLAGS;
+  if (other) {
+    args.push(...other.split(WHITESPACE).filter(Boolean));
+  }
+  const defs = vars.INFOPLIST_PREPROCESSOR_DEFINITIONS;
+  if (defs) {
+    for (const token of defs.split(WHITESPACE).filter(Boolean)) {
+      args.push(`-D${token}`);
+    }
+  }
+  args.push(path);
+  const out = runCapture("cc", args);
+  return out ? parseInfoPlistStrings(out) : null;
+}
+
+/**
+ * Load an `Info.plist` and expand its build-setting variables.
+ *
+ * When `allowPreprocessing` is set and `INFOPLIST_PREPROCESS=YES`, the plist is
+ * run through `cc` first (some project templates use `#include`/macros). Falls
+ * back to build-setting env vars when the plist is missing or incomplete (e.g.
+ * the storyboard-only partial `Info.plist` newer Xcode templates emit).
+ */
+async function loadAndProcess(
+  path: string,
+  vars: Env,
+  allowPreprocessing: boolean
+): Promise<InfoPlist | null> {
+  const shouldPreprocess =
+    allowPreprocessing && vars.INFOPLIST_PREPROCESS === "YES";
+  let raw: Record<string, string> | null = null;
+  if (shouldPreprocess) {
+    raw = preprocessPlist(path, vars);
+  } else {
+    try {
+      raw = parseInfoPlistStrings(await readFile(path, "utf-8"));
+    } catch (err) {
+      log.debug("Could not read Info.plist", err);
+    }
+  }
+  const parsed = raw ? toPartialPlist(raw) : {};
+  const base = plistComplete(parsed) ? parsed : fromEnvVars(vars);
+  if (!base) {
+    return null;
   }
   return {
-    name: expandXcodeVars(parsed.name, env),
-    bundleId: expandXcodeVars(parsed.bundleId, env),
-    version: expandXcodeVars(parsed.version, env),
-    build: expandXcodeVars(parsed.build, env),
+    name: expandXcodeVars(base.name, vars),
+    bundleId: expandXcodeVars(base.bundleId, vars),
+    version: expandXcodeVars(base.version, vars),
+    build: expandXcodeVars(base.build, vars),
   };
+}
+
+/** Minimal `xcodebuild -list` project info. */
+type XcodeProjectInfo = {
+  path: string;
+  targets: string[];
+  configurations: string[];
+};
+
+/** Locate a single `.xcodeproj` under `cwd` and read its targets/configs. */
+function getXcodeProjectInfo(cwd: string): XcodeProjectInfo | null {
+  let projectPath: string | null = null;
+  if (cwd.endsWith(".xcodeproj")) {
+    projectPath = cwd;
+  } else {
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(cwd);
+    } catch (err) {
+      log.debug("Could not read directory for .xcodeproj discovery", err);
+      return null;
+    }
+    const projects = entries
+      .filter((name) => name.endsWith(".xcodeproj"))
+      .map((name) => join(cwd, name));
+    if (projects.length === 1) {
+      projectPath = projects[0] ?? null;
+    }
+  }
+  if (!projectPath) {
+    return null;
+  }
+  const out = runCapture("xcodebuild", [
+    "-list",
+    "-json",
+    "-project",
+    projectPath,
+  ]);
+  if (!out) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(out) as {
+      project?: { targets?: string[]; configurations?: string[] };
+    };
+    if (!parsed.project) {
+      return null;
+    }
+    return {
+      path: resolve(projectPath),
+      targets: parsed.project.targets ?? [],
+      configurations: parsed.project.configurations ?? [],
+    };
+  } catch (err) {
+    log.debug("Malformed xcodebuild -list JSON", err);
+    return null;
+  }
+}
+
+/** Parse `xcodebuild -showBuildSettings` output into a build-var map. */
+function getBuildVars(
+  projectPath: string,
+  target: string,
+  configuration: string
+): Record<string, string> {
+  const out = runCapture("xcodebuild", [
+    "-showBuildSettings",
+    "-project",
+    projectPath,
+    "-target",
+    target,
+    "-configuration",
+    configuration,
+  ]);
+  const vars: Record<string, string> = {};
+  if (!out) {
+    return vars;
+  }
+  for (const line of out.split("\n")) {
+    if (!line.startsWith("    ")) {
+      continue;
+    }
+    const suffix = line.slice(4);
+    const idx = suffix.indexOf(" = ");
+    if (idx > 0) {
+      vars[suffix.slice(0, idx)] = suffix.slice(idx + 3);
+    }
+  }
+  return vars;
+}
+
+/** Case-insensitive lookup of a configuration name. */
+function findConfiguration(
+  pi: XcodeProjectInfo,
+  name: string
+): string | undefined {
+  const lower = name.toLowerCase();
+  return pi.configurations.find((cfg) => cfg.toLowerCase() === lower);
+}
+
+/** Resolve the Info.plist for the project's first target (release, else debug). */
+async function fromProjectInfo(
+  pi: XcodeProjectInfo,
+  allowPreprocessing: boolean
+): Promise<InfoPlist | null> {
+  const config =
+    findConfiguration(pi, "release") ?? findConfiguration(pi, "debug");
+  const target = pi.targets[0];
+  if (!(config && target)) {
+    return null;
+  }
+  const vars = getBuildVars(pi.path, target, config);
+  const infoPlistFile = vars.INFOPLIST_FILE;
+  if (!infoPlistFile) {
+    return null;
+  }
+  const base = vars.PROJECT_DIR ?? dirname(pi.path);
+  return await loadAndProcess(
+    join(base, infoPlistFile),
+    vars,
+    allowPreprocessing
+  );
+}
+
+/**
+ * Discover the app's bundle identity from the Xcode build environment.
+ *
+ * When run inside an Xcode build phase (`XCODE_VERSION_ACTUAL` set), reads
+ * `INFOPLIST_FILE` (expanding `$(VAR)` references and, if requested, running the
+ * C preprocessor) and falls back to build-setting env vars. Otherwise, locates
+ * a single `.xcodeproj` and queries `xcodebuild` for the first target's
+ * settings. Returns `null` when the identity cannot be determined.
+ *
+ * @param allowPreprocessing - Permit `cc`-based `INFOPLIST_PREPROCESS` handling.
+ */
+export async function discoverInfoPlist(
+  env: Env,
+  cwd: string,
+  allowPreprocessing = false
+): Promise<InfoPlist | null> {
+  if (env.XCODE_VERSION_ACTUAL) {
+    const filename = env.INFOPLIST_FILE;
+    if (!filename) {
+      return fromEnvVars(env);
+    }
+    const path = join(cwd, env.PROJECT_DIR ?? ".", filename);
+    return await loadAndProcess(path, env, allowPreprocessing);
+  }
+  const pi = getXcodeProjectInfo(cwd);
+  if (!pi) {
+    return null;
+  }
+  return await fromProjectInfo(pi, allowPreprocessing);
 }
 
 /** A resolved release + distribution for the sourcemap upload. */
@@ -186,7 +387,8 @@ export type ReleaseAndDist = {
 export async function resolveReleaseAndDist(
   env: Env,
   cwd: string,
-  noAutoRelease: boolean
+  noAutoRelease: boolean,
+  allowPreprocessing = false
 ): Promise<ReleaseAndDist> {
   const distEnv = env.SENTRY_DIST;
   const releaseEnv = env.SENTRY_RELEASE;
@@ -198,7 +400,7 @@ export async function resolveReleaseAndDist(
     return { release: releaseEnv, dist: distEnv };
   }
 
-  const plist = await discoverInfoPlist(env, cwd);
+  const plist = await discoverInfoPlist(env, cwd, allowPreprocessing);
   if (!plist) {
     throw new Error(
       "Could not determine release: set SENTRY_RELEASE/SENTRY_DIST, run from " +

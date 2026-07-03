@@ -22,7 +22,10 @@ import { basename, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { SentryContext } from "../../context.js";
 import type { ArtifactFile } from "../../lib/api/sourcemaps.js";
-import { uploadSourcemaps } from "../../lib/api/sourcemaps.js";
+import {
+  resolveUploadWait,
+  uploadSourcemaps,
+} from "../../lib/api/sourcemaps.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { mdKvTable, renderMarkdown } from "../../lib/formatters/markdown.js";
@@ -59,6 +62,7 @@ type XcodeFlags = {
   wait?: boolean;
   "wait-for"?: number;
   "no-auto-release"?: boolean;
+  "allow-xcode-infoplist-preprocessing"?: boolean;
 };
 
 /** Structured result for the xcode command. */
@@ -330,7 +334,8 @@ async function uploadPair(
   const { release, dist } = await resolveReleaseAndDist(
     ctx.env,
     ctx.cwd,
-    flags["no-auto-release"] ?? false
+    flags["no-auto-release"] ?? false,
+    flags["allow-xcode-infoplist-preprocessing"] ?? false
   );
   // Explicit --dist overrides the environment/plist-derived distribution.
   let dists: string[] = [];
@@ -340,14 +345,23 @@ async function uploadPair(
     dists = [dist];
   }
 
+  const { wait, maxWaitMs } = resolveUploadWait(flags);
   let uploads = 0;
   if (dists.length > 0) {
     for (const d of dists) {
-      await uploadSourcemaps({ org, project, release, dist: d, files });
+      await uploadSourcemaps({
+        org,
+        project,
+        release,
+        dist: d,
+        files,
+        wait,
+        maxWaitMs,
+      });
       uploads += 1;
     }
   } else {
-    await uploadSourcemaps({ org, project, release, files });
+    await uploadSourcemaps({ org, project, release, files, wait, maxWaitMs });
     uploads = 1;
   }
   return { debugId, release, dist: dists, uploads };
@@ -411,9 +425,9 @@ export const xcodeCommand = buildCommand({
       "`--allow-fetch` they are fetched from the packager; in a debug build " +
       "the script simply runs.\n\n" +
       "Release/distribution come from `SENTRY_RELEASE`/`SENTRY_DIST` or the " +
-      "app Info.plist (unless `--no-auto-release`). The CLI always waits for " +
-      "server-side assembly; `--wait`/`--wait-for` are accepted for " +
-      "compatibility.",
+      "app Info.plist (unless `--no-auto-release`); outside an Xcode build the " +
+      "release is discovered via `xcodebuild`. Use `--wait`/`--wait-for` to " +
+      "block until the server finishes processing the upload.",
   },
   auth: false,
   output: {
@@ -452,18 +466,23 @@ export const xcodeCommand = buildCommand({
       },
       wait: {
         kind: "boolean",
-        brief: "Accepted for compatibility (the CLI always waits for assembly)",
+        brief: "Wait for the server to fully process the uploaded files",
         optional: true,
       },
       "wait-for": {
         kind: "parsed",
         parse: Number,
-        brief: "Accepted for compatibility (the CLI always waits for assembly)",
+        brief: "Wait for processing, but at most this many seconds",
         optional: true,
       },
       "no-auto-release": {
         kind: "boolean",
         brief: "Don't read the release from Xcode project files",
+        optional: true,
+      },
+      "allow-xcode-infoplist-preprocessing": {
+        kind: "boolean",
+        brief: "Run the C preprocessor over Info.plist (INFOPLIST_PREPROCESS)",
         optional: true,
       },
     },
