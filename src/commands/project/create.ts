@@ -472,7 +472,21 @@ function parseNames(rawNames: readonly string[]): {
   explicitOrg?: string;
   parsed: ParsedName[];
 } {
-  const parsed: ParsedName[] = rawNames.map((raw) => {
+  // Also accept comma-separated names within a single argument, matching the
+  // CLI's multi-value flag convention (`--features a,b`, set-commits `--path
+  // a,b`, `auth login --scope a,b`). So `create a,b c node` == `create a b c
+  // node`. Commas are never valid in a slug, so this is unambiguous.
+  const names = rawNames.flatMap((raw) =>
+    raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+  if (names.length === 0) {
+    throw new ContextError("Project name", USAGE_HINT, []);
+  }
+
+  const parsed: ParsedName[] = names.map((raw) => {
     const p = parseOrgProjectArg(raw);
     switch (p.type) {
       case "explicit":
@@ -600,14 +614,16 @@ export const createCommand = buildCommand({
       "Create Sentry projects in an organization.\n\n" +
       "Names support org/name syntax to specify the organization explicitly.\n" +
       "If omitted, the org is auto-detected from config defaults.\n\n" +
-      "Create several projects at once by passing multiple names — the platform\n" +
-      "is the trailing argument (or --platform). All names share one org.\n\n" +
+      "Create several projects at once by passing multiple names, separated by\n" +
+      "spaces or commas — the platform is the trailing argument (or --platform).\n" +
+      "All names share one org.\n\n" +
       "Projects are created under a team. If the org has one team, it is used\n" +
       "automatically. If no teams exist, one is created. Otherwise, specify --team.\n\n" +
       "Examples:\n" +
       "  sentry project create my-app node\n" +
       "  sentry project create acme-corp/my-app javascript-nextjs\n" +
       "  sentry project create web api worker node\n" +
+      "  sentry project create web,api,worker node\n" +
       "  sentry project create web api worker --platform node\n" +
       "  sentry project create my-app python-django --team backend\n" +
       "  sentry project create my-app go --json",

@@ -751,6 +751,21 @@ describe("project create", () => {
     }
   });
 
+  test("creates multiple projects from comma-separated names", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "web,api", "worker", "node");
+
+    expect(createProjectWithDsnSpy).toHaveBeenCalledTimes(3);
+    for (const name of ["web", "api", "worker"]) {
+      expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+        "acme-corp",
+        "engineering",
+        { name, platform: "node" }
+      );
+    }
+  });
+
   test("takes platform from --platform flag with multiple names", async () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
