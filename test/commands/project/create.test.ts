@@ -638,7 +638,9 @@ describe("project create", () => {
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(ContextError);
     expect(err.message).toContain("Project name is required");
-    expect(err.message).toContain("sentry project create <name>");
+    expect(err.message).toContain(
+      "sentry project create [<org>/]<name...> <platform>"
+    );
   });
 
   test("shows helpful error when platform is missing", async () => {

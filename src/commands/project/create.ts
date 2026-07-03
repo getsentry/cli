@@ -310,11 +310,7 @@ async function createProjectWithAutoTeamFallback(opts: {
         );
       }
       if (expError.status === 409) {
-        const slug = slugify(name);
-        throw new CliError(
-          `A project named '${name}' already exists in ${orgSlug}.\n\n` +
-            `View it: sentry project view ${orgSlug}/${slug}`
-        );
+        throw projectExistsError(orgSlug, name);
       }
       if (expError.status === 400 && WHITESPACE_RE.test(name)) {
         throw crammedNamesError(name, orgSlug, platform);
@@ -353,6 +349,19 @@ function crammedNamesError(
   );
 }
 
+/**
+ * A project with this name already exists in the org (HTTP 409). Shared by the
+ * team-scoped and org-scoped fallback create paths so the "already exists"
+ * message and the `project view` hint stay in one place.
+ */
+function projectExistsError(orgSlug: string, name: string): CliError {
+  const slug = slugify(name);
+  return new CliError(
+    `A project named '${name}' already exists in ${orgSlug}.\n\n` +
+      `View it: sentry project view ${orgSlug}/${slug}`
+  );
+}
+
 type CreateProjectOpts = {
   orgSlug: string;
   teamSlug: string;
@@ -371,11 +380,7 @@ async function handleCreateApiError(
 ): Promise<never> {
   const { orgSlug, name, platform } = opts;
   if (error.status === 409) {
-    const slug = slugify(name);
-    throw new CliError(
-      `A project named '${name}' already exists in ${orgSlug}.\n\n` +
-        `View it: sentry project view ${orgSlug}/${slug}`
-    );
+    throw projectExistsError(orgSlug, name);
   }
   if (error.status === 400 && isPlatformError(error)) {
     throw new CliError(buildPlatformError(`${orgSlug}/${name}`, platform));
@@ -430,14 +435,9 @@ function resolvePlatformAndNames(
   args: readonly string[]
 ): { platform: string; names: string[] } {
   if (args.length === 0) {
-    throw new ContextError(
-      "Project name",
-      "sentry project create <name> <platform>",
-      [
-        `Use org/name syntax: ${USAGE_HINT}`,
-        "Create several at once: sentry project create web api worker <platform>",
-      ]
-    );
+    throw new ContextError("Project name", USAGE_HINT, [
+      "Create several at once: sentry project create web api worker <platform>",
+    ]);
   }
 
   // Platform via flag → every positional is a name.
@@ -512,7 +512,8 @@ function parseNames(rawNames: readonly string[]): {
   if (orgs.size > 1) {
     throw new ValidationError(
       `Cannot create projects across multiple organizations (${[...orgs].join(", ")}).\n\n` +
-        "All names must belong to the same org."
+        "All names must belong to the same org.",
+      "organization"
     );
   }
   const [explicitOrg] = orgs;
