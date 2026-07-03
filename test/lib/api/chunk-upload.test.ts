@@ -6,8 +6,21 @@
  * (backward compatibility), and present values must be carried through.
  */
 
-import { describe, expect, test } from "vitest";
-import { ChunkServerOptionsSchema } from "../../../src/lib/api/chunk-upload.js";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  ChunkServerOptionsSchema,
+  pollAssembly,
+} from "../../../src/lib/api/chunk-upload.js";
+import { apiRequestToRegion } from "../../../src/lib/api/infrastructure.js";
+
+vi.mock("../../../src/lib/api/infrastructure.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../../src/lib/api/infrastructure.js")
+    >();
+  return { ...actual, apiRequestToRegion: vi.fn() };
+});
+const apiMock = vi.mocked(apiRequestToRegion);
 
 const BASE = {
   url: "https://us.sentry.io/api/0/chunk-upload/",
@@ -40,5 +53,47 @@ describe("ChunkServerOptionsSchema", () => {
       expect(result.data.maxFileSize).toBe(2_147_483_648);
       expect(result.data.maxWait).toBe(300);
     }
+  });
+});
+
+describe("pollAssembly: waitForOk", () => {
+  const params = {
+    regionUrl: "https://us.sentry.io",
+    endpoint: "org/artifactbundle/assemble/",
+    body: {},
+    entityName: "Artifact bundle",
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    apiMock.mockReset();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("default (waitForOk=false) returns as soon as state is 'created'", async () => {
+    apiMock.mockResolvedValue({
+      data: { state: "created" },
+    } as unknown as Awaited<ReturnType<typeof apiRequestToRegion>>);
+    const promise = pollAssembly(params);
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(promise).resolves.toBeUndefined();
+    expect(apiMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("waitForOk=true keeps polling through 'created' until 'ok'", async () => {
+    apiMock
+      .mockResolvedValueOnce({
+        data: { state: "created" },
+      } as unknown as Awaited<ReturnType<typeof apiRequestToRegion>>)
+      .mockResolvedValueOnce({
+        data: { state: "ok" },
+      } as unknown as Awaited<ReturnType<typeof apiRequestToRegion>>);
+    const promise = pollAssembly({ ...params, waitForOk: true });
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(promise).resolves.toBeUndefined();
+    expect(apiMock).toHaveBeenCalledTimes(2);
   });
 });

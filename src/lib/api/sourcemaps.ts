@@ -19,7 +19,7 @@
 import { readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError } from "../errors.js";
+import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import { type ZipCompression, ZipWriter } from "../sourcemap/zip.js";
 import {
@@ -123,6 +123,12 @@ export function resolveUploadWait(flags: {
   "wait-for"?: number;
 }): { wait: boolean; maxWaitMs: number } {
   const waitFor = flags["wait-for"];
+  if (waitFor !== undefined && (!Number.isFinite(waitFor) || waitFor <= 0)) {
+    throw new ValidationError(
+      "--wait-for must be a positive number of seconds.",
+      "wait-for"
+    );
+  }
   return {
     wait: flags.wait === true || waitFor !== undefined,
     maxWaitMs:

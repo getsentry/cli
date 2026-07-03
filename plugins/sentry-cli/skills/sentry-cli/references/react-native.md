@@ -20,8 +20,8 @@ Upload a React Native bundle + sourcemap (Gradle build step)
 - `--bundle <value> - Path to the bundle to upload`
 - `--release <value> - Release version to publish to`
 - `--dist <value>... - Distribution(s) to publish (repeatable; requires --release)`
-- `--wait - Accepted for compatibility (the CLI always waits for assembly)`
-- `--wait-for <value> - Accepted for compatibility (the CLI always waits for assembly)`
+- `--wait - Wait for the server to fully process the uploaded files`
+- `--wait-for <value> - Wait for processing, but at most this many seconds`
 
 ### `sentry react-native xcode <script-arg...>`
 

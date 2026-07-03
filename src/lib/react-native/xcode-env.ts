@@ -331,7 +331,7 @@ async function fromProjectInfo(
   }
   const base = vars.PROJECT_DIR ?? dirname(pi.path);
   return await loadAndProcess(
-    join(base, infoPlistFile),
+    resolve(base, infoPlistFile),
     vars,
     allowPreprocessing
   );
@@ -358,7 +358,7 @@ export async function discoverInfoPlist(
     if (!filename) {
       return fromEnvVars(env);
     }
-    const path = join(cwd, env.PROJECT_DIR ?? ".", filename);
+    const path = resolve(cwd, env.PROJECT_DIR ?? ".", filename);
     return await loadAndProcess(path, env, allowPreprocessing);
   }
   const pi = getXcodeProjectInfo(cwd);

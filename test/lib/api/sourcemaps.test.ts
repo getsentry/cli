@@ -33,6 +33,16 @@ describe("resolveUploadWait", () => {
       maxWaitMs: 45_000,
     });
   });
+
+  test.each([
+    Number.NaN,
+    0,
+    -5,
+  ])("rejects a non-positive --wait-for (%s)", (value) => {
+    expect(() => resolveUploadWait({ "wait-for": value })).toThrow(
+      /positive number of seconds/
+    );
+  });
 });
 
 describe("pickUploadEncoding", () => {

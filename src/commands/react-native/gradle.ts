@@ -161,13 +161,13 @@ export const gradleCommand = buildCommand({
       },
       wait: {
         kind: "boolean",
-        brief: "Accepted for compatibility (the CLI always waits for assembly)",
+        brief: "Wait for the server to fully process the uploaded files",
         optional: true,
       },
       "wait-for": {
         kind: "parsed",
         parse: Number,
-        brief: "Accepted for compatibility (the CLI always waits for assembly)",
+        brief: "Wait for processing, but at most this many seconds",
         optional: true,
       },
     },
