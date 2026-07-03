@@ -208,6 +208,46 @@ describe("release set-commits --commit", () => {
   });
 });
 
+describe("release set-commits --clear", () => {
+  let setCommitsWithRefsSpy: ReturnType<typeof spyOn>;
+  let resolveOrgSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    setCommitsWithRefsSpy = vi.spyOn(apiClient, "setCommitsWithRefs");
+    resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
+  });
+
+  afterEach(() => {
+    setCommitsWithRefsSpy.mockRestore();
+    resolveOrgSpy.mockRestore();
+  });
+
+  // The server only clears commits when it receives an explicitly-empty
+  // `refs` array; an empty `commits` list silently no-ops. This guards
+  // against regressing back to the `updateRelease({ commits: [] })` path.
+  test("sends an empty refs array to clear commits", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+    setCommitsWithRefsSpy.mockResolvedValue(sampleRelease);
+
+    const { context } = createMockContext();
+    const func = await setCommitsCommand.loader();
+    await func.call(
+      context,
+      {
+        auto: false,
+        local: false,
+        clear: true,
+        commit: undefined,
+        "initial-depth": 20,
+        json: true,
+      },
+      "1.0.0"
+    );
+
+    expect(setCommitsWithRefsSpy).toHaveBeenCalledWith("my-org", "1.0.0", []);
+  });
+});
+
 describe("release set-commits --auto", () => {
   let setCommitsAutoSpy: ReturnType<typeof spyOn>;
   let resolveOrgSpy: ReturnType<typeof spyOn>;
