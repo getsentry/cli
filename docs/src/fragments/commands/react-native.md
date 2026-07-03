@@ -12,7 +12,31 @@ sentry react-native gradle \
   --sourcemap index.android.bundle.map \
   --release com.example.app@1.0.0 \
   --dist 1000
+
+# Xcode build phase (usually added automatically to your build script)
+../node_modules/.bin/sentry-cli react-native xcode
 ```
+
+## Xcode build step (`react-native xcode`)
+
+`react-native xcode` runs inside an Xcode "Bundle React Native code and images"
+build phase. It has three modes:
+
+- **release build** — wraps the RN build script (standing in for
+  `NODE_BINARY`/`HERMES_CLI_PATH`) to capture the produced bundle + sourcemap
+  (including the Hermes combined sourcemap), then uploads them.
+- **simulator build with `--allow-fetch`** — downloads the bundle + sourcemap
+  from the running packager, then uploads.
+- **debug build** — just runs the build script.
+
+Release/distribution come from `SENTRY_RELEASE`/`SENTRY_DIST` or the app's
+`Info.plist` (`<CFBundleIdentifier>@<CFBundleShortVersionString>+<CFBundleVersion>`),
+unless `--no-auto-release` is set. Pass extra build-script arguments after the
+flags.
+
+Limitations vs. the legacy CLI: `Info.plist` C preprocessing
+(`INFOPLIST_PREPROCESS`) and `xcodebuild`-based discovery outside an Xcode build
+are not supported — set `SENTRY_RELEASE`/`SENTRY_DIST` in those cases.
 
 ## Important Notes
 
