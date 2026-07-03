@@ -3,6 +3,24 @@
    Base theme provided by @sentry/starlight-theme
    ========================================================================== */
 
+/* Brand fonts: Rubik (body) + Dammit Sans (headings) + JetBrains Mono (code).
+   Dammit Sans is a self-hosted display face with a limited glyph set, so
+   headings fall back to Rubik for any missing glyphs (e.g. / * \ | ^ _ `). */
+@font-face {
+  font-family: "Dammit Sans";
+  src: url("/fonts/dammit-sans-v0.3-bold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Headings use the Dammit Sans display font; body/code are unaffected. */
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6):not(:where(.not-content *)),
+.page-title-wrapper h1,
+.hero h1 {
+  font-family: var(--sl-font-headings);
+}
+
 :root,
 :root[data-theme="dark"],
 :root[data-theme="light"] {
@@ -10,8 +28,10 @@
   /* Sentry brand purple (#7553FF), the mid-anchor of the CLI banner gradient */
   --sl-color-accent-rgb: 117 83 255;
 
-  /* CLI uses Inter + JetBrains Mono */
-  --sl-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* Rubik (body) + Dammit Sans (headings) + JetBrains Mono (code) */
+  --sl-font: "Rubik", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --sl-font-headings: "Dammit Sans", "Rubik", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
   --sl-font-mono: "JetBrains Mono", ui-monospace, monospace;
 
   /* Match the original CLI docs header sizing. */
