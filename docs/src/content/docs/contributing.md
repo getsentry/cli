@@ -59,7 +59,7 @@ cli/
 │   │   ├── code-mappings/# upload
 │   │   ├── dart-symbol-map/# upload
 │   │   ├── dashboard/   # add, create, delete, edit, list, restore, revisions, view
-│   │   ├── debug-files/ # bundle-jvm, bundle-sources, check, print-sources, upload
+│   │   ├── debug-files/ # bundle-jvm, bundle-sources, check, find, print-sources, upload
 │   │   ├── event/       # list, send, view
 │   │   ├── issue/       # archive, events, explain, list, merge, plan, resolve, unresolve, view
 │   │   ├── local/       # run, serve
