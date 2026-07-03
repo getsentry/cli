@@ -120,4 +120,28 @@ describe("extractZipStream", () => {
       process.off("unhandledRejection", onUnhandled);
     }
   });
+
+  test("propagates a mid-stream source error and cleans up", async () => {
+    const out = tempDir();
+    const zip = zipSync({ "a.png": strToU8("A".repeat(2000)) });
+    // Emit a partial chunk (opening a write stream) then fail, exercising the
+    // early-bail cleanup path (skips Promise.all).
+    async function* faulty(): AsyncIterable<Uint8Array> {
+      yield zip.subarray(0, 40);
+      throw new Error("network boom");
+    }
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await expect(extractZipStream(faulty(), out)).rejects.toThrow(
+        "network boom"
+      );
+      await new Promise((r) => setTimeout(r, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
 });

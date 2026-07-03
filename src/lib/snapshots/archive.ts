@@ -57,7 +57,9 @@ export async function extractZipStream(
 
   let written = 0;
   let failure: Error | null = null;
+  let completed = false;
   const writes: Promise<void>[] = [];
+  const openStreams: ReturnType<typeof createWriteStream>[] = [];
 
   const unzip = new Unzip((file) => {
     const dest = safeEntryDest(root, file.name);
@@ -71,6 +73,7 @@ export async function extractZipStream(
 
     mkdirSync(dirname(dest), { recursive: true });
     const stream = createWriteStream(dest);
+    openStreams.push(stream);
     // Never reject: a write error mid-loop must not become an unhandled
     // rejection (no handler is attached until Promise.all below). Record the
     // first error and resolve; it is surfaced after all writes settle.
@@ -122,9 +125,19 @@ export async function extractZipStream(
       unzip.push(new Uint8Array(0), true);
     }
     await Promise.all(writes);
+    completed = true;
   } finally {
     // Cancel the source (e.g. the HTTP body) so a partial read doesn't leak.
     await iterator.return?.();
+    // If we bailed early (e.g. unzip.push threw on a malformed archive), close
+    // any still-open write streams so their file descriptors aren't leaked.
+    if (!completed) {
+      for (const stream of openStreams) {
+        if (!stream.closed) {
+          stream.destroy();
+        }
+      }
+    }
   }
 
   if (failure) {
