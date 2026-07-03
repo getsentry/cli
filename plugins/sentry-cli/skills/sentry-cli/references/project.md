@@ -11,12 +11,13 @@ requires:
 
 Work with Sentry projects
 
-### `sentry project create <name> <platform>`
+### `sentry project create <name...>`
 
-Create a new project
+Create one or more projects
 
 **Flags:**
 - `-t, --team <value> - Team to create the project under`
+- `-p, --platform <value> - Project platform (e.g., node, python, javascript-nextjs)`
 - `-n, --dry-run - Show what would happen without making changes`
 
 **Examples:**

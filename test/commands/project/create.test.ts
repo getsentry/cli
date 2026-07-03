@@ -736,6 +736,52 @@ describe("project create", () => {
     expect(err.message).toContain("Invalid platform 'python-django-rest'");
   });
 
+  test("creates multiple projects from separate name args", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "web", "api", "worker", "node");
+
+    expect(createProjectWithDsnSpy).toHaveBeenCalledTimes(3);
+    for (const name of ["web", "api", "worker"]) {
+      expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+        "acme-corp",
+        "engineering",
+        { name, platform: "node" }
+      );
+    }
+  });
+
+  test("takes platform from --platform flag with multiple names", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false, platform: "node" }, "web", "api");
+
+    expect(createProjectWithDsnSpy).toHaveBeenCalledTimes(2);
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme-corp",
+      "engineering",
+      { name: "api", platform: "node" }
+    );
+  });
+
+  test("space-crammed name gives actionable multi-project guidance on 400", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Bad Request",
+        400,
+        "Ensure this field has no more than 50 characters."
+      )
+    );
+    const err = await func
+      .call(context, { json: false }, "web api worker", "node")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.message).toContain("separate argument");
+    expect(err.message).toContain("sentry project create web api worker node");
+  });
+
   // --dry-run tests
 
   test("dry-run shows what would be created without API call", async () => {
