@@ -16,7 +16,7 @@
 import type {
   IssueEventDetailsResponse,
   DeployResponse as SdkDeployResponse,
-  RetrieveAnIssueResponse as SdkIssueDetail,
+  GetOrganizationIssueResponse as SdkIssueDetail,
   ListOrganizations as SdkOrganizationList,
   ProjectKey as SdkProjectKey,
   OrganizationProjectResponseDict as SdkProjectList,
@@ -25,8 +25,8 @@ import type {
 } from "@sentry/api";
 import {
   zBaseTeam,
+  zGetOrganizationIssueResponse,
   zGroupEventsResponseDict,
-  zRetrieveAnIssueResponse,
 } from "@sentry/api/zod";
 import { z } from "zod";
 
@@ -118,7 +118,7 @@ export const ISSUE_STATUSES = [
 export type IssueStatus = (typeof ISSUE_STATUSES)[number];
 
 // Note: a reverse exhaustiveness check (SDK → ISSUE_STATUSES) is not possible here
-// because RetrieveAnIssueResponses is a union of all HTTP response types, one of which
+// because GetOrganizationIssueResponses is a union of all HTTP response types, one of which
 // has `status: string` (loose), making SdkIssueDetail["status"] resolve to `string`.
 // The `satisfies` above catches the forward direction (invalid values in our tuple).
 
@@ -184,7 +184,7 @@ export type SentryIssue = Omit<Partial<SdkIssueDetail>, "metadata"> & {
  * present in most responses; optionality reflects the TypeScript type.
  */
 /**
- * Derived from the auto-generated `zRetrieveAnIssueResponse` schema.
+ * Derived from the auto-generated `zGetOrganizationIssueResponse` schema.
  *
  * The generated schema makes all API-documented fields required. We widen it
  * with `.partial()` so only the core identifiers (id, shortId, title) are
@@ -192,7 +192,7 @@ export type SentryIssue = Omit<Partial<SdkIssueDetail>, "metadata"> & {
  * Extra fields not in the OpenAPI spec (substatus, priority, isUnhandled,
  * seerFixabilityScore) are added via `.extend()`.
  */
-export const SentryIssueSchema = zRetrieveAnIssueResponse
+export const SentryIssueSchema = zGetOrganizationIssueResponse
   .pick({
     id: true,
     shortId: true,
@@ -214,37 +214,37 @@ export const SentryIssueSchema = zRetrieveAnIssueResponse
     id: z.string().describe("Numeric issue ID"),
     shortId: z.string().describe("Human-readable short ID (e.g. PROJ-ABC)"),
     title: z.string().describe("Issue title"),
-    culprit: zRetrieveAnIssueResponse.shape.culprit
+    culprit: zGetOrganizationIssueResponse.shape.culprit
       .optional()
       .describe("Culprit string"),
-    count: zRetrieveAnIssueResponse.shape.count
+    count: zGetOrganizationIssueResponse.shape.count
       .optional()
       .describe("Total event count"),
-    userCount: zRetrieveAnIssueResponse.shape.userCount
+    userCount: zGetOrganizationIssueResponse.shape.userCount
       .optional()
       .describe("Number of affected users"),
-    firstSeen: zRetrieveAnIssueResponse.shape.firstSeen
+    firstSeen: zGetOrganizationIssueResponse.shape.firstSeen
       .optional()
       .describe("First occurrence (ISO 8601)"),
-    lastSeen: zRetrieveAnIssueResponse.shape.lastSeen
+    lastSeen: zGetOrganizationIssueResponse.shape.lastSeen
       .optional()
       .describe("Most recent occurrence (ISO 8601)"),
-    level: zRetrieveAnIssueResponse.shape.level
+    level: zGetOrganizationIssueResponse.shape.level
       .optional()
       .describe("Severity level"),
-    status: zRetrieveAnIssueResponse.shape.status
+    status: zGetOrganizationIssueResponse.shape.status
       .optional()
       .describe("Issue status"),
-    permalink: zRetrieveAnIssueResponse.shape.permalink
+    permalink: zGetOrganizationIssueResponse.shape.permalink
       .optional()
       .describe("URL to the issue in Sentry"),
-    project: zRetrieveAnIssueResponse.shape.project
+    project: zGetOrganizationIssueResponse.shape.project
       .optional()
       .describe("Project info"),
-    metadata: zRetrieveAnIssueResponse.shape.metadata
+    metadata: zGetOrganizationIssueResponse.shape.metadata
       .optional()
       .describe("Issue metadata"),
-    assignedTo: zRetrieveAnIssueResponse.shape.assignedTo
+    assignedTo: zGetOrganizationIssueResponse.shape.assignedTo
       .optional()
       .describe("Assigned user or team"),
     priority: z.string().optional().describe("Triage priority"),

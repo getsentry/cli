@@ -5,11 +5,11 @@
  */
 
 import {
-  createANewProject,
-  deleteAProject,
-  listAnOrganization_sProjects,
-  listAProject_sClientKeys,
-  retrieveAProject,
+  createTeamProject,
+  listOrganizationProjects,
+  listProjectKeys,
+  deleteProject as sdkDeleteProject,
+  getProject as sdkGetProject,
 } from "@sentry/api";
 
 import pLimit from "p-limit";
@@ -57,7 +57,7 @@ export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
   const config = await getOrgSdkConfig(orgSlug);
 
   const { data: allResults } = await autoPaginate(async (cursor) => {
-    const result = await listAnOrganization_sProjects({
+    const result = await listOrganizationProjects({
       ...config,
       path: { organization_id_or_slug: orgSlug },
       query: { cursor, per_page: API_MAX_PER_PAGE } as {
@@ -99,7 +99,7 @@ export async function listProjectsPaginated(
 ): Promise<PaginatedResponse<SentryProject[]>> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await listAnOrganization_sProjects({
+  const result = await listOrganizationProjects({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: {
@@ -142,7 +142,7 @@ export async function createProject(
   body: CreateProjectBody
 ): Promise<SentryProject> {
   const config = await getOrgSdkConfig(orgSlug);
-  const result = await createANewProject({
+  const result = await createTeamProject({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
@@ -311,7 +311,7 @@ export async function deleteProject(
   projectSlug: string
 ): Promise<void> {
   const config = await getOrgSdkConfig(orgSlug);
-  const result = await deleteAProject({
+  const result = await sdkDeleteProject({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
@@ -528,18 +528,18 @@ export async function getProject(
   const config = await getOrgSdkConfig(orgSlug);
 
   // `collapse` is server-supported but not in the OpenAPI spec, so the
-  // SDK types `query` as `never` on `RetrieveAProjectData`. Double-cast
+  // SDK types `query` as `never` on `GetProjectData`. Double-cast
   // via `unknown` to bypass the stricter argument type while still
   // sending the param at runtime. Same intent as the `per_page` cast
   // used above.
-  const result = (await retrieveAProject({
+  const result = (await sdkGetProject({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
       project_id_or_slug: projectSlug,
     },
     query: { collapse: "organization" },
-  } as unknown as Parameters<typeof retrieveAProject>[0])) as
+  } as unknown as Parameters<typeof sdkGetProject>[0])) as
     | { data: unknown; error: undefined }
     | { data: undefined; error: unknown };
 
@@ -586,7 +586,7 @@ export async function getProjectKeys(
 ): Promise<ProjectKey[]> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await listAProject_sClientKeys({
+  const result = await listProjectKeys({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,

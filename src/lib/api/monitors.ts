@@ -7,7 +7,7 @@
  * envelope transport (`src/lib/envelope/`), not this module.
  */
 
-import { retrieveMonitorsForAnOrganization } from "@sentry/api";
+import { listOrganizationMonitors } from "@sentry/api";
 
 import type { SentryMonitor } from "../../types/index.js";
 
@@ -33,7 +33,7 @@ export async function listMonitors(orgSlug: string): Promise<SentryMonitor[]> {
   const config = await getOrgSdkConfig(orgSlug);
 
   const { data: allResults } = await autoPaginate(async (cursor) => {
-    const result = await retrieveMonitorsForAnOrganization({
+    const result = await listOrganizationMonitors({
       ...config,
       path: { organization_id_or_slug: orgSlug },
       query: { cursor, per_page: API_MAX_PER_PAGE } as {
@@ -64,7 +64,7 @@ export async function listMonitorsPaginated(
 ): Promise<PaginatedResponse<SentryMonitor[]>> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await retrieveMonitorsForAnOrganization({
+  const result = await listOrganizationMonitors({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: {

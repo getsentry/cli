@@ -5,7 +5,7 @@
  * including trace-associated logs.
  */
 
-import { queryExploreEventsInTableFormat } from "@sentry/api";
+import { listOrganizationEvents } from "@sentry/api";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 import type { z } from "zod";
@@ -153,7 +153,7 @@ export async function listLogs(
       ]
     : LOG_FIELDS;
 
-  const result = await queryExploreEventsInTableFormat({
+  const result = await listOrganizationEvents({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: {
@@ -227,7 +227,7 @@ async function getLogsBatch(
       ]
     : DETAILED_LOG_FIELDS;
 
-  const result = await queryExploreEventsInTableFormat({
+  const result = await listOrganizationEvents({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: {

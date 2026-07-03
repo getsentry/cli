@@ -42,8 +42,8 @@ importers:
         specifier: ^1.26.0
         version: 1.26.0(express@5.2.1)(zod@3.25.76)
       '@sentry/api':
-        specifier: ^0.180.0
-        version: 0.180.0(zod@3.25.76)
+        specifier: ^0.253.0
+        version: 0.253.0(zod@3.25.76)
       '@sentry/core':
         specifier: 10.63.0
         version: 10.63.0(patch_hash=e663994979ff877a26ab6d4dea5968fbaee4ccdfdeb85623983535a572678940)
@@ -728,8 +728,8 @@ packages:
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
 
-  '@sentry/api@0.180.0':
-    resolution: {integrity: sha512-Qv0bJnRgpnlKDFM/V86AR/CdJNOU4JO2tno1BnZjR+ACM9gcyt/Y6xow7YeD6vHLzvguW0SiwqnX/lt4DSmFUQ==}
+  '@sentry/api@0.253.0':
+    resolution: {integrity: sha512-g6zU6Qa7HaqEAhcPkrAF2yIF9Th3UBxNIM2HjFt9eTLWT+cHqO1zvgPe8yl5IXVpn4xwZmytbdome43ba+FgSQ==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.24.0
@@ -3225,7 +3225,7 @@ snapshots:
 
   '@sec-ant/readable-stream@0.4.1': {}
 
-  '@sentry/api@0.180.0(zod@3.25.76)':
+  '@sentry/api@0.253.0(zod@3.25.76)':
     optionalDependencies:
       zod: 3.25.76
 

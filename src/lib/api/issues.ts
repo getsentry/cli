@@ -4,8 +4,8 @@
  * Functions for listing, retrieving, and updating Sentry issues.
  */
 
-import type { ListAnOrganizationSissuesData } from "@sentry/api";
-import { listAnOrganization_sIssues } from "@sentry/api";
+import type { ListOrganizationIssuesData } from "@sentry/api";
+import { listOrganizationIssues } from "@sentry/api";
 
 import type { SentryIssue } from "../../types/index.js";
 import type { IssueSubstatus } from "../../types/sentry.js";
@@ -38,7 +38,7 @@ const TRAILING_SLASH_RE = /\/$/;
  * Uses the SDK type directly for compile-time safety against parameter drift.
  */
 export type IssueSort = NonNullable<
-  NonNullable<ListAnOrganizationSissuesData["query"]>["sort"]
+  NonNullable<ListOrganizationIssuesData["query"]>["sort"]
 >;
 
 /**
@@ -53,7 +53,7 @@ export type IssueSort = NonNullable<
  * - `'base'` — base group fields (rarely useful to collapse)
  */
 export type IssueCollapseField = NonNullable<
-  NonNullable<ListAnOrganizationSissuesData["query"]>["collapse"]
+  NonNullable<ListOrganizationIssuesData["query"]>["collapse"]
 >[number];
 
 /**
@@ -121,7 +121,7 @@ export const ISSUE_DETAIL_COLLAPSE: IssueCollapseField[] = [
 /**
  * List issues for a project with pagination control.
  *
- * Uses the @sentry/api SDK's `listAnOrganization_sIssues` for type-safe
+ * Uses the @sentry/api SDK's `listOrganizationIssues` for type-safe
  * query parameters, and extracts pagination from the response Link header.
  *
  * @param orgSlug - Organization slug
@@ -164,7 +164,7 @@ export async function listIssuesPaginated(
 
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await listAnOrganization_sIssues({
+  const result = await listOrganizationIssues({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: {
