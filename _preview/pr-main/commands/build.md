@@ -22,7 +22,7 @@ Upload builds to a project
 
 | Argument | Description |
 | --- | --- |
-| `<path...>` | Path(s) to the build(s) to upload (APK or AAB) |
+| `<path...>` | Path(s) to the build(s) to upload (APK, AAB, IPA, or XCArchive) |
 
 **Options:**
 
@@ -69,6 +69,7 @@ Terminal window
 
 ```
 # Upload an Android build (APK or AAB) for size analysissentry build upload ./app-release.apk
+# Upload an iOS build (XCArchive directory or IPA)sentry build upload ./MyApp.xcarchivesentry build upload ./MyApp.ipa
 # Upload with a build configuration and release notessentry build upload ./app.aab --build-configuration Release --release-notes "Nightly"
 # Tag a build with install groups (repeatable)sentry build upload ./app.aab --install-group qa --install-group beta
 # Attach explicit git metadata (otherwise auto-collected in CI)sentry build upload ./app.aab --head-sha "$GIT_SHA" --pr-number 42 --base-ref main
@@ -82,8 +83,13 @@ Terminal window
 
 [Section titled “Important Notes”](#important-notes)
 
-- `build upload` supports **Android APK and AAB**. iOS XCArchive/IPA upload is
-  not yet supported. **Sentry SaaS only.**
+- `build upload` supports **Android APK/AAB** and **iOS XCArchive/IPA**. An
+  XCArchive is a directory; an IPA is converted to an XCArchive layout for
+  upload. **Sentry SaaS only.**
+- iOS caveat: `Assets.car` asset catalogs are **not** parsed into per-asset
+  images (that required native macOS frameworks), so the server sees the raw
+  `.car` rather than a per-image breakdown. XCArchive symlinks and Unix file
+  permissions are preserved.
 - Multiple paths may be uploaded at once; the command exits non-zero if any
   build fails to upload.
 - Git metadata (commit, branch, PR number, repo) is **auto-collected in CI**

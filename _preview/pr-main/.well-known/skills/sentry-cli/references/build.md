@@ -43,6 +43,10 @@ Download a build artifact
 # Upload an Android build (APK or AAB) for size analysis
 sentry build upload ./app-release.apk
 
+# Upload an iOS build (XCArchive directory or IPA)
+sentry build upload ./MyApp.xcarchive
+sentry build upload ./MyApp.ipa
+
 # Upload with a build configuration and release notes
 sentry build upload ./app.aab --build-configuration Release --release-notes "Nightly"
 
