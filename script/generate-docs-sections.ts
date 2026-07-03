@@ -108,7 +108,8 @@ function replaceMarkerSection(
 
   const before = content.slice(0, startIdx + startTag.length);
   const after = content.slice(endIdx);
-  return `${before}\n${generated}\n${after}`;
+  const sep = style === "mdx" ? "\n\n" : "\n";
+  return `${before}${sep}${generated}${sep}${after}`;
 }
 
 // ---------------------------------------------------------------------------
