@@ -454,22 +454,20 @@ export async function waitForSnapshotArchive(
 }
 
 /**
- * Download a snapshot's archive ZIP into memory.
+ * Open a snapshot's archive ZIP for streaming.
  *
- * The endpoint streams the ZIP directly from the region origin (no redirect), so
- * the auth token is only ever sent to the region host. Should the server ever
- * 302 to third-party storage, undici strips `Authorization` cross-origin.
- *
- * The whole archive is buffered and later extracted in memory (see
- * {@link extractZipToDir}); acceptable for typical screenshot baselines, but a
- * very large archive (the server caps at ~1 GB) would need streaming extraction.
+ * Returns the raw HTTP `Response` (body unconsumed) so the caller can
+ * stream-extract it without buffering the whole archive in memory. The endpoint
+ * streams the ZIP directly from the region origin (no redirect), so the auth
+ * token is only ever sent to the region host; should the server ever 302 to
+ * third-party storage, undici strips `Authorization` cross-origin.
  *
  * @throws {ApiError} On a non-2xx response.
  */
-export async function downloadSnapshotArchive(
+export async function openSnapshotArchive(
   org: string,
   snapshotId: string
-): Promise<Buffer> {
+): Promise<Response> {
   const regionUrl = stripTrailingSlashes(await resolveOrgRegion(org));
   const url = `${regionUrl}/api/0/${snapshotArchiveEndpoint(
     org,
@@ -489,5 +487,5 @@ export async function downloadSnapshotArchive(
       url
     );
   }
-  return Buffer.from(await response.arrayBuffer());
+  return response;
 }

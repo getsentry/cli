@@ -63,10 +63,10 @@ vi.mock("../../../src/lib/api/chunk-upload.js", async (importOriginal) => {
 import {
   buildFormatFromUrl,
   downloadBuildArtifact,
-  downloadSnapshotArchive,
   getBuildInstallDetails,
   getLatestBaseSnapshot,
   LatestBaseSnapshotSchema,
+  openSnapshotArchive,
   toBinaryDownloadUrl,
   uploadBuild,
   waitForSnapshotArchive,
@@ -428,24 +428,28 @@ describe("snapshots", () => {
     expect(onBuild).not.toHaveBeenCalled();
   });
 
-  test("downloadSnapshotArchive returns the archive bytes", async () => {
-    customFetchMock.mockResolvedValue({
-      ok: true,
-      arrayBuffer: () =>
-        Promise.resolve(new TextEncoder().encode("zip-bytes").buffer),
-    });
+  test("openSnapshotArchive returns the response for streaming", async () => {
+    const response = { ok: true, status: 200, body: {} };
+    customFetchMock.mockResolvedValue(response);
 
-    const buf = await downloadSnapshotArchive("my-org", "snap-1");
-    expect(buf.toString()).toBe("zip-bytes");
+    await expect(openSnapshotArchive("my-org", "snap-1")).resolves.toBe(
+      response
+    );
+    // Auth token attached; URL targets the region archive endpoint.
+    const [url, init] = customFetchMock.mock.calls.at(-1) ?? [];
+    expect(url).toContain(
+      "/preprodartifacts/snapshots/snap-1/archive/?download"
+    );
+    expect(init?.headers?.Authorization).toBe("Bearer secret-token");
   });
 
-  test("downloadSnapshotArchive throws on a non-2xx response", async () => {
+  test("openSnapshotArchive throws on a non-2xx response", async () => {
     customFetchMock.mockResolvedValue({
       ok: false,
       status: 500,
       statusText: "Server Error",
     });
-    await expect(downloadSnapshotArchive("my-org", "snap-1")).rejects.toThrow(
+    await expect(openSnapshotArchive("my-org", "snap-1")).rejects.toThrow(
       ApiError
     );
   });
