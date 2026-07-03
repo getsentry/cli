@@ -22,6 +22,7 @@ import {
   type RouteMapEntry,
   resolveCommandPath,
 } from "./introspect.js";
+import { sixelBanner } from "./sixel.js";
 
 const TAGLINE = "The command-line interface for Sentry";
 
@@ -204,9 +205,11 @@ export function printCustomHelp(): string {
 
   // Skip banner for non-TTY to avoid wasting tokens in agent loops
   if (process.stdout.isTTY) {
-    // formatBanner sizes itself to the terminal width; it returns "" only when
-    // the terminal is too narrow for even the compact mark.
-    const banner = formatBanner();
+    const cols = process.stdout.columns ?? 80;
+    // Prefer a real sixel image on capable terminals; otherwise fall back to the
+    // block-art banner sized to the terminal width (returns "" only when the
+    // terminal is too narrow for even the compact mark).
+    const banner = sixelBanner(cols) ?? formatBanner(cols);
     if (banner) {
       lines.push("");
       lines.push(banner);
@@ -286,19 +289,15 @@ export type HelpFlagInfo = {
 /**
  * Result of introspecting the CLI.
  * Yielded as CommandOutput — JSON mode serializes directly, human mode
- * passes through {@link formatHelpHuman}.
- *
- * `_banner` is an internal field for human display of the full tree;
- * it's stripped from JSON output via `jsonExclude`.
+ * passes through {@link formatHelpHuman}, which renders the branded banner for
+ * the full tree.
  */
 export type HelpJsonResult =
-  | ({
+  | {
       routes: RouteInfo[];
       envVars: HelpEnvVarInfo[];
       flags: HelpFlagInfo[];
-    } & {
-      _banner?: string;
-    })
+    }
   | CommandInfo
   | RouteInfo
   | { error: string; suggestions?: string[] };
@@ -497,44 +496,20 @@ function formatGroupHuman(group: RouteInfo): string {
 }
 
 /**
- * Format the full command tree (without banner) as human-readable text.
- * Includes flags and env-var sections when present.
- */
-function formatFullTreeHuman(data: {
-  routes: RouteInfo[];
-  envVars?: HelpEnvVarInfo[];
-  flags?: HelpFlagInfo[];
-}): string {
-  const lines: string[] = [data.routes.map(formatGroupHuman).join("\n\n")];
-  if (data.flags && data.flags.length > 0) {
-    lines.push("", "Flags:");
-    for (const f of data.flags) {
-      const label = f.short ? `${f.short}, ${f.long}` : f.long;
-      lines.push(`  ${label} — ${f.description}`);
-    }
-  }
-  if (data.envVars && data.envVars.length > 0) {
-    lines.push("", "Environment Variables:");
-    for (const v of data.envVars) {
-      lines.push(`  ${v.name} — ${v.brief}`);
-    }
-  }
-  return lines.join("\n");
-}
-
-/**
  * Human renderer for help introspection data.
  *
  * Formats structured introspection objects as readable CLI output:
- * - Full tree with `_banner`: renders the branded banner
+ * - Full tree (`routes`): the branded banner + commands + flags + env
  * - Route group: lists subcommands with descriptions
  * - Single command: shows signature, description, and flags
  * - Error: shows the error message
  */
 export function formatHelpHuman(data: HelpJsonResult): string {
-  // Full tree with pre-rendered banner
-  if ("_banner" in data && typeof data._banner === "string") {
-    return data._banner.trimEnd();
+  // Full command tree → branded human help. Rendered here (not in the help
+  // command's func) so `--json`, which never calls this human formatter, never
+  // triggers printCustomHelp's sixel probe / terminal I/O.
+  if ("routes" in data) {
+    return printCustomHelp().trimEnd();
   }
 
   // Route group
@@ -554,12 +529,6 @@ export function formatHelpHuman(data: HelpJsonResult): string {
       return `Error: ${data.error}\n\nDid you mean: ${formatSuggestionList(suggestions)}?`;
     }
     return `Error: ${data.error}`;
-  }
-
-  // Full tree without banner (shouldn't happen in practice — the help
-  // command always attaches one). Keep the envVars/flags in sync anyway.
-  if ("routes" in data) {
-    return formatFullTreeHuman(data);
   }
 
   return "";

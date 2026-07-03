@@ -420,6 +420,7 @@ Work with Dart/Flutter symbol maps
 Work with debug information files
 
 - `sentry debug-files check <path>` — Inspect a debug information file
+- `sentry debug-files find <id...>` — Locate debug files for given debug identifiers
 - `sentry debug-files upload <path...>` — Upload debug information files to Sentry
 - `sentry debug-files print-sources <path>` — List the source files a debug file references
 - `sentry debug-files bundle-sources <path>` — Bundle a debug file's source files for source context
@@ -450,6 +451,15 @@ Work with ProGuard/R8 mapping files
 - `sentry proguard uuid <path>` — Compute the UUID for a ProGuard mapping file
 
 → Full flags and examples: `references/proguard.md`
+
+### React-native
+
+Upload React Native sourcemaps from build steps
+
+- `sentry react-native gradle` — Upload a React Native bundle + sourcemap (Gradle build step)
+- `sentry react-native xcode <script-arg...>` — Upload React Native sourcemaps (Xcode build step)
+
+→ Full flags and examples: `references/react-native.md`
 
 ### Replay
 
@@ -526,6 +536,7 @@ Manage and compare snapshots
 
 - `sentry snapshots diff <base-dir> <head-dir>` — Compare two directories of snapshot images
 - `sentry snapshots download` — Download baseline snapshot images
+- `sentry snapshots upload <path>` — Upload snapshots to a project
 
 → Full flags and examples: `references/snapshots.md`
 
@@ -574,6 +585,14 @@ Initialize Sentry in your project (experimental)
 - `sentry init <target> <directory>` — Initialize Sentry in your project (experimental)
 
 → Full flags and examples: `references/init.md`
+
+### Info
+
+Print configuration and verify authentication
+
+- `sentry info` — Print configuration and verify authentication
+
+→ Full flags and examples: `references/info.md`
 
 ### Local
 

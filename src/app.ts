@@ -21,6 +21,7 @@ import { eventRoute } from "./commands/event/index.js";
 import { listCommand as eventListCommand } from "./commands/event/list.js";
 import { exploreCommand } from "./commands/explore.js";
 import { helpCommand } from "./commands/help.js";
+import { infoCommand } from "./commands/info.js";
 import { initCommand } from "./commands/init.js";
 import { issueRoute } from "./commands/issue/index.js";
 import { listCommand as issueListCommand } from "./commands/issue/list.js";
@@ -34,6 +35,7 @@ import { listCommand as orgListCommand } from "./commands/org/list.js";
 import { proguardRoute } from "./commands/proguard/index.js";
 import { projectRoute } from "./commands/project/index.js";
 import { listCommand as projectListCommand } from "./commands/project/list.js";
+import { reactNativeRoute } from "./commands/react-native/index.js";
 import { releaseRoute } from "./commands/release/index.js";
 import { listCommand as releaseListCommand } from "./commands/release/list.js";
 import { replayRoute } from "./commands/replay/index.js";
@@ -108,6 +110,7 @@ export const routes = buildRouteMap({
     org: orgRoute,
     project: projectRoute,
     proguard: proguardRoute,
+    "react-native": reactNativeRoute,
     replay: replayRoute,
     release: releaseRoute,
     repo: repoRoute,
@@ -125,6 +128,7 @@ export const routes = buildRouteMap({
     trace: traceRoute,
     trial: trialRoute,
     init: initCommand,
+    info: infoCommand,
     local: localRoute,
     api: apiCommand,
     schema: schemaCommand,

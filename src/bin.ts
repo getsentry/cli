@@ -22,6 +22,15 @@ process.emit = ((event: string, ...args: unknown[]) => {
 }) as typeof process.emit;
 
 import { startCli } from "./cli.js";
+import { wrapCall } from "./lib/react-native/wrap-call.js";
+
+// React Native Xcode build wrapper: when the RN build script invokes us in
+// place of NODE_BINARY/HERMES_CLI_PATH (see `react-native xcode`), forward to
+// the real Node/Hermes tool instead of running the CLI. Must run before any
+// command parsing.
+if (process.env.__SENTRY_RN_WRAP_XCODE_CALL === "1") {
+  process.exit(wrapCall());
+}
 
 // Handle non-recoverable stream I/O errors gracefully instead of crashing.
 // - EPIPE (errno -32): downstream pipe consumer closed (e.g., `sentry issue list | head`).

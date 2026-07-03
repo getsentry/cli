@@ -15,6 +15,16 @@ Work with debug information files
 
 Inspect a debug information file
 
+### `sentry debug-files find <id...>`
+
+Locate debug files for given debug identifiers
+
+**Flags:**
+- `-t, --type <value>... - Only consider debug files of the given type (repeatable). Default: all`
+- `--no-well-known - Do not look for debug files in well-known locations`
+- `--no-cwd - Do not look for debug files in the current directory`
+- `-p, --path <value>... - Add a directory to search recursively (repeatable)`
+
 ### `sentry debug-files upload <path...>`
 
 Upload debug information files to Sentry
@@ -65,6 +75,11 @@ sentry debug-files check ./app.pdb --json
 # List the source files a debug file references (and whether they're available)
 sentry debug-files print-sources ./libexample.so
 sentry debug-files print-sources ./app.pdb --json
+
+# Locate debug files for one or more debug identifiers on disk
+sentry debug-files find <debug-id>
+sentry debug-files find <debug-id> --type dsym --path ./build
+sentry debug-files find <debug-id> --no-cwd --no-well-known -p /symbols --json
 
 # Bundle a debug file's referenced source files (run on the build machine)
 sentry debug-files bundle-sources ./libexample.so

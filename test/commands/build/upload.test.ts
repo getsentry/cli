@@ -178,9 +178,33 @@ describe("build upload", () => {
     expect(harness.output()).toContain("Unsupported build format");
   });
 
-  test("rejects a directory (iOS XCArchive) with a non-zero exit", async () => {
-    const dir = join(tmpDir, "MyApp.xcarchive");
+  /** Write a minimal valid XCArchive directory; returns its path. */
+  async function writeXcarchive(name = "MyApp.xcarchive"): Promise<string> {
+    const dir = join(tmpDir, name);
+    const app = join(dir, "Products", "Applications", "MyApp.app");
+    await mkdir(app, { recursive: true });
+    await writeFile(join(dir, "Info.plist"), "<plist/>");
+    await writeFile(join(app, "Info.plist"), "<app/>");
+    await writeFile(join(app, "MyApp"), "binary");
+    return dir;
+  }
+
+  test("uploads an XCArchive directory", async () => {
+    const dir = await writeXcarchive();
+    const harness = createContext();
+    const func = await uploadCommand.loader();
+
+    await func.call(harness.context, {}, dir);
+
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    expect(harness.exitCode).toBeUndefined();
+    expect(harness.output()).toContain("https://sentry.io/artifact/1");
+  });
+
+  test("rejects a directory that is not a valid XCArchive", async () => {
+    const dir = join(tmpDir, "not-an-archive");
     await mkdir(dir);
+    await writeFile(join(dir, "readme.txt"), "hello");
     const harness = createContext();
     const func = await uploadCommand.loader();
 
@@ -188,7 +212,25 @@ describe("build upload", () => {
 
     expect(uploadSpy).not.toHaveBeenCalled();
     expect(harness.exitCode).toBe(1);
-    expect(harness.output()).toContain("XCArchive");
+    expect(harness.output()).toContain("Invalid XCArchive");
+  });
+
+  test("uploads an IPA (converted to an XCArchive layout)", async () => {
+    const ipa = join(tmpDir, "MyApp.ipa");
+    await writeFile(
+      ipa,
+      zipSync({
+        "Payload/MyApp.app/Info.plist": strToU8("<app/>"),
+        "Payload/MyApp.app/MyApp": strToU8("binary"),
+      })
+    );
+    const harness = createContext();
+    const func = await uploadCommand.loader();
+
+    await func.call(harness.context, {}, ipa);
+
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    expect(harness.exitCode).toBeUndefined();
   });
 
   test("uploads the good build but exits non-zero when another fails", async () => {

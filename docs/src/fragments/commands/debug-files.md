@@ -13,6 +13,11 @@ sentry debug-files check ./app.pdb --json
 sentry debug-files print-sources ./libexample.so
 sentry debug-files print-sources ./app.pdb --json
 
+# Locate debug files for one or more debug identifiers on disk
+sentry debug-files find <debug-id>
+sentry debug-files find <debug-id> --type dsym --path ./build
+sentry debug-files find <debug-id> --no-cwd --no-well-known -p /symbols --json
+
 # Bundle a debug file's referenced source files (run on the build machine)
 sentry debug-files bundle-sources ./libexample.so
 sentry debug-files bundle-sources ./app.pdb --output ./app.src.zip
@@ -45,6 +50,19 @@ sentry debug-files upload ./build --il2cpp-mapping --include-sources
 # Preview what would be uploaded without uploading (no credentials needed)
 sentry debug-files upload ./build --no-upload
 ```
+
+## Notes on `find`
+
+- `debug-files find` locates debug files **locally** by debug identifier — it
+  makes no API calls. It searches Xcode's `DerivedData` (for dSYMs, unless
+  `--no-well-known`), the current directory (unless `--no-cwd`), and any
+  `--path`/`-p` directories, recursively.
+- Restrict the search with `--type`/`-t` (repeatable): `dsym`, `elf`, `pe`,
+  `pdb`, `portablepdb`, `sourcebundle`, `breakpad`, `proguard`, `jvm`.
+- A debug identifier must match exactly, including any PE/PDB age suffix. A
+  Breakpad symbol file is listed when it matches, but does **not** satisfy the
+  request (the id is still reported as missing).
+- Exits non-zero if any requested identifier could not be located.
 
 ## Important Notes
 

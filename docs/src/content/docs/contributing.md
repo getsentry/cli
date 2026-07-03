@@ -59,7 +59,7 @@ cli/
 │   │   ├── code-mappings/# upload
 │   │   ├── dart-symbol-map/# upload
 │   │   ├── dashboard/   # add, create, delete, edit, list, restore, revisions, view
-│   │   ├── debug-files/ # bundle-jvm, bundle-sources, check, print-sources, upload
+│   │   ├── debug-files/ # bundle-jvm, bundle-sources, check, find, print-sources, upload
 │   │   ├── event/       # list, send, view
 │   │   ├── issue/       # archive, events, explain, list, merge, plan, resolve, unresolve, view
 │   │   ├── local/       # run, serve
@@ -68,10 +68,11 @@ cli/
 │   │   ├── org/         # list, view
 │   │   ├── proguard/    # upload, uuid
 │   │   ├── project/     # create, delete, list, view
+│   │   ├── react-native/# gradle, xcode
 │   │   ├── release/     # archive, create, delete, deploy, deploys, finalize, list, propose-version, restore, set-commits, view
 │   │   ├── replay/      # list, view
 │   │   ├── repo/        # list
-│   │   ├── snapshots/   # diff, download
+│   │   ├── snapshots/   # diff, download, upload
 │   │   ├── sourcemap/   # inject, resolve, upload
 │   │   ├── span/        # list, view
 │   │   ├── team/        # list
@@ -80,6 +81,7 @@ cli/
 │   │   ├── api.ts       # Make an authenticated API request
 │   │   ├── explore.ts   # Query aggregate event data (Explore)
 │   │   ├── help.ts      # Help command
+│   │   ├── info.ts      # Print configuration and verify authentication
 │   │   ├── init.ts      # Initialize Sentry in your project (experimental)
 │   │   └── schema.ts    # Browse the Sentry API schema
 │   ├── lib/            # Shared utilities

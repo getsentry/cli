@@ -6,6 +6,10 @@
 # Upload an Android build (APK or AAB) for size analysis
 sentry build upload ./app-release.apk
 
+# Upload an iOS build (XCArchive directory or IPA)
+sentry build upload ./MyApp.xcarchive
+sentry build upload ./MyApp.ipa
+
 # Upload with a build configuration and release notes
 sentry build upload ./app.aab --build-configuration Release --release-notes "Nightly"
 
@@ -27,8 +31,13 @@ sentry build download 1234567890 --json
 
 ## Important Notes
 
-- `build upload` supports **Android APK and AAB**. iOS XCArchive/IPA upload is
-  not yet supported. **Sentry SaaS only.**
+- `build upload` supports **Android APK/AAB** and **iOS XCArchive/IPA**. An
+  XCArchive is a directory; an IPA is converted to an XCArchive layout for
+  upload. **Sentry SaaS only.**
+- iOS caveat: `Assets.car` asset catalogs are **not** parsed into per-asset
+  images (that required native macOS frameworks), so the server sees the raw
+  `.car` rather than a per-image breakdown. XCArchive symlinks and Unix file
+  permissions are preserved.
 - Multiple paths may be uploaded at once; the command exits non-zero if any
   build fails to upload.
 - Git metadata (commit, branch, PR number, repo) is **auto-collected in CI**

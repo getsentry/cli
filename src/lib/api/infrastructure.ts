@@ -6,6 +6,8 @@
  * other modules in `src/lib/api/` import from.
  */
 
+import { promisify } from "node:util";
+import { zstdCompress as zstdCompressCb } from "node:zlib";
 import { parseSentryLinkHeader } from "@sentry/api";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
@@ -171,10 +173,20 @@ function enrichDetail(
  */
 export const parseLinkHeader = parseSentryLinkHeader;
 
+/** zstd body compressor, or null when the runtime lacks zstd support. */
+const zstdCompressAsync =
+  typeof zstdCompressCb === "function" ? promisify(zstdCompressCb) : null;
+
 /** Options for raw API requests to Sentry endpoints. */
 export type ApiRequestOptions<T = unknown> = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   body?: unknown;
+  /**
+   * Compress the JSON body with zstd and send `Content-Encoding: zstd`. Useful
+   * for large bodies (e.g. a snapshot manifest). Silently falls back to plain
+   * JSON when the runtime lacks zstd support.
+   */
+  bodyEncoding?: "zstd";
   /** Query parameters. String arrays create repeated keys (e.g., tags=1&tags=2) */
   params?: Record<string, string | number | boolean | string[] | undefined>;
   /** Optional Zod schema for runtime validation of response data */
@@ -448,7 +460,7 @@ export async function apiRequestToRegion<T>(
   endpoint: string,
   options: ApiRequestOptions<T> = {}
 ): Promise<{ data: T; headers: Headers }> {
-  const { method = "GET", body, params, schema } = options;
+  const { method = "GET", body, bodyEncoding, params, schema } = options;
   const config = getSdkConfig(regionUrl);
 
   const searchParams = buildSearchParams(params);
@@ -463,10 +475,20 @@ export async function apiRequestToRegion<T>(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
+  let requestBody: string | Uint8Array | undefined;
+  if (body !== undefined) {
+    const json = JSON.stringify(body);
+    if (bodyEncoding === "zstd" && zstdCompressAsync) {
+      requestBody = await zstdCompressAsync(Buffer.from(json));
+      headers["Content-Encoding"] = "zstd";
+    } else {
+      requestBody = json;
+    }
+  }
   const response = await fetchFn(url, {
     method,
     headers,
-    body: body ? JSON.stringify(body) : undefined,
+    body: requestBody,
   });
 
   if (!response.ok) {
