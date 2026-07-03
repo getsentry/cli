@@ -59,18 +59,21 @@ function setCommitsFromLocal(
 
   const commits = getCommitLog(cwd, { depth, paths, from });
   if (commits.length === 0) {
+    const hasPaths = paths !== undefined && paths.length > 0;
     const scope = from
       ? `in ${from}..HEAD`
       : `within the last ${depth} commits`;
-    const pathClause =
-      paths && paths.length > 0 ? ` touching ${paths.join(", ")}` : "";
-    if (from || (paths && paths.length > 0)) {
-      log.warn(
-        `No commits found${pathClause} ${scope}. ` +
-          (from
-            ? "Check the ref and path(s)."
-            : "Check the path(s) or increase --initial-depth.")
-      );
+    const pathClause = hasPaths ? ` touching ${paths.join(", ")}` : "";
+    // Only mention paths in the suggestion when the user actually passed some,
+    // so `--from` without `--path` doesn't tell them to "check the path(s)".
+    let suggestion: string;
+    if (from) {
+      suggestion = hasPaths ? "Check the ref and path(s)." : "Check the ref.";
+    } else {
+      suggestion = "Check the path(s) or increase --initial-depth.";
+    }
+    if (from || hasPaths) {
+      log.warn(`No commits found${pathClause} ${scope}. ${suggestion}`);
     }
   }
   const repoName = getRepositoryName(cwd);
