@@ -61,6 +61,10 @@ docs/.astro
 src/generated/
 src/sdk.generated.ts
 src/sdk.generated.d.cts
+# ...except the sixel banner: it's small, deterministic (baked from the committed
+# assets/banner-mask.png), and statically imported by src/lib/sixel.ts, so it must
+# exist on a fresh checkout before any build step regenerates it.
+!src/generated/banner-sixel.ts
 
 # Generated docs pages (rebuilt from fragments + CLI introspection / env registry)
 docs/src/content/docs/commands/

@@ -200,6 +200,12 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     example: "1",
   },
   {
+    name: "SENTRY_NO_SIXEL",
+    description:
+      "Disable the sixel image banner on terminals that support it; the block-art banner is shown instead.",
+    example: "1",
+  },
+  {
     name: "NO_COLOR",
     description:
       "Standard convention to disable color output. See [no-color.org](https://no-color.org/). Respected when `SENTRY_PLAIN_OUTPUT` is not set.",
