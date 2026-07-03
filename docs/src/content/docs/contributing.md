@@ -80,6 +80,7 @@ cli/
 │   │   ├── api.ts       # Make an authenticated API request
 │   │   ├── explore.ts   # Query aggregate event data (Explore)
 │   │   ├── help.ts      # Help command
+│   │   ├── info.ts      # Print configuration and verify authentication
 │   │   ├── init.ts      # Initialize Sentry in your project (experimental)
 │   │   └── schema.ts    # Browse the Sentry API schema
 │   ├── lib/            # Shared utilities

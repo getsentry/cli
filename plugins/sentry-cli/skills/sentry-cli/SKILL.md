@@ -577,6 +577,14 @@ Initialize Sentry in your project (experimental)
 
 → Full flags and examples: `references/init.md`
 
+### Info
+
+Print configuration and verify authentication
+
+- `sentry info` — Print configuration and verify authentication
+
+→ Full flags and examples: `references/info.md`
+
 ### Local
 
 Sentry for local development
