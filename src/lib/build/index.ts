@@ -273,14 +273,14 @@ async function collectArchiveEntries(root: string): Promise<ArchiveEntry[]> {
       const full = join(dir, dirent.name);
       const relPath = prefix ? `${prefix}/${dirent.name}` : dirent.name;
 
-      if (dirent.isDirectory()) {
-        await walk(full, relPath);
-        continue;
-      }
-
+      // Check symlink first: a symlink to a directory must be stored as a link,
+      // not descended into (matching Rust's WalkDir with follow_links = false).
       let content: Uint8Array;
       if (dirent.isSymbolicLink()) {
         content = strToU8(await readlink(full));
+      } else if (dirent.isDirectory()) {
+        await walk(full, relPath);
+        continue;
       } else if (dirent.isFile()) {
         content = await readFile(full);
       } else {
@@ -405,28 +405,41 @@ export function normalizeIpa(
   const appName = extractIpaAppName(Object.keys(ipaEntries));
 
   const archiveDir = "archive.xcarchive";
-  const entries: Zippable = {};
+  // Only the identified app's entries are included (an IPA should contain
+  // exactly one `.app`); a stray second bundle is ignored so it can't skew size
+  // analysis.
+  const appPrefix = `Payload/${appName}.app/`;
+
+  // Collect (path, bytes) then sort so the output depends only on contents, not
+  // on the IPA's central-directory order — keeping bytes deterministic for
+  // chunk dedup across re-uploads (as normalizeBuildDirectory does).
+  const archiveEntries: Array<[string, Uint8Array]> = [];
   for (const [name, bytes] of Object.entries(ipaEntries)) {
     // Directory entries (trailing "/") carry no data; skip them.
-    if (name.endsWith("/")) {
+    if (name.endsWith("/") || !name.startsWith(appPrefix)) {
       continue;
     }
-    const stripped = name.startsWith("Payload/")
-      ? name.slice("Payload/".length)
-      : null;
+    const stripped = name.slice("Payload/".length);
     // Skip path-traversal entries (a `..` segment) defensively, matching the
     // legacy CLI's `enclosed_name()` guard.
-    if (stripped && !stripped.split("/").includes("..")) {
-      entries[`${archiveDir}/Products/Applications/${stripped}`] = [
-        bytes,
-        ENTRY_OPTIONS,
-      ];
+    if (stripped.split("/").includes("..")) {
+      continue;
     }
+    archiveEntries.push([
+      `${archiveDir}/Products/Applications/${stripped}`,
+      bytes,
+    ]);
   }
-  entries[`${archiveDir}/Info.plist`] = [
+  archiveEntries.push([
+    `${archiveDir}/Info.plist`,
     strToU8(xcarchiveInfoPlist(appName)),
-    ENTRY_OPTIONS,
-  ];
+  ]);
+  archiveEntries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+
+  const entries: Zippable = {};
+  for (const [key, bytes] of archiveEntries) {
+    entries[key] = [bytes, ENTRY_OPTIONS];
+  }
   entries[METADATA_FILENAME] = [
     strToU8(buildMetadataFile(plugin)),
     ENTRY_OPTIONS,

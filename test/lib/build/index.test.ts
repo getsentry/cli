@@ -316,6 +316,23 @@ describe("normalizeIpa", () => {
     ).toEqual(strToU8("fw"));
   });
 
+  test("includes only the identified app's entries", () => {
+    const ipa = zipSync({
+      "Payload/MyApp.app/Info.plist": strToU8("<app/>"),
+      "Payload/MyApp.app/MyApp": strToU8("bin"),
+      // A stray second .app (no Info.plist so extractIpaAppName still sees one)
+      // must not be bundled.
+      "Payload/Stray.app/junk": strToU8("junk"),
+    });
+    const names = Object.keys(unzipSync(normalizeIpa(ipa, null)));
+    expect(names.some((n) => n.includes("Stray"))).toBe(false);
+    expect(
+      names.includes(
+        "archive.xcarchive/Products/Applications/MyApp.app/MyApp"
+      )
+    ).toBe(true);
+  });
+
   test("skips path-traversal entries", () => {
     const ipa = zipSync({
       "Payload/MyApp.app/Info.plist": strToU8("<app/>"),
