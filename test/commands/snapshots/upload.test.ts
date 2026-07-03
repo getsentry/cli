@@ -130,6 +130,50 @@ describe("snapshots upload", () => {
     // selective omitted when not requested.
     expect(manifest.selective).toBeUndefined();
     expect(harness.output()).toContain("snap-1");
+
+    // The objectstore key is `{orgId}/{projectId}/{sha256}` from the scope.
+    const key = putSpy.mock.calls[0]?.[1] as string;
+    expect(key).toMatch(/^1\/2\/[0-9a-f]{64}$/);
+    expect(key.endsWith(images["a.png"].content_hash as string)).toBe(true);
+  });
+
+  test("CLI width/height/content_hash override sidecar keys", async () => {
+    const dir = join(tmpDir, "shots");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "a.png"), pngBytes(4, 3));
+    await writeFile(
+      join(dir, "a.json"),
+      JSON.stringify({ width: 999, height: 888, content_hash: "nope", keep: 1 })
+    );
+    const harness = createContext();
+    const func = await uploadCommand.loader();
+
+    await func.call(harness.context, { "app-id": "app" }, dir);
+
+    const [, , manifest] = createSpy.mock.calls[0] as [
+      string,
+      string,
+      Record<string, unknown>,
+    ];
+    const entry = (manifest.images as Record<string, Record<string, unknown>>)[
+      "a.png"
+    ];
+    expect(entry.width).toBe(4);
+    expect(entry.height).toBe(3);
+    expect(entry.content_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(entry.keep).toBe(1);
+  });
+
+  test("rejects --pr-number without a resolvable base SHA", async () => {
+    const dir = await writeShots();
+    const func = await uploadCommand.loader();
+    await expect(
+      func.call(
+        createContext().context,
+        { "app-id": "app", "pr-number": 7 },
+        dir
+      )
+    ).rejects.toThrow(ValidationError);
   });
 
   test("skips objects already present in objectstore", async () => {

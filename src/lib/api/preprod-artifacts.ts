@@ -449,7 +449,13 @@ export async function createPreprodSnapshot(
   const { data } = await apiRequestToRegion(
     regionUrl,
     `projects/${org}/${project}/preprodartifacts/snapshots/`,
-    { method: "POST", body: manifest, schema: CreateSnapshotResponseSchema }
+    {
+      method: "POST",
+      body: manifest,
+      // A large image suite makes a large manifest; compress like the legacy CLI.
+      bodyEncoding: "zstd",
+      schema: CreateSnapshotResponseSchema,
+    }
   );
   return data;
 }

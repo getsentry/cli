@@ -65,7 +65,9 @@ async function readSidecarMetadata(
   }
   try {
     const parsed = JSON.parse(await readFile(sidecarPath, "utf8"));
-    return parsed && typeof parsed === "object"
+    // Only a JSON object is usable metadata; arrays/scalars are ignored (as the
+    // legacy CLI does, deserializing into a map and dropping non-objects).
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : {};
   } catch (err) {

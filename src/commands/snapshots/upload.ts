@@ -74,7 +74,7 @@ type SnapshotUploadResult = {
 /** Parse `--diff-threshold` as a float in [0, 1]. */
 function parseDiffThreshold(value: string): number {
   const parsed = Number(value);
-  if (Number.isNaN(parsed) || parsed < 0 || parsed > 1) {
+  if (value.trim() === "" || Number.isNaN(parsed) || parsed < 0 || parsed > 1) {
     throw new Error("diff threshold must be a number between 0.0 and 1.0");
   }
   return parsed;
@@ -96,12 +96,6 @@ function parsePrNumber(value: string): number {
 async function resolveAllImageNames(
   flags: UploadFlags
 ): Promise<string[] | undefined> {
-  if (flags["all-image-file-names"] && flags["all-image-file-names-file"]) {
-    throw new ValidationError(
-      "--all-image-file-names and --all-image-file-names-file cannot be used together",
-      "all-image-file-names"
-    );
-  }
   if (flags["all-image-file-names"]) {
     const names = normalizeImageNames(
       splitAndTrim(flags["all-image-file-names"], ",")
@@ -422,6 +416,12 @@ export const uploadCommand = buildCommand({
       throw new ValidationError(
         "--force-git-metadata and --no-git-metadata cannot be used together",
         "force-git-metadata"
+      );
+    }
+    if (flags["all-image-file-names"] && flags["all-image-file-names-file"]) {
+      throw new ValidationError(
+        "--all-image-file-names and --all-image-file-names-file cannot be used together",
+        "all-image-file-names"
       );
     }
     const shouldCollectVcs =
