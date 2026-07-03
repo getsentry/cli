@@ -457,6 +457,7 @@ Work with ProGuard/R8 mapping files
 Upload React Native sourcemaps from build steps
 
 - `sentry react-native gradle` — Upload a React Native bundle + sourcemap (Gradle build step)
+- `sentry react-native xcode <script-arg...>` — Upload React Native sourcemaps (Xcode build step)
 
 → Full flags and examples: `references/react-native.md`
 
