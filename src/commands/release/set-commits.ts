@@ -10,7 +10,6 @@ import {
   setCommitsAuto,
   setCommitsLocal,
   setCommitsWithRefs,
-  updateRelease,
 } from "../../lib/api-client.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import { getDatabase } from "../../lib/db/index.js";
@@ -278,11 +277,13 @@ export const setCommitsCommand = buildCommand({
       cwd
     );
 
-    // Clear mode: remove all commits regardless of other flags
+    // Clear mode: remove all commits regardless of other flags.
+    // The server only clears commits when it receives an explicitly-empty
+    // `refs` array — an empty `commits` list is treated as "no change" and
+    // silently no-ops. setCommitsWithRefs sends `{ refs: [] }`, which triggers
+    // release.clear_commits() server-side.
     if (flags.clear) {
-      const release = await updateRelease(org, version, {
-        commits: [],
-      });
+      const release = await setCommitsWithRefs(org, version, []);
       yield new CommandOutput(release);
       return;
     }
