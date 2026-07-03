@@ -17,7 +17,7 @@
 import { execSync } from "node:child_process";
 import { closeSync, openSync, readSync, writeSync } from "node:fs";
 import { BANNER_SIXEL } from "../generated/banner-sixel.js";
-import { isPlainOutput } from "./formatters/plain-detect.js";
+import { isPlainOutput, isTruthyEnv } from "./formatters/plain-detect.js";
 
 /** Terminal sixel capabilities discovered by the probe. */
 export type SixelCaps = {
@@ -84,8 +84,11 @@ export function sixelFits(
   return bannerWidth <= columns * caps.cellWidth;
 }
 
-/** True when any signal says we must not probe/emit sixel. */
-function optedOut(): boolean {
+/**
+ * True when any signal says we must not probe/emit sixel. Exported for tests.
+ * @internal
+ */
+export function optedOut(): boolean {
   const env = process.env;
   return (
     !(process.stdout.isTTY && process.stdin.isTTY) ||
@@ -93,18 +96,23 @@ function optedOut(): boolean {
     isPlainOutput() ||
     !env.TERM ||
     env.TERM === "dumb" ||
-    Boolean(env.SENTRY_NO_SIXEL)
+    isTruthyEnv(env.SENTRY_NO_SIXEL ?? "")
   );
 }
 
 /**
  * Read the terminal's query replies from a blocking tty fd. With the tty in
  * `min 0 time N` mode each read blocks up to N deciseconds and returns 0 on
- * timeout. Stops once both terminators (`c` for DA1, `t` for cell size) arrive
- * or a read times out with nothing — draining the full reply so it never leaks
- * onto the shell prompt.
+ * timeout.
+ *
+ * The queries are ordered so the Primary DA reply (which every terminal answers,
+ * ending in `c`) arrives LAST — after the optional cell-size reply. So once `c`
+ * is seen the whole reply has been drained, guaranteeing nothing trails into the
+ * shell prompt even if the cell-size report lagged behind its own timeout.
+ * Exported for tests.
+ * @internal
  */
-function readReply(fd: number): string {
+export function readReply(fd: number): string {
   const buf = Buffer.alloc(256);
   let data = "";
   for (let i = 0; i < 16; i++) {
@@ -118,7 +126,8 @@ function readReply(fd: number): string {
       break;
     }
     data += buf.toString("latin1", 0, n);
-    if (data.includes("c") && data.includes("t")) {
+    // `c` is the Primary DA (sentinel) terminator, sent last.
+    if (data.includes("c")) {
       break;
     }
   }
@@ -145,7 +154,8 @@ function probe(): SixelCaps {
     savedStty = execSync("stty -g < /dev/tty", { encoding: "utf8" }).trim();
     // min 0 time 3 => each read blocks up to ~300ms for (more) reply bytes.
     execSync("stty -echo -icanon min 0 time 3 < /dev/tty");
-    writeSync(fd, "\x1b[c\x1b[16t");
+    // Cell-size query first, Primary DA last: DA's `c` is the drain sentinel.
+    writeSync(fd, "\x1b[16t\x1b[c");
     return parseSixelCaps(readReply(fd));
   } catch {
     return UNSUPPORTED;

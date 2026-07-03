@@ -7,10 +7,27 @@
  * exercised (it requires a real tty); everything it feeds is unit-tested here.
  */
 
+import {
+  closeSync,
+  mkdtempSync,
+  openSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { assert as fcAssert, integer, property, uniqueArray } from "fast-check";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { BANNER_SIXEL } from "../../src/generated/banner-sixel.js";
-import { parseSixelCaps, sixelBanner, sixelFits } from "../../src/lib/sixel.js";
+import {
+  __resetSixelCache,
+  detectSixelCaps,
+  optedOut,
+  parseSixelCaps,
+  readReply,
+  sixelBanner,
+  sixelFits,
+} from "../../src/lib/sixel.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
 const ESC = "\x1b";
@@ -105,5 +122,141 @@ describe("BANNER_SIXEL (generated)", () => {
     expect(BANNER_SIXEL.data.endsWith(`${ESC}\\`)).toBe(true);
     // Transparent background: P2 = 1 in the DCS parameters.
     expect(BANNER_SIXEL.data.startsWith(`${ESC}P0;1;0q`)).toBe(true);
+  });
+});
+
+describe("optedOut", () => {
+  const saved = {
+    stdout: process.stdout.isTTY,
+    stdin: process.stdin.isTTY,
+    TERM: process.env.TERM,
+    SENTRY_NO_SIXEL: process.env.SENTRY_NO_SIXEL,
+    NO_COLOR: process.env.NO_COLOR,
+    SENTRY_PLAIN_OUTPUT: process.env.SENTRY_PLAIN_OUTPUT,
+    FORCE_COLOR: process.env.FORCE_COLOR,
+  };
+
+  const setEnv = (key: string, value: string | undefined): void => {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  };
+
+  afterEach(() => {
+    process.stdout.isTTY = saved.stdout;
+    process.stdin.isTTY = saved.stdin;
+    setEnv("TERM", saved.TERM);
+    setEnv("SENTRY_NO_SIXEL", saved.SENTRY_NO_SIXEL);
+    setEnv("NO_COLOR", saved.NO_COLOR);
+    setEnv("SENTRY_PLAIN_OUTPUT", saved.SENTRY_PLAIN_OUTPUT);
+    setEnv("FORCE_COLOR", saved.FORCE_COLOR);
+  });
+
+  /** Put the process in a state where sixel probing WOULD be allowed. */
+  function makeInteractive(): void {
+    process.stdout.isTTY = true;
+    process.stdin.isTTY = true;
+    setEnv("TERM", "xterm-256color");
+    setEnv("SENTRY_NO_SIXEL", undefined);
+    setEnv("NO_COLOR", undefined);
+    setEnv("SENTRY_PLAIN_OUTPUT", undefined);
+    setEnv("FORCE_COLOR", undefined);
+  }
+
+  test("does not opt out on an interactive color terminal (non-win32)", () => {
+    makeInteractive();
+    if (process.platform !== "win32") {
+      expect(optedOut()).toBe(false);
+    }
+  });
+
+  test("opts out when stdout or stdin is not a TTY", () => {
+    makeInteractive();
+    process.stdout.isTTY = false;
+    expect(optedOut()).toBe(true);
+    makeInteractive();
+    process.stdin.isTTY = false;
+    expect(optedOut()).toBe(true);
+  });
+
+  test("opts out when TERM is unset or dumb", () => {
+    makeInteractive();
+    setEnv("TERM", undefined);
+    expect(optedOut()).toBe(true);
+    makeInteractive();
+    setEnv("TERM", "dumb");
+    expect(optedOut()).toBe(true);
+  });
+
+  test("opts out under plain-output signals (NO_COLOR)", () => {
+    makeInteractive();
+    setEnv("NO_COLOR", "1");
+    expect(optedOut()).toBe(true);
+  });
+
+  test("SENTRY_NO_SIXEL honors truthiness (0/false do not opt out)", () => {
+    makeInteractive();
+    setEnv("SENTRY_NO_SIXEL", "1");
+    expect(optedOut()).toBe(true);
+    makeInteractive();
+    setEnv("SENTRY_NO_SIXEL", "0");
+    if (process.platform !== "win32") {
+      expect(optedOut()).toBe(false);
+    }
+    makeInteractive();
+    setEnv("SENTRY_NO_SIXEL", "false");
+    if (process.platform !== "win32") {
+      expect(optedOut()).toBe(false);
+    }
+  });
+});
+
+describe("readReply", () => {
+  function withReplyFile(bytes: string, fn: (fd: number) => void): void {
+    const dir = mkdtempSync(join(tmpdir(), "sixel-reply-"));
+    const file = join(dir, "reply");
+    writeFileSync(file, bytes, "latin1");
+    const fd = openSync(file, "r");
+    try {
+      fn(fd);
+    } finally {
+      closeSync(fd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("drains the full reply up to the Primary DA sentinel", () => {
+    // Cell-size report first, Primary DA (sentinel, ends in `c`) last.
+    withReplyFile(`${ESC}[6;20;10t${ESC}[?62;4;6c`, (fd) => {
+      const reply = readReply(fd);
+      expect(reply).toContain("c");
+      expect(parseSixelCaps(reply)).toMatchObject({
+        supported: true,
+        cellHeight: 20,
+        cellWidth: 10,
+      });
+    });
+  });
+
+  test("returns an empty string at EOF with no reply", () => {
+    withReplyFile("", (fd) => {
+      expect(readReply(fd)).toBe("");
+    });
+  });
+});
+
+describe("detectSixelCaps", () => {
+  afterEach(() => {
+    __resetSixelCache();
+  });
+
+  test("caches the probe result (unsupported in a non-TTY test env)", () => {
+    __resetSixelCache();
+    const first = detectSixelCaps();
+    const second = detectSixelCaps();
+    expect(first).toBe(second); // same cached reference — probed at most once
+    expect(first.supported).toBe(false);
   });
 });

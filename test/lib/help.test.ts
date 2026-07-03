@@ -93,6 +93,22 @@ describe("printCustomHelp", () => {
     expect(output).toContain("cli.sentry.dev");
   });
 
+  test("includes the banner only when stdout is a TTY", () => {
+    const savedTty = process.stdout.isTTY;
+    try {
+      process.stdout.isTTY = false;
+      const withoutBanner = printCustomHelp();
+      // stdin stays non-TTY under vitest, so sixel opts out and the block-art
+      // banner is used — exercises the `sixelBanner(cols) ?? formatBanner(cols)`
+      // fallback inside the TTY-only banner branch.
+      process.stdout.isTTY = true;
+      const withBanner = printCustomHelp();
+      expect(withBanner.length).toBeGreaterThan(withoutBanner.length);
+    } finally {
+      process.stdout.isTTY = savedTty;
+    }
+  });
+
   test("shows login example when not authenticated", async () => {
     // useTestConfigDir provides a clean env with no auth token
     const output = stripAnsi(printCustomHelp());

@@ -25,7 +25,7 @@ import { getEnv } from "../env.js";
  * Falsy values: `"0"`, `"false"`, `""` (case-insensitive).
  * Everything else (e.g. `"1"`, `"true"`, `"yes"`) is truthy.
  */
-function isTruthyEnv(val: string): boolean {
+export function isTruthyEnv(val: string): boolean {
   const normalized = val.toLowerCase().trim();
   return normalized !== "0" && normalized !== "false" && normalized !== "";
 }
