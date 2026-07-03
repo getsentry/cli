@@ -139,7 +139,8 @@ function isPlatformError(error: ApiError): boolean {
 /**
  * Build a user-friendly error message for missing or invalid platform.
  *
- * @param nameArg - The name arg (used in the usage example)
+ * @param nameArg - The project name(s) to echo in the usage example (may be
+ *   several space-separated names for the variadic form)
  * @param platform - The invalid platform string, if provided
  */
 function buildPlatformError(nameArg: string, platform?: string): string {
@@ -436,13 +437,11 @@ function resolvePlatformAndNames(
     );
   }
 
-  const nameForHint = args[0] ?? "<name>";
-
   // Platform via flag → every positional is a name.
   if (flags.platform) {
     const platform = normalizePlatform(flags.platform);
     if (!isValidPlatform(platform)) {
-      throw new CliError(buildPlatformError(nameForHint, platform));
+      throw new CliError(buildPlatformError(args.join(" "), platform));
     }
     return { platform, names: [...args] };
   }
@@ -450,12 +449,15 @@ function resolvePlatformAndNames(
   // No flag: the trailing positional is the platform. With a single positional
   // the platform is simply missing.
   if (args.length < 2) {
-    throw new CliError(buildPlatformError(nameForHint));
+    throw new CliError(buildPlatformError(args.join(" ")));
   }
 
   const platform = normalizePlatform(args.at(-1) as string);
   if (!isValidPlatform(platform)) {
-    throw new CliError(buildPlatformError(nameForHint, platform));
+    // Trailing arg was meant to be the platform; the names are everything else.
+    throw new CliError(
+      buildPlatformError(args.slice(0, -1).join(" "), platform)
+    );
   }
   return { platform, names: args.slice(0, -1) };
 }

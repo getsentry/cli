@@ -751,6 +751,19 @@ describe("project create", () => {
     }
   });
 
+  test("invalid platform with multiple names shows all names in usage hint", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    const err = await func
+      .call(context, { json: false }, "proj1", "proj2", "not-a-platform")
+      .catch((e: Error) => e);
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.message).toContain("Invalid platform 'not-a-platform'");
+    expect(err.message).toContain(
+      "sentry project create proj1 proj2 <platform>"
+    );
+  });
+
   test("creates multiple projects from comma-separated names", async () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
