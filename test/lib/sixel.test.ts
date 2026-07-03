@@ -245,6 +245,23 @@ describe("readReply", () => {
       expect(readReply(fd)).toBe("");
     });
   });
+
+  test("does not stop on a stray 'c' before the Primary DA reply", () => {
+    // A stray `c` (e.g. a keypress) followed by the cell-size report but NO DA
+    // reply: readReply must keep draining rather than stop at the stray `c`.
+    withReplyFile(`c${ESC}[6;20;10t`, (fd) => {
+      expect(readReply(fd)).toBe(`c${ESC}[6;20;10t`);
+    });
+  });
+
+  test("captures the full reply even when preceded by a stray 'c'", () => {
+    withReplyFile(`c${ESC}[6;20;10t${ESC}[?62;4;6c`, (fd) => {
+      expect(parseSixelCaps(readReply(fd))).toMatchObject({
+        supported: true,
+        cellWidth: 10,
+      });
+    });
+  });
 });
 
 describe("detectSixelCaps", () => {

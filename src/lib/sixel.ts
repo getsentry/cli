@@ -17,6 +17,7 @@
 import { execSync } from "node:child_process";
 import { closeSync, openSync, readSync, writeSync } from "node:fs";
 import { BANNER_SIXEL } from "../generated/banner-sixel.js";
+import { getEnv } from "./env.js";
 import { isPlainOutput, isTruthyEnv } from "./formatters/plain-detect.js";
 
 /** Terminal sixel capabilities discovered by the probe. */
@@ -89,7 +90,9 @@ export function sixelFits(
  * @internal
  */
 export function optedOut(): boolean {
-  const env = process.env;
+  // Use the isolation-aware env (matches isPlainOutput) so library/test runs
+  // that call setEnv() see consistent TERM / SENTRY_NO_SIXEL values.
+  const env = getEnv();
   return (
     !(process.stdout.isTTY && process.stdin.isTTY) ||
     process.platform === "win32" || // MVP: probe is unix-only
@@ -106,10 +109,12 @@ export function optedOut(): boolean {
  * timeout.
  *
  * The queries are ordered so the Primary DA reply (which every terminal answers,
- * ending in `c`) arrives LAST — after the optional cell-size reply. So once `c`
- * is seen the whole reply has been drained, guaranteeing nothing trails into the
- * shell prompt even if the cell-size report lagged behind its own timeout.
- * Exported for tests.
+ * as `ESC [ ? … c`) arrives LAST — after the optional cell-size reply. So once a
+ * complete DA reply is seen the whole reply has been drained, guaranteeing
+ * nothing trails into the shell prompt even if the cell-size report lagged.
+ *
+ * Matching the full DA pattern (not merely any `c`) avoids stopping early on a
+ * stray `c` — e.g. a keypress on `/dev/tty` during the probe. Exported for tests.
  * @internal
  */
 export function readReply(fd: number): string {
@@ -126,8 +131,8 @@ export function readReply(fd: number): string {
       break;
     }
     data += buf.toString("latin1", 0, n);
-    // `c` is the Primary DA (sentinel) terminator, sent last.
-    if (data.includes("c")) {
+    // Stop only once the complete Primary DA (sentinel) reply has arrived.
+    if (DA1_RE.test(data)) {
       break;
     }
   }
