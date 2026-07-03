@@ -36,6 +36,8 @@ vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
 });
 
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as gitLib from "../../../src/lib/git.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import type { SentryRelease } from "../../../src/types/index.js";
 import { useTestConfigDir } from "../../helpers.js";
@@ -552,8 +554,9 @@ describe("release set-commits --from", () => {
   let setCommitsAutoSpy: ReturnType<typeof spyOn>;
   let setCommitsLocalSpy: ReturnType<typeof spyOn>;
   let resolveOrgSpy: ReturnType<typeof spyOn>;
+  let getCommitLogSpy: ReturnType<typeof spyOn>;
 
-  // Use the actual repo root as cwd so getCommitLog can read git history
+  // Use the actual repo root as cwd so the git remote/shallow helpers resolve.
   const repoRoot = new URL("../../..", import.meta.url).pathname.replace(
     /\/$/,
     ""
@@ -563,15 +566,27 @@ describe("release set-commits --from", () => {
     setCommitsAutoSpy = vi.spyOn(apiClient, "setCommitsAuto");
     setCommitsLocalSpy = vi.spyOn(apiClient, "setCommitsLocal");
     resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
+    // Stub the git log so the range doesn't depend on real repo history —
+    // CI checks out a shallow clone where HEAD~N does not exist.
+    getCommitLogSpy = vi.spyOn(gitLib, "getCommitLog").mockReturnValue([
+      {
+        id: "abc123",
+        message: "commit",
+        author_name: "Jane",
+        author_email: "jane@example.com",
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    ]);
   });
 
   afterEach(() => {
     setCommitsAutoSpy.mockRestore();
     setCommitsLocalSpy.mockRestore();
     resolveOrgSpy.mockRestore();
+    getCommitLogSpy.mockRestore();
   });
 
-  test("implies local mode (no --auto needed)", async () => {
+  test("implies local mode and reads the <ref>..HEAD range", async () => {
     resolveOrgSpy.mockResolvedValue({ org: "my-org" });
     setCommitsLocalSpy.mockResolvedValue(sampleRelease);
 
@@ -593,6 +608,11 @@ describe("release set-commits --from", () => {
 
     expect(setCommitsLocalSpy).toHaveBeenCalled();
     expect(setCommitsAutoSpy).not.toHaveBeenCalled();
+    // A range is self-bounding, so no depth cap is passed.
+    expect(getCommitLogSpy).toHaveBeenCalledWith(
+      repoRoot,
+      expect.objectContaining({ from: "HEAD~1", depth: undefined, paths: [] })
+    );
   });
 
   test("combines with --path in local mode", async () => {
@@ -618,6 +638,10 @@ describe("release set-commits --from", () => {
 
     expect(setCommitsLocalSpy).toHaveBeenCalled();
     expect(setCommitsAutoSpy).not.toHaveBeenCalled();
+    expect(getCommitLogSpy).toHaveBeenCalledWith(
+      repoRoot,
+      expect.objectContaining({ from: "HEAD~3", paths: ["src", "test"] })
+    );
   });
 
   test("throws when --from is empty/whitespace", async () => {
