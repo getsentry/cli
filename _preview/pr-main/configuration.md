@@ -250,6 +250,19 @@ export SENTRY_PLAIN_OUTPUT=1
 ```
 
 
+### `SENTRY_NO_SIXEL`
+
+[Section titled “SENTRY_NO_SIXEL”](#sentry_no_sixel)
+
+Disable the sixel image banner on terminals that support it; the block-art banner is shown instead.
+
+Terminal window
+
+```
+export SENTRY_NO_SIXEL=1
+```
+
+
 ### `NO_COLOR`
 
 [Section titled “NO_COLOR”](#no_color)
