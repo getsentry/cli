@@ -452,6 +452,14 @@ Work with ProGuard/R8 mapping files
 
 → Full flags and examples: `references/proguard.md`
 
+### React-native
+
+Upload React Native sourcemaps from build steps
+
+- `sentry react-native gradle` — Upload a React Native bundle + sourcemap (Gradle build step)
+
+→ Full flags and examples: `references/react-native.md`
+
 ### Replay
 
 Search and inspect Session Replays
