@@ -25,6 +25,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`org`](https://cli.sentry.dev/_preview/pr-main/commands/org.md) | Work with Sentry organizations |
 | [`project`](https://cli.sentry.dev/_preview/pr-main/commands/project.md) | Work with Sentry projects |
 | [`proguard`](https://cli.sentry.dev/_preview/pr-main/commands/proguard.md) | Work with ProGuard/R8 mapping files |
+| [`react-native`](https://cli.sentry.dev/_preview/pr-main/commands/react-native.md) | Upload React Native sourcemaps from build steps |
 | [`replay`](https://cli.sentry.dev/_preview/pr-main/commands/replay.md) | Search and inspect Session Replays |
 | [`release`](https://cli.sentry.dev/_preview/pr-main/commands/release.md) | Work with Sentry releases |
 | [`repo`](https://cli.sentry.dev/_preview/pr-main/commands/repo.md) | Work with Sentry repositories |
@@ -103,6 +104,7 @@ sentry issue view PROJ-123 -w
 - [org](https://cli.sentry.dev/_preview/pr-main/commands/org.md)
 - [proguard](https://cli.sentry.dev/_preview/pr-main/commands/proguard.md)
 - [project](https://cli.sentry.dev/_preview/pr-main/commands/project.md)
+- [react-native](https://cli.sentry.dev/_preview/pr-main/commands/react-native.md)
 - [release](https://cli.sentry.dev/_preview/pr-main/commands/release.md)
 - [replay](https://cli.sentry.dev/_preview/pr-main/commands/replay.md)
 - [repo](https://cli.sentry.dev/_preview/pr-main/commands/repo.md)
