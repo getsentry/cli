@@ -16,7 +16,6 @@ import {
   formatHelpHuman,
   introspectAllCommands,
   introspectCommand,
-  printCustomHelp,
 } from "../lib/help.js";
 
 export const helpCommand = buildCommand({
@@ -30,7 +29,6 @@ export const helpCommand = buildCommand({
   },
   output: {
     human: formatHelpHuman,
-    jsonExclude: ["_banner"] as const,
   },
   parameters: {
     flags: {},
@@ -47,11 +45,10 @@ export const helpCommand = buildCommand({
   // biome-ignore lint/suspicious/useAwait: async generator required by Stricli buildCommand pattern
   async *func(this: SentryContext, _flags: {}, ...commandPath: string[]) {
     if (commandPath.length === 0) {
-      // Yield the full command tree. Attach the branded banner for human display;
-      // jsonExclude strips _banner from JSON output.
-      const tree = introspectAllCommands();
-      const banner = printCustomHelp();
-      return yield new CommandOutput({ ...tree, _banner: banner });
+      // Yield the full command tree. The branded banner + help is rendered by
+      // formatHelpHuman (human output only), so `--json` never triggers the
+      // sixel probe or any terminal I/O for a banner it would discard.
+      return yield new CommandOutput(introspectAllCommands());
     }
 
     // Resolve the command path and yield the result.
