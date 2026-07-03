@@ -41,6 +41,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`trace`](https://cli.sentry.dev/_preview/pr-1192/commands/trace.md) | View distributed traces |
 | [`trial`](https://cli.sentry.dev/_preview/pr-1192/commands/trial.md) | Manage product trials |
 | [`init`](https://cli.sentry.dev/_preview/pr-1192/commands/init.md) | Initialize Sentry in your project (experimental) |
+| [`info`](https://cli.sentry.dev/_preview/pr-1192/commands/info.md) | Print configuration and verify authentication |
 | [`local`](https://cli.sentry.dev/_preview/pr-1192/commands/local.md) | Sentry for local development |
 | [`api`](https://cli.sentry.dev/_preview/pr-1192/commands/api.md) | Make an authenticated API request |
 | [`schema`](https://cli.sentry.dev/_preview/pr-1192/commands/schema.md) | Browse the Sentry API schema |
@@ -94,6 +95,7 @@ sentry issue view PROJ-123 -w
 - [debug-files](https://cli.sentry.dev/_preview/pr-1192/commands/debug-files.md)
 - [event](https://cli.sentry.dev/_preview/pr-1192/commands/event.md)
 - [explore](https://cli.sentry.dev/_preview/pr-1192/commands/explore.md)
+- [info](https://cli.sentry.dev/_preview/pr-1192/commands/info.md)
 - [init](https://cli.sentry.dev/_preview/pr-1192/commands/init.md)
 - [issue](https://cli.sentry.dev/_preview/pr-1192/commands/issue.md)
 - [local](https://cli.sentry.dev/_preview/pr-1192/commands/local.md)

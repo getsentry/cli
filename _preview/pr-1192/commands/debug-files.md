@@ -24,6 +24,27 @@ Inspect a debug information file
 | --- | --- |
 | `<path>` | Path to the debug information file |
 
+### `sentry debug-files find <id...>`
+
+[Section titled “sentry debug-files find <id...>”](#sentry-debug-files-find-id)
+
+Locate debug files for given debug identifiers
+
+**Arguments:**
+
+| Argument | Description |
+| --- | --- |
+| `<id...>` | Debug identifier(s) to search for |
+
+**Options:**
+
+| Option | Description |
+| --- | --- |
+| `-t, --type <type>...` | Only consider debug files of the given type (repeatable). Default: all |
+| `--no-well-known` | Do not look for debug files in well-known locations |
+| `--no-cwd` | Do not look for debug files in the current directory |
+| `-p, --path <path>...` | Add a directory to search recursively (repeatable) |
+
 ### `sentry debug-files upload <path...>`
 
 [Section titled “sentry debug-files upload <path...>”](#sentry-debug-files-upload-path)
@@ -114,6 +135,7 @@ Terminal window
 ```
 # Inspect a debug information file (auto-detects the format)sentry debug-files check ./libexample.sosentry debug-files check MyApp.dSYM/Contents/Resources/DWARF/MyAppsentry debug-files check ./app.pdb --json
 # List the source files a debug file references (and whether they're available)sentry debug-files print-sources ./libexample.sosentry debug-files print-sources ./app.pdb --json
+# Locate debug files for one or more debug identifiers on disksentry debug-files find <debug-id>sentry debug-files find <debug-id> --type dsym --path ./buildsentry debug-files find <debug-id> --no-cwd --no-well-known -p /symbols --json
 # Bundle a debug file's referenced source files (run on the build machine)sentry debug-files bundle-sources ./libexample.sosentry debug-files bundle-sources ./app.pdb --output ./app.src.zip
 # Bundle JVM sources with a debug IDsentry debug-files bundle-jvm --output ./out --debug-id <uuid> ./src
 # Exclude additional directoriessentry debug-files bundle-jvm --output ./out --debug-id <uuid> --exclude generated --exclude build-tools ./src
