@@ -62,7 +62,9 @@ vi.mock("../../../src/lib/api/chunk-upload.js", async (importOriginal) => {
 
 import {
   buildFormatFromUrl,
+  createPreprodSnapshot,
   downloadBuildArtifact,
+  fetchSnapshotsUploadOptions,
   getBuildInstallDetails,
   getLatestBaseSnapshot,
   LatestBaseSnapshotSchema,
@@ -370,6 +372,42 @@ describe("snapshots", () => {
         imageCount: 5,
       }).success
     ).toBe(false);
+  });
+
+  test("fetchSnapshotsUploadOptions hits the upload-options endpoint", async () => {
+    apiRequestToRegionMock.mockResolvedValue({
+      data: {
+        objectstore: {
+          url: "https://os.example.com",
+          scopes: [["org", "1"]],
+          authToken: "tok",
+          expirationPolicy: "ttl:30d",
+        },
+      },
+    });
+    const opts = await fetchSnapshotsUploadOptions("my-org", "my-project");
+    expect(opts.objectstore.url).toBe("https://os.example.com");
+    const [, endpoint] = apiRequestToRegionMock.mock.calls.at(-1) ?? [];
+    expect(endpoint).toBe(
+      "projects/my-org/my-project/preprodartifacts/snapshots/upload-options/"
+    );
+  });
+
+  test("createPreprodSnapshot POSTs the manifest and parses the response", async () => {
+    apiRequestToRegionMock.mockResolvedValue({
+      data: { artifactId: "snap-1", imageCount: 3, snapshotUrl: "https://s" },
+    });
+    const manifest = { app_id: "app", images: {} };
+    const res = await createPreprodSnapshot("my-org", "my-project", manifest);
+    expect(res.artifactId).toBe("snap-1");
+    expect(res.imageCount).toBe(3);
+    const [, endpoint, options] =
+      apiRequestToRegionMock.mock.calls.at(-1) ?? [];
+    expect(endpoint).toBe(
+      "projects/my-org/my-project/preprodartifacts/snapshots/"
+    );
+    expect(options.method).toBe("POST");
+    expect(options.body).toBe(manifest);
   });
 
   test("getLatestBaseSnapshot maps the response and forwards params", async () => {

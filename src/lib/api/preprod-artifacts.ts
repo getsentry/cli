@@ -384,6 +384,76 @@ export async function getLatestBaseSnapshot(
   }
 }
 
+/** Objectstore config within the snapshots upload-options response. */
+const ObjectstoreUploadOptionsSchema = z.object({
+  url: z.string(),
+  scopes: z.array(z.tuple([z.string(), z.string()])),
+  authToken: z.string().nullish(),
+  expirationPolicy: z.string(),
+});
+
+/** Response from `.../snapshots/upload-options/`. */
+const SnapshotsUploadOptionsSchema = z.object({
+  objectstore: ObjectstoreUploadOptionsSchema,
+});
+
+/** Snapshot upload options (objectstore config), for the caller. */
+export type SnapshotsUploadOptions = z.infer<
+  typeof SnapshotsUploadOptionsSchema
+>;
+
+/**
+ * Fetch objectstore upload options (URL, scopes, token, expiration) for
+ * uploading snapshot images.
+ *
+ * @throws {ApiError} On a non-2xx response.
+ */
+export async function fetchSnapshotsUploadOptions(
+  org: string,
+  project: string
+): Promise<SnapshotsUploadOptions> {
+  const regionUrl = await resolveOrgRegion(org);
+  const { data } = await apiRequestToRegion(
+    regionUrl,
+    `projects/${org}/${project}/preprodartifacts/snapshots/upload-options/`,
+    { schema: SnapshotsUploadOptionsSchema }
+  );
+  return data;
+}
+
+/** Response from the create-snapshot endpoint. */
+const CreateSnapshotResponseSchema = z.object({
+  artifactId: z.string(),
+  imageCount: z.number(),
+  snapshotUrl: z.string().nullish(),
+});
+
+/** Result of creating a preprod snapshot. */
+export type CreateSnapshotResponse = z.infer<
+  typeof CreateSnapshotResponseSchema
+>;
+
+/**
+ * Create a preprod snapshot from an uploaded image manifest.
+ *
+ * @param manifest - The snapshot manifest (app id, per-image metadata, VCS,
+ *   selective flags).
+ * @throws {ApiError} On a non-2xx response.
+ */
+export async function createPreprodSnapshot(
+  org: string,
+  project: string,
+  manifest: Record<string, unknown>
+): Promise<CreateSnapshotResponse> {
+  const regionUrl = await resolveOrgRegion(org);
+  const { data } = await apiRequestToRegion(
+    regionUrl,
+    `projects/${org}/${project}/preprodartifacts/snapshots/`,
+    { method: "POST", body: manifest, schema: CreateSnapshotResponseSchema }
+  );
+  return data;
+}
+
 const SnapshotArchiveStatusSchema = z.object({ ready: z.boolean() });
 
 /**
