@@ -67,6 +67,17 @@ describe("getCommitLog pathspec argv", () => {
     expect(lastGitArgs().some((a) => a.startsWith("--max-count="))).toBe(false);
   });
 
+  // Guards against git argument injection: a `from` like "--format=x" must be
+  // treated as a revision, not an option.
+  test("passes --end-of-options before the range", () => {
+    getCommitLog("/repo", { from: "abc123" });
+    const args = lastGitArgs();
+    const eooIdx = args.indexOf("--end-of-options");
+    const rangeIdx = args.indexOf("abc123..HEAD");
+    expect(eooIdx).toBeGreaterThanOrEqual(0);
+    expect(rangeIdx).toBeGreaterThan(eooIdx);
+  });
+
   // Uncapped `--from` ranges can emit >1 MB, so git() must raise maxBuffer
   // above execFileSync's 1 MB default to avoid crashing on large histories.
   test("passes a large maxBuffer to execFileSync", () => {

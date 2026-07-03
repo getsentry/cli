@@ -265,6 +265,15 @@ function parseLocalScope(flags: {
   if (flags.from !== undefined && !from) {
     throw new ValidationError("--from requires a non-empty git ref.", "from");
   }
+  // Reject option-like refs. Otherwise `--from=--format=x` would become the
+  // argv element `--format=x..HEAD`, which git parses as a `--format` override
+  // (arg injection). Git ref names cannot start with "-" anyway.
+  if (from?.startsWith("-")) {
+    throw new ValidationError(
+      "--from must be a git ref, not an option (must not start with '-').",
+      "from"
+    );
+  }
   if (from && serverExpanded) {
     throw new ValidationError(
       "--from cannot be combined with --auto or --commit (their commit ranges are expanded server-side). Use --from with local mode.",

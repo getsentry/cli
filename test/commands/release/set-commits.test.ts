@@ -644,6 +644,29 @@ describe("release set-commits --from", () => {
     );
   });
 
+  test("throws when --from looks like an option", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: "my-org" });
+
+    const { context } = createMockContext(repoRoot);
+    const func = await setCommitsCommand.loader();
+
+    await expect(
+      func.call(
+        context,
+        {
+          auto: false,
+          local: false,
+          clear: false,
+          commit: undefined,
+          from: "--format=%H",
+          "initial-depth": 20,
+          json: false,
+        },
+        "1.0.0"
+      )
+    ).rejects.toThrow("--from must be a git ref, not an option");
+  });
+
   test("throws when --from is empty/whitespace", async () => {
     resolveOrgSpy.mockResolvedValue({ org: "my-org" });
 

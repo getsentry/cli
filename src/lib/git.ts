@@ -173,8 +173,18 @@ export function getCommitLog(
   // Pathspecs go after `--`; each path is a discrete argv entry (no shell), so
   // there is no escaping/injection concern.
   const pathspec = paths && paths.length > 0 ? ["--", ...paths] : [];
+  // `--end-of-options` forces git to treat the range as a revision, not an
+  // option, so a caller-supplied `from` that looks like a flag (e.g.
+  // `--format=x`) can't inject a git option. See getMergeBase for the same intent.
   const raw = git(
-    ["log", `--format=${format}`, ...maxCount, range, ...pathspec],
+    [
+      "log",
+      `--format=${format}`,
+      ...maxCount,
+      "--end-of-options",
+      range,
+      ...pathspec,
+    ],
     cwd
   );
 
