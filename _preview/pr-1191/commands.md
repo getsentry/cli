@@ -25,6 +25,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`org`](https://cli.sentry.dev/_preview/pr-1191/commands/org.md) | Work with Sentry organizations |
 | [`project`](https://cli.sentry.dev/_preview/pr-1191/commands/project.md) | Work with Sentry projects |
 | [`proguard`](https://cli.sentry.dev/_preview/pr-1191/commands/proguard.md) | Work with ProGuard/R8 mapping files |
+| [`react-native`](https://cli.sentry.dev/_preview/pr-1191/commands/react-native.md) | Upload React Native sourcemaps from build steps |
 | [`replay`](https://cli.sentry.dev/_preview/pr-1191/commands/replay.md) | Search and inspect Session Replays |
 | [`release`](https://cli.sentry.dev/_preview/pr-1191/commands/release.md) | Work with Sentry releases |
 | [`repo`](https://cli.sentry.dev/_preview/pr-1191/commands/repo.md) | Work with Sentry repositories |
@@ -40,6 +41,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`trace`](https://cli.sentry.dev/_preview/pr-1191/commands/trace.md) | View distributed traces |
 | [`trial`](https://cli.sentry.dev/_preview/pr-1191/commands/trial.md) | Manage product trials |
 | [`init`](https://cli.sentry.dev/_preview/pr-1191/commands/init.md) | Initialize Sentry in your project (experimental) |
+| [`info`](https://cli.sentry.dev/_preview/pr-1191/commands/info.md) | Print configuration and verify authentication |
 | [`local`](https://cli.sentry.dev/_preview/pr-1191/commands/local.md) | Sentry for local development |
 | [`api`](https://cli.sentry.dev/_preview/pr-1191/commands/api.md) | Make an authenticated API request |
 | [`schema`](https://cli.sentry.dev/_preview/pr-1191/commands/schema.md) | Browse the Sentry API schema |
@@ -93,6 +95,7 @@ sentry issue view PROJ-123 -w
 - [debug-files](https://cli.sentry.dev/_preview/pr-1191/commands/debug-files.md)
 - [event](https://cli.sentry.dev/_preview/pr-1191/commands/event.md)
 - [explore](https://cli.sentry.dev/_preview/pr-1191/commands/explore.md)
+- [info](https://cli.sentry.dev/_preview/pr-1191/commands/info.md)
 - [init](https://cli.sentry.dev/_preview/pr-1191/commands/init.md)
 - [issue](https://cli.sentry.dev/_preview/pr-1191/commands/issue.md)
 - [local](https://cli.sentry.dev/_preview/pr-1191/commands/local.md)
@@ -101,6 +104,7 @@ sentry issue view PROJ-123 -w
 - [org](https://cli.sentry.dev/_preview/pr-1191/commands/org.md)
 - [proguard](https://cli.sentry.dev/_preview/pr-1191/commands/proguard.md)
 - [project](https://cli.sentry.dev/_preview/pr-1191/commands/project.md)
+- [react-native](https://cli.sentry.dev/_preview/pr-1191/commands/react-native.md)
 - [release](https://cli.sentry.dev/_preview/pr-1191/commands/release.md)
 - [replay](https://cli.sentry.dev/_preview/pr-1191/commands/replay.md)
 - [repo](https://cli.sentry.dev/_preview/pr-1191/commands/repo.md)
