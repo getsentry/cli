@@ -39,12 +39,21 @@ tracks the same channel on future updates.
 
 {/* GENERATED:START platform-support */}
 
-| OS | Architectures | Notes |
-|----|---------------|-------|
-| **macOS** | x64, arm64 (Apple Silicon) |  |
-| **Linux** | x64, arm64 | glibc and musl (Alpine) |
-| **Windows** | x64 | Via Git Bash, MSYS2, or WSL |
-
+      OS
+      Architectures
+      Notes
+    
+      macOS
+      x64, arm64 (Apple Silicon)
+      
+      Linux
+      x64, arm64
+      glibc and musl (Alpine)
+    
+      Windows
+      x64
+      Via Git Bash, MSYS2, or WSL
+    
 {/* GENERATED:END platform-support */}
 
 ## Homebrew
