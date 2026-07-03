@@ -17,7 +17,9 @@ import {
 } from "../../lib/api/preprod-artifacts.js";
 import {
   detectBuildFormat,
+  normalizeBuildDirectory,
   normalizeBuildFile,
+  normalizeIpa,
   parsePluginFromPipeline,
 } from "../../lib/build/index.js";
 import {
@@ -110,12 +112,12 @@ async function uploadOne(
     throw new ValidationError(`Path does not exist: ${path}`, "path");
   }
 
-  // XCArchive is a directory; iOS support is ported separately.
+  const plugin = parsePluginFromPipeline(ctx.env.SENTRY_PIPELINE);
+
+  // An XCArchive is a directory; zip it into the normalized layout.
   if (info.isDirectory()) {
-    throw new ValidationError(
-      `iOS XCArchive upload is not yet supported: ${path}`,
-      "path"
-    );
+    const normalized = await normalizeBuildDirectory(path, plugin);
+    return await uploadBuild({ org, project, content: normalized, metadata });
   }
 
   // NOTE: the build is read fully into memory (and normalized into a second
@@ -125,21 +127,25 @@ async function uploadOne(
   const content = await readFile(path);
   const format = detectBuildFormat(content);
 
-  if (format === "ipa" || format === "xcarchive") {
+  if (format === "xcarchive") {
+    // XCArchive is only ever a directory; a file can't be one.
     throw new ValidationError(
-      `iOS ${format.toUpperCase()} upload is not yet supported: ${path}`,
-      "path"
-    );
-  }
-  if (format !== "apk" && format !== "aab") {
-    throw new ValidationError(
-      `Unsupported build format (expected APK or AAB): ${path}`,
+      `Expected an XCArchive directory, not a file: ${path}`,
       "path"
     );
   }
 
-  const plugin = parsePluginFromPipeline(ctx.env.SENTRY_PIPELINE);
-  const normalized = normalizeBuildFile(path, content, plugin);
+  let normalized: Buffer;
+  if (format === "ipa") {
+    normalized = normalizeIpa(content, plugin);
+  } else if (format === "apk" || format === "aab") {
+    normalized = normalizeBuildFile(path, content, plugin);
+  } else {
+    throw new ValidationError(
+      `Unsupported build format (expected APK, AAB, IPA, or XCArchive): ${path}`,
+      "path"
+    );
+  }
   return await uploadBuild({ org, project, content: normalized, metadata });
 }
 
@@ -148,13 +154,15 @@ export const uploadCommand = buildCommand({
     brief: "Upload builds to a project",
     fullDescription:
       "Upload mobile builds to Sentry for preprod size analysis. Each build " +
-      "is wrapped in a deterministic ZIP and uploaded via the chunk-upload + " +
-      "assemble protocol.\n\n" +
-      "Supported formats: Android APK and AAB. (iOS XCArchive/IPA is not yet " +
-      "supported.) This feature only works with Sentry SaaS.\n\n" +
+      "is normalized into a deterministic ZIP and uploaded via the " +
+      "chunk-upload + assemble protocol.\n\n" +
+      "Supported formats: Android APK/AAB, iOS XCArchive (a directory) and IPA. " +
+      "Note: iOS Assets.car asset catalogs are not parsed into per-asset " +
+      "images. This feature only works with Sentry SaaS.\n\n" +
       "Usage:\n" +
       "  sentry build upload ./app-release.apk\n" +
-      "  sentry build upload ./app.aab --build-configuration Release\n" +
+      "  sentry build upload ./MyApp.xcarchive\n" +
+      "  sentry build upload ./MyApp.ipa --build-configuration Release\n" +
       "  sentry build upload ./app.aab --install-group qa --install-group beta",
   },
   output: {
@@ -164,7 +172,7 @@ export const uploadCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        brief: "Path(s) to the build(s) to upload (APK or AAB)",
+        brief: "Path(s) to the build(s) to upload (APK, AAB, IPA, or XCArchive)",
         parse: String,
         placeholder: "path",
       },
