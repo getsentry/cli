@@ -128,6 +128,19 @@ function isProguardId(normalized: string): boolean {
   return normalized.split("-")[2]?.[0] === "5";
 }
 
+/**
+ * Choose the display label for a `sourcebundle`-format match. Both `sourcebundle`
+ * and `jvm` map to that format, so label a match with whichever the user asked
+ * for, preferring `sourcebundle`.
+ */
+function sourcebundleDisplayType(wantedTypes: readonly string[]): string {
+  const lowered = wantedTypes.map((t) => t.toLowerCase());
+  if (!lowered.includes("sourcebundle") && lowered.includes("jvm")) {
+    return "jvm";
+  }
+  return "sourcebundle";
+}
+
 /** Mutable search state threaded through the walk. */
 type SearchState = {
   /** Ids still being searched for (normalized). */
@@ -136,6 +149,8 @@ type SearchState = {
   breakpadFound: Set<string>;
   /** Wanted object formats (peekFormat names). */
   formats: Set<string>;
+  /** Display type to use for a `sourcebundle` match (`sourcebundle` or `jvm`). */
+  sourcebundleType: string;
   /** Whether ProGuard mappings should be considered. */
   wantProguard: boolean;
   /** Accumulated matches. */
@@ -177,8 +192,16 @@ async function tryProguard(
   const matched = matchRemaining(state, uuid);
   if (matched) {
     state.matches.push({ type: "proguard", id: matched, path });
-    state.remaining.delete(matched);
+    satisfy(state, matched);
   }
+}
+
+/** Mark an id as located by a real debug file (clears any breakpad-only flag). */
+function satisfy(state: SearchState, id: string): void {
+  state.remaining.delete(id);
+  // A real match supersedes a prior breakpad-only match for the same id, so the
+  // id is no longer "missing" (the legacy CLI failed to clear this).
+  state.breakpadFound.delete(id);
 }
 
 /** Try to match an object debug file (ELF/Mach-O/PE/PDB/breakpad/…). */
@@ -203,7 +226,10 @@ async function tryObject(
   if (!state.formats.has(format)) {
     return;
   }
-  const displayType = FORMAT_TO_TYPE[format] ?? format;
+  const displayType =
+    format === "sourcebundle"
+      ? state.sourcebundleType
+      : (FORMAT_TO_TYPE[format] ?? format);
   let objects: { debugId: string }[];
   try {
     objects = parseDebugFile(await readFile(path)).objects;
@@ -221,7 +247,7 @@ async function tryObject(
     if (format === "breakpad") {
       state.breakpadFound.add(matched);
     } else {
-      state.remaining.delete(matched);
+      satisfy(state, matched);
     }
   }
 }
@@ -273,6 +299,7 @@ export async function findDebugFiles(opts: FindOptions): Promise<FindResult> {
         .map((t) => TYPE_TO_FORMAT[t.toLowerCase()])
         .filter((f): f is string => Boolean(f))
     ),
+    sourcebundleType: sourcebundleDisplayType(wantedTypes),
     wantProguard: wantedTypes.some((t) => t.toLowerCase() === "proguard"),
     matches: [],
   };

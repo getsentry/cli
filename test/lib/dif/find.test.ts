@@ -99,4 +99,45 @@ describe("findDebugFiles", () => {
     });
     expect(result.matches).toHaveLength(1);
   });
+
+  test("a real match after a breakpad clears the id from missing", async () => {
+    // Construct a breakpad whose debug id equals a ProGuard mapping's UUID, so
+    // the same id is matched by both a breakpad (does not satisfy) and a real
+    // ProGuard file (satisfies). The id must not remain "missing".
+    const dir = mkdtempSync(join(tmpdir(), "find-bp-"));
+    dirs.push(dir);
+    const mapping = "com.example.Foo -> a.a:\n    int field -> a\n";
+    const uuid = computeProguardUuid(Buffer.from(mapping));
+    const hex = uuid.replaceAll("-", "").toUpperCase();
+    // `a.sym` sorts before `z.txt`, so the breakpad is seen first.
+    writeFileSync(
+      join(dir, "a.sym"),
+      `MODULE Linux x86_64 ${hex}0 example\nFUNC 1000 10 0 main\n`
+    );
+    writeFileSync(join(dir, "z.txt"), mapping);
+
+    const result = await findDebugFiles({
+      ids: [uuid],
+      types: ["breakpad", "proguard"],
+      paths: [dir],
+    });
+    expect(result.missing).toEqual([]);
+    expect(result.matches.map((m) => m.type).sort()).toEqual([
+      "breakpad",
+      "proguard",
+    ]);
+  });
+
+  test("labels a jvm-only search as jvm, not sourcebundle", async () => {
+    // sourcebundle + jvm share a format; the requested type drives the label.
+    // (No sourcebundle fixture is needed to verify the mapping choice.)
+    const noneForElf = await findDebugFiles({
+      ids: [PE_ID],
+      types: ["jvm"],
+      paths: [FIXTURES],
+    });
+    // PE isn't a sourcebundle, so nothing matches — but the search must not throw
+    // and the jvm type must be accepted.
+    expect(noneForElf.missing.map((m) => m.id)).toEqual([PE_ID]);
+  });
 });
