@@ -35,14 +35,20 @@ const log = logger.withTag("release.set-commits");
 
 const USAGE_HINT = "sentry release set-commits [<org>/]<version>";
 
-/** Read commits from local git history and send to the Sentry API. */
+/**
+ * Read commits from local git history and send to the Sentry API.
+ *
+ * When `from` is set, reads the whole `from..HEAD` range (bounded by the range
+ * itself, so `depth` is omitted); otherwise walks back `depth` commits from
+ * HEAD. Optional `paths` restrict the log to commits touching those subtrees.
+ */
 function setCommitsFromLocal(
   org: string,
   version: string,
   cwd: string,
-  options: { depth: number; paths?: string[] }
+  options: { depth?: number; paths?: string[]; from?: string }
 ): Promise<SentryRelease> {
-  const { depth, paths } = options;
+  const { depth, paths, from } = options;
   const shallow = isShallowRepository(cwd);
   if (shallow) {
     log.warn(
@@ -51,12 +57,24 @@ function setCommitsFromLocal(
     );
   }
 
-  const commits = getCommitLog(cwd, { depth, paths });
-  if (commits.length === 0 && paths && paths.length > 0) {
-    log.warn(
-      `No commits found touching ${paths.join(", ")} within the last ${depth} commits. ` +
-        "Check the path(s) or increase --initial-depth."
-    );
+  const commits = getCommitLog(cwd, { depth, paths, from });
+  if (commits.length === 0) {
+    const hasPaths = paths !== undefined && paths.length > 0;
+    const scope = from
+      ? `in ${from}..HEAD`
+      : `within the last ${depth} commits`;
+    const pathClause = hasPaths ? ` touching ${paths.join(", ")}` : "";
+    // Only mention paths in the suggestion when the user actually passed some,
+    // so `--from` without `--path` doesn't tell them to "check the path(s)".
+    let suggestion: string;
+    if (from) {
+      suggestion = hasPaths ? "Check the ref and path(s)." : "Check the ref.";
+    } else {
+      suggestion = "Check the path(s) or increase --initial-depth.";
+    }
+    if (from || hasPaths) {
+      log.warn(`No commits found${pathClause} ${scope}. ${suggestion}`);
+    }
   }
   const repoName = getRepositoryName(cwd);
   const commitsWithRepo = commits.map((c) => ({
@@ -171,6 +189,104 @@ async function setCommitsDefault(
   }
 }
 
+/**
+ * Parse the `--commit` flag into Sentry ref objects.
+ *
+ * Accepts comma-separated `REPO@SHA` or `REPO@PREV..SHA` entries. The range
+ * form maps `PREV` to `previousCommit` and `SHA` to `commit`.
+ *
+ * @throws {ValidationError} When an entry is missing the `@` separator.
+ */
+function parseCommitRefs(
+  commitFlag: string
+): Array<{ repository: string; commit: string; previousCommit?: string }> {
+  return commitFlag.split(",").map((pair) => {
+    const trimmed = pair.trim();
+    const atIdx = trimmed.lastIndexOf("@");
+    if (atIdx <= 0) {
+      throw new ValidationError(
+        `Invalid commit format '${trimmed}'. Expected REPO@SHA or REPO@PREV..SHA.`,
+        "commit"
+      );
+    }
+    const repository = trimmed.slice(0, atIdx);
+    const sha = trimmed.slice(atIdx + 1);
+
+    const rangeParts = sha.split("..");
+    if (rangeParts.length === 2 && rangeParts[0] && rangeParts[1]) {
+      return {
+        repository,
+        commit: rangeParts[1],
+        previousCommit: rangeParts[0],
+      };
+    }
+
+    return { repository, commit: sha };
+  });
+}
+
+/**
+ * Parse and validate the local-scope flags (`--path`, `--from`).
+ *
+ * Both restrict commit selection to local git history and are incompatible
+ * with `--auto`/`--commit`, whose commit ranges are expanded server-side (so a
+ * client-side path filter or range start would be silently ignored).
+ *
+ * @returns The parsed pathspecs and the normalized (trimmed) `from` ref.
+ * @throws {ValidationError} On an empty `--path`/`--from`, or a conflict with
+ *   `--auto`/`--commit`.
+ */
+function parseLocalScope(flags: {
+  auto: boolean;
+  commit?: string;
+  path?: string;
+  from?: string;
+}): { paths: string[]; from?: string } {
+  const serverExpanded = flags.auto || Boolean(flags.commit);
+
+  const paths =
+    flags.path === undefined
+      ? []
+      : flags.path
+          .split(",")
+          .map((p) => p.trim())
+          .filter(Boolean);
+  if (flags.path !== undefined && paths.length === 0) {
+    throw new ValidationError(
+      "--path requires at least one non-empty path.",
+      "path"
+    );
+  }
+  if (paths.length > 0 && serverExpanded) {
+    throw new ValidationError(
+      "--path cannot be combined with --auto or --commit (their commit ranges are expanded server-side). Use --path with local mode.",
+      "path"
+    );
+  }
+
+  const from = flags.from?.trim();
+  if (flags.from !== undefined && !from) {
+    throw new ValidationError("--from requires a non-empty git ref.", "from");
+  }
+  // Reject option-like refs. Otherwise `--from=--format=x` would become the
+  // argv element `--format=x..HEAD`, which git parses as a `--format` override
+  // (arg injection). Git ref names cannot start with "-" anyway.
+  if (from?.startsWith("-")) {
+    throw new ValidationError(
+      "--from must be a git ref, not an option (must not start with '-').",
+      "from"
+    );
+  }
+  if (from && serverExpanded) {
+    throw new ValidationError(
+      "--from cannot be combined with --auto or --commit (their commit ranges are expanded server-side). Use --from with local mode.",
+      "from"
+    );
+  }
+
+  return { paths, from };
+}
+
 function formatCommitsSet(release: SentryRelease): string {
   const lines: string[] = [];
   lines.push(`## Commits Set: ${escapeMarkdownInline(release.version)}`);
@@ -194,11 +310,19 @@ export const setCommitsCommand = buildCommand({
       "For monorepos, --path restricts commits to one or more subtrees\n" +
       "(comma-separated). It implies --local and cannot be combined with\n" +
       "--auto or --commit, whose ranges are expanded server-side.\n\n" +
+      "Use --from <ref> to read the local range <ref>..HEAD (e.g. the previous\n" +
+      "release tag through the current checkout). It implies --local, reads the\n" +
+      "whole range (--initial-depth does not apply), and combines with --path to\n" +
+      "scope a monorepo release to the files that changed since the last release.\n" +
+      "Like --path, it cannot be combined with --auto or --commit. Requires a\n" +
+      "full (non-shallow) checkout spanning the range.\n\n" +
       "Examples:\n" +
       "  sentry release set-commits 1.0.0 --auto\n" +
       "  sentry release set-commits my-org/1.0.0 --local\n" +
       "  sentry release set-commits 1.0.0 --local --initial-depth 50\n" +
       "  sentry release set-commits 1.0.0 --path apps/mobile,packages/shared-ui\n" +
+      "  sentry release set-commits 1.0.0 --from v0.9.0\n" +
+      "  sentry release set-commits 1.0.0 --from v0.9.0 --path apps/mobile,apps/shared\n" +
       "  sentry release set-commits 1.0.0 --commit owner/repo@abc123..def456\n" +
       "  sentry release set-commits 1.0.0 --clear",
   },
@@ -247,6 +371,13 @@ export const setCommitsCommand = buildCommand({
           "Filter commits to these paths (comma-separated). Implies --local.",
         optional: true,
       },
+      from: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Read the local range <ref>..HEAD (e.g. previous release tag). Implies --local.",
+        optional: true,
+      },
       "initial-depth": {
         kind: "parsed",
         parse: numberParser,
@@ -263,6 +394,7 @@ export const setCommitsCommand = buildCommand({
       readonly clear: boolean;
       readonly commit?: string;
       readonly path?: string;
+      readonly from?: string;
       readonly "initial-depth": number;
       readonly json: boolean;
       readonly fields?: string[];
@@ -297,56 +429,13 @@ export const setCommitsCommand = buildCommand({
       );
     }
 
-    // --path filters local git history by pathspec. It only works in local
-    // mode: --auto and --commit hand a SHA range to Sentry, which expands it
-    // into commits server-side, so the CLI can't filter those by path.
-    const paths =
-      flags.path === undefined
-        ? []
-        : flags.path
-            .split(",")
-            .map((p) => p.trim())
-            .filter(Boolean);
-    if (flags.path !== undefined && paths.length === 0) {
-      throw new ValidationError(
-        "--path requires at least one non-empty path.",
-        "path"
-      );
-    }
-    if (paths.length > 0 && (flags.auto || flags.commit)) {
-      throw new ValidationError(
-        "--path cannot be combined with --auto or --commit (their commit ranges are expanded server-side). Use --path with local mode.",
-        "path"
-      );
-    }
+    // --path and --from restrict commit selection to local git history. Neither
+    // works with --auto/--commit, whose ranges are expanded server-side.
+    const { paths, from } = parseLocalScope(flags);
 
     // Explicit --commit mode: parse REPO@SHA or REPO@PREV..SHA pairs as refs
     if (flags.commit) {
-      const refs = flags.commit.split(",").map((pair) => {
-        const trimmed = pair.trim();
-        const atIdx = trimmed.lastIndexOf("@");
-        if (atIdx <= 0) {
-          throw new ValidationError(
-            `Invalid commit format '${trimmed}'. Expected REPO@SHA or REPO@PREV..SHA.`,
-            "commit"
-          );
-        }
-        const repository = trimmed.slice(0, atIdx);
-        const sha = trimmed.slice(atIdx + 1);
-
-        // Support REPO@PREV..SHA range syntax
-        const rangeParts = sha.split("..");
-        if (rangeParts.length === 2 && rangeParts[0] && rangeParts[1]) {
-          return {
-            repository,
-            commit: rangeParts[1],
-            previousCommit: rangeParts[0],
-          };
-        }
-
-        return { repository, commit: sha };
-      });
-
+      const refs = parseCommitRefs(flags.commit);
       const release = await setCommitsWithRefs(org, version, refs);
       yield new CommandOutput(release);
       return;
@@ -354,11 +443,14 @@ export const setCommitsCommand = buildCommand({
 
     let release: SentryRelease;
 
-    if (flags.local || paths.length > 0) {
-      // Explicit --local, or --path (which implies local): use local git only
+    if (flags.local || paths.length > 0 || from) {
+      // Explicit --local, or --path/--from (which imply local): local git only.
+      // An explicit --from range is self-bounding, so pass depth 0 (no cap) to
+      // read every commit in <ref>..HEAD; otherwise walk back --initial-depth.
       release = await setCommitsFromLocal(org, version, cwd, {
-        depth: flags["initial-depth"],
+        depth: from ? 0 : flags["initial-depth"],
         paths,
+        from,
       });
     } else if (flags.auto) {
       // Explicit --auto: use repo integration, fail hard on error

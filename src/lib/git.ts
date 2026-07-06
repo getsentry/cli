@@ -26,6 +26,17 @@ export type GitCommit = {
 };
 
 /**
+ * Upper bound on captured git stdout (100 MB).
+ *
+ * `execFileSync` defaults to a 1 MB `maxBuffer` and throws
+ * `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` once exceeded. Uncapped `git log`
+ * (e.g. `getCommitLog` with `--from` and no `--max-count`) can emit far more
+ * than 1 MB on a large `from..HEAD` range, so raise the limit to avoid
+ * crashing on big histories. ~200 bytes/commit → this allows ~500k commits.
+ */
+const GIT_MAX_BUFFER = 100 * 1024 * 1024;
+
+/**
  * Run a git command and return trimmed stdout.
  *
  * Uses `execFileSync` (no shell) to avoid shell injection risks.
@@ -41,6 +52,7 @@ function git(args: string[], cwd?: string): string {
     cwd,
     encoding: "utf-8",
     stdio: ["pipe", "pipe", "pipe"],
+    maxBuffer: GIT_MAX_BUFFER,
   }).trim();
 }
 
@@ -136,7 +148,10 @@ const NUL = "\x00";
  * @param cwd - Working directory
  * @param options - Log options
  * @param options.from - Only include commits after this ref (uses `from..HEAD`)
- * @param options.depth - Maximum number of commits to return (default 20)
+ * @param options.depth - Maximum number of commits to return (default 20). Pass
+ *   a non-positive value together with `from` to read the whole `from..HEAD`
+ *   range without a cap. A non-positive depth without `from` still passes
+ *   `--max-count` (e.g. `--initial-depth 0` yields zero commits, not all of HEAD).
  * @param options.paths - Restrict the log to commits touching these pathspecs
  *   (appended after `--`). Use for monorepos to scope a release to one subtree.
  *   With `--max-count`, the depth bounds commits *matching* the paths.
@@ -148,15 +163,37 @@ export function getCommitLog(
 ): GitCommit[] {
   const { from, depth = 20, paths } = options;
 
+  // Reject option-like refs so a `from` such as "--format=x" can't be parsed
+  // as a git option (arg injection). Git refs cannot start with "-" anyway.
+  // This is version-independent, unlike `--end-of-options` (git >= 2.24).
+  // Mirrors the guard in getMergeBase.
+  if (from?.startsWith("-")) {
+    throw new ValidationError(
+      `Invalid git ref '${from}': must not start with '-'.`,
+      "from"
+    );
+  }
+
   // Format: hash, subject, author name, author email, author date (ISO)
   // %x00 is git's hex escape for NUL — avoids literal NUL in the command string
   const format = "%H%x00%s%x00%aN%x00%aE%x00%aI";
   const range = from ? `${from}..HEAD` : "HEAD";
+  // Drop max-count only for an explicit uncapped range read (`from` + depth <= 0).
+  // A non-positive depth without `from` (e.g. `--initial-depth 0`) must still
+  // pass --max-count so we don't walk all of HEAD.
+  let maxCount: string[];
+  if (depth > 0) {
+    maxCount = [`--max-count=${depth}`];
+  } else if (from) {
+    maxCount = [];
+  } else {
+    maxCount = [`--max-count=${depth}`];
+  }
   // Pathspecs go after `--`; each path is a discrete argv entry (no shell), so
   // there is no escaping/injection concern.
   const pathspec = paths && paths.length > 0 ? ["--", ...paths] : [];
   const raw = git(
-    ["log", `--format=${format}`, `--max-count=${depth}`, range, ...pathspec],
+    ["log", `--format=${format}`, ...maxCount, range, ...pathspec],
     cwd
   );
 
