@@ -169,6 +169,54 @@ Note
 
 The `command` builtin bypasses the function so `sentry` always resolves to the real binary (no infinite recursion). In `fish`, wrap the same `switch`/`case` logic in a `function sentry-cli … end` instead.
 
+## Node.js wrapper (`SentryCli` class)
+
+[Section titled “Node.js wrapper (SentryCli class)”](#nodejs-wrapper-sentrycli-class)
+
+v3's `@sentry/cli` package exported a `SentryCli` class for programmatic use:
+
+```
+// v3const SentryCli = require("@sentry/cli");const cli = new SentryCli(null, { authToken: process.env.SENTRY_AUTH_TOKEN });await cli.releases.new("1.0.0");await cli.releases.uploadSourceMaps("1.0.0", { include: ["./dist"] });await cli.releases.setCommits("1.0.0", { auto: true });await cli.releases.finalize("1.0.0");
+```
+
+
+v4 does **not** ship the `SentryCli` class. Instead, the `sentry` package is itself usable as a library via `createSentrySDK()`, which exposes a typed method for **every** command (full reference: [Library Usage](/library-usage/)):
+
+```
+// v4import createSentrySDK from "sentry";const sdk = createSentrySDK({ token: process.env.SENTRY_AUTH_TOKEN });await sdk.release.create({ orgVersion: "1.0.0" });await sdk.sourcemap.upload({ directory: "./dist", release: "1.0.0" });await sdk.release["set-commits"]({ orgVersion: "1.0.0", auto: true });await sdk.release.finalize({ orgVersion: "1.0.0" });
+```
+
+
+Mapping:
+
+| v3 (`@sentry/cli`) | v4 (`sentry`) |
+| --- | --- |
+| `new SentryCli(configFile, { authToken })` | `createSentrySDK({ token })` (`configFile` dropped) |
+| `cli.releases.new(v)` | `sdk.release.create({ orgVersion: v })` |
+| `cli.releases.finalize(v)` | `sdk.release.finalize({ orgVersion: v })` |
+| `cli.releases.setCommits(v, o)` | `sdk.release["set-commits"]({ orgVersion: v, ...o })` |
+| `cli.releases.uploadSourceMaps(v, { include })` | `sdk.sourcemap.upload({ directory, release: v })` |
+| `cli.releases.newDeploy(v, o)` | `sdk.release.deploy({ orgVersionEnvironmentName: v, ...o })` |
+| `cli.releases.proposeVersion()` | `sdk.release["propose-version"]()` |
+| `cli.execute(args)` | `sdk.run(...args)` |
+
+Note that sourcemaps are now **debug-ID-first and decoupled from releases** — the v3 `uploadSourceMaps` `include` array becomes the `directory` argument, and a release is optional.
+
+### Codemod
+
+[Section titled “Codemod”](#codemod)
+
+To automate the mechanical parts of this migration, run the codemod (it rewrites the import, constructor, and method chain, and inserts `// TODO(sentry-v4): …` comments where option shapes changed and need a manual check):
+
+Terminal window
+
+```
+npx jscodeshift \  -t https://raw.githubusercontent.com/getsentry/cli/main/codemods/sentry-v3-to-v4.cjs \  src/
+```
+
+
+Use `--parser=tsx` for TypeScript sources. Review the diff afterward — argument shapes differ (especially for `uploadSourceMaps`), so the codemod flags those rather than guessing. See [`codemods/`](https://github.com/getsentry/cli/tree/main/codemods) for details.
+
 ## Output and scripting
 
 [Section titled “Output and scripting”](#output-and-scripting)
