@@ -50,6 +50,15 @@ const NEGATABLE_NAMES = new Set(
 );
 
 /**
+ * Flags whose values may start with `-`.
+ *
+ * Stricli treats a following token like `--format=x` as a separate flag, not
+ * as the value of `--from`. Rewriting `--from --format=x` → `--from=--format=x`
+ * lets the leaf parser pass the ref through to validation.
+ */
+const DASHED_VALUE_FLAGS = new Set(["from"]);
+
+/**
  * Match result from {@link matchHoistable}.
  *
  * - `"plain"`: `--flag` (boolean) or `--flag` (value-taking, value is next token)
@@ -226,14 +235,53 @@ export function hoistGlobalFlags(argv: readonly string[]): string[] {
 }
 
 /**
+ * Rewrite `--flag VALUE` as `--flag=VALUE` when `VALUE` starts with `-`.
+ *
+ * Stricli's parser treats dashed tokens as flags, so `--from --format=x` fails
+ * before the command sees the ref. Git refs cannot start with `-` anyway; this
+ * rewrite makes space-separated injection attempts reach our validation guard.
+ *
+ * Tokens after `--` are never touched.
+ *
+ * @param argv - Raw CLI arguments (e.g., `process.argv.slice(2)`)
+ * @returns New array with eligible flag/value pairs collapsed to `--flag=value`
+ */
+export function rewriteDashedFlagValues(argv: readonly string[]): string[] {
+  const result: string[] = [];
+  let i = 0;
+  while (i < argv.length) {
+    const token = argv[i] ?? "";
+    if (token === "--") {
+      result.push(...argv.slice(i));
+      break;
+    }
+    if (token.startsWith("--") && !token.includes("=")) {
+      const name = token.slice(2);
+      if (DASHED_VALUE_FLAGS.has(name)) {
+        const next = argv[i + 1];
+        if (next?.startsWith("-") && next !== "--") {
+          result.push(`${token}=${next}`);
+          i += 2;
+          continue;
+        }
+      }
+    }
+    result.push(token);
+    i += 1;
+  }
+  return result;
+}
+
+/**
  * Preprocess raw CLI argv before Stricli dispatch.
  *
- * Composes the two argv transforms applied on every invocation:
+ * Composes the argv transforms applied on every invocation:
  * 1. A top-level `--version` (see {@link isVersionRequest}) is normalized to a
  *    plain `["--version"]` so the application-level version handler prints it
  *    regardless of how deep in the route tree it appeared.
- * 2. Otherwise, global flags are hoisted to the tail (see
- *    {@link hoistGlobalFlags}).
+ * 2. Otherwise, dashed flag values are rewritten (see
+ *    {@link rewriteDashedFlagValues}), then global flags are hoisted to the
+ *    tail (see {@link hoistGlobalFlags}).
  *
  * Kept as a single entry point so callers apply one transform and stay under
  * the cognitive-complexity budget.
@@ -245,5 +293,5 @@ export function preprocessArgv(argv: readonly string[]): string[] {
   if (isVersionRequest(argv)) {
     return ["--version"];
   }
-  return hoistGlobalFlags(argv);
+  return hoistGlobalFlags(rewriteDashedFlagValues(argv));
 }

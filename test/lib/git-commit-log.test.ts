@@ -83,6 +83,20 @@ describe("getCommitLog pathspec argv", () => {
     expect(execFileSyncMock).not.toHaveBeenCalled();
   });
 
+  test("throws ValidationError when the from ref is unknown", () => {
+    const gitError = Object.assign(new Error("Command failed"), {
+      stderr:
+        "fatal: ambiguous argument 'bogus-ref..HEAD': unknown revision or path not in the working tree.\n",
+    });
+    execFileSyncMock.mockImplementation(() => {
+      throw gitError;
+    });
+
+    expect(() => getCommitLog("/repo", { from: "bogus-ref" })).toThrow(
+      "Unknown git ref 'bogus-ref': not found in this repository."
+    );
+  });
+
   // Uncapped `--from` ranges can emit >1 MB, so git() must raise maxBuffer
   // above execFileSync's 1 MB default to avoid crashing on large histories.
   test("passes a large maxBuffer to execFileSync", () => {

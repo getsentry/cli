@@ -15,6 +15,30 @@ import { execFileSync } from "node:child_process";
 
 import { ValidationError } from "./errors.js";
 
+/** `execFileSync` failure shape when git exits non-zero. */
+type ExecFileSyncError = Error & {
+  stderr?: string | Buffer;
+  stdout?: string | Buffer;
+};
+
+/**
+ * Return true when git stderr indicates an unknown or invalid revision ref.
+ *
+ * Used to surface friendly {@link ValidationError}s instead of raw git output.
+ */
+function isUnknownGitRefError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("stderr" in error)) {
+    return false;
+  }
+  const stderr = String((error as ExecFileSyncError).stderr ?? "");
+  return (
+    stderr.includes("unknown revision") ||
+    stderr.includes("bad revision") ||
+    stderr.includes("ambiguous argument") ||
+    stderr.includes("Invalid revision range")
+  );
+}
+
 /** Commit data structure matching the Sentry releases API */
 export type GitCommit = {
   id: string;
@@ -192,10 +216,21 @@ export function getCommitLog(
   // Pathspecs go after `--`; each path is a discrete argv entry (no shell), so
   // there is no escaping/injection concern.
   const pathspec = paths && paths.length > 0 ? ["--", ...paths] : [];
-  const raw = git(
-    ["log", `--format=${format}`, ...maxCount, range, ...pathspec],
-    cwd
-  );
+  let raw: string;
+  try {
+    raw = git(
+      ["log", `--format=${format}`, ...maxCount, range, ...pathspec],
+      cwd
+    );
+  } catch (error) {
+    if (from && isUnknownGitRefError(error)) {
+      throw new ValidationError(
+        `Unknown git ref '${from}': not found in this repository.`,
+        "from"
+      );
+    }
+    throw error;
+  }
 
   if (!raw) {
     return [];
