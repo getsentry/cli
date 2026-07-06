@@ -1,0 +1,72 @@
+name: Cleanup Doc Previews
+
+# Safety net for the on-close cleanup in docs-preview.yml: sweeps gh-pages for
+# `_preview/pr-<n>` directories whose PR is no longer open and removes them.
+# Catches previews that slipped through (e.g. closed while the preview workflow
+# was failing) so gh-pages never bloats past GitHub Pages' build limits again.
+
+on:
+  schedule:
+    # Every Sunday at 05:30 UTC (before the nightly-tag cleanup).
+    - cron: "30 5 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  # Serialize with any gh-pages writer to avoid clobbering a concurrent deploy.
+  group: gh-pages-write
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Prune previews for closed PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prune stale previews
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Blobless, no-checkout clone so we never download the (large) preview
+          # file contents — we only need trees to rewrite the index.
+          git clone --filter=blob:none --no-checkout --single-branch \
+            --branch gh-pages \
+            "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" ghp
+          cd ghp
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git read-tree HEAD
+
+          removed=0
+          # One entry per top-level _preview/<dir>.
+          for dir in $(git ls-files _preview/ | sed -E 's#(_preview/[^/]+)/.*#\1#' | sort -u); do
+            name="${dir#_preview/}"
+            # Keep the production/main preview.
+            if [ "$name" = "pr-main" ]; then
+              continue
+            fi
+            num="${name#pr-}"
+            # Skip anything that isn't a pr-<number> directory.
+            case "$num" in
+              ''|*[!0-9]*) continue ;;
+            esac
+            state=$(gh pr view "$num" --repo "$REPO" --json state --jq .state 2>/dev/null || echo "MISSING")
+            if [ "$state" != "OPEN" ]; then
+              echo "Removing $dir (PR #$num state=$state)"
+              git rm -r -q --cached "$dir"
+              removed=$((removed + 1))
+            fi
+          done
+
+          if [ "$removed" -gt 0 ]; then
+            git commit -q -m "chore(docs): prune ${removed} preview(s) for closed PRs [skip ci]"
+            git push origin gh-pages
+            echo "Pruned ${removed} stale preview(s)."
+          else
+            echo "No stale previews to prune."
+          fi
