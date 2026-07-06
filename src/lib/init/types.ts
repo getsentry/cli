@@ -277,4 +277,11 @@ export type WorkflowRunResult = {
   suspendPayload?: unknown;
   result?: WizardOutput;
   error?: string;
+  /**
+   * Internal: the suspend-point sequence number from the server, carried on the
+   * result so recovery paths can sync the run's `seqRef` after `runById` fetches
+   * state through a separate `seqRef`. Without this, `resumeAsync` would build a
+   * stale token after recovery.
+   */
+  _seq?: number;
 };
