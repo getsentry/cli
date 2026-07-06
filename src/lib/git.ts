@@ -193,7 +193,14 @@ export function getCommitLog(
   // Mirrors the guard in getMergeBase.
   if (from?.startsWith("-")) {
     throw new ValidationError(
-      `Invalid git ref '${from}': must not start with '-'.`,
+      [
+        `--from must be a git ref, not a CLI flag (received '${from}').`,
+        "",
+        "Try:",
+        "  sentry release set-commits 1.0.0 --from v0.9.0",
+        "",
+        "If a ref starts with '-', use the equals form: --from=<ref>",
+      ].join("\n"),
       "from"
     );
   }
@@ -225,7 +232,15 @@ export function getCommitLog(
   } catch (error) {
     if (from && isUnknownGitRefError(error)) {
       throw new ValidationError(
-        `Unknown git ref '${from}': not found in this repository.`,
+        [
+          `Unknown git ref '${from}': not found in this repository.`,
+          "",
+          "Try:",
+          `  git rev-parse ${from}`,
+          "  sentry release set-commits <org>/<version> --from v0.9.0",
+          "",
+          "Range is always <ref>..HEAD — checkout the current release tag first.",
+        ].join("\n"),
         "from"
       );
     }

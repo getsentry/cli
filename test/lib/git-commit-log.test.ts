@@ -78,7 +78,7 @@ describe("getCommitLog pathspec argv", () => {
   // (no reliance on --end-of-options, which requires git >= 2.24).
   test("throws on an option-like `from` ref", () => {
     expect(() => getCommitLog("/repo", { from: "--format=%H" })).toThrow(
-      "must not start with '-'"
+      "must be a git ref, not a CLI flag"
     );
     expect(execFileSyncMock).not.toHaveBeenCalled();
   });
@@ -94,6 +94,9 @@ describe("getCommitLog pathspec argv", () => {
 
     expect(() => getCommitLog("/repo", { from: "bogus-ref" })).toThrow(
       "Unknown git ref 'bogus-ref': not found in this repository."
+    );
+    expect(() => getCommitLog("/repo", { from: "bogus-ref" })).toThrow(
+      "git rev-parse bogus-ref"
     );
   });
 
