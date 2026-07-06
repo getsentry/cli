@@ -1,0 +1,104 @@
+/**
+ * Tests for the v3→v4 wrapper codemod (`codemods/sentry-v3-to-v4.cjs`).
+ *
+ * Drives the transform through jscodeshift the same way `npx jscodeshift` does,
+ * asserting the mechanical rewrites (import, constructor, method chain) and the
+ * `// TODO(sentry-v4)` breadcrumbs for the option-shape changes.
+ */
+
+import { createRequire } from "node:module";
+import jscodeshift from "jscodeshift";
+import { describe, expect, test } from "vitest";
+
+const require = createRequire(import.meta.url);
+const transform = require("../../codemods/sentry-v3-to-v4.cjs") as (
+  file: { path: string; source: string },
+  api: { jscodeshift: typeof jscodeshift; j: typeof jscodeshift }
+) => string | undefined;
+
+/** Run the codemod on a source string, returning the transformed output. */
+function run(source: string): string {
+  const j = jscodeshift.withParser("tsx");
+  const api = { jscodeshift: j, j };
+  const out = transform({ path: "input.js", source }, api);
+  return out ?? source;
+}
+
+describe("codemod: sentry-v3-to-v4", () => {
+  test("rewrites the ESM import to createSentrySDK from sentry", () => {
+    const out = run(`import SentryCli from "@sentry/cli";`);
+    expect(out).toContain('import createSentrySDK from "sentry"');
+    expect(out).not.toContain("@sentry/cli");
+  });
+
+  test("rewrites the CommonJS require", () => {
+    const out = run(`const SentryCli = require("@sentry/cli");`);
+    expect(out).toContain('const createSentrySDK = require("sentry")');
+  });
+
+  test("rewrites the constructor (drops configFile, authToken → token)", () => {
+    const out = run(
+      `const cli = new SentryCli(null, { authToken: process.env.T, org: "acme" });`
+    );
+    expect(out).toContain("createSentrySDK({");
+    expect(out).toContain("token: process.env.T");
+    expect(out).toContain('org: "acme"');
+    expect(out).not.toContain("authToken");
+    expect(out).not.toContain("new SentryCli");
+  });
+
+  test("maps the canonical release flow", () => {
+    const out = run(
+      [
+        `import SentryCli from "@sentry/cli";`,
+        "const cli = new SentryCli(null, { authToken: t });",
+        `await cli.releases.new("1.0.0");`,
+        `await cli.releases.finalize("1.0.0");`,
+        "const v = await cli.releases.proposeVersion();",
+      ].join("\n")
+    );
+    expect(out).toContain('cli.release.create({\n  orgVersion: "1.0.0"\n})');
+    expect(out).toContain('cli.release.finalize({\n  orgVersion: "1.0.0"\n})');
+    expect(out).toContain('cli.release["propose-version"]()');
+  });
+
+  test("maps setCommits, inlining literal options, with a TODO breadcrumb", () => {
+    const out = run(`await cli.releases.setCommits("1.0.0", { auto: true });`);
+    expect(out).toContain('cli.release["set-commits"]({');
+    expect(out).toContain('orgVersion: "1.0.0"');
+    expect(out).toMatch(/auto: true/);
+    expect(out).not.toContain("...{"); // object literal inlined, not spread
+    expect(out).toContain("TODO(sentry-v4)");
+  });
+
+  test("spreads a non-literal options argument", () => {
+    const out = run("await cli.releases.setCommits(v, opts);");
+    expect(out).toMatch(/\.\.\.opts/);
+  });
+
+  test("maps uploadSourceMaps to sourcemap.upload with a TODO", () => {
+    const out = run(
+      `await cli.releases.uploadSourceMaps("1.0.0", { include: ["./dist"] });`
+    );
+    expect(out).toContain("cli.sourcemap.upload({");
+    expect(out).toContain('release: "1.0.0"');
+    expect(out).toMatch(/TODO\(sentry-v4\).*directory/);
+  });
+
+  test("maps newDeploy to release.deploy", () => {
+    const out = run(`await cli.releases.newDeploy("1.0.0", { env: "prod" });`);
+    expect(out).toContain("cli.release.deploy({");
+    expect(out).toContain('orgVersionEnvironmentName: "1.0.0"');
+  });
+
+  test("rewrites execute() to run(...) spreading the args array", () => {
+    const out = run(`await cli.execute(["releases", "new", version], true);`);
+    expect(out).toMatch(/cli\.run\("releases",\s*"new",\s*version\)/);
+    expect(out).not.toContain(".execute(");
+  });
+
+  test("leaves unrelated code untouched (returns undefined → original)", () => {
+    const src = "const x = 1;\nconsole.log(x);\n";
+    expect(run(src)).toBe(src);
+  });
+});
