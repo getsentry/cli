@@ -60,6 +60,24 @@ module.exports = function transform(file, api) {
   /** Local identifiers bound to the SentryCli class (default import/require). */
   const sentryCliLocals = new Set(["SentryCli"]);
 
+  /** Variable names bound to a SentryCli/SDK instance (e.g. `const cli = …`). */
+  const instanceNames = new Set();
+
+  /**
+   * True when `node` is (or references) a Sentry CLI instance: a tracked
+   * instance variable, an inline `createSentrySDK(...)` call, or an as-yet
+   * unrewritten `new SentryCli(...)`. Used to avoid rewriting unrelated
+   * `.execute()` / `.releases` members on foreign objects.
+   */
+  const isInstance = (node) =>
+    (node.type === "Identifier" && instanceNames.has(node.name)) ||
+    (node.type === "CallExpression" &&
+      node.callee.type === "Identifier" &&
+      node.callee.name === "createSentrySDK") ||
+    (node.type === "NewExpression" &&
+      node.callee.type === "Identifier" &&
+      sentryCliLocals.has(node.callee.name));
+
   /** Build `obj.name` or, for non-identifier names, `obj["name"]` (computed). */
   const member = (obj, name) =>
     /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)
@@ -123,6 +141,19 @@ module.exports = function transform(file, api) {
       return;
     }
     changed = true;
+    // Record the variable this instance is bound to, so later passes only
+    // rewrite `.execute()` / `.releases.*` on genuine SDK instances.
+    const parent = path.parent && path.parent.node;
+    if (parent) {
+      if (parent.type === "VariableDeclarator" && parent.id.type === "Identifier") {
+        instanceNames.add(parent.id.name);
+      } else if (
+        parent.type === "AssignmentExpression" &&
+        parent.left.type === "Identifier"
+      ) {
+        instanceNames.add(parent.left.name);
+      }
+    }
     const args = path.node.arguments;
     // The v3 constructor is (configFile, options); v4 takes just options.
     let options = null;
@@ -152,7 +183,9 @@ module.exports = function transform(file, api) {
     const methodName = callee.property.name;
 
     // 4a) `<recv>.execute(args, live)` → `<recv>.run(...args)`
-    if (methodName === "execute") {
+    // Gated on a known SDK instance so we never touch unrelated `.execute()`
+    // APIs (DB clients, query builders, etc.).
+    if (methodName === "execute" && isInstance(callee.object)) {
       const recv = callee.object;
       const first = path.node.arguments[0];
       let runArgs;
@@ -176,7 +209,8 @@ module.exports = function transform(file, api) {
       obj.type !== "MemberExpression" ||
       obj.computed ||
       obj.property.name !== "releases" ||
-      !METHOD_MAP[methodName]
+      !METHOD_MAP[methodName] ||
+      !isInstance(obj.object)
     ) {
       return;
     }

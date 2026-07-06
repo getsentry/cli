@@ -24,6 +24,11 @@ function run(source: string): string {
   return out ?? source;
 }
 
+/** Prepend a recognized SDK-instance declaration so method rewrites apply. */
+function withCli(body: string): string {
+  return `const cli = new SentryCli();\n${body}`;
+}
+
 describe("codemod: sentry-v3-to-v4", () => {
   test("rewrites the ESM import to createSentrySDK from sentry", () => {
     const out = run(`import SentryCli from "@sentry/cli";`);
@@ -63,7 +68,9 @@ describe("codemod: sentry-v3-to-v4", () => {
   });
 
   test("maps setCommits, inlining literal options, with a TODO breadcrumb", () => {
-    const out = run(`await cli.releases.setCommits("1.0.0", { auto: true });`);
+    const out = run(
+      withCli(`await cli.releases.setCommits("1.0.0", { auto: true });`)
+    );
     expect(out).toContain('cli.release["set-commits"]({');
     expect(out).toContain('orgVersion: "1.0.0"');
     expect(out).toMatch(/auto: true/);
@@ -72,13 +79,15 @@ describe("codemod: sentry-v3-to-v4", () => {
   });
 
   test("spreads a non-literal options argument", () => {
-    const out = run("await cli.releases.setCommits(v, opts);");
+    const out = run(withCli("await cli.releases.setCommits(v, opts);"));
     expect(out).toMatch(/\.\.\.opts/);
   });
 
   test("maps uploadSourceMaps to sourcemap.upload with a TODO", () => {
     const out = run(
-      `await cli.releases.uploadSourceMaps("1.0.0", { include: ["./dist"] });`
+      withCli(
+        `await cli.releases.uploadSourceMaps("1.0.0", { include: ["./dist"] });`
+      )
     );
     expect(out).toContain("cli.sourcemap.upload({");
     expect(out).toContain('release: "1.0.0"');
@@ -86,15 +95,30 @@ describe("codemod: sentry-v3-to-v4", () => {
   });
 
   test("maps newDeploy to release.deploy", () => {
-    const out = run(`await cli.releases.newDeploy("1.0.0", { env: "prod" });`);
+    const out = run(
+      withCli(`await cli.releases.newDeploy("1.0.0", { env: "prod" });`)
+    );
     expect(out).toContain("cli.release.deploy({");
     expect(out).toContain('orgVersionEnvironmentName: "1.0.0"');
   });
 
   test("rewrites execute() to run(...) spreading the args array", () => {
-    const out = run(`await cli.execute(["releases", "new", version], true);`);
+    const out = run(
+      withCli(`await cli.execute(["releases", "new", version], true);`)
+    );
     expect(out).toMatch(/cli\.run\("releases",\s*"new",\s*version\)/);
     expect(out).not.toContain(".execute(");
+  });
+
+  test("does NOT rewrite .execute() on unrelated (non-SDK) objects", () => {
+    const out = run(`const db = getDb();\nawait db.execute("SELECT 1");`);
+    expect(out).toContain('db.execute("SELECT 1")');
+    expect(out).not.toContain(".run(");
+  });
+
+  test("does NOT rewrite a .releases chain on an unrelated object", () => {
+    const src = 'const music = getCatalog();\nmusic.releases.new("album");\n';
+    expect(run(src)).toBe(src);
   });
 
   test("leaves unrelated code untouched (returns undefined → original)", () => {
