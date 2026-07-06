@@ -38,7 +38,7 @@ targets:
         desc "Sentry command-line tool for error monitoring and debugging"
         homepage "https://cli.sentry.dev"
         version "{{version}}"
-        license "FSL-1.1-MIT"
+        license "FSL-1.1-Apache-2.0"
 
         if OS.mac?
           if Hardware::CPU.arm?
