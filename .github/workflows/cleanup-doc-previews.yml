@@ -16,8 +16,10 @@ permissions:
   pull-requests: read
 
 concurrency:
-  # Serialize with any gh-pages writer to avoid clobbering a concurrent deploy.
-  group: gh-pages-write
+  # Serialize cleanup runs with each other. Races against docs-preview deploys
+  # are handled by the push retry loop below (a non-fast-forward push is
+  # rejected, never applied, so it can't corrupt gh-pages).
+  group: gh-pages-cleanup
   cancel-in-progress: false
 
 jobs:
@@ -40,33 +42,58 @@ jobs:
           cd ghp
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git read-tree HEAD
 
-          removed=0
-          # One entry per top-level _preview/<dir>.
-          for dir in $(git ls-files _preview/ | sed -E 's#(_preview/[^/]+)/.*#\1#' | sort -u); do
-            name="${dir#_preview/}"
-            # Keep the production/main preview.
-            if [ "$name" = "pr-main" ]; then
-              continue
-            fi
-            num="${name#pr-}"
-            # Skip anything that isn't a pr-<number> directory.
-            case "$num" in
-              ''|*[!0-9]*) continue ;;
-            esac
-            state=$(gh pr view "$num" --repo "$REPO" --json state --jq .state 2>/dev/null || echo "MISSING")
-            if [ "$state" != "OPEN" ]; then
-              echo "Removing $dir (PR #$num state=$state)"
-              git rm -r -q --cached "$dir"
-              removed=$((removed + 1))
-            fi
-          done
+          # Retry loop: another gh-pages writer (a docs-preview deploy) may land
+          # between our read and push. A non-fast-forward push is REJECTED (never
+          # applied, so no corruption); we re-sync onto the new tip and re-prune.
+          max_attempts=3
+          attempt=0
+          while :; do
+            attempt=$((attempt + 1))
+            git read-tree HEAD
 
-          if [ "$removed" -gt 0 ]; then
+            removed=0
+            # One entry per top-level _preview/<dir>.
+            for dir in $(git ls-files _preview/ | sed -E 's#(_preview/[^/]+)/.*#\1#' | sort -u); do
+              name="${dir#_preview/}"
+              # Keep the production/main preview.
+              if [ "$name" = "pr-main" ]; then
+                continue
+              fi
+              num="${name#pr-}"
+              # Skip anything that isn't a pr-<number> directory.
+              case "$num" in
+                ''|*[!0-9]*) continue ;;
+              esac
+              state=$(gh pr view "$num" --repo "$REPO" --json state --jq .state 2>/dev/null || echo "UNKNOWN")
+              # Only prune when the PR is CONFIRMED closed/merged. Keep the
+              # preview on OPEN and on any API error/unknown state so a transient
+              # glitch never deletes a live preview.
+              case "$state" in
+                CLOSED|MERGED)
+                  echo "Removing $dir (PR #$num state=$state)"
+                  git rm -r -q --cached "$dir"
+                  removed=$((removed + 1))
+                  ;;
+              esac
+            done
+
+            if [ "$removed" -eq 0 ]; then
+              echo "No stale previews to prune."
+              exit 0
+            fi
+
             git commit -q -m "chore(docs): prune ${removed} preview(s) for closed PRs [skip ci]"
-            git push origin gh-pages
-            echo "Pruned ${removed} stale preview(s)."
-          else
-            echo "No stale previews to prune."
-          fi
+            if git push origin gh-pages; then
+              echo "Pruned ${removed} stale preview(s)."
+              exit 0
+            fi
+
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "gh-pages push kept failing after ${max_attempts} attempts; retrying next run." >&2
+              exit 1
+            fi
+            echo "gh-pages moved underneath us; re-syncing and retrying (attempt ${attempt})…"
+            git fetch --quiet origin gh-pages
+            git reset --soft FETCH_HEAD
+          done
