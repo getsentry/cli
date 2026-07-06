@@ -3,6 +3,7 @@ import {
   AbortError,
   ApiError,
   AuthError,
+  buildValidationMessage,
   CliError,
   ConfigError,
   ContextError,
@@ -21,6 +22,7 @@ import {
   TimeoutError,
   UpgradeError,
   ValidationError,
+  validationError,
   WizardError,
   withAuthGuard,
 } from "../../src/lib/errors.js";
@@ -273,6 +275,34 @@ describe("ValidationError", () => {
   test("field is optional", () => {
     const err = new ValidationError("Invalid input");
     expect(err.field).toBeUndefined();
+  });
+});
+
+describe("buildValidationMessage", () => {
+  test("formats Try examples and Note section", () => {
+    expect(
+      buildValidationMessage(
+        "Invalid flag.",
+        ["sentry release set-commits 1.0.0 --from v0.9.0"],
+        "Range is always <ref>..HEAD."
+      )
+    ).toBe(
+      [
+        "Invalid flag.",
+        "",
+        "Try:",
+        "  sentry release set-commits 1.0.0 --from v0.9.0",
+        "",
+        "Note: Range is always <ref>..HEAD.",
+      ].join("\n")
+    );
+  });
+
+  test("validationError wrapper preserves field", () => {
+    const err = validationError("Bad ref.", ["git rev-parse v0.9.0"], "from");
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.field).toBe("from");
+    expect(err.message).toContain("Try:");
   });
 });
 

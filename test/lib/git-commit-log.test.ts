@@ -78,9 +78,32 @@ describe("getCommitLog pathspec argv", () => {
   // (no reliance on --end-of-options, which requires git >= 2.24).
   test("throws on an option-like `from` ref", () => {
     expect(() => getCommitLog("/repo", { from: "--format=%H" })).toThrow(
-      "must not start with '-'"
+      "must be a git ref, not a CLI flag"
+    );
+    expect(() => getCommitLog("/repo", { from: "--format=%H" })).toThrow(
+      "Git refs cannot start with '-'"
+    );
+    expect(() => getCommitLog("/repo", { from: "--format=%H" })).not.toThrow(
+      "use the equals form"
     );
     expect(execFileSyncMock).not.toHaveBeenCalled();
+  });
+
+  test("throws ValidationError when the from ref is unknown", () => {
+    const gitError = Object.assign(new Error("Command failed"), {
+      stderr:
+        "fatal: ambiguous argument 'bogus-ref..HEAD': unknown revision or path not in the working tree.\n",
+    });
+    execFileSyncMock.mockImplementation(() => {
+      throw gitError;
+    });
+
+    expect(() => getCommitLog("/repo", { from: "bogus-ref" })).toThrow(
+      "Unknown git ref 'bogus-ref': not found in this repository."
+    );
+    expect(() => getCommitLog("/repo", { from: "bogus-ref" })).toThrow(
+      "git rev-parse bogus-ref"
+    );
   });
 
   // Uncapped `--from` ranges can emit >1 MB, so git() must raise maxBuffer

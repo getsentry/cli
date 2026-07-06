@@ -664,7 +664,7 @@ describe("release set-commits --from", () => {
         },
         "1.0.0"
       )
-    ).rejects.toThrow("--from must be a git ref, not an option");
+    ).rejects.toThrow("--from must be a git ref, not a CLI flag");
   });
 
   test("throws when --from is empty/whitespace", async () => {

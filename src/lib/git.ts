@@ -13,7 +13,31 @@
 
 import { execFileSync } from "node:child_process";
 
-import { ValidationError } from "./errors.js";
+import { ValidationError, validationError } from "./errors.js";
+
+/** `execFileSync` failure shape when git exits non-zero. */
+type ExecFileSyncError = Error & {
+  stderr?: string | Buffer;
+  stdout?: string | Buffer;
+};
+
+/**
+ * Return true when git stderr indicates an unknown or invalid revision ref.
+ *
+ * Used to surface friendly {@link ValidationError}s instead of raw git output.
+ */
+function isUnknownGitRefError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("stderr" in error)) {
+    return false;
+  }
+  const stderr = String((error as ExecFileSyncError).stderr ?? "");
+  return (
+    stderr.includes("unknown revision") ||
+    stderr.includes("bad revision") ||
+    stderr.includes("ambiguous argument") ||
+    stderr.includes("Invalid revision range")
+  );
+}
 
 /** Commit data structure matching the Sentry releases API */
 export type GitCommit = {
@@ -168,9 +192,11 @@ export function getCommitLog(
   // This is version-independent, unlike `--end-of-options` (git >= 2.24).
   // Mirrors the guard in getMergeBase.
   if (from?.startsWith("-")) {
-    throw new ValidationError(
-      `Invalid git ref '${from}': must not start with '-'.`,
-      "from"
+    throw validationError(
+      `--from must be a git ref, not a CLI flag (received '${from}').`,
+      ["sentry release set-commits 1.0.0 --from v0.9.0"],
+      "from",
+      "Git refs cannot start with '-'. Tokens like '--format=x' are CLI flags, not refs — use a tag or commit (e.g. v0.9.0)."
     );
   }
 
@@ -192,10 +218,26 @@ export function getCommitLog(
   // Pathspecs go after `--`; each path is a discrete argv entry (no shell), so
   // there is no escaping/injection concern.
   const pathspec = paths && paths.length > 0 ? ["--", ...paths] : [];
-  const raw = git(
-    ["log", `--format=${format}`, ...maxCount, range, ...pathspec],
-    cwd
-  );
+  let raw: string;
+  try {
+    raw = git(
+      ["log", `--format=${format}`, ...maxCount, range, ...pathspec],
+      cwd
+    );
+  } catch (error) {
+    if (from && isUnknownGitRefError(error)) {
+      throw validationError(
+        `Unknown git ref '${from}': not found in this repository.`,
+        [
+          `git rev-parse ${from}`,
+          "sentry release set-commits <org>/<version> --from v0.9.0",
+        ],
+        "from",
+        "Range is always <ref>..HEAD — checkout the current release tag first."
+      );
+    }
+    throw error;
+  }
 
   if (!raw) {
     return [];

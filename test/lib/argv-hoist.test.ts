@@ -11,6 +11,7 @@ import {
   hoistGlobalFlags,
   isVersionRequest,
   preprocessArgv,
+  rewriteDashedFlagValues,
 } from "../../src/lib/argv-hoist.js";
 
 describe("hoistGlobalFlags", () => {
@@ -380,6 +381,75 @@ describe("isVersionRequest", () => {
   });
 });
 
+describe("rewriteDashedFlagValues", () => {
+  test("rewrites --from followed by a dashed token to equals form", () => {
+    expect(
+      rewriteDashedFlagValues([
+        "release",
+        "set-commits",
+        "1.0.0",
+        "--from",
+        "--format=x",
+      ])
+    ).toEqual(["release", "set-commits", "1.0.0", "--from=--format=x"]);
+  });
+
+  test("does not rewrite --from followed by a single-dash token", () => {
+    expect(
+      rewriteDashedFlagValues([
+        "release",
+        "set-commits",
+        "1.0.0",
+        "--from",
+        "-v1.0",
+      ])
+    ).toEqual(["release", "set-commits", "1.0.0", "--from", "-v1.0"]);
+  });
+
+  test("does not rewrite --from followed by a global flag", () => {
+    expect(
+      rewriteDashedFlagValues([
+        "release",
+        "set-commits",
+        "1.0.0",
+        "--from",
+        "--json",
+      ])
+    ).toEqual(["release", "set-commits", "1.0.0", "--from", "--json"]);
+  });
+
+  test("leaves --from= already in equals form unchanged", () => {
+    expect(
+      rewriteDashedFlagValues([
+        "release",
+        "set-commits",
+        "1.0.0",
+        "--from=-format=x",
+      ])
+    ).toEqual(["release", "set-commits", "1.0.0", "--from=-format=x"]);
+  });
+
+  test("does not rewrite tokens after --", () => {
+    expect(
+      rewriteDashedFlagValues([
+        "release",
+        "set-commits",
+        "1.0.0",
+        "--",
+        "--from",
+        "--format=x",
+      ])
+    ).toEqual([
+      "release",
+      "set-commits",
+      "1.0.0",
+      "--",
+      "--from",
+      "--format=x",
+    ]);
+  });
+});
+
 describe("preprocessArgv", () => {
   test("normalizes a route-scoped --version to a plain --version", () => {
     expect(preprocessArgv(["cli", "--version"])).toEqual(["--version"]);
@@ -400,5 +470,42 @@ describe("preprocessArgv", () => {
     expect(
       preprocessArgv(["monitor", "run", "job", "--", "tool", "--version"])
     ).toEqual(["monitor", "run", "job", "--", "tool", "--version"]);
+  });
+
+  test("rewrites dashed --from values before hoisting global flags", () => {
+    expect(
+      preprocessArgv([
+        "--verbose",
+        "release",
+        "set-commits",
+        "1.0.0",
+        "--from",
+        "--format=x",
+      ])
+    ).toEqual([
+      "release",
+      "set-commits",
+      "1.0.0",
+      "--from=--format=x",
+      "--verbose",
+    ]);
+  });
+
+  test("preserves --json when it follows --from without a ref", () => {
+    expect(
+      preprocessArgv(["release", "set-commits", "1.0.0", "--from", "--json"])
+    ).toEqual(["release", "set-commits", "1.0.0", "--from", "--json"]);
+  });
+
+  test("does not rewrite --from followed by another set-commits flag", () => {
+    expect(
+      rewriteDashedFlagValues([
+        "release",
+        "set-commits",
+        "1.0.0",
+        "--from",
+        "--auto",
+      ])
+    ).toEqual(["release", "set-commits", "1.0.0", "--from", "--auto"]);
   });
 });

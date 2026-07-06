@@ -14,7 +14,11 @@ import {
 import { buildCommand, numberParser } from "../../lib/command.js";
 import { getDatabase } from "../../lib/db/index.js";
 import { clearMetadata, getMetadata, setMetadata } from "../../lib/db/utils.js";
-import { ApiError, ValidationError } from "../../lib/errors.js";
+import {
+  ApiError,
+  ValidationError,
+  validationError,
+} from "../../lib/errors.js";
 import {
   escapeMarkdownInline,
   mdKvTable,
@@ -34,6 +38,14 @@ import { resolveReleaseTarget } from "./parse.js";
 const log = logger.withTag("release.set-commits");
 
 const USAGE_HINT = "sentry release set-commits [<org>/]<version>";
+
+/** Diagnostic note shared by --from validation errors. */
+const FROM_RANGE_NOTE =
+  "Range is always <ref>..HEAD — checkout the current release before running.";
+
+/** Note when --from receives a CLI-flag-like value (git refs cannot start with '-'). */
+const FROM_DASHED_REF_NOTE =
+  "Git refs cannot start with '-'. Tokens like '--format=x' are CLI flags, not refs — use a tag or commit (e.g. v0.9.0).";
 
 /**
  * Read commits from local git history and send to the Sentry API.
@@ -204,8 +216,12 @@ function parseCommitRefs(
     const trimmed = pair.trim();
     const atIdx = trimmed.lastIndexOf("@");
     if (atIdx <= 0) {
-      throw new ValidationError(
+      throw validationError(
         `Invalid commit format '${trimmed}'. Expected REPO@SHA or REPO@PREV..SHA.`,
+        [
+          "sentry release set-commits 1.0.0 --commit owner/repo@abc123",
+          "sentry release set-commits 1.0.0 --commit owner/repo@prev..abc123",
+        ],
         "commit"
       );
     }
@@ -252,35 +268,60 @@ function parseLocalScope(flags: {
           .map((p) => p.trim())
           .filter(Boolean);
   if (flags.path !== undefined && paths.length === 0) {
-    throw new ValidationError(
+    throw validationError(
       "--path requires at least one non-empty path.",
+      ["sentry release set-commits 1.0.0 --path apps/mobile,packages/shared"],
       "path"
     );
   }
   if (paths.length > 0 && serverExpanded) {
-    throw new ValidationError(
-      "--path cannot be combined with --auto or --commit (their commit ranges are expanded server-side). Use --path with local mode.",
+    throw validationError(
+      "--path cannot be combined with --auto or --commit. Those modes expand commit ranges on the server; --path filters local git history only.",
+      flags.commit
+        ? [
+            "sentry release set-commits 1.0.0 --from v0.9.0 --path apps/mobile",
+            "sentry release set-commits 1.0.0 --local --path apps/mobile",
+          ]
+        : [
+            "sentry release set-commits 1.0.0 --local --path apps/mobile",
+            "sentry release set-commits 1.0.0 --from v0.9.0 --path apps/mobile",
+          ],
       "path"
     );
   }
 
   const from = flags.from?.trim();
   if (flags.from !== undefined && !from) {
-    throw new ValidationError("--from requires a non-empty git ref.", "from");
+    throw validationError(
+      "--from requires a non-empty git ref (tag, branch, or commit).",
+      ["sentry release set-commits 1.0.0 --from v0.9.0"],
+      "from",
+      FROM_RANGE_NOTE
+    );
   }
   // Reject option-like refs. Otherwise `--from=--format=x` would become the
   // argv element `--format=x..HEAD`, which git parses as a `--format` override
   // (arg injection). Git ref names cannot start with "-" anyway.
   if (from?.startsWith("-")) {
-    throw new ValidationError(
-      "--from must be a git ref, not an option (must not start with '-').",
-      "from"
+    throw validationError(
+      `--from must be a git ref, not a CLI flag (received '${from}').`,
+      [
+        "sentry release set-commits 1.0.0 --from v0.9.0",
+        "sentry release set-commits 1.0.0 --from v0.9.0 --path apps/mobile",
+      ],
+      "from",
+      FROM_DASHED_REF_NOTE
     );
   }
   if (from && serverExpanded) {
-    throw new ValidationError(
-      "--from cannot be combined with --auto or --commit (their commit ranges are expanded server-side). Use --from with local mode.",
-      "from"
+    throw validationError(
+      "--from cannot be combined with --auto or --commit. Those modes expand commit ranges on the server; --from reads local git history.",
+      [
+        "sentry release set-commits 1.0.0 --from v0.9.0 --path apps/mobile",
+        "sentry release set-commits 1.0.0 --local --initial-depth 50",
+      ],
+      "from",
+      FROM_RANGE_NOTE
     );
   }
 
@@ -423,8 +464,13 @@ export const setCommitsCommand = buildCommand({
     // Validate mutual exclusivity of commit source flags
     const modeFlags = [flags.auto, flags.local, !!flags.commit].filter(Boolean);
     if (modeFlags.length > 1) {
-      throw new ValidationError(
+      throw validationError(
         "Only one of --auto, --local, or --commit can be used at a time.",
+        [
+          "sentry release set-commits 1.0.0 --auto",
+          "sentry release set-commits 1.0.0 --from v0.9.0 --path apps/mobile",
+          "sentry release set-commits 1.0.0 --commit owner/repo@abc123..def456",
+        ],
         "commit"
       );
     }
