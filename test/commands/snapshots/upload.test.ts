@@ -132,9 +132,12 @@ describe("snapshots upload", () => {
     expect(harness.output()).toContain("snap-1");
 
     // The objectstore key is `{orgId}/{projectId}/{sha256}` from the scope.
-    const key = putSpy.mock.calls[0]?.[1] as string;
+    const hash = images["a.png"].content_hash as string;
+    const key = putSpy.mock.calls.find(([, k]) =>
+      (k as string).endsWith(hash)
+    )?.[1] as string;
     expect(key).toMatch(/^1\/2\/[0-9a-f]{64}$/);
-    expect(key.endsWith(images["a.png"].content_hash as string)).toBe(true);
+    expect(key.endsWith(hash)).toBe(true);
   });
 
   test("CLI width/height/content_hash override sidecar keys", async () => {
