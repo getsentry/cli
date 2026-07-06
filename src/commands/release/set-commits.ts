@@ -43,6 +43,10 @@ const USAGE_HINT = "sentry release set-commits [<org>/]<version>";
 const FROM_RANGE_NOTE =
   "Range is always <ref>..HEAD — checkout the current release before running.";
 
+/** Note when --from receives a CLI-flag-like value (git refs cannot start with '-'). */
+const FROM_DASHED_REF_NOTE =
+  "Git refs cannot start with '-'. Tokens like '--format=x' are CLI flags, not refs — use a tag or commit (e.g. v0.9.0).";
+
 /**
  * Read commits from local git history and send to the Sentry API.
  *
@@ -306,7 +310,7 @@ function parseLocalScope(flags: {
         "sentry release set-commits 1.0.0 --from v0.9.0 --path apps/mobile",
       ],
       "from",
-      "If a ref starts with '-', use the equals form: --from=<ref>"
+      FROM_DASHED_REF_NOTE
     );
   }
   if (from && serverExpanded) {

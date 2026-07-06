@@ -394,7 +394,7 @@ describe("rewriteDashedFlagValues", () => {
     ).toEqual(["release", "set-commits", "1.0.0", "--from=--format=x"]);
   });
 
-  test("rewrites --from followed by a single-dash ref token", () => {
+  test("does not rewrite --from followed by a single-dash token", () => {
     expect(
       rewriteDashedFlagValues([
         "release",
@@ -403,7 +403,19 @@ describe("rewriteDashedFlagValues", () => {
         "--from",
         "-v1.0",
       ])
-    ).toEqual(["release", "set-commits", "1.0.0", "--from=-v1.0"]);
+    ).toEqual(["release", "set-commits", "1.0.0", "--from", "-v1.0"]);
+  });
+
+  test("does not rewrite --from followed by a global flag", () => {
+    expect(
+      rewriteDashedFlagValues([
+        "release",
+        "set-commits",
+        "1.0.0",
+        "--from",
+        "--json",
+      ])
+    ).toEqual(["release", "set-commits", "1.0.0", "--from", "--json"]);
   });
 
   test("leaves --from= already in equals form unchanged", () => {
@@ -477,5 +489,23 @@ describe("preprocessArgv", () => {
       "--from=--format=x",
       "--verbose",
     ]);
+  });
+
+  test("preserves --json when it follows --from without a ref", () => {
+    expect(
+      preprocessArgv(["release", "set-commits", "1.0.0", "--from", "--json"])
+    ).toEqual(["release", "set-commits", "1.0.0", "--from", "--json"]);
+  });
+
+  test("does not rewrite --from followed by another set-commits flag", () => {
+    expect(
+      rewriteDashedFlagValues([
+        "release",
+        "set-commits",
+        "1.0.0",
+        "--from",
+        "--auto",
+      ])
+    ).toEqual(["release", "set-commits", "1.0.0", "--from", "--auto"]);
   });
 });

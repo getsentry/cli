@@ -196,7 +196,7 @@ export function getCommitLog(
       `--from must be a git ref, not a CLI flag (received '${from}').`,
       ["sentry release set-commits 1.0.0 --from v0.9.0"],
       "from",
-      "If a ref starts with '-', use the equals form: --from=<ref>"
+      "Git refs cannot start with '-'. Tokens like '--format=x' are CLI flags, not refs — use a tag or commit (e.g. v0.9.0)."
     );
   }
 

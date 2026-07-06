@@ -80,6 +80,12 @@ describe("getCommitLog pathspec argv", () => {
     expect(() => getCommitLog("/repo", { from: "--format=%H" })).toThrow(
       "must be a git ref, not a CLI flag"
     );
+    expect(() => getCommitLog("/repo", { from: "--format=%H" })).toThrow(
+      "Git refs cannot start with '-'"
+    );
+    expect(() => getCommitLog("/repo", { from: "--format=%H" })).not.toThrow(
+      "use the equals form"
+    );
     expect(execFileSyncMock).not.toHaveBeenCalled();
   });
 

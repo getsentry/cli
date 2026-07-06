@@ -59,6 +59,33 @@ const NEGATABLE_NAMES = new Set(
 const DASHED_VALUE_FLAGS = new Set(["from"]);
 
 /**
+ * Leaf flags on `release set-commits` that must not be swallowed as a `--from`
+ * value when rewrite runs (only `--from` uses {@link DASHED_VALUE_FLAGS} today).
+ */
+const SET_COMMITS_FROM_NEIGHBOR_FLAGS = new Set([
+  "auto",
+  "local",
+  "clear",
+  "commit",
+  "path",
+  "from",
+  "initial-depth",
+]);
+
+/** True when `token` is a registered global or set-commits leaf flag. */
+function isRegisteredFlagToken(token: string): boolean {
+  if (matchHoistable(token) !== null) {
+    return true;
+  }
+  if (!token.startsWith("--")) {
+    return false;
+  }
+  const eqIdx = token.indexOf("=");
+  const name = eqIdx === -1 ? token.slice(2) : token.slice(2, eqIdx);
+  return SET_COMMITS_FROM_NEIGHBOR_FLAGS.has(name);
+}
+
+/**
  * Match result from {@link matchHoistable}.
  *
  * - `"plain"`: `--flag` (boolean) or `--flag` (value-taking, value is next token)
@@ -235,11 +262,13 @@ export function hoistGlobalFlags(argv: readonly string[]): string[] {
 }
 
 /**
- * Rewrite `--flag VALUE` as `--flag=VALUE` when `VALUE` starts with `-`.
+ * Rewrite `--flag VALUE` as `--flag=VALUE` when `VALUE` looks like a long flag.
  *
  * Stricli's parser treats dashed tokens as flags, so `--from --format=x` fails
- * before the command sees the ref. Git refs cannot start with `-` anyway; this
- * rewrite makes space-separated injection attempts reach our validation guard.
+ * before the command sees the ref. Only unregistered `--`-prefixed tokens are
+ * merged — registered global flags (`--json`) and set-commits leaf flags
+ * (`--auto`) are left separate; short flags like `-v` are never merged. Git refs cannot start with `-` anyway; merged injection
+ * attempts still reach our validation guard.
  *
  * Tokens after `--` are never touched.
  *
@@ -259,7 +288,11 @@ export function rewriteDashedFlagValues(argv: readonly string[]): string[] {
       const name = token.slice(2);
       if (DASHED_VALUE_FLAGS.has(name)) {
         const next = argv[i + 1];
-        if (next?.startsWith("-") && next !== "--") {
+        if (
+          next?.startsWith("--") &&
+          next !== "--" &&
+          !isRegisteredFlagToken(next)
+        ) {
           result.push(`${token}=${next}`);
           i += 2;
           continue;
