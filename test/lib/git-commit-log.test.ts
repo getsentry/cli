@@ -61,11 +61,16 @@ describe("getCommitLog pathspec argv", () => {
     expect(lastGitArgs()).toContain("--max-count=20");
   });
 
-  test("omits --max-count for a non-positive depth (whole range)", () => {
+  test("omits --max-count only when from is set with non-positive depth", () => {
     getCommitLog("/repo", { from: "abc123", depth: 0 });
     const args = lastGitArgs();
     expect(args.some((a) => a.startsWith("--max-count="))).toBe(false);
     expect(args).toContain("abc123..HEAD");
+  });
+
+  test("keeps --max-count when depth is non-positive but from is absent", () => {
+    getCommitLog("/repo", { depth: 0 });
+    expect(lastGitArgs()).toContain("--max-count=0");
   });
 
   // Guards against git argument injection: a `from` like "--format=x" must be
