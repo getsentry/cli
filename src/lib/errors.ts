@@ -504,6 +504,52 @@ export class ResolutionError extends CliError {
 }
 
 /**
+ * Build a {@link ValidationError} message with Try: examples and optional Note: section.
+ *
+ * Matches {@link buildResolutionMessage} / {@link buildContextMessage} formatting so
+ * agent consumers get actionable recovery commands plus diagnostic context in a
+ * predictable shape. Always pass `field` when constructing the error — unfielded
+ * validation errors collapse into one Sentry fingerprint.
+ *
+ * @param headline - What failed validation
+ * @param examples - CLI commands or steps shown under "Try:"
+ * @param note - Optional diagnostic context rendered as "Note:" (not actionable)
+ */
+export function buildValidationMessage(
+  headline: string,
+  examples: string[],
+  note?: string
+): string {
+  const lines = [headline];
+  if (examples.length > 0) {
+    lines.push("", "Try:");
+    for (const example of examples) {
+      lines.push(`  ${example}`);
+    }
+  }
+  if (note) {
+    lines.push("", `Note: ${note}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Convenience wrapper around {@link buildValidationMessage} that returns a
+ * {@link ValidationError} with the given field name.
+ */
+export function validationError(
+  headline: string,
+  examples: string[],
+  field?: string,
+  note?: string
+): ValidationError {
+  return new ValidationError(
+    buildValidationMessage(headline, examples, note),
+    field
+  );
+}
+
+/**
  * Input validation errors.
  *
  * @param message - Validation failure description

@@ -13,7 +13,7 @@
 
 import { execFileSync } from "node:child_process";
 
-import { ValidationError } from "./errors.js";
+import { ValidationError, validationError } from "./errors.js";
 
 /** `execFileSync` failure shape when git exits non-zero. */
 type ExecFileSyncError = Error & {
@@ -192,16 +192,11 @@ export function getCommitLog(
   // This is version-independent, unlike `--end-of-options` (git >= 2.24).
   // Mirrors the guard in getMergeBase.
   if (from?.startsWith("-")) {
-    throw new ValidationError(
-      [
-        `--from must be a git ref, not a CLI flag (received '${from}').`,
-        "",
-        "Try:",
-        "  sentry release set-commits 1.0.0 --from v0.9.0",
-        "",
-        "If a ref starts with '-', use the equals form: --from=<ref>",
-      ].join("\n"),
-      "from"
+    throw validationError(
+      `--from must be a git ref, not a CLI flag (received '${from}').`,
+      ["sentry release set-commits 1.0.0 --from v0.9.0"],
+      "from",
+      "If a ref starts with '-', use the equals form: --from=<ref>"
     );
   }
 
@@ -231,17 +226,14 @@ export function getCommitLog(
     );
   } catch (error) {
     if (from && isUnknownGitRefError(error)) {
-      throw new ValidationError(
+      throw validationError(
+        `Unknown git ref '${from}': not found in this repository.`,
         [
-          `Unknown git ref '${from}': not found in this repository.`,
-          "",
-          "Try:",
-          `  git rev-parse ${from}`,
-          "  sentry release set-commits <org>/<version> --from v0.9.0",
-          "",
-          "Range is always <ref>..HEAD — checkout the current release tag first.",
-        ].join("\n"),
-        "from"
+          `git rev-parse ${from}`,
+          "sentry release set-commits <org>/<version> --from v0.9.0",
+        ],
+        "from",
+        "Range is always <ref>..HEAD — checkout the current release tag first."
       );
     }
     throw error;
