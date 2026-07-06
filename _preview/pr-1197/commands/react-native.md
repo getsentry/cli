@@ -26,8 +26,8 @@ Upload a React Native bundle + sourcemap (Gradle build step)
 | `--bundle <bundle>` | Path to the bundle to upload |
 | `--release <release>` | Release version to publish to |
 | `--dist <dist>...` | Distribution(s) to publish (repeatable; requires --release) |
-| `--wait` | Accepted for compatibility (the CLI always waits for assembly) |
-| `--wait-for <wait-for>` | Accepted for compatibility (the CLI always waits for assembly) |
+| `--wait` | Wait for the server to fully process the uploaded files |
+| `--wait-for <wait-for>` | Wait for processing, but at most this many seconds |
 
 ### `sentry react-native xcode <script-arg...>`
 
@@ -50,9 +50,10 @@ Upload React Native sourcemaps (Xcode build step)
 | `--fetch-from <fetch-from>` | Packager URL to fetch from (default: [http://127.0.0.1:8081/](http://127.0.0.1:8081/)) |
 | `--build-script <build-script>` | Path to the react-native-xcode.sh build script |
 | `--dist <dist>...` | Distribution(s) to publish (repeatable) |
-| `--wait` | Accepted for compatibility (the CLI always waits for assembly) |
-| `--wait-for <wait-for>` | Accepted for compatibility (the CLI always waits for assembly) |
+| `--wait` | Wait for the server to fully process the uploaded files |
+| `--wait-for <wait-for>` | Wait for processing, but at most this many seconds |
 | `--no-auto-release` | Don't read the release from Xcode project files |
+| `--allow-xcode-infoplist-preprocessing` | Run the C preprocessor over Info.plist (INFOPLIST_PREPROCESS) |
 
 All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
 
@@ -79,9 +80,7 @@ Terminal window
   from the running packager, then uploads.
 - **debug build** — just runs the build script.
 
-Release/distribution come from `SENTRY_RELEASE`/`SENTRY_DIST` or the app's `Info.plist` (`<CFBundleIdentifier>@<CFBundleShortVersionString>+<CFBundleVersion>`), unless `--no-auto-release` is set. Pass extra build-script arguments after the flags.
-
-Limitations vs. the legacy CLI: `Info.plist` C preprocessing (`INFOPLIST_PREPROCESS`) and `xcodebuild`-based discovery outside an Xcode build are not supported — set `SENTRY_RELEASE`/`SENTRY_DIST` in those cases.
+Release/distribution come from `SENTRY_RELEASE`/`SENTRY_DIST` or the app's `Info.plist` (`<CFBundleIdentifier>@<CFBundleShortVersionString>+<CFBundleVersion>`), unless `--no-auto-release` is set. When run outside an Xcode build phase the release is discovered via `xcodebuild`; `--allow-xcode-infoplist-preprocessing` enables `cc`-based `INFOPLIST_PREPROCESS` handling. Pass extra build-script arguments after the flags.
 
 ## Important Notes
 
@@ -94,6 +93,6 @@ Limitations vs. the legacy CLI: `Info.plist` C preprocessing (`INFOPLIST_PREPROC
   them under the `~/<filename>` convention. Without `--release` the files are
   matched by debug ID; with `--release` they are also uploaded for each
   `--dist`.
-- Indexed RAM bundles are not supported — use a plain or Hermes bundle.
-- The CLI always waits for server-side assembly; `--wait`/`--wait-for` are
-  accepted for backward compatibility but do not change behavior.
+- `--wait`/`--wait-for` block until the server finishes processing the upload.
+- Indexed/file RAM bundles (a pre-Hermes format that React Native has since
+  deprecated) are not supported — use a plain or Hermes bundle.
