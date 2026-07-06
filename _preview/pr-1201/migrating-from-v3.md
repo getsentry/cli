@@ -27,6 +27,7 @@ Add the [compatibility shim](#drop-in-compatibility-shim) to your shell profile 
 | Exit codes | mostly `1` | [semantic ranges](/exit-codes/) (auth=1x, input=2x, API=3x…) |
 | Auth | token-only | OAuth device flow (`sentry auth login`) **or** token |
 | Some commands | `login`, `update`, `upload-dif`, `deploys` | moved (see [table](#command-changes)) |
+| Flags | per-command `--auth-token`/`--url`/`--header`/… | `--org`/`--project`/`--log-level`/`-v` kept; others → env vars (see [Global flags](#global-flags-and-options)) |
 
 Your **environment variables** (`SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_DSN`, `SENTRY_URL`) and your **`.sentryclirc`** file are still read, so CI credentials keep working as-is.
 
@@ -108,9 +109,9 @@ Command **groups** are singular now. The plural name still works as a shortcut f
 
 | v3 | v4 |
 | --- | --- |
-| `sentry-cli organizations …` / `orgs` | `sentry org …` |
+| `sentry-cli organizations …` | `sentry org …` |
 | `sentry-cli projects …` | `sentry project …` |
-| `sentry-cli releases new/finalize/set-commits …` | `sentry release new/finalize/set-commits …` |
+| `sentry-cli releases …` | `sentry release …` |
 | `sentry-cli issues …` | `sentry issue …` |
 | `sentry-cli monitors …` | `sentry monitor …` |
 | `sentry-cli repos …` | `sentry repo …` |
@@ -141,13 +142,7 @@ These live under a different group now:
 | `sentry-cli difutil check …` | `sentry debug-files check …` |
 | `sentry-cli upload-proguard …` | `sentry proguard upload …` |
 
-### Removed
-
-[Section titled “Removed”](#removed)
-
-| v3 | v4 |
-| --- | --- |
-| `sentry-cli send-metric …` | **Removed** — metrics were deprecated in Sentry. No replacement. |
+Most of these were already soft-deprecated in v3 (hidden from `--help` in favor of `debug-files` / `proguard`); v4 simply drops the legacy top-level spellings.
 
 ## Drop-in compatibility shim
 
@@ -158,16 +153,56 @@ Paste this shell function into your `~/.bashrc` / `~/.zshrc` (or a CI step). It 
 Terminal window
 
 ```
-sentry-cli() {  case "$1" in    # Moved commands    login|logout)            local c=$1; shift; command sentry auth "$c" "$@" ;;    update)                  shift; command sentry cli upgrade "$@" ;;    uninstall)               shift; command sentry cli uninstall "$@" ;;    deploys)                 shift; command sentry release deploys "$@" ;;    upload-dif|upload-dsym)  shift; command sentry debug-files upload "$@" ;;    upload-proguard)         shift; command sentry proguard upload "$@" ;;    difutil)                 shift; command sentry debug-files "$@" ;;
-    # Renamed groups (plural → singular) so subcommands keep working    organizations|orgs)      shift; command sentry org "$@" ;;    projects)                shift; command sentry project "$@" ;;    releases)                shift; command sentry release "$@" ;;    issues)                  shift; command sentry issue "$@" ;;    monitors)                shift; command sentry monitor "$@" ;;    repos)                   shift; command sentry repo "$@" ;;    events)                  shift; command sentry event "$@" ;;
-    # Removed    send-metric)      echo "sentry-cli send-metric was removed in v4 (metrics are deprecated)." >&2      return 1 ;;
-    # Everything else is unchanged    *) command sentry "$@" ;;  esac}
+sentry-cli() {  # v3 global flags that became environment variables in v4 (see the  # "Global flags" section below). Translate them into a per-call env prefix  # so we don't pollute the parent shell.  local envs=() rest=()  while [ "$#" -gt 0 ]; do    case "$1" in      --auth-token)   envs+=("SENTRY_AUTH_TOKEN=$2"); shift 2 ;;      --auth-token=*) envs+=("SENTRY_AUTH_TOKEN=${1#*=}"); shift ;;      --url)          envs+=("SENTRY_URL=$2"); shift 2 ;;      --url=*)        envs+=("SENTRY_URL=${1#*=}"); shift ;;      --header)       envs+=("SENTRY_CUSTOM_HEADERS=$2"); shift 2 ;;      --header=*)     envs+=("SENTRY_CUSTOM_HEADERS=${1#*=}"); shift ;;      *)              rest+=("$1"); shift ;;    esac  done  set -- "${rest[@]}"
+  # `env` runs the real `sentry` binary (bypassing this function → no recursion).  case "$1" in    # Moved commands    login|logout)            local c=$1; shift; env "${envs[@]}" sentry auth "$c" "$@" ;;    update)                  shift; env "${envs[@]}" sentry cli upgrade "$@" ;;    uninstall)               shift; env "${envs[@]}" sentry cli uninstall "$@" ;;    deploys)                 shift; env "${envs[@]}" sentry release deploys "$@" ;;    upload-dif|upload-dsym)  shift; env "${envs[@]}" sentry debug-files upload "$@" ;;    upload-proguard)         shift; env "${envs[@]}" sentry proguard upload "$@" ;;    difutil)                 shift; env "${envs[@]}" sentry debug-files "$@" ;;
+    # Renamed groups (plural → singular) so subcommands keep working    organizations)           shift; env "${envs[@]}" sentry org "$@" ;;    projects)                shift; env "${envs[@]}" sentry project "$@" ;;    releases)                shift; env "${envs[@]}" sentry release "$@" ;;    issues)                  shift; env "${envs[@]}" sentry issue "$@" ;;    monitors)                shift; env "${envs[@]}" sentry monitor "$@" ;;    repos)                   shift; env "${envs[@]}" sentry repo "$@" ;;    events)                  shift; env "${envs[@]}" sentry event "$@" ;;
+    # Everything else is unchanged    *) env "${envs[@]}" sentry "$@" ;;  esac}
 ```
 
 
 Note
 
-The `command` builtin bypasses the function so `sentry` always resolves to the real binary (no infinite recursion). In `fish`, wrap the same `switch`/`case` logic in a `function sentry-cli … end` instead.
+`env` runs the real `sentry` binary, bypassing the function (no infinite recursion), and applies the translated `--auth-token`/`--url`/`--header` values for that one call only. In `fish`, port the same preprocessing + `switch`/`case` into a `function sentry-cli … end`.
+
+## Global flags and options
+
+[Section titled “Global flags and options”](#global-flags-and-options)
+
+v3 accepted many of the same flags on (nearly) every command. v4 keeps a small set as **global flags** and moves the rest to environment variables — so the biggest migration gotcha is flags that silently no longer exist.
+
+### Still global (work on every command)
+
+[Section titled “Still global (work on every command)”](#still-global-work-on-every-command)
+
+| v3 flag | v4 |
+| --- | --- |
+| `--org <slug>` | `--org` (accepted; also `SENTRY_ORG`) |
+| `--project <slug>` | `--project` (accepted; also `SENTRY_PROJECT`, or `org/project` combo) |
+| `--log-level <level>` | `--log-level` |
+| — | `-v` / `--verbose` |
+| — | `--json`, `--fields` (new — structured output) |
+
+### Replaced by environment variables
+
+[Section titled “Replaced by environment variables”](#replaced-by-environment-variables)
+
+| v3 flag | v4 replacement |
+| --- | --- |
+| `--auth-token <tok>` | `SENTRY_AUTH_TOKEN` (or `sentry auth login`) |
+| `--url <url>` (self-hosted) | `SENTRY_URL` / `SENTRY_HOST`, or pass the URL as a command argument |
+| `--header "K: V"` | `SENTRY_CUSTOM_HEADERS` |
+
+The [compatibility shim](#drop-in-compatibility-shim) above translates `--auth-token`, `--url`, and `--header` into these env vars automatically.
+
+### Dropped
+
+[Section titled “Dropped”](#dropped)
+
+`--quiet` has no direct replacement — pipe the output (non-TTY is plain) or use `--log-level error`.
+
+Caution
+
+Command-specific flags changed more than the global ones. Some v3 flags don't exist in v4 yet. Before relying on a flag, confirm it with `sentry <command> --help` — that's the authoritative list for v4. If a flag you depend on is missing, please [open an issue](https://github.com/getsentry/cli/issues).
 
 ## Node.js wrapper (`SentryCli` class)
 
@@ -200,7 +235,7 @@ Mapping:
 | `cli.releases.proposeVersion()` | `sdk.release["propose-version"]()` |
 | `cli.execute(args)` | `sdk.run(...args)` |
 
-Note that sourcemaps are now **debug-ID-first and decoupled from releases** — the v3 `uploadSourceMaps` `include` array becomes the `directory` argument, and a release is optional.
+Note the argument reshaping: the v3 `uploadSourceMaps` `include` array becomes the `directory` argument of `sourcemap.upload`, and the release is optional (sourcemap upload is keyed by debug ID, as it has been since v2).
 
 ### Codemod
 
@@ -253,7 +288,9 @@ Terminal window
 ```
 
 
-`SENTRY_AUTH_TOKEN` (and the legacy `SENTRY_TOKEN`) continue to take precedence over stored credentials, so existing pipelines don't need changes.
+`SENTRY_AUTH_TOKEN` works exactly as before and takes precedence over stored credentials, so existing CI pipelines don't need changes. (v4 also accepts `SENTRY_TOKEN` as an alias for it.)
+
+Note: there is **no `--auth-token` flag** in v4 — authentication comes from `sentry auth login`, `SENTRY_AUTH_TOKEN`, or `.sentryclirc`. See [Global flags](#global-flags-and-options) below.
 
 ## Exit codes
 
@@ -267,17 +304,26 @@ If a script did `sentry-cli … || handle_error`, it still works — any non-zer
 
 [Section titled “Sourcemaps”](#sourcemaps)
 
-Sourcemap upload is now **debug-ID-first** and decoupled from releases — you no longer have to create a release just to upload maps:
+The command maps `sourcemaps` → `sourcemap` (the plural is aliased, so existing invocations keep working):
 
 Terminal window
 
 ```
-# v3sentry-cli releases files 1.0.0 upload-sourcemaps ./dist
-# v4 — debug-ID based (release optional)sentry sourcemap upload ./dist
+# v3sentry-cli sourcemaps upload ./dist
+# v4 (either form works)sentry sourcemap upload ./dist
 ```
 
 
-`sentry sourcemaps …` (plural) is aliased to the same command, so existing invocations keep working. See [`sourcemap`](/commands/sourcemap/) for details.
+Two behavioral differences to be aware of:
+
+- **Positional args:** v3 accepted multiple paths (`[PATHS]...`); v4 takes a
+  single `<directory>`. Upload each directory in its own invocation.
+- **Flags:** several v3 flags are not (yet) present in v4 — e.g. `--validate`,
+  `--decompress`, `--wait`, `--url-suffix`, `--bundle`/`--bundle-sourcemap`,
+  `--no-sourcemap-reference`, `--strict`. Run `sentry sourcemap upload --help`
+  for the current set.
+
+See [`sourcemap`](/commands/sourcemap/) for details.
 
 ## Configuration
 
@@ -303,4 +349,4 @@ Your existing **`.sentryclirc`** and `SENTRY_*` environment variables are still 
 - [Command reference](/commands/) · [Exit codes](/exit-codes/) ·
   [Configuration](/configuration/)
 
-If a command you relied on isn't covered here, please [open an issue](https://github.com/getsentry/sentry-cli/issues) — we want the migration to be painless.
+If a command you relied on isn't covered here, please [open an issue](https://github.com/getsentry/cli/issues) — we want the migration to be painless.
