@@ -1909,7 +1909,7 @@ describe("events.ts (findEventAcrossOrgs)", () => {
           }
         );
       }
-      // resolveAnEventId
+      // resolveOrganizationEventId
       if (req.url.includes("/eventids/")) {
         return new Response(JSON.stringify(resolved), {
           status: 200,

@@ -710,7 +710,7 @@ export function getControlSiloUrl(): string {
  * @example
  * ```ts
  * const config = getSdkConfig("https://us.sentry.io");
- * const result = await listYourOrganizations({ ...config });
+ * const result = await listOrganizations({ ...config });
  * ```
  */
 export function getSdkConfig(regionUrl: string) {
