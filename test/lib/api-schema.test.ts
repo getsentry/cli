@@ -83,11 +83,11 @@ describe("getEndpointsByResource", () => {
 
 describe("getEndpoint", () => {
   test("finds specific endpoint by operationId substring", () => {
-    const ep = getEndpoint("issues", "Retrieve an Issue");
+    const ep = getEndpoint("issues", "getOrganizationIssue");
     expect(ep).toBeDefined();
     expect(ep?.resource).toBe("issues");
     expect(ep?.method).toBe("GET");
-    expect(ep?.fn).toBe("retrieveAnIssue");
+    expect(ep?.fn).toBe("getOrganizationIssue");
   });
 
   test("is case-insensitive", () => {

@@ -5,10 +5,10 @@
  */
 
 import {
-  listAnIssue_sEvents,
-  retrieveAnEventForAProject,
-  retrieveAnIssueEvent,
-  resolveAnEventId as sdkResolveAnEventId,
+  getOrganizationIssueEvent,
+  getProjectEvent,
+  listOrganizationIssueEvents,
+  resolveOrganizationEventId as sdkResolveAnEventId,
 } from "@sentry/api";
 import pLimit from "p-limit";
 
@@ -40,7 +40,7 @@ export async function getLatestEvent(
 ): Promise<SentryEvent> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await retrieveAnIssueEvent({
+  const result = await getOrganizationIssueEvent({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
@@ -63,7 +63,7 @@ export async function getEvent(
 ): Promise<SentryEvent> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await retrieveAnEventForAProject({
+  const result = await getProjectEvent({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
@@ -199,7 +199,7 @@ export type ListIssueEventsOptions = {
 /**
  * List events for a specific issue.
  *
- * Uses the SDK's `listAnIssue_sEvents` endpoint with region-aware routing.
+ * Uses the SDK's `listOrganizationIssueEvents` endpoint with region-aware routing.
  * When `limit` exceeds {@link API_MAX_PER_PAGE} (100), auto-paginates through
  * multiple API calls to fill the requested limit, bounded by
  * {@link MAX_PAGINATION_PAGES}.
@@ -235,7 +235,7 @@ export async function listIssueEvents(
   let nextCursor: string | undefined;
 
   for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
-    const result = await listAnIssue_sEvents({
+    const result = await listOrganizationIssueEvents({
       ...config,
       path: {
         organization_id_or_slug: orgSlug,
@@ -251,7 +251,7 @@ export async function listIssueEvents(
         // `per_page` is accepted at runtime but absent from the generated query
         // type, so widen via cast.
         per_page: perPage,
-      } as Parameters<typeof listAnIssue_sEvents>[0]["query"],
+      } as Parameters<typeof listOrganizationIssueEvents>[0]["query"],
     });
 
     const paginated = unwrapPaginatedResult(

@@ -6,14 +6,14 @@
  */
 
 import {
-  createADeploy,
-  createANewReleaseForAnOrganization,
-  deleteAnOrganization_sRelease,
-  listAnOrganization_sReleases,
-  listAProject_sEnvironments,
-  listARelease_sDeploys,
-  retrieveAnOrganization_sRelease,
-  updateAnOrganization_sRelease,
+  createOrganizationRelease,
+  createOrganizationReleaseDeploy,
+  deleteOrganizationRelease,
+  getOrganizationRelease,
+  listOrganizationReleaseDeploys,
+  listOrganizationReleases,
+  listProjectEnvironments as sdkListProjectEnvironments,
+  updateOrganizationRelease,
 } from "@sentry/api";
 import type { SentryDeploy, SentryRelease } from "../../types/index.js";
 import { ApiError, ValidationError } from "../errors.js";
@@ -66,7 +66,7 @@ export async function listReleasesPaginated(
 ): Promise<PaginatedResponse<SentryRelease[]>> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await listAnOrganization_sReleases({
+  const result = await listOrganizationReleases({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     // Most query params are supported at runtime but absent from the OpenAPI spec
@@ -161,7 +161,7 @@ export async function getRelease(
 ): Promise<SentryRelease> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await retrieveAnOrganization_sRelease({
+  const result = await getOrganizationRelease({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
@@ -219,11 +219,11 @@ export async function createRelease(
 
   // Cast body through unknown — the SDK's body type requires `projects: string[]`
   // as non-optional, but the API accepts it as optional at runtime.
-  const result = await createANewReleaseForAnOrganization({
+  const result = await createOrganizationRelease({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     body: body as unknown as Parameters<
-      typeof createANewReleaseForAnOrganization
+      typeof createOrganizationRelease
     >[0]["body"],
   });
 
@@ -263,14 +263,14 @@ export async function updateRelease(
 ): Promise<SentryRelease> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await updateAnOrganization_sRelease({
+  const result = await updateOrganizationRelease({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
       version,
     },
     body: body as unknown as Parameters<
-      typeof updateAnOrganization_sRelease
+      typeof updateOrganizationRelease
     >[0]["body"],
   });
 
@@ -292,7 +292,7 @@ export async function deleteRelease(
 ): Promise<void> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await deleteAnOrganization_sRelease({
+  const result = await deleteOrganizationRelease({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
@@ -316,7 +316,7 @@ export async function listReleaseDeploys(
 ): Promise<SentryDeploy[]> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await listARelease_sDeploys({
+  const result = await listOrganizationReleaseDeploys({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
@@ -351,13 +351,15 @@ export async function createReleaseDeploy(
 ): Promise<SentryDeploy> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await createADeploy({
+  const result = await createOrganizationReleaseDeploy({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
       version,
     },
-    body: body as unknown as Parameters<typeof createADeploy>[0]["body"],
+    body: body as unknown as Parameters<
+      typeof createOrganizationReleaseDeploy
+    >[0]["body"],
   });
 
   return unwrapResult<SentryDeploy>(result, "Failed to create deploy");
@@ -569,7 +571,7 @@ export async function listProjectEnvironments(
   projectSlug: string
 ): Promise<ProjectEnvironment[]> {
   const config = await getOrgSdkConfig(orgSlug);
-  const result = await listAProject_sEnvironments({
+  const result = await sdkListProjectEnvironments({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,

@@ -6,10 +6,10 @@
  */
 
 import {
-  createANewDashboardForAnOrganization,
-  editAnOrganization_sCustomDashboard,
-  listAnOrganization_sCustomDashboards,
-  retrieveAnOrganization_sCustomDashboard,
+  createOrganizationDashboard,
+  getOrganizationDashboard,
+  listOrganizationDashboards,
+  updateOrganizationDashboard,
 } from "@sentry/api";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
@@ -66,7 +66,7 @@ export async function listDashboardsPaginated(
 ): Promise<PaginatedResponse<DashboardListItem[]>> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await listAnOrganization_sCustomDashboards({
+  const result = await listOrganizationDashboards({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: { per_page: options.perPage, cursor: options.cursor },
@@ -91,7 +91,7 @@ export async function getDashboard(
 ): Promise<DashboardDetail> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await retrieveAnOrganization_sCustomDashboard({
+  const result = await getOrganizationDashboard({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
@@ -118,11 +118,11 @@ export async function createDashboard(
 ): Promise<DashboardDetail> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await createANewDashboardForAnOrganization({
+  const result = await createOrganizationDashboard({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     body: body as unknown as Parameters<
-      typeof createANewDashboardForAnOrganization
+      typeof createOrganizationDashboard
     >[0]["body"],
   });
 
@@ -151,14 +151,14 @@ export async function updateDashboard(
 ): Promise<DashboardDetail> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await editAnOrganization_sCustomDashboard({
+  const result = await updateOrganizationDashboard({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
       dashboard_id: dashboardId as unknown as number,
     },
     body: body as unknown as Parameters<
-      typeof editAnOrganization_sCustomDashboard
+      typeof updateOrganizationDashboard
     >[0]["body"],
   });
 

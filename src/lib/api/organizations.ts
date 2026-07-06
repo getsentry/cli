@@ -5,8 +5,8 @@
  */
 
 import {
-  retrieveAnOrganization,
-  listYourOrganizations as sdkListOrganizations,
+  getOrganization as sdkGetOrganization,
+  listOrganizations as sdkListOrganizations,
 } from "@sentry/api";
 
 import {
@@ -209,7 +209,7 @@ export async function getOrganization(
 ): Promise<SentryOrganization> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await retrieveAnOrganization({
+  const result = await sdkGetOrganization({
     ...config,
     path: { organization_id_or_slug: orgSlug },
   });
