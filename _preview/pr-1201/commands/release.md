@@ -209,6 +209,7 @@ Set commits for a release
 | `--clear` | Clear all commits from the release |
 | `--commit <commit>` | Explicit commit as REPO@SHA or REPO@PREV..SHA (comma-separated) |
 | `--path <path>` | Filter commits to these paths (comma-separated). Implies --local. |
+| `--from <from>` | Read the local range ..HEAD (e.g. previous release tag). Implies --local. |
 | `--initial-depth <initial-depth>` | Number of commits to read with --local (default: "20") |
 
 ### `sentry release propose-version`
