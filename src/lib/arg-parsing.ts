@@ -69,6 +69,12 @@ const ISSUE_SHORT_ID_PATTERN = /^[A-Z][A-Z0-9]*(-[A-Z][A-Z0-9]*)*-[A-Z0-9]+$/;
 /** Detects any uppercase ASCII letter — used for mixed-case short ID recovery. */
 const HAS_UPPERCASE_ASCII_RE = /[A-Z]/;
 
+/** Detects at least one digit — used to distinguish short ID suffixes from slugs. */
+const HAS_DIGIT_RE = /\d/;
+
+/** Matches purely numeric issue suffixes (e.g. `1` in `issue-1`). */
+const NUMERIC_SUFFIX_RE = /^\d+$/;
+
 /**
  * Minimum dash-separated parts for ignoreCase recovery when the input has no
  * uppercase letters (e.g. `javascript-react-mr-1b` has four parts).
@@ -86,8 +92,9 @@ const LINE_SPLIT_PATTERN = /\r?\n/;
  *
  * @param str - String to check
  * @param opts.ignoreCase - When true, also match mixed-case and multi-segment
- *   lowercase inputs (e.g. `javascript-react-mr-1b`). Two-part all-lowercase
- *   slugs like `my-project` are still rejected — those are usually project names.
+ *   lowercase inputs whose final segment contains a digit (e.g.
+ *   `javascript-react-mr-1b`). Two-part all-lowercase slugs like `my-project`
+ *   and letter-only multi-segment slugs like `my-frontend-app` are rejected.
  * @returns true if the string matches the issue short ID pattern
  *
  * @example
@@ -117,6 +124,10 @@ function matchesIssueShortIdIgnoreCase(str: string): boolean {
   const hasUppercase = HAS_UPPERCASE_ASCII_RE.test(str);
   const multiSegment = parts.length >= ISSUE_SHORT_ID_MULTI_SEGMENT_PARTS;
   if (!(hasUppercase || multiSegment)) {
+    return false;
+  }
+  // Letter-only multi-segment slugs (e.g. `my-frontend-app`) are project names.
+  if (!hasUppercase && multiSegment && !HAS_DIGIT_RE.test(parts.at(-1) ?? "")) {
     return false;
   }
   return ISSUE_SHORT_ID_PATTERN.test(str.toUpperCase());
@@ -163,7 +174,9 @@ const CLI_RESOURCE_NOUNS = new Set([
  * Check if a slug matches a top-level CLI resource noun (e.g. "issue", "trace").
  *
  * Used to detect when agents pass command-like tokens as project prefixes in
- * dash-separated issue args (`issue-1` → project `issue`, suffix `1`).
+ * dash-separated issue args (`issue-1` → project `issue`, suffix `1`). Only
+ * combined with a purely numeric suffix — alphanumeric suffixes like `api-G`
+ * are valid issue short IDs.
  */
 export function isCliResourceNoun(slug: string): boolean {
   return CLI_RESOURCE_NOUNS.has(slug.toLowerCase());
@@ -1092,7 +1105,7 @@ function parseWithDash(arg: string): ParsedIssueArg {
     );
   }
 
-  if (isCliResourceNoun(projectSlug)) {
+  if (isCliResourceNoun(projectSlug) && NUMERIC_SUFFIX_RE.test(suffix)) {
     const normalizedProject = projectSlug.toLowerCase();
     throw validationError(
       `"${arg}" looks like a command token plus a suffix, not an issue short ID.\n` +

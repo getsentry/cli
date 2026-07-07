@@ -486,10 +486,27 @@ describe("looksLikeIssueShortId properties", () => {
     );
   });
 
-  test("three-plus-part lowercase slugs match with ignoreCase", async () => {
+  test("three-plus-part lowercase slugs without digit in final segment do not match with ignoreCase", async () => {
     await fcAssert(
       property(lowercaseSlugWithDashArb, (input) => {
-        if (input.split("-").length >= 3) {
+        const parts = input.split("-");
+        const lastPart = parts.at(-1) ?? "";
+        if (parts.length >= 3 && !/\d/.test(lastPart)) {
+          expect(looksLikeIssueShortId(input, { ignoreCase: true })).toBe(
+            false
+          );
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("three-plus-part lowercase slugs with digit in final segment match with ignoreCase", async () => {
+    await fcAssert(
+      property(lowercaseSlugWithDashArb, (input) => {
+        const parts = input.split("-");
+        const lastPart = parts.at(-1) ?? "";
+        if (parts.length >= 3 && /\d/.test(lastPart)) {
           expect(looksLikeIssueShortId(input, { ignoreCase: true })).toBe(true);
         }
       }),

@@ -409,6 +409,14 @@ describe("parseIssueArg", () => {
       );
     });
 
+    test("api-G parses as project-search despite api being a CLI noun", () => {
+      expect(parseIssueArg("api-G")).toEqual({
+        type: "project-search",
+        projectSlug: "api",
+        suffix: "G",
+      });
+    });
+
     test("cli-g still parses as project-search", () => {
       expect(parseIssueArg("cli-g")).toEqual({
         type: "project-search",
@@ -1052,6 +1060,12 @@ describe("looksLikeIssueShortId", () => {
       expect(
         looksLikeIssueShortId("javascript-react-mr-1b", { ignoreCase: true })
       ).toBe(true);
+    });
+
+    test("my-frontend-app with ignoreCase is false (3-part project slug)", () => {
+      expect(
+        looksLikeIssueShortId("my-frontend-app", { ignoreCase: true })
+      ).toBe(false);
     });
 
     test("my-project with ignoreCase is false (project slug)", () => {
