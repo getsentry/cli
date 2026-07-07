@@ -66,6 +66,9 @@ function looksLikeDisplayName(input: string): boolean {
  */
 const ISSUE_SHORT_ID_PATTERN = /^[A-Z][A-Z0-9]*(-[A-Z][A-Z0-9]*)*-[A-Z0-9]+$/;
 
+/** Detects any uppercase ASCII letter — used for mixed-case short ID recovery. */
+const HAS_UPPERCASE_ASCII_RE = /[A-Z]/;
+
 /** Splits a string into lines on LF or CRLF boundaries. */
 const LINE_SPLIT_PATTERN = /\r?\n/;
 
@@ -84,14 +87,27 @@ const LINE_SPLIT_PATTERN = /\r?\n/;
  * looksLikeIssueShortId("SPOTLIGHT-ELECTRON-4Y") // true
  * looksLikeIssueShortId("my-project")            // false (lowercase)
  * looksLikeIssueShortId("a9b4ad2c")             // false (no dash)
- * looksLikeIssueShortId("cam-82x", { ignoreCase: true }) // true
+ * looksLikeIssueShortId("javascript-react-mr-1b", { ignoreCase: true }) // true
+ * looksLikeIssueShortId("my-project", { ignoreCase: true })            // false
  */
 export function looksLikeIssueShortId(
   str: string,
   opts?: { ignoreCase?: boolean }
 ): boolean {
-  const candidate = opts?.ignoreCase ? str.toUpperCase() : str;
-  return ISSUE_SHORT_ID_PATTERN.test(candidate);
+  if (opts?.ignoreCase) {
+    // Lowercase dashed strings are usually project slugs (e.g. `my-project`,
+    // `acme-corp`). Only treat them as short IDs when the input already
+    // contains uppercase (CAM-82X / CaM-82x) or has 3+ dash segments
+    // (javascript-react-mr-1b).
+    const parts = str.split("-");
+    const hasUppercase = HAS_UPPERCASE_ASCII_RE.test(str);
+    const multiSegmentShortId = parts.length >= 3;
+    if (!(hasUppercase || multiSegmentShortId)) {
+      return false;
+    }
+    return ISSUE_SHORT_ID_PATTERN.test(str.toUpperCase());
+  }
+  return ISSUE_SHORT_ID_PATTERN.test(str);
 }
 
 /** CLI route/resource nouns that are never valid project slugs in dash parsing. */

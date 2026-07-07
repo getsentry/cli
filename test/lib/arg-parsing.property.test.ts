@@ -473,10 +473,25 @@ describe("looksLikeIssueShortId properties", () => {
     );
   });
 
-  test("all-lowercase slugs with dashes match with ignoreCase", async () => {
+  test("two-part lowercase slugs do not match with ignoreCase", async () => {
     await fcAssert(
       property(lowercaseSlugWithDashArb, (input) => {
-        expect(looksLikeIssueShortId(input, { ignoreCase: true })).toBe(true);
+        if (input.split("-").length === 2) {
+          expect(looksLikeIssueShortId(input, { ignoreCase: true })).toBe(
+            false
+          );
+        }
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
+  test("three-plus-part lowercase slugs match with ignoreCase", async () => {
+    await fcAssert(
+      property(lowercaseSlugWithDashArb, (input) => {
+        if (input.split("-").length >= 3) {
+          expect(looksLikeIssueShortId(input, { ignoreCase: true })).toBe(true);
+        }
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );

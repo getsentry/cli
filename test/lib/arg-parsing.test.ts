@@ -1038,14 +1038,32 @@ describe("looksLikeIssueShortId", () => {
       expect(looksLikeIssueShortId("cam-82x")).toBe(false);
     });
 
-    test("cam-82x with ignoreCase", () => {
-      expect(looksLikeIssueShortId("cam-82x", { ignoreCase: true })).toBe(true);
+    test("cam-82x with ignoreCase is false (two-part lowercase slug)", () => {
+      expect(looksLikeIssueShortId("cam-82x", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+
+    test("CaM-82x with ignoreCase (mixed case short ID)", () => {
+      expect(looksLikeIssueShortId("CaM-82x", { ignoreCase: true })).toBe(true);
     });
 
     test("javascript-react-mr-1b with ignoreCase", () => {
       expect(
         looksLikeIssueShortId("javascript-react-mr-1b", { ignoreCase: true })
       ).toBe(true);
+    });
+
+    test("my-project with ignoreCase is false (project slug)", () => {
+      expect(looksLikeIssueShortId("my-project", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+
+    test("acme-corp with ignoreCase is false (org/project slug)", () => {
+      expect(looksLikeIssueShortId("acme-corp", { ignoreCase: true })).toBe(
+        false
+      );
     });
 
     test("123 (pure numeric)", () => {
