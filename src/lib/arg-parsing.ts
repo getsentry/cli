@@ -7,7 +7,7 @@
  */
 
 import type { LogSortDirection } from "./api/logs.js";
-import { ContextError, ValidationError } from "./errors.js";
+import { ContextError, ValidationError, validationError } from "./errors.js";
 import { validateResourceId } from "./input-validation.js";
 
 import type { ParsedSentryUrl } from "./sentry-url-parser.js";
@@ -69,6 +69,12 @@ const ISSUE_SHORT_ID_PATTERN = /^[A-Z][A-Z0-9]*(-[A-Z][A-Z0-9]*)*-[A-Z0-9]+$/;
 /** Detects any uppercase ASCII letter — used for mixed-case short ID recovery. */
 const HAS_UPPERCASE_ASCII_RE = /[A-Z]/;
 
+/**
+ * Minimum dash-separated parts for ignoreCase recovery when the input has no
+ * uppercase letters (e.g. `javascript-react-mr-1b` has four parts).
+ */
+const ISSUE_SHORT_ID_MULTI_SEGMENT_PARTS = 3;
+
 /** Splits a string into lines on LF or CRLF boundaries. */
 const LINE_SPLIT_PATTERN = /\r?\n/;
 
@@ -79,6 +85,9 @@ const LINE_SPLIT_PATTERN = /\r?\n/;
  * (org/project) is expected — e.g., `sentry event view CAM-82X 95fd7f5a`.
  *
  * @param str - String to check
+ * @param opts.ignoreCase - When true, also match mixed-case and multi-segment
+ *   lowercase inputs (e.g. `javascript-react-mr-1b`). Two-part all-lowercase
+ *   slugs like `my-project` are still rejected — those are usually project names.
  * @returns true if the string matches the issue short ID pattern
  *
  * @example
@@ -95,19 +104,22 @@ export function looksLikeIssueShortId(
   opts?: { ignoreCase?: boolean }
 ): boolean {
   if (opts?.ignoreCase) {
-    // Lowercase dashed strings are usually project slugs (e.g. `my-project`,
-    // `acme-corp`). Only treat them as short IDs when the input already
-    // contains uppercase (CAM-82X / CaM-82x) or has 3+ dash segments
-    // (javascript-react-mr-1b).
-    const parts = str.split("-");
-    const hasUppercase = HAS_UPPERCASE_ASCII_RE.test(str);
-    const multiSegmentShortId = parts.length >= 3;
-    if (!(hasUppercase || multiSegmentShortId)) {
-      return false;
-    }
-    return ISSUE_SHORT_ID_PATTERN.test(str.toUpperCase());
+    return matchesIssueShortIdIgnoreCase(str);
   }
   return ISSUE_SHORT_ID_PATTERN.test(str);
+}
+
+/**
+ * Case-insensitive short ID match with guardrails against project-slug false positives.
+ */
+function matchesIssueShortIdIgnoreCase(str: string): boolean {
+  const parts = str.split("-");
+  const hasUppercase = HAS_UPPERCASE_ASCII_RE.test(str);
+  const multiSegment = parts.length >= ISSUE_SHORT_ID_MULTI_SEGMENT_PARTS;
+  if (!(hasUppercase || multiSegment)) {
+    return false;
+  }
+  return ISSUE_SHORT_ID_PATTERN.test(str.toUpperCase());
 }
 
 /** CLI route/resource nouns that are never valid project slugs in dash parsing. */
@@ -1081,14 +1093,16 @@ function parseWithDash(arg: string): ParsedIssueArg {
   }
 
   if (isCliResourceNoun(projectSlug)) {
-    throw new ValidationError(
+    const normalizedProject = projectSlug.toLowerCase();
+    throw validationError(
       `"${arg}" looks like a command token plus a suffix, not an issue short ID.\n` +
-        `  Parsed as project '${projectSlug.toLowerCase()}' + suffix '${suffix}', but '${projectSlug.toLowerCase()}' is a CLI resource name.\n\n` +
-        "Try:\n" +
-        "  sentry issue view PROJECT-1\n" +
-        "  sentry issue explain PROJECT-1\n" +
-        "  sentry issue explain 123456789\n" +
-        "  sentry issue explain my-org/PROJECT-1",
+        `  Parsed as project '${normalizedProject}' + suffix '${suffix}', but '${normalizedProject}' is a CLI resource name.`,
+      [
+        "sentry issue view PROJECT-1",
+        "sentry issue explain PROJECT-1",
+        "sentry issue explain 123456789",
+        "sentry issue explain my-org/PROJECT-1",
+      ],
       "issue"
     );
   }

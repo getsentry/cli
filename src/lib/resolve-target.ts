@@ -830,7 +830,13 @@ export async function triageProjectNotFound(
   return { kind: "not-found", displaySlug, suggestions };
 }
 
-/** Build ResolutionError suggestions when `getProject(org, project)` returns 404. */
+/**
+ * Build {@link ResolutionError} suggestions when `getProject(org, project)` 404s.
+ *
+ * @param org - Organization slug from the user's target
+ * @param project - Project segment that failed lookup (slug or numeric ID)
+ * @param similar - Fuzzy-matched project slugs in the org, if any
+ */
 function buildProjectNotFoundSuggestions(
   org: string,
   project: string,
@@ -1909,20 +1915,20 @@ export async function resolveTargetsFromParsedArg(
     }
 
     case "project-search": {
+      const displaySlug = parsed.originalSlug ?? parsed.projectSlug;
+
       if (
         checkIssueShortId &&
-        looksLikeIssueShortId(parsed.projectSlug, { ignoreCase: true })
+        looksLikeIssueShortId(displaySlug, { ignoreCase: true })
       ) {
-        const displayId = parsed.originalSlug ?? parsed.projectSlug;
         throw new ResolutionError(
-          `'${displayId}'`,
+          `'${displaySlug}'`,
           "looks like an issue short ID, not a project slug",
-          `sentry issue view ${displayId}`,
+          `sentry issue view ${displaySlug}`,
           ["To list issues in a project: sentry issue list <org>/<project>"]
         );
       }
 
-      const displaySlug = parsed.originalSlug ?? parsed.projectSlug;
       // When the input is a display name (originalSlug set, contains spaces),
       // skip the slug-based API lookup and go straight to fuzzy matching.
       const isDisplayName = parsed.originalSlug !== undefined;
