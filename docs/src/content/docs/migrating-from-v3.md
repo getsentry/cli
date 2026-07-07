@@ -156,18 +156,20 @@ sentry-cli() {
   # v3 global flags that became environment variables in v4 (see the
   # "Global flags" section below). Translate them into a per-call env prefix
   # so we don't pollute the parent shell.
-  local envs=() rest=()
+  local envs=() rest=() headers=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --auth-token)   envs+=("SENTRY_AUTH_TOKEN=$2"); shift 2 ;;
       --auth-token=*) envs+=("SENTRY_AUTH_TOKEN=${1#*=}"); shift ;;
       --url)          envs+=("SENTRY_URL=$2"); shift 2 ;;
       --url=*)        envs+=("SENTRY_URL=${1#*=}"); shift ;;
-      --header)       envs+=("SENTRY_CUSTOM_HEADERS=$2"); shift 2 ;;
-      --header=*)     envs+=("SENTRY_CUSTOM_HEADERS=${1#*=}"); shift ;;
+      # Multiple --header flags merge into one semicolon-separated var.
+      --header)       headers="${headers:+$headers; }$2"; shift 2 ;;
+      --header=*)     headers="${headers:+$headers; }${1#*=}"; shift ;;
       *)              rest+=("$1"); shift ;;
     esac
   done
+  [ -n "$headers" ] && envs+=("SENTRY_CUSTOM_HEADERS=$headers")
   set -- "${rest[@]}"
 
   # `env` runs the real `sentry` binary (bypassing this function → no recursion).

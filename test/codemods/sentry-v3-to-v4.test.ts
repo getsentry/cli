@@ -77,6 +77,12 @@ describe("codemod: sentry-v3-to-v4", () => {
     expect(out).toMatch(/TODO\(sentry-v4\).*authToken/);
   });
 
+  test("expands shorthand authToken to token: authToken (keeps the binding)", () => {
+    const out = run("const cli = new SentryCli(null, { authToken });");
+    expect(out).toMatch(/token:\s*authToken/); // not a bare `{ token }`
+    expect(out).not.toMatch(/{\s*token\s*}/);
+  });
+
   test("maps the canonical release flow", () => {
     const out = run(
       [
@@ -137,6 +143,8 @@ describe("codemod: sentry-v3-to-v4", () => {
     );
     expect(out).toMatch(/cli\.run\("releases",\s*"new",\s*version\)/);
     expect(out).not.toContain(".execute(");
+    // argv tokens are raw v3 CLI args — flag them for remapping to v4.
+    expect(out).toContain("TODO(sentry-v4)");
   });
 
   test("does NOT rewrite .execute() on unrelated (non-SDK) objects", () => {

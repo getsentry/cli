@@ -183,7 +183,14 @@ module.exports = function transform(file, api) {
     if (options && options.type === "ObjectExpression") {
       for (const prop of options.properties) {
         if (prop.key && (prop.key.name === "authToken" || prop.key.value === "authToken")) {
+          const wasShorthand = prop.shorthand;
           prop.key = j.identifier("token");
+          if (wasShorthand) {
+            // `{ authToken }` → `{ token: authToken }` — keep referencing the
+            // original variable rather than printing a bare `{ token }`.
+            prop.shorthand = false;
+            prop.value = j.identifier("authToken");
+          }
         }
       }
     }
@@ -230,6 +237,13 @@ module.exports = function transform(file, api) {
       } else {
         runArgs = [];
       }
+      // The argv tokens are raw v3 CLI args — command names may have moved in
+      // v4 (e.g. `releases`→`release`, `new`→`create`, `login`→`auth login`),
+      // so flag them for review rather than assuming they still resolve.
+      addTodo(
+        path,
+        "run(...) passes raw CLI args verbatim; remap v3 command names to v4 (releases→release, new→create, login→auth login, …) and verify flags"
+      );
       path.replace(
         j.callExpression(j.memberExpression(recv, j.identifier("run")), runArgs)
       );
