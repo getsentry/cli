@@ -77,7 +77,8 @@ module.exports = function transform(file, api) {
     (node.type === "Identifier" && instanceNames.has(node.name)) ||
     (node.type === "CallExpression" &&
       node.callee.type === "Identifier" &&
-      node.callee.name === "createSentrySDK") ||
+      (node.callee.name === "createSentrySDK" ||
+        sentryCliLocals.has(node.callee.name))) ||
     (node.type === "NewExpression" &&
       node.callee.type === "Identifier" &&
       sentryCliLocals.has(node.callee.name));
@@ -106,7 +107,10 @@ module.exports = function transform(file, api) {
     stmt.comments.unshift(j.commentLine(` TODO(sentry-v4): ${msg}`, true, false));
   };
 
-  // 1) Rewrite ESM import: import SentryCli from "@sentry/cli" → import createSentrySDK from "sentry"
+  // 1) Rewrite ESM import: only the module specifier changes; the user's local
+  // binding name is KEPT so every reference to it (re-exports, passing the
+  // module around, etc.) stays valid. v4's default export is the
+  // createSentrySDK factory, so `new <name>(…)` below becomes a plain call.
   root
     .find(j.ImportDeclaration, { source: { value: "@sentry/cli" } })
     .forEach((path) => {
@@ -116,15 +120,10 @@ module.exports = function transform(file, api) {
           sentryCliLocals.add(spec.local.name);
         }
       }
-      path.replace(
-        j.importDeclaration(
-          [j.importDefaultSpecifier(j.identifier("createSentrySDK"))],
-          j.literal("sentry")
-        )
-      );
+      path.node.source = j.literal("sentry");
     });
 
-  // 2) Rewrite CommonJS: const SentryCli = require("@sentry/cli") → const createSentrySDK = require("sentry")
+  // 2) Rewrite CommonJS require: change the module specifier, keep the binding.
   root
     .find(j.VariableDeclarator, {
       init: {
@@ -138,7 +137,6 @@ module.exports = function transform(file, api) {
       path.node.init.arguments[0] = j.literal("sentry");
       if (path.node.id.type === "Identifier") {
         sentryCliLocals.add(path.node.id.name);
-        path.node.id = j.identifier("createSentrySDK");
       }
     });
 
@@ -203,8 +201,10 @@ module.exports = function transform(file, api) {
         "v4 renamed the `authToken` option to `token` — update it inside the options object passed here"
       );
     }
+    // Keep the callee's binding name (which now refers to the createSentrySDK
+    // factory) and drop `new` — v4's default export is a function, not a class.
     path.replace(
-      j.callExpression(j.identifier("createSentrySDK"), options ? [options] : [])
+      j.callExpression(j.identifier(callee.name), options ? [options] : [])
     );
   });
 

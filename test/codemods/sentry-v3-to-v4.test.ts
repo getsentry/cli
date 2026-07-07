@@ -30,22 +30,34 @@ function withCli(body: string): string {
 }
 
 describe("codemod: sentry-v3-to-v4", () => {
-  test("rewrites the ESM import to createSentrySDK from sentry", () => {
+  test("changes the ESM import specifier but keeps the binding name", () => {
     const out = run(`import SentryCli from "@sentry/cli";`);
-    expect(out).toContain('import createSentrySDK from "sentry"');
+    expect(out).toContain('import SentryCli from "sentry"');
     expect(out).not.toContain("@sentry/cli");
   });
 
-  test("rewrites the CommonJS require", () => {
+  test("changes the CommonJS require specifier but keeps the binding name", () => {
     const out = run(`const SentryCli = require("@sentry/cli");`);
-    expect(out).toContain('const createSentrySDK = require("sentry")');
+    expect(out).toContain('const SentryCli = require("sentry")');
+    expect(out).not.toContain("@sentry/cli");
   });
 
-  test("rewrites the constructor (drops configFile, authToken → token)", () => {
+  test("preserves a custom binding name and all references (no dangling refs)", () => {
+    const out = run(
+      'import Sentry from "@sentry/cli";\nconst cli = new Sentry();\nexport { Sentry };'
+    );
+    expect(out).toContain('import Sentry from "sentry"');
+    expect(out).toMatch(/const cli = Sentry\(\)/); // factory call, `new` dropped
+    expect(out).toContain("export { Sentry }"); // reference preserved
+    expect(out).not.toContain("createSentrySDK");
+    expect(out).not.toContain("new Sentry");
+  });
+
+  test("rewrites the constructor (drops new + configFile, authToken → token)", () => {
     const out = run(
       `const cli = new SentryCli(null, { authToken: process.env.T, org: "acme" });`
     );
-    expect(out).toContain("createSentrySDK({");
+    expect(out).toContain("SentryCli({");
     expect(out).toContain("token: process.env.T");
     expect(out).toContain('org: "acme"');
     expect(out).not.toContain("authToken");
@@ -55,13 +67,13 @@ describe("codemod: sentry-v3-to-v4", () => {
   test("preserves a single non-object constructor arg with a TODO (no silent drop)", () => {
     const out = run("const cli = new SentryCli(myOptions);");
     // The user's config variable must survive, not be dropped.
-    expect(out).toContain("createSentrySDK(myOptions)");
+    expect(out).toContain("SentryCli(myOptions)");
     expect(out).toContain("TODO(sentry-v4)");
   });
 
   test("flags authToken rename when options is a variable (can't rewrite in place)", () => {
     const out = run("const cli = new SentryCli(null, opts);");
-    expect(out).toContain("createSentrySDK(opts)");
+    expect(out).toContain("SentryCli(opts)");
     expect(out).toMatch(/TODO\(sentry-v4\).*authToken/);
   });
 
