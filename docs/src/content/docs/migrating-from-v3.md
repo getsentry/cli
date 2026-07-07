@@ -238,10 +238,17 @@ The [compatibility shim](#drop-in-compatibility-shim) above translates
 `--log-level error`.
 
 :::caution
-Command-specific flags changed more than the global ones. Some v3 flags don't
-exist in v4 yet. Before relying on a flag, confirm it with
-`sentry <command> --help` — that's the authoritative list for v4. If a flag you
-depend on is missing, please [open an issue](https://github.com/getsentry/cli/issues).
+Command-specific flags changed more than the global ones, and some v3 flags
+don't exist in v4 yet. A few notable ones:
+
+- `release set-commits` drops `--ignore-missing`.
+- `release deploy` takes the environment and name as part of the positional
+  target (`org/version/env/name`), not `--env`/`--name`.
+- `sourcemap upload`/`inject` drop several flags (see [Sourcemaps](#sourcemaps)).
+
+Before relying on a flag, confirm it with `sentry <command> --help` — that's the
+authoritative list for v4. If a flag you depend on is missing, please
+[open an issue](https://github.com/getsentry/cli/issues).
 :::
 
 ## Node.js wrapper (`SentryCli` class)
@@ -379,11 +386,15 @@ sentry sourcemap upload ./dist
 Two behavioral differences to be aware of:
 
 - **Positional args:** v3 accepted multiple paths (`[PATHS]...`); v4 takes a
-  single `<directory>`. Upload each directory in its own invocation.
-- **Flags:** several v3 flags are not (yet) present in v4 — e.g. `--validate`,
-  `--decompress`, `--wait`, `--url-suffix`, `--bundle`/`--bundle-sourcemap`,
-  `--no-sourcemap-reference`, `--strict`. Run `sentry sourcemap upload --help`
-  for the current set.
+  single `<directory>` (both `upload` and `inject`). Run one invocation per
+  directory.
+- **Flags:** v4 `sourcemap upload` keeps `--release`, `--dist`, `--url-prefix`,
+  `--ext`, `--ignore`, `--ignore-file`, `--strip-prefix`,
+  `--strip-common-prefix`, `--no-rewrite`, `--allow-empty`. These v3 flags are
+  **not present** in v4: `--url-suffix`, `--note`, `--validate`, `--decompress`,
+  `--wait`, `--wait-for`, `--no-sourcemap-reference`, `--debug-id-reference`,
+  `--bundle`, `--bundle-sourcemap`, `--strict`. `sourcemap inject` also drops
+  `--release`. Run `sentry sourcemap upload --help` for the current set.
 
 See [`sourcemap`](/commands/sourcemap/) for details.
 
