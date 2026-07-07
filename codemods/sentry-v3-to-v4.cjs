@@ -181,6 +181,7 @@ module.exports = function transform(file, api) {
         ambiguous = true;
       }
     }
+    // Rename authToken → token inline when we can see the object literal.
     if (options && options.type === "ObjectExpression") {
       for (const prop of options.properties) {
         if (prop.key && (prop.key.name === "authToken" || prop.key.value === "authToken")) {
@@ -188,15 +189,23 @@ module.exports = function transform(file, api) {
         }
       }
     }
-    path.replace(
-      j.callExpression(j.identifier("createSentrySDK"), options ? [options] : [])
-    );
+    // Emit TODOs before replacing the node (keeps `path` pristine). When the
+    // options are a variable/expression we can't reach in to rename authToken,
+    // so we flag it.
     if (ambiguous) {
       addTodo(
         path,
         "verify this argument: v3's first constructor param was a configFile path (removed in v4); v4 takes an options object. Drop it if it's a config path, or map authToken→token if it's options"
       );
+    } else if (options && options.type !== "ObjectExpression") {
+      addTodo(
+        path,
+        "v4 renamed the `authToken` option to `token` — update it inside the options object passed here"
+      );
     }
+    path.replace(
+      j.callExpression(j.identifier("createSentrySDK"), options ? [options] : [])
+    );
   });
 
   // 4) Rewrite method chains: `<recv>.releases.<method>(...)` and `<recv>.execute(...)`
@@ -263,12 +272,13 @@ module.exports = function transform(file, api) {
       callArgs = [j.objectExpression(props)];
     }
 
-    path.replace(
-      j.callExpression(member(j.memberExpression(recv, j.identifier(route)), target), callArgs)
-    );
+    // Emit the TODO before replacing so it attaches to the original path.
     if (reshape && reshape.todo) {
       addTodo(path, reshape.todo);
     }
+    path.replace(
+      j.callExpression(member(j.memberExpression(recv, j.identifier(route)), target), callArgs)
+    );
   });
 
   return changed ? root.toSource({ quote: "double" }) : undefined;

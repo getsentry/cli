@@ -59,6 +59,12 @@ describe("codemod: sentry-v3-to-v4", () => {
     expect(out).toContain("TODO(sentry-v4)");
   });
 
+  test("flags authToken rename when options is a variable (can't rewrite in place)", () => {
+    const out = run("const cli = new SentryCli(null, opts);");
+    expect(out).toContain("createSentrySDK(opts)");
+    expect(out).toMatch(/TODO\(sentry-v4\).*authToken/);
+  });
+
   test("maps the canonical release flow", () => {
     const out = run(
       [
