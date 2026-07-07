@@ -73,8 +73,7 @@ Install globally with your preferred package manager (the npm/pnpm/yarn packages
   bun="bun add -g sentry"
 />
 
-Unlike the install script and Homebrew, package manager installs don't set up
-shell completions or agent skills. Run `sentry cli setup` once to enable them:
+Unlike the install script and Homebrew, package manager installs don't set up shell completions or agent skills. Run `sentry cli setup` once to enable them:
 
 ```bash
 sentry cli setup
