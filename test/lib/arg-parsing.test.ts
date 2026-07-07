@@ -399,6 +399,24 @@ describe("parseIssueArg", () => {
       );
     });
 
+    test("issue-1 throws ValidationError for CLI resource noun prefix", () => {
+      expect(() => parseIssueArg("issue-1")).toThrow(ValidationError);
+      expect(() => parseIssueArg("issue-1")).toThrow(
+        "looks like a command token plus a suffix"
+      );
+      expect(() => parseIssueArg("issue-1")).toThrow(
+        "sentry issue explain PROJECT-1"
+      );
+    });
+
+    test("cli-g still parses as project-search", () => {
+      expect(parseIssueArg("cli-g")).toEqual({
+        type: "project-search",
+        projectSlug: "cli",
+        suffix: "G",
+      });
+    });
+
     test("trailing dash (empty suffix) throws error", () => {
       expect(() => parseIssueArg("cli-")).toThrow("Missing suffix after dash");
     });
@@ -1018,6 +1036,16 @@ describe("looksLikeIssueShortId", () => {
 
     test("cam-82x (all lowercase)", () => {
       expect(looksLikeIssueShortId("cam-82x")).toBe(false);
+    });
+
+    test("cam-82x with ignoreCase", () => {
+      expect(looksLikeIssueShortId("cam-82x", { ignoreCase: true })).toBe(true);
+    });
+
+    test("javascript-react-mr-1b with ignoreCase", () => {
+      expect(
+        looksLikeIssueShortId("javascript-react-mr-1b", { ignoreCase: true })
+      ).toBe(true);
     });
 
     test("123 (pure numeric)", () => {

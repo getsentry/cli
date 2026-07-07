@@ -616,7 +616,7 @@ describe("resolveOrgAndIssueId", () => {
         cwd: getConfigDir(),
         command: "explain",
       })
-    ).rejects.toThrow("not found");
+    ).rejects.toThrow("Issue 'NONEXISTENT-G'");
   });
 
   test("throws when project found in multiple orgs without explicit org", async () => {

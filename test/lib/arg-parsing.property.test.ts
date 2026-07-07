@@ -473,6 +473,15 @@ describe("looksLikeIssueShortId properties", () => {
     );
   });
 
+  test("all-lowercase slugs with dashes match with ignoreCase", async () => {
+    await fcAssert(
+      property(lowercaseSlugWithDashArb, (input) => {
+        expect(looksLikeIssueShortId(input, { ignoreCase: true })).toBe(true);
+      }),
+      { numRuns: DEFAULT_NUM_RUNS }
+    );
+  });
+
   test("strings without dashes never match", async () => {
     await fcAssert(
       property(noDashAlphanumArb, (input) => {

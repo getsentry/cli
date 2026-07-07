@@ -84,9 +84,61 @@ const LINE_SPLIT_PATTERN = /\r?\n/;
  * looksLikeIssueShortId("SPOTLIGHT-ELECTRON-4Y") // true
  * looksLikeIssueShortId("my-project")            // false (lowercase)
  * looksLikeIssueShortId("a9b4ad2c")             // false (no dash)
+ * looksLikeIssueShortId("cam-82x", { ignoreCase: true }) // true
  */
-export function looksLikeIssueShortId(str: string): boolean {
-  return ISSUE_SHORT_ID_PATTERN.test(str);
+export function looksLikeIssueShortId(
+  str: string,
+  opts?: { ignoreCase?: boolean }
+): boolean {
+  const candidate = opts?.ignoreCase ? str.toUpperCase() : str;
+  return ISSUE_SHORT_ID_PATTERN.test(candidate);
+}
+
+/** CLI route/resource nouns that are never valid project slugs in dash parsing. */
+const CLI_RESOURCE_NOUNS = new Set([
+  "alert",
+  "alerts",
+  "api",
+  "dashboard",
+  "dashboards",
+  "event",
+  "events",
+  "explore",
+  "issue",
+  "issues",
+  "log",
+  "logs",
+  "monitor",
+  "monitors",
+  "org",
+  "orgs",
+  "project",
+  "projects",
+  "release",
+  "releases",
+  "replay",
+  "replays",
+  "repo",
+  "repos",
+  "schema",
+  "span",
+  "spans",
+  "team",
+  "teams",
+  "trace",
+  "traces",
+  "trial",
+  "trials",
+]);
+
+/**
+ * Check if a slug matches a top-level CLI resource noun (e.g. "issue", "trace").
+ *
+ * Used to detect when agents pass command-like tokens as project prefixes in
+ * dash-separated issue args (`issue-1` → project `issue`, suffix `1`).
+ */
+export function isCliResourceNoun(slug: string): boolean {
+  return CLI_RESOURCE_NOUNS.has(slug.toLowerCase());
 }
 
 // ---------------------------------------------------------------------------
@@ -1008,6 +1060,19 @@ function parseWithDash(arg: string): ParsedIssueArg {
   if (!suffix) {
     throw new ValidationError(
       `Invalid issue format: "${arg}". Missing suffix after dash.`,
+      "issue"
+    );
+  }
+
+  if (isCliResourceNoun(projectSlug)) {
+    throw new ValidationError(
+      `"${arg}" looks like a command token plus a suffix, not an issue short ID.\n` +
+        `  Parsed as project '${projectSlug.toLowerCase()}' + suffix '${suffix}', but '${projectSlug.toLowerCase()}' is a CLI resource name.\n\n` +
+        "Try:\n" +
+        "  sentry issue view PROJECT-1\n" +
+        "  sentry issue explain PROJECT-1\n" +
+        "  sentry issue explain 123456789\n" +
+        "  sentry issue explain my-org/PROJECT-1",
       "issue"
     );
   }

@@ -830,6 +830,30 @@ export async function triageProjectNotFound(
   return { kind: "not-found", displaySlug, suggestions };
 }
 
+/** Build ResolutionError suggestions when `getProject(org, project)` returns 404. */
+function buildProjectNotFoundSuggestions(
+  org: string,
+  project: string,
+  similar: string[]
+): string[] {
+  const suggestions: string[] = [];
+  if (isAllDigits(project)) {
+    suggestions.push(
+      "Project targets use slugs (e.g. 'frontend'), not numeric project IDs",
+      `List available slugs: sentry project list ${org}/`
+    );
+  }
+  if (similar.length > 0) {
+    suggestions.push(
+      `Similar projects: ${similar.map((s) => `'${s}'`).join(", ")}`
+    );
+  }
+  suggestions.push(
+    `Check the project slug at https://sentry.io/organizations/${org}/projects/`
+  );
+  return suggestions;
+}
+
 /**
  * Fetch the numeric project ID for an explicit org/project pair.
  *
@@ -869,20 +893,11 @@ export async function fetchProjectId(
       projectResult.error.status === 404
     ) {
       const similar = await findSimilarProjects(org, project);
-      const suggestions: string[] = [];
-      if (similar.length > 0) {
-        suggestions.push(
-          `Similar projects: ${similar.map((s) => `'${s}'`).join(", ")}`
-        );
-      }
-      suggestions.push(
-        `Check the project slug at https://sentry.io/organizations/${org}/projects/`
-      );
       throw new ResolutionError(
         `Project '${project}'`,
         `not found in organization '${org}'`,
         `sentry project list ${org}/`,
-        suggestions
+        buildProjectNotFoundSuggestions(org, project, similar)
       );
     }
     return;
@@ -1894,11 +1909,15 @@ export async function resolveTargetsFromParsedArg(
     }
 
     case "project-search": {
-      if (checkIssueShortId && looksLikeIssueShortId(parsed.projectSlug)) {
+      if (
+        checkIssueShortId &&
+        looksLikeIssueShortId(parsed.projectSlug, { ignoreCase: true })
+      ) {
+        const displayId = parsed.originalSlug ?? parsed.projectSlug;
         throw new ResolutionError(
-          `'${parsed.projectSlug}'`,
+          `'${displayId}'`,
           "looks like an issue short ID, not a project slug",
-          `sentry issue view ${parsed.projectSlug}`,
+          `sentry issue view ${displayId}`,
           ["To list issues in a project: sentry issue list <org>/<project>"]
         );
       }
