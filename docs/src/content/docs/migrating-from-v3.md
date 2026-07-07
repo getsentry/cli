@@ -279,7 +279,7 @@ Mapping:
 | `cli.releases.finalize(v)` | `sdk.release.finalize({ orgVersion: v })` |
 | `cli.releases.setCommits(v, o)` | `sdk.release["set-commits"]({ orgVersion: v, ...o })` |
 | `cli.releases.uploadSourceMaps(v, { include })` | `sdk.sourcemap.upload({ directory, release: v })` |
-| `cli.releases.newDeploy(v, o)` | `sdk.release.deploy({ orgVersionEnvironmentName: v, ...o })` |
+| `cli.releases.newDeploy(v, { env, name })` | `sdk.release.deploy({ orgVersionEnvironmentName: "v/env/name" })` (env/name are part of the positional target, not options; `url`/`started`/`finished`/`time` are options) |
 | `cli.releases.proposeVersion()` | `sdk.release["propose-version"]()` |
 | `cli.execute(args)` | `sdk.run(...args)` |
 

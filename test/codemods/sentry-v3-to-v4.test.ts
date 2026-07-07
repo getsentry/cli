@@ -52,6 +52,13 @@ describe("codemod: sentry-v3-to-v4", () => {
     expect(out).not.toContain("new SentryCli");
   });
 
+  test("preserves a single non-object constructor arg with a TODO (no silent drop)", () => {
+    const out = run("const cli = new SentryCli(myOptions);");
+    // The user's config variable must survive, not be dropped.
+    expect(out).toContain("createSentrySDK(myOptions)");
+    expect(out).toContain("TODO(sentry-v4)");
+  });
+
   test("maps the canonical release flow", () => {
     const out = run(
       [
@@ -100,6 +107,10 @@ describe("codemod: sentry-v3-to-v4", () => {
     );
     expect(out).toContain("cli.release.deploy({");
     expect(out).toContain('orgVersionEnvironmentName: "1.0.0"');
+    // env/name are part of the positional target in v4, not options — the
+    // codemod must NOT spread them (would emit invalid params); flags instead.
+    expect(out).not.toMatch(/env:\s*"prod"/);
+    expect(out).toContain("TODO(sentry-v4)");
   });
 
   test("rewrites execute() to run(...) spreading the args array", () => {

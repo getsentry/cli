@@ -49,7 +49,11 @@ const RESHAPE = {
   finalize: { key: "orgVersion" },
   setCommits: { key: "orgVersion", spreadSecond: true, todo: "verify set-commits options (repo/commit/auto → commit/auto/local)" },
   uploadSourceMaps: { key: "release", spreadSecond: true, todo: "sourcemaps are debug-ID-first: map `include` → the `directory` positional and review options" },
-  newDeploy: { key: "orgVersionEnvironmentName", spreadSecond: true, todo: "verify deploy options (env/name/url/started/finished/time)" },
+  // Deploy is intentionally NOT spread: v4's `release.deploy` takes the
+  // environment and name as part of the positional `orgVersionEnvironmentName`
+  // (e.g. "org/version/env/name"), not as `env`/`name` option keys. Spreading
+  // the v3 options would emit invalid params, so we flag it instead.
+  newDeploy: { key: "orgVersionEnvironmentName", todo: "release.deploy: fold env/name into the positional target (org/version/env/name); pass url/started/finished/time as options" },
 };
 
 module.exports = function transform(file, api) {
@@ -84,10 +88,14 @@ module.exports = function transform(file, api) {
       ? j.memberExpression(obj, j.identifier(name), false)
       : j.memberExpression(obj, j.literal(name), true);
 
-  /** Attach a leading `// TODO(sentry-v4): <msg>` to the enclosing statement. */
+  /**
+   * Attach a leading `// TODO(sentry-v4): <msg>` to the enclosing statement.
+   * Matches both `*Statement` (e.g. ExpressionStatement) and `*Declaration`
+   * (e.g. VariableDeclaration for `const cli = new SentryCli(…)`).
+   */
   const addTodo = (path, msg) => {
     let p = path;
-    while (p && !(p.node && /Statement$/.test(p.node.type))) {
+    while (p && !(p.node && /(Statement|Declaration)$/.test(p.node.type))) {
       p = p.parent;
     }
     const stmt = p && p.node;
@@ -157,10 +165,21 @@ module.exports = function transform(file, api) {
     const args = path.node.arguments;
     // The v3 constructor is (configFile, options); v4 takes just options.
     let options = null;
+    let ambiguous = false;
     if (args.length >= 2) {
+      // (configFile, options) — drop configFile, keep options.
       options = args[1];
-    } else if (args.length === 1 && args[0].type === "ObjectExpression") {
-      options = args[0];
+    } else if (args.length === 1) {
+      if (args[0].type === "ObjectExpression") {
+        // A lone object is options (the v3 configFile is always a string/null).
+        options = args[0];
+      } else {
+        // A lone non-object arg is ambiguous: v3's first param is a configFile
+        // path (dropped in v4), but it may be an options variable. Preserve it
+        // rather than silently dropping the user's config, and flag it.
+        options = args[0];
+        ambiguous = true;
+      }
     }
     if (options && options.type === "ObjectExpression") {
       for (const prop of options.properties) {
@@ -172,6 +191,12 @@ module.exports = function transform(file, api) {
     path.replace(
       j.callExpression(j.identifier("createSentrySDK"), options ? [options] : [])
     );
+    if (ambiguous) {
+      addTodo(
+        path,
+        "verify this argument: v3's first constructor param was a configFile path (removed in v4); v4 takes an options object. Drop it if it's a config path, or map authToken→token if it's options"
+      );
+    }
   });
 
   // 4) Rewrite method chains: `<recv>.releases.<method>(...)` and `<recv>.execute(...)`
