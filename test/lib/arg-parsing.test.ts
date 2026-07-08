@@ -1108,9 +1108,9 @@ describe("rejectIssueCommandTokenListTarget", () => {
     expect(() => rejectIssueCommandTokenListTarget(" issue-1 ")).toThrow(
       ValidationError
     );
-    expect(() => rejectIssueCommandTokenListTarget(" my-org/issue-1\n")).toThrow(
-      ValidationError
-    );
+    expect(() =>
+      rejectIssueCommandTokenListTarget(" my-org/issue-1\n")
+    ).toThrow(ValidationError);
   });
 
   test("api-1 does not throw", () => {
