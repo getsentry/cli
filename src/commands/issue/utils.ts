@@ -161,8 +161,8 @@ async function tryResolveFromAlias(
 
 /**
  * Fallback for when the fast shortid fan-out found no matches.
- * Uses findProjectsBySlug to give a precise error ("project not found" vs
- * "issue not found") and retries the issue lookup on transient failures.
+ * Uses findProjectsBySlug to retry on transient failures; when no project
+ * slug matches, reports the issue short ID as not found (not the project).
  */
 async function resolveProjectSearchFallback(
   projectSlug: string,
@@ -172,11 +172,16 @@ async function resolveProjectSearchFallback(
   const { projects } = await findProjectsBySlug(projectSlug.toLowerCase());
 
   if (projects.length === 0) {
+    const fullShortId = expandToFullShortId(suffix, projectSlug);
     throw new ResolutionError(
-      `Project '${projectSlug}'`,
+      `Issue '${fullShortId}'`,
       "not found",
       commandHint,
-      ["No project with this slug found in any accessible organization"]
+      [
+        "No issue with this short ID found in any accessible organization",
+        "Check the project prefix and suffix, or use a numeric issue ID",
+        `Specify the org: sentry issue ... <org>/${fullShortId}`,
+      ]
     );
   }
 
