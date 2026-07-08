@@ -182,6 +182,32 @@ export function isCliResourceNoun(slug: string): boolean {
   return CLI_RESOURCE_NOUNS.has(slug.toLowerCase());
 }
 
+/**
+ * Reject dash-parsed args where the project segment is a CLI resource noun and
+ * the suffix is purely numeric (e.g. `issue-1`, `my-org/issue-1`).
+ */
+function rejectCliResourceNounWithNumericSuffix(
+  arg: string,
+  projectSlug: string,
+  suffix: string
+): void {
+  if (!(isCliResourceNoun(projectSlug) && NUMERIC_SUFFIX_RE.test(suffix))) {
+    return;
+  }
+  const normalizedProject = projectSlug.toLowerCase();
+  throw validationError(
+    `"${arg}" looks like a command token plus a suffix, not an issue short ID.\n` +
+      `  Parsed as project '${normalizedProject}' + suffix '${suffix}', but '${normalizedProject}' is a CLI resource name.`,
+    [
+      "sentry issue view PROJECT-1",
+      "sentry issue explain PROJECT-1",
+      "sentry issue explain 123456789",
+      "sentry issue explain my-org/project/PROJECT-G",
+    ],
+    "issue"
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Path detection
 // ---------------------------------------------------------------------------
@@ -917,6 +943,8 @@ function parseAfterSlash(
       );
     }
 
+    rejectCliResourceNounWithNumericSuffix(arg, project, suffix);
+
     // "my-org/cli-G" or "sentry/spotlight-electron-4Y"
     // Lowercase the project slug — Sentry slugs are always lowercase.
     return { type: "explicit", org, project: project.toLowerCase(), suffix };
@@ -1105,20 +1133,7 @@ function parseWithDash(arg: string): ParsedIssueArg {
     );
   }
 
-  if (isCliResourceNoun(projectSlug) && NUMERIC_SUFFIX_RE.test(suffix)) {
-    const normalizedProject = projectSlug.toLowerCase();
-    throw validationError(
-      `"${arg}" looks like a command token plus a suffix, not an issue short ID.\n` +
-        `  Parsed as project '${normalizedProject}' + suffix '${suffix}', but '${normalizedProject}' is a CLI resource name.`,
-      [
-        "sentry issue view PROJECT-1",
-        "sentry issue explain PROJECT-1",
-        "sentry issue explain 123456789",
-        "sentry issue explain my-org/PROJECT-1",
-      ],
-      "issue"
-    );
-  }
+  rejectCliResourceNounWithNumericSuffix(arg, projectSlug, suffix);
 
   // "cli-G" or "spotlight-electron-4Y"
   // Lowercase the project slug since Sentry slugs are always lowercase.

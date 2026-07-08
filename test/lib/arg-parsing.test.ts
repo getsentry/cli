@@ -409,6 +409,22 @@ describe("parseIssueArg", () => {
       );
     });
 
+    test("my-org/issue-1 throws ValidationError for org-qualified CLI noun", () => {
+      expect(() => parseIssueArg("my-org/issue-1")).toThrow(ValidationError);
+      expect(() => parseIssueArg("my-org/issue-1")).toThrow(
+        "looks like a command token plus a suffix"
+      );
+    });
+
+    test("my-org/api-G parses as explicit despite api being a CLI noun", () => {
+      expect(parseIssueArg("my-org/api-G")).toEqual({
+        type: "explicit",
+        org: "my-org",
+        project: "api",
+        suffix: "G",
+      });
+    });
+
     test("api-G parses as project-search despite api being a CLI noun", () => {
       expect(parseIssueArg("api-G")).toEqual({
         type: "project-search",
