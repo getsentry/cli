@@ -845,8 +845,7 @@ function buildProjectNotFoundSuggestions(
   const suggestions: string[] = [];
   if (isAllDigits(project)) {
     suggestions.push(
-      "Project targets use slugs (e.g. 'frontend'), not numeric project IDs",
-      `List available slugs: sentry project list ${org}/`
+      "Project targets use slugs (e.g. 'frontend'), not numeric project IDs"
     );
   }
   if (similar.length > 0) {

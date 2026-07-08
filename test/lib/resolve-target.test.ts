@@ -454,6 +454,7 @@ describe("fetchProjectId", () => {
       const msg = (error as ResolutionError).message;
       expect(msg).toContain("not numeric project IDs");
       expect(msg).toContain("sentry project list test-org/");
+      expect(msg.match(/sentry project list test-org\//g)).toHaveLength(1);
     }
   });
 
