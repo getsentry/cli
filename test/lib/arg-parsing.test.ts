@@ -1109,6 +1109,18 @@ describe("looksLikeIssueShortId", () => {
       ).toBe(false);
     });
 
+    test("my-app-2 with ignoreCase is false (versioned project slug)", () => {
+      expect(looksLikeIssueShortId("my-app-2", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+
+    test("api-gateway-1 with ignoreCase is false (versioned project slug)", () => {
+      expect(looksLikeIssueShortId("api-gateway-1", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+
     test("my-project with ignoreCase is false (project slug)", () => {
       expect(looksLikeIssueShortId("my-project", { ignoreCase: true })).toBe(
         false

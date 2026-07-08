@@ -72,6 +72,9 @@ const HAS_UPPERCASE_ASCII_RE = /[A-Z]/;
 /** Detects at least one digit — used to distinguish short ID suffixes from slugs. */
 const HAS_DIGIT_RE = /\d/;
 
+/** Detects at least one ASCII letter — used for short ID suffix shape checks. */
+const HAS_LETTER_ASCII_RE = /[a-zA-Z]/;
+
 /** Matches purely numeric issue suffixes (e.g. `1` in `issue-1`). */
 const NUMERIC_SUFFIX_RE = /^\d+$/;
 
@@ -92,9 +95,10 @@ const LINE_SPLIT_PATTERN = /\r?\n/;
  *
  * @param str - String to check
  * @param opts.ignoreCase - When true, also match mixed-case and multi-segment
- *   lowercase inputs whose final segment contains a digit (e.g.
- *   `javascript-react-mr-1b`). Two-part all-lowercase slugs like `my-project`
- *   and letter-only multi-segment slugs like `my-frontend-app` are rejected.
+ *   lowercase inputs whose final segment is alphanumeric (e.g.
+ *   `javascript-react-mr-1b`). Two-part slugs like `my-project`, letter-only
+ *   multi-segment slugs like `my-frontend-app`, and versioned project slugs
+ *   like `my-app-2` are rejected.
  * @returns true if the string matches the issue short ID pattern
  *
  * @example
@@ -126,9 +130,13 @@ function matchesIssueShortIdIgnoreCase(str: string): boolean {
   if (!(hasUppercase || multiSegment)) {
     return false;
   }
-  // Letter-only multi-segment slugs (e.g. `my-frontend-app`) are project names.
-  if (!hasUppercase && multiSegment && !HAS_DIGIT_RE.test(parts.at(-1) ?? "")) {
-    return false;
+  // Multi-segment lowercase slugs are usually project names, not short IDs.
+  if (!hasUppercase && multiSegment) {
+    const lastPart = parts.at(-1) ?? "";
+    // Letter-only finals: `my-frontend-app`. Digit-only finals: `my-app-2`.
+    if (!(HAS_DIGIT_RE.test(lastPart) && HAS_LETTER_ASCII_RE.test(lastPart))) {
+      return false;
+    }
   }
   return ISSUE_SHORT_ID_PATTERN.test(str.toUpperCase());
 }

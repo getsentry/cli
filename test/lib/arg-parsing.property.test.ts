@@ -486,12 +486,14 @@ describe("looksLikeIssueShortId properties", () => {
     );
   });
 
-  test("three-plus-part lowercase slugs without digit in final segment do not match with ignoreCase", async () => {
+  test("three-plus-part lowercase slugs without alphanumeric final segment do not match with ignoreCase", async () => {
     await fcAssert(
       property(lowercaseSlugWithDashArb, (input) => {
         const parts = input.split("-");
         const lastPart = parts.at(-1) ?? "";
-        if (parts.length >= 3 && !/\d/.test(lastPart)) {
+        const hasDigit = /\d/.test(lastPart);
+        const hasLetter = /[a-z]/.test(lastPart);
+        if (parts.length >= 3 && !(hasDigit && hasLetter)) {
           expect(looksLikeIssueShortId(input, { ignoreCase: true })).toBe(
             false
           );
@@ -501,12 +503,16 @@ describe("looksLikeIssueShortId properties", () => {
     );
   });
 
-  test("three-plus-part lowercase slugs with digit in final segment match with ignoreCase", async () => {
+  test("three-plus-part lowercase slugs with alphanumeric final segment match with ignoreCase", async () => {
     await fcAssert(
       property(lowercaseSlugWithDashArb, (input) => {
         const parts = input.split("-");
         const lastPart = parts.at(-1) ?? "";
-        if (parts.length >= 3 && /\d/.test(lastPart)) {
+        if (
+          parts.length >= 3 &&
+          /\d/.test(lastPart) &&
+          /[a-z]/.test(lastPart)
+        ) {
           expect(looksLikeIssueShortId(input, { ignoreCase: true })).toBe(true);
         }
       }),
