@@ -109,6 +109,8 @@ const LINE_SPLIT_PATTERN = /\r?\n/;
  * looksLikeIssueShortId("a9b4ad2c")             // false (no dash)
  * looksLikeIssueShortId("javascript-react-mr-1b", { ignoreCase: true }) // true
  * looksLikeIssueShortId("my-project", { ignoreCase: true })            // false
+ * looksLikeIssueShortId("my-frontend-app", { ignoreCase: true })       // false
+ * looksLikeIssueShortId("my-app-2", { ignoreCase: true })              // false
  */
 export function looksLikeIssueShortId(
   str: string,
@@ -122,6 +124,19 @@ export function looksLikeIssueShortId(
 
 /**
  * Case-insensitive short ID match with guardrails against project-slug false positives.
+ *
+ * Guard tiers for all-lowercase input:
+ * 1. Two-part slugs (e.g. `my-project`) — rejected as project names
+ * 2. Multi-segment with letter-only final (e.g. `my-frontend-app`) — rejected
+ * 3. Multi-segment with digit-only final (e.g. `my-app-2`) — rejected
+ *
+ * Mixed-case input (e.g. `CaM-82x`) or multi-segment with alphanumeric final
+ * (e.g. `javascript-react-mr-1b`) may match when the uppercased form fits the
+ * short ID pattern.
+ *
+ * @example
+ * matchesIssueShortIdIgnoreCase("my-app-2")              // false
+ * matchesIssueShortIdIgnoreCase("javascript-react-mr-1b") // true
  */
 function matchesIssueShortIdIgnoreCase(str: string): boolean {
   const parts = str.split("-");
@@ -130,15 +145,18 @@ function matchesIssueShortIdIgnoreCase(str: string): boolean {
   if (!(hasUppercase || multiSegment)) {
     return false;
   }
-  // Multi-segment lowercase slugs are usually project names, not short IDs.
   if (!hasUppercase && multiSegment) {
     const lastPart = parts.at(-1) ?? "";
-    // Letter-only finals: `my-frontend-app`. Digit-only finals: `my-app-2`.
-    if (!(HAS_DIGIT_RE.test(lastPart) && HAS_LETTER_ASCII_RE.test(lastPart))) {
+    if (!isAlphanumericSegment(lastPart)) {
       return false;
     }
   }
   return ISSUE_SHORT_ID_PATTERN.test(str.toUpperCase());
+}
+
+/** True when a segment contains at least one letter and one digit (e.g. `1b`, not `2` or `app`). */
+function isAlphanumericSegment(segment: string): boolean {
+  return HAS_DIGIT_RE.test(segment) && HAS_LETTER_ASCII_RE.test(segment);
 }
 
 /** Issue command tokens agents often mistake for project slugs in dash args. */
@@ -153,20 +171,23 @@ const CLI_COMMAND_TOKEN_NOUNS = new Set(["issue", "issues"]);
  * are valid issue short IDs, and other CLI nouns like `api` or `release` may
  * be real project slugs even with numeric suffixes (`api-1`, `release-123`).
  */
-export function isCliResourceNoun(slug: string): boolean {
+export function isIssueCommandToken(slug: string): boolean {
   return CLI_COMMAND_TOKEN_NOUNS.has(slug.toLowerCase());
 }
 
 /**
  * Reject dash-parsed args where the project segment is an issue command token
  * and the suffix is purely numeric (e.g. `issue-1`, `my-org/issue-1`).
+ *
+ * @throws {ValidationError} When the project segment is `issue`/`issues` and the
+ *   suffix is purely numeric
  */
-function rejectCliResourceNounWithNumericSuffix(
+function rejectIssueCommandTokenWithNumericSuffix(
   arg: string,
   projectSlug: string,
   suffix: string
 ): void {
-  if (!(isCliResourceNoun(projectSlug) && NUMERIC_SUFFIX_RE.test(suffix))) {
+  if (!(isIssueCommandToken(projectSlug) && NUMERIC_SUFFIX_RE.test(suffix))) {
     return;
   }
   const normalizedProject = projectSlug.toLowerCase();
@@ -918,7 +939,7 @@ function parseAfterSlash(
       );
     }
 
-    rejectCliResourceNounWithNumericSuffix(arg, project, suffix);
+    rejectIssueCommandTokenWithNumericSuffix(arg, project, suffix);
 
     // "my-org/cli-G" or "sentry/spotlight-electron-4Y"
     // Lowercase the project slug — Sentry slugs are always lowercase.
@@ -1108,7 +1129,7 @@ function parseWithDash(arg: string): ParsedIssueArg {
     );
   }
 
-  rejectCliResourceNounWithNumericSuffix(arg, projectSlug, suffix);
+  rejectIssueCommandTokenWithNumericSuffix(arg, projectSlug, suffix);
 
   // "cli-G" or "spotlight-electron-4Y"
   // Lowercase the project slug since Sentry slugs are always lowercase.

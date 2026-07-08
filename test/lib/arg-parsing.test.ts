@@ -3,7 +3,8 @@
  *
  * Note: Core invariants (return type determination, suffix normalization) are tested
  * via property-based tests in arg-parsing.property.test.ts. These tests focus on
- * error messages and edge cases.
+ * error messages and edge cases. `looksLikeIssueShortId` ignoreCase slug-false-positive
+ * cases from PR review are documented here; general invariants live in the property file.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -399,7 +400,7 @@ describe("parseIssueArg", () => {
       );
     });
 
-    test("issue-1 throws ValidationError for CLI resource noun prefix", () => {
+    test("issue-1 throws ValidationError for issue command token prefix", () => {
       expect(() => parseIssueArg("issue-1")).toThrow(ValidationError);
       expect(() => parseIssueArg("issue-1")).toThrow(
         "looks like a command token plus a suffix"
@@ -409,14 +410,14 @@ describe("parseIssueArg", () => {
       );
     });
 
-    test("my-org/issue-1 throws ValidationError for org-qualified CLI noun", () => {
+    test("my-org/issue-1 throws ValidationError for org-qualified issue command token", () => {
       expect(() => parseIssueArg("my-org/issue-1")).toThrow(ValidationError);
       expect(() => parseIssueArg("my-org/issue-1")).toThrow(
         "looks like a command token plus a suffix"
       );
     });
 
-    test("my-org/api-G parses as explicit despite api being a CLI noun", () => {
+    test("my-org/api-G parses as explicit org/project-suffix", () => {
       expect(parseIssueArg("my-org/api-G")).toEqual({
         type: "explicit",
         org: "my-org",
@@ -425,7 +426,7 @@ describe("parseIssueArg", () => {
       });
     });
 
-    test("api-G parses as project-search despite api being a CLI noun", () => {
+    test("api-G parses as project-search", () => {
       expect(parseIssueArg("api-G")).toEqual({
         type: "project-search",
         projectSlug: "api",
