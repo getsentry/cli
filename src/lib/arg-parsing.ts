@@ -133,58 +133,25 @@ function matchesIssueShortIdIgnoreCase(str: string): boolean {
   return ISSUE_SHORT_ID_PATTERN.test(str.toUpperCase());
 }
 
-/** CLI route/resource nouns that are never valid project slugs in dash parsing. */
-const CLI_RESOURCE_NOUNS = new Set([
-  "alert",
-  "alerts",
-  "api",
-  "dashboard",
-  "dashboards",
-  "event",
-  "events",
-  "explore",
-  "issue",
-  "issues",
-  "log",
-  "logs",
-  "monitor",
-  "monitors",
-  "org",
-  "orgs",
-  "project",
-  "projects",
-  "release",
-  "releases",
-  "replay",
-  "replays",
-  "repo",
-  "repos",
-  "schema",
-  "span",
-  "spans",
-  "team",
-  "teams",
-  "trace",
-  "traces",
-  "trial",
-  "trials",
-]);
+/** Issue command tokens agents often mistake for project slugs in dash args. */
+const CLI_COMMAND_TOKEN_NOUNS = new Set(["issue", "issues"]);
 
 /**
- * Check if a slug matches a top-level CLI resource noun (e.g. "issue", "trace").
+ * Check if a slug is an issue command token (e.g. "issue", "issues").
  *
  * Used to detect when agents pass command-like tokens as project prefixes in
  * dash-separated issue args (`issue-1` → project `issue`, suffix `1`). Only
  * combined with a purely numeric suffix — alphanumeric suffixes like `api-G`
- * are valid issue short IDs.
+ * are valid issue short IDs, and other CLI nouns like `api` or `release` may
+ * be real project slugs even with numeric suffixes (`api-1`, `release-123`).
  */
 export function isCliResourceNoun(slug: string): boolean {
-  return CLI_RESOURCE_NOUNS.has(slug.toLowerCase());
+  return CLI_COMMAND_TOKEN_NOUNS.has(slug.toLowerCase());
 }
 
 /**
- * Reject dash-parsed args where the project segment is a CLI resource noun and
- * the suffix is purely numeric (e.g. `issue-1`, `my-org/issue-1`).
+ * Reject dash-parsed args where the project segment is an issue command token
+ * and the suffix is purely numeric (e.g. `issue-1`, `my-org/issue-1`).
  */
 function rejectCliResourceNounWithNumericSuffix(
   arg: string,
@@ -197,7 +164,7 @@ function rejectCliResourceNounWithNumericSuffix(
   const normalizedProject = projectSlug.toLowerCase();
   throw validationError(
     `"${arg}" looks like a command token plus a suffix, not an issue short ID.\n` +
-      `  Parsed as project '${normalizedProject}' + suffix '${suffix}', but '${normalizedProject}' is a CLI resource name.`,
+      `  Parsed as project '${normalizedProject}' + suffix '${suffix}', but '${normalizedProject}' is an issue command name.`,
     [
       "sentry issue view PROJECT-1",
       "sentry issue explain PROJECT-1",

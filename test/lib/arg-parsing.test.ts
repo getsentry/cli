@@ -433,6 +433,31 @@ describe("parseIssueArg", () => {
       });
     });
 
+    test("api-1 parses as project-search for projects named api", () => {
+      expect(parseIssueArg("api-1")).toEqual({
+        type: "project-search",
+        projectSlug: "api",
+        suffix: "1",
+      });
+    });
+
+    test("release-123 parses as project-search for projects named release", () => {
+      expect(parseIssueArg("release-123")).toEqual({
+        type: "project-search",
+        projectSlug: "release",
+        suffix: "123",
+      });
+    });
+
+    test("my-org/api-1 parses as explicit for org-qualified api project", () => {
+      expect(parseIssueArg("my-org/api-1")).toEqual({
+        type: "explicit",
+        org: "my-org",
+        project: "api",
+        suffix: "1",
+      });
+    });
+
     test("cli-g still parses as project-search", () => {
       expect(parseIssueArg("cli-g")).toEqual({
         type: "project-search",
