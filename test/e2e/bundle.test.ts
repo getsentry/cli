@@ -6,11 +6,12 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
+import { BUNDLE_BIN_PATH, ensureBundleBuilt } from "./bundle-setup.js";
 
 function noop(): void {
   // Intentionally empty — absorbs async spawn errors
@@ -45,48 +46,19 @@ async function spawnCollect(
 }
 
 const ROOT_DIR = join(import.meta.dirname, "../..");
-const BUNDLE_PATH = join(ROOT_DIR, "dist/bin.cjs");
 const INK_APP_PATH = join(ROOT_DIR, "dist/ink-app.js");
 
 describe("npm bundle", () => {
   beforeAll(async () => {
-    // Clean dist directory before building
-    const distDir = join(ROOT_DIR, "dist");
-    if (existsSync(distDir)) {
-      rmSync(distDir, { recursive: true, force: true });
-    }
-
-    // Build the bundle (requires SENTRY_CLIENT_ID)
-    // Run the bundle script directly to avoid PATH issues in test environments
-    const result = await spawnCollect("pnpm", ["run", "bundle"], {
-      cwd: ROOT_DIR,
-      env: {
-        ...process.env,
-        SENTRY_CLIENT_ID: process.env.SENTRY_CLIENT_ID || "test-client-id",
-      },
-    });
-
-    if (result.exitCode !== 0) {
-      throw new Error(
-        `Bundle failed with exit code ${result.exitCode}: ${result.stderr}`
-      );
-    }
+    await ensureBundleBuilt({ clean: true });
   }, 60_000); // Bundle can take a while
 
-  afterAll(() => {
-    // Clean up bundle after tests
-    const distDir = join(ROOT_DIR, "dist");
-    if (existsSync(distDir)) {
-      rmSync(distDir, { recursive: true, force: true });
-    }
-  });
-
   test("bundle file exists", () => {
-    expect(existsSync(BUNDLE_PATH)).toBe(true);
+    expect(existsSync(BUNDLE_BIN_PATH)).toBe(true);
   });
 
   test("bundle starts with node shebang", async () => {
-    const content = await readFile(BUNDLE_PATH, "utf-8");
+    const content = await readFile(BUNDLE_BIN_PATH, "utf-8");
 
     // The bundle MUST start with the Node.js shebang for npm global installs to work
     // Without this, Unix shells try to execute the JavaScript as shell commands
@@ -100,7 +72,7 @@ describe("npm bundle", () => {
     // tried to interpret JavaScript as shell commands
     const { stdout, stderr } = await spawnCollect(
       "node",
-      [BUNDLE_PATH, "--version"],
+      [BUNDLE_BIN_PATH, "--version"],
       {
         cwd: ROOT_DIR,
       }
@@ -119,9 +91,13 @@ describe("npm bundle", () => {
   test("bundle does not emit Node.js warnings", async () => {
     // Run the bundle and capture stderr to check for warnings
     // This ensures we don't regress on warning suppression (e.g., SQLite experimental)
-    const { stderr } = await spawnCollect("node", [BUNDLE_PATH, "--version"], {
-      cwd: ROOT_DIR,
-    });
+    const { stderr } = await spawnCollect(
+      "node",
+      [BUNDLE_BIN_PATH, "--version"],
+      {
+        cwd: ROOT_DIR,
+      }
+    );
 
     // Should not have any Node.js warnings
     expect(stderr).not.toContain("ExperimentalWarning");
@@ -137,12 +113,16 @@ describe("npm bundle", () => {
 
     // Make the bundle executable
     const { chmod } = await import("node:fs/promises");
-    await chmod(BUNDLE_PATH, 0o755);
+    await chmod(BUNDLE_BIN_PATH, 0o755);
 
     // Execute it directly (like npm global install would)
-    const { stdout, stderr } = await spawnCollect(BUNDLE_PATH, ["--version"], {
-      cwd: ROOT_DIR,
-    });
+    const { stdout, stderr } = await spawnCollect(
+      BUNDLE_BIN_PATH,
+      ["--version"],
+      {
+        cwd: ROOT_DIR,
+      }
+    );
 
     // This is the exact error from the bug report - shell interpreting JS as bash
     expect(stderr).not.toContain("syntax error near unexpected token");
@@ -158,7 +138,7 @@ describe("npm bundle", () => {
     // This catches lazy-import and require-resolution bugs that --version misses.
     const { stdout, stderr, exitCode } = await spawnCollect(
       "node",
-      [BUNDLE_PATH, "auth", "status"],
+      [BUNDLE_BIN_PATH, "auth", "status"],
       {
         cwd: ROOT_DIR,
         env: {
@@ -187,7 +167,7 @@ describe("npm bundle", () => {
     // DB init and the metadata KV store without requiring auth.
     const { stdout, stderr, exitCode } = await spawnCollect(
       "node",
-      [BUNDLE_PATH, "cli", "defaults"],
+      [BUNDLE_BIN_PATH, "cli", "defaults"],
       {
         cwd: ROOT_DIR,
         env: {
