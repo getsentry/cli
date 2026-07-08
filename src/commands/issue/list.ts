@@ -1520,12 +1520,13 @@ export const listCommand = buildListCommand("issue", {
 
     // Auto-recover: user passed an issue short ID (e.g., "ARMAX-3E") instead
     // of a project slug. Their intent is unambiguous — resolve and show it.
+    // Use parsed.projectSlug (not raw target) so leading-slash project-search
+    // forms like "/CLI-G" match the same as bare "CLI-G".
     if (
-      target &&
       parsed.type === "project-search" &&
-      looksLikeIssueShortId(target, { ignoreCase: true })
+      looksLikeIssueShortId(parsed.projectSlug, { ignoreCase: true })
     ) {
-      const shortId = target;
+      const shortId = parsed.projectSlug;
       log.warn(
         `'${shortId}' is an issue short ID, not a project slug. Showing the issue.`
       );
