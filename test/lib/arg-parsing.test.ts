@@ -16,6 +16,7 @@ import {
   parseIssueArg,
   parseOrgProjectArg,
   parseSlashSeparatedArg,
+  rejectIssueCommandTokenListTarget,
   splitNewlineArg,
 } from "../../src/lib/arg-parsing.js";
 import { stripDsnOrgPrefix } from "../../src/lib/dsn/index.js";
@@ -1122,6 +1123,18 @@ describe("looksLikeIssueShortId", () => {
       );
     });
 
+    test("My-App-2 with ignoreCase is false (title-case project slug)", () => {
+      expect(looksLikeIssueShortId("My-App-2", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+
+    test("My-Frontend-App with ignoreCase is false (title-case project slug)", () => {
+      expect(
+        looksLikeIssueShortId("My-Frontend-App", { ignoreCase: true })
+      ).toBe(false);
+    });
+
     test("my-project with ignoreCase is false (project slug)", () => {
       expect(looksLikeIssueShortId("my-project", { ignoreCase: true })).toBe(
         false
@@ -1137,6 +1150,31 @@ describe("looksLikeIssueShortId", () => {
     test("123 (pure numeric)", () => {
       expect(looksLikeIssueShortId("123")).toBe(false);
     });
+  });
+});
+
+describe("rejectIssueCommandTokenListTarget", () => {
+  test("issue-1 throws ValidationError", () => {
+    expect(() => rejectIssueCommandTokenListTarget("issue-1")).toThrow(
+      ValidationError
+    );
+    expect(() => rejectIssueCommandTokenListTarget("issue-1")).toThrow(
+      "looks like a command token plus a suffix"
+    );
+  });
+
+  test("my-org/issue-1 throws ValidationError", () => {
+    expect(() => rejectIssueCommandTokenListTarget("my-org/issue-1")).toThrow(
+      ValidationError
+    );
+  });
+
+  test("api-1 does not throw", () => {
+    expect(() => rejectIssueCommandTokenListTarget("api-1")).not.toThrow();
+  });
+
+  test("my-org/cli does not throw", () => {
+    expect(() => rejectIssueCommandTokenListTarget("my-org/cli")).not.toThrow();
   });
 });
 

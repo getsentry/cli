@@ -130,12 +130,14 @@ export function looksLikeIssueShortId(
  * 2. Multi-segment with letter-only final (e.g. `my-frontend-app`) — rejected
  * 3. Multi-segment with digit-only final (e.g. `my-app-2`) — rejected
  *
- * Mixed-case input (e.g. `CaM-82x`) or multi-segment with alphanumeric final
- * (e.g. `javascript-react-mr-1b`) may match when the uppercased form fits the
- * short ID pattern.
+ * Mixed-case input with short-ID shape (e.g. `CaM-82x`) or multi-segment with
+ * alphanumeric final (e.g. `javascript-react-mr-1b`) may match when the
+ * uppercased form fits the short ID pattern. Title-case project slugs
+ * (e.g. `My-App-2`) are rejected via the same lowercase final-segment rules.
  *
  * @example
  * matchesIssueShortIdIgnoreCase("my-app-2")              // false
+ * matchesIssueShortIdIgnoreCase("My-App-2")              // false
  * matchesIssueShortIdIgnoreCase("javascript-react-mr-1b") // true
  */
 function matchesIssueShortIdIgnoreCase(str: string): boolean {
@@ -145,9 +147,9 @@ function matchesIssueShortIdIgnoreCase(str: string): boolean {
   if (!(hasUppercase || multiSegment)) {
     return false;
   }
-  if (!hasUppercase && multiSegment) {
-    const lastPart = parts.at(-1) ?? "";
-    if (!isAlphanumericSegment(lastPart)) {
+  if (multiSegment) {
+    const lastPartLower = (parts.at(-1) ?? "").toLowerCase();
+    if (!isAlphanumericSegment(lastPartLower)) {
       return false;
     }
   }
@@ -202,6 +204,30 @@ function rejectIssueCommandTokenWithNumericSuffix(
     ],
     "issue"
   );
+}
+
+/**
+ * Reject org/project list targets that look like `issue-1` command tokens.
+ *
+ * `parseOrgProjectArg` treats bare `issue-1` as a single project slug; this
+ * applies the same guard as `parseIssueArg` for bare and `org/issue-1` forms.
+ *
+ * @throws {ValidationError} When the target matches an issue command token with
+ *   a purely numeric suffix
+ */
+export function rejectIssueCommandTokenListTarget(target: string): void {
+  const dashIdx = target.lastIndexOf("-");
+  if (dashIdx === -1) {
+    return;
+  }
+  const suffix = target.slice(dashIdx + 1);
+  if (!NUMERIC_SUFFIX_RE.test(suffix)) {
+    return;
+  }
+  const prefix = target.slice(0, dashIdx);
+  const slashIdx = prefix.lastIndexOf("/");
+  const projectSegment = slashIdx === -1 ? prefix : prefix.slice(slashIdx + 1);
+  rejectIssueCommandTokenWithNumericSuffix(target, projectSegment, suffix);
 }
 
 // ---------------------------------------------------------------------------
