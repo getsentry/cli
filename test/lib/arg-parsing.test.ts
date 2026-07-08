@@ -1024,6 +1024,78 @@ describe("looksLikeIssueShortId", () => {
       expect(looksLikeIssueShortId("123")).toBe(false);
     });
   });
+
+  describe("with ignoreCase option", () => {
+    test("cam-82x with ignoreCase is false (two-part lowercase slug)", () => {
+      expect(looksLikeIssueShortId("cam-82x", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+
+    test("CaM-82x with ignoreCase (mixed case short ID)", () => {
+      expect(looksLikeIssueShortId("CaM-82x", { ignoreCase: true })).toBe(true);
+    });
+
+    test("javascript-react-mr-1b with ignoreCase", () => {
+      expect(
+        looksLikeIssueShortId("javascript-react-mr-1b", { ignoreCase: true })
+      ).toBe(true);
+    });
+
+    test("my-frontend-app with ignoreCase is false (3-part project slug)", () => {
+      expect(
+        looksLikeIssueShortId("my-frontend-app", { ignoreCase: true })
+      ).toBe(false);
+    });
+
+    test("my-app-2 with ignoreCase is false (versioned project slug)", () => {
+      expect(looksLikeIssueShortId("my-app-2", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+
+    test("api-gateway-1 with ignoreCase is false (versioned project slug)", () => {
+      expect(looksLikeIssueShortId("api-gateway-1", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+
+    test("My-App-2 with ignoreCase is false (title-case project slug)", () => {
+      expect(looksLikeIssueShortId("My-App-2", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+
+    test("My-Frontend-App with ignoreCase is false (title-case project slug)", () => {
+      expect(
+        looksLikeIssueShortId("My-Frontend-App", { ignoreCase: true })
+      ).toBe(false);
+    });
+
+    test("My-2 with ignoreCase is false (two-part title-case slug)", () => {
+      expect(looksLikeIssueShortId("My-2", { ignoreCase: true })).toBe(false);
+    });
+
+    test("Foo-3 with ignoreCase is false (two-part title-case slug)", () => {
+      expect(looksLikeIssueShortId("Foo-3", { ignoreCase: true })).toBe(false);
+    });
+
+    test("CLI-5 with ignoreCase is true (all-uppercase prefix, numeric suffix)", () => {
+      expect(looksLikeIssueShortId("CLI-5", { ignoreCase: true })).toBe(true);
+    });
+
+    test("my-project with ignoreCase is false (project slug)", () => {
+      expect(looksLikeIssueShortId("my-project", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+
+    test("acme-corp with ignoreCase is false (org/project slug)", () => {
+      expect(looksLikeIssueShortId("acme-corp", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+  });
 });
 
 describe("detectSwappedViewArgs", () => {
