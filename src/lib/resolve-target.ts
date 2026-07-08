@@ -831,6 +831,36 @@ export async function triageProjectNotFound(
 }
 
 /**
+ * Build {@link ResolutionError} suggestions when `getProject(org, project)` 404s.
+ *
+ * @param org - Organization slug from the user's target
+ * @param project - Project segment that failed lookup (slug or numeric ID)
+ * @param similar - Fuzzy-matched project slugs in the org, if any
+ */
+function buildProjectNotFoundSuggestions(
+  org: string,
+  project: string,
+  similar: string[]
+): string[] {
+  const suggestions: string[] = [];
+  if (isAllDigits(project)) {
+    suggestions.push(
+      "Project targets use slugs (e.g. 'frontend'), not numeric project IDs",
+      `List available slugs: sentry project list ${org}/`
+    );
+  }
+  if (similar.length > 0) {
+    suggestions.push(
+      `Similar projects: ${similar.map((s) => `'${s}'`).join(", ")}`
+    );
+  }
+  suggestions.push(
+    `Check the project slug at https://sentry.io/organizations/${org}/projects/`
+  );
+  return suggestions;
+}
+
+/**
  * Fetch the numeric project ID for an explicit org/project pair.
  *
  * Throws on auth errors and 404s (user-actionable). Returns undefined
@@ -869,20 +899,11 @@ export async function fetchProjectId(
       projectResult.error.status === 404
     ) {
       const similar = await findSimilarProjects(org, project);
-      const suggestions: string[] = [];
-      if (similar.length > 0) {
-        suggestions.push(
-          `Similar projects: ${similar.map((s) => `'${s}'`).join(", ")}`
-        );
-      }
-      suggestions.push(
-        `Check the project slug at https://sentry.io/organizations/${org}/projects/`
-      );
       throw new ResolutionError(
         `Project '${project}'`,
         `not found in organization '${org}'`,
         `sentry project list ${org}/`,
-        suggestions
+        buildProjectNotFoundSuggestions(org, project, similar)
       );
     }
     return;
