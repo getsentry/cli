@@ -1104,6 +1104,15 @@ describe("rejectIssueCommandTokenListTarget", () => {
     );
   });
 
+  test("whitespace-padded issue-1 throws ValidationError", () => {
+    expect(() => rejectIssueCommandTokenListTarget(" issue-1 ")).toThrow(
+      ValidationError
+    );
+    expect(() => rejectIssueCommandTokenListTarget(" my-org/issue-1\n")).toThrow(
+      ValidationError
+    );
+  });
+
   test("api-1 does not throw", () => {
     expect(() => rejectIssueCommandTokenListTarget("api-1")).not.toThrow();
   });

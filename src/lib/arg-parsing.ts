@@ -147,18 +147,19 @@ function rejectIssueCommandTokenWithNumericSuffix(
  *   a purely numeric suffix
  */
 export function rejectIssueCommandTokenListTarget(target: string): void {
-  const dashIdx = target.lastIndexOf("-");
+  const trimmed = target.trim();
+  const dashIdx = trimmed.lastIndexOf("-");
   if (dashIdx === -1) {
     return;
   }
-  const suffix = target.slice(dashIdx + 1);
+  const suffix = trimmed.slice(dashIdx + 1);
   if (!NUMERIC_SUFFIX_RE.test(suffix)) {
     return;
   }
-  const prefix = target.slice(0, dashIdx);
+  const prefix = trimmed.slice(0, dashIdx);
   const slashIdx = prefix.lastIndexOf("/");
   const projectSegment = slashIdx === -1 ? prefix : prefix.slice(slashIdx + 1);
-  rejectIssueCommandTokenWithNumericSuffix(target, projectSegment, suffix);
+  rejectIssueCommandTokenWithNumericSuffix(trimmed, projectSegment, suffix);
 }
 
 // ---------------------------------------------------------------------------
