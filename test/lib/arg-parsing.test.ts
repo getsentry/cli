@@ -1054,6 +1054,12 @@ describe("looksLikeIssueShortId", () => {
       );
     });
 
+    test("my-app-2b with ignoreCase is false (compact versioned project slug)", () => {
+      expect(looksLikeIssueShortId("my-app-2b", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+
     test("api-gateway-1 with ignoreCase is false (versioned project slug)", () => {
       expect(looksLikeIssueShortId("api-gateway-1", { ignoreCase: true })).toBe(
         false
@@ -1092,6 +1098,20 @@ describe("looksLikeIssueShortId", () => {
 
     test("CLI-5 with ignoreCase is true (all-uppercase prefix, numeric suffix)", () => {
       expect(looksLikeIssueShortId("CLI-5", { ignoreCase: true })).toBe(true);
+    });
+
+    test("P-1 with ignoreCase is true (single-letter short ID prefix)", () => {
+      expect(looksLikeIssueShortId("P-1", { ignoreCase: true })).toBe(true);
+    });
+
+    test("A-1 with ignoreCase is true (single-letter short ID prefix)", () => {
+      expect(looksLikeIssueShortId("A-1", { ignoreCase: true })).toBe(true);
+    });
+
+    test("spotlight-electron-4y with ignoreCase is true (lowercase multi-segment short ID)", () => {
+      expect(
+        looksLikeIssueShortId("spotlight-electron-4y", { ignoreCase: true })
+      ).toBe(true);
     });
 
     test("SPOTLIGHT-ELECTRON-5 with ignoreCase is true (uppercase multi-segment numeric suffix)", () => {

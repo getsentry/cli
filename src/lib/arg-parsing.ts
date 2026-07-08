@@ -76,12 +76,12 @@ const HAS_DIGIT_RE = /\d/;
 const HAS_LETTER_ASCII_RE = /[a-zA-Z]/;
 
 /**
- * Matches a strict "Title Case" word: one leading uppercase letter, rest
- * lowercase (e.g. `My`). Deliberately excludes all-uppercase prefixes like
- * `CLI` and mixed-case prefixes like `CaM` — those are genuine short-ID
- * prefix shapes, not "someone capitalized a project name" shapes.
+ * Matches a strict "Title Case" word: one leading uppercase letter plus at
+ * least one lowercase letter (e.g. `My`). Excludes single-letter prefixes
+ * like `P` in `P-1`, all-uppercase prefixes like `CLI`, and mixed-case
+ * prefixes like `CaM`.
  */
-const TITLE_CASE_WORD_RE = /^[A-Z][a-z]*$/;
+const TITLE_CASE_WORD_RE = /^[A-Z][a-z]+$/;
 
 /** Minimum parts for a dash-separated string to be considered "2-part" for the title-case guard. */
 const TWO_SEGMENT_PARTS = 2;
@@ -91,6 +91,9 @@ const TWO_SEGMENT_PARTS = 2;
  * uppercase letters (e.g. `javascript-react-mr-1b` has four parts).
  */
 const ISSUE_SHORT_ID_MULTI_SEGMENT_PARTS = 3;
+
+/** Max segment length for compact version-slug prefix words (`my`, `app` in `my-app-2b`). */
+const COMPACT_VERSION_SLUG_SEGMENT_MAX_LEN = 3;
 
 /** Splits a string into lines on LF or CRLF boundaries. */
 const LINE_SPLIT_PATTERN = /\r?\n/;
@@ -141,6 +144,8 @@ export function looksLikeIssueShortId(
  * 3. Title-case first segment (e.g. `My` in `My-Project`, `My-2b`, `My-App-2`) —
  *    rejected. Real short-ID prefixes are fully uppercase or fully lowercase,
  *    not "someone capitalized a project name" title case.
+ * 4. Compact three-part version slugs (e.g. `my-app-2b`) — rejected when the
+ *    first two segments are short lowercase words and the final is alphanumeric.
  *
  * All-uppercase multi-segment short IDs (e.g. `SPOTLIGHT-ELECTRON-5`) pass tier 2
  * because Sentry project slugs are always lowercase. Mixed-case short IDs
@@ -149,6 +154,7 @@ export function looksLikeIssueShortId(
  *
  * @example
  * matchesIssueShortIdIgnoreCase("my-app-2")               // false
+ * matchesIssueShortIdIgnoreCase("my-app-2b")              // false
  * matchesIssueShortIdIgnoreCase("My-Project")             // false
  * matchesIssueShortIdIgnoreCase("My-2b")                  // false
  * matchesIssueShortIdIgnoreCase("CLI-5")                  // true
@@ -164,6 +170,15 @@ function matchesIssueShortIdIgnoreCase(str: string): boolean {
   }
   const lastPartLower = (parts.at(-1) ?? "").toLowerCase();
   if (multiSegment && !hasUppercase && !isAlphanumericSegment(lastPartLower)) {
+    return false;
+  }
+  if (
+    parts.length === ISSUE_SHORT_ID_MULTI_SEGMENT_PARTS &&
+    !hasUppercase &&
+    isAlphanumericSegment(lastPartLower) &&
+    (parts[0]?.length ?? 0) <= COMPACT_VERSION_SLUG_SEGMENT_MAX_LEN &&
+    (parts[1]?.length ?? 0) <= COMPACT_VERSION_SLUG_SEGMENT_MAX_LEN
+  ) {
     return false;
   }
   if (
