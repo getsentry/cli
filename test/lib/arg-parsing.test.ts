@@ -427,6 +427,14 @@ describe("parseIssueArg", () => {
       expect(() => parseIssueArg("my-org/issue-1")).toThrow(ValidationError);
     });
 
+    test("ISSUE-1 parses as project-search (uppercase short ID, not command token)", () => {
+      expect(parseIssueArg("ISSUE-1")).toEqual({
+        type: "project-search",
+        projectSlug: "issue",
+        suffix: "1",
+      });
+    });
+
     test("my-org/api-G parses as explicit org/project-suffix", () => {
       expect(parseIssueArg("my-org/api-G")).toEqual({
         type: "explicit",
@@ -1119,6 +1127,10 @@ describe("rejectIssueCommandTokenListTarget", () => {
 
   test("my-org/cli does not throw", () => {
     expect(() => rejectIssueCommandTokenListTarget("my-org/cli")).not.toThrow();
+  });
+
+  test("ISSUE-1 does not throw (uppercase short ID, not command token)", () => {
+    expect(() => rejectIssueCommandTokenListTarget("ISSUE-1")).not.toThrow();
   });
 });
 

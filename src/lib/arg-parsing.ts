@@ -103,9 +103,12 @@ const CLI_COMMAND_TOKEN_NOUNS = new Set(["issue", "issues"]);
  * combined with a purely numeric suffix — alphanumeric suffixes like `api-G`
  * are valid issue short IDs, and other CLI nouns like `api` or `release` may
  * be real project slugs even with numeric suffixes (`api-1`, `release-123`).
+ *
+ * Matching is case-sensitive on the slug: uppercase prefixes like `ISSUE` in
+ * `ISSUE-1` are valid short IDs, not mistaken lowercase command tokens.
  */
 export function isIssueCommandToken(slug: string): boolean {
-  return CLI_COMMAND_TOKEN_NOUNS.has(slug.toLowerCase());
+  return CLI_COMMAND_TOKEN_NOUNS.has(slug);
 }
 
 /**
