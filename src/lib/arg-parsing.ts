@@ -75,9 +75,6 @@ const HAS_DIGIT_RE = /\d/;
 /** Detects at least one ASCII letter — used for short ID suffix shape checks. */
 const HAS_LETTER_ASCII_RE = /[a-zA-Z]/;
 
-/** Matches purely numeric final segments (e.g. `2` in `my-app-2` or `My-2`). */
-const NUMERIC_SEGMENT_RE = /^\d+$/;
-
 /**
  * Matches a strict "Title Case" word: one leading uppercase letter, rest
  * lowercase (e.g. `My`). Deliberately excludes all-uppercase prefixes like
@@ -139,23 +136,23 @@ export function looksLikeIssueShortId(
  *
  * Guard tiers:
  * 1. Two-part all-lowercase slugs (e.g. `my-project`) — rejected as project names
- * 2. Multi-segment (3+) with a letter-only final (e.g. `my-frontend-app`) — rejected
- * 3. Multi-segment (3+) with a digit-only final (e.g. `my-app-2`) — rejected
- * 4. Two-part "Title Case" prefix (e.g. `My` in `My-2`, but not `CLI-5` or
- *    `CaM-82x`) with a purely numeric final segment — rejected. Real short-ID
- *    prefixes are either fully uppercase or fully lowercase; a single leading
- *    capital followed by lowercase letters is how humans capitalize a project
- *    name, not how Sentry short-ID prefixes look.
+ * 2. Multi-segment all-lowercase with a letter-only or digit-only final
+ *    (e.g. `my-frontend-app`, `my-app-2`) — rejected
+ * 3. Title-case first segment (e.g. `My` in `My-Project`, `My-2b`, `My-App-2`) —
+ *    rejected. Real short-ID prefixes are fully uppercase or fully lowercase,
+ *    not "someone capitalized a project name" title case.
  *
- * Mixed-case input with short-ID shape (e.g. `CaM-82x`) or multi-segment with
- * alphanumeric final (e.g. `javascript-react-mr-1b`) may match when the
- * uppercased form fits the short ID pattern.
+ * All-uppercase multi-segment short IDs (e.g. `SPOTLIGHT-ELECTRON-5`) pass tier 2
+ * because Sentry project slugs are always lowercase. Mixed-case short IDs
+ * (e.g. `CaM-82x`) and lowercase multi-segment with alphanumeric finals
+ * (e.g. `javascript-react-mr-1b`) may match when uppercased.
  *
  * @example
- * matchesIssueShortIdIgnoreCase("my-app-2")              // false
- * matchesIssueShortIdIgnoreCase("My-App-2")              // false
- * matchesIssueShortIdIgnoreCase("My-2")                  // false (tier 4)
- * matchesIssueShortIdIgnoreCase("CLI-5")                 // true (not title-case)
+ * matchesIssueShortIdIgnoreCase("my-app-2")               // false
+ * matchesIssueShortIdIgnoreCase("My-Project")             // false
+ * matchesIssueShortIdIgnoreCase("My-2b")                  // false
+ * matchesIssueShortIdIgnoreCase("CLI-5")                  // true
+ * matchesIssueShortIdIgnoreCase("SPOTLIGHT-ELECTRON-5")   // true
  * matchesIssueShortIdIgnoreCase("javascript-react-mr-1b") // true
  */
 function matchesIssueShortIdIgnoreCase(str: string): boolean {
@@ -166,13 +163,12 @@ function matchesIssueShortIdIgnoreCase(str: string): boolean {
     return false;
   }
   const lastPartLower = (parts.at(-1) ?? "").toLowerCase();
-  if (multiSegment && !isAlphanumericSegment(lastPartLower)) {
+  if (multiSegment && !hasUppercase && !isAlphanumericSegment(lastPartLower)) {
     return false;
   }
   if (
-    parts.length === TWO_SEGMENT_PARTS &&
-    TITLE_CASE_WORD_RE.test(parts[0] ?? "") &&
-    NUMERIC_SEGMENT_RE.test(lastPartLower)
+    parts.length >= TWO_SEGMENT_PARTS &&
+    TITLE_CASE_WORD_RE.test(parts[0] ?? "")
   ) {
     return false;
   }

@@ -1076,12 +1076,34 @@ describe("looksLikeIssueShortId", () => {
       expect(looksLikeIssueShortId("My-2", { ignoreCase: true })).toBe(false);
     });
 
+    test("My-Project with ignoreCase is false (two-part title-case slug)", () => {
+      expect(looksLikeIssueShortId("My-Project", { ignoreCase: true })).toBe(
+        false
+      );
+    });
+
+    test("My-2b with ignoreCase is false (title-case slug, alphanumeric suffix)", () => {
+      expect(looksLikeIssueShortId("My-2b", { ignoreCase: true })).toBe(false);
+    });
+
     test("Foo-3 with ignoreCase is false (two-part title-case slug)", () => {
       expect(looksLikeIssueShortId("Foo-3", { ignoreCase: true })).toBe(false);
     });
 
     test("CLI-5 with ignoreCase is true (all-uppercase prefix, numeric suffix)", () => {
       expect(looksLikeIssueShortId("CLI-5", { ignoreCase: true })).toBe(true);
+    });
+
+    test("SPOTLIGHT-ELECTRON-5 with ignoreCase is true (uppercase multi-segment numeric suffix)", () => {
+      expect(
+        looksLikeIssueShortId("SPOTLIGHT-ELECTRON-5", { ignoreCase: true })
+      ).toBe(true);
+    });
+
+    test("JAVASCRIPT-NUXT-52 with ignoreCase is true (uppercase multi-segment numeric suffix)", () => {
+      expect(
+        looksLikeIssueShortId("JAVASCRIPT-NUXT-52", { ignoreCase: true })
+      ).toBe(true);
     });
 
     test("my-project with ignoreCase is false (project slug)", () => {
