@@ -246,6 +246,15 @@ Terminal window
 ```
 
 
+### Common mistakes
+
+[Section titled “Common mistakes”](#common-mistakes)
+
+- **Don't use the issue command name as an issue prefix** — `sentry issue explain issue-1` is parsed as project `issue` + suffix `1`. Use a real project prefix: `sentry issue explain FRONT-1` or a numeric ID: `sentry issue explain 123456789`.
+- **Issue short IDs use uppercase prefixes** — `CLI-G`, not `cli-g`. The CLI tolerates lowercase input in most commands, but agents should prefer the canonical form.
+- **`org/project` targets use slugs, not numeric IDs** — `sentry issue list my-org/6775615880` fails when `6775615880` is a project ID copied from a URL. Run `sentry project list my-org/` to find the slug (e.g. `frontend`).
+- **Prefer auto-detect over guessing slugs** — omit the target when possible; the CLI resolves org/project from DSNs, `.env` files, and your working directory.
+
 ### List events for an issue
 
 [Section titled “List events for an issue”](#list-events-for-an-issue)
