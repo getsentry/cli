@@ -217,19 +217,22 @@ export async function getMetricAlertRule(
 // Issue alert write operations
 
 /**
- * Delete an issue (project) alert rule.
+ * Delete an issue alert rule via the org-scoped `/workflows/` endpoint.
+ *
+ * `ruleId` is the workflow id surfaced by the migrated read path (`list`/`view`),
+ * so the delete is keyed by id alone — no project slug is needed (project scoping
+ * already happens upstream when the rule is resolved via `resolveIssueAlertRule`).
  *
  * Succeeds with 204 No Content and no response body.
  */
 export async function deleteIssueAlertRule(
   orgSlug: string,
-  projectSlug: string,
   ruleId: string
 ): Promise<void> {
   const regionUrl = await resolveOrgRegion(orgSlug);
   await apiRequestToRegionNoContent(
     regionUrl,
-    `/projects/${orgSlug}/${projectSlug}/rules/${encodeURIComponent(ruleId)}/`,
+    `/organizations/${orgSlug}/workflows/${encodeURIComponent(ruleId)}/`,
     { method: "DELETE" }
   );
 }
