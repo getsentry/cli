@@ -55,6 +55,11 @@ export async function getUserRegions(): Promise<Region[]> {
  * the control silo, or a self-hosted monolith — they all serve the same
  * shape at `/organizations/`).
  *
+ * @param baseUrl - Base URL to query (region, control silo, or self-hosted instance)
+ * @param options - Pagination options (cursor, page size)
+ * @returns The page's organizations plus pagination cursors
+ * @throws {ApiError} When the response isn't an array (CLI-1CQ: a proxy/WAF
+ *   interfered) or the request itself failed (enriched 401/403/etc.)
  * @internal exported for testing
  */
 export async function listOrganizationsPage(
@@ -169,7 +174,7 @@ export async function listOrganizationsUncached(): Promise<
     regionUrl: org.links?.regionUrl ?? controlSiloUrl,
     orgId: org.id,
     orgName: org.name,
-    orgRole: (org as Record<string, unknown>).orgRole as string | undefined,
+    orgRole: org.orgRole,
   }));
   setOrgRegions(regionEntries);
 
