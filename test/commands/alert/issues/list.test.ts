@@ -87,7 +87,7 @@ describe("alert issues list pagination", () => {
   test("hasMore is false when limit is reached without next cursor", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
-      if (req.url.includes("/projects/test-org/test-project/rules/")) {
+      if (req.url.includes("/organizations/test-org/workflows/")) {
         return new Response(
           JSON.stringify([
             {
@@ -101,6 +101,7 @@ describe("alert issues list pagination", () => {
               environment: null,
               owner: null,
               projects: ["test-project"],
+              detectorIds: [1],
               dateCreated: "2026-01-01T00:00:00Z",
             },
           ]),
@@ -134,7 +135,7 @@ describe("alert issues list pagination", () => {
   test("empty query page keeps hasMore when next cursor exists", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
-      if (req.url.includes("/projects/test-org/test-project/rules/")) {
+      if (req.url.includes("/organizations/test-org/workflows/")) {
         return new Response(
           JSON.stringify([
             {
@@ -148,6 +149,7 @@ describe("alert issues list pagination", () => {
               environment: null,
               owner: null,
               projects: ["test-project"],
+              detectorIds: [1],
               dateCreated: "2026-01-01T00:00:00Z",
             },
           ]),
@@ -222,7 +224,7 @@ describe("alert issues list pagination", () => {
           name: "My Project",
         });
       }
-      if (url.pathname.includes("/rules/")) {
+      if (url.pathname.includes("/workflows/")) {
         throw new Error("rule fetch should not be called for --web");
       }
       return new Response(JSON.stringify({ detail: "Not found" }), {
@@ -276,7 +278,7 @@ describe("alert issues list pagination", () => {
           name: "My Project",
         });
       }
-      if (url.pathname.includes("/rules/")) {
+      if (url.pathname.includes("/workflows/")) {
         throw new Error("rule fetch should not be called for --web");
       }
       return new Response(JSON.stringify({ detail: "Not found" }), {
@@ -317,7 +319,7 @@ describe("alert issues list pagination", () => {
           name: "Issues Project",
         });
       }
-      if (url.pathname === "/api/0/projects/org-one/issues/rules/") {
+      if (url.pathname === "/api/0/organizations/org-one/workflows/") {
         return Response.json([
           {
             id: "issues-rule",
@@ -330,6 +332,7 @@ describe("alert issues list pagination", () => {
             environment: null,
             owner: null,
             projects: ["issues"],
+            detectorIds: [1],
             dateCreated: "2026-01-01T00:00:00Z",
           },
         ]);
@@ -388,6 +391,7 @@ describe("alert issues list pagination", () => {
       environment: "prod",
       owner: null,
       projects: ["myproj"],
+      detectorIds: [1],
       dateCreated: "2026-01-01T00:00:00Z",
     });
 
@@ -395,7 +399,7 @@ describe("alert issues list pagination", () => {
       const req = new Request(input, init);
       const url = new URL(req.url);
       const ruleMatch = url.pathname.match(
-        /\/api\/0\/projects\/([^/]+)\/myproj\/rules\//
+        /\/api\/0\/organizations\/([^/]+)\/workflows\//
       );
       if (ruleMatch) {
         return Response.json([rule(ruleMatch[1] as string)]);
@@ -451,7 +455,7 @@ describe("alert issues list pagination", () => {
       const req = new Request(input, init);
       const url = new URL(req.url);
       const ruleMatch = url.pathname.match(
-        /\/api\/0\/projects\/([^/]+)\/myproj\/rules\//
+        /\/api\/0\/organizations\/([^/]+)\/workflows\//
       );
       if (ruleMatch) {
         const org = ruleMatch[1] as string;
@@ -472,6 +476,7 @@ describe("alert issues list pagination", () => {
             environment: null,
             owner: null,
             projects: ["myproj"],
+            detectorIds: [1],
             dateCreated: "2026-01-01T00:00:00Z",
           },
         ]);
@@ -536,7 +541,7 @@ describe("alert issues list pagination", () => {
           name: "Test Project",
         });
       }
-      if (url.pathname === "/api/0/projects/test-org/test-project/rules/") {
+      if (url.pathname === "/api/0/organizations/test-org/workflows/") {
         return new Response(JSON.stringify({ detail: "scope denied" }), {
           status: 403,
         });
@@ -561,7 +566,7 @@ describe("alert issues list pagination", () => {
     ).rejects.toMatchObject({
       name: "ApiError",
       status: 403,
-      endpoint: "/projects/test-org/test-project/rules/",
+      endpoint: "/organizations/test-org/workflows/",
     } satisfies Partial<ApiError>);
   });
 
@@ -582,6 +587,7 @@ describe("alert issues list pagination", () => {
       environment: null,
       owner: null,
       projects: ["myproj"],
+      detectorIds: [1],
       dateCreated: "2026-01-01T00:00:00Z",
     });
 
@@ -589,7 +595,7 @@ describe("alert issues list pagination", () => {
       const req = new Request(input, init);
       const url = new URL(req.url);
       const ruleMatch = url.pathname.match(
-        /\/api\/0\/projects\/([^/]+)\/myproj\/rules\//
+        /\/api\/0\/organizations\/([^/]+)\/workflows\//
       );
       if (ruleMatch) {
         const org = ruleMatch[1] as string;
