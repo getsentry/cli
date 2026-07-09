@@ -348,7 +348,7 @@ export async function findProjectsBySlug(
   const isNumericId = isAllDigits(projectSlug);
 
   // listOrganizations() returns from cache when populated, avoiding
-  // the expensive getUserRegions() + listOrganizationsInRegion() fan-out.
+  // an org listing API round-trip.
   const orgs = await listOrganizations();
 
   // Direct lookup with concurrency limit — one API call per org instead of

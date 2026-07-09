@@ -254,30 +254,12 @@ describe("listOrganizationsInRegion", () => {
   });
 });
 
-describe("listOrganizations (fan-out)", () => {
-  test("fetches orgs from multiple regions in parallel", async () => {
+describe("listOrganizations (control silo)", () => {
+  test("fetches all orgs from the control silo in a single call", async () => {
     const requestedUrls: string[] = [];
 
     globalThis.fetch = createMultiRegionMockFetch({
       controlSilo: (req) => {
-        requestedUrls.push(req.url);
-        if (req.url.includes("/users/me/regions/")) {
-          return new Response(
-            JSON.stringify({
-              regions: [
-                { name: "us", url: "https://us.sentry.io" },
-                { name: "de", url: "https://de.sentry.io" },
-              ],
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            }
-          );
-        }
-        return new Response(JSON.stringify([]), { status: 200 });
-      },
-      usRegion: (req) => {
         requestedUrls.push(req.url);
         return new Response(
           JSON.stringify([
@@ -290,17 +272,6 @@ describe("listOrganizations (fan-out)", () => {
                 regionUrl: "https://us.sentry.io",
               },
             },
-          ]),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-      },
-      euRegion: (req) => {
-        requestedUrls.push(req.url);
-        return new Response(
-          JSON.stringify([
             {
               id: "200",
               slug: "eu-org",
@@ -321,46 +292,22 @@ describe("listOrganizations (fan-out)", () => {
 
     const orgs = await listOrganizations();
 
-    // Should have requested regions endpoint and both region org endpoints
+    // No region discovery call, and only one request to the control silo.
     expect(requestedUrls.some((u) => u.includes("/users/me/regions/"))).toBe(
-      true
+      false
     );
     expect(
-      requestedUrls.some(
-        (u) => u.includes("us.sentry.io") && u.includes("/organizations/")
-      )
-    ).toBe(true);
-    expect(
-      requestedUrls.some(
-        (u) => u.includes("de.sentry.io") && u.includes("/organizations/")
-      )
-    ).toBe(true);
+      requestedUrls.filter((u) => u.includes("/organizations/"))
+    ).toHaveLength(1);
 
-    // Should have combined results from both regions
+    // Both orgs (from different regions) come back from that single call.
     expect(orgs).toHaveLength(2);
     expect(orgs.map((o) => o.slug).sort()).toEqual(["eu-org", "us-org"]);
   });
 
-  test("caches region URLs for each organization", async () => {
+  test("caches each org's own region URL from links, in one round-trip", async () => {
     globalThis.fetch = createMultiRegionMockFetch({
-      controlSilo: (req) => {
-        if (req.url.includes("/users/me/regions/")) {
-          return new Response(
-            JSON.stringify({
-              regions: [
-                { name: "us", url: "https://us.sentry.io" },
-                { name: "de", url: "https://de.sentry.io" },
-              ],
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            }
-          );
-        }
-        return new Response(JSON.stringify([]), { status: 200 });
-      },
-      usRegion: () =>
+      controlSilo: () =>
         new Response(
           JSON.stringify([
             {
@@ -372,15 +319,6 @@ describe("listOrganizations (fan-out)", () => {
                 regionUrl: "https://us.sentry.io",
               },
             },
-          ]),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        ),
-      euRegion: () =>
-        new Response(
-          JSON.stringify([
             {
               id: "201",
               slug: "acme-eu",
@@ -400,32 +338,20 @@ describe("listOrganizations (fan-out)", () => {
 
     await listOrganizations();
 
-    // Verify region cache was populated
+    // Verify region cache was populated from links in the single response
     const cachedRegions = getAllOrgRegions();
     expect(cachedRegions.size).toBe(2);
     expect(cachedRegions.get("acme-us")).toBe("https://us.sentry.io");
     expect(cachedRegions.get("acme-eu")).toBe("https://de.sentry.io");
   });
 
-  test("returns empty array when no regions", async () => {
+  test("returns empty array when the user has no orgs", async () => {
     globalThis.fetch = createMultiRegionMockFetch({
-      controlSilo: (req) => {
-        if (req.url.includes("/users/me/regions/")) {
-          return new Response(
-            JSON.stringify({
-              regions: [],
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            }
-          );
-        }
-        return new Response(JSON.stringify([]), {
+      controlSilo: () =>
+        new Response(JSON.stringify([]), {
           status: 200,
           headers: { "Content-Type": "application/json" },
-        });
-      },
+        }),
     });
 
     const orgs = await listOrganizations();
@@ -433,74 +359,9 @@ describe("listOrganizations (fan-out)", () => {
     expect(orgs).toHaveLength(0);
   });
 
-  test("continues with other regions when one fails", async () => {
+  test("falls back to the control silo URL when an org has no links", async () => {
     globalThis.fetch = createMultiRegionMockFetch({
-      controlSilo: (req) => {
-        if (req.url.includes("/users/me/regions/")) {
-          return new Response(
-            JSON.stringify({
-              regions: [
-                { name: "us", url: "https://us.sentry.io" },
-                { name: "de", url: "https://de.sentry.io" },
-              ],
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            }
-          );
-        }
-        return new Response(JSON.stringify([]), { status: 200 });
-      },
-      usRegion: () =>
-        new Response(JSON.stringify({ detail: "Internal error" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }),
-      euRegion: () =>
-        new Response(
-          JSON.stringify([
-            {
-              id: "202",
-              slug: "eu-org",
-              name: "EU Org",
-              links: {
-                organizationUrl: "https://de.sentry.io/organizations/eu-org/",
-                regionUrl: "https://de.sentry.io",
-              },
-            },
-          ]),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        ),
-    });
-
-    // Should not throw, should return orgs from working region
-    const orgs = await listOrganizations();
-
-    expect(orgs).toHaveLength(1);
-    expect(orgs[0].slug).toBe("eu-org");
-  });
-
-  test("uses region URL from org links when available", async () => {
-    globalThis.fetch = createMultiRegionMockFetch({
-      controlSilo: (req) => {
-        if (req.url.includes("/users/me/regions/")) {
-          return new Response(
-            JSON.stringify({
-              regions: [{ name: "us", url: "https://us.sentry.io" }],
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            }
-          );
-        }
-        return new Response(JSON.stringify([]), { status: 200 });
-      },
-      usRegion: () =>
+      controlSilo: () =>
         new Response(
           JSON.stringify([
             {
@@ -517,7 +378,7 @@ describe("listOrganizations (fan-out)", () => {
               id: "104",
               slug: "org-without-links",
               name: "Org Without Links",
-              // No links - should fall back to region URL
+              // No links - should fall back to the control silo URL
             },
           ]),
           {
@@ -529,41 +390,22 @@ describe("listOrganizations (fan-out)", () => {
 
     await listOrganizations();
 
-    // Check cached regions
     const cachedRegions = getAllOrgRegions();
-    // Org with links should use its regionUrl
+    // Org with links should use its own regionUrl
     expect(cachedRegions.get("org-with-links")).toBe(
       "https://custom.sentry.io"
     );
-    // Org without links should fall back to region URL
-    expect(cachedRegions.get("org-without-links")).toBe("https://us.sentry.io");
+    // Org without links falls back to the control silo base URL
+    expect(cachedRegions.get("org-without-links")).toBe("https://sentry.io");
   });
 
-  test("propagates 403 error when all regions return 403", async () => {
+  test("propagates a 403 error from the control silo", async () => {
     globalThis.fetch = createMultiRegionMockFetch({
-      controlSilo: (req) => {
-        if (req.url.includes("/users/me/regions/")) {
-          return new Response(
-            JSON.stringify({
-              regions: [
-                { name: "us", url: "https://us.sentry.io" },
-                { name: "de", url: "https://de.sentry.io" },
-              ],
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } }
-          );
-        }
-        return new Response("Not found", { status: 404 });
-      },
-      usRegion: () =>
+      controlSilo: () =>
         new Response(JSON.stringify({ detail: "You do not have permission" }), {
           status: 403,
           statusText: "Forbidden",
-        }),
-      euRegion: () =>
-        new Response(JSON.stringify({ detail: "You do not have permission" }), {
-          status: 403,
-          statusText: "Forbidden",
+          headers: { "Content-Type": "application/json" },
         }),
     });
 
@@ -579,38 +421,44 @@ describe("listOrganizations (fan-out)", () => {
     }
   });
 
-  test("returns partial results when some regions return 403", async () => {
+  test("auto-paginates through multiple pages via the Link header", async () => {
+    let callCount = 0;
+
     globalThis.fetch = createMultiRegionMockFetch({
-      controlSilo: (req) => {
-        if (req.url.includes("/users/me/regions/")) {
+      controlSilo: () => {
+        callCount += 1;
+        if (callCount === 1) {
           return new Response(
-            JSON.stringify({
-              regions: [
-                { name: "us", url: "https://us.sentry.io" },
-                { name: "de", url: "https://de.sentry.io" },
-              ],
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } }
+            JSON.stringify([{ id: "1", slug: "org-page-1", name: "Page 1" }]),
+            {
+              status: 200,
+              headers: {
+                "Content-Type": "application/json",
+                Link: '<https://sentry.io/api/0/organizations/>; rel="next"; results="true"; cursor="page2:0:0"',
+              },
+            }
           );
         }
-        return new Response("Not found", { status: 404 });
+        return new Response(
+          JSON.stringify([{ id: "2", slug: "org-page-2", name: "Page 2" }]),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              Link: '<https://sentry.io/api/0/organizations/>; rel="next"; results="false"; cursor="end:0:0"',
+            },
+          }
+        );
       },
-      usRegion: () =>
-        new Response(
-          JSON.stringify([{ id: "1", slug: "us-org", name: "US Org" }]),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        ),
-      euRegion: () =>
-        new Response(JSON.stringify({ detail: "You do not have permission" }), {
-          status: 403,
-          statusText: "Forbidden",
-        }),
     });
 
-    // Should return the successful region's orgs, not throw
     const orgs = await listOrganizations();
-    expect(orgs).toHaveLength(1);
-    expect(orgs[0]!.slug).toBe("us-org");
+
+    expect(callCount).toBe(2);
+    expect(orgs.map((o) => o.slug).sort()).toEqual([
+      "org-page-1",
+      "org-page-2",
+    ]);
   });
 });
 

@@ -196,6 +196,26 @@ function createRegionRoutes(
 }
 
 /**
+ * Attach `links.regionUrl` to each org fixture, mirroring how the real
+ * control silo's org listing endpoint (`_get_from_control`, see
+ * getsentry/sentry#112622 and #115513) tags every organization with the
+ * region it actually lives in. The CLI uses this field to route
+ * subsequent org-scoped requests without a separate region lookup.
+ */
+function withRegionLinks(
+  orgs: readonly unknown[],
+  regionUrl: string
+): unknown[] {
+  return (orgs as Array<{ slug: string }>).map((org) => ({
+    ...org,
+    links: {
+      organizationUrl: `${regionUrl}/organizations/${org.slug}/`,
+      regionUrl,
+    },
+  }));
+}
+
+/**
  * Creates routes for the control silo server.
  */
 function createControlSiloRoutes(
@@ -228,20 +248,31 @@ function createControlSiloRoutes(
       status: 404,
     });
 
-    // In self-hosted mode, control silo also serves organizations directly
+    // Self-hosted is a single monolith deployment: the control silo serves
+    // organizations directly, with no region/links concept (matches the
+    // Rust sentry-cli's "Self-hosted/monolith deployments serve the same
+    // endpoint and return all organizations as well").
     routes.push({
       method: "GET",
       path: "/api/0/organizations/",
       response: usOrganizationsFixture,
     });
   } else if (options.singleRegionMode) {
-    // Single region mode: only return US region
+    // Single region mode: only the US region exists
     routes.push({
       method: "GET",
       path: "/api/0/users/me/regions/",
       response: {
         regions: [{ name: "us", url: usRegionUrl }],
       },
+    });
+
+    // The control silo's org listing endpoint returns every org the user
+    // belongs to (here, just the US region's) in one response.
+    routes.push({
+      method: "GET",
+      path: "/api/0/organizations/",
+      response: withRegionLinks(usOrganizationsFixture, usRegionUrl),
     });
   } else {
     // Multi-region mode: return both regions
@@ -254,6 +285,19 @@ function createControlSiloRoutes(
           { name: "de", url: euRegionUrl },
         ],
       },
+    });
+
+    // The control silo's org listing endpoint returns every org across
+    // *all* regions in a single paginated response — no per-region
+    // fan-out. Each org is tagged with its own regionUrl so the CLI can
+    // still route org-scoped requests correctly.
+    routes.push({
+      method: "GET",
+      path: "/api/0/organizations/",
+      response: [
+        ...withRegionLinks(usOrganizationsFixture, usRegionUrl),
+        ...withRegionLinks(euOrganizationsFixture, euRegionUrl),
+      ],
     });
   }
 

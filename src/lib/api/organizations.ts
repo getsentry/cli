@@ -16,22 +16,27 @@ import {
   UserRegionsResponseSchema,
 } from "../../types/index.js";
 
-import { ApiError, withAuthGuard } from "../errors.js";
-import {
-  getApiBaseUrl,
-  getControlSiloUrl,
-  getSdkConfig,
-} from "../sentry-client.js";
+import { ApiError } from "../errors.js";
+import { getControlSiloUrl, getSdkConfig } from "../sentry-client.js";
 
 import {
+  API_MAX_PER_PAGE,
   apiRequestToRegion,
+  autoPaginate,
   getOrgSdkConfig,
+  MAX_PAGINATION_PAGES,
+  type PaginatedResponse,
+  unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
 
 /**
  * Get the list of regions the user has organization membership in.
  * This endpoint is on the control silo (sentry.io) and returns all regions.
+ *
+ * Kept as a lightweight, side-effect-free call used to validate a token
+ * (`auth login`, sentryclirc import) — org listing itself no longer needs
+ * region discovery, see {@link listOrganizationsUncached}.
  *
  * @returns Array of regions with name and URL
  */
@@ -46,7 +51,45 @@ export async function getUserRegions(): Promise<Region[]> {
 }
 
 /**
- * List organizations in a specific region.
+ * Fetch a single page of organizations from a specific base URL (a region,
+ * the control silo, or a self-hosted monolith — they all serve the same
+ * shape at `/organizations/`).
+ *
+ * @internal exported for testing
+ */
+export async function listOrganizationsPage(
+  baseUrl: string,
+  options: { cursor?: string; perPage?: number } = {}
+): Promise<PaginatedResponse<SentryOrganization[]>> {
+  const config = getSdkConfig(baseUrl);
+
+  const result = await sdkListOrganizations({
+    ...config,
+    query: { cursor: options.cursor, per_page: options.perPage },
+  });
+
+  // 403 enrichment (CLI-89, 24 users) is now handled centrally by
+  // throwApiError() in infrastructure.ts — no per-endpoint catch needed.
+  const paginated = unwrapPaginatedResult<SentryOrganization[]>(
+    result,
+    "Failed to list organizations"
+  );
+
+  // CLI-1CQ: self-hosted instances can return non-array data from
+  // GET /api/0/organizations/ when a reverse proxy or WAF interferes.
+  if (!Array.isArray(paginated.data)) {
+    throw new ApiError(
+      "Failed to list organizations: unexpected response format",
+      0,
+      `Expected an array from ${baseUrl}/api/0/organizations/ but received ${typeof paginated.data}. ` +
+        "This may indicate an incompatible self-hosted Sentry version or a proxy interfering with the response."
+    );
+  }
+  return paginated;
+}
+
+/**
+ * List organizations in a specific region (single page only).
  *
  * @param regionUrl - The region's base URL
  * @returns Organizations in that region
@@ -54,26 +97,7 @@ export async function getUserRegions(): Promise<Region[]> {
 export async function listOrganizationsInRegion(
   regionUrl: string
 ): Promise<SentryOrganization[]> {
-  const config = getSdkConfig(regionUrl);
-
-  const result = await sdkListOrganizations({
-    ...config,
-  });
-
-  // 403 enrichment (CLI-89, 24 users) is now handled centrally by
-  // throwApiError() in infrastructure.ts — no per-endpoint catch needed.
-  const data = unwrapResult<SentryOrganization[]>(
-    result,
-    "Failed to list organizations"
-  );
-  if (!Array.isArray(data)) {
-    throw new ApiError(
-      "Failed to list organizations: unexpected response format",
-      0,
-      `Expected an array from ${regionUrl}/api/0/organizations/ but received ${typeof data}. ` +
-        "This may indicate an incompatible self-hosted Sentry version or a proxy interfering with the response."
-    );
-  }
+  const { data } = await listOrganizationsPage(regionUrl);
   return data;
 }
 
@@ -82,8 +106,8 @@ export async function listOrganizationsInRegion(
  *
  * On first call (cold cache), fetches from the API and populates the cache.
  * On subsequent calls, returns organizations from the SQLite cache without
- * any HTTP requests. This avoids the expensive getUserRegions() +
- * listOrganizationsInRegion() fan-out (~800ms) on every command.
+ * any HTTP requests. This avoids the org listing API round-trip
+ * (~200-400ms) on every command.
  *
  * Callers that need guaranteed-fresh data (e.g., `org list`, `auth status`)
  * should use {@link listOrganizationsUncached} instead.
@@ -108,8 +132,15 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
 /**
  * List all organizations by fetching from the API, bypassing the cache.
  *
- * Performs a fan-out to each region and combines results.
- * Populates the org_regions cache with slug, region URL, org ID, and org name.
+ * Makes a single call to the control silo's org listing endpoint
+ * (`GET /organizations/`), which returns every organization the user
+ * belongs to across all regions in one paginated response — no more
+ * discovering regions via `/users/me/regions/` and fanning out to each
+ * one. Self-hosted/monolith deployments serve the same endpoint from the
+ * same base URL, so no special-casing is needed there either.
+ *
+ * Populates the org_regions cache using each org's own `links.regionUrl`,
+ * so subsequent org-scoped commands still route to the right region.
  *
  * Use this when you need guaranteed-fresh data (e.g., `org list`, `auth status`).
  * Most callers should use {@link listOrganizations} instead.
@@ -117,84 +148,29 @@ export async function listOrganizations(): Promise<SentryOrganization[]> {
 export async function listOrganizationsUncached(): Promise<
   SentryOrganization[]
 > {
-  const { registerTrustedRegionUrls, setOrgRegions } = await import(
-    "../db/regions.js"
+  const { setOrgRegions } = await import("../db/regions.js");
+
+  const controlSiloUrl = getControlSiloUrl();
+
+  const { data: orgs } = await autoPaginate(
+    (cursor) =>
+      listOrganizationsPage(controlSiloUrl, {
+        cursor,
+        perPage: API_MAX_PER_PAGE,
+      }),
+    MAX_PAGINATION_PAGES * API_MAX_PER_PAGE
   );
 
-  // Self-hosted instances may not have the regions endpoint (404)
-  const regionsResult = await withAuthGuard(() => getUserRegions());
-  const regions = regionsResult.ok ? regionsResult.value : ([] as Region[]);
-
-  if (regions.length === 0) {
-    // Fall back to default API for self-hosted instances
-    const orgs = await listOrganizationsInRegion(getApiBaseUrl());
-    const baseUrl = getApiBaseUrl();
-    setOrgRegions(
-      orgs.map((org) => ({
-        slug: org.slug,
-        regionUrl: baseUrl,
-        orgId: org.id,
-        orgName: org.name,
-        orgRole: (org as Record<string, unknown>).orgRole as string | undefined,
-      }))
-    );
-    return orgs;
-  }
-
-  // Extend the trust class BEFORE fan-out so the per-region requests
-  // pass the host-scoping guard. setOrgRegions later persists these
-  // (and re-registers them, idempotent) but only after fan-out completes.
-  registerTrustedRegionUrls(regions.map((r) => r.url));
-
-  const settled = await Promise.allSettled(
-    regions.map(async (region) => {
-      const orgs = await listOrganizationsInRegion(region.url);
-      return orgs.map((org) => ({
-        org,
-        regionUrl: org.links?.regionUrl ?? region.url,
-      }));
-    })
-  );
-
-  // Collect successful results while tracking 403 errors.
-  // Transient failures (network, 5xx) are swallowed — they don't affect other
-  // regions. But 403 errors indicate a token scope problem that affects ALL
-  // regions, so if every region failed with 403 we re-throw the enriched error
-  // instead of returning an empty list (CLI-89 follow-up).
-  const flatResults: { org: SentryOrganization; regionUrl: string }[] = [];
-  let lastScopeError: ApiError | undefined;
-  let hasSuccessfulRegion = false;
-
-  for (const result of settled) {
-    if (result.status === "fulfilled") {
-      hasSuccessfulRegion = true;
-      flatResults.push(...result.value);
-    } else if (
-      result.reason instanceof ApiError &&
-      result.reason.status === 403
-    ) {
-      lastScopeError = result.reason;
-    }
-  }
-
-  // All regions rejected with 403 — the token lacks org:read scope globally.
-  // A fulfilled-but-empty region (200 OK, no memberships) is still a success,
-  // so we only throw when no region succeeded at all.
-  if (!hasSuccessfulRegion && lastScopeError) {
-    throw lastScopeError;
-  }
-  const orgs = flatResults.map((r) => r.org);
-
-  const regionEntries = flatResults.map((r) => ({
-    slug: r.org.slug,
-    regionUrl: r.regionUrl,
-    orgId: r.org.id,
-    orgName: r.org.name,
-    orgRole: (r.org as Record<string, unknown>).orgRole as string | undefined,
+  const regionEntries = orgs.map((org) => ({
+    slug: org.slug,
+    // Each org carries its own regionUrl (added to the control serializer
+    // in getsentry/sentry#115513); fall back to the control silo URL for
+    // any older/self-hosted response that omits it.
+    regionUrl: org.links?.regionUrl ?? controlSiloUrl,
+    orgId: org.id,
+    orgName: org.name,
+    orgRole: (org as Record<string, unknown>).orgRole as string | undefined,
   }));
-  // setOrgRegions persists AND extends the in-process trust class to
-  // include any per-org regionUrl from links (may differ from the
-  // /users/me/regions/ response when the SDK returns a more specific URL).
   setOrgRegions(regionEntries);
 
   return orgs;
