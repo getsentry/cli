@@ -60,7 +60,6 @@ export async function getUserRegions(): Promise<Region[]> {
  * @returns The page's organizations plus pagination cursors
  * @throws {ApiError} When the response isn't an array (CLI-1CQ: a proxy/WAF
  *   interfered) or the request itself failed (enriched 401/403/etc.)
- * @internal exported for testing
  */
 export async function listOrganizationsPage(
   baseUrl: string,
@@ -91,19 +90,6 @@ export async function listOrganizationsPage(
     );
   }
   return paginated;
-}
-
-/**
- * List organizations in a specific region (single page only).
- *
- * @param regionUrl - The region's base URL
- * @returns Organizations in that region
- */
-export async function listOrganizationsInRegion(
-  regionUrl: string
-): Promise<SentryOrganization[]> {
-  const { data } = await listOrganizationsPage(regionUrl);
-  return data;
 }
 
 /**

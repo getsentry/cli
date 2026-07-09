@@ -10,7 +10,7 @@ import {
   findProjectByDsnKey,
   getUserRegions,
   listOrganizations,
-  listOrganizationsInRegion,
+  listOrganizationsPage,
 } from "../../src/lib/api-client.js";
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import {
@@ -182,8 +182,8 @@ describe("getUserRegions", () => {
   });
 });
 
-describe("listOrganizationsInRegion", () => {
-  test("fetches organizations from specified region", async () => {
+describe("listOrganizationsPage", () => {
+  test("fetches organizations from a specific base URL", async () => {
     let capturedUrl: string | undefined;
 
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -202,7 +202,7 @@ describe("listOrganizationsInRegion", () => {
       );
     };
 
-    const orgs = await listOrganizationsInRegion("https://us.sentry.io");
+    const { data: orgs } = await listOrganizationsPage("https://us.sentry.io");
 
     expect(capturedUrl).toContain("us.sentry.io");
     expect(capturedUrl).toContain("/api/0/organizations/");
@@ -219,7 +219,7 @@ describe("listOrganizationsInRegion", () => {
       });
 
     try {
-      await listOrganizationsInRegion("https://us.sentry.io");
+      await listOrganizationsPage("https://us.sentry.io");
       expect.unreachable("should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ApiError);
@@ -233,7 +233,7 @@ describe("listOrganizationsInRegion", () => {
     }
   });
 
-  test("handles region with trailing slash", async () => {
+  test("handles base URL with trailing slash", async () => {
     let capturedUrl: string | undefined;
 
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -246,7 +246,7 @@ describe("listOrganizationsInRegion", () => {
       });
     };
 
-    await listOrganizationsInRegion("https://de.sentry.io/");
+    await listOrganizationsPage("https://de.sentry.io/");
 
     // Should not have double slashes
     expect(capturedUrl).not.toContain("//api");
