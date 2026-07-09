@@ -1873,7 +1873,7 @@ describe("logs.ts (detailed)", () => {
 describe("events.ts (findEventAcrossOrgs)", () => {
   test("finds event across multiple orgs", async () => {
     // This test needs both listOrganizations and resolveEventInOrg mocked.
-    // listOrganizations uses /users/me/regions/ then /organizations/
+    // listOrganizations uses /organizations/ (control silo, single call)
     // resolveEventInOrg uses /organizations/{org}/eventids/{event_id}/
     const resolved = {
       organizationSlug: "test-org",
@@ -1884,19 +1884,7 @@ describe("events.ts (findEventAcrossOrgs)", () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input!, init);
 
-      // listOrganizations → getUserRegions
-      if (req.url.includes("/users/me/regions/")) {
-        return new Response(
-          JSON.stringify({
-            regions: [{ name: "us", url: "https://sentry.io" }],
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-      }
-      // listOrganizationsInRegion
+      // listOrganizations → listOrganizationsPage (control silo)
       if (
         req.url.includes("/organizations/") &&
         !req.url.includes("eventids")

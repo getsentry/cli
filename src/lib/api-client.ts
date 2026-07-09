@@ -106,7 +106,7 @@ export {
   getOrganization,
   getUserRegions,
   listOrganizations,
-  listOrganizationsInRegion,
+  listOrganizationsPage,
   listOrganizationsUncached,
 } from "./api/organizations.js";
 export {

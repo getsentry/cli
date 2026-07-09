@@ -1,12 +1,12 @@
 /**
- * Tests for listOrganizationsInRegion — guards against non-array SDK responses.
+ * Tests for listOrganizationsPage — guards against non-array SDK responses.
  *
  * CLI-1CQ: self-hosted instances can return non-array data from
  * GET /api/0/organizations/ when a reverse proxy or WAF interferes.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { listOrganizationsInRegion } from "../../../src/lib/api/organizations.js";
+import { listOrganizationsPage } from "../../../src/lib/api/organizations.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { ApiError } from "../../../src/lib/errors.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
@@ -26,7 +26,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-describe("listOrganizationsInRegion", () => {
+describe("listOrganizationsPage", () => {
   test("returns organizations when API returns a valid array", async () => {
     globalThis.fetch = mockFetch(
       async () =>
@@ -39,7 +39,9 @@ describe("listOrganizationsInRegion", () => {
         )
     );
 
-    const orgs = await listOrganizationsInRegion("https://sentry.example.com");
+    const { data: orgs } = await listOrganizationsPage(
+      "https://sentry.example.com"
+    );
     expect(orgs).toHaveLength(1);
     expect(orgs[0].slug).toBe("test-org");
   });
@@ -54,11 +56,11 @@ describe("listOrganizationsInRegion", () => {
     );
 
     await expect(
-      listOrganizationsInRegion("https://sentry.example.com")
+      listOrganizationsPage("https://sentry.example.com")
     ).rejects.toThrow(ApiError);
 
     try {
-      await listOrganizationsInRegion("https://sentry.example.com");
+      await listOrganizationsPage("https://sentry.example.com");
     } catch (error) {
       expect(error).toBeInstanceOf(ApiError);
       const apiError = error as ApiError;
@@ -77,7 +79,7 @@ describe("listOrganizationsInRegion", () => {
     );
 
     await expect(
-      listOrganizationsInRegion("https://sentry.example.com")
+      listOrganizationsPage("https://sentry.example.com")
     ).rejects.toThrow(ApiError);
   });
 });
