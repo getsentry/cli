@@ -1,0 +1,132 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-hero class="astro-pdyrgfef"> <head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>404 | Sentry CLI</title><link rel="canonical" href="https://cli.sentry.dev/_preview/pr-1213/404/"/><link rel="sitemap" href="/_preview/pr-1213/sitemap-index.xml"/><link rel="icon" href="/favicon.png" type="image/png" sizes="256x256"/><script>
+            (function() {
+              let overscrollEl;
+              let pullDistance = 0;
+              let touchStartY = 0;
+              let isAtBottom = false;
+              
+              function isLandingPage() {
+                const path = window.location.pathname;
+                // Works with both / (prod) and /pr-preview/pr-XX (preview)
+                return path === '/' || 
+                       /^\/\_preview\/pr-(\d+|main)\/?$/.test(path);
+              }
+              
+              function checkAtBottom() {
+                const scrollTop = window.scrollY || document.documentElement.scrollTop;
+                const scrollHeight = document.documentElement.scrollHeight;
+                const clientHeight = document.documentElement.clientHeight;
+                return scrollTop + clientHeight >= scrollHeight - 5;
+              }
+              
+              function createOverscrollMessage() {
+                if (!isLandingPage()) return;
+                var command = 'curl https://cli.sentry.dev/install -fsS | bash';
+                overscrollEl = document.createElement('div');
+                overscrollEl.className = 'overscroll-message';
+                overscrollEl.innerHTML = '<span>You made it to the end. Might as well give it a try → <code class="overscroll-copy-cmd" title="Click to copy">' + command + '</code></span>';
+                document.body.appendChild(overscrollEl);
+                var codeEl = overscrollEl.querySelector('.overscroll-copy-cmd');
+                codeEl.addEventListener('click', function() {
+                  if (!navigator.clipboard) return;
+                  navigator.clipboard.writeText(command).then(function() {
+                    codeEl.textContent = 'copied!';
+                    setTimeout(function() { codeEl.textContent = command; }, 1500);
+                  }).catch(function() {});
+                });
+              }
+              
+              function updateOverscroll(distance) {
+                if (!overscrollEl) return;
+                const clampedDistance = Math.min(Math.max(distance, 0), 50);
+                const opacity = Math.min(clampedDistance / 15, 1);
+                const translateY = Math.min(clampedDistance * 2.5, 120);
+                overscrollEl.style.opacity = opacity;
+                overscrollEl.style.transform = 'translateX(-50%) translateY(-' + translateY + 'px)';
+              }
+              
+              function handleTouchStart(e) {
+                if (!isLandingPage()) return;
+                touchStartY = e.touches[0].clientY;
+                isAtBottom = checkAtBottom();
+              }
+              
+              function handleTouchMove(e) {
+                if (!isLandingPage() || !isAtBottom) return;
+                const touchY = e.touches[0].clientY;
+                pullDistance = touchStartY - touchY;
+                if (pullDistance > 0 && checkAtBottom()) {
+                  updateOverscroll(pullDistance);
+                }
+              }
+              
+              function handleTouchEnd() {
+                pullDistance = 0;
+                updateOverscroll(0);
+              }
+              
+              function handleWheel(e) {
+                if (!isLandingPage()) return;
+                if (checkAtBottom() && e.deltaY > 0) {
+                  pullDistance = Math.min(pullDistance + e.deltaY * 0.8, 50);
+                  updateOverscroll(pullDistance);
+                  clearTimeout(window.overscrollTimeout);
+                  window.overscrollTimeout = setTimeout(function() {
+                    pullDistance = 0;
+                    updateOverscroll(0);
+                  }, 5000);
+                } else if (e.deltaY < 0) {
+                  clearTimeout(window.overscrollTimeout);
+                  pullDistance = 0;
+                  updateOverscroll(0);
+                }
+              }
+              
+              document.addEventListener('DOMContentLoaded', function() {
+                createOverscrollMessage();
+                document.addEventListener('touchstart', handleTouchStart, { passive: true });
+                document.addEventListener('touchmove', handleTouchMove, { passive: true });
+                document.addEventListener('touchend', handleTouchEnd, { passive: true });
+                document.addEventListener('wheel', handleWheel, { passive: true });
+              });
+            })();
+          </script><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="true"/><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&amp;display=swap"/><script defer data-domain="cli.sentry.dev" src="https://plausible.io/js/script.js"></script><style>html{background:#0a0a0f}</style><link rel="shortcut icon" href="/_preview/pr-1213/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v6.4.6"/><meta name="generator" content="Starlight v0.39.3"/><meta property="og:title" content="404"/><meta property="og:type" content="article"/><meta property="og:url" content="https://cli.sentry.dev/_preview/pr-1213/404/"/><meta property="og:locale" content="en"/><meta property="og:site_name" content="Sentry CLI"/><meta name="twitter:card" content="summary_large_image"/><meta property="og:image" content="https://cli.sentry.dev/og-image.png"/><meta name="twitter:image" content="https://cli.sentry.dev/og-image-twitter.png"/><meta name="color-scheme" content="dark"/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-sdw2zlvw" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-sdw2zlvw" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-sdw2zlvw" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/_preview/pr-1213/_astro/print.DNXP8c50.css" media="print"><link rel="stylesheet" href="/_preview/pr-1213/_astro/common.DXFNn78r.css">
+<link rel="stylesheet" href="/_preview/pr-1213/_astro/_astro_assets.lhRLVtS2.css"><script type="module" src="/_preview/pr-1213/_astro/page.BBdwjWSI.js"></script></head> <body class="astro-pdyrgfef"> <a href="#_top" class="astro-omdumggt">Skip to content</a> <div class="page sl-flex astro-ylkcvuol"> <header class="header astro-ylkcvuol"><div class="header sl-flex astro-3ef6ksr2"> <div class="sl-flex header-left astro-3ef6ksr2"> <a href="/_preview/pr-1213/" class="site-title sl-flex astro-26v5pzbq">  <img class="astro-26v5pzbq" alt src="/_preview/pr-1213/_astro/logo.DPuxaczD.svg" width="1135" height="195">  <span class="sr-only astro-26v5pzbq" translate="no"> Sentry CLI </span> </a> </div> <div class="sl-flex header-right astro-3ef6ksr2"> <site-search class="astro-3ef6ksr2 astro-7m3t7hmb" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"> <button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-7m3t7hmb"> <svg aria-hidden="true" class="astro-7m3t7hmb astro-sdw2zlvw" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg> <span class="sl-hidden md:sl-block astro-7m3t7hmb" aria-hidden="true">Search</span> <kbd class="sl-hidden md:sl-flex astro-7m3t7hmb" style="display: none;"> <kbd class="astro-7m3t7hmb">Ctrl</kbd><kbd class="astro-7m3t7hmb">K</kbd> </kbd> </button> <dialog style="padding:0" aria-label="Search" class="astro-7m3t7hmb"> <div class="dialog-frame sl-flex astro-7m3t7hmb">  <button data-close-modal class="sl-flex md:sl-hidden astro-7m3t7hmb"> Cancel </button> <div class="search-container astro-7m3t7hmb"> <div id="starlight__search" class="astro-7m3t7hmb"></div> </div> </div> </dialog> </site-search>  <script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script> <script type="module" src="/_preview/pr-1213/_astro/Search.astro_astro_type_script_index_0_lang.DQsgTG7N.js"></script>   <span class="header-nav-link header-nav-active astro-3ef6ksr2">Docs</span> <a href="https://github.com/getsentry/cli" rel="me" class="sl-flex astro-ooqq2ph4"><span class="sr-only astro-ooqq2ph4">GitHub</span><svg aria-hidden="true" class="astro-ooqq2ph4 astro-sdw2zlvw" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a> </div> </div></header>  <div class="main-frame astro-ylkcvuol">  <script type="module">const a=document.getElementById("starlight__sidebar"),n=a?.querySelector("sl-sidebar-state-persist"),o="sl-sidebar-state",i=()=>{let t=[];const e=n?.dataset.hash||"";try{const s=sessionStorage.getItem(o),r=JSON.parse(s||"{}");Array.isArray(r.open)&&r.hash===e&&(t=r.open)}catch{}return{hash:e,open:t,scroll:a?.scrollTop||0}},c=t=>{try{sessionStorage.setItem(o,JSON.stringify(t))}catch{}},d=()=>c(i()),l=(t,e)=>{const s=i();s.open[e]=t,c(s)};n?.addEventListener("click",t=>{if(!(t.target instanceof Element))return;const e=t.target.closest("summary")?.closest("details");if(!e)return;const s=e.querySelector("sl-sidebar-restore"),r=parseInt(s?.dataset.index||"");isNaN(r)||l(!e.open,r)});addEventListener("visibilitychange",()=>{document.visibilityState==="hidden"&&d()});addEventListener("pageHide",d);</script> <div class="lg:sl-flex astro-tkgx3vob">  <div class="main-pane astro-tkgx3vob">  <main class="astro-pdyrgfef" lang="en" dir="ltr">   <div class="content-panel astro-pswstjac"> <div class="sl-container astro-pswstjac"> <div class="hero astro-muquneh7">    <div class="sl-flex stack astro-muquneh7"> <div class="sl-flex copy astro-muquneh7"> <h1 id="_top" data-page-title class="astro-muquneh7">404</h1>  <div class="tagline astro-muquneh7">Page not found. Check the URL or try using the search bar.</div> </div>  </div> </div> <div class="sl-markdown-content">  </div> <footer> <table role="presentation" width="100%" height="32" cellspacing="0" cellpadding="0"> <tbody> <tr> <td></td> </tr> </tbody> </table> <div class="pagination-links sentry-pagination-links print:hidden" dir="ltr">   </div> <table role="presentation" width="100%" height="72" cellspacing="0" cellpadding="0"> <tbody> <tr> <td align="center" valign="bottom"> <nav aria-label="Project links"> <a href="https://github.com/getsentry/cli" rel="me" aria-label="GitHub" title="GitHub"> <font color="#888888"> <svg aria-hidden="true" class=" astro-sdw2zlvw" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg> </font> </a> </nav> </td> </tr> </tbody> </table> </footer> </div> </div> </main> </div> </div> </div> </div> </body></html>
