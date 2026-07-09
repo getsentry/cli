@@ -135,11 +135,7 @@ describe("alert issues delete", () => {
     );
 
     expect(getRuleSpy).toHaveBeenCalledWith("test-org", "test-project", "42");
-    expect(deleteRuleSpy).toHaveBeenCalledWith(
-      "test-org",
-      "test-project",
-      "42"
-    );
+    expect(deleteRuleSpy).toHaveBeenCalledWith("test-org", "42");
     expect(stdoutWrite.mock.calls.map((c) => c[0]).join("")).toContain(
       "Deleted issue alert rule"
     );

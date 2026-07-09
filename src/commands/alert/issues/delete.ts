@@ -138,7 +138,7 @@ export const deleteCommand = buildDeleteCommand({
       }
     }
 
-    await deleteIssueAlertRule(target.org, target.project, rule.id);
+    await deleteIssueAlertRule(target.org, rule.id);
     yield new CommandOutput({
       org: target.org,
       project: target.project,

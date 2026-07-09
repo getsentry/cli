@@ -40,7 +40,7 @@ describe("deleteIssueAlertRule", () => {
     });
 
     await expect(
-      deleteIssueAlertRule("test-org", "test-project", "42")
+      deleteIssueAlertRule("test-org", "42")
     ).resolves.toBeUndefined();
   });
 });
