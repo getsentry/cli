@@ -33,7 +33,7 @@ describe("deleteIssueAlertRule", () => {
       const req = new Request(input!, init);
       expect(req.method).toBe("DELETE");
       expect(req.url).toBe(
-        `${DEFAULT_SENTRY_URL}/api/0/projects/test-org/test-project/rules/42/`
+        `${DEFAULT_SENTRY_URL}/api/0/organizations/test-org/workflows/42/`
       );
       expect(req.headers.get("Authorization")).toBe("Bearer test-token");
       return new Response(null, { status: 204 });
