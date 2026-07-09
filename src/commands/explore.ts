@@ -713,7 +713,7 @@ export const exploreCommand = buildListCommand("explore", {
     const userSuppliedFields = flags.field && flags.field.length > 0;
     let fieldList = [...defaultFieldsForDataset(dataset)];
     if (userSuppliedFields) {
-      fieldList = flags.field;
+      fieldList = Array.isArray(flags.field) ? flags.field : [flags.field];
     }
     const timeRange = flags.period;
     const environment = parseReplayEnvironmentFilter(flags.environment);
