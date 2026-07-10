@@ -18,7 +18,6 @@ import * as Sentry from "@sentry/node-core/light";
  * - EISDIR: Path is a directory, not a file (e.g., `.env/` directory instead of `.env` file)
  * - ENOTDIR: A path component is not a directory (e.g., `/file.txt/child`)
  * - ETIMEDOUT: Connection timed out (e.g., transient error on network/cloud-mounted paths)
- * - EINVAL: Invalid argument (e.g., transient error on network/cloud-mounted paths)
  *
  * All other errors are unexpected and should be reported to Sentry.
  *
@@ -34,8 +33,7 @@ function isIgnorableFileError(error: unknown): boolean {
       code === "EPERM" ||
       code === "EISDIR" ||
       code === "ENOTDIR" ||
-      code === "ETIMEDOUT" ||
-      code === "EINVAL"
+      code === "ETIMEDOUT"
     );
   }
   return false;
