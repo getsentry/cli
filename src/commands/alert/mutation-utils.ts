@@ -35,6 +35,16 @@ export function parseMatchMode(
   );
 }
 
+/**
+ * Map a legacy all|any match mode to a workflow DataConditionGroup logic type.
+ * Mirrors the backend issue-alert dual-write: "any" → "any-short", "all" → "all".
+ */
+export function matchToLogicType(
+  match: "all" | "any" | undefined
+): "all" | "any-short" {
+  return match === "any" ? "any-short" : "all";
+}
+
 /** Parse and validate an "active" | "disabled" status flag. Returns `undefined` when absent. */
 export function parseStatusFlag(
   value: string | undefined
