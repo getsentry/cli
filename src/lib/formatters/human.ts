@@ -375,9 +375,9 @@ export const TREND_MIN_TERM_WIDTH = 100;
  * Returns `true` when the terminal is wide enough (≥ {@link TREND_MIN_TERM_WIDTH}).
  * Non-TTY output defaults to 80 columns, which is below the threshold.
  *
- * Used by the issue list command to decide whether to request stats data
- * from the API — when TREND won't be shown, stats can be collapsed to
- * save 200-500ms per request.
+ * Display-only — the issue list command always requests seen-stats data from
+ * the API regardless of this value so SEEN/AGE/EVENTS/USERS stay populated
+ * when output is piped. See #1219.
  */
 export function willShowTrend(): boolean {
   const termWidth = process.stdout.columns || 80;
