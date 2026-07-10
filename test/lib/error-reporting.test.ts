@@ -308,12 +308,17 @@ describe("classifySilenced", () => {
     expect(classifySilenced(err)).toBe("context_missing");
   });
 
+  test("silences ValidationError (user-supplied malformed input)", () => {
+    expect(classifySilenced(new ValidationError("bad"))).toBe(
+      "validation_error",
+    );
+  });
+
   test.each([
     [
       "ResolutionError",
       new ResolutionError("Project 'x'", "not found", "sentry issue list"),
     ],
-    ["ValidationError", new ValidationError("bad")],
     ["SeerError", new SeerError("not_enabled")],
     ["ConfigError", new ConfigError("bad")],
     ["generic Error", new Error("boom")],
