@@ -68,18 +68,14 @@ export async function triggerRootCauseAnalysis(
   const { data } = await apiRequestToRegion<{
     run_id?: number;
     sentry_run_id: string | null;
-  }>(
-    regionUrl,
-    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
-    {
-      method: "POST",
-      params: EXPLORER_MODE_PARAMS,
-      body: {
-        step: "root_cause",
-        referrer: "api.cli",
-      },
-    }
-  );
+  }>(regionUrl, `/organizations/${orgSlug}/issues/${issueId}/autofix/`, {
+    method: "POST",
+    params: EXPLORER_MODE_PARAMS,
+    body: {
+      step: "root_cause",
+      referrer: "api.cli",
+    },
+  });
   return data;
 }
 
@@ -118,7 +114,7 @@ export async function getAutofixState(
  * Trigger solution planning for an existing autofix run.
  *
  * Posts to the agent-based autofix endpoint with `step: "solution"` and
- * the existing run ID (from {@link getAutofixRunId}). The agent continues
+ * the existing run ID (from {@link requireAutofixRunId}). The agent continues
  * from root cause analysis to generating a solution plan.
  *
  * The request body has two distinct, separately-validated fields: `run_id`
@@ -130,7 +126,7 @@ export async function getAutofixState(
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
- * @param runId - The autofix run ID (see {@link getAutofixRunId}) — a UUID
+ * @param runId - The autofix run ID (see {@link requireAutofixRunId}) — a UUID
  *   string for current runs, or a legacy number for older ones
  * @returns The response from the API
  */

@@ -254,13 +254,22 @@ export function isTerminalStatus(status: string): boolean {
  * `sentry_run_id` field (a UUID string) over the deprecated numeric
  * `run_id` field.
  *
+ * The API dual-writes both fields on every non-null autofix state, so a
+ * missing run ID here means the response is malformed, not a legitimate
+ * in-progress state — callers should treat it as an error, not a value to
+ * pass through.
+ *
  * @param state - The autofix state
- * @returns The run ID, or undefined if neither field is present
+ * @throws {Error} If neither `sentry_run_id` nor `run_id` is present
  */
-export function getAutofixRunId(
-  state: AutofixState
-): string | number | undefined {
-  return state.sentry_run_id ?? state.run_id;
+export function requireAutofixRunId(state: AutofixState): string | number {
+  const runId = state.sentry_run_id ?? state.run_id;
+  if (runId === undefined) {
+    throw new Error(
+      "Autofix state is missing a run ID (no sentry_run_id or run_id). Check the issue in Sentry web UI."
+    );
+  }
+  return runId;
 }
 
 /** Container that may hold root cause analysis data (legacy format) */

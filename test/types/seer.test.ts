@@ -11,9 +11,9 @@ import {
   extractNoSolutionReason,
   extractRootCauses,
   extractSolution,
-  getAutofixRunId,
   isTerminalStatus,
   type RootCause,
+  requireAutofixRunId,
   TERMINAL_STATUSES,
 } from "../../src/types/seer.js";
 
@@ -50,24 +50,26 @@ describe("isTerminalStatus", () => {
   });
 });
 
-describe("getAutofixRunId", () => {
+describe("requireAutofixRunId", () => {
   test("prefers sentry_run_id over legacy run_id", () => {
     const state: AutofixState = {
       sentry_run_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       run_id: 123,
       status: "COMPLETED",
     };
-    expect(getAutofixRunId(state)).toBe("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+    expect(requireAutofixRunId(state)).toBe(
+      "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    );
   });
 
   test("falls back to legacy run_id when sentry_run_id is absent", () => {
     const state: AutofixState = { run_id: 123, status: "COMPLETED" };
-    expect(getAutofixRunId(state)).toBe(123);
+    expect(requireAutofixRunId(state)).toBe(123);
   });
 
-  test("returns undefined when neither field is present", () => {
+  test("throws when neither field is present", () => {
     const state: AutofixState = { status: "COMPLETED" };
-    expect(getAutofixRunId(state)).toBeUndefined();
+    expect(() => requireAutofixRunId(state)).toThrow(/missing a run ID/);
   });
 });
 
