@@ -27,7 +27,11 @@ import {
 import { formatLogDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
-import { ageInDaysFromUuidV7, validateHexId } from "../../lib/hex-id.js";
+import {
+  ageInDaysFromUuidV7,
+  tryNormalizeHexId,
+  validateHexId,
+} from "../../lib/hex-id.js";
 import {
   handleRecoveryResult,
   recoverHexId,
@@ -101,6 +105,20 @@ export function parsePositionalArgs(args: string[]): {
   if (args.length === 1) {
     // Single arg — could be slash-separated org/project/logId or a plain ID
     // (possibly containing newlines)
+
+    // Handle <org>/<log-id> shorthand — must check before parseSlashSeparatedArg
+    // because a single-slash arg is interpreted as org/project with a missing ID,
+    // causing a ContextError. Mirrors the pattern in replay/view.ts and event/view.ts.
+    const slashIdx = first.indexOf("/");
+    if (slashIdx !== -1 && first.indexOf("/", slashIdx + 1) === -1) {
+      const org = first.slice(0, slashIdx);
+      const logSegment = first.slice(slashIdx + 1);
+      const normalizedLogId = logSegment && tryNormalizeHexId(logSegment);
+      if (normalizedLogId) {
+        return { rawLogIds: [normalizedLogId], targetArg: `${org}/` };
+      }
+    }
+
     const { id, targetArg } = parseSlashSeparatedArg(
       first,
       "Log ID",
