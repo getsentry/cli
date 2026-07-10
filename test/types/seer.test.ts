@@ -69,7 +69,7 @@ describe("requireAutofixRunId", () => {
 
   test("throws when neither field is present", () => {
     const state: AutofixState = { status: "COMPLETED" };
-    expect(() => requireAutofixRunId(state)).toThrow(/missing a run ID/);
+    expect(() => requireAutofixRunId(state)).toThrow(/missing both/);
   });
 });
 

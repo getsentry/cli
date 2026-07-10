@@ -245,13 +245,13 @@ export function isTerminalStatus(status: string): boolean {
   return TERMINAL_STATUSES.includes(status as AutofixStatus);
 }
 
-// Both fields are always present on a non-null autofix state, so a missing
-// run ID means a malformed response, not an in-progress state.
+// At least one of sentry_run_id/run_id is always present on a non-null
+// autofix state, so a missing run ID means a malformed response.
 export function requireAutofixRunId(state: AutofixState): string | number {
   const runId = state.sentry_run_id ?? state.run_id;
   if (runId === undefined) {
     throw new Error(
-      "Autofix state is missing a run ID (no sentry_run_id or run_id). Check the issue in Sentry web UI."
+      "Unexpected autofix response: missing both sentry_run_id and run_id."
     );
   }
   return runId;
