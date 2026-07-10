@@ -1389,7 +1389,47 @@ describe("issue list: collapse parameter optimization", () => {
     expect(collapse).toContain("lifetime");
   });
 
-  test("collapses stats in JSON mode", async () => {
+  test("does not collapse stats in human mode (needed for EVENTS/USERS/SEEN/AGE when piped)", async () => {
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const savedColumns = process.stdout.columns;
+    Object.defineProperty(process.stdout, "columns", {
+      value: 80,
+      configurable: true,
+    });
+
+    try {
+      const { context } = createOrgAllContext();
+      await orgAllFunc.call(
+        context,
+        { limit: 10, sort: "date", period: parsePeriod("90d"), json: false },
+        "my-org/"
+      );
+
+      expect(listIssuesAllPagesMock).toHaveBeenCalled();
+      const callArgs = listIssuesAllPagesMock.mock.calls[0];
+      const options = callArgs?.[2] as Record<string, unknown> | undefined;
+      const collapse = options?.collapse as string[];
+      expect(collapse).not.toContain("stats");
+      expect(options?.groupStatsPeriod).toBe("auto");
+    } finally {
+      Object.defineProperty(process.stdout, "columns", {
+        value: savedColumns,
+        configurable: true,
+      });
+    }
+  });
+
+  test("does not collapse stats in JSON mode without --fields", async () => {
     listIssuesAllPagesMock.mockResolvedValue({
       issues: [sampleIssue],
       nextCursor: undefined,
@@ -1412,10 +1452,11 @@ describe("issue list: collapse parameter optimization", () => {
     const callArgs = listIssuesAllPagesMock.mock.calls[0];
     const options = callArgs?.[2] as Record<string, unknown> | undefined;
     const collapse = options?.collapse as string[];
-    expect(collapse).toContain("stats");
+    expect(collapse).not.toContain("stats");
+    expect(options?.groupStatsPeriod).toBe("auto");
   });
 
-  test("omits groupStatsPeriod when stats are collapsed (JSON mode)", async () => {
+  test("collapses stats in JSON mode when --fields omits seen-stats fields", async () => {
     listIssuesAllPagesMock.mockResolvedValue({
       issues: [sampleIssue],
       nextCursor: undefined,
@@ -1430,7 +1471,45 @@ describe("issue list: collapse parameter optimization", () => {
     const { context } = createOrgAllContext();
     await orgAllFunc.call(
       context,
-      { limit: 10, sort: "date", period: parsePeriod("90d"), json: true },
+      {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: true,
+        fields: ["shortId", "title"],
+      },
+      "my-org/"
+    );
+
+    expect(listIssuesAllPagesMock).toHaveBeenCalled();
+    const callArgs = listIssuesAllPagesMock.mock.calls[0];
+    const options = callArgs?.[2] as Record<string, unknown> | undefined;
+    const collapse = options?.collapse as string[];
+    expect(collapse).toContain("stats");
+  });
+
+  test("omits groupStatsPeriod when stats are collapsed (JSON --fields opt-out)", async () => {
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(
+      context,
+      {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: true,
+        fields: ["shortId", "title"],
+      },
       "my-org/"
     );
 
