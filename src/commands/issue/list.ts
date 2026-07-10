@@ -188,21 +188,6 @@ type ListApiOptions = {
 };
 
 /**
- * Fields populated by Snuba seen-stats queries on the list endpoint.
- *
- * On the Sentry API, `collapse=stats` skips `_get_seen_stats()` entirely,
- * stripping top-level `count`, `userCount`, `firstSeen`, `lastSeen` and the
- * sparkline `stats` object — not just the TREND column data. See #1219.
- */
-const SEEN_STATS_FIELDS = new Set([
-  "count",
-  "userCount",
-  "firstSeen",
-  "lastSeen",
-  "stats",
-]);
-
-/**
  * Fields stripped by `collapse=lifetime` on the list endpoint. See #969.
  */
 const LIFETIME_FIELDS = new Set([
@@ -213,25 +198,37 @@ const LIFETIME_FIELDS = new Set([
 ]);
 
 /**
+ * Fields populated by Snuba seen-stats queries on the list endpoint.
+ *
+ * On the Sentry API, `collapse=stats` skips `_get_seen_stats()` entirely,
+ * stripping top-level count/timestamp fields and the sparkline `stats` object
+ * — not just the TREND column data. See #1219.
+ */
+const SEEN_STATS_FIELDS = new Set([...LIFETIME_FIELDS, "stats"]);
+
+/**
+ * Whether collapse is safe for a `--fields` subset — true when explicit fields
+ * were requested and none depend on the given API data.
+ */
+function shouldCollapseForFields(
+  fields: string[] | undefined,
+  dependentFields: ReadonlySet<string>
+): boolean {
+  return (
+    fields !== undefined &&
+    fields.length > 0 &&
+    !fields.some((f) => dependentFields.has(f))
+  );
+}
+
+/**
  * Determine whether stats data should be collapsed (skipped) in the API request.
  *
- * Collapsing stats avoids expensive Snuba/ClickHouse aggregation queries
- * (~200–500ms per request) but also removes basic issue metadata (`count`,
- * `userCount`, `firstSeen`, `lastSeen`). Only opt out when the caller
- * explicitly requests a `--fields` subset that omits all seen-stats fields.
- *
- * Human output never collapses stats — the table always renders SEEN, AGE,
- * EVENTS, and USERS even when the TREND sparkline column is hidden on narrow
- * or piped terminals.
+ * Collapsing stats saves ~200–500ms per Snuba query but also removes basic issue
+ * metadata. Human output never collapses stats; JSON only opts out via `--fields`.
  */
 function shouldCollapseStats(json: boolean, fields?: string[]): boolean {
-  if (!json) {
-    return false;
-  }
-  if (fields === undefined || fields.length === 0) {
-    return false;
-  }
-  return !fields.some((f) => SEEN_STATS_FIELDS.has(f));
+  return json && shouldCollapseForFields(fields, SEEN_STATS_FIELDS);
 }
 
 /**
@@ -248,10 +245,7 @@ function shouldCollapseStats(json: boolean, fields?: string[]): boolean {
 function buildListApiOptions(json: boolean, fields?: string[]): ListApiOptions {
   const collapseStats = shouldCollapseStats(json, fields);
   const collapseLifetime =
-    json &&
-    fields !== undefined &&
-    fields.length > 0 &&
-    !fields.some((f) => LIFETIME_FIELDS.has(f));
+    json && shouldCollapseForFields(fields, LIFETIME_FIELDS);
   return {
     collapse: buildIssueListCollapse({
       shouldCollapseStats: collapseStats,
