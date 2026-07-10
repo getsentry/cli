@@ -54,16 +54,21 @@ function normalizeAgentStatus(status: string): string {
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
- * @returns The trigger response with run_id
+ * @returns The trigger response with `sentry_run_id` (current UUID, null for
+ *   very old runs) and the legacy `run_id` (numeric), which is slated for
+ *   removal — treat it as optional, not guaranteed to be present
  * @throws {ApiError} On API errors (402 = no budget, 403 = not enabled)
  */
 export async function triggerRootCauseAnalysis(
   orgSlug: string,
   issueId: string
-): Promise<{ run_id: number }> {
+): Promise<{ run_id?: number; sentry_run_id: string | null }> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
-  const { data } = await apiRequestToRegion<{ run_id: number }>(
+  const { data } = await apiRequestToRegion<{
+    run_id?: number;
+    sentry_run_id: string | null;
+  }>(
     regionUrl,
     `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
     {
@@ -113,20 +118,31 @@ export async function getAutofixState(
  * Trigger solution planning for an existing autofix run.
  *
  * Posts to the agent-based autofix endpoint with `step: "solution"` and
- * the existing `run_id`. The agent continues from root cause analysis
- * to generating a solution plan.
+ * the existing run ID (from {@link getAutofixRunId}). The agent continues
+ * from root cause analysis to generating a solution plan.
+ *
+ * The request body has two distinct, separately-validated fields: `run_id`
+ * (an integer field, deprecated) and `sentry_run_id` (a UUID field, takes
+ * precedence when both are given). A UUID string sent under `run_id` fails
+ * server-side validation, so the value must go under the field matching its
+ * type — string runIds (current `sentry_run_id`s) go under `sentry_run_id`,
+ * numeric runIds (legacy `run_id`s) go under `run_id`.
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
- * @param runId - The autofix run ID
+ * @param runId - The autofix run ID (see {@link getAutofixRunId}) — a UUID
+ *   string for current runs, or a legacy number for older ones
  * @returns The response from the API
  */
 export async function triggerSolutionPlanning(
   orgSlug: string,
   issueId: string,
-  runId: number
+  runId: string | number
 ): Promise<unknown> {
   const regionUrl = await resolveOrgRegion(orgSlug);
+
+  const runIdBodyField =
+    typeof runId === "string" ? { sentry_run_id: runId } : { run_id: runId };
 
   const { data } = await apiRequestToRegion(
     regionUrl,
@@ -136,7 +152,7 @@ export async function triggerSolutionPlanning(
       params: EXPLORER_MODE_PARAMS,
       body: {
         step: "solution",
-        run_id: runId,
+        ...runIdBodyField,
         referrer: "api.cli",
       },
     }

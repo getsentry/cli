@@ -11,6 +11,7 @@ import {
   extractNoSolutionReason,
   extractRootCauses,
   extractSolution,
+  getAutofixRunId,
   isTerminalStatus,
   type RootCause,
   TERMINAL_STATUSES,
@@ -46,6 +47,27 @@ describe("isTerminalStatus", () => {
     expect(TERMINAL_STATUSES).toContain("ERROR");
     expect(TERMINAL_STATUSES).toContain("CANCELLED");
     expect(TERMINAL_STATUSES).not.toContain("PROCESSING");
+  });
+});
+
+describe("getAutofixRunId", () => {
+  test("prefers sentry_run_id over legacy run_id", () => {
+    const state: AutofixState = {
+      sentry_run_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      run_id: 123,
+      status: "COMPLETED",
+    };
+    expect(getAutofixRunId(state)).toBe("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+  });
+
+  test("falls back to legacy run_id when sentry_run_id is absent", () => {
+    const state: AutofixState = { run_id: 123, status: "COMPLETED" };
+    expect(getAutofixRunId(state)).toBe(123);
+  });
+
+  test("returns undefined when neither field is present", () => {
+    const state: AutofixState = { status: "COMPLETED" };
+    expect(getAutofixRunId(state)).toBeUndefined();
   });
 });
 

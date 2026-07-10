@@ -26,6 +26,7 @@ import {
   extractNoSolutionReason,
   extractRootCauses,
   extractSolution,
+  getAutofixRunId,
   type SolutionArtifact,
 } from "../../types/seer.js";
 import {
@@ -54,7 +55,8 @@ type NoSolutionContext = {
 
 /** Return type for issue plan — includes state metadata and solution data */
 type PlanData = {
-  run_id: number;
+  /** The autofix run ID (UUID from state.sentry_run_id, falling back to the legacy numeric state.run_id). */
+  run_id: string | number | undefined;
   status: string;
   /** The solution data (without the artifact wrapper). Null when no solution is available. */
   solution: SolutionArtifact["data"] | null;
@@ -141,7 +143,7 @@ function buildNoSolutionContext(
 function buildPlanData(state: AutofixState): PlanData {
   const solution = extractSolution(state);
   const data: PlanData = {
-    run_id: state.run_id,
+    run_id: getAutofixRunId(state),
     status: state.status,
     solution: solution?.data ?? null,
   };
@@ -235,7 +237,13 @@ export const planCommand = buildCommand({
         }
       }
 
-      await triggerSolutionPlanning(org, numericId, state.run_id);
+      const runId = getAutofixRunId(state);
+      if (runId === undefined) {
+        throw new Error(
+          "Autofix state is missing a run ID. Check the issue in Sentry web UI."
+        );
+      }
+      await triggerSolutionPlanning(org, numericId, runId);
 
       // Poll until solution is ready or terminal
       const finalState = await pollAutofixState({

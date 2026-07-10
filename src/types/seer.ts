@@ -172,7 +172,14 @@ export type SolutionArtifact = z.infer<typeof SolutionArtifactSchema>;
 
 export const AutofixStateSchema = z
   .object({
-    run_id: z.number(),
+    /** Legacy numeric run identifier. Deprecated in favor of {@link sentry_run_id}, kept for older API responses. */
+    run_id: z.number().optional(),
+    /**
+     * Current run identifier (UUID string). Preferred over the legacy `run_id`
+     * field. The API returns this as explicit `null` (not an omitted key) for
+     * legacy runs predating SeerRun mirroring.
+     */
+    sentry_run_id: z.string().nullable().optional(),
     status: z.string(),
     updated_at: z.string().optional(),
     request: z
@@ -240,6 +247,20 @@ export type AutofixUpdatePayload =
  */
 export function isTerminalStatus(status: string): boolean {
   return TERMINAL_STATUSES.includes(status as AutofixStatus);
+}
+
+/**
+ * Get the run identifier from autofix state, preferring the current
+ * `sentry_run_id` field (a UUID string) over the deprecated numeric
+ * `run_id` field.
+ *
+ * @param state - The autofix state
+ * @returns The run ID, or undefined if neither field is present
+ */
+export function getAutofixRunId(
+  state: AutofixState
+): string | number | undefined {
+  return state.sentry_run_id ?? state.run_id;
 }
 
 /** Container that may hold root cause analysis data (legacy format) */
