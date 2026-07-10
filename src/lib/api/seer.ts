@@ -54,9 +54,9 @@ function normalizeAgentStatus(status: string): string {
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
- * @returns The trigger response with `sentry_run_id` (current UUID, null for
- *   very old runs) and the legacy `run_id` (numeric), which is slated for
- *   removal — treat it as optional, not guaranteed to be present
+ * @returns The trigger response with `sentry_run_id` (current UUID) and the
+ *   legacy `run_id` (numeric), which is slated for removal — treat it as
+ *   optional, not guaranteed to be present
  * @throws {ApiError} On API errors (402 = no budget, 403 = not enabled)
  */
 export async function triggerRootCauseAnalysis(
