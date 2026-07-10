@@ -54,9 +54,7 @@ function normalizeAgentStatus(status: string): string {
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
- * @returns The trigger response with `sentry_run_id` (current UUID) and the
- *   legacy `run_id` (numeric), which is slated for removal — treat it as
- *   optional, not guaranteed to be present
+ * @returns The trigger response with `sentry_run_id` and the legacy `run_id`
  * @throws {ApiError} On API errors (402 = no budget, 403 = not enabled)
  */
 export async function triggerRootCauseAnalysis(
@@ -114,20 +112,11 @@ export async function getAutofixState(
  * Trigger solution planning for an existing autofix run.
  *
  * Posts to the agent-based autofix endpoint with `step: "solution"` and
- * the existing run ID (from {@link requireAutofixRunId}). The agent continues
- * from root cause analysis to generating a solution plan.
- *
- * The request body has two distinct, separately-validated fields: `run_id`
- * (an integer field, deprecated) and `sentry_run_id` (a UUID field, takes
- * precedence when both are given). A UUID string sent under `run_id` fails
- * server-side validation, so the value must go under the field matching its
- * type — string runIds (current `sentry_run_id`s) go under `sentry_run_id`,
- * numeric runIds (legacy `run_id`s) go under `run_id`.
+ * the existing run ID (from {@link requireAutofixRunId}).
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
- * @param runId - The autofix run ID (see {@link requireAutofixRunId}) — a UUID
- *   string for current runs, or a legacy number for older ones
+ * @param runId - The autofix run ID (see {@link requireAutofixRunId})
  * @returns The response from the API
  */
 export async function triggerSolutionPlanning(
@@ -137,6 +126,7 @@ export async function triggerSolutionPlanning(
 ): Promise<unknown> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
+  // A UUID sent under run_id (an IntegerField) fails server-side validation.
   const runIdBodyField =
     typeof runId === "string" ? { sentry_run_id: runId } : { run_id: runId };
 

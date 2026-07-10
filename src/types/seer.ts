@@ -172,13 +172,9 @@ export type SolutionArtifact = z.infer<typeof SolutionArtifactSchema>;
 
 export const AutofixStateSchema = z
   .object({
-    /** Legacy numeric run identifier. Deprecated in favor of {@link sentry_run_id}, kept for older API responses. */
+    /** @deprecated Use sentry_run_id instead. */
     run_id: z.number().optional(),
-    /**
-     * Current run identifier (UUID string). Preferred over the legacy `run_id`
-     * field. The API returns this as explicit `null` (not an omitted key) for
-     * legacy runs predating SeerRun mirroring.
-     */
+    /** Null for legacy runs predating this field. */
     sentry_run_id: z.string().nullable().optional(),
     status: z.string(),
     updated_at: z.string().optional(),
@@ -249,19 +245,8 @@ export function isTerminalStatus(status: string): boolean {
   return TERMINAL_STATUSES.includes(status as AutofixStatus);
 }
 
-/**
- * Get the run identifier from autofix state, preferring the current
- * `sentry_run_id` field (a UUID string) over the deprecated numeric
- * `run_id` field.
- *
- * The API dual-writes both fields on every non-null autofix state, so a
- * missing run ID here means the response is malformed, not a legitimate
- * in-progress state — callers should treat it as an error, not a value to
- * pass through.
- *
- * @param state - The autofix state
- * @throws {Error} If neither `sentry_run_id` nor `run_id` is present
- */
+// Both fields are always present on a non-null autofix state, so a missing
+// run ID means a malformed response, not an in-progress state.
 export function requireAutofixRunId(state: AutofixState): string | number {
   const runId = state.sentry_run_id ?? state.run_id;
   if (runId === undefined) {

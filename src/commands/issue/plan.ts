@@ -55,7 +55,6 @@ type NoSolutionContext = {
 
 /** Return type for issue plan — includes state metadata and solution data */
 type PlanData = {
-  /** The autofix run ID (UUID from state.sentry_run_id, falling back to the legacy numeric state.run_id). */
   run_id: string | number;
   status: string;
   /** The solution data (without the artifact wrapper). Null when no solution is available. */
