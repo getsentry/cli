@@ -99,8 +99,15 @@ const codemod: Codemod<L> = async (root) => {
     const src = imp.field("source");
     if (!src || unquote(src.text()) !== "@sentry/cli") continue;
     const clause = imp.children().find((c) => c.kind() === "import_clause");
+    // Default import (`import X from`) or namespace import (`import * as X from`).
     const def = clause?.children().find((c) => c.kind() === "identifier");
+    const nsId = clause
+      ?.children()
+      .find((c) => c.kind() === "namespace_import")
+      ?.children()
+      .find((c) => c.kind() === "identifier");
     if (def) bindings.add(def.text());
+    if (nsId) bindings.add(nsId.text());
     const q = src.text()[0];
     edits.push(replaceNode(src, `${q}sentry${q}`));
   }

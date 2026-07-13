@@ -154,10 +154,12 @@ passed straight through to `sentry`.
 
 ```bash
 sentry-cli() {
-  # v3 global flags that became environment variables in v4 (see the
-  # "Global flags" section below). Translate them into a per-call env prefix
-  # so we don't pollute the parent shell.
-  local envs=() rest=() headers=""
+  # v3 GLOBAL flags that became environment variables in v4 (see the "Global
+  # flags" section below). They precede the command, so translate only the
+  # LEADING run and stop at the first command word — this leaves command-level
+  # flags untouched (notably `--url`, which `release create`/`deploy` use for
+  # the release/deploy URL, not the Sentry host).
+  local envs=() headers=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --auth-token)   envs+=("SENTRY_AUTH_TOKEN=$2"); shift 2 ;;
@@ -167,11 +169,10 @@ sentry-cli() {
       # Multiple --header flags merge into one semicolon-separated var.
       --header)       headers="${headers:+$headers; }$2"; shift 2 ;;
       --header=*)     headers="${headers:+$headers; }${1#*=}"; shift ;;
-      *)              rest+=("$1"); shift ;;
+      *)              break ;;
     esac
   done
   [ -n "$headers" ] && envs+=("SENTRY_CUSTOM_HEADERS=$headers")
-  set -- "${rest[@]}"
 
   # `env` runs the real `sentry` binary (bypassing this function → no recursion).
   case "$1" in
