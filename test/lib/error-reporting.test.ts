@@ -309,11 +309,17 @@ describe("classifySilenced", () => {
   });
 
   test.each([
+    ["ValidationError", new ValidationError("bad")],
+    ["ValidationError with field", new ValidationError("Project x exists in multiple orgs.", "project")],
+  ])("silences %s", (_label, err) => {
+    expect(classifySilenced(err)).toBe("validation_error");
+  });
+
+  test.each([
     [
       "ResolutionError",
       new ResolutionError("Project 'x'", "not found", "sentry issue list"),
     ],
-    ["ValidationError", new ValidationError("bad")],
     ["SeerError", new SeerError("not_enabled")],
     ["ConfigError", new ConfigError("bad")],
     ["generic Error", new Error("boom")],
