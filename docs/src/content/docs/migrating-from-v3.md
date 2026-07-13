@@ -135,7 +135,8 @@ These live under a different group now:
 | `sentry-cli logout` | `sentry auth logout` |
 | `sentry-cli update` | `sentry cli upgrade` |
 | `sentry-cli uninstall` | `sentry cli uninstall` |
-| `sentry-cli deploys new …` | `sentry release deploys new …` |
+| `sentry-cli deploys new …` | `sentry release deploy …` (create) |
+| `sentry-cli deploys list …` | `sentry release deploys …` (list) |
 | `sentry-cli upload-dif …` | `sentry debug-files upload …` |
 | `sentry-cli upload-dsym …` | `sentry debug-files upload …` |
 | `sentry-cli difutil check …` | `sentry debug-files check …` |
@@ -178,7 +179,11 @@ sentry-cli() {
     login|logout)            local c=$1; shift; env "${envs[@]}" sentry auth "$c" "$@" ;;
     update)                  shift; env "${envs[@]}" sentry cli upgrade "$@" ;;
     uninstall)               shift; env "${envs[@]}" sentry cli uninstall "$@" ;;
-    deploys)                 shift; env "${envs[@]}" sentry release deploys "$@" ;;
+    # `deploys new` creates (→ `release deploy`); `deploys`/`deploys list` lists.
+    deploys)
+      shift
+      if [ "$1" = "new" ]; then shift; env "${envs[@]}" sentry release deploy "$@";
+      else env "${envs[@]}" sentry release deploys "$@"; fi ;;
     upload-dif|upload-dsym)  shift; env "${envs[@]}" sentry debug-files upload "$@" ;;
     upload-proguard)         shift; env "${envs[@]}" sentry proguard upload "$@" ;;
     difutil)                 shift; env "${envs[@]}" sentry debug-files "$@" ;;
@@ -298,20 +303,20 @@ the `directory` argument of `sourcemap.upload`, and the release is optional
 
 ### Codemod
 
-To automate the mechanical parts of this migration, run the codemod (it rewrites
-the import, constructor, and method chain, and inserts `// TODO(sentry-v4): …`
-comments where option shapes changed and need a manual check):
+To automate the mechanical parts of this migration, run the
+[Codemod](https://codemod.com) from your project root (it rewrites the import,
+constructor, and method chain, and inserts `// TODO(sentry-v4): …` comments where
+option shapes changed and need a manual check):
 
 ```bash
-npx jscodeshift \
-  -t https://raw.githubusercontent.com/getsentry/cli/main/codemods/sentry-v3-to-v4.cjs \
-  src/
+npx codemod@latest @sentry/cli-v3-to-v4
 ```
 
-Use `--parser=tsx` for TypeScript sources. Review the diff afterward — argument
-shapes differ (especially for `uploadSourceMaps`), so the codemod flags those
-rather than guessing. See [`codemods/`](https://github.com/getsentry/cli/tree/main/codemods)
-for details.
+It rewrites `.js`/`.ts` files in place. Review the diff afterward — argument
+shapes differ (especially for `uploadSourceMaps` and `newDeploy`), so the codemod
+flags those rather than guessing. See
+[`codemods/sentry-v3-to-v4`](https://github.com/getsentry/cli/tree/main/codemods/sentry-v3-to-v4)
+for the source and test fixtures.
 
 ## Output and scripting
 
