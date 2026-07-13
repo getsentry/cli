@@ -49,6 +49,8 @@ const RESHAPE: Record<string, { key: string; spread?: boolean; todo?: string }> 
   },
 };
 
+const isNullish = (n: Node) =>
+  n.kind() === "null" || (n.kind() === "identifier" && n.text() === "undefined");
 const identSafe = (s: string) => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(s);
 const accessor = (name: string) =>
   identSafe(name) ? `.${name}` : `[${JSON.stringify(name)}]`;
@@ -162,18 +164,20 @@ const codemod: Codemod<L> = async (root) => {
     let options: Node | null = null;
     let ambiguous = false;
     if (a.length >= 2) {
-      // Drop the configFile positional (removed in v4); keep options.
+      // Drop the configFile positional (removed in v4).
       edits.push({
         startPos: a[0]!.range().start.index,
         endPos: a[1]!.range().start.index,
         insertedText: "",
       });
-      options = a[1]!;
+      if (isNullish(a[1]!)) {
+        edits.push(replaceNode(a[1]!, "")); // `new X(cfg, null)` → `X()`
+      } else {
+        options = a[1]!;
+      }
     } else if (a.length === 1) {
       const arg = a[0]!;
-      const nullish =
-        arg.kind() === "null" || (arg.kind() === "identifier" && arg.text() === "undefined");
-      if (nullish) {
+      if (isNullish(arg)) {
         edits.push(replaceNode(arg, "")); // `new X(null)` → `X()`
       } else if (arg.kind() === "object") {
         options = arg;
