@@ -136,7 +136,8 @@ These live under a different group now:
 | `sentry-cli logout` | `sentry auth logout` |
 | `sentry-cli update` | `sentry cli upgrade` |
 | `sentry-cli uninstall` | `sentry cli uninstall` |
-| `sentry-cli deploys new …` | `sentry release deploys new …` |
+| `sentry-cli deploys new …` | `sentry release deploy …` (create) |
+| `sentry-cli deploys list …` | `sentry release deploys …` (list) |
 | `sentry-cli upload-dif …` | `sentry debug-files upload …` |
 | `sentry-cli upload-dsym …` | `sentry debug-files upload …` |
 | `sentry-cli difutil check …` | `sentry debug-files check …` |
@@ -154,8 +155,8 @@ Terminal window
 
 ```
 sentry-cli() {  # v3 global flags that became environment variables in v4 (see the  # "Global flags" section below). Translate them into a per-call env prefix  # so we don't pollute the parent shell.  local envs=() rest=() headers=""  while [ "$#" -gt 0 ]; do    case "$1" in      --auth-token)   envs+=("SENTRY_AUTH_TOKEN=$2"); shift 2 ;;      --auth-token=*) envs+=("SENTRY_AUTH_TOKEN=${1#*=}"); shift ;;      --url)          envs+=("SENTRY_URL=$2"); shift 2 ;;      --url=*)        envs+=("SENTRY_URL=${1#*=}"); shift ;;      # Multiple --header flags merge into one semicolon-separated var.      --header)       headers="${headers:+$headers; }$2"; shift 2 ;;      --header=*)     headers="${headers:+$headers; }${1#*=}"; shift ;;      *)              rest+=("$1"); shift ;;    esac  done  [ -n "$headers" ] && envs+=("SENTRY_CUSTOM_HEADERS=$headers")  set -- "${rest[@]}"
-  # `env` runs the real `sentry` binary (bypassing this function → no recursion).  case "$1" in    # Moved commands    login|logout)            local c=$1; shift; env "${envs[@]}" sentry auth "$c" "$@" ;;    update)                  shift; env "${envs[@]}" sentry cli upgrade "$@" ;;    uninstall)               shift; env "${envs[@]}" sentry cli uninstall "$@" ;;    deploys)                 shift; env "${envs[@]}" sentry release deploys "$@" ;;    upload-dif|upload-dsym)  shift; env "${envs[@]}" sentry debug-files upload "$@" ;;    upload-proguard)         shift; env "${envs[@]}" sentry proguard upload "$@" ;;    difutil)                 shift; env "${envs[@]}" sentry debug-files "$@" ;;
-    # Renamed groups (plural → singular) so subcommands keep working    organizations)           shift; env "${envs[@]}" sentry org "$@" ;;    projects)                shift; env "${envs[@]}" sentry project "$@" ;;    releases)                shift; env "${envs[@]}" sentry release "$@" ;;    issues)                  shift; env "${envs[@]}" sentry issue "$@" ;;    monitors)                shift; env "${envs[@]}" sentry monitor "$@" ;;    repos)                   shift; env "${envs[@]}" sentry repo "$@" ;;    events)                  shift; env "${envs[@]}" sentry event "$@" ;;
+  # `env` runs the real `sentry` binary (bypassing this function → no recursion).  case "$1" in    # Moved commands    login|logout)            local c=$1; shift; env "${envs[@]}" sentry auth "$c" "$@" ;;    update)                  shift; env "${envs[@]}" sentry cli upgrade "$@" ;;    uninstall)               shift; env "${envs[@]}" sentry cli uninstall "$@" ;;    # `deploys new` creates (→ `release deploy`); `deploys`/`deploys list` lists.    deploys)      shift      if [ "$1" = "new" ]; then shift; env "${envs[@]}" sentry release deploy "$@";      else env "${envs[@]}" sentry release deploys "$@"; fi ;;    upload-dif|upload-dsym)  shift; env "${envs[@]}" sentry debug-files upload "$@" ;;    upload-proguard)         shift; env "${envs[@]}" sentry proguard upload "$@" ;;    difutil)                 shift; env "${envs[@]}" sentry debug-files "$@" ;;
+    # Renamed groups (plural → singular). Bare form lists (matches v4's native    # `sentry releases` → `release list`); a subcommand uses the singular group    # (v4 aliases `new`→`create`, `ls`→`list`, so subcommands keep working).    organizations|projects|releases|issues|monitors|repos|events)      local grp=$1; shift      case "$grp" in        organizations) grp=org ;;        projects)       grp=project ;;        releases)       grp=release ;;        issues)         grp=issue ;;        monitors)       grp=monitor ;;        repos)          grp=repo ;;        events)         grp=event ;;      esac      if [ "$#" -eq 0 ]; then env "${envs[@]}" sentry "$grp" list;      else env "${envs[@]}" sentry "$grp" "$@"; fi ;;
     # Everything else is unchanged    *) env "${envs[@]}" sentry "$@" ;;  esac}
 ```
 
@@ -248,16 +249,16 @@ Note the argument reshaping: the v3 `uploadSourceMaps` `include` array becomes t
 
 [Section titled “Codemod”](#codemod)
 
-To automate the mechanical parts of this migration, run the codemod (it rewrites the import, constructor, and method chain, and inserts `// TODO(sentry-v4): …` comments where option shapes changed and need a manual check):
+To automate the mechanical parts of this migration, run the [Codemod](https://codemod.com) from your project root (it rewrites the import, constructor, and method chain, and inserts `// TODO(sentry-v4): …` comments where option shapes changed and need a manual check):
 
 Terminal window
 
 ```
-npx jscodeshift \  -t https://raw.githubusercontent.com/getsentry/cli/main/codemods/sentry-v3-to-v4.cjs \  src/
+npx codemod@latest @sentry/cli-v3-to-v4
 ```
 
 
-Use `--parser=tsx` for TypeScript sources. Review the diff afterward — argument shapes differ (especially for `uploadSourceMaps`), so the codemod flags those rather than guessing. See [`codemods/`](https://github.com/getsentry/cli/tree/main/codemods) for details.
+It rewrites `.js`/`.ts` files in place. Review the diff afterward — argument shapes differ (especially for `uploadSourceMaps` and `newDeploy`), so the codemod flags those rather than guessing. See [`codemods/sentry-v3-to-v4`](https://github.com/getsentry/cli/tree/main/codemods/sentry-v3-to-v4) for the source and test fixtures.
 
 ## Output and scripting
 
