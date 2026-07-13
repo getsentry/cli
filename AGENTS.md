@@ -70,7 +70,7 @@ When the `@sentry/api` SDK provides types for an API response, import them direc
 
 ## Rules: Use Bun APIs
 
-**CRITICAL**: This project uses Bun as runtime. Always prefer Bun-native APIs over Node.js equivalents.
+**CRITICAL**: Source code uses Bun-style APIs (e.g., `Bun.file()`, `Bun.Glob`, `Bun.which()`). These are shimmed by `script/node-polyfills.ts` for the npm/Node.js distribution. Always prefer these over raw Node.js equivalents.
 
 Read the full guidelines in `.cursor/rules/bun-cli.mdc`.
 
@@ -733,7 +733,7 @@ Tests that need a database or config directory **must** use `useTestConfigDir()`
 - `const baseDir = process.env[CONFIG_DIR_ENV_VAR]!` at module scope — This captures a value that may be stale
 - Manual `beforeEach`/`afterEach` that sets/deletes `SENTRY_CONFIG_DIR`
 
-**Why**: Bun's test runner uses `--isolate --parallel` (see `test:unit` in `package.json`), so each test file runs in a fresh global environment within a worker process. That bounds most cross-file leaks to a single worker, but `process.env` is still shared within a file's lifecycle — if your `afterEach` deletes the env var, the next describe/test's module-level code (or a beforeEach that re-reads env) gets `undefined`, causing `TypeError: The "paths[0]" property must be of type string`. Also, `TEST_TMP_DIR` is namespaced by `BUN_TEST_WORKER_ID` in `test/constants.ts` so parallel workers don't wipe each other's temp state during preload.
+**Why**: Vitest runs test files in parallel worker pools, so each test file runs in a fresh global environment within a worker process. That bounds most cross-file leaks to a single worker, but `process.env` is still shared within a file's lifecycle — if your `afterEach` deletes the env var, the next describe/test's module-level code (or a beforeEach that re-reads env) gets `undefined`, causing `TypeError: The "paths[0]" property must be of type string`. Also, `TEST_TMP_DIR` is namespaced by `VITEST_POOL_ID` in `test/constants.ts` so parallel workers don't wipe each other's temp state during preload.
 
 ```typescript
 // CORRECT: Use the helper
