@@ -317,7 +317,7 @@ Mapping:
 | `cli.releases.finalize(v)` | `sdk.release.finalize({ orgVersion: v })` |
 | `cli.releases.setCommits(v, o)` | `sdk.release["set-commits"]({ orgVersion: v, ...o })` |
 | `cli.releases.uploadSourceMaps(v, { include })` | `sdk.sourcemap.upload({ directory, release: v })` |
-| `cli.releases.newDeploy(v, { env, name })` | `sdk.release.deploy({ orgVersionEnvironmentName: "v/env/name" })` (env/name are part of the positional target, not options; `url`/`started`/`finished`/`time` are options) |
+| `cli.releases.newDeploy(v, { env, name, url })` | `sdk.run("release", "deploy", v, env, name, "--url", url)` (the typed `sdk.release.deploy` can only pass one positional, so it can't supply the required environment — use the `run()` escape hatch for the raw args) |
 | `cli.releases.proposeVersion()` | `sdk.release["propose-version"]()` |
 | `cli.execute(args)` | `sdk.run(...args)` |
 

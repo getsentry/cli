@@ -22,8 +22,10 @@ const METHOD_MAP: Record<string, [string, string]> = {
   finalize: ["release", "finalize"],
   setCommits: ["release", "set-commits"],
   uploadSourceMaps: ["sourcemap", "upload"],
-  newDeploy: ["release", "deploy"],
   proposeVersion: ["release", "propose-version"],
+  // Note: `newDeploy` is handled separately (via the `run(...)` escape hatch),
+  // not here — the typed `release.deploy` method can't pass the required
+  // environment positional. See the transform below.
 };
 
 /** How each method's positional args fold into the v4 options object. */
@@ -39,13 +41,6 @@ const RESHAPE: Record<string, { key: string; spread?: boolean; todo?: string }> 
     key: "release",
     spread: true,
     todo: "sourcemaps are debug-ID-first: map `include` → the `directory` positional and review options",
-  },
-  // No spread: v4's ReleaseDeployParams has no `env`/`name` keys (they fold into
-  // the `orgVersionEnvironmentName` positional), so spreading v3's options would
-  // emit non-compiling code. Seed the positional and flag the rest.
-  newDeploy: {
-    key: "orgVersionEnvironmentName",
-    todo: "release.deploy: fold env/name into the positional (org/version/env/name via `orgVersionEnvironmentName`); re-add url/started/finished/time from your v3 options — v4 has no `env`/`name` option keys",
   },
 };
 
@@ -237,11 +232,31 @@ const codemod: Codemod<L> = async (root) => {
     const recv = call.getMatch("RECV");
     const methodNode = call.getMatch("METHOD");
     if (!recv || !methodNode || !isInstance(recv)) continue;
-    const map = METHOD_MAP[methodNode.text()];
+    const method = methodNode.text();
+    const a = argsOf(call);
+
+    if (method === "newDeploy") {
+      // The typed `release.deploy` SDK method collapses version/environment/name
+      // into a single positional token, so it can't supply the required
+      // environment. Emit the raw `run(...)` escape hatch (which forwards
+      // separate argv) and flag the parts the codemod can't derive.
+      const version = a[0]?.text();
+      edits.push(
+        todo(
+          call,
+          "release deploy needs <environment> (and optional [name]) as positionals plus --url/--started/--finished/--time flags from your v3 options — add them to this run() call"
+        )
+      );
+      edits.push(
+        replaceNode(call, `${recv.text()}.run("release", "deploy"${version ? `, ${version}` : ""})`)
+      );
+      continue;
+    }
+
+    const map = METHOD_MAP[method];
     if (!map) continue;
     const [route, target] = map;
-    const a = argsOf(call);
-    const reshape = RESHAPE[methodNode.text()];
+    const reshape = RESHAPE[method];
 
     let argsOut: string;
     if (reshape) {
