@@ -179,11 +179,15 @@ sentry-cli() {
     login|logout)            local c=$1; shift; env "${envs[@]}" sentry auth "$c" "$@" ;;
     update)                  shift; env "${envs[@]}" sentry cli upgrade "$@" ;;
     uninstall)               shift; env "${envs[@]}" sentry cli uninstall "$@" ;;
-    # `deploys new` creates (→ `release deploy`); `deploys`/`deploys list` lists.
+    # `deploys new` creates (→ `release deploy`); bare/`deploys list` lists
+    # (→ `release deploys`, dropping the v3 `list` subcommand).
     deploys)
       shift
-      if [ "$1" = "new" ]; then shift; env "${envs[@]}" sentry release deploy "$@";
-      else env "${envs[@]}" sentry release deploys "$@"; fi ;;
+      case "$1" in
+        new)  shift; env "${envs[@]}" sentry release deploy "$@" ;;
+        list) shift; env "${envs[@]}" sentry release deploys "$@" ;;
+        *)    env "${envs[@]}" sentry release deploys "$@" ;;
+      esac ;;
     upload-dif|upload-dsym)  shift; env "${envs[@]}" sentry debug-files upload "$@" ;;
     upload-proguard)         shift; env "${envs[@]}" sentry proguard upload "$@" ;;
     difutil)                 shift; env "${envs[@]}" sentry debug-files "$@" ;;

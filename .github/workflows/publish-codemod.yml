@@ -31,4 +31,7 @@ jobs:
           node-version: "22"
       - name: Publish
         working-directory: codemods/sentry-v3-to-v4
-        run: npx codemod@latest publish
+        # Pin the CLI in this OIDC-privileged job (avoid running unreviewed
+        # `@latest` with a publish token). Bump deliberately alongside the CI
+        # `codemod-test` job.
+        run: npx codemod@1.12.7 publish

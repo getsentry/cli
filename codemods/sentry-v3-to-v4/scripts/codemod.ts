@@ -40,10 +40,12 @@ const RESHAPE: Record<string, { key: string; spread?: boolean; todo?: string }> 
     spread: true,
     todo: "sourcemaps are debug-ID-first: map `include` → the `directory` positional and review options",
   },
+  // No spread: v4's ReleaseDeployParams has no `env`/`name` keys (they fold into
+  // the `orgVersionEnvironmentName` positional), so spreading v3's options would
+  // emit non-compiling code. Seed the positional and flag the rest.
   newDeploy: {
     key: "orgVersionEnvironmentName",
-    spread: true,
-    todo: "release.deploy: move env/name into the positional target (org/version/env/name) — they are NOT options; url/started/finished/time stay as options",
+    todo: "release.deploy: fold env/name into the positional (org/version/env/name via `orgVersionEnvironmentName`); re-add url/started/finished/time from your v3 options — v4 has no `env`/`name` option keys",
   },
 };
 
