@@ -4,7 +4,7 @@ Guidelines for AI agents working in this codebase.
 
 ## Project Overview
 
-**Sentry CLI** is a command-line interface for [Sentry](https://sentry.io), built with [Bun](https://bun.sh) and [Stricli](https://bloomberg.github.io/stricli/).
+**Sentry CLI** is a command-line interface for [Sentry](https://sentry.io), built with [esbuild](https://esbuild.github.io/) + [fossilize](https://github.com/nicolo-ribaudo/fossilize) (Node.js SEA binaries) and [Stricli](https://bloomberg.github.io/stricli/). Uses [pnpm](https://pnpm.io/) as package manager and [vitest](https://vitest.dev/) for testing.
 
 ### Goals
 
@@ -12,7 +12,7 @@ Guidelines for AI agents working in this codebase.
 - **AI-powered debugging** - Integrate Seer AI for root cause analysis and fix plans
 - **Developer-friendly** - Follow `gh` CLI conventions for intuitive UX
 - **Agent-friendly** - JSON output and predictable behavior for AI coding agents
-- **Fast** - Native binaries via Bun, SQLite caching for API responses
+- **Fast** - Native binaries via Node.js SEA (fossilize), SQLite caching for API responses
 
 ### Key Features
 
@@ -408,12 +408,12 @@ Use `"date"` for timestamp-based sort (not `"time"`). Export sort types from the
 
 ### Generated Docs & Skills
 
-All command docs and skill files are generated via `bun run generate:docs` (which runs `generate:command-docs` then `generate:skill`). This runs automatically as part of `dev`, `build`, `typecheck`, and `test` scripts.
+All command docs and skill files are generated via `pnpm run generate:docs` (which runs `generate:command-docs` then `generate:skill`). This runs automatically as part of `dev`, `build`, `typecheck`, and `test` scripts.
 
 - **Command docs** (`docs/src/content/docs/commands/*.md`) are **gitignored** and generated from CLI metadata + hand-written fragments in `docs/src/fragments/commands/`.
 - **Skill files** (`plugins/sentry-cli/skills/sentry-cli/`) are **committed** (consumed by external plugin systems) and auto-committed by CI when stale.
 - Edit fragments in `docs/src/fragments/commands/` for custom examples and guides.
-- `bun run check:fragments` validates fragment ↔ route consistency.
+- `pnpm run check:fragments` validates fragment ↔ route consistency.
 - Positional `placeholder` values must be descriptive: `"org/project/trace-id"` not `"args"`.
 
 ### Zod Schemas for Validation
@@ -509,7 +509,7 @@ CliError (base, exitCode=1)
 - Pass `alternatives: []` when defaults are irrelevant (e.g., for missing Trace ID, Event ID)
 - Use `" and "` in `resource` for plural grammar: `"Trace ID and span ID"` → "are required"
 
-**CI enforcement:** `bun run check:errors` scans for `ContextError` with multiline commands, `CliError` with ad-hoc "Try:" strings, and silent `catch` blocks (advisory).
+**CI enforcement:** `pnpm run check:errors` scans for `ContextError` with multiline commands, `CliError` with ad-hoc "Try:" strings, and silent `catch` blocks (advisory).
 
 ```typescript
 // Usage examples
@@ -553,7 +553,7 @@ catch (error) {
 
 Use `logger.withTag("command-name")` for tagged logging in command files.
 
-**CI enforcement:** `bun run check:errors` includes a silent-catch scan that flags
+**CI enforcement:** `pnpm run check:errors` includes a silent-catch scan that flags
 `catch` blocks which are empty, comment-only, or return-only without surfacing the
 error. It is currently **advisory** (warns, does not fail CI) because of a pre-existing
 backlog; run with `SENTRY_STRICT_SILENT_CATCH=1` to enforce. Do not add new silent
