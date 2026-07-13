@@ -4,7 +4,7 @@
  * Functions for listing Sentry repositories in an organization.
  */
 
-import { listAnOrganization_sRepositories } from "@sentry/api";
+import { listOrganizationRepos } from "@sentry/api";
 
 import type { SentryRepository } from "../../types/index.js";
 import { getCachedRepos, setCachedRepos } from "../db/repo-cache.js";
@@ -34,7 +34,7 @@ export async function listRepositories(
 ): Promise<SentryRepository[]> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await listAnOrganization_sRepositories({
+  const result = await listOrganizationRepos({
     ...config,
     path: { organization_id_or_slug: orgSlug },
   });
@@ -59,7 +59,7 @@ export async function listRepositoriesPaginated(
 ): Promise<PaginatedResponse<SentryRepository[]>> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await listAnOrganization_sRepositories({
+  const result = await listOrganizationRepos({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: {

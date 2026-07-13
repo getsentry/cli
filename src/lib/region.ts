@@ -5,7 +5,7 @@
  * using cached data when available or fetching from the API when needed.
  */
 
-import { retrieveAnOrganization } from "@sentry/api";
+import { getOrganization } from "@sentry/api";
 import { getConfiguredSentryUrl } from "./constants.js";
 import { getOrgByNumericId, getOrgRegion, setOrgRegion } from "./db/regions.js";
 import { stripDsnOrgPrefix } from "./dsn/index.js";
@@ -74,7 +74,7 @@ async function resolveOrgRegionUncached(orgSlug: string): Promise<string> {
   const config = getSdkConfig(baseUrl);
 
   const result = await withAuthGuard(async () => {
-    const response = await retrieveAnOrganization({
+    const response = await getOrganization({
       ...config,
       path: { organization_id_or_slug: orgSlug },
     });

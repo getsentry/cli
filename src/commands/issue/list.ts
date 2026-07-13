@@ -46,7 +46,6 @@ import {
 import {
   type IssueTableRow,
   shouldAutoCompact,
-  willShowTrend,
   writeIssueTable,
 } from "../../lib/formatters/index.js";
 import {
@@ -189,27 +188,7 @@ type ListApiOptions = {
 };
 
 /**
- * Determine whether stats data should be collapsed (skipped) in the API request.
- *
- * Stats power the TREND sparkline column, which is only shown when:
- * 1. Output is human (not `--json`) — JSON consumers don't render sparklines
- * 2. Terminal is wide enough — narrow terminals and non-TTY hide TREND
- *
- * Collapsing stats avoids expensive Snuba/ClickHouse aggregation queries,
- * saving 200-500ms per API request.
- *
- * @see {@link willShowTrend} for the terminal width threshold logic
- */
-function shouldCollapseStats(json: boolean): boolean {
-  if (json) {
-    return true;
-  }
-  return !willShowTrend();
-}
-
-/**
- * Fields that depend on the `lifetime` API data. When `collapse=lifetime`
- * is sent, the server omits these from the list response. See #969.
+ * Fields stripped by `collapse=lifetime` on the list endpoint. See #969.
  */
 const LIFETIME_FIELDS = new Set([
   "count",
@@ -219,28 +198,54 @@ const LIFETIME_FIELDS = new Set([
 ]);
 
 /**
+ * Fields populated by Snuba seen-stats queries on the list endpoint.
+ *
+ * On the Sentry API, `collapse=stats` skips `_get_seen_stats()` entirely,
+ * stripping top-level count/timestamp fields and the sparkline `stats` object
+ * — not just the TREND column data. See #1219.
+ */
+const SEEN_STATS_FIELDS = new Set([...LIFETIME_FIELDS, "stats"]);
+
+/**
+ * Whether collapse is safe for a `--fields` subset — true when explicit fields
+ * were requested and none depend on the given API data.
+ */
+function shouldCollapseForFields(
+  fields: string[] | undefined,
+  dependentFields: ReadonlySet<string>
+): boolean {
+  return (
+    fields !== undefined &&
+    fields.length > 0 &&
+    !fields.some((f) => dependentFields.has(f))
+  );
+}
+
+/**
+ * Determine whether stats data should be collapsed (skipped) in the API request.
+ *
+ * Collapsing stats saves ~200–500ms per Snuba query but also removes basic issue
+ * metadata. Human output never collapses stats; JSON only opts out via `--fields`.
+ */
+function shouldCollapseStats(json: boolean, fields?: string[]): boolean {
+  return json && shouldCollapseForFields(fields, SEEN_STATS_FIELDS);
+}
+
+/**
  * Build the collapse and groupStatsPeriod options for issue list API calls.
  *
  * When stats are collapsed, groupStatsPeriod is omitted (undefined) since
  * the server won't compute stats anyway. This avoids wasted server-side
  * processing and makes the request intent explicit.
  *
- * Lifetime is only collapsed in JSON mode when explicit `--fields` are
- * provided and none of them are lifetime-dependent (`count`, `userCount`,
- * `firstSeen`, `lastSeen`). Human output always needs these for the
- * EVENTS, USERS, SEEN, and AGE columns.
+ * Stats and lifetime are only collapsed in JSON mode with explicit `--fields`
+ * that omit the corresponding dependent fields. Human output always requests
+ * seen-stats data for the EVENTS, USERS, SEEN, and AGE columns.
  */
 function buildListApiOptions(json: boolean, fields?: string[]): ListApiOptions {
-  const collapseStats = shouldCollapseStats(json);
-  // Collapse lifetime only when in JSON mode with explicit --fields that
-  // don't include any lifetime-dependent field. Human output always needs
-  // these (EVENTS, USERS, SEEN, AGE columns), and JSON without --fields
-  // returns all fields.
+  const collapseStats = shouldCollapseStats(json, fields);
   const collapseLifetime =
-    json &&
-    fields !== undefined &&
-    fields.length > 0 &&
-    !fields.some((f) => LIFETIME_FIELDS.has(f));
+    json && shouldCollapseForFields(fields, LIFETIME_FIELDS);
   return {
     collapse: buildIssueListCollapse({
       shouldCollapseStats: collapseStats,

@@ -1171,6 +1171,30 @@ describe("issue list: collapse parameter optimization", () => {
     };
   }
 
+  /** Run org-all issue list and return the API options passed to listIssuesAllPages. */
+  async function runOrgAll(
+    callFlags: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    listIssuesAllPagesMock.mockResolvedValue({
+      issues: [sampleIssue],
+      nextCursor: undefined,
+    });
+
+    const orgAllFunc = (await listCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      target?: string
+    ) => Promise<void>;
+
+    const { context } = createOrgAllContext();
+    await orgAllFunc.call(context, callFlags, "my-org/");
+
+    return (listIssuesAllPagesMock.mock.calls[0]?.[2] ?? {}) as Record<
+      string,
+      unknown
+    >;
+  }
+
   beforeEach(async () => {
     listIssuesAllPagesMock.mockReset();
     resolveCursorMock.mockReset();
@@ -1247,197 +1271,121 @@ describe("issue list: collapse parameter optimization", () => {
   });
 
   test("always collapses filtered and unhandled in org-all mode", async () => {
-    listIssuesAllPagesMock.mockResolvedValue({
-      issues: [sampleIssue],
-      nextCursor: undefined,
+    const options = await runOrgAll({
+      limit: 10,
+      sort: "date",
+      period: parsePeriod("90d"),
+      json: false,
     });
-
-    const orgAllFunc = (await listCommand.loader()) as unknown as (
-      this: unknown,
-      flags: Record<string, unknown>,
-      target?: string
-    ) => Promise<void>;
-
-    const { context } = createOrgAllContext();
-    await orgAllFunc.call(
-      context,
-      { limit: 10, sort: "date", period: parsePeriod("90d"), json: false },
-      "my-org/"
-    );
-
-    expect(listIssuesAllPagesMock).toHaveBeenCalled();
-    const callArgs = listIssuesAllPagesMock.mock.calls[0];
-    const options = callArgs?.[2] as Record<string, unknown> | undefined;
-    const collapse = options?.collapse as string[];
+    const collapse = options.collapse as string[];
     expect(collapse).toContain("filtered");
     expect(collapse).toContain("unhandled");
   });
 
   test("does not collapse lifetime in human mode (needed for EVENTS/USERS/SEEN/AGE)", async () => {
-    listIssuesAllPagesMock.mockResolvedValue({
-      issues: [sampleIssue],
-      nextCursor: undefined,
+    const options = await runOrgAll({
+      limit: 10,
+      sort: "date",
+      period: parsePeriod("90d"),
+      json: false,
     });
-
-    const orgAllFunc = (await listCommand.loader()) as unknown as (
-      this: unknown,
-      flags: Record<string, unknown>,
-      target?: string
-    ) => Promise<void>;
-
-    const { context } = createOrgAllContext();
-    await orgAllFunc.call(
-      context,
-      { limit: 10, sort: "date", period: parsePeriod("90d"), json: false },
-      "my-org/"
-    );
-
-    expect(listIssuesAllPagesMock).toHaveBeenCalled();
-    const callArgs = listIssuesAllPagesMock.mock.calls[0];
-    const options = callArgs?.[2] as Record<string, unknown> | undefined;
-    const collapse = options?.collapse as string[];
+    const collapse = options.collapse as string[];
     expect(collapse).not.toContain("lifetime");
   });
 
   test("does not collapse lifetime in JSON mode without --fields", async () => {
-    listIssuesAllPagesMock.mockResolvedValue({
-      issues: [sampleIssue],
-      nextCursor: undefined,
+    const options = await runOrgAll({
+      limit: 10,
+      sort: "date",
+      period: parsePeriod("90d"),
+      json: true,
     });
-
-    const orgAllFunc = (await listCommand.loader()) as unknown as (
-      this: unknown,
-      flags: Record<string, unknown>,
-      target?: string
-    ) => Promise<void>;
-
-    const { context } = createOrgAllContext();
-    await orgAllFunc.call(
-      context,
-      { limit: 10, sort: "date", period: parsePeriod("90d"), json: true },
-      "my-org/"
-    );
-
-    expect(listIssuesAllPagesMock).toHaveBeenCalled();
-    const callArgs = listIssuesAllPagesMock.mock.calls[0];
-    const options = callArgs?.[2] as Record<string, unknown> | undefined;
-    const collapse = options?.collapse as string[];
+    const collapse = options.collapse as string[];
     expect(collapse).not.toContain("lifetime");
   });
 
   test("does not collapse lifetime in JSON mode when --fields includes lifetime-dependent field", async () => {
-    listIssuesAllPagesMock.mockResolvedValue({
-      issues: [sampleIssue],
-      nextCursor: undefined,
+    const options = await runOrgAll({
+      limit: 10,
+      sort: "date",
+      period: parsePeriod("90d"),
+      json: true,
+      fields: ["shortId", "title", "count"],
     });
-
-    const orgAllFunc = (await listCommand.loader()) as unknown as (
-      this: unknown,
-      flags: Record<string, unknown>,
-      target?: string
-    ) => Promise<void>;
-
-    const { context } = createOrgAllContext();
-    await orgAllFunc.call(
-      context,
-      {
-        limit: 10,
-        sort: "date",
-        period: parsePeriod("90d"),
-        json: true,
-        fields: ["shortId", "title", "count"],
-      },
-      "my-org/"
-    );
-
-    expect(listIssuesAllPagesMock).toHaveBeenCalled();
-    const callArgs = listIssuesAllPagesMock.mock.calls[0];
-    const options = callArgs?.[2] as Record<string, unknown> | undefined;
-    const collapse = options?.collapse as string[];
+    const collapse = options.collapse as string[];
     expect(collapse).not.toContain("lifetime");
   });
 
   test("collapses lifetime in JSON mode when --fields omits all lifetime-dependent fields", async () => {
-    listIssuesAllPagesMock.mockResolvedValue({
-      issues: [sampleIssue],
-      nextCursor: undefined,
+    const options = await runOrgAll({
+      limit: 10,
+      sort: "date",
+      period: parsePeriod("90d"),
+      json: true,
+      fields: ["shortId", "title"],
     });
-
-    const orgAllFunc = (await listCommand.loader()) as unknown as (
-      this: unknown,
-      flags: Record<string, unknown>,
-      target?: string
-    ) => Promise<void>;
-
-    const { context } = createOrgAllContext();
-    await orgAllFunc.call(
-      context,
-      {
-        limit: 10,
-        sort: "date",
-        period: parsePeriod("90d"),
-        json: true,
-        fields: ["shortId", "title"],
-      },
-      "my-org/"
-    );
-
-    expect(listIssuesAllPagesMock).toHaveBeenCalled();
-    const callArgs = listIssuesAllPagesMock.mock.calls[0];
-    const options = callArgs?.[2] as Record<string, unknown> | undefined;
-    const collapse = options?.collapse as string[];
+    const collapse = options.collapse as string[];
     expect(collapse).toContain("lifetime");
   });
 
-  test("collapses stats in JSON mode", async () => {
-    listIssuesAllPagesMock.mockResolvedValue({
-      issues: [sampleIssue],
-      nextCursor: undefined,
+  test("does not collapse stats in human mode (needed for EVENTS/USERS/SEEN/AGE when piped)", async () => {
+    const savedColumns = process.stdout.columns;
+    Object.defineProperty(process.stdout, "columns", {
+      value: 80,
+      configurable: true,
     });
 
-    const orgAllFunc = (await listCommand.loader()) as unknown as (
-      this: unknown,
-      flags: Record<string, unknown>,
-      target?: string
-    ) => Promise<void>;
+    try {
+      const options = await runOrgAll({
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: false,
+      });
+      const collapse = options.collapse as string[];
+      expect(collapse).not.toContain("stats");
+      expect(options.groupStatsPeriod).toBe("auto");
+    } finally {
+      Object.defineProperty(process.stdout, "columns", {
+        value: savedColumns,
+        configurable: true,
+      });
+    }
+  });
 
-    const { context } = createOrgAllContext();
-    await orgAllFunc.call(
-      context,
-      { limit: 10, sort: "date", period: parsePeriod("90d"), json: true },
-      "my-org/"
-    );
+  test("does not collapse stats in JSON mode without --fields", async () => {
+    const options = await runOrgAll({
+      limit: 10,
+      sort: "date",
+      period: parsePeriod("90d"),
+      json: true,
+    });
+    const collapse = options.collapse as string[];
+    expect(collapse).not.toContain("stats");
+    expect(options.groupStatsPeriod).toBe("auto");
+  });
 
-    expect(listIssuesAllPagesMock).toHaveBeenCalled();
-    const callArgs = listIssuesAllPagesMock.mock.calls[0];
-    const options = callArgs?.[2] as Record<string, unknown> | undefined;
-    const collapse = options?.collapse as string[];
+  test("collapses stats in JSON mode when --fields omits seen-stats fields", async () => {
+    const options = await runOrgAll({
+      limit: 10,
+      sort: "date",
+      period: parsePeriod("90d"),
+      json: true,
+      fields: ["shortId", "title"],
+    });
+    const collapse = options.collapse as string[];
     expect(collapse).toContain("stats");
   });
 
-  test("omits groupStatsPeriod when stats are collapsed (JSON mode)", async () => {
-    listIssuesAllPagesMock.mockResolvedValue({
-      issues: [sampleIssue],
-      nextCursor: undefined,
+  test("omits groupStatsPeriod when stats are collapsed (JSON --fields opt-out)", async () => {
+    const options = await runOrgAll({
+      limit: 10,
+      sort: "date",
+      period: parsePeriod("90d"),
+      json: true,
+      fields: ["shortId", "title"],
     });
-
-    const orgAllFunc = (await listCommand.loader()) as unknown as (
-      this: unknown,
-      flags: Record<string, unknown>,
-      target?: string
-    ) => Promise<void>;
-
-    const { context } = createOrgAllContext();
-    await orgAllFunc.call(
-      context,
-      { limit: 10, sort: "date", period: parsePeriod("90d"), json: true },
-      "my-org/"
-    );
-
-    expect(listIssuesAllPagesMock).toHaveBeenCalled();
-    const callArgs = listIssuesAllPagesMock.mock.calls[0];
-    const options = callArgs?.[2] as Record<string, unknown> | undefined;
-    expect(options?.groupStatsPeriod).toBeUndefined();
+    expect(options.groupStatsPeriod).toBeUndefined();
   });
 });
 

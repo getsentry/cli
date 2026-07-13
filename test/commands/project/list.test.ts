@@ -685,7 +685,7 @@ describe("handleProjectSearch", () => {
         );
       }
 
-      // getProject (SDK retrieveAProject) hits /projects/{org}/{slug}/
+      // getProject (SDK getProject) hits /projects/{org}/{slug}/
       // Return 404 to simulate project not found
       return new Response(JSON.stringify({ detail: "Not found" }), {
         status: 404,

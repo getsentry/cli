@@ -5,10 +5,10 @@
  */
 
 import {
-  addAnOrganizationMemberToATeam,
-  createANewTeam,
-  listAnOrganization_sTeams,
-  listAProject_sTeams,
+  addOrganizationMemberTeam,
+  createOrganizationTeam,
+  listOrganizationTeams,
+  listProjectTeams as sdkListProjectTeams,
 } from "@sentry/api";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
@@ -31,7 +31,7 @@ import {
 export async function listTeams(orgSlug: string): Promise<SentryTeam[]> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await listAnOrganization_sTeams({
+  const result = await listOrganizationTeams({
     ...config,
     path: { organization_id_or_slug: orgSlug },
   });
@@ -53,7 +53,7 @@ export async function listTeamsPaginated(
 ): Promise<PaginatedResponse<SentryTeam[]>> {
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await listAnOrganization_sTeams({
+  const result = await listOrganizationTeams({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: {
@@ -80,7 +80,7 @@ export async function listProjectTeams(
   projectSlug: string
 ): Promise<SentryTeam[]> {
   const config = await getOrgSdkConfig(orgSlug);
-  const result = await listAProject_sTeams({
+  const result = await sdkListProjectTeams({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,
@@ -107,7 +107,7 @@ export async function createTeam(
   slug: string
 ): Promise<SentryTeam> {
   const config = await getOrgSdkConfig(orgSlug);
-  const result = await createANewTeam({
+  const result = await createOrganizationTeam({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     body: { slug },
@@ -142,7 +142,7 @@ export async function addMemberToTeam(
   memberId: string
 ): Promise<void> {
   const config = await getOrgSdkConfig(orgSlug);
-  const result = await addAnOrganizationMemberToATeam({
+  const result = await addOrganizationMemberTeam({
     ...config,
     path: {
       organization_id_or_slug: orgSlug,

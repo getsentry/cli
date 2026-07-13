@@ -4,8 +4,8 @@
  * Functions for listing, retrieving, and updating Sentry issues.
  */
 
-import type { ListAnOrganizationSissuesData } from "@sentry/api";
-import { listAnOrganization_sIssues } from "@sentry/api";
+import type { ListOrganizationIssuesData } from "@sentry/api";
+import { listOrganizationIssues } from "@sentry/api";
 
 import type { SentryIssue } from "../../types/index.js";
 import type { IssueSubstatus } from "../../types/sentry.js";
@@ -38,7 +38,7 @@ const TRAILING_SLASH_RE = /\/$/;
  * Uses the SDK type directly for compile-time safety against parameter drift.
  */
 export type IssueSort = NonNullable<
-  NonNullable<ListAnOrganizationSissuesData["query"]>["sort"]
+  NonNullable<ListOrganizationIssuesData["query"]>["sort"]
 >;
 
 /**
@@ -53,31 +53,29 @@ export type IssueSort = NonNullable<
  * - `'base'` — base group fields (rarely useful to collapse)
  */
 export type IssueCollapseField = NonNullable<
-  NonNullable<ListAnOrganizationSissuesData["query"]>["collapse"]
+  NonNullable<ListOrganizationIssuesData["query"]>["collapse"]
 >[number];
 
 /**
  * Build the `collapse` parameter for issue list API calls.
  *
  * Always collapses `filtered` and `unhandled` — the CLI never consumes
- * these in issue list views. Conditionally collapses `stats` when
- * sparklines won't be rendered (narrow terminal, non-TTY, or JSON),
- * and `lifetime` when the caller confirms the lifetime-dependent
- * top-level fields (`count`, `userCount`, `firstSeen`, `lastSeen`)
- * aren't needed.
+ * these in issue list views. Conditionally collapses `stats` when the caller
+ * confirms seen-stats fields aren't needed, and `lifetime` when the caller
+ * confirms lifetime-dependent fields aren't needed.
+ *
+ * **Important:** `collapse=stats` skips Snuba seen-stats queries entirely,
+ * stripping top-level `count`, `userCount`, `firstSeen`, `lastSeen` and the
+ * sparkline `stats` object — not just the time-series. See #1219.
  *
  * **Important:** Despite being documented as removing only the `lifetime`
  * sub-object, `collapse=lifetime` also strips the top-level `count`,
  * `userCount`, `firstSeen`, and `lastSeen` fields from list responses.
  * Only collapse it when those fields are confirmed unnecessary. See #969.
  *
- * Matches the Sentry web UI's optimization: the initial page load sends
- * `collapse=stats,unhandled` to skip expensive Snuba queries, fetching
- * stats in a follow-up request only when needed.
- *
  * @param options - Context for determining what to collapse
  * @param options.shouldCollapseStats - Whether stats data can be skipped
- *   (true when sparklines won't be shown: narrow terminal, non-TTY, --json)
+ *   (true only when `--json --fields` omits all seen-stats-dependent fields)
  * @param options.shouldCollapseLifetime - Whether lifetime data can be skipped.
  *   Defaults to `false` because most output paths need `count`/`userCount`/
  *   `firstSeen`/`lastSeen`. Only set to `true` when `--json --fields` omits
@@ -121,7 +119,7 @@ export const ISSUE_DETAIL_COLLAPSE: IssueCollapseField[] = [
 /**
  * List issues for a project with pagination control.
  *
- * Uses the @sentry/api SDK's `listAnOrganization_sIssues` for type-safe
+ * Uses the @sentry/api SDK's `listOrganizationIssues` for type-safe
  * query parameters, and extracts pagination from the response Link header.
  *
  * @param orgSlug - Organization slug
@@ -164,7 +162,7 @@ export async function listIssuesPaginated(
 
   const config = await getOrgSdkConfig(orgSlug);
 
-  const result = await listAnOrganization_sIssues({
+  const result = await listOrganizationIssues({
     ...config,
     path: { organization_id_or_slug: orgSlug },
     query: {

@@ -436,6 +436,28 @@ describe("fetchProjectId", () => {
     }
   });
 
+  test("includes numeric project ID hint on 404 for all-digit slug", async () => {
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Not found" }), {
+          status: 404,
+        })
+    );
+
+    try {
+      await fetchProjectId("test-org", "6775615880");
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      const msg = (error as ResolutionError).message;
+      expect(msg).toContain("not numeric project IDs");
+      expect(msg).toContain("sentry project list test-org/");
+      expect(msg.match(/sentry project list test-org\//g)).toHaveLength(1);
+    }
+  });
+
   test("includes project list suggestion even when listProjects fails", async () => {
     await setAuthToken("test-token");
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
