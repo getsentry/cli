@@ -183,25 +183,31 @@ sentry-cli() {
   # re-applying any leading global flags before the translated command.
   local run=(env "${envs[@]}" sentry "${lead[@]}")
 
-  # v4 deploys can't be shimmed transparently: create takes the environment and
-  # name as positionals (not v3's `-e`/`-n` flags). Point at the new syntax.
-  local deploy_msg='sentry-cli: `deploys` changed in v4 — migrate manually:\n  list:   sentry release deploys <version>\n  create: sentry release deploy <version> <environment> [name] [--url … --started … --finished …]\n'
+  # `deploys` handling (top-level or nested under `releases`). Bare/`list` map to
+  # `release deploys` (list); only `new` (create) can't be shimmed — v4 takes the
+  # environment/name as positionals, not v3's `-e`/`-n` flags — so flag those.
+  local deploy_msg='sentry-cli: `deploys new` changed in v4 — environment/name are positionals now:\n  sentry release deploy <version> <environment> [name] [--url … --started … --finished …]\n'
+  _scli_deploys() {
+    local a dargs=()
+    for a in "$@"; do [ "$a" = "new" ] && { printf '%b' "$deploy_msg" >&2; return 64; }; done
+    for a in "$@"; do [ "$a" = "list" ] || dargs+=("$a"); done  # drop v3 `list`
+    "${run[@]}" release deploys "${dargs[@]}"
+  }
 
   case "$1" in
     # Moved commands
     login|logout)            local c=$1; shift; "${run[@]}" auth "$c" "$@" ;;
     update)                  shift; "${run[@]}" cli upgrade "$@" ;;
     uninstall)               shift; "${run[@]}" cli uninstall "$@" ;;
-    deploys)                 printf '%b' "$deploy_msg" >&2; return 64 ;;
+    deploys)                 shift; _scli_deploys "$@" ;;
     upload-dif|upload-dsym)  shift; "${run[@]}" debug-files upload "$@" ;;
     upload-proguard)         shift; "${run[@]}" proguard upload "$@" ;;
     difutil)                 shift; "${run[@]}" debug-files "$@" ;;
 
-    # `releases` → `release` (bare lists). v3 nested deploys under `releases`;
-    # those can't be shimmed either, so surface the new syntax.
+    # `releases` → `release` (bare lists). v3 nested deploys under `releases`.
     releases)
       shift
-      if [ "$1" = "deploys" ]; then printf '%b' "$deploy_msg" >&2; return 64; fi
+      if [ "$1" = "deploys" ]; then shift; _scli_deploys "$@"; return; fi
       if [ "$#" -eq 0 ]; then "${run[@]}" release list; else "${run[@]}" release "$@"; fi ;;
 
     # Other renamed groups (plural → singular). Bare form lists (matches v4's
