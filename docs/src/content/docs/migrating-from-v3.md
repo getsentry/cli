@@ -179,12 +179,16 @@ sentry-cli() {
     login|logout)            local c=$1; shift; env "${envs[@]}" sentry auth "$c" "$@" ;;
     update)                  shift; env "${envs[@]}" sentry cli upgrade "$@" ;;
     uninstall)               shift; env "${envs[@]}" sentry cli uninstall "$@" ;;
-    # `deploys new` creates (→ `release deploy`); bare/`deploys list` lists
-    # (→ `release deploys`, dropping the v3 `list` subcommand).
+    # `deploys list`/bare → `sentry release deploys` (list). `deploys new`
+    # changed shape in v4 (environment and name are positionals, not `-e`/`-n`
+    # flags), so the shim can't translate it transparently — print the new
+    # syntax instead of silently forwarding broken flags.
     deploys)
       shift
       case "$1" in
-        new)  shift; env "${envs[@]}" sentry release deploy "$@" ;;
+        new)
+          printf 'sentry-cli: `deploys new` changed in v4 — environment/name are positionals now:\n  sentry release deploy <version> <environment> [name] [--url … --started … --finished …]\n' >&2
+          return 64 ;;
         list) shift; env "${envs[@]}" sentry release deploys "$@" ;;
         *)    env "${envs[@]}" sentry release deploys "$@" ;;
       esac ;;
