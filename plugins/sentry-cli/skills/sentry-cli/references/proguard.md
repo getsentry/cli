@@ -20,6 +20,25 @@ Upload ProGuard/R8 mapping files to Sentry
 - `--no-upload - Compute and print UUIDs without uploading (dry-run)`
 - `--require-one - Require at least one mapping file (error if none provided)`
 
+**Examples:**
+
+```bash
+# Upload a ProGuard/R8 mapping file
+sentry proguard upload ./app/build/outputs/mapping/release/mapping.txt
+
+# Upload multiple mapping files
+sentry proguard upload build/mapping1.txt build/mapping2.txt
+
+# Force a specific UUID (single file only)
+sentry proguard upload mapping.txt --uuid 5db7294d-87fc-5726-a5c0-4a90679657a5
+
+# Dry-run: compute UUIDs without uploading
+sentry proguard upload mapping.txt --no-upload
+
+# Require at least one mapping file (useful in CI)
+sentry proguard upload mapping.txt --require-one
+```
+
 ### `sentry proguard uuid <path>`
 
 Compute the UUID for a ProGuard mapping file
