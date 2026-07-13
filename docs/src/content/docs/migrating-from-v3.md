@@ -158,8 +158,9 @@ sentry-cli() {
   # flags" section below). They precede the command, so translate only the
   # LEADING run and stop at the first command word — this leaves command-level
   # flags untouched (notably `--url`, which `release create`/`deploy` use for
-  # the release/deploy URL, not the Sentry host).
-  local envs=() headers=""
+  # the release/deploy URL, not the Sentry host). Other still-valid v4 globals
+  # are collected into `lead` and re-applied before the command.
+  local envs=() lead=() headers=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --auth-token)   envs+=("SENTRY_AUTH_TOKEN=$2"); shift 2 ;;
@@ -169,17 +170,23 @@ sentry-cli() {
       # Multiple --header flags merge into one semicolon-separated var.
       --header)       headers="${headers:+$headers; }$2"; shift 2 ;;
       --header=*)     headers="${headers:+$headers; }${1#*=}"; shift ;;
+      # Still-valid v4 globals: keep them (value-taking ones consume a value).
+      --org|--project|--log-level|--fields) lead+=("$1" "$2"); shift 2 ;;
+      --org=*|--project=*|--log-level=*|--fields=*) lead+=("$1"); shift ;;
+      -v|--verbose|--json) lead+=("$1"); shift ;;
       *)              break ;;
     esac
   done
   [ -n "$headers" ] && envs+=("SENTRY_CUSTOM_HEADERS=$headers")
 
-  # `env` runs the real `sentry` binary (bypassing this function → no recursion).
+  # `env` runs the real `sentry` (bypassing this function → no recursion),
+  # re-applying any leading global flags before the translated command.
+  local run=(env "${envs[@]}" sentry "${lead[@]}")
   case "$1" in
     # Moved commands
-    login|logout)            local c=$1; shift; env "${envs[@]}" sentry auth "$c" "$@" ;;
-    update)                  shift; env "${envs[@]}" sentry cli upgrade "$@" ;;
-    uninstall)               shift; env "${envs[@]}" sentry cli uninstall "$@" ;;
+    login|logout)            local c=$1; shift; "${run[@]}" auth "$c" "$@" ;;
+    update)                  shift; "${run[@]}" cli upgrade "$@" ;;
+    uninstall)               shift; "${run[@]}" cli uninstall "$@" ;;
     # `deploys list`/bare → `sentry release deploys` (list). `deploys new`
     # changed shape in v4 (environment and name are positionals, not `-e`/`-n`
     # flags), so the shim can't translate it transparently — print the new
@@ -190,12 +197,12 @@ sentry-cli() {
         new)
           printf 'sentry-cli: `deploys new` changed in v4 — environment/name are positionals now:\n  sentry release deploy <version> <environment> [name] [--url … --started … --finished …]\n' >&2
           return 64 ;;
-        list) shift; env "${envs[@]}" sentry release deploys "$@" ;;
-        *)    env "${envs[@]}" sentry release deploys "$@" ;;
+        list) shift; "${run[@]}" release deploys "$@" ;;
+        *)    "${run[@]}" release deploys "$@" ;;
       esac ;;
-    upload-dif|upload-dsym)  shift; env "${envs[@]}" sentry debug-files upload "$@" ;;
-    upload-proguard)         shift; env "${envs[@]}" sentry proguard upload "$@" ;;
-    difutil)                 shift; env "${envs[@]}" sentry debug-files "$@" ;;
+    upload-dif|upload-dsym)  shift; "${run[@]}" debug-files upload "$@" ;;
+    upload-proguard)         shift; "${run[@]}" proguard upload "$@" ;;
+    difutil)                 shift; "${run[@]}" debug-files "$@" ;;
 
     # Renamed groups (plural → singular). Bare form lists (matches v4's native
     # `sentry releases` → `release list`); a subcommand uses the singular group
@@ -211,11 +218,11 @@ sentry-cli() {
         repos)          grp=repo ;;
         events)         grp=event ;;
       esac
-      if [ "$#" -eq 0 ]; then env "${envs[@]}" sentry "$grp" list;
-      else env "${envs[@]}" sentry "$grp" "$@"; fi ;;
+      if [ "$#" -eq 0 ]; then "${run[@]}" "$grp" list;
+      else "${run[@]}" "$grp" "$@"; fi ;;
 
     # Everything else is unchanged
-    *) env "${envs[@]}" sentry "$@" ;;
+    *) "${run[@]}" "$@" ;;
   esac
 }
 ```
