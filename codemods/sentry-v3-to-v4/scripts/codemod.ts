@@ -37,10 +37,11 @@ const RESHAPE: Record<string, { key: string; spread?: boolean; todo?: string }> 
     spread: true,
     todo: "verify set-commits options (repo/commit/auto → commit/auto/local)",
   },
+  // No spread: v3 `include` is a path array, but v4 `sourcemap.upload` takes a
+  // single `directory` string — spreading would emit an invalid `include` key.
   uploadSourceMaps: {
     key: "release",
-    spread: true,
-    todo: "sourcemaps are debug-ID-first: map `include` → the `directory` positional and review options",
+    todo: "sourcemaps are debug-ID-first in v4: set the `directory` option to your bundle output dir (v3 `include` was a path array — run one upload per directory) and review the remaining options",
   },
 };
 
