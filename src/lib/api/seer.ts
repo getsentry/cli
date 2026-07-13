@@ -54,27 +54,26 @@ function normalizeAgentStatus(status: string): string {
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
- * @returns The trigger response with run_id
+ * @returns The trigger response with `sentry_run_id` and the legacy `run_id`
  * @throws {ApiError} On API errors (402 = no budget, 403 = not enabled)
  */
 export async function triggerRootCauseAnalysis(
   orgSlug: string,
   issueId: string
-): Promise<{ run_id: number }> {
+): Promise<{ run_id?: number; sentry_run_id: string | null }> {
   const regionUrl = await resolveOrgRegion(orgSlug);
 
-  const { data } = await apiRequestToRegion<{ run_id: number }>(
-    regionUrl,
-    `/organizations/${orgSlug}/issues/${issueId}/autofix/`,
-    {
-      method: "POST",
-      params: EXPLORER_MODE_PARAMS,
-      body: {
-        step: "root_cause",
-        referrer: "api.cli",
-      },
-    }
-  );
+  const { data } = await apiRequestToRegion<{
+    run_id?: number;
+    sentry_run_id: string | null;
+  }>(regionUrl, `/organizations/${orgSlug}/issues/${issueId}/autofix/`, {
+    method: "POST",
+    params: EXPLORER_MODE_PARAMS,
+    body: {
+      step: "root_cause",
+      referrer: "api.cli",
+    },
+  });
   return data;
 }
 
@@ -113,20 +112,23 @@ export async function getAutofixState(
  * Trigger solution planning for an existing autofix run.
  *
  * Posts to the agent-based autofix endpoint with `step: "solution"` and
- * the existing `run_id`. The agent continues from root cause analysis
- * to generating a solution plan.
+ * the existing run ID (from {@link requireAutofixRunId}).
  *
  * @param orgSlug - The organization slug
  * @param issueId - The numeric Sentry issue ID
- * @param runId - The autofix run ID
+ * @param runId - The autofix run ID (see {@link requireAutofixRunId})
  * @returns The response from the API
  */
 export async function triggerSolutionPlanning(
   orgSlug: string,
   issueId: string,
-  runId: number
+  runId: string | number
 ): Promise<unknown> {
   const regionUrl = await resolveOrgRegion(orgSlug);
+
+  // A UUID sent under run_id (an IntegerField) fails server-side validation.
+  const runIdBodyField =
+    typeof runId === "string" ? { sentry_run_id: runId } : { run_id: runId };
 
   const { data } = await apiRequestToRegion(
     regionUrl,
@@ -136,7 +138,7 @@ export async function triggerSolutionPlanning(
       params: EXPLORER_MODE_PARAMS,
       body: {
         step: "solution",
-        run_id: runId,
+        ...runIdBodyField,
         referrer: "api.cli",
       },
     }

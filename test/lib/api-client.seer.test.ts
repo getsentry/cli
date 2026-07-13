@@ -110,7 +110,7 @@ describe("getAutofixState", () => {
       return new Response(
         JSON.stringify({
           autofix: {
-            run_id: 12_345,
+            sentry_run_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             status: "processing",
             blocks: [],
             updated_at: "2025-01-01T00:00:00Z",
@@ -125,13 +125,36 @@ describe("getAutofixState", () => {
 
     const result = await getAutofixState("test-org", "123456789");
 
-    expect(result?.run_id).toBe(12_345);
+    expect(result?.sentry_run_id).toBe("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
     expect(result?.status).toBe("PROCESSING");
     expect(capturedRequest?.method).toBe("GET");
     expect(capturedRequest?.url).toContain(
       "/organizations/test-org/issues/123456789/autofix/"
     );
     expect(capturedRequest?.url).toContain("mode=explorer");
+  });
+
+  test("still parses legacy run_id when sentry_run_id is absent", async () => {
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          autofix: {
+            run_id: 12_345,
+            status: "processing",
+            blocks: [],
+            updated_at: "2025-01-01T00:00:00Z",
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+
+    const result = await getAutofixState("test-org", "123456789");
+
+    expect(result?.run_id).toBe(12_345);
+    expect(result?.sentry_run_id).toBeUndefined();
   });
 
   test("normalizes agent status values to uppercase", async () => {
@@ -271,6 +294,39 @@ describe("triggerSolutionPlanning", () => {
     expect(capturedBody).toEqual({
       step: "solution",
       run_id: 12_345,
+      referrer: "api.cli",
+    });
+  });
+
+  test("sends a UUID run ID under the sentry_run_id body field, not run_id", async () => {
+    let capturedBody: unknown;
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      capturedBody = await new Request(input, init).json();
+
+      return new Response(
+        JSON.stringify({
+          run_id: 12_345,
+          sentry_run_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        }),
+        {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    };
+
+    await triggerSolutionPlanning(
+      "test-org",
+      "123456789",
+      "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    );
+
+    // sentry_run_id is a UUIDField server-side; run_id is an IntegerField.
+    // Sending the UUID under run_id would fail server-side validation.
+    expect(capturedBody).toEqual({
+      step: "solution",
+      sentry_run_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       referrer: "api.cli",
     });
   });

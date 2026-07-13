@@ -26,6 +26,7 @@ import {
   extractNoSolutionReason,
   extractRootCauses,
   extractSolution,
+  requireAutofixRunId,
   type SolutionArtifact,
 } from "../../types/seer.js";
 import {
@@ -54,7 +55,7 @@ type NoSolutionContext = {
 
 /** Return type for issue plan — includes state metadata and solution data */
 type PlanData = {
-  run_id: number;
+  run_id: string | number;
   status: string;
   /** The solution data (without the artifact wrapper). Null when no solution is available. */
   solution: SolutionArtifact["data"] | null;
@@ -141,7 +142,7 @@ function buildNoSolutionContext(
 function buildPlanData(state: AutofixState): PlanData {
   const solution = extractSolution(state);
   const data: PlanData = {
-    run_id: state.run_id,
+    run_id: requireAutofixRunId(state),
     status: state.status,
     solution: solution?.data ?? null,
   };
@@ -235,7 +236,7 @@ export const planCommand = buildCommand({
         }
       }
 
-      await triggerSolutionPlanning(org, numericId, state.run_id);
+      await triggerSolutionPlanning(org, numericId, requireAutofixRunId(state));
 
       // Poll until solution is ready or terminal
       const finalState = await pollAutofixState({

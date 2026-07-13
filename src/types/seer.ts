@@ -172,7 +172,10 @@ export type SolutionArtifact = z.infer<typeof SolutionArtifactSchema>;
 
 export const AutofixStateSchema = z
   .object({
-    run_id: z.number(),
+    /** @deprecated Use sentry_run_id instead. */
+    run_id: z.number().optional(),
+    /** Null for legacy runs predating this field. */
+    sentry_run_id: z.string().nullable().optional(),
     status: z.string(),
     updated_at: z.string().optional(),
     request: z
@@ -240,6 +243,18 @@ export type AutofixUpdatePayload =
  */
 export function isTerminalStatus(status: string): boolean {
   return TERMINAL_STATUSES.includes(status as AutofixStatus);
+}
+
+// At least one of sentry_run_id/run_id is always present on a non-null
+// autofix state, so a missing run ID means a malformed response.
+export function requireAutofixRunId(state: AutofixState): string | number {
+  const runId = state.sentry_run_id ?? state.run_id;
+  if (runId === undefined) {
+    throw new Error(
+      "Unexpected autofix response: missing both sentry_run_id and run_id."
+    );
+  }
+  return runId;
 }
 
 /** Container that may hold root cause analysis data (legacy format) */
