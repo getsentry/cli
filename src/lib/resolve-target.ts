@@ -298,7 +298,8 @@ async function normalizeNumericOrg(orgId: string): Promise<string> {
   try {
     const { listOrganizationsUncached } = await import("./api-client.js");
     await listOrganizationsUncached();
-  } catch {
+  } catch (error) {
+    log.debug("Failed to refresh org list for numeric ID resolution", error);
     return orgId;
   }
 
@@ -735,7 +736,8 @@ async function findSimilarProjectsAcrossOrgs(
     return mergedSlugs.flatMap((matched) =>
       allProjects.filter((p) => p.slug === matched)
     );
-  } catch {
+  } catch (error) {
+    log.debug("Failed to find similar projects across orgs", error);
     return [];
   }
 }
@@ -1407,7 +1409,8 @@ export async function resolveOrg(
       return { org: resolvedOrg, detectedFrom: result.detectedFrom };
     }
     return result;
-  } catch {
+  } catch (error) {
+    log.debug("DSN auto-detection failed during org resolution", error);
     return null;
   }
 }
