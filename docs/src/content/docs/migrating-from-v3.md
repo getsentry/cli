@@ -188,14 +188,22 @@ sentry-cli() {
     upload-proguard)         shift; env "${envs[@]}" sentry proguard upload "$@" ;;
     difutil)                 shift; env "${envs[@]}" sentry debug-files "$@" ;;
 
-    # Renamed groups (plural → singular) so subcommands keep working
-    organizations)           shift; env "${envs[@]}" sentry org "$@" ;;
-    projects)                shift; env "${envs[@]}" sentry project "$@" ;;
-    releases)                shift; env "${envs[@]}" sentry release "$@" ;;
-    issues)                  shift; env "${envs[@]}" sentry issue "$@" ;;
-    monitors)                shift; env "${envs[@]}" sentry monitor "$@" ;;
-    repos)                   shift; env "${envs[@]}" sentry repo "$@" ;;
-    events)                  shift; env "${envs[@]}" sentry event "$@" ;;
+    # Renamed groups (plural → singular). Bare form lists (matches v4's native
+    # `sentry releases` → `release list`); a subcommand uses the singular group
+    # (v4 aliases `new`→`create`, `ls`→`list`, so subcommands keep working).
+    organizations|projects|releases|issues|monitors|repos|events)
+      local grp=$1; shift
+      case "$grp" in
+        organizations) grp=org ;;
+        projects)       grp=project ;;
+        releases)       grp=release ;;
+        issues)         grp=issue ;;
+        monitors)       grp=monitor ;;
+        repos)          grp=repo ;;
+        events)         grp=event ;;
+      esac
+      if [ "$#" -eq 0 ]; then env "${envs[@]}" sentry "$grp" list;
+      else env "${envs[@]}" sentry "$grp" "$@"; fi ;;
 
     # Everything else is unchanged
     *) env "${envs[@]}" sentry "$@" ;;
