@@ -37,35 +37,34 @@ Before working on this codebase, read the Cursor rules:
 
 ```bash
 # Development
-bun install                              # Install dependencies
-bun run dev                              # Run CLI in dev mode
-bun run --env-file=.env.local src/bin.ts # Dev with env vars
+pnpm install                             # Install dependencies
+pnpm run cli -- --help                   # Run CLI in dev mode
+pnpm run cli -- auth login               # Dev with env vars (reads .env.local automatically)
 
 # Build
-bun run build                            # Build for current platform
-bun run build:all                        # Build for all platforms
+pnpm run build                           # Build for current platform
+pnpm run build:all                       # Build for all platforms
 
 # Type Checking
-bun run typecheck                        # Check types
+pnpm run typecheck                       # Check types
 
 # Linting & Formatting
-bun run lint                             # Check for issues
-bun run lint:fix                         # Auto-fix issues (run before committing)
+pnpm run lint                            # Check for issues
+pnpm run lint:fix                        # Auto-fix issues (run before committing)
 
 # Testing
-bun test                                 # Run all tests
-bun test path/to/file.test.ts            # Run single test file
-bun test --watch                         # Watch mode
-bun test --filter "test name"            # Run tests matching pattern
-bun run test:unit                        # Run unit tests only
-bun run test:e2e                         # Run e2e tests only
+pnpm run test:unit                       # Run unit tests
+pnpm run test:e2e                        # Run e2e tests
+vitest run path/to/file.test.ts          # Run single test file
+vitest --watch                           # Watch mode
+vitest run --filter "test name"          # Run tests matching pattern
 ```
 
 ## Rules: No Runtime Dependencies
 
-**CRITICAL**: All packages must be in `devDependencies`, never `dependencies`. Everything is bundled at build time via esbuild. CI enforces this with `bun run check:deps`.
+**CRITICAL**: All packages must be in `devDependencies`, never `dependencies`. Everything is bundled at build time via esbuild. CI enforces this with `pnpm run check:deps`.
 
-When adding a package, always use `bun add -d <package>` (the `-d` flag).
+When adding a package, always use `pnpm add -D <package>` (the `-D` flag).
 
 When the `@sentry/api` SDK provides types for an API response, import them directly from `@sentry/api` instead of creating redundant Zod schemas in `src/types/sentry.ts`.
 
@@ -700,7 +699,7 @@ await deleteUserData(userId)
 ### Goal
 Minimal comments, maximum clarity. Comments explain **intent and reasoning**, not syntax.
 
-## Testing (bun:test + fast-check)
+## Testing (vitest + fast-check)
 
 **Prefer property-based and model-based testing** over traditional unit tests. These approaches find edge cases automatically and provide better coverage with less code.
 
@@ -757,7 +756,7 @@ afterEach(() => { delete process.env.SENTRY_CONFIG_DIR; }); // BUG!
 Use property-based tests when verifying invariants that should hold for **any valid input**.
 
 ```typescript
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { constantFrom, assert as fcAssert, property, tuple } from "fast-check";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
@@ -805,7 +804,7 @@ describe("property: myFunction", () => {
 Use model-based tests for **stateful systems** where sequences of operations should maintain invariants.
 
 ```typescript
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   type AsyncCommand,
   asyncModelRun,
@@ -933,7 +932,7 @@ When adding property tests for a function that already has unit tests, **remove 
 ```
 
 ```typescript
-import { describe, expect, test, mock } from "bun:test";
+import { describe, expect, test, vi } from "vitest";
 
 describe("feature", () => {
   test("should return specific value", async () => {
@@ -942,7 +941,7 @@ describe("feature", () => {
 });
 
 // Mock modules when needed
-mock.module("./some-module", () => ({
+vi.mock("./some-module", () => ({
   default: () => "mocked",
 }));
 ```
