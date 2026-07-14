@@ -35,7 +35,7 @@ const RESHAPE: Record<string, { key: string; spread?: boolean; todo?: string }> 
   setCommits: {
     key: "orgVersion",
     spread: true,
-    todo: "verify set-commits options (repo/commit/auto → commit/auto/local)",
+    todo: "verify set-commits options: v4 has no `ignoreMissing`/`ignoreEmpty` (both dropped); repo/commit map via the `commit` flag and `auto`/`local` are kept",
   },
   // No spread: v3 `include` is a path array, but v4 `sourcemap.upload` takes a
   // single `directory` string — spreading would emit an invalid `include` key.
@@ -185,14 +185,33 @@ const codemod: Codemod<L> = async (root) => {
 
     if (options?.kind() === "object") {
       // Rename authToken → token in place.
+      const keys: string[] = [];
       for (const c of options.children()) {
         if (c.kind() === "pair") {
           const k = c.field("key");
-          if (k && unquote(k.text()) === "authToken") edits.push(replaceNode(k, "token"));
-        } else if (c.kind() === "shorthand_property_identifier" && c.text() === "authToken") {
-          // `{ authToken }` → `{ token: authToken }` (keep the binding).
-          edits.push(replaceNode(c, "token: authToken"));
+          const kn = k ? unquote(k.text()) : "";
+          if (kn) keys.push(kn);
+          if (k && kn === "authToken") edits.push(replaceNode(k, "token"));
+        } else if (c.kind() === "shorthand_property_identifier") {
+          keys.push(c.text());
+          if (c.text() === "authToken") {
+            // `{ authToken }` → `{ token: authToken }` (keep the binding).
+            edits.push(replaceNode(c, "token: authToken"));
+          }
         }
+      }
+      // v3 SentryCliOptions had several keys with no direct v4 equivalent.
+      // Flag them so auth-critical ones (apiKey) aren't silently dropped.
+      const unmapped = keys.filter((k) =>
+        ["apiKey", "url", "dsn", "silent", "customHeader", "headers", "org", "project", "vcsRemote"].includes(k)
+      );
+      if (unmapped.length) {
+        edits.push(
+          todo(
+            ne,
+            `verify these v3 options — they have no direct v4 SDK equivalent: ${unmapped.join(", ")} (e.g. apiKey → use \`token\`; url/dsn/org/project → SENTRY_* env vars; silent/customHeader/vcsRemote were dropped)`
+          )
+        );
       }
     } else if (ambiguous) {
       edits.push(

@@ -160,7 +160,7 @@ sentry-cli() {
   # flags untouched (notably `--url`, which `release create`/`deploy` use for
   # the release/deploy URL, not the Sentry host). Other still-valid v4 globals
   # are collected into `lead` and re-applied before the command.
-  local envs=() lead=() headers=""
+  local envs=() lead=() headers="" allow_failure=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --auth-token)   envs+=("SENTRY_AUTH_TOKEN=$2"); shift 2 2>/dev/null || shift ;;
@@ -174,9 +174,13 @@ sentry-cli() {
       --org|--project|--log-level|--fields) lead+=("$1" "$2"); shift 2 2>/dev/null || shift ;;
       --org=*|--project=*|--log-level=*|--fields=*) lead+=("$1"); shift ;;
       -v|--verbose|--json) lead+=("$1"); shift ;;
+      # v3 `--allow-failure` (and SENTRY_ALLOW_FAILURE) is gone in v4 and would
+      # be rejected as unknown. Strip it and emulate its "never fail" behavior.
+      --allow-failure) allow_failure=1; shift ;;
       *)              break ;;
     esac
   done
+  [ "${SENTRY_ALLOW_FAILURE:-}" = "1" ] && allow_failure=1
   [ -n "$headers" ] && envs+=("SENTRY_CUSTOM_HEADERS=$headers")
 
   # `env` runs the real `sentry` (bypassing this function → no recursion),
@@ -194,7 +198,8 @@ sentry-cli() {
     "${run[@]}" release deploys "${dargs[@]}"
   }
 
-  case "$1" in
+  _scli_dispatch() {
+    case "$1" in
     # Moved commands
     login|logout)            local c=$1; shift; "${run[@]}" auth "$c" "$@" ;;
     update)                  shift; "${run[@]}" cli upgrade "$@" ;;
@@ -229,6 +234,15 @@ sentry-cli() {
     # Everything else is unchanged
     *) "${run[@]}" "$@" ;;
   esac
+  }
+
+  # v3's `--allow-failure`/`SENTRY_ALLOW_FAILURE` made any command exit 0. v4
+  # dropped it, so emulate here: swallow a non-zero status when it was set.
+  if [ -n "$allow_failure" ]; then
+    _scli_dispatch "$@" || { printf 'sentry-cli: command failed, but --allow-failure/SENTRY_ALLOW_FAILURE was set — exiting 0\n' >&2; return 0; }
+  else
+    _scli_dispatch "$@"
+  fi
 }
 ```
 
@@ -268,14 +282,23 @@ The [compatibility shim](#drop-in-compatibility-shim) above translates
 
 ### Dropped
 
-`--quiet` has no direct replacement — pipe the output (non-TTY is plain) or use
-`--log-level error`.
+- `--quiet` (and its `--silent` alias) has no direct replacement — pipe the
+  output (non-TTY is plain) or use `--log-level error`.
+- `--allow-failure` (and the `SENTRY_ALLOW_FAILURE` env var), which made any
+  command exit `0` even on error, is **not implemented in v4** and will be
+  rejected as an unknown flag. Handle failures in your own script (e.g.
+  `sentry … || true`); the [shim](#drop-in-compatibility-shim) above emulates
+  the old behavior when it sees the flag or env var.
+- `SENTRY_API_KEY` (the v3 `apiKey` option) and `SENTRY_VCS_REMOTE` (the
+  `vcsRemote` option) are no longer honored — use `SENTRY_AUTH_TOKEN` for auth.
+- `SENTRY_CUSTOM_HEADERS` only applies to self-hosted Sentry; custom headers are
+  ignored for `sentry.io`.
 
 :::caution
 Command-specific flags changed more than the global ones, and some v3 flags
 don't exist in v4 yet. A few notable ones:
 
-- `release set-commits` drops `--ignore-missing`.
+- `release set-commits` drops `--ignore-missing` and `--ignore-empty`.
 - `release deploy` takes the environment and name as part of the positional
   target (`org/version/env/name`), not `--env`/`--name`.
 - `sourcemap upload`/`inject` drop several flags (see [Sourcemaps](#sourcemaps)).
