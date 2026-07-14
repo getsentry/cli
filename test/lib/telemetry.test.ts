@@ -289,9 +289,24 @@ describe("withTelemetry", () => {
       captureSpy.mockRestore();
     });
 
-    test("silences ContextError (missing user input, not a crash)", async () => {
+    test("captures ContextError so its volume stays visible (CLI-3B)", async () => {
       const captureSpy = vi.spyOn(Sentry, "captureException");
       const metricSpy = vi.spyOn(Sentry.metrics, "distribution");
+      // Seed an OK session so we can assert the crash decision. ContextError is
+      // captured (see below) but is an expected user-context failure, not a CLI
+      // crash — marking it crashed would skew release-health for the ~2000
+      // affected users, so the session must stay "ok".
+      const session = { status: "ok", errors: 0 };
+      const isolationScopeSpy = vi
+        .spyOn(Sentry, "getIsolationScope")
+        .mockReturnValue({
+          getSession: () => session,
+        } as unknown as Sentry.Scope);
+      const currentScopeSpy = vi
+        .spyOn(Sentry, "getCurrentScope")
+        .mockReturnValue({
+          getSession: () => null,
+        } as unknown as Sentry.Scope);
       const { ContextError } = await import("../../src/lib/errors.js");
       const error = new ContextError(
         "Organization and project",
@@ -302,15 +317,99 @@ describe("withTelemetry", () => {
           throw error;
         })
       ).rejects.toThrow(error);
-      // ContextError is an expected "missing input" error — not reported as a
-      // Sentry issue; volume is preserved via the cli.error.silenced metric.
-      expect(captureSpy).not.toHaveBeenCalled();
+      // ContextError is no longer silenced — its volume drives auto-detection
+      // and UX improvements, so it must be reported to Sentry.
+      expect(captureSpy).toHaveBeenCalled();
       const silencedCall = metricSpy.mock.calls.find(
         (c) => c[0] === "cli.error.silenced"
       );
-      expect(silencedCall).toBeDefined();
+      expect(silencedCall).toBeUndefined();
+      // ...but the session must NOT be marked crashed.
+      expect(session.status).toBe("ok");
       captureSpy.mockRestore();
       metricSpy.mockRestore();
+      isolationScopeSpy.mockRestore();
+      currentScopeSpy.mockRestore();
+    });
+
+    test("marks session crashed for a genuine CLI bug", async () => {
+      // A generic Error is neither silenced nor a user error, so the session
+      // should be marked crashed (the counterpart to the ContextError case).
+      const session = { status: "ok", errors: 0 };
+      const isolationScopeSpy = vi
+        .spyOn(Sentry, "getIsolationScope")
+        .mockReturnValue({
+          getSession: () => session,
+        } as unknown as Sentry.Scope);
+      const currentScopeSpy = vi
+        .spyOn(Sentry, "getCurrentScope")
+        .mockReturnValue({
+          getSession: () => null,
+        } as unknown as Sentry.Scope);
+      const error = new Error("unexpected bug");
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      expect(session.status).toBe("crashed");
+      isolationScopeSpy.mockRestore();
+      currentScopeSpy.mockRestore();
+    });
+
+    test("marks session crashed for a 5xx ApiError (captured, non-user)", async () => {
+      // A 5xx is captured (not silenced) and is NOT a user error, so it must
+      // still mark the session crashed — guards against the isUserError gate
+      // accidentally widening to swallow server/CLI failures.
+      const session = { status: "ok", errors: 0 };
+      const isolationScopeSpy = vi
+        .spyOn(Sentry, "getIsolationScope")
+        .mockReturnValue({
+          getSession: () => session,
+        } as unknown as Sentry.Scope);
+      const currentScopeSpy = vi
+        .spyOn(Sentry, "getCurrentScope")
+        .mockReturnValue({
+          getSession: () => null,
+        } as unknown as Sentry.Scope);
+      const error = new ApiError("Server error", 500, "Internal");
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      expect(session.status).toBe("crashed");
+      isolationScopeSpy.mockRestore();
+      currentScopeSpy.mockRestore();
+    });
+
+    test("does not mark session crashed for a deliberate CliError", async () => {
+      // A bare CliError is a deliberately-thrown, message-carrying failure (the
+      // CLI decided to stop and told the user why), not an unexpected crash.
+      // isUserError returns true for it, so it must NOT mark the session
+      // crashed. On main (before the isUserError gate) this WAS crash-marked, so
+      // this test documents and guards the intended behavior change.
+      const session = { status: "ok", errors: 0 };
+      const isolationScopeSpy = vi
+        .spyOn(Sentry, "getIsolationScope")
+        .mockReturnValue({
+          getSession: () => session,
+        } as unknown as Sentry.Scope);
+      const currentScopeSpy = vi
+        .spyOn(Sentry, "getCurrentScope")
+        .mockReturnValue({
+          getSession: () => null,
+        } as unknown as Sentry.Scope);
+      const { CliError } = await import("../../src/lib/errors.js");
+      const error = new CliError("Internal error: resolved issue missing org");
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      expect(session.status).toBe("ok");
+      isolationScopeSpy.mockRestore();
+      currentScopeSpy.mockRestore();
     });
   });
 });

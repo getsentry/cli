@@ -37,7 +37,7 @@ import {
   enrichEventWithGroupingTags,
   reportCliError,
 } from "./error-reporting.js";
-import { ApiError } from "./errors.js";
+import { ApiError, isUserError } from "./errors.js";
 import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { makeCompressedTransport } from "./telemetry/zstd-transport.js";
@@ -226,16 +226,30 @@ export async function withTelemetry<T>(
       }
     );
   } catch (e) {
-    // Route through reportCliError so silencing (OutputError, ContextError,
-    // expected-auth AuthError, 401–499 ApiError) and fingerprint normalization
-    // are applied consistently. Silenced errors emit a `cli.error.silenced`
-    // metric + optional structured log instead of creating a Sentry issue.
+    // Route through reportCliError so silencing (OutputError, expected-auth
+    // AuthError, 401–499 ApiError) and fingerprint normalization are applied
+    // consistently. Silenced errors emit a `cli.error.silenced` metric +
+    // optional structured log instead of creating a Sentry issue. (ContextError
+    // is intentionally NOT silenced — see classifySilenced.)
     reportCliError(e);
-    // Only mark session crashed for errors that weren't silenced.
-    // Silenced errors (OutputError, ContextError, expected AuthError, user 4xx
-    // ApiError) are expected states — marking them crashed would skew
-    // release-health.
-    if (!classifySilenced(e)) {
+    // Only mark the session crashed for genuine, unexpected CLI bugs. This is a
+    // stricter gate than `classifySilenced`: an error can be *captured* to
+    // Sentry (not silenced) yet still be an expected user/environment failure
+    // rather than a crash. `ContextError` (missing org/project) is the
+    // motivating case — it is deliberately un-silenced so its volume stays
+    // visible (CLI-3B), but it must not count as a crashed session or it would
+    // skew release-health for the ~2000 affected users.
+    //
+    // `isUserError` gates the crash decision. Besides the specific user-context
+    // subclasses (ContextError, ResolutionError, ValidationError, AuthError,
+    // ConfigError, HostScopeError, user 4xx, network failures), it also returns
+    // true for a bare/unknown `CliError`. That is intentional: a `CliError` is a
+    // deliberately-thrown, message-carrying failure (the CLI decided to stop and
+    // told the user why), not an unexpected crash. Genuine crashes surface as
+    // non-CliError throwables (TypeError, RangeError, plain Error) or as
+    // captured-but-not-user errors (5xx ApiError, TimeoutError, UpgradeError,
+    // CLI-built 400s), all of which still mark the session crashed here.
+    if (!(classifySilenced(e) || isUserError(e))) {
       markSessionCrashed();
     }
     throw e;

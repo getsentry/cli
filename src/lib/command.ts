@@ -57,6 +57,7 @@ import {
 } from "./formatters/output.js";
 import { isPlainOutput } from "./formatters/plain-detect.js";
 import { GLOBAL_FLAGS } from "./global-flags.js";
+import { setInteractivePromptsAllowed } from "./interactive-prompts.js";
 import {
   LOG_LEVEL_NAMES,
   type LogLevelName,
@@ -703,6 +704,10 @@ export function buildCommand<
         cleanFlags.json = true;
       }
     }
+
+    // Suppress interactive prompts (e.g. the org/project picker) in JSON mode so
+    // a prompt never blocks a scripted run or interleaves with stdout JSON.
+    setInteractivePromptsAllowed(!cleanFlags.json);
 
     const stdout = (this as unknown as { stdout: Writer }).stdout;
 

@@ -292,8 +292,10 @@ describe("classifySilenced", () => {
   test.each([
     ["auto-detect failure", new ContextError("Organization and project", "x")],
     ["missing ID", new ContextError("Event ID", "sentry event view <id>", [])],
-  ])("silences ContextError (%s)", (_label, err) => {
-    expect(classifySilenced(err)).toBe("context_missing");
+  ])("does NOT silence ContextError (%s)", (_label, err) => {
+    // ContextError volume is the signal driving auto-detection/UX fixes
+    // (single-org auto-select, interactive picker), so it must stay captured.
+    expect(classifySilenced(err)).toBeNull();
   });
 
   test.each([
@@ -453,20 +455,18 @@ describe("reportCliError integration", () => {
     return { tags, contexts };
   }
 
-  test("silences ContextError and emits metric with resource", () => {
+  test("captures ContextError (no longer silenced) so its volume stays visible", () => {
     reportCliError(
       new ContextError("Organization and project", "sentry org view <slug>")
     );
-    expect(captureSpy).not.toHaveBeenCalled();
-    expect(metricSpy).toHaveBeenCalledWith(
+    // CLI-3B: ContextError is the signal for auto-detection/UX improvements, so
+    // it is captured rather than dropped to a silenced-metric.
+    expect(captureSpy).toHaveBeenCalled();
+    expect(metricSpy).not.toHaveBeenCalledWith(
       "cli.error.silenced",
       1,
       expect.objectContaining({
-        attributes: expect.objectContaining({
-          error_class: "ContextError",
-          reason: "context_missing",
-          resource: "Organization and project",
-        }),
+        attributes: expect.objectContaining({ error_class: "ContextError" }),
       })
     );
   });
