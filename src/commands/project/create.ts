@@ -14,9 +14,8 @@
  * 5. Display results (one block per project)
  *
  * Multiple projects are created by passing several names as separate arguments
- * (e.g. `sentry project create web api worker node`). This mirrors the variadic
- * convention used by `issue merge` and avoids the common agent mistake of
- * cramming many names into a single space-separated argument.
+ * (e.g. `sentry project create web api worker node`). Quoted multi-word display
+ * names remain a single project (e.g. `sentry project create "Web API" node`).
  */
 
 import type { SentryContext } from "../../context.js";
@@ -38,8 +37,9 @@ import {
   withAuthGuard,
 } from "../../lib/errors.js";
 import {
-  formatProjectCreated,
+  formatProjectCreateOutput,
   type ProjectCreatedResult,
+  type ProjectCreateOutput,
 } from "../../lib/formatters/human.js";
 import { isPlainOutput } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
@@ -64,9 +64,6 @@ const log = logger.withTag("project.create");
 
 /** Full usage hint shown in errors and help text. */
 const USAGE_HINT = "sentry project create [<org>/]<name...> <platform>";
-
-/** Matches any internal whitespace — used to detect crammed multi-name args. */
-const WHITESPACE_RE = /\s+/;
 
 type CreateFlags = {
   readonly team?: string;
@@ -312,9 +309,6 @@ async function createProjectWithAutoTeamFallback(opts: {
       if (expError.status === 409) {
         throw projectExistsError(orgSlug, name);
       }
-      if (expError.status === 400 && WHITESPACE_RE.test(name)) {
-        throw crammedNamesError(name, orgSlug, platform);
-      }
     }
     throw expError;
   }
@@ -325,28 +319,6 @@ async function createProjectWithAutoTeamFallback(opts: {
     teamSlug: result.team_slug,
     teamSource: "auto-created",
   };
-}
-
-/**
- * Turn a raw 400 on a space-containing name into actionable guidance.
- *
- * The most common cause (CLI-1YY) is an agent cramming several project names
- * into one quoted argument: `sentry project create "web api worker" node`.
- * The API rejects the resulting name/slug with a cryptic 400. Point them at
- * the variadic form instead.
- */
-function crammedNamesError(
-  name: string,
-  orgSlug: string,
-  platform: string
-): CliError {
-  const parts = name.trim().split(WHITESPACE_RE).filter(Boolean);
-  return new CliError(
-    `Failed to create project '${name}' in ${orgSlug}: that name isn't valid.\n\n` +
-      "If you meant several projects, pass each name as a separate argument:\n" +
-      `  sentry project create ${parts.join(" ")} ${platform}\n\n` +
-      "If you meant one project, use a shorter slug (letters, numbers, hyphens)."
-  );
 }
 
 /**
@@ -384,9 +356,6 @@ async function handleCreateApiError(
   }
   if (error.status === 400 && isPlatformError(error)) {
     throw new CliError(buildPlatformError(`${orgSlug}/${name}`, platform));
-  }
-  if (error.status === 400 && WHITESPACE_RE.test(name)) {
-    throw crammedNamesError(name, orgSlug, platform);
   }
   if (error.status === 404) {
     return await handleCreateProject404(opts);
@@ -440,7 +409,6 @@ function resolvePlatformAndNames(
     ]);
   }
 
-  // Platform via flag → every positional is a name.
   if (flags.platform) {
     const platform = normalizePlatform(flags.platform);
     if (!isValidPlatform(platform)) {
@@ -449,15 +417,12 @@ function resolvePlatformAndNames(
     return { platform, names: [...args] };
   }
 
-  // No flag: the trailing positional is the platform. With a single positional
-  // the platform is simply missing.
   if (args.length < 2) {
     throw new CliError(buildPlatformError(args.join(" ")));
   }
 
   const platform = normalizePlatform(args.at(-1) as string);
   if (!isValidPlatform(platform)) {
-    // Trailing arg was meant to be the platform; the names are everything else.
     throw new CliError(
       buildPlatformError(args.slice(0, -1).join(" "), platform)
     );
@@ -476,21 +441,11 @@ function parseNames(rawNames: readonly string[]): {
   explicitOrg?: string;
   parsed: ParsedName[];
 } {
-  // Also accept comma-separated names within a single argument, matching the
-  // CLI's multi-value flag convention (`--features a,b`, set-commits `--path
-  // a,b`, `auth login --scope a,b`). So `create a,b c node` == `create a b c
-  // node`. Commas are never valid in a slug, so this is unambiguous.
-  const names = rawNames.flatMap((raw) =>
-    raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-  );
-  if (names.length === 0) {
+  if (rawNames.length === 0) {
     throw new ContextError("Project name", USAGE_HINT, []);
   }
 
-  const parsed: ParsedName[] = names.map((raw) => {
+  const parsed: ParsedName[] = rawNames.map((raw) => {
     const p = parseOrgProjectArg(raw);
     switch (p.type) {
       case "explicit":
@@ -518,6 +473,18 @@ function parseNames(rawNames: readonly string[]): {
   }
   const [explicitOrg] = orgs;
   return { explicitOrg, parsed };
+}
+
+/**
+ * Preserve the existing object shape for a single create while giving every
+ * batch—complete or partial—a stable array shape.
+ */
+function buildProjectCreateOutput(
+  results: ProjectCreatedResult[],
+  requestedCount: number
+): ProjectCreateOutput {
+  const [singleResult] = results;
+  return requestedCount === 1 && singleResult ? singleResult : results;
 }
 
 /**
@@ -622,26 +589,31 @@ async function createOneProject(opts: {
 export const createCommand = buildCommand({
   docs: {
     brief: "Create one or more projects",
+    customUsage: [
+      "[<org>/]<name...> <platform>",
+      "[<org>/]<name...> --platform <platform>",
+    ],
     fullDescription:
       "Create Sentry projects in an organization.\n\n" +
       "Names support org/name syntax to specify the organization explicitly.\n" +
-      "If omitted, the org is auto-detected from config defaults.\n\n" +
-      "Create several projects at once by passing multiple names, separated by\n" +
-      "spaces or commas — the platform is the trailing argument (or --platform).\n" +
+      "If omitted, the org is auto-detected from config defaults. Quoted project\n" +
+      "display names may contain whitespace.\n\n" +
+      "Create several projects at once by passing multiple names as separate\n" +
+      "arguments — the platform is the trailing argument (or --platform).\n" +
       "All names share one org.\n\n" +
       "Projects are created under a team. If the org has one team, it is used\n" +
       "automatically. If no teams exist, one is created. Otherwise, specify --team.\n\n" +
       "Examples:\n" +
       "  sentry project create my-app node\n" +
+      '  sentry project create "My App" node\n' +
       "  sentry project create acme-corp/my-app javascript-nextjs\n" +
       "  sentry project create web api worker node\n" +
-      "  sentry project create web,api,worker node\n" +
       "  sentry project create web api worker --platform node\n" +
       "  sentry project create my-app python-django --team backend\n" +
       "  sentry project create my-app go --json",
   },
   output: {
-    human: formatProjectCreated,
+    human: formatProjectCreateOutput,
     jsonExclude: [
       "slugDiverged",
       "expectedSlug",
@@ -653,9 +625,9 @@ export const createCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "name",
+        placeholder: "name-or-platform",
         brief:
-          "Project name(s) (supports org/name syntax). Trailing arg is the platform unless --platform is set.",
+          "Project name(s), followed by the required platform unless --platform is set",
         parse: String,
       },
     },
@@ -696,19 +668,31 @@ export const createCommand = buildCommand({
     // preview agree (dry-run never actually creates the team).
     const teamAutoCreateSlug = slugify(parsed[0]?.name ?? "");
 
-    // Create sequentially so partial progress is visible and rate limits are
-    // respected. A failure throws with an actionable message; projects created
-    // before it remain created.
-    for (const { name } of parsed) {
-      const result = await createOneProject({
-        orgSlug,
-        name,
-        platform,
-        flags,
-        detectedFrom: resolved.detectedFrom,
-        teamAutoCreateSlug,
-      });
-      yield new CommandOutput(result);
+    // Create sequentially to respect rate limits. Results are emitted as one
+    // value so --json stays parseable, including partial success before an error.
+    const results: ProjectCreatedResult[] = [];
+    try {
+      for (const { name } of parsed) {
+        results.push(
+          await createOneProject({
+            orgSlug,
+            name,
+            platform,
+            flags,
+            detectedFrom: resolved.detectedFrom,
+            teamAutoCreateSlug,
+          })
+        );
+      }
+    } catch (error) {
+      if (results.length > 0) {
+        yield new CommandOutput(
+          buildProjectCreateOutput(results, parsed.length)
+        );
+      }
+      throw error;
     }
+
+    yield new CommandOutput(buildProjectCreateOutput(results, parsed.length));
   },
 });

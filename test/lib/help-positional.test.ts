@@ -12,7 +12,7 @@
  * and verify help output is shown when resolution fails.
  */
 
-import { run } from "@stricli/core";
+import { generateHelpTextForAllCommands, run } from "@stricli/core";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { app } from "../../src/app.js";
 import type { SentryContext } from "../../src/context.js";
@@ -177,5 +177,28 @@ describe("help command unchanged", () => {
     expect(stdout).toContain("sentry issue list");
     // Should NOT have the recovery tip — this is the normal help path
     expect(stderr).not.toContain("Tip");
+  });
+
+  test("sentry help project create shows the public positional syntax", async () => {
+    const { stdout, stderr } = await runCommand(["help", "project", "create"]);
+
+    expect(stdout).toContain(
+      "sentry project create [<org>/]<name...> <platform>"
+    );
+    expect(stderr).not.toContain("Tip");
+  });
+
+  test("project create --help shows both supported platform forms", () => {
+    const help = generateHelpTextForAllCommands(app).find(
+      ([route]) => route === "sentry project create"
+    )?.[1];
+
+    expect(help).toContain(
+      "sentry project create [<org>/]<name...> <platform>"
+    );
+    expect(help).toContain(
+      "sentry project create [<org>/]<name...> --platform <platform>"
+    );
+    expect(help).not.toContain("<name-or-platform>...");
   });
 });

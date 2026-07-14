@@ -242,9 +242,10 @@ Split by argument type — do not mix the conventions:
 
 - **Required positionals → space-separated variadic.** Declare the arg as
   variadic and accept repeated tokens: `issue merge A B C`,
-  `project create web api node`. Also accept commas within a token for
-  agent ergonomics (`create web,api node`), since commas are never valid in a
-  slug — but spaces stay the ambiguous case (a quoted `"web api"` is one name).
+  `project create web api node`. Do not split positional values on commas;
+  commas may be part of the value. Quoting preserves a multi-word positional
+  as one value: `project create "Web API" node` creates one project, while
+  `project create web api node` creates two.
 - **Optional flags → comma-separated (sometimes also repeatable).** Split the
   flag value on `,`: `--features errors,tracing`, set-commits `--path a,b`,
   `auth login --scope a,b`. Use `value.split(",")` (repeatable array flags:

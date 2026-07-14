@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createCommand } from "../../../src/commands/project/create.js";
+import type { CreatedProjectDetails } from "../../../src/lib/api-client.js";
 
 // Auto-mock at the definition site so internal calls (e.g. createProjectWithDsn
 // calling createProject within projects.js) are intercepted. All exports become
@@ -31,8 +32,10 @@ import {
   ContextError,
   ResolutionError,
 } from "../../../src/lib/errors.js";
+import type { ProjectCreatedResult } from "../../../src/lib/formatters/human.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for vi.spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
+import { slugify } from "../../../src/lib/utils.js";
 import type { SentryProject, SentryTeam } from "../../../src/types/index.js";
 import { useTestConfigDir } from "../../helpers.js";
 
@@ -59,6 +62,16 @@ const sampleProject: SentryProject = {
   platform: "python",
   dateCreated: "2026-02-12T10:00:00Z",
 };
+
+/** Build an API result whose project identity matches the requested name. */
+function createdProjectDetails(name: string): CreatedProjectDetails {
+  const slug = slugify(name);
+  return {
+    project: { ...sampleProject, name, slug, platform: "node" },
+    dsn: `https://${slug}@o123.ingest.us.sentry.io/999`,
+    url: `https://sentry.io/organizations/acme-corp/projects/${slug}/`,
+  };
+}
 
 // Isolated DB for region cache — prevents "unexpected fetch" warnings
 // from resolveOrgRegion when buildOrgNotFoundError calls resolveEffectiveOrg
@@ -500,9 +513,26 @@ describe("project create", () => {
     });
   });
 
-  test("crammed name on the 403 fallback path also gives actionable guidance", async () => {
-    // Team-scoped create 403s → org-scoped fallback runs, which itself 400s on
-    // the crammed name. The fallback must map it to the same guidance.
+  test("preserves unrelated API 400 errors for multi-word display names", async () => {
+    createProjectWithDsnSpy.mockRejectedValue(
+      new ApiError(
+        "Bad Request",
+        400,
+        '{"name":["Ensure this field has no more than 50 characters."]}'
+      )
+    );
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    const err = (await func
+      .call(context, { json: false }, "My Cool App", "node")
+      .catch((e: Error) => e)) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(400);
+    expect(err.detail).toContain("no more than 50 characters");
+    expect(err.message).not.toContain("separate argument");
+  });
+
+  test("preserves unrelated API 400 errors on the org-scoped fallback", async () => {
     createProjectWithDsnSpy.mockRejectedValue(
       new ApiError("Forbidden", 403, "You do not have permission")
     );
@@ -510,17 +540,18 @@ describe("project create", () => {
       new ApiError(
         "Bad Request",
         400,
-        "Ensure this field has no more than 50 characters."
+        '{"name":["Ensure this field has no more than 50 characters."]}'
       )
     );
     const { context } = createMockContext();
     const func = await createCommand.loader();
-    const err = await func
-      .call(context, { json: false }, "web api worker", "node")
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(CliError);
-    expect(err.message).toContain("separate argument");
-    expect(err.message).toContain("sentry project create web api worker node");
+    const err = (await func
+      .call(context, { json: false }, "My Cool App", "node")
+      .catch((e: Error) => e)) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(400);
+    expect(err.detail).toContain("no more than 50 characters");
+    expect(err.message).not.toContain("separate argument");
   });
 
   test("surfaces policy error when org has disabled member project creation", async () => {
@@ -762,7 +793,7 @@ describe("project create", () => {
   });
 
   test("creates multiple projects from separate name args", async () => {
-    const { context } = createMockContext();
+    const { context, stdoutWrite } = createMockContext();
     const func = await createCommand.loader();
     await func.call(context, { json: false }, "web", "api", "worker", "node");
 
@@ -774,6 +805,61 @@ describe("project create", () => {
         { name, platform: "node" }
       );
     }
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    expect(output.match(/Created project/g)).toHaveLength(3);
+  });
+
+  test("outputs a single JSON array for created projects", async () => {
+    createProjectWithDsnSpy
+      .mockResolvedValueOnce(createdProjectDetails("web"))
+      .mockResolvedValueOnce(createdProjectDetails("api"));
+    const { context, stdoutWrite } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: true }, "web", "api", "node");
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output) as Array<
+      Record<string, unknown> & { project: { name: string } }
+    >;
+    expect(parsed.map((result) => result.project.name)).toEqual(["web", "api"]);
+    for (const result of parsed) {
+      expect(result).not.toHaveProperty("slugDiverged");
+      expect(result).not.toHaveProperty("expectedSlug");
+      expect(result).not.toHaveProperty("teamSource");
+      expect(result).not.toHaveProperty("requestedPlatform");
+    }
+  });
+
+  test("shows completed projects when a later creation fails", async () => {
+    createProjectWithDsnSpy
+      .mockResolvedValueOnce(createdProjectDetails("web"))
+      .mockRejectedValueOnce(new ApiError("Server Error", 500));
+    const { context, stdoutWrite } = createMockContext();
+    const func = await createCommand.loader();
+    const error = await func
+      .call(context, { json: false }, "web", "api", "node")
+      .catch((caught: Error) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    expect(output).toContain("Created project 'web'");
+    expect(output).not.toContain("Created project 'api'");
+  });
+
+  test("keeps partial batch JSON parseable when a later creation fails", async () => {
+    createProjectWithDsnSpy
+      .mockResolvedValueOnce(createdProjectDetails("web"))
+      .mockRejectedValueOnce(new ApiError("Server Error", 500));
+    const { context, stdoutWrite } = createMockContext();
+    const func = await createCommand.loader();
+    const error = await func
+      .call(context, { json: true }, "web", "api", "node")
+      .catch((caught: Error) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output) as ProjectCreatedResult[];
+    expect(parsed.map((result) => result.project.name)).toEqual(["web"]);
   });
 
   test("invalid platform with multiple names shows all names in usage hint", async () => {
@@ -789,19 +875,17 @@ describe("project create", () => {
     );
   });
 
-  test("creates multiple projects from comma-separated names", async () => {
+  test("preserves commas inside a project name", async () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
-    await func.call(context, { json: false }, "web,api", "worker", "node");
+    await func.call(context, { json: false }, "payments,eu", "node");
 
-    expect(createProjectWithDsnSpy).toHaveBeenCalledTimes(3);
-    for (const name of ["web", "api", "worker"]) {
-      expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
-        "acme-corp",
-        "engineering",
-        { name, platform: "node" }
-      );
-    }
+    expect(createProjectWithDsnSpy).toHaveBeenCalledTimes(1);
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme-corp",
+      "engineering",
+      { name: "payments,eu", platform: "node" }
+    );
   });
 
   test("takes platform from --platform flag with multiple names", async () => {
@@ -817,22 +901,16 @@ describe("project create", () => {
     );
   });
 
-  test("space-crammed name gives actionable multi-project guidance on 400", async () => {
+  test("preserves whitespace in a quoted project display name", async () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
-    createProjectWithDsnSpy.mockRejectedValueOnce(
-      new ApiError(
-        "Bad Request",
-        400,
-        "Ensure this field has no more than 50 characters."
-      )
+    await func.call(context, { json: false }, "My Cool App", "node");
+
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme-corp",
+      "engineering",
+      { name: "My Cool App", platform: "node" }
     );
-    const err = await func
-      .call(context, { json: false }, "web api worker", "node")
-      .catch((e: Error) => e);
-    expect(err).toBeInstanceOf(CliError);
-    expect(err.message).toContain("separate argument");
-    expect(err.message).toContain("sentry project create web api worker node");
   });
 
   // --dry-run tests
@@ -935,6 +1013,25 @@ describe("project create", () => {
 
     // Should NOT call createProject
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+  });
+
+  test("dry-run outputs one JSON array for multiple projects", async () => {
+    const { context, stdoutWrite } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(
+      context,
+      { json: true, "dry-run": true },
+      "web",
+      "api",
+      "node"
+    );
+
+    const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
+    const parsed = JSON.parse(output);
+    expect(parsed).toHaveLength(2);
+    expect(
+      parsed.map((result: ProjectCreatedResult) => result.project.name)
+    ).toEqual(["web", "api"]);
   });
 
   test("dry-run shows team source for auto-selected teams", async () => {

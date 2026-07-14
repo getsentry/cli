@@ -41,6 +41,12 @@ sentry project view my-org/frontend -w
 # Create a new project
 sentry project create my-new-app javascript-nextjs
 
+# Create a project with a multi-word display name
+sentry project create "My New App" javascript-nextjs
+
+# Create several projects
+sentry project create web api worker node
+
 # Create under a specific org and team
 sentry project create my-org/my-new-app python --team backend-team
 
