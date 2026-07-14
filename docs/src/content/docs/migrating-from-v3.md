@@ -213,11 +213,13 @@ sentry-cli() {
     releases)
       shift
       if [ "$1" = "deploys" ]; then shift; _scli_deploys "$@"; return; fi
-      if [ "$#" -eq 0 ]; then "${run[@]}" release list; else "${run[@]}" release "$@"; fi ;;
+      # v3 `releases` lists; insert `list` when there's no subcommand (only flags).
+      if [ "$#" -eq 0 ] || [ "${1#-}" != "$1" ]; then "${run[@]}" release list "$@";
+      else "${run[@]}" release "$@"; fi ;;
 
-    # Other renamed groups (plural → singular). Bare form lists (matches v4's
-    # native aliases); a subcommand uses the singular group (v4 aliases
-    # `new`→`create`, `ls`→`list`, so subcommands keep working).
+    # Other renamed groups (plural → singular). Bare (or flags-only) form lists
+    # (matches v4's native aliases); a subcommand uses the singular group (v4
+    # aliases `new`→`create`, `ls`→`list`, so subcommands keep working).
     organizations|projects|issues|monitors|repos|events)
       local grp=$1; shift
       case "$grp" in
@@ -228,7 +230,9 @@ sentry-cli() {
         repos)          grp=repo ;;
         events)         grp=event ;;
       esac
-      if [ "$#" -eq 0 ]; then "${run[@]}" "$grp" list;
+      # No subcommand (empty or a leading flag like `--json`) → explicit `list`,
+      # since some groups (e.g. project) default to `view`, not `list`.
+      if [ "$#" -eq 0 ] || [ "${1#-}" != "$1" ]; then "${run[@]}" "$grp" list "$@";
       else "${run[@]}" "$grp" "$@"; fi ;;
 
     # Everything else is unchanged

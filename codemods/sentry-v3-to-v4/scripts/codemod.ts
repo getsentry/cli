@@ -110,10 +110,14 @@ const codemod: Codemod<L> = async (root) => {
     edits.push(replaceNode(src, `${q}sentry${q}`));
   }
   //    CJS: `const X = require("@sentry/cli")` (metavar is quote-agnostic).
+  //    Also handles `const X = require("@sentry/cli").default` (member access).
   for (const call of rootNode.findAll({ rule: { pattern: "require($SRC)" } })) {
     const src = call.getMatch("SRC");
     if (!src || unquote(src.text()) !== "@sentry/cli") continue;
-    const decl = call.parent();
+    // The declarator may be the direct parent, or one level up when the require
+    // is the object of a member expression (`require(...).default`).
+    let decl = call.parent();
+    if (decl?.kind() === "member_expression") decl = decl.parent();
     if (decl?.kind() === "variable_declarator") {
       const id = decl.field("name");
       if (id?.kind() === "identifier") bindings.add(id.text());
