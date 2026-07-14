@@ -52,7 +52,8 @@ type SilenceReason =
   | "auth_expected"
   | "api_user_error"
   | "api_query_error"
-  | "network_error";
+  | "network_error"
+  | "validation_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -81,6 +82,12 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   // the volume and which value was missing. (CLI-3B: ~2000 users.)
   if (error instanceof ContextError) {
     return "context_missing";
+  }
+  // A ValidationError always means the user supplied an invalid argument value
+  // (e.g. an empty issue identifier). It is never a CLI bug, so silence the
+  // whole class to avoid noise from AI-agent callers passing bad input.
+  if (error instanceof ValidationError) {
+    return "validation_error";
   }
   // All AuthError reasons are expected auth states the user must act on, not
   // CLI bugs: `not_authenticated` (no token), `expired` (token aged out), and
