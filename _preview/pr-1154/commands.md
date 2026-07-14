@@ -16,6 +16,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | --- | --- |
 | [`alert`](https://cli.sentry.dev/_preview/pr-1154/commands/alert.md) | Manage Sentry alert rules |
 | [`auth`](https://cli.sentry.dev/_preview/pr-1154/commands/auth.md) | Authenticate with Sentry |
+| [`build`](https://cli.sentry.dev/_preview/pr-1154/commands/build.md) | Manage mobile build artifacts |
 | [`cli`](https://cli.sentry.dev/_preview/pr-1154/commands/cli.md) | CLI-related commands |
 | [`code-mappings`](https://cli.sentry.dev/_preview/pr-1154/commands/code-mappings.md) | Manage code mappings for stack trace linking |
 | [`dart-symbol-map`](https://cli.sentry.dev/_preview/pr-1154/commands/dart-symbol-map.md) | Work with Dart/Flutter symbol maps |
@@ -24,6 +25,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`org`](https://cli.sentry.dev/_preview/pr-1154/commands/org.md) | Work with Sentry organizations |
 | [`project`](https://cli.sentry.dev/_preview/pr-1154/commands/project.md) | Work with Sentry projects |
 | [`proguard`](https://cli.sentry.dev/_preview/pr-1154/commands/proguard.md) | Work with ProGuard/R8 mapping files |
+| [`react-native`](https://cli.sentry.dev/_preview/pr-1154/commands/react-native.md) | Upload React Native sourcemaps from build steps |
 | [`replay`](https://cli.sentry.dev/_preview/pr-1154/commands/replay.md) | Search and inspect Session Replays |
 | [`release`](https://cli.sentry.dev/_preview/pr-1154/commands/release.md) | Work with Sentry releases |
 | [`repo`](https://cli.sentry.dev/_preview/pr-1154/commands/repo.md) | Work with Sentry repositories |
@@ -33,11 +35,13 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`explore`](https://cli.sentry.dev/_preview/pr-1154/commands/explore.md) | Query aggregate event data (Explore) |
 | [`log`](https://cli.sentry.dev/_preview/pr-1154/commands/log.md) | View Sentry logs |
 | [`monitor`](https://cli.sentry.dev/_preview/pr-1154/commands/monitor.md) | Work with Sentry cron monitors |
+| [`snapshots`](https://cli.sentry.dev/_preview/pr-1154/commands/snapshots.md) | Manage and compare snapshots |
 | [`sourcemap`](https://cli.sentry.dev/_preview/pr-1154/commands/sourcemap.md) | Manage sourcemaps |
 | [`span`](https://cli.sentry.dev/_preview/pr-1154/commands/span.md) | List and view spans in projects or traces |
 | [`trace`](https://cli.sentry.dev/_preview/pr-1154/commands/trace.md) | View distributed traces |
 | [`trial`](https://cli.sentry.dev/_preview/pr-1154/commands/trial.md) | Manage product trials |
 | [`init`](https://cli.sentry.dev/_preview/pr-1154/commands/init.md) | Initialize Sentry in your project (experimental) |
+| [`info`](https://cli.sentry.dev/_preview/pr-1154/commands/info.md) | Print configuration and verify authentication |
 | [`local`](https://cli.sentry.dev/_preview/pr-1154/commands/local.md) | Sentry for local development |
 | [`api`](https://cli.sentry.dev/_preview/pr-1154/commands/api.md) | Make an authenticated API request |
 | [`schema`](https://cli.sentry.dev/_preview/pr-1154/commands/schema.md) | Browse the Sentry API schema |
@@ -83,6 +87,7 @@ sentry issue view PROJ-123 -w
 - [alert](https://cli.sentry.dev/_preview/pr-1154/commands/alert.md)
 - [api](https://cli.sentry.dev/_preview/pr-1154/commands/api.md)
 - [auth](https://cli.sentry.dev/_preview/pr-1154/commands/auth.md)
+- [build](https://cli.sentry.dev/_preview/pr-1154/commands/build.md)
 - [cli](https://cli.sentry.dev/_preview/pr-1154/commands/cli.md)
 - [code-mappings](https://cli.sentry.dev/_preview/pr-1154/commands/code-mappings.md)
 - [dart-symbol-map](https://cli.sentry.dev/_preview/pr-1154/commands/dart-symbol-map.md)
@@ -90,6 +95,7 @@ sentry issue view PROJ-123 -w
 - [debug-files](https://cli.sentry.dev/_preview/pr-1154/commands/debug-files.md)
 - [event](https://cli.sentry.dev/_preview/pr-1154/commands/event.md)
 - [explore](https://cli.sentry.dev/_preview/pr-1154/commands/explore.md)
+- [info](https://cli.sentry.dev/_preview/pr-1154/commands/info.md)
 - [init](https://cli.sentry.dev/_preview/pr-1154/commands/init.md)
 - [issue](https://cli.sentry.dev/_preview/pr-1154/commands/issue.md)
 - [local](https://cli.sentry.dev/_preview/pr-1154/commands/local.md)
@@ -98,10 +104,12 @@ sentry issue view PROJ-123 -w
 - [org](https://cli.sentry.dev/_preview/pr-1154/commands/org.md)
 - [proguard](https://cli.sentry.dev/_preview/pr-1154/commands/proguard.md)
 - [project](https://cli.sentry.dev/_preview/pr-1154/commands/project.md)
+- [react-native](https://cli.sentry.dev/_preview/pr-1154/commands/react-native.md)
 - [release](https://cli.sentry.dev/_preview/pr-1154/commands/release.md)
 - [replay](https://cli.sentry.dev/_preview/pr-1154/commands/replay.md)
 - [repo](https://cli.sentry.dev/_preview/pr-1154/commands/repo.md)
 - [schema](https://cli.sentry.dev/_preview/pr-1154/commands/schema.md)
+- [snapshots](https://cli.sentry.dev/_preview/pr-1154/commands/snapshots.md)
 - [sourcemap](https://cli.sentry.dev/_preview/pr-1154/commands/sourcemap.md)
 - [span](https://cli.sentry.dev/_preview/pr-1154/commands/span.md)
 - [team](https://cli.sentry.dev/_preview/pr-1154/commands/team.md)

@@ -24,6 +24,27 @@ Inspect a debug information file
 | --- | --- |
 | `<path>` | Path to the debug information file |
 
+### `sentry debug-files find <id...>`
+
+[Section titled “sentry debug-files find <id...>”](#sentry-debug-files-find-id)
+
+Locate debug files for given debug identifiers
+
+**Arguments:**
+
+| Argument | Description |
+| --- | --- |
+| `<id...>` | Debug identifier(s) to search for |
+
+**Options:**
+
+| Option | Description |
+| --- | --- |
+| `-t, --type <type>...` | Only consider debug files of the given type (repeatable). Default: all |
+| `--no-well-known` | Do not look for debug files in well-known locations |
+| `--no-cwd` | Do not look for debug files in the current directory |
+| `-p, --path <path>...` | Add a directory to search recursively (repeatable) |
+
 ### `sentry debug-files upload <path...>`
 
 [Section titled “sentry debug-files upload <path...>”](#sentry-debug-files-upload-path)
@@ -47,6 +68,7 @@ Upload debug information files to Sentry
 | `--no-unwind` | Do not upload files whose only feature is unwind info |
 | `--no-sources` | Do not upload files whose only feature is source info |
 | `--include-sources` | Build and upload a source bundle for each file with debug info |
+| `--il2cpp-mapping` | Compute and upload Unity IL2CPP line mappings for each scanned file |
 | `--derived-data` | Also scan Xcode's DerivedData folder (macOS only) |
 | `--no-zips` | Do not scan inside .zip archives |
 | `--no-upload` | Scan and print what would be uploaded without uploading |
@@ -113,6 +135,7 @@ Terminal window
 ```
 # Inspect a debug information file (auto-detects the format)sentry debug-files check ./libexample.sosentry debug-files check MyApp.dSYM/Contents/Resources/DWARF/MyAppsentry debug-files check ./app.pdb --json
 # List the source files a debug file references (and whether they're available)sentry debug-files print-sources ./libexample.sosentry debug-files print-sources ./app.pdb --json
+# Locate debug files for one or more debug identifiers on disksentry debug-files find <debug-id>sentry debug-files find <debug-id> --type dsym --path ./buildsentry debug-files find <debug-id> --no-cwd --no-well-known -p /symbols --json
 # Bundle a debug file's referenced source files (run on the build machine)sentry debug-files bundle-sources ./libexample.sosentry debug-files bundle-sources ./app.pdb --output ./app.src.zip
 # Bundle JVM sources with a debug IDsentry debug-files bundle-jvm --output ./out --debug-id <uuid> ./src
 # Exclude additional directoriessentry debug-files bundle-jvm --output ./out --debug-id <uuid> --exclude generated --exclude build-tools ./src
@@ -120,5 +143,6 @@ Terminal window
 # Upload debug information files (scans directories recursively)sentry debug-files upload ./buildsentry debug-files upload ./libexample.so --include-sources
 # .zip archives are scanned in place; use --no-zips to skip themsentry debug-files upload ./symbols.zipsentry debug-files upload ./build --no-zips
 # Restrict by type or debug id, and wait for server-side processingsentry debug-files upload ./dsyms --type dsym --waitsentry debug-files upload ./build --id <debug-id> --require-all
+# Unity: upload IL2CPP line mappings (optionally with referenced C# sources)sentry debug-files upload ./build --il2cpp-mappingsentry debug-files upload ./build --il2cpp-mapping --include-sources
 # Preview what would be uploaded without uploading (no credentials needed)sentry debug-files upload ./build --no-upload
 ```
