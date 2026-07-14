@@ -11,13 +11,12 @@ on:
       - 'install'
       - '.github/workflows/docs-preview.yml'
   pull_request:
-    paths:
-      - 'docs/**'
-      - 'src/**'
-      - 'script/generate-command-docs.ts'
-      - 'script/generate-skill.ts'
-      - 'install'
-      - '.github/workflows/docs-preview.yml'
+    # No paths filter here: the 'closed' event must ALWAYS fire so
+    # pr-preview-action can remove the deployed preview. A paths-filter step
+    # inside the job (below) skips the build/deploy for non-docs PRs. Without
+    # this, closed PRs never clean up and gh-pages bloats until GitHub Pages
+    # exceeds its build limits and starts failing.
+    types: [opened, reopened, synchronize, closed]
 
 permissions:
   contents: write
@@ -40,32 +39,77 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Detect whether this PR actually touches docs. Skipped on 'closed' (and
+      # on push), where the gate below decides what to do without a diff.
+      - name: Check for docs changes
+        id: filter
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            docs:
+              - 'docs/**'
+              - 'src/**'
+              - 'script/generate-command-docs.ts'
+              - 'script/generate-skill.ts'
+              - 'install'
+              - '.github/workflows/docs-preview.yml'
+
+      # Central gate. `build` = produce the site (push, or a docs PR being
+      # opened/updated). `deploy` = publish/remove on gh-pages (build, or any
+      # 'closed' event to clean up), but never for fork PRs which lack write
+      # access. Fork PRs still build to surface compilation errors.
+      - name: Compute gates
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          DOCS_CHANGED: ${{ steps.filter.outputs.docs }}
+          IS_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          build=false
+          deploy=false
+          if [ "$EVENT" = "push" ] || { [ "$ACTION" != "closed" ] && [ "$DOCS_CHANGED" = "true" ]; }; then
+            build=true
+          fi
+          if { [ "$build" = "true" ] || [ "$ACTION" = "closed" ]; } && [ "$IS_FORK" != "true" ]; then
+            deploy=true
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
+
       - uses: pnpm/action-setup@v4
+        if: steps.gate.outputs.build == 'true'
 
       # Astro 6 requires Node >= 22.12. Pin an exact patched version (see
       # NODE_VERSION_24) so the docs build doesn't rely on the runner image's
       # default.
       - uses: actions/setup-node@v6
+        if: steps.gate.outputs.build == 'true'
         with:
           node-version: ${{ env.NODE_VERSION_24 }}
 
       - uses: actions/cache@v5
         id: cache
+        if: steps.gate.outputs.build == 'true'
         with:
           path: node_modules
           key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
 
-      - if: steps.cache.outputs.cache-hit != 'true'
+      - if: steps.gate.outputs.build == 'true' && steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Get CLI version
         id: version
+        if: steps.gate.outputs.build == 'true'
         run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
 
       - name: Generate docs content
+        if: steps.gate.outputs.build == 'true'
         run: pnpm run generate:schema && pnpm run generate:docs
 
       - name: Build Docs for Preview
+        if: steps.gate.outputs.build == 'true'
         working-directory: docs
         env:
           DOCS_BASE_PATH: ${{ github.event_name == 'push'
@@ -79,7 +123,7 @@ jobs:
           pnpm run build
 
       - name: Inject debug IDs and upload sourcemaps
-        if: env.SENTRY_AUTH_TOKEN != ''
+        if: steps.gate.outputs.build == 'true' && env.SENTRY_AUTH_TOKEN != ''
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: sentry
@@ -92,13 +136,13 @@ jobs:
 
       # Remove .map files — uploaded to Sentry but shouldn't be deployed.
       - name: Remove sourcemaps from output
+        if: steps.gate.outputs.build == 'true'
         run: find docs/dist -name '*.map' -delete
 
       - name: Ensure .nojekyll at gh-pages root
-        # Fork PRs can't push to the base repo (GITHUB_TOKEN is read-only on
-        # pull_request from forks). Skip the deploy but still run the build
-        # above so docs compilation errors surface.
-        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
+        # Runs whenever we deploy (build or a 'closed' cleanup), but never for
+        # fork PRs which lack write access to the base repo's gh-pages branch.
+        if: steps.gate.outputs.deploy == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -130,8 +174,10 @@ jobs:
           fi
 
       - name: Deploy Preview
-        # Same fork-PR guard as the .nojekyll step above.
-        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
+        # Deploys on build; on a 'closed' event `auto` removes the preview
+        # instead — this is what keeps gh-pages from accumulating stale
+        # previews. Skipped for fork PRs (no write access).
+        if: steps.gate.outputs.deploy == 'true'
         uses: rossjrw/pr-preview-action@v1
         with:
           source-dir: docs/dist/
