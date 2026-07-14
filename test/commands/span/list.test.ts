@@ -287,6 +287,28 @@ describe("listCommand.func (trace mode)", () => {
     );
   });
 
+  test("converts a search-query parse 400 to a ValidationError when --query is set (trace mode)", async () => {
+    listSpansSpy.mockRejectedValue(
+      new ApiError("bad", 400, "Error parsing search query: bad op filter")
+    );
+
+    const { context } = createContext();
+
+    await expect(
+      func.call(
+        context,
+        {
+          limit: 25,
+          query: "op:::db",
+          sort: "date",
+          period: parsePeriod("7d"),
+          fresh: false,
+        },
+        VALID_TRACE_ID
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
   test("uses explicit org/project when target is provided", async () => {
     listSpansSpy.mockResolvedValue({ data: [], nextCursor: undefined });
 

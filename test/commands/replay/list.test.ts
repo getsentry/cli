@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { listCommand, parseSort } from "../../../src/commands/replay/list.js";
+import { ApiError, ValidationError } from "../../../src/lib/errors.js";
 
 vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
   const actual =
@@ -161,6 +162,53 @@ describe("listCommand.func", () => {
     expect(parsed.hasPrev).toBe(false);
     expect(parsed.nextCursor).toBe("0:25:0");
     expect(parsed.data[0].id).toBe(sampleReplays[0]?.id);
+  });
+
+  test("converts a search-query parse 400 to a ValidationError when --query is set", async () => {
+    // replay list must wrap listReplays with toSearchQueryError — a bad user
+    // --query is a user mistake, not a reported CLI bug.
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy.mockRejectedValue(
+      new ApiError("bad", 400, "Error parsing search query: bad field")
+    );
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await expect(
+      func.call(
+        context,
+        {
+          limit: 25,
+          json: true,
+          period: parsePeriod("7d"),
+          sort: "-started_at",
+          query: "bad:::query",
+        },
+        "test-org/cli"
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("keeps a search-query parse 400 as a reported ApiError when no --query is set", async () => {
+    resolveTargetSpy.mockResolvedValue({ org: "test-org", project: "cli" });
+    listReplaysSpy.mockRejectedValue(
+      new ApiError("bad", 400, "Error parsing search query: bad field")
+    );
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await expect(
+      func.call(
+        context,
+        {
+          limit: 25,
+          json: true,
+          period: parsePeriod("7d"),
+          sort: "-started_at",
+        },
+        "test-org/cli"
+      )
+    ).rejects.toBeInstanceOf(ApiError);
   });
 
   test("passes replay environment filters through to the API", async () => {

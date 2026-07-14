@@ -1074,6 +1074,27 @@ describe("listCommand.func — follow mode (standard)", () => {
     expect(output).toContain("Request received");
   });
 
+  test("converts a bad --query 400 to a ValidationError in follow mode", async () => {
+    // The follow-mode fetch closure wraps listLogs with toSearchQueryError, so
+    // a bad user --query surfaces as a ValidationError on the initial fetch and
+    // terminates the stream instead of being reported as a CLI bug.
+    listLogsSpy.mockRejectedValueOnce(
+      new ApiError("bad", 400, "Error parsing search query: bad field")
+    );
+    resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+
+    await expect(
+      func.call(
+        context,
+        { ...followFlags, query: "bad:::query" },
+        `${ORG}/${PROJECT}`
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
   test("SIGINT during initial fetch does not start poll loop", async () => {
     // fetchInitial will hang until we resolve it manually
     let resolveFetch!: (logs: typeof sampleLogs) => void;
