@@ -50,6 +50,7 @@ vi.mock("../../../src/lib/db/auth.js", async (importOriginal) => {
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbAuth from "../../../src/lib/db/auth.js";
 import {
+  ApiError,
   AuthError,
   ContextError,
   ValidationError,
@@ -495,6 +496,40 @@ describe("listCommand.func — standard mode", () => {
     });
   });
 
+  test("converts a search-query parse 400 to a ValidationError when --query is set (project single-fetch)", async () => {
+    listLogsSpy.mockRejectedValue(
+      new ApiError("bad", 400, "Error parsing search query: bad field")
+    );
+    resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await expect(
+      func.call(
+        context,
+        { json: false, limit: 50, query: "bad:::query", sort: "newest" },
+        `${ORG}/${PROJECT}`
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("keeps a search-query parse 400 as a reported ApiError with no --query (project single-fetch)", async () => {
+    listLogsSpy.mockRejectedValue(
+      new ApiError("bad", 400, "Error parsing search query: bad field")
+    );
+    resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await expect(
+      func.call(
+        context,
+        { json: false, limit: 50, sort: "newest" },
+        `${ORG}/${PROJECT}`
+      )
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
   test("hasMore is true when results match limit", async () => {
     listLogsSpy.mockResolvedValue(sampleLogs);
     resolveOrgProjectSpy.mockResolvedValue({ org: ORG, project: PROJECT });
@@ -564,6 +599,34 @@ describe("listCommand.func — trace mode", () => {
     expect(parsed).toHaveProperty("hasMore");
     expect(Array.isArray(parsed.data)).toBe(true);
     expect(parsed.data).toHaveLength(3);
+  });
+
+  test("converts a search-query parse 400 to a ValidationError when --query is set (trace single-fetch)", async () => {
+    // executeTraceSingleFetch must wrap listTraceLogs with toSearchQueryError
+    // just like executeSingleFetch does for the project path.
+    listTraceLogsSpy.mockRejectedValue(
+      new ApiError("bad", 400, "Error parsing search query: bad field")
+    );
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await expect(
+      func.call(context, { ...BATCH_FLAGS, query: "bad:::query" }, TRACE_ID)
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("keeps a search-query parse 400 as a reported ApiError with no --query (trace single-fetch)", async () => {
+    listTraceLogsSpy.mockRejectedValue(
+      new ApiError("bad", 400, "Error parsing search query: bad field")
+    );
+    resolveTraceOrgSpy.mockResolvedValue({ traceId: TRACE_ID, org: ORG });
+
+    const { context } = createMockContext();
+    const func = await listCommand.loader();
+    await expect(
+      func.call(context, BATCH_FLAGS, TRACE_ID)
+    ).rejects.toBeInstanceOf(ApiError);
   });
 
   test("outputs JSON in newest-first order by default (trace mode)", async () => {

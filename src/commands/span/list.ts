@@ -475,6 +475,9 @@ async function handleProjectMode(
         cursor,
         ...timeRangeToApiParams(timeRange),
         extraFields: extraApiFields,
+      }).catch((error: unknown): never => {
+        // An unparseable user --query is a user input mistake, not a CLI bug.
+        throw toSearchQueryError(error, flags.query);
       })
   );
 

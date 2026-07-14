@@ -54,6 +54,7 @@ vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
   );
 });
 
+import { ApiError, ValidationError } from "../../../src/lib/errors.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import { parsePeriod } from "../../../src/lib/time-range.js";
@@ -619,6 +620,53 @@ describe("listCommand.func (project mode)", () => {
         query: "span.op:db span.duration:>100ms",
       })
     );
+  });
+
+  test("converts a search-query parse 400 to a ValidationError when --query is set (project mode)", async () => {
+    // Project mode must wrap listSpans with toSearchQueryError just like trace
+    // mode does — a bad user --query is a user mistake, not a reported CLI bug.
+    listSpansSpy.mockRejectedValue(
+      new ApiError("bad", 400, "Error parsing search query: bad op filter")
+    );
+
+    const { context } = createContext();
+
+    await expect(
+      func.call(
+        context,
+        {
+          limit: 25,
+          query: "op:::db",
+          sort: "date",
+          period: parsePeriod("7d"),
+          fresh: false,
+        },
+        "my-org/my-project"
+      )
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  test("keeps a search-query parse 400 as a reported ApiError when no --query is set (project mode)", async () => {
+    // No user --query means the CLI built the bad query — stays a reported
+    // ApiError(400), not reclassified as user input.
+    listSpansSpy.mockRejectedValue(
+      new ApiError("bad", 400, "Error parsing search query: bad op filter")
+    );
+
+    const { context } = createContext();
+
+    await expect(
+      func.call(
+        context,
+        {
+          limit: 25,
+          sort: "date",
+          period: parsePeriod("7d"),
+          fresh: false,
+        },
+        "my-org/my-project"
+      )
+    ).rejects.toBeInstanceOf(ApiError);
   });
 
   test("passes statsPeriod in project mode", async () => {
