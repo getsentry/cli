@@ -15,7 +15,7 @@ import {
   hasPreviousPage,
   resolveCursor,
 } from "../../lib/db/pagination.js";
-import { ContextError } from "../../lib/errors.js";
+import { ContextError, toSearchQueryError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { buildListCommand, paginationHint } from "../../lib/list-command.js";
 import { withProgress } from "../../lib/polling.js";
@@ -155,6 +155,9 @@ export const listCommand = buildListCommand("event", {
           full: flags.full,
           cursor,
           ...timeRangeToApiParams(timeRange),
+        }).catch((error: unknown): never => {
+          // An unparseable user --query is a user input mistake, not a CLI bug.
+          throw toSearchQueryError(error, flags.query);
         })
     );
 

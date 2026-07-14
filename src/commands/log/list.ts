@@ -22,6 +22,7 @@ import {
 import {
   AuthError,
   stringifyUnknown,
+  toSearchQueryError,
   ValidationError,
 } from "../../lib/errors.js";
 import {
@@ -180,6 +181,9 @@ async function executeSingleFetch(
     ...timeRangeToApiParams(timeRange),
     sort: flags.sort,
     extraFields: flags.fields,
+  }).catch((error: unknown): never => {
+    // An unparseable user --query is a user input mistake, not a CLI bug.
+    throw toSearchQueryError(error, flags.query);
   });
 
   const periodLabel =
@@ -317,7 +321,8 @@ function renderLogRows(
  * Execute a single poll iteration in follow mode.
  *
  * Returns the new logs, or `undefined` if a transient error occurred
- * (reported via `onDiagnostic`). Re-throws {@link AuthError}.
+ * (reported via `onDiagnostic`). Re-throws {@link AuthError} and
+ * {@link ValidationError} (a converted bad-`--query` 400).
  */
 async function fetchPoll<T extends LogLike>(
   config: FollowGeneratorConfig<T>,
@@ -328,6 +333,12 @@ async function fetchPoll<T extends LogLike>(
     return config.extractNew(rawLogs, lastTimestamp);
   } catch (error) {
     if (error instanceof AuthError) {
+      throw error;
+    }
+    // A ValidationError here is a converted search-query 400 (bad user
+    // --query). It is a user input mistake, not a transient fetch failure, so
+    // surface it and stop the stream rather than capturing it as a CLI bug.
+    if (error instanceof ValidationError) {
       throw error;
     }
     Sentry.captureException(error);
@@ -485,6 +496,9 @@ async function executeTraceSingleFetch(
     limit: flags.limit,
     ...timeRangeToApiParams(timeRange),
     sort: flags.sort,
+  }).catch((error: unknown): never => {
+    // An unparseable user --query is a user input mistake, not a CLI bug.
+    throw toSearchQueryError(error, flags.query);
   });
 
   const periodLabel =
@@ -825,6 +839,10 @@ export const listCommand = buildListCommand(
                 query: traceQuery,
                 limit: flags.limit,
                 statsPeriod,
+              }).catch((error: unknown): never => {
+                // An unparseable user --query is a user input mistake, not a
+                // CLI bug — surface it as an actionable ValidationError.
+                throw toSearchQueryError(error, flags.query);
               }),
             extractNew: (logs, lastTs) =>
               logs.filter((l) => {
@@ -896,6 +914,10 @@ export const listCommand = buildListCommand(
                 statsPeriod,
                 afterTimestamp,
                 extraFields: flags.fields,
+              }).catch((error: unknown): never => {
+                // An unparseable user --query is a user input mistake, not a
+                // CLI bug — surface it as an actionable ValidationError.
+                throw toSearchQueryError(error, flags.query);
               }),
             extractNew: (logs) => logs,
           });

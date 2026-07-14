@@ -20,6 +20,7 @@ import {
   hasPreviousPage,
   resolveCursor,
 } from "../../lib/db/pagination.js";
+import { toSearchQueryError } from "../../lib/errors.js";
 import {
   type FlatSpan,
   formatSpanTable,
@@ -390,6 +391,9 @@ async function handleTraceMode(
         ...timeRangeToApiParams(timeRange),
         extraFields: extraApiFields,
         allProjects: true,
+      }).catch((error: unknown): never => {
+        // An unparseable user --query is a user input mistake, not a CLI bug.
+        throw toSearchQueryError(error, flags.query);
       })
   );
 
@@ -471,6 +475,9 @@ async function handleProjectMode(
         cursor,
         ...timeRangeToApiParams(timeRange),
         extraFields: extraApiFields,
+      }).catch((error: unknown): never => {
+        // An unparseable user --query is a user input mistake, not a CLI bug.
+        throw toSearchQueryError(error, flags.query);
       })
   );
 

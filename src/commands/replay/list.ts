@@ -17,6 +17,7 @@ import {
   hasPreviousPage,
   resolveCursor,
 } from "../../lib/db/pagination.js";
+import { toSearchQueryError } from "../../lib/errors.js";
 import {
   escapeMarkdownCell,
   formatRelativeTime,
@@ -364,6 +365,9 @@ export const listCommand = buildListCommand("replay", {
           sort: flags.sort,
           cursor,
           ...timeRangeToApiParams(timeRange),
+        }).catch((error: unknown): never => {
+          // An unparseable user --query is a user input mistake, not a CLI bug.
+          throw toSearchQueryError(error, flags.query);
         })
     );
 
