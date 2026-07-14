@@ -15,6 +15,16 @@ Work with debug information files
 
 Inspect a debug information file
 
+### `sentry debug-files find <id...>`
+
+Locate debug files for given debug identifiers
+
+**Flags:**
+- `-t, --type <value>... - Only consider debug files of the given type (repeatable). Default: all`
+- `--no-well-known - Do not look for debug files in well-known locations`
+- `--no-cwd - Do not look for debug files in the current directory`
+- `-p, --path <value>... - Add a directory to search recursively (repeatable)`
+
 ### `sentry debug-files upload <path...>`
 
 Upload debug information files to Sentry
@@ -27,6 +37,7 @@ Upload debug information files to Sentry
 - `--no-unwind - Do not upload files whose only feature is unwind info`
 - `--no-sources - Do not upload files whose only feature is source info`
 - `--include-sources - Build and upload a source bundle for each file with debug info`
+- `--il2cpp-mapping - Compute and upload Unity IL2CPP line mappings for each scanned file`
 - `--derived-data - Also scan Xcode's DerivedData folder (macOS only)`
 - `--no-zips - Do not scan inside .zip archives`
 - `--no-upload - Scan and print what would be uploaded without uploading`
@@ -65,6 +76,11 @@ sentry debug-files check ./app.pdb --json
 sentry debug-files print-sources ./libexample.so
 sentry debug-files print-sources ./app.pdb --json
 
+# Locate debug files for one or more debug identifiers on disk
+sentry debug-files find <debug-id>
+sentry debug-files find <debug-id> --type dsym --path ./build
+sentry debug-files find <debug-id> --no-cwd --no-well-known -p /symbols --json
+
 # Bundle a debug file's referenced source files (run on the build machine)
 sentry debug-files bundle-sources ./libexample.so
 sentry debug-files bundle-sources ./app.pdb --output ./app.src.zip
@@ -89,6 +105,10 @@ sentry debug-files upload ./build --no-zips
 # Restrict by type or debug id, and wait for server-side processing
 sentry debug-files upload ./dsyms --type dsym --wait
 sentry debug-files upload ./build --id <debug-id> --require-all
+
+# Unity: upload IL2CPP line mappings (optionally with referenced C# sources)
+sentry debug-files upload ./build --il2cpp-mapping
+sentry debug-files upload ./build --il2cpp-mapping --include-sources
 
 # Preview what would be uploaded without uploading (no credentials needed)
 sentry debug-files upload ./build --no-upload
