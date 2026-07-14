@@ -232,15 +232,23 @@ export async function withTelemetry<T>(
     // optional structured log instead of creating a Sentry issue. (ContextError
     // is intentionally NOT silenced — see classifySilenced.)
     reportCliError(e);
-    // Only mark the session crashed for genuine CLI bugs. This is a stricter
-    // gate than `classifySilenced`: an error can be *captured* to Sentry (not
-    // silenced) yet still be an expected user/environment failure rather than a
-    // crash. `ContextError` (missing org/project) is the motivating case — it is
-    // deliberately un-silenced so its volume stays visible (CLI-3B), but it must
-    // not count as a crashed session or it would skew release-health for the
-    // ~2000 affected users. `isUserError` classifies exactly these user-context
-    // failures (missing/invalid input, expected auth state, user 4xx), so a
-    // session is only crashed when the error is neither silenced nor a user error.
+    // Only mark the session crashed for genuine, unexpected CLI bugs. This is a
+    // stricter gate than `classifySilenced`: an error can be *captured* to
+    // Sentry (not silenced) yet still be an expected user/environment failure
+    // rather than a crash. `ContextError` (missing org/project) is the
+    // motivating case — it is deliberately un-silenced so its volume stays
+    // visible (CLI-3B), but it must not count as a crashed session or it would
+    // skew release-health for the ~2000 affected users.
+    //
+    // `isUserError` gates the crash decision. Besides the specific user-context
+    // subclasses (ContextError, ResolutionError, ValidationError, AuthError,
+    // ConfigError, HostScopeError, user 4xx, network failures), it also returns
+    // true for a bare/unknown `CliError`. That is intentional: a `CliError` is a
+    // deliberately-thrown, message-carrying failure (the CLI decided to stop and
+    // told the user why), not an unexpected crash. Genuine crashes surface as
+    // non-CliError throwables (TypeError, RangeError, plain Error) or as
+    // captured-but-not-user errors (5xx ApiError, TimeoutError, UpgradeError,
+    // CLI-built 400s), all of which still mark the session crashed here.
     if (!(classifySilenced(e) || isUserError(e))) {
       markSessionCrashed();
     }
