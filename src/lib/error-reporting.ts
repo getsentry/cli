@@ -52,7 +52,8 @@ type SilenceReason =
   | "auth_expected"
   | "api_user_error"
   | "api_query_error"
-  | "network_error";
+  | "network_error"
+  | "validation_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -101,6 +102,9 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   // error, and the API already returns an actionable message, so silence it.
   if (error instanceof ApiError && isSearchQueryParseError(error)) {
     return "api_query_error";
+  }
+  if (error instanceof ValidationError) {
+    return "validation_error";
   }
   return null;
 }
