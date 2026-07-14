@@ -59,6 +59,8 @@ const codemod: Codemod<L> = async (root) => {
 
   /** Local names bound to the v3 SentryCli class (default import / require). */
   const bindings = new Set<string>();
+  /** Namespace-import names (`import * as X`) whose `.default` is the v3 class. */
+  const nsBindings = new Set<string>();
   /** Variable names holding an SDK instance (`const cli = new SentryCli()`). */
   const instanceNames = new Set<string>();
 
@@ -105,7 +107,12 @@ const codemod: Codemod<L> = async (root) => {
       ?.children()
       .find((c) => c.kind() === "identifier");
     if (def) bindings.add(def.text());
-    if (nsId) bindings.add(nsId.text());
+    if (nsId) {
+      // Namespace import: the v3 class is the module's default export, so it's
+      // constructed as `new X.default()` (or `new X()` if the module is callable).
+      bindings.add(nsId.text());
+      nsBindings.add(nsId.text());
+    }
     const q = src.text()[0];
     edits.push(replaceNode(src, `${q}sentry${q}`));
   }
@@ -130,12 +137,21 @@ const codemod: Codemod<L> = async (root) => {
   if (bindings.size === 0) return null;
 
   // 2) Collect instance variable names from `new <binding>(...)`.
+  //    Matches `new X(...)` for any binding, plus `new X.default(...)` when X is
+  //    a namespace import (the v3 class is the module's default export).
+  const isCtor = (c: Node | null): boolean => {
+    if (!c) return false;
+    if (bindings.has(c.text())) return true;
+    if (c.kind() === "member_expression") {
+      const obj = c.field("object");
+      const prop = c.field("property");
+      return !!obj && !!prop && prop.text() === "default" && nsBindings.has(obj.text());
+    }
+    return false;
+  };
   const newExprs = rootNode
     .findAll({ rule: { pattern: "new $C($$$A)" } })
-    .filter((n) => {
-      const c = n.field("constructor");
-      return !!c && bindings.has(c.text());
-    });
+    .filter((n) => isCtor(n.field("constructor")));
   for (const ne of newExprs) {
     const p = ne.parent();
     if (p?.kind() === "variable_declarator") {
