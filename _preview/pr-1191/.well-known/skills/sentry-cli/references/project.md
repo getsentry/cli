@@ -11,7 +11,7 @@ requires:
 
 Work with Sentry projects
 
-### `sentry project create <name...>`
+### `sentry project create [<org>/]<name...> <platform>`
 
 Create one or more projects
 
@@ -25,6 +25,12 @@ Create one or more projects
 ```bash
 # Create a new project
 sentry project create my-new-app javascript-nextjs
+
+# Create a project with a multi-word display name
+sentry project create "My New App" javascript-nextjs
+
+# Create several projects
+sentry project create web api worker node
 
 # Create under a specific org and team
 sentry project create my-org/my-new-app python --team backend-team

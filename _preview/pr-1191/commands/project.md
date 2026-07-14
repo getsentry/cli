@@ -12,9 +12,9 @@ Work with Sentry projects
 
 [Section titled “Commands”](#commands)
 
-### `sentry project create <name...>`
+### `sentry project create [<org>/]<name...> <platform>`
 
-[Section titled “sentry project create <name...>”](#sentry-project-create-name)
+[Section titled “sentry project create [<org>/]<name...> <platform>”](#sentry-project-create-orgname-platform)
 
 Create one or more projects
 
@@ -22,7 +22,7 @@ Create one or more projects
 
 | Argument | Description |
 | --- | --- |
-| `<name...>` | Project name(s) (supports org/name syntax). Trailing arg is the platform unless --platform is set. |
+| `<name-or-platform...>` | Project name(s), followed by the required platform unless --platform is set |
 
 **Options:**
 
@@ -136,6 +136,8 @@ Terminal window
 
 ```
 # Create a new projectsentry project create my-new-app javascript-nextjs
+# Create a project with a multi-word display namesentry project create "My New App" javascript-nextjs
+# Create several projectssentry project create web api worker node
 # Create under a specific org and teamsentry project create my-org/my-new-app python --team backend-team
 # Preview without creatingsentry project create my-new-app node --dry-run
 ```
