@@ -4,10 +4,11 @@
  * Provides two things:
  *
  * 1. **Silencing rules** — `OutputError`, network failures (offline/DNS/proxy),
- *    `ContextError` (a required value the user omitted), `AuthError` (expected
- *    auth states the user must act on), 401–499 `ApiError`, and 400 `ApiError`s
- *    that report an unparseable user search query are not sent to Sentry as
- *    issues. A `cli.error.silenced` metric preserves volume + user/org context.
+ *    `ContextError` (a required value the user omitted), `ValidationError` (bad
+ *    user input such as an ambiguous project slug), `AuthError` (expected auth
+ *    states the user must act on), 401–499 `ApiError`, and 400 `ApiError`s that
+ *    report an unparseable user search query are not sent to Sentry as issues.
+ *    A `cli.error.silenced` metric preserves volume + user/org context.
  *
  * 2. **Grouping tags** — enriches every error event with `cli_error.*` tags
  *    that Sentry's server-side fingerprint rules use for stable grouping.
@@ -52,7 +53,8 @@ type SilenceReason =
   | "auth_expected"
   | "api_user_error"
   | "api_query_error"
-  | "network_error";
+  | "network_error"
+  | "validation_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -81,6 +83,12 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   // the volume and which value was missing. (CLI-3B: ~2000 users.)
   if (error instanceof ContextError) {
     return "context_missing";
+  }
+  // ValidationError always means the user supplied invalid input (e.g. an
+  // ambiguous project slug that matches multiple orgs). It is never a CLI
+  // bug — the error message is already actionable — so silence it here.
+  if (error instanceof ValidationError) {
+    return "validation_error";
   }
   // All AuthError reasons are expected auth states the user must act on, not
   // CLI bugs: `not_authenticated` (no token), `expired` (token aged out), and
