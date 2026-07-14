@@ -13,7 +13,7 @@ import {
 } from "../../lib/api-client.js";
 import { spansFlag } from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError, ValidationError } from "../../lib/errors.js";
+import { ContextError, ResolutionError, ValidationError } from "../../lib/errors.js";
 import {
   type FoundSpan,
   findSpanById,
@@ -413,7 +413,7 @@ export const viewCommand = buildCommand({
 
     if (results.length === 0) {
       const idList = formatIdList(spanIds);
-      throw new ValidationError(
+      throw new ResolutionError(
         spanIds.length === 1
           ? `No span found with ID "${spanIds[0]}" in trace ${traceId}.`
           : `No spans found with any of the following IDs in trace ${traceId}:\n${idList}`
