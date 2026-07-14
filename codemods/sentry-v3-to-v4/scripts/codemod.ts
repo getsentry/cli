@@ -204,16 +204,17 @@ const codemod: Codemod<L> = async (root) => {
           }
         }
       }
-      // v3 SentryCliOptions had several keys with no direct v4 equivalent.
-      // Flag them so auth-critical ones (apiKey) aren't silently dropped.
+      // v3 SentryCliOptions keys with no direct v4 `SentryOptions` equivalent.
+      // (`token`/`url`/`org`/`project` ARE first-class v4 options, so they're
+      // fine as-is; only flag the ones that need attention.)
       const unmapped = keys.filter((k) =>
-        ["apiKey", "url", "dsn", "silent", "customHeader", "headers", "org", "project", "vcsRemote"].includes(k)
+        ["apiKey", "dsn", "silent", "customHeader", "headers", "vcsRemote"].includes(k)
       );
       if (unmapped.length) {
         edits.push(
           todo(
             ne,
-            `verify these v3 options — they have no direct v4 SDK equivalent: ${unmapped.join(", ")} (e.g. apiKey → use \`token\`; url/dsn/org/project → SENTRY_* env vars; silent/customHeader/vcsRemote were dropped)`
+            `verify these v3 options — they have no direct v4 SentryOptions equivalent: ${unmapped.join(", ")} (apiKey → rename to \`token\`; dsn → use SENTRY_DSN env; silent/customHeader/headers/vcsRemote were dropped)`
           )
         );
       }
