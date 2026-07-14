@@ -292,6 +292,21 @@ describe("withTelemetry", () => {
     test("captures ContextError so its volume stays visible (CLI-3B)", async () => {
       const captureSpy = vi.spyOn(Sentry, "captureException");
       const metricSpy = vi.spyOn(Sentry.metrics, "distribution");
+      // Seed an OK session so we can assert the crash decision. ContextError is
+      // captured (see below) but is an expected user-context failure, not a CLI
+      // crash — marking it crashed would skew release-health for the ~2000
+      // affected users, so the session must stay "ok".
+      const session = { status: "ok", errors: 0 };
+      const isolationScopeSpy = vi
+        .spyOn(Sentry, "getIsolationScope")
+        .mockReturnValue({
+          getSession: () => session,
+        } as unknown as Sentry.Scope);
+      const currentScopeSpy = vi
+        .spyOn(Sentry, "getCurrentScope")
+        .mockReturnValue({
+          getSession: () => null,
+        } as unknown as Sentry.Scope);
       const { ContextError } = await import("../../src/lib/errors.js");
       const error = new ContextError(
         "Organization and project",
@@ -309,8 +324,37 @@ describe("withTelemetry", () => {
         (c) => c[0] === "cli.error.silenced"
       );
       expect(silencedCall).toBeUndefined();
+      // ...but the session must NOT be marked crashed.
+      expect(session.status).toBe("ok");
       captureSpy.mockRestore();
       metricSpy.mockRestore();
+      isolationScopeSpy.mockRestore();
+      currentScopeSpy.mockRestore();
+    });
+
+    test("marks session crashed for a genuine CLI bug", async () => {
+      // A generic Error is neither silenced nor a user error, so the session
+      // should be marked crashed (the counterpart to the ContextError case).
+      const session = { status: "ok", errors: 0 };
+      const isolationScopeSpy = vi
+        .spyOn(Sentry, "getIsolationScope")
+        .mockReturnValue({
+          getSession: () => session,
+        } as unknown as Sentry.Scope);
+      const currentScopeSpy = vi
+        .spyOn(Sentry, "getCurrentScope")
+        .mockReturnValue({
+          getSession: () => null,
+        } as unknown as Sentry.Scope);
+      const error = new Error("unexpected bug");
+      await expect(
+        withTelemetry(() => {
+          throw error;
+        })
+      ).rejects.toThrow(error);
+      expect(session.status).toBe("crashed");
+      isolationScopeSpy.mockRestore();
+      currentScopeSpy.mockRestore();
     });
   });
 });

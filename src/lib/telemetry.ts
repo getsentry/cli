@@ -37,7 +37,7 @@ import {
   enrichEventWithGroupingTags,
   reportCliError,
 } from "./error-reporting.js";
-import { ApiError } from "./errors.js";
+import { ApiError, isUserError } from "./errors.js";
 import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 import { makeCompressedTransport } from "./telemetry/zstd-transport.js";
@@ -232,10 +232,16 @@ export async function withTelemetry<T>(
     // optional structured log instead of creating a Sentry issue. (ContextError
     // is intentionally NOT silenced — see classifySilenced.)
     reportCliError(e);
-    // Only mark session crashed for errors that weren't silenced.
-    // Silenced errors (OutputError, expected AuthError, user 4xx ApiError) are
-    // expected states — marking them crashed would skew release-health.
-    if (!classifySilenced(e)) {
+    // Only mark the session crashed for genuine CLI bugs. This is a stricter
+    // gate than `classifySilenced`: an error can be *captured* to Sentry (not
+    // silenced) yet still be an expected user/environment failure rather than a
+    // crash. `ContextError` (missing org/project) is the motivating case — it is
+    // deliberately un-silenced so its volume stays visible (CLI-3B), but it must
+    // not count as a crashed session or it would skew release-health for the
+    // ~2000 affected users. `isUserError` classifies exactly these user-context
+    // failures (missing/invalid input, expected auth state, user 4xx), so a
+    // session is only crashed when the error is neither silenced nor a user error.
+    if (!(classifySilenced(e) || isUserError(e))) {
       markSessionCrashed();
     }
     throw e;
