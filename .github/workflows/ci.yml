@@ -61,24 +61,24 @@ jobs:
         with:
           filters: |
             skill:
-              - 'src/**'
-              - 'docs/**'
-              - 'package.json'
-              - 'README.md'
-              - 'DEVELOPMENT.md'
-              - 'script/generate-skill.ts'
-              - 'script/generate-command-docs.ts'
-              - 'script/generate-docs-sections.ts'
-              - 'script/eval-skill.ts'
-              - 'test/skill-eval/**'
+              - 'packages/cli/src/**'
+              - 'apps/cli-docs/**'
+              - 'packages/cli/package.json'
+              - 'packages/cli/README.md'
+              - 'packages/cli/DEVELOPMENT.md'
+              - 'packages/cli/script/generate-skill.ts'
+              - 'packages/cli/script/generate-command-docs.ts'
+              - 'packages/cli/script/generate-docs-sections.ts'
+              - 'packages/cli/script/eval-skill.ts'
+              - 'packages/cli/test/skill-eval/**'
             code:
-              - 'src/**'
-              - 'test/**'
-              - 'script/**'
-              - 'patches/**'
-              - 'docs/**'
-              - 'plugins/**'
-              - 'package.json'
+              - 'packages/cli/src/**'
+              - 'packages/cli/test/**'
+              - 'packages/cli/script/**'
+              - 'packages/cli/patches/**'
+              - 'apps/cli-docs/**'
+              - 'packages/cli/plugins/**'
+              - 'packages/cli/package.json'
               - 'pnpm-lock.yaml'
               - '.github/workflows/ci.yml'
             codemod:
@@ -113,7 +113,7 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           TS=$(date -d "$COMMIT_TIMESTAMP" +%s)
-          CURRENT=$(jq -r .version package.json)
+          CURRENT=$(jq -r .version packages/cli/package.json)
           VERSION=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Nightly version: ${VERSION}"
@@ -163,8 +163,11 @@ jobs:
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Generate API Schema
@@ -218,8 +221,11 @@ jobs:
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - run: pnpm run generate:schema
@@ -249,8 +255,11 @@ jobs:
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Generate API Schema
@@ -284,8 +293,11 @@ jobs:
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ matrix.os }}-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ matrix.os }}-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         shell: bash
@@ -331,8 +343,8 @@ jobs:
         if: needs.changes.outputs.nightly-version != ''
         shell: bash
         run: |
-          jq --arg v "${{ needs.changes.outputs.nightly-version }}" '.version = $v' package.json > package.json.tmp
-          mv package.json.tmp package.json
+          jq --arg v "${{ needs.changes.outputs.nightly-version }}" '.version = $v' packages/cli/package.json > packages/cli/package.json.tmp
+          mv packages/cli/package.json.tmp packages/cli/package.json
       - name: Build
         env:
           # Environment-scoped (production) — must be set at step level to
@@ -351,9 +363,9 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-            ./dist-bin/sentry-windows-x64.exe --help
+            ./packages/cli/dist-bin/sentry-windows-x64.exe --help
           else
-            ./dist-bin/sentry-${{ matrix.target }} --help
+            ./packages/cli/dist-bin/sentry-${{ matrix.target }} --help
           fi
       - name: Smoke test (deep — SQLite, telemetry, auth DB)
         if: matrix.can-test
@@ -363,9 +375,9 @@ jobs:
           SENTRY_TOKEN: ""
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-            BIN=./dist-bin/sentry-windows-x64.exe
+            BIN=./packages/cli/dist-bin/sentry-windows-x64.exe
           else
-            BIN=./dist-bin/sentry-${{ matrix.target }}
+            BIN=./packages/cli/dist-bin/sentry-${{ matrix.target }}
           fi
           # auth status without a token exercises SQLite init, schema
           # migrations, telemetry lazy import, and the CJS require chain.
@@ -391,7 +403,7 @@ jobs:
           (github.ref_name == 'main' || startsWith(github.ref_name, 'release/'))
         shell: bash
         run: |
-          BIN=./dist-bin/sentry-${{ matrix.target }}
+          BIN=./packages/cli/dist-bin/sentry-${{ matrix.target }}
           echo "Verifying code signature on $BIN..."
           rcodesign verify "$BIN"
       - name: Upload binary artifact
@@ -399,15 +411,15 @@ jobs:
         with:
           name: sentry-${{ matrix.target }}
           path: |
-            dist-bin/sentry-*
-            !dist-bin/*.gz
+            packages/cli/dist-bin/sentry-*
+            !packages/cli/dist-bin/*.gz
 
       - name: Upload compressed artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: sentry-${{ matrix.target }}-gz
-          path: dist-bin/*.gz
+          path: packages/cli/dist-bin/*.gz
 
   generate-patches:
     name: Generate Delta Patches
@@ -748,8 +760,11 @@ jobs:
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Download Linux binary
@@ -790,8 +805,11 @@ jobs:
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Bundle
@@ -800,7 +818,7 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: pnpm run bundle
       - name: Smoke test (Node.js)
-        run: node dist/bin.cjs --help
+        run: node packages/cli/dist/bin.cjs --help
       - name: Smoke test (Node.js — deep)
         shell: bash
         env:
@@ -810,7 +828,7 @@ jobs:
           # auth status without a token exercises SQLite init, schema
           # migrations, telemetry lazy import, and the CJS require chain.
           # Expected: exit 10 (AUTH_NOT_AUTHENTICATED), NOT a crash/syntax error.
-          OUTPUT=$(node dist/bin.cjs auth status 2>&1) && EXIT_CODE=$? || EXIT_CODE=$?
+          OUTPUT=$(node packages/cli/dist/bin.cjs auth status 2>&1) && EXIT_CODE=$? || EXIT_CODE=$?
           if [[ $EXIT_CODE -ne 10 ]]; then
             echo "::error::Expected exit code 10 (not authenticated), got $EXIT_CODE"
             echo "$OUTPUT"
@@ -822,12 +840,13 @@ jobs:
             exit 1
           fi
       - run: npm pack
+        working-directory: packages/cli
       - name: Upload artifact
         if: matrix.node == '22'
         uses: actions/upload-artifact@v7
         with:
           name: npm-package
-          path: "*.tgz"
+          path: "packages/cli/*.tgz"
 
   build-docs:
     name: Build Docs
@@ -853,13 +872,16 @@ jobs:
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Get CLI version
         id: version
-        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(node -p 'require("./packages/cli/package.json").version')" >> "$GITHUB_OUTPUT"
       - name: Download compiled CLI binary
         uses: actions/download-artifact@v8
         with:
@@ -870,7 +892,7 @@ jobs:
       - name: Generate docs content
         run: pnpm run generate:schema && pnpm run generate:docs
       - name: Build Docs
-        working-directory: docs
+        working-directory: apps/cli-docs
         env:
           PUBLIC_SENTRY_ENVIRONMENT: production
           SENTRY_RELEASE: ${{ steps.version.outputs.version }}
@@ -887,18 +909,18 @@ jobs:
           SENTRY_ORG: sentry
           SENTRY_PROJECT: cli-website
         run: |
-          ./dist-bin/sentry-linux-x64 sourcemap inject docs/dist/
-          ./dist-bin/sentry-linux-x64 sourcemap upload docs/dist/ \
+          ./dist-bin/sentry-linux-x64 sourcemap inject apps/cli-docs/dist/
+          ./dist-bin/sentry-linux-x64 sourcemap upload apps/cli-docs/dist/ \
             --release "${{ steps.version.outputs.version }}" \
             --url-prefix "~/"
       # Remove .map files — they were uploaded to Sentry but shouldn't
       # be deployed to production.
       - name: Remove sourcemaps from output
-        run: find docs/dist -name '*.map' -delete
+        run: find apps/cli-docs/dist -name '*.map' -delete
       - name: Package Docs
         run: |
-          cp .nojekyll docs/dist/
-          cd docs/dist && zip -r ../../gh-pages.zip .
+          cp .nojekyll apps/cli-docs/dist/
+          cd apps/cli-docs/dist && zip -r "$GITHUB_WORKSPACE/gh-pages.zip" .
       - name: Upload docs artifact
         uses: actions/upload-artifact@v7
         with:

@@ -43,10 +43,59 @@
  */
 
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+
+/**
+ * Read `patchedDependencies` from the workspace-root package.json.
+ *
+ * In the pnpm workspace, pnpm settings (`patchedDependencies`) are a
+ * workspace-root-only concern, so they live in the root package.json (two
+ * levels up from this package), not in this package's own manifest.
+ */
+const ROOT_PKG_PATH = "../../package.json";
+
+/**
+ * Resolve an installed package file to the copy THIS package actually uses.
+ *
+ * With `node-linker=hoisted` in a pnpm workspace, a transitive (unpatched)
+ * copy of a dependency can win the hoist to the workspace-root `node_modules`,
+ * so a naive `node_modules/<pkg>` path may point at the wrong version. Using
+ * `require.resolve` rooted at this package respects pnpm's per-package
+ * resolution and finds the patched copy the `sentry` package links to.
+ *
+ * We resolve the package's MAIN entry (not its `package.json`, which many
+ * packages exclude from their `exports` map) and then derive the package root
+ * by truncating the resolved path at the package-name segment.
+ *
+ * @param subpath - Package subpath, e.g. `@sentry/core/build/cjs/index.js`.
+ * @returns Absolute path to the resolved file, or null if unresolvable.
+ */
+const require_ = createRequire(import.meta.url);
+function resolvePackageFile(subpath: string): string | null {
+  const parts = subpath.split("/");
+  const pkgName = subpath.startsWith("@")
+    ? `${parts[0]}/${parts[1]}`
+    : parts[0];
+  const inner = subpath.slice(pkgName.length + 1);
+  try {
+    // Resolve the package's main entry to locate the exact installed copy.
+    const mainEntry = require_.resolve(pkgName);
+    // Derive the package root: everything up to and including "<pkgName>".
+    const marker = `/${pkgName}/`;
+    const idx = mainEntry.lastIndexOf(marker);
+    if (idx === -1) {
+      return null;
+    }
+    const pkgRoot = mainEntry.slice(0, idx + marker.length - 1);
+    return inner ? `${pkgRoot}/${inner}` : pkgRoot;
+  } catch {
+    return null;
+  }
+}
 
 const pkg: {
   pnpm?: { patchedDependencies?: Record<string, string> };
-} = JSON.parse(await readFile("package.json", "utf-8"));
+} = JSON.parse(await readFile(ROOT_PKG_PATH, "utf-8"));
 
 const patches = pkg.pnpm?.patchedDependencies ?? {};
 const warnings: string[] = [];
@@ -87,8 +136,11 @@ for (const [key, patchPath] of Object.entries(patches)) {
   const patchVersion = versionMatch[1];
 
   // Resolve installed version
-  const pkgJsonPath = `node_modules/${name}/package.json`;
+  const pkgJsonPath = resolvePackageFile(`${name}/package.json`);
   try {
+    if (!pkgJsonPath) {
+      throw new Error("unresolved");
+    }
     const installed: { version: string } = JSON.parse(
       await readFile(pkgJsonPath, "utf-8")
     );
@@ -123,7 +175,7 @@ for (const [key, patchPath] of Object.entries(patches)) {
  * re-export class the patch guards against.
  */
 const CONTENT_ASSERTIONS: ReadonlyArray<{
-  /** Installed file to inspect, relative to repo root. */
+  /** Installed file to inspect, relative to the resolved node_modules dir. */
   file: string;
   /** Stale marker that MUST be absent once the patch is applied. */
   staleMarker: string;
@@ -131,37 +183,37 @@ const CONTENT_ASSERTIONS: ReadonlyArray<{
   description: string;
 }> = [
   {
-    file: "node_modules/@stricli/core/dist/index.js",
+    file: "@stricli/core/dist/index.js",
     staleMarker: 'checkForReservedAliases(aliases, ["h", "H"])',
     description:
       "@stricli/core ESM: -H alias not freed (api -H/--header will crash)",
   },
   {
-    file: "node_modules/@stricli/core/dist/index.cjs",
+    file: "@stricli/core/dist/index.cjs",
     staleMarker: 'checkForReservedAliases(aliases, ["h", "H"])',
     description:
       "@stricli/core CJS: -H alias not freed (api -H/--header will crash)",
   },
   {
-    file: "node_modules/@sentry/core/build/cjs/index.js",
+    file: "@sentry/core/build/cjs/index.js",
     staleMarker: "exports.instrumentOpenAiClient",
     description:
       "@sentry/core CJS: tree-shaking strip not applied (AI integrations re-bundled)",
   },
   {
-    file: "node_modules/@sentry/core/build/esm/index.js",
+    file: "@sentry/core/build/esm/index.js",
     staleMarker: "from './tracing/openai/index.js'",
     description:
       "@sentry/core ESM: tree-shaking strip not applied (AI integrations re-bundled)",
   },
   {
-    file: "node_modules/@sentry/node-core/build/cjs/light/index.js",
+    file: "@sentry/node-core/build/cjs/light/index.js",
     staleMarker: "exports.dedupeIntegration",
     description:
       "@sentry/node-core CJS light: integration re-export strip not applied",
   },
   {
-    file: "node_modules/@sentry/node-core/build/esm/light/index.js",
+    file: "@sentry/node-core/build/esm/light/index.js",
     staleMarker: "dedupeIntegration",
     description:
       "@sentry/node-core ESM light: integration re-export strip not applied",
@@ -169,8 +221,12 @@ const CONTENT_ASSERTIONS: ReadonlyArray<{
 ];
 
 for (const assertion of CONTENT_ASSERTIONS) {
+  const assertionPath = resolvePackageFile(assertion.file);
   try {
-    const contents = await readFile(assertion.file, "utf-8");
+    if (!assertionPath) {
+      throw new Error("unresolved");
+    }
+    const contents = await readFile(assertionPath, "utf-8");
     if (contents.includes(assertion.staleMarker)) {
       errors.push(
         `  ${assertion.description} — patch not applied to ${assertion.file} (regenerate the patch for the current dependency version)`

@@ -17,6 +17,7 @@
 import { mkdirSync, readdirSync } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
 import type { RouteInfo, RouteMap } from "../src/lib/introspect.js";
+import { DOCS_FRAGMENTS } from "./paths.js";
 
 // Ensure skill-content stub exists (see generate-command-docs.ts for rationale)
 const SKILL_CONTENT_PATH = "src/generated/skill-content.ts";
@@ -35,7 +36,7 @@ if (!skillContentExists) {
 const { routes } = await import("../src/app.js");
 const { extractAllRoutes } = await import("../src/lib/introspect.js");
 
-const FRAGMENTS_DIR = "docs/src/fragments/commands";
+const FRAGMENTS_DIR = `${DOCS_FRAGMENTS}/commands`;
 const GENERATED_END_MARKER = "<!-- GENERATED:END -->";
 
 /** Routes that don't have doc pages (and therefore no fragments) */
@@ -109,7 +110,7 @@ for (const file of fragmentFiles) {
 // Check 4: Top-level fragments (non-command generated pages)
 // ---------------------------------------------------------------------------
 
-const TOP_LEVEL_FRAGMENTS_DIR = "docs/src/fragments";
+const TOP_LEVEL_FRAGMENTS_DIR = DOCS_FRAGMENTS;
 
 /** Top-level fragment files that must exist (for generated doc pages) */
 const REQUIRED_TOP_LEVEL_FRAGMENTS = ["configuration"];

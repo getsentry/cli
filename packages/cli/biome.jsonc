@@ -1,6 +1,14 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "extends": ["ultracite/core"],
+  // The workspace .gitignore lives at the monorepo root (two levels up from this
+  // package). Point Biome's VCS integration there so `useIgnoreFile` resolves it.
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "root": "../.."
+  },
   "plugins": [
     "./lint-rules/no-stdout-write-in-commands.grit",
     "./lint-rules/no-process-stdout-in-commands.grit",

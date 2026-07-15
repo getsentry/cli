@@ -54,8 +54,11 @@ jobs:
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
 

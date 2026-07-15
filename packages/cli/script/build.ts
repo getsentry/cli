@@ -30,7 +30,7 @@
 import { execSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { build as esbuild } from "esbuild";
@@ -314,7 +314,21 @@ async function compileAllTargets(
   // Embed the DIF parser WASM (from @sentry/symbolic) as a SEA asset. The
   // runtime loads it via node:sea.getRawAsset(DIF_WASM_ASSET_KEY) — the asset
   // key MUST equal this path string (see src/lib/dif/index.ts).
-  const DIF_WASM_SRC = "node_modules/@sentry/symbolic/symbolic_bg.wasm";
+  //
+  // Resolve via Node module resolution rather than a hardcoded
+  // node_modules path: in the pnpm workspace, @sentry/symbolic is hoisted to
+  // the workspace-root node_modules, not this package's, so a package-relative
+  // literal path would not find it.
+  let DIF_WASM_SRC: string;
+  try {
+    DIF_WASM_SRC = createRequire(import.meta.url).resolve(
+      "@sentry/symbolic/symbolic_bg.wasm"
+    );
+  } catch {
+    throw new Error(
+      "Missing @sentry/symbolic WASM (@sentry/symbolic/symbolic_bg.wasm). Run: pnpm install"
+    );
+  }
   if (!existsSync(DIF_WASM_SRC)) {
     throw new Error(
       `Missing @sentry/symbolic WASM at ${DIF_WASM_SRC}. Run: pnpm install`
@@ -328,7 +342,10 @@ async function compileAllTargets(
     `  Step 2: Compiling ${platforms.length} target(s) (Node SEA via fossilize)...`
   );
 
-  const fossilizeBin = join("node_modules", ".bin", "fossilize");
+  // Invoke fossilize via `pnpm exec` so it resolves from the workspace bin
+  // regardless of whether it's hoisted to the workspace-root node_modules (the
+  // pnpm workspace hoists it there, not into this package's node_modules).
+  const fossilizeBin = "pnpm exec fossilize";
 
   try {
     execSync(

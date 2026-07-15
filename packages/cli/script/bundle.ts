@@ -1,5 +1,6 @@
 #!/usr/bin/env tsx
 import { copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { build, type Plugin } from "esbuild";
 import pkg from "../package.json";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
@@ -305,7 +306,9 @@ console.log("  -> dist/index.d.cts (type declarations)");
 // which resolves relative to dist/index.cjs (see src/lib/dif/index.ts).
 await mkdir("./dist/vendor", { recursive: true });
 await copyFile(
-  "./node_modules/@sentry/symbolic/symbolic_bg.wasm",
+  // Resolve via module resolution: in the pnpm workspace @sentry/symbolic is
+  // hoisted to the workspace-root node_modules, not this package's.
+  createRequire(import.meta.url).resolve("@sentry/symbolic/symbolic_bg.wasm"),
   "./dist/vendor/symbolic_bg.wasm"
 );
 console.log("  -> dist/vendor/symbolic_bg.wasm (DIF parser)");

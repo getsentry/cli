@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docs/**'
-      - 'src/**'
-      - 'script/generate-command-docs.ts'
-      - 'script/generate-skill.ts'
-      - 'install'
+      - 'apps/cli-docs/**'
+      - 'packages/cli/src/**'
+      - 'packages/cli/script/generate-command-docs.ts'
+      - 'packages/cli/script/generate-skill.ts'
+      - 'packages/cli/install'
       - '.github/workflows/docs-preview.yml'
   pull_request:
     # No paths filter here: the 'closed' event must ALWAYS fire so
@@ -48,11 +48,11 @@ jobs:
         with:
           filters: |
             docs:
-              - 'docs/**'
-              - 'src/**'
-              - 'script/generate-command-docs.ts'
-              - 'script/generate-skill.ts'
-              - 'install'
+              - 'apps/cli-docs/**'
+              - 'packages/cli/src/**'
+              - 'packages/cli/script/generate-command-docs.ts'
+              - 'packages/cli/script/generate-skill.ts'
+              - 'packages/cli/install'
               - '.github/workflows/docs-preview.yml'
 
       # Central gate. `build` = produce the site (push, or a docs PR being
@@ -93,8 +93,11 @@ jobs:
         id: cache
         if: steps.gate.outputs.build == 'true'
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
 
       - if: steps.gate.outputs.build == 'true' && steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
@@ -102,7 +105,7 @@ jobs:
       - name: Get CLI version
         id: version
         if: steps.gate.outputs.build == 'true'
-        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(node -p 'require("./packages/cli/package.json").version')" >> "$GITHUB_OUTPUT"
 
       - name: Generate docs content
         if: steps.gate.outputs.build == 'true'
@@ -110,7 +113,7 @@ jobs:
 
       - name: Build Docs for Preview
         if: steps.gate.outputs.build == 'true'
-        working-directory: docs
+        working-directory: apps/cli-docs
         env:
           DOCS_BASE_PATH: ${{ github.event_name == 'push'
             && '/_preview/pr-main'
@@ -129,15 +132,15 @@ jobs:
           SENTRY_ORG: sentry
           SENTRY_PROJECT: cli-website
         run: |
-          pnpm run cli sourcemap inject docs/dist/
-          pnpm run cli sourcemap upload docs/dist/ \
+          pnpm run cli sourcemap inject "$GITHUB_WORKSPACE/apps/cli-docs/dist/"
+          pnpm run cli sourcemap upload "$GITHUB_WORKSPACE/apps/cli-docs/dist/" \
             --release "${{ steps.version.outputs.version }}" \
             --url-prefix "~/"
 
       # Remove .map files — uploaded to Sentry but shouldn't be deployed.
       - name: Remove sourcemaps from output
         if: steps.gate.outputs.build == 'true'
-        run: find docs/dist -name '*.map' -delete
+        run: find apps/cli-docs/dist -name '*.map' -delete
 
       - name: Ensure .nojekyll at gh-pages root
         # Runs whenever we deploy (build or a 'closed' cleanup), but never for
@@ -180,7 +183,7 @@ jobs:
         if: steps.gate.outputs.deploy == 'true'
         uses: rossjrw/pr-preview-action@v1
         with:
-          source-dir: docs/dist/
+          source-dir: apps/cli-docs/dist/
           preview-branch: gh-pages
           umbrella-dir: _preview
           pages-base-url: cli.sentry.dev
