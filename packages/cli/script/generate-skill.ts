@@ -23,6 +23,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
 import type { Token } from "marked";
 import { marked } from "marked";
+import { DOCS_CONTENT, DOCS_PUBLIC } from "./paths.js";
 
 // Bootstrap: ensure the generated skill-content module exists before
 // importing the route tree (app.ts → agent-skills.ts → skill-content.ts).
@@ -58,8 +59,8 @@ import {
 const SKILL_DIR = "plugins/sentry-cli/skills/sentry-cli";
 const OUTPUT_PATH = `${SKILL_DIR}/SKILL.md`;
 const REFERENCES_DIR = `${SKILL_DIR}/references`;
-const INDEX_JSON_PATH = "docs/public/.well-known/skills/index.json";
-const DOCS_PATH = "docs/src/content/docs";
+const INDEX_JSON_PATH = `${DOCS_PUBLIC}/.well-known/skills/index.json`;
+const DOCS_PATH = DOCS_CONTENT;
 
 /** Read version from package.json for YAML frontmatter */
 async function getPackageVersion(): Promise<string> {

@@ -25,6 +25,7 @@
 
 import { mkdirSync, rmSync } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
+import { DOCS_CONTENT, DOCS_FRAGMENTS } from "./paths.js";
 
 // Ensure src/generated/skill-content.ts exists before importing the route tree.
 // The route tree transitively imports agent-skills.ts → skill-content.ts, which
@@ -57,10 +58,10 @@ const { routes } = await import("../src/app.js");
 const { extractAllRoutes } = await import("../src/lib/introspect.js");
 const { ENV_VAR_REGISTRY } = await import("../src/lib/env-registry.js");
 
-const DOCS_DIR = "docs/src/content/docs/commands";
-const DOCS_CONTENT_DIR = "docs/src/content/docs";
-const FRAGMENTS_DIR = "docs/src/fragments/commands";
-const FRAGMENTS_ROOT = "docs/src/fragments";
+const DOCS_DIR = `${DOCS_CONTENT}/commands`;
+const DOCS_CONTENT_DIR = DOCS_CONTENT;
+const FRAGMENTS_DIR = `${DOCS_FRAGMENTS}/commands`;
+const FRAGMENTS_ROOT = DOCS_FRAGMENTS;
 const INDEX_PATH = `${DOCS_DIR}/index.md`;
 const CONFIG_PATH = `${DOCS_CONTENT_DIR}/configuration.md`;
 
