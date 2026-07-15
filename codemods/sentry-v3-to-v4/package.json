@@ -1,0 +1,15 @@
+{
+  "name": "sentry-v3-to-v4",
+  "version": "0.1.0",
+  "description": "Migrate @sentry/cli v3 SDK usage to the v4 sentry package",
+  "packageManager": "pnpm@10.x",
+  "type": "module",
+  "scripts": {
+    "test": "pnpm dlx codemod@1.12.7 jssg test -l typescript ./scripts/codemod.ts",
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@codemod.com/jssg-types": "latest",
+    "typescript": "latest"
+  }
+}

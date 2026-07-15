@@ -51,6 +51,7 @@ jobs:
     outputs:
       skill: ${{ steps.filter.outputs.skill == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
       code: ${{ steps.filter.outputs.code == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
+      codemod: ${{ steps.filter.outputs.codemod == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
       build-targets: ${{ steps.targets.outputs.matrix }}
       nightly-version: ${{ steps.nightly.outputs.version }}
     steps:
@@ -79,6 +80,9 @@ jobs:
               - 'plugins/**'
               - 'package.json'
               - 'pnpm-lock.yaml'
+              - '.github/workflows/ci.yml'
+            codemod:
+              - 'codemods/**'
               - '.github/workflows/ci.yml'
       - name: Compute build matrix
         id: targets
@@ -113,6 +117,22 @@ jobs:
           VERSION=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Nightly version: ${VERSION}"
+
+  codemod-test:
+    name: Codemod tests
+    needs: [changes]
+    if: needs.changes.outputs.codemod == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION_22 }}
+      # jssg fixtures live under codemods/sentry-v3-to-v4/tests/<case>/. The
+      # codemod CLI is pinned for reproducible runs (bump deliberately).
+      - name: Run jssg codemod tests
+        working-directory: codemods/sentry-v3-to-v4
+        run: npx codemod@1.12.7 jssg test -l typescript ./scripts/codemod.ts
 
   check-generated:
     name: Validate generated files
@@ -888,7 +908,7 @@ jobs:
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-generated, build-binary, build-npm, build-docs, test-e2e, generate-patches]
+    needs: [changes, check-generated, build-binary, build-npm, build-docs, test-e2e, generate-patches, codemod-test]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -897,7 +917,7 @@ jobs:
           # Check for explicit failures or cancellations in all jobs
           # generate-patches is skipped on PRs — that's expected
           # publish-nightly is excluded: it's infrastructure (GHCR push), not code quality
-          results="${{ needs.check-generated.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.generate-patches.result }}"
+          results="${{ needs.check-generated.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.generate-patches.result }} ${{ needs.codemod-test.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "::error::CI failed"
@@ -913,6 +933,10 @@ jobs:
           fi
           if [[ "${{ needs.changes.outputs.skill }}" == "true" && "${{ needs.check-generated.result }}" == "skipped" ]]; then
             echo "::error::CI failed - upstream job failed causing check-generated to be skipped"
+            exit 1
+          fi
+          if [[ "${{ needs.changes.outputs.codemod }}" == "true" && "${{ needs.codemod-test.result }}" == "skipped" ]]; then
+            echo "::error::CI failed - upstream job failed causing codemod-test to be skipped"
             exit 1
           fi
           echo "CI passed"

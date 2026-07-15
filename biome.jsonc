@@ -18,6 +18,13 @@
       "!docs",
       "!test/init-eval/templates",
       "!dist-build",
+      // The codemod package is a self-contained Codemod (jssg) project with
+      // its own tooling/tests (`codemods/sentry-v3-to-v4`); it uses the
+      // `codemod:ast-grep` runtime import and intentionally "bad" v3 fixtures,
+      // so it must not be linted/formatted by the repo's Biome config.
+      "!codemods",
+      // custom-ca.ts blows past Biome's type-analysis limit when pulled into
+      // the module graph (internal Biome bug); force-ignore even via a test.
       "!!src/lib/custom-ca.ts"
     ]
   },

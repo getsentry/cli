@@ -230,6 +230,7 @@ export default defineConfig({
           items: [
             { label: "Introduction", slug: "" },
             { label: "Installation", slug: "getting-started" },
+            { label: "Migrating from v3", slug: "migrating-from-v3" },
             { label: "Self-Hosted", slug: "self-hosted" },
             { label: "Configuration", slug: "configuration" },
             { label: "Library Usage", slug: "library-usage" },
