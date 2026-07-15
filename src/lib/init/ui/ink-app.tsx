@@ -625,13 +625,15 @@ function IntroScreen({
     bannerRows.length === 0 || bannerLinesWidth(bannerRows) <= bodyWidth
       ? bannerRows
       : bannerLinesForWidth(bodyWidth);
+  // Center the banner as one unit; centering rows separately shifts shorter rows.
+  const bannerWidth = bannerLinesWidth(banner);
 
   return (
     <Box alignItems="center" flexDirection="column" width={bodyWidth}>
       <Box
-        alignItems="center"
         flexDirection="column"
         marginBottom={welcomePrompt ? 2 : 1}
+        width={bannerWidth}
       >
         {banner.map((row, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: positional banner rows
