@@ -15,6 +15,10 @@ import { render } from "ink";
 import { createElement } from "react";
 import { describe, expect, test } from "vitest";
 import {
+  bannerLinesWidth,
+  FULL_BANNER_LINES,
+} from "../../../../src/lib/banner.js";
+import {
   App,
   formatFeedbackBanner,
 } from "../../../../src/lib/init/ui/ink-app.js";
@@ -305,6 +309,31 @@ describe("Ink App snapshot", () => {
     expect(frame).not.toMatch(FILES_TAB_RE);
     expect(frame).toContain(FEEDBACK_BANNER_TEXT);
     expect(hasForcedWhiteForeground(withoutFeedbackBanner(frame))).toBe(false);
+  });
+
+  test("welcome banner preserves row alignment while centering the art", async () => {
+    const store = new WizardStore({ bannerRows: FULL_BANNER_LINES });
+    setWelcomePrompt(store);
+
+    const terminalColumns = 120;
+    const frame = stripAnsi(
+      (await renderApp(store, terminalColumns)).allOutput()
+    );
+    const lines = frame.split(LINE_SPLIT_RE);
+    const bannerOrigin = Math.floor(
+      (terminalColumns - bannerLinesWidth(FULL_BANNER_LINES)) / 2
+    );
+
+    for (const { content } of FULL_BANNER_LINES) {
+      const visibleContent = content.trimStart();
+      const leadingSpaces = content.length - visibleContent.length;
+      const renderedRow = lines.find((line) => line.includes(visibleContent));
+
+      expect(renderedRow).toBeDefined();
+      expect(renderedRow?.indexOf(visibleContent)).toBe(
+        bannerOrigin + leadingSpaces
+      );
+    }
   });
 
   test("intro banner shrinks to fit narrow terminals (never wraps)", async () => {
