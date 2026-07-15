@@ -55,7 +55,7 @@ import {
   WORKFLOW_CREATE_RUN_ENDPOINT,
   WORKFLOW_RESUME_ASYNC_ENDPOINT,
   WORKFLOW_START_ASYNC_ENDPOINT,
-  withInitServiceAuthClassification,
+  withInitServiceAuthRetry,
 } from "./init-service-auth.js";
 import { handleInteractive } from "./interactive.js";
 import { resolveInitContext } from "./preflight.js";
@@ -614,6 +614,20 @@ type ResumeRetryArgs = {
   progressRotation?: ProgressRotationHandle;
 };
 
+function reportInitServiceAuthRetry(
+  endpoint: string,
+  spin: SpinnerHandle
+): void {
+  setTag("wizard.auth_retry", "true");
+  addBreadcrumb({
+    category: "wizard.auth",
+    message: "Retrying after transient auth service failure",
+    level: "warning",
+    data: { endpoint },
+  });
+  spin.message("Authentication service delayed, retrying...");
+}
+
 /**
  * Detect Mastra's "not suspended" conflict — means the server already
  * processed this step (our previous request succeeded but the response was
@@ -740,11 +754,21 @@ async function resumeWithRecovery(
     ui,
     progressRotation,
   } = args;
+  let authRetryShown = false;
   try {
     const raw = await withTimeout(
-      withInitServiceAuthClassification(
+      withInitServiceAuthRetry(
         () => run.resumeAsync({ step: stepId, resumeData, tracingOptions }),
-        WORKFLOW_RESUME_ASYNC_ENDPOINT
+        WORKFLOW_RESUME_ASYNC_ENDPOINT,
+        () => {
+          authRetryShown = true;
+          reportInitServiceAuthRetry(WORKFLOW_RESUME_ASYNC_ENDPOINT, spin);
+          ui.setOverlay?.({
+            kind: "health",
+            message: "Authentication service delayed, retrying...",
+            retryCount: 1,
+          });
+        }
       ),
       API_TIMEOUT_MS,
       "Workflow resume"
@@ -808,6 +832,10 @@ async function resumeWithRecovery(
       return recovered;
     }
     throw err;
+  } finally {
+    if (authRetryShown) {
+      ui.clearOverlay?.();
+    }
   }
 }
 
@@ -927,10 +955,12 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     const fileCache = await preReadCommonFiles(directory, dirListing);
     ui.setIntroMode?.(false);
     spin.message("Connecting to wizard...");
-    run = await withInitServiceAuthClassification(
+    run = await withInitServiceAuthRetry(
       () => workflow.createRun(),
-      WORKFLOW_CREATE_RUN_ENDPOINT
+      WORKFLOW_CREATE_RUN_ENDPOINT,
+      () => reportInitServiceAuthRetry(WORKFLOW_CREATE_RUN_ENDPOINT, spin)
     );
+    spin.message("Starting wizard...");
     // Large shared context (dirListing, fileCache, existingSentry)
     // travels via Mastra's workflow `initialState` instead of `inputData`.
     // Keeping it on state means the server stores it exactly once per run
@@ -940,7 +970,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     // error. See getsentry/cli-init-api#98.
     result = assertWorkflowResult(
       await withTimeout(
-        withInitServiceAuthClassification(
+        withInitServiceAuthRetry(
           () =>
             run.startAsync({
               inputData: {
@@ -957,7 +987,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
               },
               tracingOptions,
             }),
-          WORKFLOW_START_ASYNC_ENDPOINT
+          WORKFLOW_START_ASYNC_ENDPOINT,
+          () => reportInitServiceAuthRetry(WORKFLOW_START_ASYNC_ENDPOINT, spin)
         ),
         API_TIMEOUT_MS,
         "Workflow start"

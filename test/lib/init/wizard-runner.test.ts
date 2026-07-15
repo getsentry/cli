@@ -1,4 +1,4 @@
-import { MastraClient } from "@mastra/client-js";
+import { MastraClient, MastraClientError } from "@mastra/client-js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as Sentry from "@sentry/node-core/light";
 import {
@@ -333,6 +333,20 @@ function lastError(): string | undefined {
 function initService401Error(): Error {
   return new Error(
     'HTTP error! status: 401 - {"error":"Unauthorized: invalid token"}'
+  );
+}
+
+function retryableInitServiceAuthError(): MastraClientError {
+  const body = {
+    code: "AUTH_UPSTREAM_TIMEOUT",
+    error: "Sentry authentication service timed out",
+    safeToRetry: true,
+  };
+  return new MastraClientError(
+    503,
+    "Service Unavailable",
+    `HTTP error! status: 503 - ${JSON.stringify(body)}`,
+    body
   );
 }
 
@@ -1087,6 +1101,30 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     return selected;
   }
 
+  test("retries a pre-workflow auth timeout once without run-state recovery", async () => {
+    vi.useFakeTimers();
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: toolPayload } },
+    };
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      if (resumeCount === 1) {
+        return Promise.reject(retryableInitServiceAuthError());
+      }
+      return Promise.resolve({ status: "success" });
+    });
+
+    const run = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(250);
+    await run;
+
+    expect(resumeCount).toBe(2);
+    expect(runByIdMock).not.toHaveBeenCalled();
+  });
+
   test("recovers from a sparse 409 stale-resume conflict", async () => {
     mockStartResult = {
       status: "suspended",
@@ -1379,6 +1417,42 @@ describe("runWizard — additional coverage", () => {
 
     expect(spinnerMock.stop).toHaveBeenCalledWith("Connection failed", 1);
     expect(lastCancelMessage()).toBe("Setup failed");
+  });
+
+  test("retries a create-run auth timeout exactly once", async () => {
+    vi.useFakeTimers();
+    const run = {
+      runId: "test-run-id",
+      startAsync: startAsyncMock,
+      resumeAsync: vi.fn(),
+    };
+    const createRunMock = vi
+      .fn()
+      .mockRejectedValueOnce(retryableInitServiceAuthError())
+      .mockResolvedValueOnce(run);
+    getWorkflowSpy.mockImplementation(
+      () => ({ createRun: createRunMock, runById: runByIdMock }) as any
+    );
+
+    const wizard = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(250);
+    await wizard;
+
+    expect(createRunMock).toHaveBeenCalledTimes(2);
+    expect(startAsyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("retries a start-async auth timeout exactly once", async () => {
+    vi.useFakeTimers();
+    startAsyncMock
+      .mockRejectedValueOnce(retryableInitServiceAuthError())
+      .mockResolvedValueOnce({ status: "success" });
+
+    const wizard = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(250);
+    await wizard;
+
+    expect(startAsyncMock).toHaveBeenCalledTimes(2);
   });
 
   test("classifies init service 401 as expected OAuth auth state", async () => {
