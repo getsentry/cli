@@ -362,11 +362,27 @@ the `directory` argument of `sourcemap.upload`, and the release is optional
 To automate the mechanical parts of this migration, run the
 [Codemod](https://codemod.com) from your project root (it rewrites the import,
 constructor, and method chain, and inserts `// TODO(sentry-v4): …` comments where
-option shapes changed and need a manual check):
+option shapes changed and need a manual check).
+
+For now, run it from the CLI repo's source — clone the repo, then point the
+Codemod runner at the transform and your project directory:
+
+```bash
+git clone --depth 1 https://github.com/getsentry/cli /tmp/sentry-cli-src
+
+# From your project root (-t . targets the current directory)
+npx codemod@latest jssg run --language typescript \
+  /tmp/sentry-cli-src/codemods/sentry-v3-to-v4/scripts/codemod.ts -t .
+```
+
+:::note
+Once the codemod is published to the [Codemod registry](https://codemod.com), the
+shorter form below will work — until then, use the run-from-source command above:
 
 ```bash
 npx codemod@latest @sentry/cli-v3-to-v4
 ```
+:::
 
 It rewrites `.js`/`.ts` files in place. Review the diff afterward — argument
 shapes differ (especially for `uploadSourceMaps` and `newDeploy`), so the codemod
