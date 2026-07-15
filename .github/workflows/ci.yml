@@ -179,7 +179,7 @@ jobs:
       - name: Check skill files
         id: check-skill
         run: |
-          if git diff --quiet plugins/sentry-cli/skills/sentry-cli/; then
+          if git diff --quiet packages/cli/plugins/sentry-cli/skills/sentry-cli/; then
             echo "Skill files are up to date"
           else
             echo "stale=true" >> "$GITHUB_OUTPUT"
@@ -188,7 +188,7 @@ jobs:
       - name: Check docs sections
         id: check-sections
         run: |
-          if git diff --quiet README.md DEVELOPMENT.md docs/src/content/docs/contributing.md docs/src/content/docs/self-hosted.md docs/src/content/docs/getting-started.mdx; then
+          if git diff --quiet packages/cli/README.md packages/cli/DEVELOPMENT.md apps/cli-docs/src/content/docs/contributing.md apps/cli-docs/src/content/docs/self-hosted.md apps/cli-docs/src/content/docs/getting-started.mdx; then
             echo "Docs sections are up to date"
           else
             echo "stale=true" >> "$GITHUB_OUTPUT"
@@ -199,7 +199,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add plugins/sentry-cli/skills/sentry-cli/ README.md DEVELOPMENT.md docs/src/content/docs/contributing.md docs/src/content/docs/self-hosted.md docs/src/content/docs/getting-started.mdx
+          git add packages/cli/plugins/sentry-cli/skills/sentry-cli/ packages/cli/README.md packages/cli/DEVELOPMENT.md apps/cli-docs/src/content/docs/contributing.md apps/cli-docs/src/content/docs/self-hosted.md apps/cli-docs/src/content/docs/getting-started.mdx
           git diff --cached --quiet || (git commit -m "chore: regenerate docs" && git push)
       - name: Fail for fork PRs with stale generated files
         if: (steps.check-skill.outputs.stale == 'true' || steps.check-sections.outputs.stale == 'true') && steps.token.outcome != 'success'
