@@ -54,7 +54,8 @@ type SilenceReason =
   | "output_error"
   | "auth_expected"
   | "api_user_error"
-  | "network_error";
+  | "network_error"
+  | "validation_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -88,6 +89,13 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   // is now only thrown for a genuine 401/403 (see auth/login.ts) — transient
   // network/server failures no longer masquerade as it — so it is safe to
   // silence alongside the others (CLI-19).
+  // A ValidationError means the user supplied invalid input (e.g. combining
+  // --follow with an absolute date range). These are user-input mistakes, not
+  // CLI bugs, so silencing them keeps Sentry noise-free while still showing
+  // the user an actionable error message (CLI-296).
+  if (error instanceof ValidationError) {
+    return "validation_error";
+  }
   if (error instanceof AuthError) {
     return "auth_expected";
   }
