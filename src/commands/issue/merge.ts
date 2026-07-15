@@ -289,8 +289,10 @@ export const mergeCommand = buildCommand({
     // --into already designates which issue is the merge target, so passing
     // it as a positional too would be redundant. Append it to args so the
     // rest of the pipeline sees 2+ issues and orderForMerge puts it first.
+    // We append flags.into regardless of how many positional args were given,
+    // as long as it isn't already listed as a positional argument.
     const effectiveArgs =
-      args.length === 1 && flags.into ? [...args, flags.into] : args;
+      flags.into && !args.includes(flags.into) ? [...args, flags.into] : args;
 
     if (effectiveArgs.length < 2) {
       const hint =
