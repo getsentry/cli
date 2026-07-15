@@ -22,6 +22,7 @@
 
 import { mkdirSync } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
+import { DOCS_CONTENT } from "./paths.js";
 
 // Bootstrap: skill-content stub (same pattern as generate-command-docs.ts)
 const SKILL_CONTENT_PATH = "src/generated/skill-content.ts";
@@ -542,7 +543,7 @@ const routeInfos = extractAllRoutes(routeMap);
 const sections: SectionDef[] = [
   // -- Existing sections --
   {
-    filePath: "docs/src/content/docs/contributing.md",
+    filePath: `${DOCS_CONTENT}/contributing.md`,
     sectionName: "project-structure",
     generate: () => generateProjectStructure(routeInfos),
   },
@@ -552,7 +553,7 @@ const sections: SectionDef[] = [
     generate: () => generateScopesBulletList(OAUTH_SCOPES),
   },
   {
-    filePath: "docs/src/content/docs/self-hosted.md",
+    filePath: `${DOCS_CONTENT}/self-hosted.md`,
     sectionName: "oauth-scopes",
     generate: () => generateScopesInline(OAUTH_SCOPES),
   },
@@ -568,7 +569,7 @@ const sections: SectionDef[] = [
     generate: generateLibraryPrereq,
   },
   {
-    filePath: "docs/src/content/docs/contributing.md",
+    filePath: `${DOCS_CONTENT}/contributing.md`,
     sectionName: "dev-prereq",
     generate: generateDevPrereqContributing,
   },
@@ -583,7 +584,7 @@ const sections: SectionDef[] = [
     generate: generateBuildToolchain,
   },
   {
-    filePath: "docs/src/content/docs/contributing.md",
+    filePath: `${DOCS_CONTENT}/contributing.md`,
     sectionName: "build-commands",
     generate: generateBuildCommands,
   },
@@ -600,13 +601,13 @@ const sections: SectionDef[] = [
     generate: generateDevEnvVarsTable,
   },
   {
-    filePath: "docs/src/content/docs/self-hosted.md",
+    filePath: `${DOCS_CONTENT}/self-hosted.md`,
     sectionName: "self-hosted-env-vars",
     generate: generateSelfHostedEnvVarsTable,
   },
   // -- Platform support (getting-started.mdx) --
   {
-    filePath: "docs/src/content/docs/getting-started.mdx",
+    filePath: `${DOCS_CONTENT}/getting-started.mdx`,
     sectionName: "platform-support",
     generate: generatePlatformSupport,
     markerStyle: "mdx",

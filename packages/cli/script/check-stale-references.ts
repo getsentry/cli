@@ -23,6 +23,7 @@
 
 import { readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { DOCS_CONTENT } from "./paths.js";
 
 const pkg = JSON.parse(await readFile("package.json", "utf-8"));
 const currentPM: string = (pkg.packageManager ?? "").split("@")[0];
@@ -77,8 +78,8 @@ const PATTERNS: StalePattern[] = [
 const DOC_FILES = [
   "DEVELOPMENT.md",
   "plugins/README.md",
-  "docs/src/content/docs/contributing.md",
-  "docs/src/content/docs/library-usage.md",
+  `${DOCS_CONTENT}/contributing.md`,
+  `${DOCS_CONTENT}/library-usage.md`,
 ];
 
 /** This script's own filename — excluded from scanning to avoid self-flagging. */

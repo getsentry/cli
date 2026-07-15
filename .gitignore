@@ -43,10 +43,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .turbo
 .mastra
 
-# docs
-docs/dist
-docs/node_modules
-docs/.astro
+# docs (now under apps/cli-docs)
+apps/cli-docs/dist
+apps/cli-docs/node_modules
+apps/cli-docs/.astro
 
 # local planning notes (not for version control)
 .plans
@@ -58,20 +58,20 @@ docs/.astro
 .DS_Store
 
 # Generated files (rebuilt at build time)
-src/generated/
-src/sdk.generated.ts
-src/sdk.generated.d.cts
+packages/cli/src/generated/
+packages/cli/src/sdk.generated.ts
+packages/cli/src/sdk.generated.d.cts
 # ...except the sixel banner: it's small, deterministic (baked from the committed
 # assets/banner-mask.png), and statically imported by src/lib/sixel.ts, so it must
 # exist on a fresh checkout before any build step regenerates it.
-!src/generated/banner-sixel.ts
+!packages/cli/src/generated/banner-sixel.ts
 
 # Generated docs pages (rebuilt from fragments + CLI introspection / env registry)
-docs/src/content/docs/commands/
-docs/src/content/docs/configuration.md
+apps/cli-docs/src/content/docs/commands/
+apps/cli-docs/src/content/docs/configuration.md
 
 # Generated discovery manifest (rebuilt by generate:skill, served via symlinked skill files)
-docs/public/.well-known/skills/index.json
+apps/cli-docs/public/.well-known/skills/index.json
 
 # OpenCode
 .opencode/
@@ -79,7 +79,7 @@ opencode.json*
 
 # Throwaway documentation audit reports (bot-generated, not real docs)
 DOCUMENTATION_GAPS.md
-docs/DOCUMENTATION_GAPS.md
+apps/cli-docs/DOCUMENTATION_GAPS.md
 DOCUMENTATION_GAP_REPORT.md
 
 # Throwaway planning / migration notes (agent- or human-authored scratch docs,
