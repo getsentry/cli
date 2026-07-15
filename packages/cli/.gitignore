@@ -1,5 +1,7 @@
-# Package-level ignores (see the workspace-root .gitignore for shared rules).
-# Duplicated here because Biome resolves useIgnoreFile relative to biome.jsonc.
+# Package-level ignores for git. The workspace-root .gitignore mirrors these
+# with `packages/cli/`-prefixed patterns (that root file is what Biome reads,
+# since biome.jsonc sets `vcs.root: "../.."`). This file exists so plain `git`
+# ignores build artifacts within the package regardless of the root file.
 
 # dependencies
 node_modules

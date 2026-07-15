@@ -57,15 +57,23 @@ const ROOT_PKG_PATH = "../../package.json";
 /**
  * Resolve an installed package file to the copy THIS package actually uses.
  *
- * With `node-linker=hoisted` in a pnpm workspace, a transitive (unpatched)
- * copy of a dependency can win the hoist to the workspace-root `node_modules`,
- * so a naive `node_modules/<pkg>` path may point at the wrong version. Using
- * `require.resolve` rooted at this package respects pnpm's per-package
- * resolution and finds the patched copy the `sentry` package links to.
+ * In a pnpm workspace, a transitive (unpatched) copy of a dependency can
+ * coexist with the patched direct copy (e.g. an unpatched `@sentry/core`
+ * pulled in via another dependency). A naive `node_modules/<pkg>` path may
+ * point at the wrong copy. Using `require.resolve` rooted at this package
+ * respects pnpm's per-package resolution and finds the patched copy the
+ * `sentry` package links to.
  *
  * We resolve the package's MAIN entry (not its `package.json`, which many
  * packages exclude from their `exports` map) and then derive the package root
  * by truncating the resolved path at the package-name segment.
+ *
+ * The package root is the FIRST `<pkgName>/` segment that follows the last
+ * `node_modules/` boundary in the resolved path. Anchoring on `node_modules/`
+ * (rather than `lastIndexOf('/<pkgName>/')`) is important: a package that
+ * vendors a nested copy of itself (e.g.
+ * `.../node_modules/@scope/pkg/vendor/@scope/pkg/index.js`) would otherwise
+ * truncate at the wrong, inner segment.
  *
  * @param subpath - Package subpath, e.g. `@sentry/core/build/cjs/index.js`.
  * @returns Absolute path to the resolved file, or null if unresolvable.
@@ -80,9 +88,14 @@ function resolvePackageFile(subpath: string): string | null {
   try {
     // Resolve the package's main entry to locate the exact installed copy.
     const mainEntry = require_.resolve(pkgName);
-    // Derive the package root: everything up to and including "<pkgName>".
+    // The install dir is "<...>/node_modules/<pkgName>". Anchor on the last
+    // "node_modules/" boundary, then take the first "<pkgName>/" after it so a
+    // self-vendored nested copy can't shift the truncation point.
+    const nmMarker = "/node_modules/";
+    const nmIdx = mainEntry.lastIndexOf(nmMarker);
     const marker = `/${pkgName}/`;
-    const idx = mainEntry.lastIndexOf(marker);
+    const searchFrom = nmIdx === -1 ? 0 : nmIdx + nmMarker.length - 1;
+    const idx = mainEntry.indexOf(marker, searchFrom);
     if (idx === -1) {
       return null;
     }
