@@ -1,8 +1,10 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "extends": ["ultracite/core"],
-  // The workspace .gitignore lives at the monorepo root (two levels up from this
-  // package). Point Biome's VCS integration there so `useIgnoreFile` resolves it.
+  // The .gitignore Biome honors lives at the monorepo root (two levels up).
+  // Point Biome's VCS integration there so `useIgnoreFile` reads the root file,
+  // whose patterns are `packages/cli/`-prefixed. (The package-level .gitignore
+  // is for plain git only; Biome does not read it.)
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -23,7 +25,6 @@
     // on the node:tls module graph — an internal Biome bug that surfaces
     // non-deterministically as error vs warning. See biome issue tracker.
     "includes": [
-      "!docs",
       "!test/init-eval/templates",
       "!dist-build",
       // The codemod package is a self-contained Codemod (jssg) project with

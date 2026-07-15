@@ -316,9 +316,9 @@ async function compileAllTargets(
   // key MUST equal this path string (see src/lib/dif/index.ts).
   //
   // Resolve via Node module resolution rather than a hardcoded
-  // node_modules path: in the pnpm workspace, @sentry/symbolic is hoisted to
-  // the workspace-root node_modules, not this package's, so a package-relative
-  // literal path would not find it.
+  // node_modules path: in the pnpm workspace @sentry/symbolic may live in the
+  // isolated store (linked under this package's node_modules) rather than at a
+  // fixed literal path, so module resolution is the reliable way to find it.
   let DIF_WASM_SRC: string;
   try {
     DIF_WASM_SRC = createRequire(import.meta.url).resolve(
@@ -343,8 +343,8 @@ async function compileAllTargets(
   );
 
   // Invoke fossilize via `pnpm exec` so it resolves from the workspace bin
-  // regardless of whether it's hoisted to the workspace-root node_modules (the
-  // pnpm workspace hoists it there, not into this package's node_modules).
+  // regardless of where pnpm places it (isolated store vs. root), rather than
+  // assuming a fixed node_modules/.bin location.
   const fossilizeBin = "pnpm exec fossilize";
 
   try {

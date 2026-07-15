@@ -306,8 +306,8 @@ console.log("  -> dist/index.d.cts (type declarations)");
 // which resolves relative to dist/index.cjs (see src/lib/dif/index.ts).
 await mkdir("./dist/vendor", { recursive: true });
 await copyFile(
-  // Resolve via module resolution: in the pnpm workspace @sentry/symbolic is
-  // hoisted to the workspace-root node_modules, not this package's.
+  // Resolve via module resolution rather than a fixed node_modules path:
+  // in the pnpm workspace @sentry/symbolic may live in the isolated store.
   createRequire(import.meta.url).resolve("@sentry/symbolic/symbolic_bg.wasm"),
   "./dist/vendor/symbolic_bg.wasm"
 );
