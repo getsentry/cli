@@ -1275,7 +1275,10 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     });
 
     const run = runWizard(makeOptions());
-    await vi.advanceTimersByTimeAsync(180_000);
+    await vi.advanceTimersByTimeAsync(209_999);
+    expect(runByIdMock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
     await run;
 
     expect(formatResultSpy).toHaveBeenCalled();
