@@ -82,7 +82,12 @@ const ZSTD_THRESHOLD = 1024;
 const GZIP_THRESHOLD = 1024 * 32;
 
 const gzipAsync = promisify(gzipCb);
-const zstdCompressAsync = promisify(zstdCompressCb);
+// zstdCompress is only present on Node.js 22.15+. On older runtimes (where the
+// npm package falls back to the WASM SQLite driver) it's undefined, and
+// promisify(undefined) throws at import time — crashing the whole CLI. Guard it;
+// callers gate every use behind hasZstdSupport() so null is never invoked.
+const zstdCompressAsync =
+  typeof zstdCompressCb === "function" ? promisify(zstdCompressCb) : null;
 
 /**
  * Factory for the SDK's `Sentry.init({ transport })` option.
@@ -277,7 +282,7 @@ export async function maybeCompress(
     return { payload: buf, encodingApplied: "none" };
   }
 
-  if (encoding === "zstd") {
+  if (encoding === "zstd" && zstdCompressAsync) {
     const out = await zstdCompressAsync(buf, {
       params: { [zlibConstants.ZSTD_c_compressionLevel]: ZSTD_LEVEL },
     });

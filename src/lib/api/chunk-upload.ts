@@ -33,7 +33,13 @@ import { getSdkConfig } from "../sentry-client.js";
 import { apiRequestToRegion } from "./infrastructure.js";
 
 const gzipAsync = promisify(gzipCb);
-const zstdCompressAsync = promisify(zstdCompressCb);
+// zstdCompress exists only on Node.js 22.15+. On older runtimes (npm package
+// on Node < 22.15) it's undefined, and promisify(undefined) throws at import
+// time. Guard it and treat "no local zstd" as "don't advertise zstd" in
+// selectUploadCodec below, so a zstd-capable server never picks a codec we
+// can't produce.
+const zstdCompressAsync =
+  typeof zstdCompressCb === "function" ? promisify(zstdCompressCb) : null;
 const log = logger.withTag("api.chunk-upload");
 
 // ── Schemas ─────────────────────────────────────────────────────────
@@ -150,6 +156,10 @@ export function pickUploadEncoding(
   compression: string[]
 ): UploadEncoding | undefined {
   for (const codec of UPLOAD_CODECS) {
+    // Skip zstd when the local runtime can't produce it (Node < 22.15).
+    if (codec === "zstd" && !zstdCompressAsync) {
+      continue;
+    }
     if (compression.includes(codec)) {
       return codec;
     }
@@ -173,7 +183,7 @@ export async function encodeChunk(
   buf: Buffer,
   encoding: UploadEncoding | undefined
 ): Promise<Uint8Array> {
-  if (encoding === "zstd") {
+  if (encoding === "zstd" && zstdCompressAsync) {
     // L3 is libzstd's default; passed explicitly for self-documenting
     // code. L9+ trades ~14% size for 4x compress time and forces the
     // server's decoder to allocate 15-30 MiB of window state -- not
