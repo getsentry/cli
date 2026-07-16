@@ -39,6 +39,12 @@ env:
   # APIs). Fixed in 24.18.0 / 22.23.1 (nodejs/node#64004). A floating major
   # ("24"/"22") silently reuses the runner's pre-cached buggy patch, so pin the
   # exact patched versions here and bump them in one place.
+  #
+  # Node 20 is the WASM-SQLite floor: the npm package supports Node >= 18, and
+  # on < 22.15 (which lacks node:sqlite) it falls back to the bundled
+  # node-sqlite3-wasm driver. The npm-package job runs a Node 20 matrix entry
+  # so that fallback path is exercised in CI rather than only in production.
+  NODE_VERSION_20: "20.20.2"
   NODE_VERSION_22: "22.23.1"
   NODE_VERSION_24: "24.18.0"
 
@@ -777,16 +783,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["22", "24"]
+        node: ["20", "22", "24"]
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          # Matrix entries stay bare majors ("22"/"24") for the job name and the
-          # `matrix.node == '22'` artifact guard below; map each to its exact
-          # patched version from the central env block here.
-          node-version: ${{ matrix.node == '24' && env.NODE_VERSION_24 || env.NODE_VERSION_22 }}
+          # Matrix entries stay bare majors ("20"/"22"/"24") for the job name
+          # and the `matrix.node == '22'` artifact guard below; map each to its
+          # exact patched version from the central env block here. Node 20
+          # exercises the WASM SQLite fallback (no node:sqlite before 22.15).
+          node-version: ${{ matrix.node == '24' && env.NODE_VERSION_24 || matrix.node == '20' && env.NODE_VERSION_20 || env.NODE_VERSION_22 }}
       - uses: actions/cache@v5
         id: cache
         with:

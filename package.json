@@ -43,6 +43,7 @@
     "ink-spinner": "^5.0.0",
     "jpeg-js": "^0.4.4",
     "marked": "^15.0.12",
+    "node-sqlite3-wasm": "0.8.59",
     "p-limit": "^7.3.0",
     "peggy": "^5.1.0",
     "picomatch": "^4.0.4",
@@ -75,13 +76,20 @@
   },
   "description": "Sentry CLI - A command-line interface for using Sentry built by robots and humans for robots and humans",
   "engines": {
-    "node": ">=22.15"
+    "node": ">=18.0"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=22.15"
+    }
   },
   "files": [
     "dist/bin.cjs",
     "dist/index.cjs",
     "dist/index.d.cts",
     "dist/ink-app.js",
+    "dist/node-sqlite3-wasm.wasm",
     "dist/vendor/symbolic_bg.wasm"
   ],
   "license": "FSL-1.1-Apache-2.0",

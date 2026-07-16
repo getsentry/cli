@@ -194,7 +194,10 @@ const result = await build({
   // The library bundle must not suppress the host application's warnings.
   sourcemap: true,
   platform: "node",
-  target: "node24",
+  // Target Node.js 18 — the published package's floor (engines.node).
+  // Older Node.js uses the bundled WASM SQLite driver (node-sqlite3-wasm);
+  // 22.15+ uses the native node:sqlite. Downlevels newer syntax accordingly.
+  target: "node18",
   format: "cjs",
   outfile: "./dist/index.cjs",
   // Inject Bun polyfills and import.meta.url shim for CJS compatibility
@@ -218,10 +221,6 @@ const result = await build({
   // from trying to resolve these packages in the main bundle graph.
   external: [
     "node:*",
-    // bun:sqlite is referenced as a fallback in src/lib/db/sqlite.ts (never
-    // reached on Node 22+ where node:sqlite is available). Mark external so
-    // esbuild doesn't fail trying to resolve a Bun-only module.
-    "bun:sqlite",
     // The DIF loader resolves this .wasm at runtime (dev only); never bundle it.
     "@sentry/symbolic/symbolic_bg.wasm",
     "ink",
@@ -240,7 +239,7 @@ const result = await build({
 // Write the CLI bin wrapper (tiny — shebang + version check + dispatch).
 // Version floor must track `engines.node` in package.json.
 const BIN_WRAPPER = `#!/usr/bin/env node
-{let v=process.versions.node.split(".").map(Number);if(v[0]<22||(v[0]===22&&v[1]<15)){console.error("Error: sentry requires Node.js 22.15 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}}
+{let v=process.versions.node.split(".").map(Number);if(v[0]<18){console.error("Error: sentry requires Node.js 18 or later (found "+process.version+").\\n\\nEither upgrade Node.js, or install the standalone binary instead:\\n  curl -fsSL https://cli.sentry.dev/install | bash\\n");process.exit(1)}}
 {let e=process.emit;process.emit=function(n,...a){return n==="warning"?!1:e.apply(this,[n,...a])}}
 require('./index.cjs')._cli().catch(()=>{process.exitCode=1});
 `;
@@ -309,6 +308,18 @@ await copyFile(
   "./dist/vendor/symbolic_bg.wasm"
 );
 console.log("  -> dist/vendor/symbolic_bg.wasm (DIF parser)");
+
+// Ship the WASM SQLite driver's .wasm next to the bundle. The driver JS
+// (node-sqlite3-wasm) is inlined into dist/index.cjs by esbuild, and its
+// Emscripten glue locates the .wasm via `__dirname + "/node-sqlite3-wasm.wasm"`.
+// Once bundled, `__dirname` is `dist/`, so the file must sit at
+// dist/node-sqlite3-wasm.wasm. Only loaded on Node.js < 22.15 (see
+// src/lib/db/sqlite.ts resolveDriver()); harmless dead weight on newer Node.
+await copyFile(
+  "./node_modules/node-sqlite3-wasm/dist/node-sqlite3-wasm.wasm",
+  "./dist/node-sqlite3-wasm.wasm"
+);
+console.log("  -> dist/node-sqlite3-wasm.wasm (WASM SQLite fallback)");
 
 // Calculate bundle size (only the main bundle, not source maps)
 const bundleOutput = result.metafile?.outputs["dist/index.cjs"];

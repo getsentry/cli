@@ -310,15 +310,41 @@ function extractNodeVersion(): string {
   return match[1];
 }
 
+/**
+ * Extract the Node.js minimum version for *development* from
+ * `devEngines.runtime.version`, falling back to `engines.node`.
+ *
+ * The published package supports a lower Node.js floor than local
+ * development: consumers on older Node.js use a bundled WASM SQLite driver,
+ * but contributors run the sources directly (tsx) against `node:sqlite`,
+ * which requires Node.js 22.15+. This keeps the two floors independent.
+ */
+function extractDevNodeVersion(): string {
+  const constraint: string | undefined =
+    // biome-ignore lint/suspicious/noExplicitAny: devEngines is not in the pkg type
+    (pkg as any).devEngines?.runtime?.version ?? pkg.engines?.node;
+  if (!constraint) {
+    throw new Error("Missing devEngines.runtime.version and engines.node");
+  }
+  const match = constraint.match(SEMVER_RE);
+  if (!match) {
+    throw new Error(
+      `Cannot extract dev Node.js version from "${constraint}". ` +
+        "Expected a semver-like version (e.g., >=22.15)"
+    );
+  }
+  return match[1];
+}
+
 /** Generate dev prerequisite line for README.md. */
 function generateDevPrereq(): string {
-  return `- [Node.js](https://nodejs.org) v${extractNodeVersion()}+ and [pnpm](https://pnpm.io) v${extractPnpmVersion()}+`;
+  return `- [Node.js](https://nodejs.org) v${extractDevNodeVersion()}+ and [pnpm](https://pnpm.io) v${extractPnpmVersion()}+`;
 }
 
 /** Generate dev prerequisite lines for contributing.md. */
 function generateDevPrereqContributing(): string {
   return [
-    `- [Node.js](https://nodejs.org) (v${extractNodeVersion()} or later)`,
+    `- [Node.js](https://nodejs.org) (v${extractDevNodeVersion()} or later)`,
     `- [pnpm](https://pnpm.io) (v${extractPnpmVersion()} or later)`,
   ].join("\n");
 }
@@ -331,7 +357,7 @@ function generateLibraryPrereq(): string {
 /** Generate dev prerequisite lines for DEVELOPMENT.md. */
 function generateDevPrereqDevelopment(): string {
   return [
-    `- [Node.js](https://nodejs.org/) v${extractNodeVersion()}+ installed`,
+    `- [Node.js](https://nodejs.org/) v${extractDevNodeVersion()}+ installed`,
     `- [pnpm](https://pnpm.io/) v${extractPnpmVersion()}+ installed`,
   ].join("\n");
 }
