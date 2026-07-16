@@ -30,6 +30,12 @@ describe("WizardStore step progress", () => {
     expect(snapshot.steps.every((entry) => entry.status === "pending")).toBe(
       true
     );
+    expect(snapshot.steps.some((entry) => entry.id === "install-deps")).toBe(
+      false
+    );
+    expect(
+      snapshot.steps.find((entry) => entry.id === "apply-codemods")?.label
+    ).toBe("Applying changes + deps");
   });
 
   test("flips a step to in_progress on first call", () => {
@@ -43,9 +49,9 @@ describe("WizardStore step progress", () => {
 
   test("re-entering an in_progress step is idempotent (no flicker)", () => {
     const store = new WizardStore();
-    store.setStepStatus("install-deps", "in_progress");
+    store.setStepStatus("apply-codemods", "in_progress");
     const before = store.getSnapshot().steps;
-    store.setStepStatus("install-deps", "in_progress");
+    store.setStepStatus("apply-codemods", "in_progress");
     const after = store.getSnapshot().steps;
     // Reference equality: no update emitted, so the array is the
     // same instance. This is what the store guarantees for no-op
@@ -57,16 +63,16 @@ describe("WizardStore step progress", () => {
     const store = new WizardStore();
     // Jump straight to a later step — simulates the workflow
     // taking an `if`-branch that bypassed the earlier ones.
-    store.setStepStatus("install-deps", "in_progress");
+    store.setStepStatus("verify-changes", "in_progress");
     const steps = store.getSnapshot().steps;
-    const installIdx = CANONICAL_STEP_ORDER.indexOf("install-deps");
+    const verifyIndex = CANONICAL_STEP_ORDER.indexOf("verify-changes");
     for (const entry of steps) {
       const idx = CANONICAL_STEP_ORDER.indexOf(entry.id);
-      if (idx >= 0 && idx < installIdx) {
+      if (idx >= 0 && idx < verifyIndex) {
         expect(entry.status).toBe("skipped");
       }
     }
-    expect(steps.find((entry) => entry.id === "install-deps")?.status).toBe(
+    expect(steps.find((entry) => entry.id === "verify-changes")?.status).toBe(
       "in_progress"
     );
   });
@@ -75,7 +81,7 @@ describe("WizardStore step progress", () => {
     const store = new WizardStore();
     store.setStepStatus("discover-context", "in_progress");
     store.setStepStatus("discover-context", "completed");
-    store.setStepStatus("install-deps", "in_progress");
+    store.setStepStatus("verify-changes", "in_progress");
     const discover = store
       .getSnapshot()
       .steps.find((row) => row.id === "discover-context");
@@ -113,11 +119,11 @@ describe("WizardStore step progress", () => {
 
   test("failed transition wins over the existing status", () => {
     const store = new WizardStore();
-    store.setStepStatus("install-deps", "in_progress");
-    store.setStepStatus("install-deps", "failed");
+    store.setStepStatus("apply-codemods", "in_progress");
+    store.setStepStatus("apply-codemods", "failed");
     const entry = store
       .getSnapshot()
-      .steps.find((row) => row.id === "install-deps");
+      .steps.find((row) => row.id === "apply-codemods");
     expect(entry?.status).toBe("failed");
   });
 
@@ -139,9 +145,9 @@ describe("WizardStore step progress", () => {
     const unsubscribe = store.subscribe(() => {
       notifications += 1;
     });
-    store.setStepStatus("install-deps", "in_progress");
-    store.setStepStatus("install-deps", "in_progress"); // idempotent
-    store.setStepStatus("install-deps", "completed");
+    store.setStepStatus("apply-codemods", "in_progress");
+    store.setStepStatus("apply-codemods", "in_progress"); // idempotent
+    store.setStepStatus("apply-codemods", "completed");
     unsubscribe();
     // Two real transitions = two notifications. The middle no-op
     // does not fire a listener — saves a render in React.

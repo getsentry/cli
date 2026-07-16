@@ -6,14 +6,14 @@
  *
  *   ┌─ ◆ Sentry Init Wizard ──────────────────── sentry.io ─┐
  *   │                                                         │
- *   │  ╔═══╗                    │  ╭ Did you know? ─────────╮ │
- *   │  ║ S ║  Sentry banner     │  │ <tip>                  │ │
- *   │  ╚═══╝                    │  ╰────────────────────────╯ │
- *   │  ● log line               │                             │
- *   │  ▲ log line               │  ╭ Tasks ────── 2/9 ──────╮ │
- *   │  ◐ spinner...             │  │ ◼ Discover ctx         │ │
- *   │  [PromptArea]             │  │ ▶ Install deps         │ │
- *   │                           │  │ ◻ Apply codemods       │ │
+ *   │  ╔═══╗                    │  ╭ Tasks ────── 2/8 ──────╮ │
+ *   │  ║ S ║  Sentry banner     │  │ ◼ Analyze project      │ │
+ *   │  ╚═══╝                    │  │ ▶ Apply changes         │ │
+ *   │  ● log line               │  ╰────────────────────────╯ │
+ *   │  ▲ log line               │                             │
+ *   │                           │  ╭ Did you know? ─────────╮ │
+ *   │  ◐ spinner...             │  │ Errors → context → fix │ │
+ *   │  [PromptArea]             │  │ <tip>                  │ │
  *   │                           │  ╰────────────────────────╯ │
  *   │  ● Status   Files                                       │
  *   │  ←→ switch tab                                          │
@@ -340,17 +340,17 @@ function Sidebar({
   const showTips = terminalRows >= 24;
   return (
     <Box flexDirection="column" overflow="hidden" width="40%">
+      <ProgressPanel steps={steps} />
       {showTips ? (
         <>
+          <Box height={1} />
           {learnState.complete ? (
             <TipPanel tipIndex={tipIndex} />
           ) : (
             <LearnPanel learnState={learnState} />
           )}
-          <Box height={1} />
         </>
       ) : null}
-      <ProgressPanel steps={steps} />
     </Box>
   );
 }

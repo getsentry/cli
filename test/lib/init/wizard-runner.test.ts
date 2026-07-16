@@ -22,7 +22,10 @@ import {
   HostScopeError,
   WizardError,
 } from "../../../src/lib/errors.js";
-import { WizardCancelledError } from "../../../src/lib/init/clack-utils.js";
+import {
+  CHECKLIST_VISIBLE_STEPS,
+  WizardCancelledError,
+} from "../../../src/lib/init/clack-utils.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as fmt from "../../../src/lib/init/formatters.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
@@ -599,9 +602,9 @@ describe("runWizard", () => {
     };
     mockStartResult = {
       status: "suspended",
-      suspended: [["install-deps"]],
+      suspended: [["apply-codemods"]],
       steps: {
-        "install-deps": { suspendPayload: payload },
+        "apply-codemods": { suspendPayload: payload },
       },
     };
     mockResumeResults = [{ status: "success" }];
@@ -704,9 +707,9 @@ describe("runWizard", () => {
     };
     mockStartResult = {
       status: "suspended",
-      suspended: [["install-deps"]],
+      suspended: [["apply-codemods"]],
       steps: {
-        "install-deps": { suspendPayload: payload },
+        "apply-codemods": { suspendPayload: payload },
       },
     };
     executeToolSpy.mockRejectedValue(new Error("boom"));
@@ -728,9 +731,9 @@ describe("runWizard", () => {
     };
     mockStartResult = {
       status: "suspended",
-      suspended: [["install-deps"]],
+      suspended: [["apply-codemods"]],
       steps: {
-        "install-deps": { suspendPayload: payload },
+        "apply-codemods": { suspendPayload: payload },
       },
     };
     executeToolSpy.mockRejectedValue(new WizardCancelledError());
@@ -761,9 +764,9 @@ describe("runWizard", () => {
     };
     mockStartResult = {
       status: "suspended",
-      suspended: [["install-deps"]],
+      suspended: [["apply-codemods"]],
       steps: {
-        "install-deps": { suspendPayload: payload },
+        "apply-codemods": { suspendPayload: payload },
       },
     };
     executeToolSpy.mockRejectedValue(
@@ -914,9 +917,9 @@ describe("runWizard — MastraClient lifecycle", () => {
     };
     mockStartResult = {
       status: "suspended",
-      suspended: [["install-deps"]],
+      suspended: [["apply-codemods"]],
       steps: {
-        "install-deps": { suspendPayload: payload },
+        "apply-codemods": { suspendPayload: payload },
       },
     };
     executeToolSpy.mockRejectedValue(new Error("tool blew up"));
@@ -938,9 +941,9 @@ describe("runWizard — MastraClient lifecycle", () => {
     };
     mockStartResult = {
       status: "suspended",
-      suspended: [["install-deps"]],
+      suspended: [["apply-codemods"]],
       steps: {
-        "install-deps": { suspendPayload: payload },
+        "apply-codemods": { suspendPayload: payload },
       },
     };
     executeToolSpy.mockRejectedValue(new WizardCancelledError());
@@ -1627,6 +1630,93 @@ describe("runWizard — additional coverage", () => {
     expect(inProgressIdx).toBeLessThan(completedIdx);
   });
 
+  test("uses server step results for tasks that finish without suspending", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "read-files",
+      cwd: "/tmp/test",
+      params: { paths: ["package.json"] },
+    };
+
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: {
+        "discover-context": { status: "success" },
+        "detect-platform": { status: "suspended", suspendPayload: payload },
+      },
+    };
+    mockResumeResults = [
+      {
+        status: "success",
+        steps: {
+          "discover-context": { status: "success" },
+          "detect-platform": { status: "success" },
+          "ensure-sentry-project": { status: "success" },
+          "select-features": { status: "success" },
+          "plan-codemods": { status: "success" },
+          "apply-codemods": { status: "success" },
+          "verify-changes": { status: "success" },
+          "open-sentry-ui": { status: "success" },
+        },
+      },
+    ];
+
+    await runWizard(makeOptions());
+
+    const stepCalls = mockUICalls.filter((call) => call.kind === "setStep");
+    for (const stepId of CHECKLIST_VISIBLE_STEPS) {
+      expect(stepCalls).toContainEqual({
+        kind: "setStep",
+        stepId,
+        status: "completed",
+      });
+    }
+    expect(stepCalls).not.toContainEqual(
+      expect.objectContaining({ stepId: "install-deps" })
+    );
+
+    const discoverCompletedIndex = stepCalls.findIndex(
+      (call) =>
+        call.kind === "setStep" &&
+        call.stepId === "discover-context" &&
+        call.status === "completed"
+    );
+    const detectStartedIndex = stepCalls.findIndex(
+      (call) =>
+        call.kind === "setStep" &&
+        call.stepId === "detect-platform" &&
+        call.status === "in_progress"
+    );
+    expect(discoverCompletedIndex).toBeLessThan(detectStartedIndex);
+  });
+
+  test("marks a server-reported failure before any step suspends", async () => {
+    mockStartResult = {
+      status: "failed",
+      error: "Framework detection failed",
+      steps: {
+        "discover-context": { status: "success" },
+        "detect-platform": { status: "failed" },
+      },
+    };
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(
+      "Framework detection failed"
+    );
+
+    expect(mockUICalls).toContainEqual({
+      kind: "setStep",
+      stepId: "discover-context",
+      status: "completed",
+    });
+    expect(mockUICalls).toContainEqual({
+      kind: "setStep",
+      stepId: "detect-platform",
+      status: "failed",
+    });
+  });
+
   test("uses existing platform name in detect-platform spinner label", async () => {
     resolveInitContextSpy.mockResolvedValue(
       makeContext({ existingProject: { platform: "javascript-nextjs" } })
@@ -1800,8 +1890,8 @@ describe("runWizard — progress rotation for long-running steps", () => {
     };
     mockStartResult = {
       status: "suspended",
-      suspended: [["install-deps"]],
-      steps: { "install-deps": { suspendPayload: toolPayload } },
+      suspended: [["apply-codemods"]],
+      steps: { "apply-codemods": { suspendPayload: toolPayload } },
     };
 
     let resolveResume!: (value: unknown) => void;

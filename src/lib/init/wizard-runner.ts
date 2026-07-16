@@ -980,6 +980,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   const stepPhases = new Map<string, number>();
   const stepHistory = new Map<string, CompactPhaseHistoryEntry[]>();
 
+  syncWorkflowStepStatuses(result, ui);
+
   // Track which step the runner is currently suspended on so the
   // sidebar checklist can flip rows as the workflow advances. A
   // single step can suspend multiple times (read-files → analyze →
@@ -1054,6 +1056,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           ui,
           progressRotation,
         });
+        syncWorkflowStepStatuses(result, ui);
       } finally {
         progressRotation.stop();
       }
@@ -1125,6 +1128,27 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         ? resultFeatures.join(",")
         : String(resultFeatures)
     );
+  }
+}
+
+/**
+ * Reconcile checklist rows with Mastra's persisted step results.
+ *
+ * A step can finish entirely inside a start/resume request without ever
+ * suspending for CLI work. Those steps still appear in `result.steps`, so
+ * their server-reported status is more complete than the suspend transitions
+ * observed by the client.
+ */
+function syncWorkflowStepStatuses(
+  result: WorkflowRunResult,
+  ui: WizardUI
+): void {
+  for (const [stepId, step] of Object.entries(result.steps ?? {})) {
+    if (step.status === "success") {
+      ui.setStep?.(stepId, "completed");
+    } else if (step.status === "failed") {
+      ui.setStep?.(stepId, "failed");
+    }
   }
 }
 

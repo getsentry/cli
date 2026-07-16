@@ -222,6 +222,16 @@ describe("Ink App snapshot", () => {
     expect(frame).toContain("2/7");
   });
 
+  test("keeps tasks above rotating tips", async () => {
+    const store = new WizardStore({
+      learnState: { blockIndex: 0, lineIndex: 0, complete: true },
+    });
+
+    const frame = stripAnsi((await renderApp(store, 120)).allOutput());
+    expect(frame).toContain("Did you know?");
+    expect(frame.indexOf("Tasks")).toBeLessThan(frame.indexOf("Did you know?"));
+  });
+
   test("renders single-column layout at narrow width", async () => {
     const store = new WizardStore();
     store.appendLog("info", "Narrow terminal");
