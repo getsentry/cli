@@ -10,6 +10,7 @@
  * `LoggingUI` (CI / npm fallback).
  */
 
+import { setTag } from "@sentry/node-core/light";
 import chalk from "chalk";
 import { WizardError } from "../errors.js";
 import {
@@ -198,6 +199,7 @@ async function handleMultiSelect(
   }
   hints.push(`${bar}  ${chalk.dim("space=toggle, a=all, enter=confirm")}`);
 
+  setTag("wizard.features.offered", available.join(","));
   const selected = await ui.multiselect<string>({
     message: `${payload.prompt}\n${hints.join("\n")}`,
     options: optional.map((feature) => {
@@ -213,7 +215,9 @@ async function handleMultiSelect(
   });
 
   const chosen = abortIfCancelled(selected);
-  return { features: prependRequiredFeature(chosen, hasRequired) };
+  const features = prependRequiredFeature(chosen, hasRequired);
+  setTag("wizard.features.selected", features.join(","));
+  return { features };
 }
 
 async function handleConfirm(

@@ -56,6 +56,10 @@ import { setTag } from "@sentry/node-core/light";
 import { FULL_BANNER_LINES } from "../../banner.js";
 import { CLI_VERSION } from "../../constants.js";
 import { stripAnsi } from "../../formatters/plain-detect.js";
+import {
+  createWizardPromptTelemetry,
+  type WizardPromptKind,
+} from "../../telemetry.js";
 import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
 import { formatFailureReport, formatSuccessReport } from "./ink-report.js";
 import { LEARN_SEQUENCE } from "./learn-content.js";
@@ -81,8 +85,14 @@ type CreateInkUIOptions = {
 
 type PendingWelcome = {
   promise: Promise<"continue" | Cancelled>;
+  tracedPromise?: Promise<"continue" | Cancelled>;
   resolve: (value: "continue" | Cancelled) => void;
   settled: boolean;
+};
+
+type InkPromptOptions = {
+  initialWelcome?: PendingWelcome;
+  telemetry?: ReturnType<typeof createWizardPromptTelemetry>;
 };
 
 /** Tip rotation cadence in the sidebar — slow enough to read each tip. */
@@ -273,6 +283,7 @@ export async function createInkUI(
   if (opts.initialWelcome && initialWelcome) {
     seedWelcomePrompt(store, opts.initialWelcome, initialWelcome);
   }
+  const promptTelemetry = createWizardPromptTelemetry();
 
   // Open a fresh /dev/tty so Ink's `readable` event listener
   // actually fires — see the module docstring for the Bun bug
@@ -305,7 +316,10 @@ export async function createInkUI(
   try {
     const instance = app.mountApp(store, renderOptions);
 
-    return new InkUI(instance, store, freshStdin, initialWelcome);
+    return new InkUI(instance, store, freshStdin, {
+      initialWelcome,
+      telemetry: promptTelemetry,
+    });
   } catch (error) {
     // Restore the terminal if Ink rendering or UI init fails,
     // otherwise the user is stuck in the alternate screen buffer.
@@ -356,6 +370,9 @@ export class InkUI implements WizardUI {
    * `process.stdin` in that case.
    */
   private readonly freshStdin: ReadStream | null;
+  private readonly promptTelemetry: ReturnType<
+    typeof createWizardPromptTelemetry
+  >;
   private tipTimer: ReturnType<typeof setInterval> | undefined;
   private learnTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -401,13 +418,23 @@ export class InkUI implements WizardUI {
     instance: InkInstance,
     store: WizardStore,
     freshStdin: ReadStream | null,
-    initialWelcome?: PendingWelcome
+    promptOptions: InkPromptOptions = {}
   ) {
     this.instance = instance;
     this.store = store;
     this.freshStdin = freshStdin;
-    this.initialWelcome = initialWelcome;
-    if (initialWelcome && !initialWelcome.settled) {
+    this.initialWelcome = promptOptions.initialWelcome;
+    this.promptTelemetry =
+      promptOptions.telemetry ?? createWizardPromptTelemetry();
+    if (this.initialWelcome && !this.initialWelcome.tracedPromise) {
+      const initialWelcome = this.initialWelcome;
+      initialWelcome.tracedPromise = this.promptTelemetry.tracePrompt(
+        "welcome",
+        () => initialWelcome.promise
+      );
+    }
+    if (this.initialWelcome && !this.initialWelcome.settled) {
+      const initialWelcome = this.initialWelcome;
       this.activePromptCancel = () => {
         this.store.setPrompt(null);
         this.activePromptCancel = undefined;
@@ -469,6 +496,7 @@ export class InkUI implements WizardUI {
     stepId: string,
     status: "in_progress" | "completed" | "failed" | "skipped"
   ): void {
+    this.promptTelemetry.setActiveStep(stepId, status === "in_progress");
     this.store.setStepStatus(stepId, status);
   }
 
@@ -543,8 +571,16 @@ export class InkUI implements WizardUI {
 
   // ── Prompts ───────────────────────────────────────────────────────
 
+  /** Measures only the interval in which the prompt can accept user input. */
+  private waitForPrompt<T>(
+    kind: WizardPromptKind,
+    mount: (resolve: (value: T) => void) => void
+  ): Promise<T> {
+    return this.promptTelemetry.tracePrompt(kind, () => new Promise<T>(mount));
+  }
+
   select<T extends string>(opts: SelectOptions<T>): Promise<T | Cancelled> {
-    return new Promise((resolve) => {
+    return this.waitForPrompt<T | Cancelled>("select", (resolve) => {
       const initialIndex =
         opts.initialValue !== undefined
           ? Math.max(
@@ -584,7 +620,7 @@ export class InkUI implements WizardUI {
   multiselect<T extends string>(
     opts: MultiSelectOptions<T>
   ): Promise<T[] | Cancelled> {
-    return new Promise((resolve) => {
+    return this.waitForPrompt<T[] | Cancelled>("multiselect", (resolve) => {
       this.activePromptCancel = () => {
         this.store.setPrompt(null);
         this.activePromptCancel = undefined;
@@ -614,7 +650,7 @@ export class InkUI implements WizardUI {
   }
 
   confirm(opts: ConfirmOptions): Promise<boolean | Cancelled> {
-    return new Promise<boolean | Cancelled>((resolve) => {
+    return this.waitForPrompt<boolean | Cancelled>("confirm", (resolve) => {
       this.activePromptCancel = () => {
         this.store.setPrompt(null);
         this.activePromptCancel = undefined;
@@ -644,12 +680,19 @@ export class InkUI implements WizardUI {
       if (!this.initialWelcome.settled) {
         seedWelcomePrompt(this.store, opts, this.initialWelcome);
       }
-      return this.initialWelcome.promise.finally(() => {
+      const initialWelcome = this.initialWelcome;
+      const promptPromise =
+        initialWelcome.tracedPromise ??
+        this.promptTelemetry.tracePrompt(
+          "welcome",
+          () => initialWelcome.promise
+        );
+      return promptPromise.finally(() => {
         this.activePromptCancel = undefined;
         this.initialWelcome = undefined;
       });
     }
-    return new Promise<"continue" | Cancelled>((resolve) => {
+    return this.waitForPrompt<"continue" | Cancelled>("welcome", (resolve) => {
       this.activePromptCancel = () => {
         this.store.setPrompt(null);
         this.activePromptCancel = undefined;
