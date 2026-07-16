@@ -12,7 +12,7 @@
  * or fatal error patterns in stderr indicate failure.
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { captureException } from "@sentry/node-core/light";
 import { createSpotlightBuffer } from "@spotlightjs/spotlight/sdk";
@@ -25,6 +25,18 @@ import type { WizardUI } from "./ui/types.js";
 
 /** Verification timeout in seconds. */
 const VERIFY_TIMEOUT_S = 15;
+
+/** Grace period before escalating verification process cleanup to SIGKILL. */
+const PROCESS_SHUTDOWN_GRACE_MS = 5000;
+
+/** Maximum time to wait after force-killing the verification process tree. */
+const PROCESS_FORCE_SHUTDOWN_MS = 1000;
+
+/** Poll interval while waiting for a verification process tree to exit. */
+const PROCESS_EXIT_POLL_MS = 50;
+
+/** Maximum time for a Windows taskkill invocation to complete. */
+const WINDOWS_TREE_KILL_TIMEOUT_MS = 1000;
 
 /**
  * Patterns in stderr/stdout that indicate a fatal startup failure.
@@ -187,34 +199,114 @@ function buildVerifyEnv(
   return env;
 }
 
-/** Gracefully kill a child process with SIGTERM → grace period → SIGKILL. */
-async function cleanupChild(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) {
-    return;
+/** Send a signal to the verification child and all of its descendants. */
+function signalProcessTree(
+  child: ChildProcess,
+  signal: NodeJS.Signals
+): boolean {
+  const pid = child.pid;
+  if (pid === undefined) {
+    return false;
   }
+
   try {
-    child.kill("SIGTERM");
-    let graceTimer: ReturnType<typeof setTimeout> | undefined;
-    const exited = await Promise.race([
-      new Promise<true>((r) => child.on("close", () => r(true))),
-      new Promise<false>((r) => {
-        graceTimer = setTimeout(() => r(false), 5000);
-      }),
-    ]);
-    clearTimeout(graceTimer);
-    if (!exited && child.exitCode === null) {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        logger.debug("Child exited before SIGKILL");
+    if (process.platform === "win32") {
+      const args = ["/PID", String(pid), "/T"];
+      if (signal === "SIGKILL") {
+        args.push("/F");
       }
-      // Await close so child.exitCode is populated for crash detection.
-      if (child.exitCode === null) {
-        await new Promise<void>((r) => child.on("close", () => r()));
+      const taskkill = spawnSync("taskkill", args, {
+        stdio: "ignore",
+        timeout: WINDOWS_TREE_KILL_TIMEOUT_MS,
+        windowsHide: true,
+      });
+      return !(taskkill.error || taskkill.status !== 0);
+    }
+    // Verification children are spawned detached on POSIX, making their PID
+    // the process-group ID. A negative PID signals the whole group, including
+    // shell pipelines, concurrently tasks, and framework watchers.
+    process.kill(-pid, signal);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ESRCH") {
+      logger.debug(`Failed to signal verification process tree with ${signal}`);
+    }
+    return false;
+  }
+}
+
+/** Fall back to signaling only the direct child process. */
+function signalDirectChild(child: ChildProcess, signal: NodeJS.Signals): void {
+  try {
+    child.kill(signal);
+  } catch {
+    logger.debug(`Verification child exited before receiving ${signal}`);
+  }
+}
+
+/** Check whether the POSIX verification process group is still alive. */
+function isPosixProcessGroupAlive(child: ChildProcess): boolean {
+  const pid = child.pid;
+  if (pid === undefined) {
+    return false;
+  }
+
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+/** Wait for a POSIX verification process group to exit, bounded by a timeout. */
+async function waitForPosixProcessGroupExit(
+  child: ChildProcess,
+  timeoutMs: number
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (isPosixProcessGroupAlive(child)) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      return false;
+    }
+    await new Promise<void>((resolveDelay) => {
+      setTimeout(resolveDelay, Math.min(PROCESS_EXIT_POLL_MS, remainingMs));
+    });
+  }
+  return true;
+}
+
+/** Gracefully kill a process tree with SIGTERM → grace period → SIGKILL. */
+async function cleanupProcessTree(child: ChildProcess): Promise<void> {
+  try {
+    if (process.platform === "win32") {
+      if (signalProcessTree(child, "SIGTERM")) {
+        return;
       }
+      if (!signalProcessTree(child, "SIGKILL")) {
+        signalDirectChild(child, "SIGKILL");
+      }
+      return;
+    }
+
+    signalProcessTree(child, "SIGTERM");
+    const exited = await waitForPosixProcessGroupExit(
+      child,
+      PROCESS_SHUTDOWN_GRACE_MS
+    );
+    if (!exited) {
+      signalProcessTree(child, "SIGKILL");
+      await waitForPosixProcessGroupExit(child, PROCESS_FORCE_SHUTDOWN_MS);
     }
   } catch (error) {
-    logger.debug("Failed to kill verification child", error);
+    logger.debug("Failed to kill verification process tree", error);
+  } finally {
+    // Descendants can inherit these pipes. Destroying our ends guarantees the
+    // verification cleanup itself never waits indefinitely for `close`.
+    child.stdout?.destroy();
+    child.stderr?.destroy();
   }
 }
 
@@ -272,6 +364,9 @@ export async function verifySetup(
     const [cmd = "", ...cmdArgs] = detected.args;
     child = spawn(cmd, cmdArgs, {
       cwd,
+      // On POSIX this creates a dedicated process group whose entire tree can
+      // be terminated without touching the CLI's own process group.
+      detached: process.platform !== "win32",
       env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -286,10 +381,8 @@ export async function verifySetup(
   // cleanup instead of silently continuing the wizard.
   let signalReceived: NodeJS.Signals | null = null;
   const safeKill = (sig: NodeJS.Signals) => {
-    try {
-      child.kill(sig);
-    } catch {
-      logger.debug(`Child already exited when forwarding ${sig}`);
+    if (!signalProcessTree(child, sig)) {
+      signalDirectChild(child, sig);
     }
   };
   const onSigint = () => {
@@ -312,12 +405,20 @@ export async function verifySetup(
       r({ kind: "exited" as const, code: code ?? 1 })
     );
   });
+  const childErrored = new Promise<{ kind: "spawn_error"; error: Error }>(
+    (resolveError) => {
+      child.once("error", (error) => {
+        resolveError({ kind: "spawn_error", error });
+      });
+    }
+  );
 
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   const outcome = await Promise.race([
     envelopeReceived.then(() => ({ kind: "envelope" as const })),
     startupPromise,
     childExited,
+    childErrored,
     new Promise<{ kind: "timeout" }>((r) => {
       timeoutHandle = setTimeout(
         () => r({ kind: "timeout" as const }),
@@ -330,11 +431,11 @@ export async function verifySetup(
     clearTimeout(timeoutHandle);
   }
 
-  // Capture the exit code before cleanup — cleanupChild sends SIGTERM/SIGKILL
-  // which would set exitCode to 143/137, masking a natural crash code.
+  // Capture the exit code before cleanup — terminating the process tree would
+  // set exitCode to 143/137, masking a natural crash code.
   const preCleanupExitCode = child.exitCode;
 
-  await cleanupChild(child);
+  await cleanupProcessTree(child);
   if (subscriptionId) {
     buffer.unsubscribe(subscriptionId);
   }
@@ -369,6 +470,7 @@ type VerifyOutcome =
   | { kind: "envelope" }
   | StartupOutcome
   | { kind: "exited"; code: number }
+  | { kind: "spawn_error"; error: Error }
   | { kind: "timeout" };
 
 type ReportContext = {
@@ -398,6 +500,12 @@ function reportOutcome(outcome: VerifyOutcome, ctx: ReportContext): void {
 
   if (outcome.kind === "started") {
     ui.log.success("Verified — app started successfully");
+    return;
+  }
+
+  if (outcome.kind === "spawn_error") {
+    logger.debug("Failed to spawn verification child", outcome.error);
+    ui.log.warn("Skipping verification — could not start the dev command.");
     return;
   }
 
