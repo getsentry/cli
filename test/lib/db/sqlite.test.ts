@@ -9,6 +9,9 @@
  * `wrapStatement`/`toWasmParams` keeps callers driver-agnostic.
  */
 
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { __setDriverForTests, Database } from "../../../src/lib/db/sqlite.js";
 
@@ -136,6 +139,42 @@ describe.each(DRIVERS)("sqlite adapter [%s driver]", (kind) => {
       data: Uint8Array;
     };
     expect(Array.from(row.data)).toEqual([1, 2, 3, 255]);
+    db.close();
+  });
+});
+
+/**
+ * The WASM driver (node-sqlite3-wasm) locks the database by creating an
+ * empty `<db>.lock` directory and removes it only when SQLite lowers the
+ * lock to NONE. A process that exits while still holding a lock leaves the
+ * directory behind, and the next open's `mkdir` fails with EEXIST →
+ * "database is locked". The adapter clears such a stale lock before opening.
+ */
+describe("wasm driver stale-lock recovery", () => {
+  let dir: string;
+
+  afterEach(() => {
+    __setDriverForTests(null);
+    if (dir) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("clears a leftover <db>.lock directory before opening", () => {
+    __setDriverForTests("wasm");
+    dir = mkdtempSync(join(tmpdir(), "sqlite-lock-"));
+    const dbPath = join(dir, "cli.db");
+
+    // Simulate a stale lock left by a previous (now-dead) process.
+    const lockDir = `${dbPath}.lock`;
+    mkdirSync(lockDir);
+    expect(existsSync(lockDir)).toBe(true);
+
+    // Opening must succeed despite the stale lock, and the DB must be usable.
+    const db = new Database(dbPath);
+    db.exec("CREATE TABLE t (a INTEGER)");
+    db.query("INSERT INTO t (a) VALUES (?)").run(1);
+    expect(db.query("SELECT a FROM t").get()).toEqual({ a: 1 });
     db.close();
   });
 });

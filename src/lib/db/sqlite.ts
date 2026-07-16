@@ -20,6 +20,7 @@
  * return-value differences that are reconciled here.
  */
 
+import { rmdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { logger } from "../logger.js";
 
@@ -215,6 +216,45 @@ function resolveDriver(): ResolvedDriver {
 }
 
 /**
+ * Remove a stale lock directory left by a previous `node-sqlite3-wasm`
+ * process.
+ *
+ * The WASM driver implements SQLite file locking by `mkdir("<db>.lock")`
+ * (an atomic mutex) and releasing it with `rmdir` only when SQLite lowers
+ * the lock to NONE. If a process exits while still holding any lock level
+ * — including a normal exit where the connection isn't explicitly downgraded
+ * — the empty directory is left behind, and the next invocation's `mkdir`
+ * fails with EEXIST, surfacing as "database is locked" forever.
+ *
+ * The Sentry CLI runs as short-lived, effectively single-writer invocations,
+ * so a leftover `<db>.lock` is always stale (its owning process is gone).
+ * Clearing it before open is safe and restores access; live contention is
+ * still handled by SQLite's `busy_timeout`. Only the empty lock directory is
+ * removed — a non-empty dir (never produced by this driver) is left intact.
+ *
+ * Best-effort: any failure is swallowed so a genuinely concurrent writer or a
+ * permissions issue degrades to the driver's own locking error rather than a
+ * crash here.
+ */
+function clearStaleWasmLock(dbPath: string): void {
+  if (dbPath === ":memory:" || dbPath === "") {
+    return;
+  }
+  try {
+    // rmdirSync only removes empty directories, so this can never delete a
+    // lock actively held with contents (this driver's locks are always empty).
+    rmdirSync(`${dbPath}.lock`);
+    log.debug(`Cleared stale WASM SQLite lock: ${dbPath}.lock`);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // ENOENT: no stale lock (the common case). Anything else is logged.
+    if (code !== "ENOENT") {
+      log.debug("Could not clear stale WASM SQLite lock", error);
+    }
+  }
+}
+
+/**
  * SQLite database wrapper.
  *
  * - `exec(sql)` — execute raw SQL (DDL, multi-statement)
@@ -231,6 +271,9 @@ export class Database {
 
   constructor(path: string) {
     const { Ctor, kind } = resolveDriver();
+    if (kind === "wasm") {
+      clearStaleWasmLock(path);
+    }
     this.db = new Ctor(path);
     this.kind = kind;
   }

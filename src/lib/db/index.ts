@@ -8,8 +8,11 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { getEnv } from "../env.js";
+import { logger } from "../logger.js";
 
 const _require = createRequire(import.meta.url);
+
+const log = logger.withTag("db");
 
 import { migrateFromJson } from "./migration.js";
 import { initSchema, runMigrations } from "./schema.js";
@@ -32,6 +35,36 @@ let db: Database | null = null;
 /** Raw database without tracing (used for repair operations) */
 let rawDb: Database | null = null;
 let dbOpenedPath: string | null = null;
+
+/**
+ * Whether the process-exit close handler has been registered.
+ *
+ * The WASM SQLite fallback (`node-sqlite3-wasm`, used on Node < 22.15)
+ * implements cross-process locking with an on-disk lock **directory**
+ * (`<db>.lock`). Unlike native `node:sqlite`, whose OS file locks are
+ * released automatically when the process exits, that directory persists
+ * if the connection isn't closed — so a subsequent CLI invocation sees
+ * "database is locked". We close the connection on process exit to release
+ * it. Harmless (and cheap) for the native driver too.
+ */
+let exitHandlerRegistered = false;
+
+function registerExitHandler(): void {
+  if (exitHandlerRegistered) {
+    return;
+  }
+  exitHandlerRegistered = true;
+  // 'exit' handlers must be synchronous; close() is synchronous.
+  process.on("exit", () => {
+    try {
+      db?.close();
+    } catch (error) {
+      // Best-effort: the process is exiting anyway. A failed close here
+      // must never mask the real exit code.
+      log.debug("Failed to close database on exit", error);
+    }
+  });
+}
 
 export function getConfigDir(): string {
   const { homedir } = _require("node:os");
@@ -117,6 +150,7 @@ export function getDatabase(): Database {
       db = createTracedDatabase(rawDb);
     }
     dbOpenedPath = dbPath;
+    registerExitHandler();
 
     return db;
   } catch (error) {
