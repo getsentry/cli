@@ -922,6 +922,73 @@ export function recordCacheHit(cacheName: string, hit: boolean): void {
   });
 }
 
+export type WizardPromptKind = "select" | "multiselect" | "confirm" | "welcome";
+
+type WizardPromptTelemetry = {
+  setActiveStep(stepId: string, active: boolean): void;
+  tracePrompt<T>(kind: WizardPromptKind, prompt: () => Promise<T>): Promise<T>;
+};
+
+/**
+ * Track time spent waiting for human input during `sentry init`.
+ *
+ * Prompt spans make user think-time visible in the trace instead of folding it
+ * into the top-level `sentry.init` duration. The measurement is accumulated on
+ * the root span so a run can be compared both with and without user wait time.
+ */
+export function createWizardPromptTelemetry(): WizardPromptTelemetry {
+  let activeStepId: string | undefined;
+  let totalWaitMs = 0;
+
+  return {
+    setActiveStep(stepId, active) {
+      if (active) {
+        activeStepId = stepId;
+      } else if (activeStepId === stepId) {
+        activeStepId = undefined;
+      }
+    },
+    tracePrompt(kind, prompt) {
+      const stepId = activeStepId;
+      return withTracingSpan(
+        `wizard.prompt.${kind}`,
+        "ui.prompt",
+        async (span) => {
+          const startedAt = performance.now();
+          try {
+            return await prompt();
+          } finally {
+            const waitMs = Math.max(0, performance.now() - startedAt);
+            totalWaitMs += waitMs;
+
+            span.setAttributes({
+              "wizard.user_wait_ms": waitMs,
+              "wizard.user_wait_total_ms": totalWaitMs,
+            });
+            Sentry.setMeasurement(
+              "wizard.user_wait_ms",
+              totalWaitMs,
+              "millisecond",
+              Sentry.getRootSpan(span)
+            );
+            Sentry.metrics.distribution("wizard.user_wait_ms", waitMs, {
+              attributes: {
+                prompt_kind: kind,
+                ...(stepId ? { workflow_step: stepId } : {}),
+              },
+            });
+          }
+        },
+        {
+          "wizard.prompt.kind": kind,
+          "wizard.prompt.phase": stepId ? "workflow" : "preflight",
+          ...(stepId ? { "wizard.step.id": stepId } : {}),
+        }
+      );
+    },
+  };
+}
+
 /**
  * Wrap an operation with a Sentry span for tracing.
  *

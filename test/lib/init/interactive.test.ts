@@ -7,7 +7,9 @@
  * terminal.
  */
 
-import { describe, expect, test } from "vitest";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as Sentry from "@sentry/node-core/light";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { WizardError } from "../../../src/lib/errors.js";
 import { handleInteractive } from "../../../src/lib/init/interactive.js";
 import type { InteractiveContext } from "../../../src/lib/init/types.js";
@@ -23,6 +25,10 @@ function makeOptions(
     ...overrides,
   };
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("handleInteractive dispatcher", () => {
   test("throws WizardError for unknown kind", async () => {
@@ -270,6 +276,36 @@ describe("handleSelect with --app flag", () => {
 });
 
 describe("handleMultiSelect", () => {
+  test("records offered and selected features for interactive prompts", async () => {
+    const setTagSpy = vi.spyOn(Sentry, "setTag");
+    const { ui, respond } = createMockUI();
+    respond.multiselect(["sessionReplay"]);
+
+    await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Select features",
+        kind: "multi-select",
+        availableFeatures: [
+          "errorMonitoring",
+          "performanceMonitoring",
+          "sessionReplay",
+        ],
+      },
+      makeOptions(),
+      ui
+    );
+
+    expect(setTagSpy).toHaveBeenCalledWith(
+      "wizard.features.offered",
+      "errorMonitoring,performanceMonitoring,sessionReplay"
+    );
+    expect(setTagSpy).toHaveBeenCalledWith(
+      "wizard.features.selected",
+      "errorMonitoring,sessionReplay"
+    );
+  });
+
   test("auto-selects all features with --yes", async () => {
     const { ui } = createMockUI();
     const result = await handleInteractive(
@@ -336,6 +372,7 @@ describe("handleMultiSelect", () => {
   });
 
   test("throws WizardCancelledError when user cancels multi-select", async () => {
+    const setTagSpy = vi.spyOn(Sentry, "setTag");
     const { ui, respond } = createMockUI();
     respond.multiselect(CANCELLED);
 
@@ -351,6 +388,14 @@ describe("handleMultiSelect", () => {
         ui
       )
     ).rejects.toThrow("Setup cancelled");
+    expect(setTagSpy).toHaveBeenCalledWith(
+      "wizard.features.offered",
+      "errorMonitoring,performanceMonitoring"
+    );
+    expect(setTagSpy).not.toHaveBeenCalledWith(
+      "wizard.features.selected",
+      expect.anything()
+    );
   });
 
   test("returns required feature without calling multiselect when only errorMonitoring available", async () => {
