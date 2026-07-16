@@ -9,7 +9,13 @@
  * `wrapStatement`/`toWasmParams` keeps callers driver-agnostic.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -165,9 +171,12 @@ describe("wasm driver stale-lock recovery", () => {
     dir = mkdtempSync(join(tmpdir(), "sqlite-lock-"));
     const dbPath = join(dir, "cli.db");
 
-    // Simulate a stale lock left by a previous (now-dead) process.
+    // Simulate a stale lock left by a previous (now-dead) process, backdated
+    // well beyond the staleness window so it's treated as orphaned.
     const lockDir = `${dbPath}.lock`;
     mkdirSync(lockDir);
+    const old = new Date(Date.now() - 5 * 60_000);
+    utimesSync(lockDir, old, old);
     expect(existsSync(lockDir)).toBe(true);
 
     // Opening must succeed despite the stale lock, and the DB must be usable.
@@ -176,5 +185,22 @@ describe("wasm driver stale-lock recovery", () => {
     db.query("INSERT INTO t (a) VALUES (?)").run(1);
     expect(db.query("SELECT a FROM t").get()).toEqual({ a: 1 });
     db.close();
+  });
+
+  test("does not remove a recent (possibly live) lock", () => {
+    __setDriverForTests("wasm");
+    dir = mkdtempSync(join(tmpdir(), "sqlite-lock-live-"));
+    const dbPath = join(dir, "cli.db");
+
+    // A freshly-created lock may belong to a concurrent process — it must be
+    // left intact (the WASM driver would then surface its own busy error).
+    const lockDir = `${dbPath}.lock`;
+    mkdirSync(lockDir);
+
+    // Constructing the adapter must not clear a recent lock.
+    // The driver still opens (it acquires locks lazily per operation), but the
+    // pre-existing lock directory must survive the constructor's cleanup pass.
+    new Database(dbPath).close();
+    expect(existsSync(lockDir)).toBe(true);
   });
 });

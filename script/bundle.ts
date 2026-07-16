@@ -152,9 +152,17 @@ const sentrySourcemapPlugin: Plugin = {
 };
 
 // Always inject debug IDs (even without auth token); upload is gated inside the plugin
-/** Files that use _require() for lazy relative imports (circular dep breaking). */
+/**
+ * Files that use `_require()` for lazy imports. The `require-alias` plugin
+ * rewrites `_require(` → `require(` in these so esbuild resolves them at
+ * bundle time. `db/sqlite` is included so the WASM SQLite fallback
+ * (`node-sqlite3-wasm`) is actually inlined into the npm bundle — otherwise
+ * it stays a runtime `require()` that fails in a real install (the driver is
+ * a devDependency, not shipped). `node:sqlite` in the same file stays a
+ * builtin and is left external by esbuild regardless.
+ */
 const REQUIRE_ALIAS_FILTER =
-  /(?:db[\\/](?:index|schema)|list-command|telemetry)\.ts$/;
+  /(?:db[\\/](?:index|schema|sqlite)|list-command|telemetry)\.ts$/;
 const REQUIRE_ALIAS_RE = /\b_require\(/g;
 
 /** Transform _require() → require() so esbuild resolves lazy relative requires. */

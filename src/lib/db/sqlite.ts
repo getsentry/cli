@@ -20,7 +20,7 @@
  * return-value differences that are reconciled here.
  */
 
-import { rmdirSync } from "node:fs";
+import { rmdirSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { logger } from "../logger.js";
 
@@ -216,6 +216,18 @@ function resolveDriver(): ResolvedDriver {
 }
 
 /**
+ * Age (ms) beyond which a `<db>.lock` directory is considered stale.
+ *
+ * The WASM driver holds the lock only briefly (during a write transaction's
+ * lock escalation) and downgrades between operations, so a live lock's
+ * directory is re-created and thus recently modified. A directory older than
+ * this window is therefore almost certainly orphaned by a dead process. The
+ * value is deliberately generous (well beyond any single write) to avoid
+ * ever racing a genuinely concurrent writer.
+ */
+const STALE_LOCK_MAX_AGE_MS = 60_000;
+
+/**
  * Remove a stale lock directory left by a previous `node-sqlite3-wasm`
  * process.
  *
@@ -226,25 +238,31 @@ function resolveDriver(): ResolvedDriver {
  * — the empty directory is left behind, and the next invocation's `mkdir`
  * fails with EEXIST, surfacing as "database is locked" forever.
  *
- * The Sentry CLI runs as short-lived, effectively single-writer invocations,
- * so a leftover `<db>.lock` is always stale (its owning process is gone).
- * Clearing it before open is safe and restores access; live contention is
- * still handled by SQLite's `busy_timeout`. Only the empty lock directory is
- * removed — a non-empty dir (never produced by this driver) is left intact.
+ * We only remove a lock directory that is *older* than
+ * {@link STALE_LOCK_MAX_AGE_MS}, so a lock a concurrently-running CLI just
+ * acquired is never deleted out from under it — that live contention is left
+ * to SQLite's own `busy_timeout`. A recent lock is kept; only a clearly
+ * orphaned one is cleared. Only the empty lock directory is removed (a
+ * non-empty dir, never produced by this driver, is left intact by `rmdir`).
  *
- * Best-effort: any failure is swallowed so a genuinely concurrent writer or a
- * permissions issue degrades to the driver's own locking error rather than a
- * crash here.
+ * Best-effort: any failure is swallowed so a permissions issue or a genuine
+ * race degrades to the driver's own locking error rather than a crash here.
  */
 function clearStaleWasmLock(dbPath: string): void {
   if (dbPath === ":memory:" || dbPath === "") {
     return;
   }
+  const lockDir = `${dbPath}.lock`;
   try {
+    const age = Date.now() - statSync(lockDir).mtimeMs;
+    if (age < STALE_LOCK_MAX_AGE_MS) {
+      // Recent — may belong to a live process. Let busy_timeout handle it.
+      return;
+    }
     // rmdirSync only removes empty directories, so this can never delete a
     // lock actively held with contents (this driver's locks are always empty).
-    rmdirSync(`${dbPath}.lock`);
-    log.debug(`Cleared stale WASM SQLite lock: ${dbPath}.lock`);
+    rmdirSync(lockDir);
+    log.debug(`Cleared stale WASM SQLite lock (age ${age}ms): ${lockDir}`);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     // ENOENT: no stale lock (the common case). Anything else is logged.
