@@ -187,20 +187,36 @@ describe("wasm driver stale-lock recovery", () => {
     db.close();
   });
 
-  test("does not remove a recent (possibly live) lock", () => {
+  test("does not clear a recent (possibly live) lock when opening", () => {
     __setDriverForTests("wasm");
     dir = mkdtempSync(join(tmpdir(), "sqlite-lock-live-"));
     const dbPath = join(dir, "cli.db");
 
-    // A freshly-created lock may belong to a concurrent process — it must be
-    // left intact (the WASM driver would then surface its own busy error).
+    // A freshly-created lock may belong to a concurrent process, so the
+    // open-time stale-lock cleanup must leave it intact (live contention is
+    // left to busy_timeout). We check the state right after construction —
+    // before close(), which legitimately removes our *own* lock.
     const lockDir = `${dbPath}.lock`;
     mkdirSync(lockDir);
 
-    // Constructing the adapter must not clear a recent lock.
-    // The driver still opens (it acquires locks lazily per operation), but the
-    // pre-existing lock directory must survive the constructor's cleanup pass.
-    new Database(dbPath).close();
+    const db = new Database(dbPath);
+    // The constructor's clearStaleWasmLock must not have removed the recent dir.
     expect(existsSync(lockDir)).toBe(true);
+    db.close();
+  });
+
+  test("close() removes this connection's own lock directory", () => {
+    __setDriverForTests("wasm");
+    dir = mkdtempSync(join(tmpdir(), "sqlite-lock-close-"));
+    const dbPath = join(dir, "cli.db");
+
+    const db = new Database(dbPath);
+    db.exec("CREATE TABLE t (a INTEGER)");
+    db.query("INSERT INTO t (a) VALUES (?)").run(1);
+    db.close();
+
+    // A plain WASM close() leaves <db>.lock behind; the adapter must remove it
+    // so a subsequent process doesn't hit "database is locked".
+    expect(existsSync(`${dbPath}.lock`)).toBe(false);
   });
 });

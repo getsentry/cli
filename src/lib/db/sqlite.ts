@@ -287,6 +287,9 @@ export class Database {
   /** Which backing driver this instance uses (for param normalisation). */
   private readonly kind: DriverKind;
 
+  /** On-disk path (for WASM lock cleanup); undefined for in-memory. */
+  private readonly path: string;
+
   constructor(path: string) {
     const { Ctor, kind } = resolveDriver();
     if (kind === "wasm") {
@@ -294,6 +297,7 @@ export class Database {
     }
     this.db = new Ctor(path);
     this.kind = kind;
+    this.path = path;
   }
 
   /** Execute raw SQL (DDL statements, multi-statement strings). */
@@ -309,9 +313,29 @@ export class Database {
     return wrapStatement(this.db.prepare(sql), this.kind);
   }
 
-  /** Close the database connection. */
+  /**
+   * Close the database connection.
+   *
+   * On the WASM path, also removes this connection's own lock directory.
+   * node-sqlite3-wasm only `rmdir`s `<db>.lock` when SQLite downgrades to
+   * lock level NONE, which a plain `close()` doesn't force — so the empty
+   * lock dir routinely survives and blocks the next process with "database
+   * is locked". Since we're closing *our own* connection here (not racing
+   * anyone), removing the lock is safe and unconditional, unlike the
+   * age-guarded stale cleanup on open.
+   */
   close(): void {
     this.db.close();
+    if (this.kind === "wasm" && this.path !== ":memory:" && this.path !== "") {
+      try {
+        rmdirSync(`${this.path}.lock`);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") {
+          log.debug("Could not remove WASM SQLite lock on close", error);
+        }
+      }
+    }
   }
 
   /**
