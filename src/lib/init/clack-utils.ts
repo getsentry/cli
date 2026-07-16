@@ -117,9 +117,8 @@ export const STEP_LABELS: Record<string, string> = {
   "detect-platform": "Detecting platform and framework",
   "ensure-sentry-project": "Setting up Sentry project",
   "select-features": "Selecting features",
-  "install-deps": "Installing dependencies",
   "plan-codemods": "Planning code modifications",
-  "apply-codemods": "Applying code modifications",
+  "apply-codemods": "Applying code modifications and installing dependencies",
   "verify-changes": "Verifying changes",
   "open-sentry-ui": "Finishing up",
 };
@@ -147,7 +146,6 @@ export const CANONICAL_STEP_ORDER: readonly string[] = [
   "select-features",
   "plan-codemods",
   "apply-codemods",
-  "install-deps",
   "verify-changes",
   "open-sentry-ui",
 ];
@@ -156,13 +154,15 @@ export const CANONICAL_STEP_ORDER: readonly string[] = [
  * Subset of {@link CANONICAL_STEP_ORDER} surfaced in the progress
  * checklist. The Ink sidebar is 36 cols wide and shares vertical
  * space with the tip card and the files-read panel, so showing all
- * 12 step rows would push the files panel off-screen on shorter
+ * 11 step rows would push the files panel off-screen on shorter
  * terminals.
  *
  * The hidden steps (`select-target-app`, `resolve-dir`,
  * `check-existing-sentry`) are plumbing — users care that "Setting up
  * Sentry project" happened, not that we resolved their working
- * directory along the way.
+ * directory along the way. Dependency installation is part of
+ * `apply-codemods`; the server removed the separate `install-deps` step in
+ * getsentry/cli-init-api#140.
  */
 export const CHECKLIST_VISIBLE_STEPS: readonly string[] = [
   "discover-context",
@@ -171,7 +171,6 @@ export const CHECKLIST_VISIBLE_STEPS: readonly string[] = [
   "select-features",
   "plan-codemods",
   "apply-codemods",
-  "install-deps",
   "verify-changes",
   "open-sentry-ui",
 ];
@@ -188,9 +187,8 @@ export const STEP_ACTIVE_LABELS: Record<string, string> = {
   "detect-platform": "Detecting framework and platform...",
   "ensure-sentry-project": "Configuring Sentry project...",
   "select-features": "Preparing feature selection...",
-  "install-deps": "Installing Sentry SDK and dependencies...",
   "plan-codemods": "Planning code changes...",
-  "apply-codemods": "Applying code modifications...",
+  "apply-codemods": "Applying code changes and installing dependencies...",
   "verify-changes": "Verifying setup...",
   "open-sentry-ui": "Finishing up...",
 };
@@ -207,9 +205,8 @@ export const STEP_LABELS_SHORT: Record<string, string> = {
   "detect-platform": "Detecting platform",
   "ensure-sentry-project": "Setting up project",
   "select-features": "Selecting features",
-  "install-deps": "Installing deps",
   "plan-codemods": "Planning changes",
-  "apply-codemods": "Applying changes",
+  "apply-codemods": "Applying changes + deps",
   "verify-changes": "Verifying changes",
   "open-sentry-ui": "Finishing up",
 };

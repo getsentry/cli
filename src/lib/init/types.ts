@@ -273,7 +273,19 @@ export type WorkflowRunResult = {
   status: "suspended" | "success" | "failed";
   suspended?: string[][];
   activeStepsPath?: Record<string, unknown>;
-  steps?: Record<string, { suspendPayload?: unknown }>;
+  steps?: Record<
+    string,
+    {
+      status?:
+        | "success"
+        | "failed"
+        | "suspended"
+        | "running"
+        | "waiting"
+        | "paused";
+      suspendPayload?: unknown;
+    }
+  >;
   suspendPayload?: unknown;
   result?: WizardOutput;
   error?: string;
