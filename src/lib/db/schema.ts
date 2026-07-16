@@ -594,9 +594,10 @@ let isRepairing = false;
 /**
  * Check if an error is a schema-related SQLite error that can be auto-repaired.
  *
- * Matches by message content rather than error name because `bun:sqlite`
- * throws `SQLiteError` while `node:sqlite` throws plain `Error` — the
- * message strings are identical across both runtimes.
+ * Matches by message content rather than error name because the two SQLite
+ * backends throw different error types (`node:sqlite` throws a plain `Error`,
+ * `node-sqlite3-wasm` throws `SQLite3Error`) but share identical message
+ * strings for these cases.
  */
 function isSchemaError(error: unknown): boolean {
   if (!(error instanceof Error)) {
@@ -618,8 +619,13 @@ function isSchemaError(error: unknown): boolean {
  * lacks write permissions (e.g., installed globally in a protected path,
  * read-only filesystem, or changed permissions).
  *
- * Matches by message content rather than error name because `bun:sqlite`
- * throws `SQLiteError` while `node:sqlite` throws plain `Error`.
+ * Matches by message content rather than error name because the two SQLite
+ * backends throw different error types (`node:sqlite` plain `Error`,
+ * `node-sqlite3-wasm` `SQLite3Error`) with identical message strings.
+ *
+ * Note: this matches the runtime write-time error. The WASM driver can also
+ * fail to *open* a read-only DB at construction with a different message
+ * ("Could not open the database"); that path is not covered here.
  */
 export function isReadonlyError(error: unknown): boolean {
   if (!(error instanceof Error)) {

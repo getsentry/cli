@@ -183,7 +183,16 @@ export async function encodeChunk(
   buf: Buffer,
   encoding: UploadEncoding | undefined
 ): Promise<Uint8Array> {
-  if (encoding === "zstd" && zstdCompressAsync) {
+  if (encoding === "zstd") {
+    // pickUploadEncoding never selects zstd when the runtime lacks it, so this
+    // should be unreachable. Fail loudly rather than return raw bytes that the
+    // caller would still tag `Content-Encoding: zstd` — that mislabel would
+    // corrupt the upload on the server.
+    if (!zstdCompressAsync) {
+      throw new Error(
+        "zstd encoding requested but unavailable on this runtime (Node < 22.15)"
+      );
+    }
     // L3 is libzstd's default; passed explicitly for self-documenting
     // code. L9+ trades ~14% size for 4x compress time and forces the
     // server's decoder to allocate 15-30 MiB of window state -- not

@@ -1,7 +1,7 @@
 /**
  * SQLite database connection manager for CLI configuration storage.
- * Uses the sqlite.ts adapter which wraps node:sqlite's DatabaseSync
- * with a bun:sqlite-compatible API surface.
+ * Uses the sqlite.ts adapter, which selects `node:sqlite` (Node 22.15+) or a
+ * bundled WASM driver (`node-sqlite3-wasm`, Node < 22.15) behind one API.
  */
 
 import { chmodSync, mkdirSync } from "node:fs";
@@ -39,13 +39,13 @@ let dbOpenedPath: string | null = null;
 /**
  * Whether the process-exit close handler has been registered.
  *
- * The WASM SQLite fallback (`node-sqlite3-wasm`, used on Node < 22.15)
- * implements cross-process locking with an on-disk lock **directory**
- * (`<db>.lock`). Unlike native `node:sqlite`, whose OS file locks are
- * released automatically when the process exits, that directory persists
- * if the connection isn't closed — so a subsequent CLI invocation sees
- * "database is locked". We close the connection on process exit to release
- * it. Harmless (and cheap) for the native driver too.
+ * On the WASM fallback (`node-sqlite3-wasm`, Node < 22.15), the driver
+ * releases its `<db>.lock` mutex during `close()` — the adapter's `.get()`
+ * wrapper finalizes cursors so this happens reliably. Explicitly closing on
+ * a normal `exit` is a proactive backstop that shrinks the window in which a
+ * lock could linger; it does NOT fire on SIGKILL/SIGINT, so it is not the
+ * primary guarantee. Crash-orphaned locks are recovered at open time by
+ * {@link clearStaleWasmLock}. Harmless (and cheap) for the native driver too.
  */
 let exitHandlerRegistered = false;
 

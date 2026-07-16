@@ -67,15 +67,38 @@ type StatementWrapper = {
 };
 
 /**
+ * Coerce a single bind value to a form both drivers accept.
+ *
+ * `node:sqlite` rejects JS booleans ("Provided value cannot be bound") while
+ * `node-sqlite3-wasm` accepts them — normalise `boolean` → `0|1` for both so
+ * the exported {@link SQLQueryBindings} `boolean` option behaves identically
+ * regardless of runtime. `undefined` → `null` (the WASM driver rejects
+ * `undefined`; `node:sqlite` callers never pass it).
+ */
+function normalizeBind(value: SQLQueryBindings): SQLQueryBindings {
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+  if (value === undefined) {
+    return null;
+  }
+  return value;
+}
+
+/**
  * Normalise positional bind parameters for the WASM driver.
  *
  * `node-sqlite3-wasm` expects a single array of bind values (`run([a, b])`),
- * whereas `node:sqlite` expects spread arguments (`run(a, b)`). It also
- * rejects `undefined` (throwing "Unsupported type for binding") where
- * `node:sqlite` callers never pass it — map `undefined` → `null` defensively.
+ * whereas `node:sqlite` expects spread arguments (`run(a, b)`). Values are
+ * also passed through {@link normalizeBind}.
  */
 function toWasmParams(params: SQLQueryBindings[]): SQLQueryBindings[] {
-  return params.map((p) => (p === undefined ? null : p));
+  return params.map(normalizeBind);
+}
+
+/** Apply {@link normalizeBind} to spread params for the native driver. */
+function toNodeParams(params: SQLQueryBindings[]): SQLQueryBindings[] {
+  return params.map(normalizeBind);
 }
 
 /**
@@ -97,10 +120,22 @@ function wrapStatement(stmt: any, kind: DriverKind): StatementWrapper {
     get(target, prop) {
       if (prop === "get") {
         return (...params: SQLQueryBindings[]) => {
-          const row =
-            kind === "wasm"
-              ? target.get(toWasmParams(params))
-              : target.get(...params);
+          if (kind === "wasm") {
+            const row = target.get(toWasmParams(params));
+            // node-sqlite3-wasm leaves the statement's cursor open after a
+            // single-row read, which keeps the SQLite lock held. That lock
+            // (an on-disk `<db>.lock` mutex) then survives `Database.close()`
+            // via close_v2's deferred-close, leaking a lock dir that blocks
+            // the next process. Finalizing here releases the cursor so the
+            // driver's own close-time unlock removes only *our* lock. (`.all()`
+            // and `.run()` read to completion and auto-reset, so they don't
+            // need this.) Guarded so a reused statement never double-finalizes.
+            if (!target.isFinalized) {
+              target.finalize();
+            }
+            return (row as Record<string, SQLQueryBindings>) ?? null;
+          }
+          const row = target.get(...toNodeParams(params));
           // Normalise no-row result to null (node:sqlite returns undefined).
           return (row as Record<string, SQLQueryBindings>) ?? null;
         };
@@ -109,13 +144,13 @@ function wrapStatement(stmt: any, kind: DriverKind): StatementWrapper {
         return (...params: SQLQueryBindings[]) =>
           kind === "wasm"
             ? target.all(toWasmParams(params))
-            : target.all(...params);
+            : target.all(...toNodeParams(params));
       }
       if (prop === "run") {
         return (...params: SQLQueryBindings[]) =>
           kind === "wasm"
             ? target.run(toWasmParams(params))
-            : target.run(...params);
+            : target.run(...toNodeParams(params));
       }
       const value = Reflect.get(target, prop);
       if (typeof value === "function") {
@@ -287,9 +322,6 @@ export class Database {
   /** Which backing driver this instance uses (for param normalisation). */
   private readonly kind: DriverKind;
 
-  /** On-disk path (for WASM lock cleanup); undefined for in-memory. */
-  private readonly path: string;
-
   constructor(path: string) {
     const { Ctor, kind } = resolveDriver();
     if (kind === "wasm") {
@@ -297,7 +329,6 @@ export class Database {
     }
     this.db = new Ctor(path);
     this.kind = kind;
-    this.path = path;
   }
 
   /** Execute raw SQL (DDL statements, multi-statement strings). */
@@ -316,26 +347,17 @@ export class Database {
   /**
    * Close the database connection.
    *
-   * On the WASM path, also removes this connection's own lock directory.
-   * node-sqlite3-wasm only `rmdir`s `<db>.lock` when SQLite downgrades to
-   * lock level NONE, which a plain `close()` doesn't force — so the empty
-   * lock dir routinely survives and blocks the next process with "database
-   * is locked". Since we're closing *our own* connection here (not racing
-   * anyone), removing the lock is safe and unconditional, unlike the
-   * age-guarded stale cleanup on open.
+   * On the WASM path the driver releases its own `<db>.lock` mutex during
+   * close, provided no statement cursor is still open — which the `.get()`
+   * wrapper guarantees by finalizing after each single-row read. We do NOT
+   * remove the lock directory ourselves here: `<db>.lock` is a path-keyed
+   * cross-process mutex, so a stray `rmdir` could delete a concurrently-
+   * running CLI's live lock and allow two writers at once (corruption). Stale
+   * locks left by a crashed process are handled conservatively at open time by
+   * {@link clearStaleWasmLock}.
    */
   close(): void {
     this.db.close();
-    if (this.kind === "wasm" && this.path !== ":memory:" && this.path !== "") {
-      try {
-        rmdirSync(`${this.path}.lock`);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "ENOENT") {
-          log.debug("Could not remove WASM SQLite lock on close", error);
-        }
-      }
-    }
   }
 
   /**
