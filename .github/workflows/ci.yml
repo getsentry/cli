@@ -776,7 +776,7 @@ jobs:
         run: pnpm run test:e2e
 
   build-npm:
-    name: Build npm Package (Node ${{ matrix.node }})
+    name: Build npm Package (smoke Node ${{ matrix.node }})
     needs: [lint, test-unit]
     runs-on: ubuntu-latest
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 'production' || '' }}
@@ -787,13 +787,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
+      # Build under our development Node floor (22.15+). The build tooling
+      # (tsx loader hooks in script/require-shim.mjs) uses node:module APIs
+      # only present on 22.15+, so the bundle is always produced on a modern
+      # Node — matching how we actually publish. The matrix Node version is
+      # only used to *run* the produced artifact below.
       - uses: actions/setup-node@v6
         with:
-          # Matrix entries stay bare majors ("20"/"22"/"24") for the job name
-          # and the `matrix.node == '22'` artifact guard below; map each to its
-          # exact patched version from the central env block here. Node 20
-          # exercises the WASM SQLite fallback (no node:sqlite before 22.15).
-          node-version: ${{ matrix.node == '24' && env.NODE_VERSION_24 || matrix.node == '20' && env.NODE_VERSION_20 || env.NODE_VERSION_22 }}
+          node-version: ${{ env.NODE_VERSION_22 }}
       - uses: actions/cache@v5
         id: cache
         with:
@@ -806,6 +807,16 @@ jobs:
           # Environment-scoped (production) — see note in build-binary.
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: pnpm run bundle
+      - run: npm pack
+      # Switch to the matrix Node to run the produced artifact. This is the
+      # consumer's perspective: Node 20 exercises the WASM SQLite fallback
+      # (no node:sqlite before 22.15); 22/24 use the native driver.
+      - uses: actions/setup-node@v6
+        with:
+          # Matrix entries stay bare majors ("20"/"22"/"24") for the job name
+          # and the `matrix.node == '22'` artifact guard below; map each to its
+          # exact patched version from the central env block here.
+          node-version: ${{ matrix.node == '24' && env.NODE_VERSION_24 || matrix.node == '20' && env.NODE_VERSION_20 || env.NODE_VERSION_22 }}
       - name: Smoke test (Node.js)
         run: node dist/bin.cjs --help
       - name: Smoke test (Node.js — deep)
@@ -816,7 +827,8 @@ jobs:
         run: |
           # auth status without a token exercises SQLite init, schema
           # migrations, telemetry lazy import, and the CJS require chain.
-          # Expected: exit 10 (AUTH_NOT_AUTHENTICATED), NOT a crash/syntax error.
+          # On Node 20 this runs entirely through the bundled WASM SQLite
+          # driver. Expected: exit 10 (AUTH_NOT_AUTHENTICATED), NOT a crash.
           OUTPUT=$(node dist/bin.cjs auth status 2>&1) && EXIT_CODE=$? || EXIT_CODE=$?
           if [[ $EXIT_CODE -ne 10 ]]; then
             echo "::error::Expected exit code 10 (not authenticated), got $EXIT_CODE"
@@ -828,7 +840,6 @@ jobs:
             echo "$OUTPUT"
             exit 1
           fi
-      - run: npm pack
       - name: Upload artifact
         if: matrix.node == '22'
         uses: actions/upload-artifact@v7
