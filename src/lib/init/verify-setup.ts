@@ -26,10 +26,10 @@ import type { WizardUI } from "./ui/types.js";
 /** Verification timeout in seconds. */
 const VERIFY_TIMEOUT_S = 15;
 
-/** Grace period before escalating verification process cleanup to SIGKILL. */
+/** POSIX grace period before escalating verification cleanup to SIGKILL. */
 const PROCESS_SHUTDOWN_GRACE_MS = 5000;
 
-/** Maximum time to wait after force-killing the verification process tree. */
+/** Maximum POSIX wait after force-killing the verification process tree. */
 const PROCESS_FORCE_SHUTDOWN_MS = 1000;
 
 /** Poll interval while waiting for a verification process tree to exit. */
@@ -199,8 +199,8 @@ function buildVerifyEnv(
   return env;
 }
 
-/** Send a signal to the verification child and all of its descendants. */
-function signalProcessTree(
+/** Signal the POSIX process group or force-terminate the Windows process tree. */
+function terminateProcessTree(
   child: ChildProcess,
   signal: NodeJS.Signals
 ): boolean {
@@ -211,16 +211,29 @@ function signalProcessTree(
 
   try {
     if (process.platform === "win32") {
-      const args = ["/PID", String(pid), "/T"];
-      if (signal === "SIGKILL") {
-        args.push("/F");
-      }
+      // Verification children are disposable. Force the complete tree in one
+      // bounded call because Windows cannot reliably reproduce POSIX process-
+      // group signaling or discover descendants after their parent exits.
+      const args = ["/PID", String(pid), "/T", "/F"];
       const taskkill = spawnSync("taskkill", args, {
         stdio: "ignore",
         timeout: WINDOWS_TREE_KILL_TIMEOUT_MS,
         windowsHide: true,
       });
-      return !(taskkill.error || taskkill.status !== 0);
+      if (taskkill.error) {
+        logger.debug(
+          `Failed to terminate Windows verification process tree while handling ${signal}`,
+          taskkill.error
+        );
+        return false;
+      }
+      if (taskkill.status !== 0) {
+        logger.debug(
+          `taskkill exited with status ${taskkill.status} while handling ${signal} for the verification process tree`
+        );
+        return false;
+      }
+      return true;
     }
     // Verification children are spawned detached on POSIX, making their PID
     // the process-group ID. A negative PID signals the whole group, including
@@ -278,26 +291,23 @@ async function waitForPosixProcessGroupExit(
   return true;
 }
 
-/** Gracefully kill a process tree with SIGTERM → grace period → SIGKILL. */
+/** Terminate the process tree, with a grace period on POSIX. */
 async function cleanupProcessTree(child: ChildProcess): Promise<void> {
   try {
     if (process.platform === "win32") {
-      if (signalProcessTree(child, "SIGTERM")) {
-        return;
-      }
-      if (!signalProcessTree(child, "SIGKILL")) {
+      if (!terminateProcessTree(child, "SIGKILL")) {
         signalDirectChild(child, "SIGKILL");
       }
       return;
     }
 
-    signalProcessTree(child, "SIGTERM");
+    terminateProcessTree(child, "SIGTERM");
     const exited = await waitForPosixProcessGroupExit(
       child,
       PROCESS_SHUTDOWN_GRACE_MS
     );
     if (!exited) {
-      signalProcessTree(child, "SIGKILL");
+      terminateProcessTree(child, "SIGKILL");
       await waitForPosixProcessGroupExit(child, PROCESS_FORCE_SHUTDOWN_MS);
     }
   } catch (error) {
@@ -381,7 +391,7 @@ export async function verifySetup(
   // cleanup instead of silently continuing the wizard.
   let signalReceived: NodeJS.Signals | null = null;
   const safeKill = (sig: NodeJS.Signals) => {
-    if (!signalProcessTree(child, sig)) {
+    if (!terminateProcessTree(child, sig)) {
       signalDirectChild(child, sig);
     }
   };
