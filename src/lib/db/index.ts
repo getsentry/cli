@@ -1,15 +1,18 @@
 /**
  * SQLite database connection manager for CLI configuration storage.
- * Uses the sqlite.ts adapter which wraps node:sqlite's DatabaseSync
- * with a bun:sqlite-compatible API surface.
+ * Uses the sqlite.ts adapter, which selects `node:sqlite` (Node 22.15+) or a
+ * bundled WASM driver (`node-sqlite3-wasm`, Node < 22.15) behind one API.
  */
 
 import { chmodSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { getEnv } from "../env.js";
+import { logger } from "../logger.js";
 
 const _require = createRequire(import.meta.url);
+
+const log = logger.withTag("db");
 
 import { migrateFromJson } from "./migration.js";
 import { initSchema, runMigrations } from "./schema.js";
@@ -32,6 +35,36 @@ let db: Database | null = null;
 /** Raw database without tracing (used for repair operations) */
 let rawDb: Database | null = null;
 let dbOpenedPath: string | null = null;
+
+/**
+ * Whether the process-exit close handler has been registered.
+ *
+ * On the WASM fallback (`node-sqlite3-wasm`, Node < 22.15), the driver
+ * releases its `<db>.lock` mutex during `close()` — the adapter's `.get()`
+ * wrapper finalizes cursors so this happens reliably. Explicitly closing on
+ * a normal `exit` is a proactive backstop that shrinks the window in which a
+ * lock could linger; it does NOT fire on SIGKILL/SIGINT, so it is not the
+ * primary guarantee. Crash-orphaned locks are recovered at open time by
+ * {@link clearStaleWasmLock}. Harmless (and cheap) for the native driver too.
+ */
+let exitHandlerRegistered = false;
+
+function registerExitHandler(): void {
+  if (exitHandlerRegistered) {
+    return;
+  }
+  exitHandlerRegistered = true;
+  // 'exit' handlers must be synchronous; close() is synchronous.
+  process.on("exit", () => {
+    try {
+      db?.close();
+    } catch (error) {
+      // Best-effort: the process is exiting anyway. A failed close here
+      // must never mask the real exit code.
+      log.debug("Failed to close database on exit", error);
+    }
+  });
+}
 
 export function getConfigDir(): string {
   const { homedir } = _require("node:os");
@@ -96,7 +129,13 @@ export function getDatabase(): Database {
     // must wait. Without sufficient timeout, concurrent processes fail immediately.
     // Set busy_timeout FIRST - before WAL mode - to handle lock contention during init.
     rawDb.exec("PRAGMA busy_timeout = 5000");
-    rawDb.exec("PRAGMA journal_mode = WAL");
+    // WAL is only supported by the native node:sqlite driver. The WASM fallback
+    // (Node < 22.15) silently ignores it and stays in the default rollback
+    // journal — acceptable for a single-process CLI cache — so skip the no-op
+    // pragma there rather than pretend it took effect.
+    if (rawDb.driverKind === "node") {
+      rawDb.exec("PRAGMA journal_mode = WAL");
+    }
     rawDb.exec("PRAGMA foreign_keys = ON");
     rawDb.exec("PRAGMA synchronous = NORMAL");
 
@@ -117,6 +156,7 @@ export function getDatabase(): Database {
       db = createTracedDatabase(rawDb);
     }
     dbOpenedPath = dbPath;
+    registerExitHandler();
 
     return db;
   } catch (error) {

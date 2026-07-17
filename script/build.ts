@@ -135,6 +135,12 @@ async function bundleJs(): Promise<boolean> {
         "react-reconciler/*",
         // The DIF loader resolves this .wasm at runtime (dev only); never bundle it.
         "@sentry/symbolic/symbolic_bg.wasm",
+        // WASM SQLite fallback for Node.js < 22.15. The SEA binary always
+        // embeds a modern LTS Node.js (>= 22.15) and uses the native
+        // node:sqlite driver, so this fallback branch is dead code here.
+        // Externalizing it keeps the driver (and its ~1MB .wasm) out of the
+        // binary entirely — see src/lib/db/sqlite.ts resolveDriver().
+        "node-sqlite3-wasm",
       ],
       sourcemap: "linked",
       minify: true,

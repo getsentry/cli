@@ -340,6 +340,18 @@ await sdk.release["set-commits"]({ orgVersion: "1.0.0", auto: true });
 await sdk.release.finalize({ orgVersion: "1.0.0" });
 ```
 
+:::note
+The `sentry` npm package requires **Node.js 18+** (v3's `@sentry/cli` supported
+older runtimes). On Node.js 22.15+ it uses the built-in `node:sqlite` module; on
+Node.js 18–22.14 it transparently falls back to a bundled WASM SQLite driver, so
+no native module or extra install step is needed. The standalone binary bundles
+its own runtime and is unaffected by your installed Node.js version.
+
+For best performance we strongly recommend the standalone binary or Node.js
+22.15+ — the WASM fallback can't use SQLite WAL mode, making its local cache
+slower and less concurrency-friendly.
+:::
+
 Mapping:
 
 | v3 (`@sentry/cli`) | v4 (`sentry`) |

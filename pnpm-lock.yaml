@@ -135,6 +135,9 @@ importers:
       marked:
         specifier: ^15.0.12
         version: 15.0.12
+      node-sqlite3-wasm:
+        specifier: 0.8.59
+        version: 0.8.59
       p-limit:
         specifier: ^7.3.0
         version: 7.3.0
@@ -2000,6 +2003,9 @@ packages:
     peerDependenciesMeta:
       encoding:
         optional: true
+
+  node-sqlite3-wasm@0.8.59:
+    resolution: {integrity: sha512-BsVATSCxLzgpdj6Ey6bZ72MzhkXTCPmb9aVCqyptiwRojo/hzCCoXILoU0SiU7av+iiSyLCTLsCrV96yNUf2/w==}
 
   npm-run-path@6.0.0:
     resolution: {integrity: sha512-9qny7Z9DsQU8Ou39ERsPU4OZQlSTP47ShQzuKZ6PRXpYLtIFgl/DEBYEXKlvcEa+9tHVcK8CF81Y2V72qaZhWA==}
@@ -4620,6 +4626,8 @@ snapshots:
   node-fetch@2.7.0:
     dependencies:
       whatwg-url: 5.0.0
+
+  node-sqlite3-wasm@0.8.59: {}
 
   npm-run-path@6.0.0:
     dependencies:

@@ -5,9 +5,22 @@
  * codebase. It provides a `.query(sql).get()` / `.all()` / `.run()`
  * interface and a manual `transaction()` wrapper.
  *
- * Uses `node:sqlite` (Node 22.15+ with `--experimental-sqlite` flag).
+ * Two backing drivers are supported and selected at runtime:
+ *
+ * - **`node:sqlite`** (`DatabaseSync`) on Node.js 22.15+ — the built-in,
+ *   native driver. This is the fast path used by the standalone binary
+ *   (which always embeds a modern LTS Node.js) and by modern npm installs.
+ * - **`node-sqlite3-wasm`** on Node.js 18–22.14 — a pure-WASM fallback so
+ *   the npm package works on older runtimes that lack `node:sqlite`. It is
+ *   lazily `require()`d only in the fallback branch, which lets the binary
+ *   build externalize (and therefore drop) it entirely.
+ *
+ * The two drivers have subtly different APIs; this adapter normalises them
+ * behind a single surface. See {@link wrapStatement} for the parameter and
+ * return-value differences that are reconciled here.
  */
 
+import { rmdirSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { logger } from "../logger.js";
 
@@ -26,6 +39,21 @@ export type SQLQueryBindings =
   | undefined;
 
 /**
+ * Which backing SQLite driver is active.
+ *
+ * - `"node"` — `node:sqlite` `DatabaseSync` (Node.js 22.15+).
+ * - `"wasm"` — `node-sqlite3-wasm` (Node.js 18–22.14 fallback).
+ */
+type DriverKind = "node" | "wasm";
+
+/**
+ * Minimum Node.js version that ships a usable built-in `node:sqlite`
+ * (`DatabaseSync`). Below this the WASM fallback is used.
+ */
+const NODE_SQLITE_MIN_MAJOR = 22;
+const NODE_SQLITE_MIN_MINOR = 15;
+
+/**
  * Prepared statement wrapper exposing `.get()`, `.all()`, `.run()`.
  *
  * Uses a Proxy to pass through any additional methods while normalising
@@ -38,14 +66,91 @@ type StatementWrapper = {
   [method: string]: unknown;
 };
 
+/**
+ * Coerce a single bind value to a form both drivers accept.
+ *
+ * `node:sqlite` rejects JS booleans ("Provided value cannot be bound") while
+ * `node-sqlite3-wasm` accepts them — normalise `boolean` → `0|1` for both so
+ * the exported {@link SQLQueryBindings} `boolean` option behaves identically
+ * regardless of runtime. `undefined` → `null` (the WASM driver rejects
+ * `undefined`; `node:sqlite` callers never pass it).
+ */
+function normalizeBind(value: SQLQueryBindings): SQLQueryBindings {
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+  if (value === undefined) {
+    return null;
+  }
+  return value;
+}
+
+/**
+ * Normalise positional bind parameters for the WASM driver.
+ *
+ * `node-sqlite3-wasm` expects a single array of bind values (`run([a, b])`),
+ * whereas `node:sqlite` expects spread arguments (`run(a, b)`). Values are
+ * also passed through {@link normalizeBind}.
+ */
+function toWasmParams(params: SQLQueryBindings[]): SQLQueryBindings[] {
+  return params.map(normalizeBind);
+}
+
+/** Apply {@link normalizeBind} to spread params for the native driver. */
+function toNodeParams(params: SQLQueryBindings[]): SQLQueryBindings[] {
+  return params.map(normalizeBind);
+}
+
+/**
+ * Wrap a driver-native prepared statement in the unified {@link StatementWrapper}.
+ *
+ * Reconciles the two drivers' calling conventions:
+ * - **params**: `node:sqlite` takes spread args; `node-sqlite3-wasm` takes a
+ *   single array. We branch on `kind` so callers can always use spread.
+ * - **`.get()` no-row result**: both are normalised to `null`
+ *   (`node:sqlite` returns `undefined`).
+ *
+ * @param stmt Driver-native statement (`node:sqlite` Statement or
+ *   `node-sqlite3-wasm` Statement).
+ * @param kind Which driver produced `stmt`.
+ */
 // biome-ignore lint/suspicious/noExplicitAny: backing driver types vary
-function wrapStatement(stmt: any): StatementWrapper {
+function wrapStatement(stmt: any, kind: DriverKind): StatementWrapper {
   return new Proxy(stmt, {
     get(target, prop) {
       if (prop === "get") {
-        return (...params: SQLQueryBindings[]) =>
+        return (...params: SQLQueryBindings[]) => {
+          if (kind === "wasm") {
+            const row = target.get(toWasmParams(params));
+            // node-sqlite3-wasm leaves the statement's cursor open after a
+            // single-row read, which keeps the SQLite lock held. That lock
+            // (an on-disk `<db>.lock` mutex) then survives `Database.close()`
+            // via close_v2's deferred-close, leaking a lock dir that blocks
+            // the next process. Finalizing here releases the cursor so the
+            // driver's own close-time unlock removes only *our* lock. (`.all()`
+            // and `.run()` read to completion and auto-reset, so they don't
+            // need this.) Guarded so a reused statement never double-finalizes.
+            if (!target.isFinalized) {
+              target.finalize();
+            }
+            return (row as Record<string, SQLQueryBindings>) ?? null;
+          }
+          const row = target.get(...toNodeParams(params));
           // Normalise no-row result to null (node:sqlite returns undefined).
-          (target.get(...params) as Record<string, SQLQueryBindings>) ?? null;
+          return (row as Record<string, SQLQueryBindings>) ?? null;
+        };
+      }
+      if (prop === "all") {
+        return (...params: SQLQueryBindings[]) =>
+          kind === "wasm"
+            ? target.all(toWasmParams(params))
+            : target.all(...toNodeParams(params));
+      }
+      if (prop === "run") {
+        return (...params: SQLQueryBindings[]) =>
+          kind === "wasm"
+            ? target.run(toWasmParams(params))
+            : target.run(...toNodeParams(params));
       }
       const value = Reflect.get(target, prop);
       if (typeof value === "function") {
@@ -56,12 +161,157 @@ function wrapStatement(stmt: any): StatementWrapper {
   }) as StatementWrapper;
 }
 
+/** Backing-driver constructor plus which kind it is. */
+type ResolvedDriver = {
+  // biome-ignore lint/suspicious/noExplicitAny: driver constructors differ
+  Ctor: any;
+  kind: DriverKind;
+};
+
 /**
- * Resolve the SQLite database constructor.
- * Uses `node:sqlite` (Node 22.15+ with `--experimental-sqlite`).
+ * Whether the current runtime provides a usable built-in `node:sqlite`.
+ *
+ * Bun sets `process.versions.node` to a compat version but does not ship
+ * `node:sqlite`; the try/catch in {@link resolveDriver} is the ultimate
+ * guard, this is just the fast happy-path check.
  */
-// biome-ignore lint/suspicious/noExplicitAny: driver types loaded lazily
-const SqliteImpl: any = _require("node:sqlite").DatabaseSync;
+function hasNativeNodeSqlite(): boolean {
+  const [major = 0, minor = 0] = process.versions.node
+    .split(".")
+    .map((n) => Number.parseInt(n, 10));
+  if (major > NODE_SQLITE_MIN_MAJOR) {
+    return true;
+  }
+  return major === NODE_SQLITE_MIN_MAJOR && minor >= NODE_SQLITE_MIN_MINOR;
+}
+
+let resolvedDriver: ResolvedDriver | null = null;
+
+/**
+ * Test-only override for which driver {@link resolveDriver} returns.
+ * `null` means "use normal runtime detection".
+ * @internal
+ */
+let forcedDriverKind: DriverKind | null = null;
+
+/**
+ * Force a specific backing driver for the next connection(s), or reset to
+ * automatic detection with `null`. Clears the memoised resolution so the
+ * change takes effect immediately.
+ *
+ * Intended for tests that need to exercise the WASM fallback on a modern
+ * Node.js (where native `node:sqlite` would otherwise be chosen).
+ *
+ * @internal
+ */
+export function __setDriverForTests(kind: DriverKind | null): void {
+  forcedDriverKind = kind;
+  resolvedDriver = null;
+}
+
+/**
+ * Resolve the SQLite database constructor for the current runtime.
+ *
+ * Prefers native `node:sqlite` (`DatabaseSync`); falls back to the bundled
+ * `node-sqlite3-wasm` on older Node.js. Memoised after first resolution.
+ *
+ * The WASM driver is `require()`d only inside the fallback branch. The
+ * standalone binary build (`script/build.ts`) marks `node-sqlite3-wasm`
+ * external, so this branch is dead code there and adds zero bytes to the
+ * SEA binary (which always runs Node.js ≥ 22.15).
+ */
+function resolveDriver(): ResolvedDriver {
+  if (resolvedDriver) {
+    return resolvedDriver;
+  }
+
+  if (
+    forcedDriverKind === "node" ||
+    (!forcedDriverKind && hasNativeNodeSqlite())
+  ) {
+    try {
+      resolvedDriver = {
+        Ctor: _require("node:sqlite").DatabaseSync,
+        kind: "node",
+      };
+      return resolvedDriver;
+    } catch (error) {
+      // When the native driver was *explicitly* requested (tests), silently
+      // swapping to WASM would run against the wrong backend and mask failures.
+      // Only auto-fall-through when the choice was ours (version-based).
+      if (forcedDriverKind === "node") {
+        throw error;
+      }
+      // node:sqlite genuinely unavailable despite the version check
+      // (e.g. Bun, or a Node build without SQLite). Fall through to WASM.
+      log.debug("node:sqlite unavailable, falling back to WASM driver", error);
+    }
+  }
+
+  const { Database: WasmDatabase } = _require("node-sqlite3-wasm") as {
+    // biome-ignore lint/suspicious/noExplicitAny: driver types loaded lazily
+    Database: any;
+  };
+  resolvedDriver = { Ctor: WasmDatabase, kind: "wasm" };
+  return resolvedDriver;
+}
+
+/**
+ * Age (ms) beyond which a `<db>.lock` directory is considered stale.
+ *
+ * The WASM driver holds the lock only briefly (during a write transaction's
+ * lock escalation) and downgrades between operations, so a live lock's
+ * directory is re-created and thus recently modified. A directory older than
+ * this window is therefore almost certainly orphaned by a dead process. The
+ * value is deliberately generous (well beyond any single write) to avoid
+ * ever racing a genuinely concurrent writer.
+ */
+const STALE_LOCK_MAX_AGE_MS = 60_000;
+
+/**
+ * Remove a stale lock directory left by a previous `node-sqlite3-wasm`
+ * process.
+ *
+ * The WASM driver implements SQLite file locking by `mkdir("<db>.lock")`
+ * (an atomic mutex) and releasing it with `rmdir` only when SQLite lowers
+ * the lock to NONE. If a process exits while still holding any lock level
+ * — including a normal exit where the connection isn't explicitly downgraded
+ * — the empty directory is left behind, and the next invocation's `mkdir`
+ * fails with EEXIST, surfacing as "database is locked" forever.
+ *
+ * We only remove a lock directory that is *older* than
+ * {@link STALE_LOCK_MAX_AGE_MS}, so a lock a concurrently-running CLI just
+ * acquired is never deleted out from under it — that live contention is left
+ * to SQLite's own `busy_timeout`. A recent lock is kept; only a clearly
+ * orphaned one is cleared. Only the empty lock directory is removed (a
+ * non-empty dir, never produced by this driver, is left intact by `rmdir`).
+ *
+ * Best-effort: any failure is swallowed so a permissions issue or a genuine
+ * race degrades to the driver's own locking error rather than a crash here.
+ */
+function clearStaleWasmLock(dbPath: string): void {
+  if (dbPath === ":memory:" || dbPath === "") {
+    return;
+  }
+  const lockDir = `${dbPath}.lock`;
+  try {
+    const age = Date.now() - statSync(lockDir).mtimeMs;
+    if (age < STALE_LOCK_MAX_AGE_MS) {
+      // Recent — may belong to a live process. Let busy_timeout handle it.
+      return;
+    }
+    // rmdirSync only removes empty directories, so this can never delete a
+    // lock actively held with contents (this driver's locks are always empty).
+    rmdirSync(lockDir);
+    log.debug(`Cleared stale WASM SQLite lock (age ${age}ms): ${lockDir}`);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // ENOENT: no stale lock (the common case). Anything else is logged.
+    if (code !== "ENOENT") {
+      log.debug("Could not clear stale WASM SQLite lock", error);
+    }
+  }
+}
 
 /**
  * SQLite database wrapper.
@@ -75,8 +325,26 @@ export class Database {
   // biome-ignore lint/suspicious/noExplicitAny: backing driver resolved at runtime
   private readonly db: any;
 
+  /** Which backing driver this instance uses (for param normalisation). */
+  private readonly kind: DriverKind;
+
   constructor(path: string) {
-    this.db = new SqliteImpl(path);
+    const { Ctor, kind } = resolveDriver();
+    if (kind === "wasm") {
+      clearStaleWasmLock(path);
+    }
+    this.db = new Ctor(path);
+    this.kind = kind;
+  }
+
+  /**
+   * Which backing SQLite driver is active (`"node"` or `"wasm"`).
+   *
+   * Callers use this to skip pragmas the WASM driver doesn't support (e.g.
+   * `journal_mode = WAL`, which it silently ignores).
+   */
+  get driverKind(): DriverKind {
+    return this.kind;
   }
 
   /** Execute raw SQL (DDL statements, multi-statement strings). */
@@ -89,11 +357,21 @@ export class Database {
    * Returns a wrapper with `.get()`, `.all()`, `.run()`.
    */
   query(sql: string): StatementWrapper {
-    const prepFn = this.db.query ?? this.db.prepare;
-    return wrapStatement(prepFn.call(this.db, sql));
+    return wrapStatement(this.db.prepare(sql), this.kind);
   }
 
-  /** Close the database connection. */
+  /**
+   * Close the database connection.
+   *
+   * On the WASM path the driver releases its own `<db>.lock` mutex during
+   * close, provided no statement cursor is still open — which the `.get()`
+   * wrapper guarantees by finalizing after each single-row read. We do NOT
+   * remove the lock directory ourselves here: `<db>.lock` is a path-keyed
+   * cross-process mutex, so a stray `rmdir` could delete a concurrently-
+   * running CLI's live lock and allow two writers at once (corruption). Stale
+   * locks left by a crashed process are handled conservatively at open time by
+   * {@link clearStaleWasmLock}.
+   */
   close(): void {
     this.db.close();
   }
@@ -101,6 +379,9 @@ export class Database {
   /**
    * Wrap a function in a transaction. Returns a callable that executes
    * the function within BEGIN/COMMIT, with ROLLBACK on error.
+   *
+   * Neither `node:sqlite` nor `node-sqlite3-wasm` exposes a native
+   * `transaction()` helper, so this always uses the manual wrapper.
    */
   transaction<T>(fn: () => T): () => T {
     if (typeof this.db.transaction === "function") {
