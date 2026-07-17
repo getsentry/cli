@@ -5,9 +5,11 @@
  */
 
 import {
+  type EventAttachmentDetailsResponse,
   getOrganizationIssueEvent,
   getProjectEvent,
   listOrganizationIssueEvents,
+  listProjectEventAttachments,
   resolveOrganizationEventId as sdkResolveAnEventId,
 } from "@sentry/api";
 import pLimit from "p-limit";
@@ -73,6 +75,31 @@ export async function getEvent(
   });
 
   return unwrapResult<SentryEvent>(result, "Failed to get event");
+}
+
+/**
+ * List metadata for attachments on a project event.
+ * Uses the generated Sentry API client and region-aware organization routing.
+ */
+export async function listEventAttachments(
+  orgSlug: string,
+  projectSlug: string,
+  eventId: string
+): Promise<EventAttachmentDetailsResponse[]> {
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await listProjectEventAttachments({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlug,
+      event_id: eventId,
+    },
+  });
+
+  return unwrapResult<EventAttachmentDetailsResponse[]>(
+    result,
+    "Failed to list event attachments"
+  );
 }
 
 /**

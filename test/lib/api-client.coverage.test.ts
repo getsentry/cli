@@ -431,6 +431,37 @@ describe("issues.ts", () => {
       expect(result.nextCursor).toBe("has-more");
     });
 
+    test("uses the remaining limit on the final page and preserves its cursor", async () => {
+      const requestedLimits: string[] = [];
+      let callCount = 0;
+
+      globalThis.fetch = mockFetch(async (input, init) => {
+        callCount += 1;
+        const req = new Request(input!, init);
+        const url = new URL(req.url);
+        requestedLimits.push(url.searchParams.get("limit") ?? "");
+        const count = callCount === 3 ? 50 : 100;
+        const issues = Array.from({ length: count }, (_, index) =>
+          mockIssue({ id: `${callCount}-${index}` })
+        );
+        return new Response(JSON.stringify(issues), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            Link: linkHeader(`cursor-${callCount + 1}`, true),
+          },
+        });
+      });
+
+      const result = await listIssuesAllPages("test-org", "test-project", {
+        limit: 250,
+      });
+
+      expect(result.issues).toHaveLength(250);
+      expect(requestedLimits).toEqual(["100", "100", "50"]);
+      expect(result.nextCursor).toBe("cursor-4");
+    });
+
     test("accepts startCursor option", async () => {
       let capturedUrl = "";
 
