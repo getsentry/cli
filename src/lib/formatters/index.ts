@@ -6,6 +6,7 @@
  */
 
 export * from "./colors.js";
+export * from "./feedback.js";
 export * from "./human.js";
 export * from "./json.js";
 export * from "./log.js";

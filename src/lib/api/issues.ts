@@ -190,8 +190,7 @@ export type IssuesPage = {
   issues: SentryIssue[];
   /**
    * Cursor for the next page of results, if more exist beyond the returned
-   * issues. `undefined` when all matching issues have been returned OR when
-   * the last page was trimmed to fit `limit` (cursor would skip items).
+   * issues. `undefined` when exhausted or a safe page boundary is unavailable.
    */
   nextCursor?: string;
 };
@@ -244,10 +243,9 @@ export async function listIssuesAllPages(
   const allResults: SentryIssue[] = [];
   let cursor: string | undefined = options.startCursor;
 
-  // Use the smaller of the requested limit and the API max as page size
-  const perPage = Math.min(options.limit, API_MAX_PER_PAGE);
-
   for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
+    const remaining = options.limit - allResults.length;
+    const perPage = Math.min(remaining, API_MAX_PER_PAGE);
     const response = await listIssuesPaginated(orgSlug, projectSlug, {
       query: options.query,
       cursor,
@@ -264,10 +262,10 @@ export async function listIssuesAllPages(
     allResults.push(...response.data);
     options.onPage?.(Math.min(allResults.length, options.limit), options.limit);
 
-    // Stop if we've reached the requested limit or there are no more pages
+    // Request only the remaining number of items on each page. A conforming
+    // API therefore reaches the limit exactly and its cursor remains usable.
+    // Keep the defensive overshoot branch for servers that ignore `limit`.
     if (allResults.length >= options.limit || !response.nextCursor) {
-      // If we overshot the limit, trim and don't return a nextCursor —
-      // the cursor would point past the trimmed items, causing skips.
       if (allResults.length > options.limit) {
         return { issues: allResults.slice(0, options.limit) };
       }

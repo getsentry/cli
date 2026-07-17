@@ -34,6 +34,18 @@ export {
   DashboardWidgetQuerySchema,
   DashboardWidgetSchema,
 } from "./dashboard.js";
+// Feedback types and schemas
+export type {
+  FeedbackListResult,
+  FeedbackMetadata,
+  FeedbackViewResult,
+  SentryFeedback,
+} from "./feedback.js";
+export {
+  FeedbackMetadataSchema,
+  FeedbackViewOutputSchema,
+  SentryFeedbackSchema,
+} from "./feedback.js";
 // OAuth types and schemas
 export type {
   DeviceCodeResponse,

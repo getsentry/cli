@@ -131,6 +131,16 @@ type StrictResolvedIssue = {
   issue: SentryIssue;
 };
 
+/** Command-specific recovery text shared by issue-style resolvers. */
+type IssueCommandContext = {
+  /** Primary recovery command for the original input. */
+  commandHint: string;
+  /** Active issue-style subcommand. */
+  command: string;
+  /** Command domain used for recovery suggestions. */
+  commandBase: string;
+};
+
 /**
  * Try to resolve via alias cache.
  * Returns null if the alias is not found in cache or fingerprint doesn't match.
@@ -163,12 +173,17 @@ async function tryResolveFromAlias(
  * Fallback for when the fast shortid fan-out found no matches.
  * Uses findProjectsBySlug to retry on transient failures; when no project
  * slug matches, reports the issue short ID as not found (not the project).
+ *
+ * @param projectSlug - Project slug parsed from the short ID
+ * @param suffix - Issue short-ID suffix
+ * @param commandContext - Command-specific recovery text
  */
 async function resolveProjectSearchFallback(
   projectSlug: string,
   suffix: string,
-  commandHint: string
+  commandContext: IssueCommandContext
 ): Promise<StrictResolvedIssue> {
+  const { command, commandBase, commandHint } = commandContext;
   const { projects } = await findProjectsBySlug(projectSlug.toLowerCase());
 
   if (projects.length === 0) {
@@ -180,7 +195,7 @@ async function resolveProjectSearchFallback(
       [
         "No issue with this short ID found in any accessible organization",
         "Check the project prefix and suffix, or use a numeric issue ID",
-        `Specify the org: sentry issue ... <org>/${fullShortId}`,
+        `Specify the org: ${commandBase} ${command} <org>/${fullShortId}`,
       ]
     );
   }
@@ -193,7 +208,7 @@ async function resolveProjectSearchFallback(
       commandHint,
       [
         `Found in: ${orgList}`,
-        `Specify the org: sentry issue ... <org>/${projectSlug}-${suffix}`,
+        `Specify the org: ${commandBase} ${command} <org>/${projectSlug}-${suffix}`,
       ]
     );
   }
@@ -230,14 +245,15 @@ async function resolveProjectSearchFallback(
  * @param projectSlug - Project slug to search for
  * @param suffix - Issue suffix (uppercase)
  * @param cwd - Current working directory
- * @param commandHint - Hint for error messages
+ * @param commandContext - Command-specific recovery text
  */
 async function resolveProjectSearch(
   projectSlug: string,
   suffix: string,
   cwd: string,
-  commandHint: string
+  commandContext: IssueCommandContext
 ): Promise<StrictResolvedIssue> {
+  const { command, commandBase, commandHint } = commandContext;
   // 1. Try alias cache first (fast, local lookup)
   const aliasResult = await tryResolveFromAlias(
     projectSlug.toLowerCase(),
@@ -312,7 +328,7 @@ async function resolveProjectSearch(
       commandHint,
       [
         `Found in: ${orgList}`,
-        `Specify the org: sentry issue ... <org>/${projectSlug}-${suffix}`,
+        `Specify the org: ${commandBase} ${command} <org>/${projectSlug}-${suffix}`,
       ]
     );
   }
@@ -334,7 +350,7 @@ async function resolveProjectSearch(
 
   // 4. Fall back to findProjectsBySlug for precise error messages
   //    and retry the issue lookup (handles transient failures).
-  return resolveProjectSearchFallback(projectSlug, suffix, commandHint);
+  return resolveProjectSearchFallback(projectSlug, suffix, commandContext);
 }
 
 /**
@@ -374,20 +390,21 @@ async function resolveSuffixOnly(
  *
  * @param org - Explicit organization slug
  * @param suffix - Issue suffix (uppercase)
- * @param commandHint - Hint for error messages
+ * @param commandContext - Command-specific recovery text
  */
 function resolveExplicitOrgSuffix(
   org: string,
   suffix: string,
-  commandHint: string
+  commandContext: IssueCommandContext
 ): never {
+  const { command, commandBase, commandHint } = commandContext;
   throw new ResolutionError(
     `Issue suffix '${suffix}'`,
     "could not be resolved without project context",
     commandHint,
     [
       `The format '${org}/${suffix}' requires a project to build the full issue ID.`,
-      `Use: sentry issue ... ${org}/<project>-${suffix}`,
+      `Use: ${commandBase} ${command} ${org}/<project>-${suffix}`,
     ]
   );
 }
@@ -420,7 +437,7 @@ const SELECTOR_LABELS: Record<IssueSelector, string> = {
  * @param selector - The magic selector (e.g., `@latest`, `@most_frequent`)
  * @param explicitOrg - Optional explicit org slug from `org/@selector` format
  * @param cwd - Current working directory for context resolution
- * @param commandHint - Hint for error messages
+ * @param commandContext - Command-specific recovery text
  * @returns The resolved issue with org context
  * @throws {ContextError} When organization cannot be resolved
  * @throws {ResolutionError} When no issues match the selector
@@ -429,8 +446,9 @@ async function resolveSelector(
   selector: IssueSelector,
   explicitOrg: string | undefined,
   cwd: string,
-  commandHint: string
+  commandContext: IssueCommandContext
 ): Promise<StrictResolvedIssue> {
+  const { commandBase, commandHint } = commandContext;
   // Resolve org: explicit from `org/@latest` or auto-detected from DSN/defaults
   let orgSlug: string;
   if (explicitOrg) {
@@ -460,7 +478,7 @@ async function resolveSelector(
     throw new ResolutionError(
       `Selector '${selector}'`,
       "no unresolved issues found",
-      `sentry issue list ${orgSlug}/ -q "is:resolved"`,
+      `${commandBase} list ${orgSlug}/ -q "is:resolved"`,
       [`The ${label} issue selector only matches unresolved issues.`]
     );
   }
@@ -718,8 +736,14 @@ export async function resolveIssue(
   options: ResolveIssueOptions
 ): Promise<ResolvedIssueResult> {
   const { issueArg, cwd, command, commandBase } = options;
+  const effectiveCommandBase = commandBase ?? "sentry issue";
   const parsed = parseIssueArg(issueArg);
-  const commandHint = buildCommandHint(command, issueArg, commandBase);
+  const commandHint = buildCommandHint(command, issueArg, effectiveCommandBase);
+  const commandContext: IssueCommandContext = {
+    command,
+    commandBase: effectiveCommandBase,
+    commandHint,
+  };
 
   let result: ResolvedIssueResult;
 
@@ -755,7 +779,7 @@ export async function resolveIssue(
             commandHint,
             [
               `No issue with numeric ID ${parsed.numericId} found in org '${org}' — you may not have access, or it may have been deleted.`,
-              `If this is a short ID suffix, try: sentry issue ${command} <project>-${parsed.numericId}`,
+              `If this is a short ID suffix, try: ${effectiveCommandBase} ${command} <project>-${parsed.numericId}`,
             ]
           );
         }
@@ -767,7 +791,7 @@ export async function resolveIssue(
     case "explicit-org-suffix": {
       // Org + suffix only - ambiguous without project, always errors
       const org = await resolveEffectiveOrg(parsed.org);
-      result = await resolveExplicitOrgSuffix(org, parsed.suffix, commandHint);
+      result = resolveExplicitOrgSuffix(org, parsed.suffix, commandContext);
       break;
     }
 
@@ -777,7 +801,7 @@ export async function resolveIssue(
         parsed.projectSlug,
         parsed.suffix,
         cwd,
-        commandHint
+        commandContext
       );
       break;
 
@@ -792,7 +816,7 @@ export async function resolveIssue(
         parsed.selector,
         parsed.org,
         cwd,
-        commandHint
+        commandContext
       );
       break;
 
