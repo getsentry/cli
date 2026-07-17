@@ -119,7 +119,6 @@ import {
   acquireLock,
   getBinaryDownloadUrl,
   isNightlyVersion,
-  isProcessRunning,
   releaseLock,
 } from "../../src/lib/binary.js";
 import {
@@ -127,6 +126,7 @@ import {
   setInstallInfo,
 } from "../../src/lib/db/install-info.js";
 import { UpgradeError } from "../../src/lib/errors.js";
+import { isProcessRunning } from "../../src/lib/process-utils.js";
 
 const {
   detectInstallationMethod,

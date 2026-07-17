@@ -25,7 +25,7 @@ import {
 } from "./custom-ca.js";
 import { stringifyUnknown, UpgradeError } from "./errors.js";
 import { logger } from "./logger.js";
-
+import { isProcessRunning } from "./process-utils.js";
 /** Known directories where the curl installer may place the binary */
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
 
@@ -359,27 +359,6 @@ export function cleanupOldBinary(oldPath: string): void {
 }
 
 // Lock Management
-
-/**
- * Check if a process with the given PID is still running.
- *
- * On Unix, process.kill(pid, 0) throws:
- * - ESRCH: Process does not exist (not running)
- * - EPERM: Process exists but we lack permission to signal it (IS running)
- */
-export function isProcessRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0); // Signal 0 just checks if process exists
-    return true;
-  } catch (error) {
-    // EPERM means process exists but we can't signal it (different user)
-    if ((error as NodeJS.ErrnoException).code === "EPERM") {
-      return true;
-    }
-    // ESRCH or other errors mean process is not running
-    return false;
-  }
-}
 
 /**
  * Acquire an exclusive lock for binary installation/upgrade.
