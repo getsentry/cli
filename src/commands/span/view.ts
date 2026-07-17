@@ -127,6 +127,29 @@ export function parsePositionalArgs(args: string[]): SpanViewArgs {
     }
   }
 
+  // Auto-detect `<org>/<project>/<trace-id>/<span-id>` single-arg form with
+  // multiple slashes. When the last segment is a valid 16-char hex span ID,
+  // split it off and defer the trace portion to parseTraceTargetWithRecovery.
+  if (args.length === 1 && first.indexOf("/") !== -1) {
+    const lastSlash = first.lastIndexOf("/");
+    const maybeSpanId = first
+      .slice(lastSlash + 1)
+      .trim()
+      .toLowerCase()
+      .replace(/-/g, "");
+    const traceArg = first.slice(0, lastSlash);
+    // Only treat it as a combined trace/span arg when the prefix still
+    // contains a slash (i.e. this is truly multi-segment like org/proj/trace/span).
+    // The single-slash `<trace-id>/<span-id>` case is already handled above.
+    if (traceArg.includes("/") && SPAN_ID_RE.test(maybeSpanId)) {
+      log.warn(
+        `Interpreting '${first}' as <trace-target>/<span-id>. ` +
+          `Use separate arguments: sentry span view ${traceArg} ${maybeSpanId}`
+      );
+      return { kind: "deferred", rawTraceArg: traceArg, rawSpanIds: [maybeSpanId] };
+    }
+  }
+
   // Single bare arg that looks like a span ID (16-char hex, no slashes):
   // the user forgot the trace ID. Give a targeted ContextError instead
   // of the confusing "Invalid trace ID" from validateTraceId() (CLI-SC).
