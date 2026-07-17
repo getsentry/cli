@@ -99,30 +99,53 @@ export function parsePositionalArgs(args: string[]): SpanViewArgs {
     throw new ContextError("Trace ID and span ID", USAGE_HINT, []);
   }
 
-  // Auto-detect `<trace-id>/<span-id>` single-arg form. When a single
-  // arg contains exactly one slash separating a 32-char hex trace ID
-  // from a 16-char hex span ID, the user clearly intended to pass both.
+  // Auto-detect `[<org>/<project>/]<trace-id>/<span-id>` single-arg form.
+  // The user clearly intended to pass both trace target and span ID together.
+  // We split on the last slash so that full `org/project/trace-id/span-id`
+  // inputs are handled correctly, not just the simple `trace-id/span-id` form.
   // Without this check, parseSlashSeparatedTraceTarget treats the span
   // ID as a trace ID and fails validation (CLI-G6).
   if (args.length === 1) {
-    const slashIdx = first.indexOf("/");
-    if (slashIdx !== -1 && first.indexOf("/", slashIdx + 1) === -1) {
-      const left = normalizeHexId(first.slice(0, slashIdx));
+    const lastSlashIdx = first.lastIndexOf("/");
+    if (lastSlashIdx !== -1) {
       const right = first
-        .slice(slashIdx + 1)
+        .slice(lastSlashIdx + 1)
         .trim()
         .toLowerCase()
         .replace(/-/g, "");
-      if (HEX_ID_RE.test(left) && SPAN_ID_RE.test(right)) {
-        log.warn(
-          `Interpreting '${first}' as <trace-id>/<span-id>. ` +
-            `Use separate arguments: sentry span view ${left} ${right}`
-        );
-        return {
-          kind: "resolved",
-          traceTarget: { type: "auto-detect" as const, traceId: left },
-          rawSpanIds: [right],
-        };
+      if (SPAN_ID_RE.test(right)) {
+        const rawLeft = first.slice(0, lastSlashIdx);
+        const firstSlashIdx = first.indexOf("/");
+        const hasMultipleSlashes = firstSlashIdx !== lastSlashIdx;
+
+        if (hasMultipleSlashes) {
+          // Multi-segment form: org/project/trace-id/span-id — defer so that
+          // parseTraceTargetWithRecovery resolves the full trace target.
+          log.warn(
+            `Interpreting '${first}' as <trace-target>/<span-id>. ` +
+              `Use separate arguments: sentry span view ${rawLeft} ${right}`
+          );
+          return {
+            kind: "deferred",
+            rawTraceArg: rawLeft,
+            rawSpanIds: [right],
+          };
+        } else {
+          // Simple trace-id/span-id form: left must be a valid 32-char hex
+          // trace ID. If not, fall through to the missing-span-IDs error.
+          const left = normalizeHexId(rawLeft);
+          if (HEX_ID_RE.test(left)) {
+            log.warn(
+              `Interpreting '${first}' as <trace-id>/<span-id>. ` +
+                `Use separate arguments: sentry span view ${left} ${right}`
+            );
+            return {
+              kind: "resolved",
+              traceTarget: { type: "auto-detect" as const, traceId: left },
+              rawSpanIds: [right],
+            };
+          }
+        }
       }
     }
   }
