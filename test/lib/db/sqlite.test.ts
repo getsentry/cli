@@ -213,9 +213,11 @@ describe.each(DRIVERS)("sqlite adapter [%s driver]", (kind) => {
  *     the lock past `close()` and leaking the dir → the `.get()` wrapper
  *     finalizes the statement so the driver releases the lock on close.
  *  2. A process killed mid-write leaks the dir → the next open consults the
- *     PID sentinel and clears it immediately if the owner is dead, keeps it if
- *     the owner is alive, and falls back to an age heuristic if there is no
- *     sentinel — so a concurrent peer's live lock is never stolen.
+ *     PID sentinel: a lock past a short safety floor whose owner is dead is
+ *     cleared immediately, a lock whose owner is alive is kept, and a lock
+ *     younger than the floor is always kept (so a stale sentinel can't steal a
+ *     freshly-acquired live lock). With no sentinel it falls back to an age
+ *     heuristic.
  */
 describe("wasm driver lock handling", () => {
   let dir: string;
@@ -305,23 +307,45 @@ describe("wasm driver lock handling", () => {
     expect(existsSync(lockDir)).toBe(true);
   });
 
-  test("clears a lock owned by a dead process immediately, even if recent", () => {
+  test("clears a dead-owner lock past the safety floor without the age wait", () => {
     // A process killed mid-write leaves the lock dir plus an owner sentinel.
-    // If that PID is dead the lock is provably orphaned and must be cleared
-    // right away — no waiting for the age window.
+    // Once the lock is older than the short safety floor, a dead owner PID
+    // means it's provably orphaned — cleared without waiting the full 60s.
     __setDriverForTests("wasm");
     dir = mkdtempSync(join(tmpdir(), "sqlite-dead-"));
     const dbPath = join(dir, "cli.db");
 
     const lockDir = `${dbPath}.lock`;
-    mkdirSync(lockDir); // fresh mtime — the age heuristic alone would keep it
-    // Record an owner PID that is certainly not running.
+    mkdirSync(lockDir);
+    // Older than LOCK_SAFETY_FLOOR_MS (3s) but far younger than the 60s age
+    // window — so only the dead-owner sentinel can justify clearing it.
+    const pastFloor = new Date(Date.now() - 10_000);
+    utimesSync(lockDir, pastFloor, pastFloor);
     writeFileSync(`${dbPath}.lock.owner`, String(DEAD_PID));
 
     const db = new Database(dbPath);
     db.exec("CREATE TABLE t (a INTEGER)");
     db.query("INSERT INTO t (a) VALUES (?)").run(1);
     expect(db.query("SELECT a FROM t").get()).toEqual({ a: 1 });
+    db.close();
+  });
+
+  test("keeps a fresh lock even when the sentinel names a dead PID", () => {
+    // Guards against a stale sentinel stealing a live lock: a lock younger than
+    // the safety floor may have just been acquired by another (older) CLI that
+    // doesn't refresh the sentinel, so a leftover dead-PID sentinel must NOT
+    // cause it to be deleted.
+    __setDriverForTests("wasm");
+    dir = mkdtempSync(join(tmpdir(), "sqlite-fresh-dead-"));
+    const dbPath = join(dir, "cli.db");
+
+    const lockDir = `${dbPath}.lock`;
+    mkdirSync(lockDir); // fresh mtime, under the safety floor
+    writeFileSync(`${dbPath}.lock.owner`, String(DEAD_PID));
+
+    const db = new Database(dbPath);
+    // Under the floor: the fresh lock is preserved despite the dead sentinel.
+    expect(existsSync(lockDir)).toBe(true);
     db.close();
   });
 

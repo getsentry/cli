@@ -29,6 +29,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { logger } from "../logger.js";
+import { isProcessRunning } from "../process-utils.js";
 
 const _require = createRequire(import.meta.url);
 
@@ -263,8 +264,8 @@ function resolveDriver(): ResolvedDriver {
 }
 
 /**
- * Fallback age (ms) beyond which a `<db>.lock` directory is treated as stale
- * when its owner cannot be determined from the PID sentinel.
+ * Fallback age (ms) beyond which a `<db>.lock` directory with no usable PID
+ * sentinel is treated as stale.
  *
  * The WASM driver acquires the lock (`mkdir`) for the duration of a write and
  * releases it (`rmdir`) when SQLite drops to lock level NONE; while held, the
@@ -278,6 +279,21 @@ function resolveDriver(): ResolvedDriver {
 const STALE_LOCK_MAX_AGE_MS = 60_000;
 
 /**
+ * Minimum age (ms) before a lock may be removed *at all*, even when the PID
+ * sentinel says its owner is dead.
+ *
+ * The sentinel is a single shared file, so it can be stale: a leftover
+ * `.lock.owner` naming a dead PID may sit next to a lock that a *different*,
+ * still-live process (e.g. an older CLI that doesn't write sentinels) just
+ * acquired. Refusing to delete any lock younger than this floor guarantees we
+ * never steal a freshly-acquired live lock on the strength of a stale
+ * sentinel. It is comfortably larger than a single write's lock hold (sub-ms
+ * to a few ms) but small enough that Ctrl+C recovery is near-instant instead
+ * of the old 60s wait.
+ */
+const LOCK_SAFETY_FLOOR_MS = 3000;
+
+/**
  * Sibling file recording the PID of the process that most recently opened the
  * DB on the WASM path. Lets a later invocation test whether a leftover
  * `<db>.lock` belongs to a still-running process or an orphan. Kept *outside*
@@ -286,19 +302,6 @@ const STALE_LOCK_MAX_AGE_MS = 60_000;
  */
 function lockOwnerPath(dbPath: string): string {
   return `${dbPath}.lock.owner`;
-}
-
-/** Whether a process with the given PID is currently alive. */
-function isProcessAlive(pid: number): boolean {
-  try {
-    // Signal 0 performs error checking without sending a signal: it throws
-    // ESRCH if no such process exists, EPERM if it exists but we can't signal
-    // it (still alive). Returns cleanly if we own it.
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
 }
 
 /**
@@ -312,16 +315,21 @@ function isProcessAlive(pid: number): boolean {
  * the next invocation's `mkdir` fails with EEXIST, surfacing as "database is
  * locked".
  *
- * Recovery is precise where possible: the PID sentinel written by
- * {@link writeLockOwner} is consulted first, so an orphan left by a *dead*
- * process is cleared immediately (no waiting), while a lock whose owner is
- * still alive is left untouched (live contention is handled by SQLite's
- * `busy_timeout`). Only when no readable sentinel exists do we fall back to
- * the {@link STALE_LOCK_MAX_AGE_MS} age heuristic. Only the empty lock
- * directory is removed (`rmdir` leaves a non-empty dir intact).
+ * Removal is deliberately conservative — it never deletes a lock that could
+ * still be live:
+ *  - A lock younger than {@link LOCK_SAFETY_FLOOR_MS} is always kept, even if a
+ *    (possibly stale) sentinel names a dead PID. This stops a leftover sentinel
+ *    from stealing a lock another process just acquired.
+ *  - Past that floor, a dead-owner sentinel means the lock is provably orphaned
+ *    → clear it immediately (near-instant Ctrl+C recovery).
+ *  - A live-owner sentinel means a genuine live lock → keep it (contention is
+ *    left to SQLite's `busy_timeout`).
+ *  - With no readable sentinel we fall back to the {@link STALE_LOCK_MAX_AGE_MS}
+ *    age heuristic.
  *
- * Best-effort: any failure is swallowed so a permissions issue or a genuine
- * race degrades to the driver's own locking error rather than a crash here.
+ * Only the empty lock directory is removed (`rmdir` leaves a non-empty dir
+ * intact). Best-effort: any failure is swallowed so a permissions issue or a
+ * genuine race degrades to the driver's own locking error rather than a crash.
  */
 function clearStaleWasmLock(dbPath: string): void {
   if (dbPath === ":memory:" || dbPath === "") {
@@ -330,19 +338,26 @@ function clearStaleWasmLock(dbPath: string): void {
   const lockDir = `${dbPath}.lock`;
   try {
     const stat = statSync(lockDir); // throws ENOENT when no lock — common case
-    const owner = readLockOwner(dbPath);
-    if (owner !== null && isProcessAlive(owner)) {
-      // Owner still running: a genuine live lock. Leave it to busy_timeout.
+    const age = Date.now() - stat.mtimeMs;
+
+    // Safety floor: too fresh to touch. A lock this young may have just been
+    // acquired by a live peer, and a stale sentinel must not override that.
+    if (age < LOCK_SAFETY_FLOOR_MS) {
       return;
     }
-    if (owner === null) {
-      // No sentinel to prove death (older CLI, or race). Fall back to age.
-      const age = Date.now() - stat.mtimeMs;
-      if (age < STALE_LOCK_MAX_AGE_MS) {
+
+    const owner = readLockOwner(dbPath);
+    if (owner !== null) {
+      if (isProcessRunning(owner)) {
+        // Owner still running: a genuine live lock. Leave it to busy_timeout.
         return;
       }
+      // Owner dead and lock past the safety floor: provably orphaned.
+    } else if (age < STALE_LOCK_MAX_AGE_MS) {
+      // No sentinel to prove death; not old enough for the age fallback.
+      return;
     }
-    // Either the owning PID is dead, or the lock is old with no owner — orphan.
+
     // rmdirSync only removes empty directories, so this can never delete a
     // lock actively held with contents (this driver's locks are always empty).
     rmdirSync(lockDir);
