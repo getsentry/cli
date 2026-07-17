@@ -129,7 +129,13 @@ export function getDatabase(): Database {
     // must wait. Without sufficient timeout, concurrent processes fail immediately.
     // Set busy_timeout FIRST - before WAL mode - to handle lock contention during init.
     rawDb.exec("PRAGMA busy_timeout = 5000");
-    rawDb.exec("PRAGMA journal_mode = WAL");
+    // WAL is only supported by the native node:sqlite driver. The WASM fallback
+    // (Node < 22.15) silently ignores it and stays in the default rollback
+    // journal — acceptable for a single-process CLI cache — so skip the no-op
+    // pragma there rather than pretend it took effect.
+    if (rawDb.driverKind === "node") {
+      rawDb.exec("PRAGMA journal_mode = WAL");
+    }
     rawDb.exec("PRAGMA foreign_keys = ON");
     rawDb.exec("PRAGMA synchronous = NORMAL");
 

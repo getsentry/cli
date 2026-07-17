@@ -236,6 +236,12 @@ function resolveDriver(): ResolvedDriver {
       };
       return resolvedDriver;
     } catch (error) {
+      // When the native driver was *explicitly* requested (tests), silently
+      // swapping to WASM would run against the wrong backend and mask failures.
+      // Only auto-fall-through when the choice was ours (version-based).
+      if (forcedDriverKind === "node") {
+        throw error;
+      }
       // node:sqlite genuinely unavailable despite the version check
       // (e.g. Bun, or a Node build without SQLite). Fall through to WASM.
       log.debug("node:sqlite unavailable, falling back to WASM driver", error);
@@ -329,6 +335,16 @@ export class Database {
     }
     this.db = new Ctor(path);
     this.kind = kind;
+  }
+
+  /**
+   * Which backing SQLite driver is active (`"node"` or `"wasm"`).
+   *
+   * Callers use this to skip pragmas the WASM driver doesn't support (e.g.
+   * `journal_mode = WAL`, which it silently ignores).
+   */
+  get driverKind(): DriverKind {
+    return this.kind;
   }
 
   /** Execute raw SQL (DDL statements, multi-statement strings). */

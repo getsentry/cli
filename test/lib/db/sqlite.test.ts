@@ -36,6 +36,12 @@ describe.each(DRIVERS)("sqlite adapter [%s driver]", (kind) => {
     return new Database(":memory:");
   }
 
+  test("reports its own driver kind", () => {
+    const db = open();
+    expect(db.driverKind).toBe(kind);
+    db.close();
+  });
+
   test("run + get roundtrips positional params", () => {
     const db = open();
     db.exec("CREATE TABLE t (a TEXT, b INTEGER)");
