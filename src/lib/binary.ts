@@ -26,7 +26,6 @@ import {
 import { stringifyUnknown, UpgradeError } from "./errors.js";
 import { logger } from "./logger.js";
 import { isProcessRunning } from "./process-utils.js";
-
 /** Known directories where the curl installer may place the binary */
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
 
@@ -360,11 +359,6 @@ export function cleanupOldBinary(oldPath: string): void {
 }
 
 // Lock Management
-
-// Re-exported (imported at the top for internal use) so existing importers
-// keep working while lean hot-path modules (e.g. db/sqlite.ts) can import it
-// from process-utils without pulling in binary.ts's heavier dependency graph.
-export { isProcessRunning };
 
 /**
  * Acquire an exclusive lock for binary installation/upgrade.
