@@ -20,7 +20,13 @@
  * return-value differences that are reconciled here.
  */
 
-import { rmdirSync, statSync } from "node:fs";
+import {
+  readFileSync,
+  rmdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { logger } from "../logger.js";
 
@@ -257,16 +263,43 @@ function resolveDriver(): ResolvedDriver {
 }
 
 /**
- * Age (ms) beyond which a `<db>.lock` directory is considered stale.
+ * Fallback age (ms) beyond which a `<db>.lock` directory is treated as stale
+ * when its owner cannot be determined from the PID sentinel.
  *
- * The WASM driver holds the lock only briefly (during a write transaction's
- * lock escalation) and downgrades between operations, so a live lock's
- * directory is re-created and thus recently modified. A directory older than
- * this window is therefore almost certainly orphaned by a dead process. The
- * value is deliberately generous (well beyond any single write) to avoid
- * ever racing a genuinely concurrent writer.
+ * The WASM driver acquires the lock (`mkdir`) for the duration of a write and
+ * releases it (`rmdir`) when SQLite drops to lock level NONE; while held, the
+ * directory's mtime is frozen at acquisition time (the driver never re-touches
+ * it). A held lock therefore ages, so a pure time threshold cannot by itself
+ * distinguish "long-running live writer" from "orphaned by a dead process" —
+ * that is what the PID sentinel is for. This age check is only the fallback
+ * for locks with no readable sentinel (e.g. left by an older CLI version); it
+ * is kept generously large so it never races a plausibly-live writer.
  */
 const STALE_LOCK_MAX_AGE_MS = 60_000;
+
+/**
+ * Sibling file recording the PID of the process that most recently opened the
+ * DB on the WASM path. Lets a later invocation test whether a leftover
+ * `<db>.lock` belongs to a still-running process or an orphan. Kept *outside*
+ * the lock directory itself: a file inside it would make the driver's
+ * `rmdir`-based unlock fail, defeating the driver's own cleanup.
+ */
+function lockOwnerPath(dbPath: string): string {
+  return `${dbPath}.lock.owner`;
+}
+
+/** Whether a process with the given PID is currently alive. */
+function isProcessAlive(pid: number): boolean {
+  try {
+    // Signal 0 performs error checking without sending a signal: it throws
+    // ESRCH if no such process exists, EPERM if it exists but we can't signal
+    // it (still alive). Returns cleanly if we own it.
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
 
 /**
  * Remove a stale lock directory left by a previous `node-sqlite3-wasm`
@@ -274,17 +307,18 @@ const STALE_LOCK_MAX_AGE_MS = 60_000;
  *
  * The WASM driver implements SQLite file locking by `mkdir("<db>.lock")`
  * (an atomic mutex) and releasing it with `rmdir` only when SQLite lowers
- * the lock to NONE. If a process exits while still holding any lock level
- * — including a normal exit where the connection isn't explicitly downgraded
- * — the empty directory is left behind, and the next invocation's `mkdir`
- * fails with EEXIST, surfacing as "database is locked" forever.
+ * the lock to NONE. If a process is killed (SIGINT/SIGKILL) while holding a
+ * lock — bypassing our normal close — the empty directory is left behind, and
+ * the next invocation's `mkdir` fails with EEXIST, surfacing as "database is
+ * locked".
  *
- * We only remove a lock directory that is *older* than
- * {@link STALE_LOCK_MAX_AGE_MS}, so a lock a concurrently-running CLI just
- * acquired is never deleted out from under it — that live contention is left
- * to SQLite's own `busy_timeout`. A recent lock is kept; only a clearly
- * orphaned one is cleared. Only the empty lock directory is removed (a
- * non-empty dir, never produced by this driver, is left intact by `rmdir`).
+ * Recovery is precise where possible: the PID sentinel written by
+ * {@link writeLockOwner} is consulted first, so an orphan left by a *dead*
+ * process is cleared immediately (no waiting), while a lock whose owner is
+ * still alive is left untouched (live contention is handled by SQLite's
+ * `busy_timeout`). Only when no readable sentinel exists do we fall back to
+ * the {@link STALE_LOCK_MAX_AGE_MS} age heuristic. Only the empty lock
+ * directory is removed (`rmdir` leaves a non-empty dir intact).
  *
  * Best-effort: any failure is swallowed so a permissions issue or a genuine
  * race degrades to the driver's own locking error rather than a crash here.
@@ -295,21 +329,71 @@ function clearStaleWasmLock(dbPath: string): void {
   }
   const lockDir = `${dbPath}.lock`;
   try {
-    const age = Date.now() - statSync(lockDir).mtimeMs;
-    if (age < STALE_LOCK_MAX_AGE_MS) {
-      // Recent — may belong to a live process. Let busy_timeout handle it.
+    const stat = statSync(lockDir); // throws ENOENT when no lock — common case
+    const owner = readLockOwner(dbPath);
+    if (owner !== null && isProcessAlive(owner)) {
+      // Owner still running: a genuine live lock. Leave it to busy_timeout.
       return;
     }
+    if (owner === null) {
+      // No sentinel to prove death (older CLI, or race). Fall back to age.
+      const age = Date.now() - stat.mtimeMs;
+      if (age < STALE_LOCK_MAX_AGE_MS) {
+        return;
+      }
+    }
+    // Either the owning PID is dead, or the lock is old with no owner — orphan.
     // rmdirSync only removes empty directories, so this can never delete a
     // lock actively held with contents (this driver's locks are always empty).
     rmdirSync(lockDir);
-    log.debug(`Cleared stale WASM SQLite lock (age ${age}ms): ${lockDir}`);
+    log.debug(`Cleared orphaned WASM SQLite lock: ${lockDir}`);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     // ENOENT: no stale lock (the common case). Anything else is logged.
     if (code !== "ENOENT") {
       log.debug("Could not clear stale WASM SQLite lock", error);
     }
+  }
+}
+
+/**
+ * Record the current process as the WASM lock owner (best-effort).
+ * Written on open so a later invocation can test our liveness if we're killed
+ * mid-write before {@link removeLockOwner} runs.
+ */
+function writeLockOwner(dbPath: string): void {
+  if (dbPath === ":memory:" || dbPath === "") {
+    return;
+  }
+  try {
+    writeFileSync(lockOwnerPath(dbPath), String(process.pid));
+  } catch (error) {
+    log.debug("Could not write WASM lock owner sentinel", error);
+  }
+}
+
+/** Read the recorded owner PID, or null if absent/unreadable. */
+function readLockOwner(dbPath: string): number | null {
+  try {
+    const pid = Number.parseInt(
+      readFileSync(lockOwnerPath(dbPath), "utf8"),
+      10
+    );
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remove our owner sentinel on clean close (best-effort). */
+function removeLockOwner(dbPath: string): void {
+  if (dbPath === ":memory:" || dbPath === "") {
+    return;
+  }
+  try {
+    rmSync(lockOwnerPath(dbPath), { force: true });
+  } catch (error) {
+    log.debug("Could not remove WASM lock owner sentinel", error);
   }
 }
 
@@ -328,6 +412,9 @@ export class Database {
   /** Which backing driver this instance uses (for param normalisation). */
   private readonly kind: DriverKind;
 
+  /** On-disk path (for WASM lock-owner sentinel cleanup on close). */
+  private readonly path: string;
+
   constructor(path: string) {
     const { Ctor, kind } = resolveDriver();
     if (kind === "wasm") {
@@ -335,6 +422,12 @@ export class Database {
     }
     this.db = new Ctor(path);
     this.kind = kind;
+    this.path = path;
+    if (kind === "wasm") {
+      // Record ourselves so a later invocation can tell whether a leftover
+      // lock (e.g. after we're SIGINT-killed mid-write) is orphaned or live.
+      writeLockOwner(path);
+    }
   }
 
   /**
@@ -369,11 +462,15 @@ export class Database {
    * remove the lock directory ourselves here: `<db>.lock` is a path-keyed
    * cross-process mutex, so a stray `rmdir` could delete a concurrently-
    * running CLI's live lock and allow two writers at once (corruption). Stale
-   * locks left by a crashed process are handled conservatively at open time by
-   * {@link clearStaleWasmLock}.
+   * locks left by a crashed process are handled at open time by
+   * {@link clearStaleWasmLock}. We do clear our own owner sentinel so it can't
+   * linger and be misread by a later invocation.
    */
   close(): void {
     this.db.close();
+    if (this.kind === "wasm") {
+      removeLockOwner(this.path);
+    }
   }
 
   /**

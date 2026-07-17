@@ -44,8 +44,10 @@ let dbOpenedPath: string | null = null;
  * wrapper finalizes cursors so this happens reliably. Explicitly closing on
  * a normal `exit` is a proactive backstop that shrinks the window in which a
  * lock could linger; it does NOT fire on SIGKILL/SIGINT, so it is not the
- * primary guarantee. Crash-orphaned locks are recovered at open time by
- * {@link clearStaleWasmLock}. Harmless (and cheap) for the native driver too.
+ * primary guarantee. A lock orphaned by a signal-killed process is recovered
+ * at the next open by `clearStaleWasmLock`, which uses the PID-owner sentinel
+ * to clear it immediately once the owner is gone. Harmless (and cheap) for the
+ * native driver too.
  */
 let exitHandlerRegistered = false;
 

@@ -15,6 +15,7 @@ import {
   mkdtempSync,
   rmSync,
   utimesSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +25,24 @@ import { __setDriverForTests, Database } from "../../../src/lib/db/sqlite.js";
 type DriverKind = "node" | "wasm";
 
 const DRIVERS: DriverKind[] = ["node", "wasm"];
+
+/**
+ * Find a PID with no running process, searching downward from a high value.
+ * Used to simulate a lock left by a since-exited (dead) process.
+ */
+function findDeadPid(): number {
+  for (let pid = 0x7f_ff_ff_ff; pid > 1; pid -= 7919) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        return pid;
+      }
+    }
+  }
+  // Fallback: an unlikely-but-not-guaranteed PID.
+  return 0x7f_ff_ff_ff;
+}
 
 afterEach(() => {
   // Always return to automatic detection so we don't leak forced state.
@@ -193,12 +212,19 @@ describe.each(DRIVERS)("sqlite adapter [%s driver]", (kind) => {
  *  1. A `.get()` that reads one row leaves the statement cursor open, holding
  *     the lock past `close()` and leaking the dir → the `.get()` wrapper
  *     finalizes the statement so the driver releases the lock on close.
- *  2. A process killed mid-write leaks the dir with no chance to close → the
- *     next open clears it, but only if it's old enough to be certainly stale,
- *     so a concurrent peer's live lock is never stolen.
+ *  2. A process killed mid-write leaks the dir → the next open consults the
+ *     PID sentinel and clears it immediately if the owner is dead, keeps it if
+ *     the owner is alive, and falls back to an age heuristic if there is no
+ *     sentinel — so a concurrent peer's live lock is never stolen.
  */
 describe("wasm driver lock handling", () => {
   let dir: string;
+
+  /**
+   * A PID that is almost certainly not a running process. `process.kill(pid, 0)`
+   * throws ESRCH for it, so the adapter treats its lock as orphaned.
+   */
+  const DEAD_PID = findDeadPid();
 
   afterEach(() => {
     __setDriverForTests(null);
@@ -277,5 +303,44 @@ describe("wasm driver lock handling", () => {
     db.close();
     // close() must not remove a foreign lock either (it's a shared mutex).
     expect(existsSync(lockDir)).toBe(true);
+  });
+
+  test("clears a lock owned by a dead process immediately, even if recent", () => {
+    // A process killed mid-write leaves the lock dir plus an owner sentinel.
+    // If that PID is dead the lock is provably orphaned and must be cleared
+    // right away — no waiting for the age window.
+    __setDriverForTests("wasm");
+    dir = mkdtempSync(join(tmpdir(), "sqlite-dead-"));
+    const dbPath = join(dir, "cli.db");
+
+    const lockDir = `${dbPath}.lock`;
+    mkdirSync(lockDir); // fresh mtime — the age heuristic alone would keep it
+    // Record an owner PID that is certainly not running.
+    writeFileSync(`${dbPath}.lock.owner`, String(DEAD_PID));
+
+    const db = new Database(dbPath);
+    db.exec("CREATE TABLE t (a INTEGER)");
+    db.query("INSERT INTO t (a) VALUES (?)").run(1);
+    expect(db.query("SELECT a FROM t").get()).toEqual({ a: 1 });
+    db.close();
+  });
+
+  test("keeps a lock owned by a live process, even if old", () => {
+    // If the owner PID is still alive the lock is genuinely held; the age of
+    // the directory is irrelevant and it must not be stolen.
+    __setDriverForTests("wasm");
+    dir = mkdtempSync(join(tmpdir(), "sqlite-alive-"));
+    const dbPath = join(dir, "cli.db");
+
+    const lockDir = `${dbPath}.lock`;
+    mkdirSync(lockDir);
+    const old = new Date(Date.now() - 5 * 60_000);
+    utimesSync(lockDir, old, old);
+    // Our own PID is definitely alive.
+    writeFileSync(`${dbPath}.lock.owner`, String(process.pid));
+
+    const db = new Database(dbPath);
+    expect(existsSync(lockDir)).toBe(true);
+    db.close();
   });
 });
