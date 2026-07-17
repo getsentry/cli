@@ -1244,7 +1244,7 @@ export function buildProjectQuery(
  */
 export function splitNewlineArg(arg: string): string[] {
   return arg
-    .split("\n")
+    .split(/\s+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
