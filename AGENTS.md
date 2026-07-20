@@ -4,7 +4,7 @@ Guidelines for AI agents working in this codebase.
 
 ## Project Overview
 
-**Sentry CLI** is a command-line interface for [Sentry](https://sentry.io), built with [Bun](https://bun.sh) and [Stricli](https://bloomberg.github.io/stricli/).
+**Sentry CLI** is a command-line interface for [Sentry](https://sentry.io), built with [Stricli](https://bloomberg.github.io/stricli/) and bundled via [esbuild](https://esbuild.github.io/) into standalone Node.js SEA binaries (via [fossilize](https://github.com/nicolo-ribaudo/fossilize)). Source code uses [Bun](https://bun.sh) APIs for file I/O and process spawning, shimmed for the Node.js distribution.
 
 ### Goals
 
@@ -12,7 +12,7 @@ Guidelines for AI agents working in this codebase.
 - **AI-powered debugging** - Integrate Seer AI for root cause analysis and fix plans
 - **Developer-friendly** - Follow `gh` CLI conventions for intuitive UX
 - **Agent-friendly** - JSON output and predictable behavior for AI coding agents
-- **Fast** - Native binaries via Bun, SQLite caching for API responses
+- **Fast** - Native binaries via Node.js SEA, SQLite caching for API responses
 
 ### Key Features
 
