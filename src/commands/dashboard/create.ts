@@ -6,7 +6,6 @@
 
 import type { SentryContext } from "../../context.js";
 import { createDashboard, getProject } from "../../lib/api-client.js";
-import { logger } from "../../lib/logger.js";
 import {
   type ParsedOrgProject,
   parseOrgProjectArg,
@@ -15,6 +14,7 @@ import { buildCommand } from "../../lib/command.js";
 import { ContextError, ValidationError } from "../../lib/errors.js";
 import { formatDashboardCreated } from "../../lib/formatters/human.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { logger } from "../../lib/logger.js";
 import {
   fetchProjectId,
   resolveAllTargets,
@@ -76,7 +76,10 @@ async function enrichTargetProjectIds(
         const info = await getProject(t.org, t.project);
         return toNumericId(info.id);
       } catch (error) {
-        log.debug(`Failed to resolve project ID for ${t.org}/${t.project}`, error);
+        log.debug(
+          `Failed to resolve project ID for ${t.org}/${t.project}`,
+          error
+        );
         return;
       }
     })

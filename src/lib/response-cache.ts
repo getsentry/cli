@@ -718,7 +718,10 @@ export async function invalidateCachedResponsesMatching(
           entry.url?.startsWith(prefix)
         ) {
           await unlink(filePath).catch((unlinkErr) => {
-            log.debug("Cache file already deleted by another process", unlinkErr);
+            log.debug(
+              "Cache file already deleted by another process",
+              unlinkErr
+            );
           });
         }
       } catch (error) {
