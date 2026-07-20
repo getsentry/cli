@@ -2,20 +2,19 @@
  * sentry project create
  *
  * Create one or more Sentry projects.
- * Supports org/name positional syntax (like `gh repo create owner/repo`).
+ * Supports org/name:platform positional syntax.
  *
  * ## Flow
  *
- * 1. Resolve platform (--platform flag, or the trailing positional) and names
- * 2. Parse each name → extract org prefix if present (e.g., "acme/my-app")
- * 3. Resolve org → CLI flag > env vars > config defaults > DSN auto-detection
+ * 1. Parse each name:platform pair and extract any org prefix
+ * 2. Resolve org → positional prefix > env vars > config defaults > DSN auto-detection
  *    (all names must share one org)
- * 4. For each name: resolve team + create project (fetch DSN, build URL)
- * 5. Display results (one block per project)
+ * 3. For each name: resolve team + create project (fetch DSN, build URL)
+ * 4. Display results (one block per project)
  *
- * Multiple projects are created by passing several names as separate arguments
- * (e.g. `sentry project create web api worker node`). Quoted multi-word display
- * names remain a single project (e.g. `sentry project create "Web API" node`).
+ * Every project uses a `name:platform` positional. Multiple projects are created
+ * by passing several pairs (e.g. `sentry project create web:javascript
+ * api:python-django`). Project names cannot contain whitespace.
  */
 
 import type { SentryContext } from "../../context.js";
@@ -61,13 +60,13 @@ import {
 import { slugify } from "../../lib/utils.js";
 
 const log = logger.withTag("project.create");
+const WHITESPACE_RE = /\s/;
 
 /** Full usage hint shown in errors and help text. */
-const USAGE_HINT = "sentry project create [<org>/]<name...> <platform>";
+const USAGE_HINT = "sentry project create [<org>/]<name>:<platform>...";
 
 type CreateFlags = {
   readonly team?: string;
-  readonly platform?: string;
   readonly "dry-run": boolean;
   readonly json: boolean;
   readonly fields?: string[];
@@ -136,8 +135,7 @@ function isPlatformError(error: ApiError): boolean {
 /**
  * Build a user-friendly error message for missing or invalid platform.
  *
- * @param nameArg - The project name(s) to echo in the usage example (may be
- *   several space-separated names for the variadic form)
+ * @param nameArg - The project name to echo in the usage example
  * @param platform - The invalid platform string, if provided
  */
 function buildPlatformError(nameArg: string, platform?: string): string {
@@ -159,9 +157,9 @@ function buildPlatformError(nameArg: string, platform?: string): string {
     `${heading}\n` +
     didYouMean +
     "\nUsage:\n" +
-    `  sentry project create ${nameArg} <platform>\n\n` +
+    `  sentry project create ${nameArg}:<platform>\n\n` +
     `Common platforms:\n\n${platformTable}\n` +
-    "Run 'sentry project create <name> <platform>' with any valid Sentry platform identifier."
+    "Run 'sentry project create <name>:<platform>' with any valid Sentry platform identifier."
   );
 }
 
@@ -204,7 +202,7 @@ async function handleCreateProject404(opts: {
       throw new ResolutionError(
         `Team '${teamSlug}'`,
         `not found in ${orgSlug}`,
-        `sentry project create ${orgSlug}/${name} ${platform} --team <team-slug>`,
+        `sentry project create ${orgSlug}/${name}:${platform} --team <team-slug>`,
         [`Available teams: ${teams.map((t) => t.slug).join(", ")}`]
       );
     }
@@ -224,7 +222,7 @@ async function handleCreateProject404(opts: {
   throw new ResolutionError(
     `Project '${name}' in ${orgSlug}`,
     "could not be created",
-    `sentry project create ${orgSlug}/${name} ${platform} --team <team-slug>`,
+    `sentry project create ${orgSlug}/${name}:${platform} --team <team-slug>`,
     [
       "The organization or team may not exist, or you may lack access",
       `List teams: sentry team list ${orgSlug}/`,
@@ -396,71 +394,78 @@ async function createProjectWithErrors(
   }
 }
 
-/**
- * Resolve the platform and the list of project names from the raw positionals.
- *
- * Platform sources, in order:
- * 1. `--platform`/`-p` flag → all positionals are names.
- * 2. Trailing positional, when it is a valid platform → the rest are names.
- *    Keeps the classic `sentry project create <name> <platform>` shape working
- *    while allowing `sentry project create <name...> <platform>`.
- */
-function resolvePlatformAndNames(
-  flags: CreateFlags,
-  args: readonly string[]
-): { platform: string; names: string[] } {
-  if (args.length === 0) {
-    throw new ContextError("Project name", USAGE_HINT, [
-      "Create several at once: sentry project create web api worker <platform>",
-    ]);
-  }
-
-  if (flags.platform) {
-    const platform = normalizePlatform(flags.platform);
-    if (!isValidPlatform(platform)) {
-      throw new CliError(buildPlatformError(args.join(" "), platform));
-    }
-    return { platform, names: [...args] };
-  }
-
-  if (args.length < 2) {
-    throw new CliError(buildPlatformError(args.join(" ")));
-  }
-
-  const platform = normalizePlatform(args.at(-1) as string);
-  if (!isValidPlatform(platform)) {
-    throw new CliError(
-      buildPlatformError(args.slice(0, -1).join(" "), platform)
-    );
-  }
-  return { platform, names: args.slice(0, -1) };
-}
-
-/** A single project's name plus any org prefix parsed from the positional. */
-type ParsedName = { org?: string; name: string };
+/** A validated project specification parsed from one positional argument. */
+type ParsedProjectSpec = {
+  /** Explicit organization slug, when the name used org/name syntax. */
+  org?: string;
+  /** Project display name. */
+  name: string;
+  /** Validated Sentry platform identifier. */
+  platform: string;
+};
 
 /**
- * Parse each raw name into an org (optional) + project name, and require that
- * any explicit org prefixes agree (mirrors `issue merge`'s single-org rule).
+ * Parse each `<name>:<platform>` positional and require explicit org prefixes
+ * to agree. The final colon is the separator so display names may contain
+ * earlier colons.
  */
-function parseNames(rawNames: readonly string[]): {
+function parseProjectSpecs(rawSpecs: readonly string[]): {
   explicitOrg?: string;
-  parsed: ParsedName[];
+  parsed: ParsedProjectSpec[];
 } {
-  if (rawNames.length === 0) {
-    throw new ContextError("Project name", USAGE_HINT, []);
+  if (rawSpecs.length === 0) {
+    throw new ContextError("Project specification", USAGE_HINT, []);
   }
 
-  const parsed: ParsedName[] = rawNames.map((raw) => {
-    const p = parseOrgProjectArg(raw);
-    switch (p.type) {
+  const parsed: ParsedProjectSpec[] = rawSpecs.map((rawSpec) => {
+    const separatorIndex = rawSpec.lastIndexOf(":");
+    if (separatorIndex === -1) {
+      throw new ValidationError(
+        `Project '${rawSpec}' must use <name>:<platform> syntax.`,
+        "project"
+      );
+    }
+
+    const rawName = rawSpec.slice(0, separatorIndex);
+    if (rawName.trim() === "") {
+      throw new ValidationError("Project name cannot be empty.", "name");
+    }
+    if (WHITESPACE_RE.test(rawName)) {
+      throw new ValidationError(
+        `Project name '${rawName}' cannot contain whitespace.`,
+        "name"
+      );
+    }
+
+    const rawPlatform = rawSpec.slice(separatorIndex + 1).trim();
+    if (rawPlatform === "") {
+      throw new ValidationError(buildPlatformError(rawName), "platform");
+    }
+    const platform = normalizePlatform(rawPlatform);
+    if (!isValidPlatform(platform)) {
+      throw new ValidationError(
+        buildPlatformError(rawName, platform),
+        "platform"
+      );
+    }
+
+    const parsedName = parseOrgProjectArg(rawName);
+    switch (parsedName.type) {
       case "explicit":
-        return { org: p.org, name: p.project };
+        return {
+          org: parsedName.org,
+          name: parsedName.project,
+          platform,
+        };
       case "project-search":
-        return { org: p.org, name: p.projectSlug };
+        return {
+          org: parsedName.org,
+          name: parsedName.projectSlug,
+          platform,
+        };
       case "org-all":
         throw new ContextError("Project name", USAGE_HINT, [
-          `'${raw}' looks like an org, not a project name.`,
+          `'${rawName}' looks like an org, not a project name.`,
         ]);
       case "auto-detect":
         throw new ValidationError("Project name cannot be empty.", "name");
@@ -597,28 +602,22 @@ async function createOneProject(opts: {
 export const createCommand = buildCommand({
   docs: {
     brief: "Create one or more projects",
-    customUsage: [
-      "[<org>/]<name...> <platform>",
-      "[<org>/]<name...> --platform <platform>",
-    ],
+    customUsage: ["[<org>/]<name>:<platform>..."],
     fullDescription:
       "Create Sentry projects in an organization.\n\n" +
       "Names support org/name syntax to specify the organization explicitly.\n" +
-      "If omitted, the org is auto-detected from config defaults. Quoted project\n" +
-      "display names may contain whitespace.\n\n" +
-      "Create several projects at once by passing multiple names as separate\n" +
-      "arguments — the platform is the trailing argument (or --platform).\n" +
-      "All names share one org.\n\n" +
+      "If omitted, the org is auto-detected from config defaults. Project names\n" +
+      "cannot contain whitespace.\n\n" +
+      "Every project is a name:platform pair. Create several projects at once\n" +
+      "by passing multiple pairs as separate arguments. All projects share one org.\n\n" +
       "Projects are created under a team. If the org has one team, it is used\n" +
       "automatically. If no teams exist, one is created. Otherwise, specify --team.\n\n" +
       "Examples:\n" +
-      "  sentry project create my-app node\n" +
-      '  sentry project create "My App" node\n' +
-      "  sentry project create acme-corp/my-app javascript-nextjs\n" +
-      "  sentry project create web api worker node\n" +
-      "  sentry project create web api worker --platform node\n" +
-      "  sentry project create my-app python-django --team backend\n" +
-      "  sentry project create my-app go --json",
+      "  sentry project create my-app:node\n" +
+      "  sentry project create acme-corp/my-app:javascript-nextjs\n" +
+      "  sentry project create web:javascript api:python-django worker:node\n" +
+      "  sentry project create my-app:python-django --team backend\n" +
+      "  sentry project create my-app:go --json",
   },
   output: {
     human: formatProjectCreateOutput,
@@ -633,9 +632,8 @@ export const createCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "name-or-platform",
-        brief:
-          "Project name(s), followed by the required platform unless --platform is set",
+        placeholder: "name:platform",
+        brief: "One or more project name and platform pairs",
         parse: String,
       },
     },
@@ -646,21 +644,14 @@ export const createCommand = buildCommand({
         brief: "Team to create the project under",
         optional: true,
       },
-      platform: {
-        kind: "parsed",
-        parse: String,
-        brief: "Project platform (e.g., node, python, javascript-nextjs)",
-        optional: true,
-      },
       "dry-run": DRY_RUN_FLAG,
     },
-    aliases: { ...DRY_RUN_ALIASES, t: "team", p: "platform" },
+    aliases: { ...DRY_RUN_ALIASES, t: "team" },
   },
   async *func(this: SentryContext, flags: CreateFlags, ...args: string[]) {
     const { cwd } = this;
 
-    const { platform, names: rawNames } = resolvePlatformAndNames(flags, args);
-    const { explicitOrg, parsed } = parseNames(rawNames);
+    const { explicitOrg, parsed } = parseProjectSpecs(args);
 
     // Resolve organization once — all projects are created in the same org.
     const resolved = await resolveOrg({ org: explicitOrg, cwd });
@@ -680,7 +671,7 @@ export const createCommand = buildCommand({
     // value so --json stays parseable, including partial success before an error.
     const results: ProjectCreatedResult[] = [];
     try {
-      for (const { name } of parsed) {
+      for (const { name, platform } of parsed) {
         results.push(
           await createOneProject({
             orgSlug,

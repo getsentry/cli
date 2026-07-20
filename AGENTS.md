@@ -242,10 +242,10 @@ Split by argument type — do not mix the conventions:
 
 - **Required positionals → space-separated variadic.** Declare the arg as
   variadic and accept repeated tokens: `issue merge A B C`,
-  `project create web api node`. Do not split positional values on commas;
-  commas may be part of the value. Quoting preserves a multi-word positional
-  as one value: `project create "Web API" node` creates one project, while
-  `project create web api node` creates two.
+  `project create web:javascript api:python-django`. Do not split positional
+  values on commas; commas may be part of the value. `project create` requires
+  every positional to use `name:platform` syntax, and project names cannot
+  contain whitespace.
 - **Optional flags → comma-separated (sometimes also repeatable).** Split the
   flag value on `,`: `--features errors,tracing`, set-commits `--path a,b`,
   `auth login --scope a,b`. Use `value.split(",")` (repeatable array flags:

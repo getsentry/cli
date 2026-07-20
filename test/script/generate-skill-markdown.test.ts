@@ -11,7 +11,7 @@ describe("extractCommandPathFromHeading", () => {
   test.each([
     ["`sentry issue view <issue-id>`", "sentry issue view"],
     [
-      "`sentry project create [<org>/]<name...> <platform>`",
+      "`sentry project create [<org>/]<name>:<platform>...`",
       "sentry project create",
     ],
     ["`sentry auth status`", "sentry auth status"],
@@ -28,7 +28,7 @@ describe("matchExampleToCommand", () => {
   test("associates a project create block with its command", () => {
     const code = [
       "# Create projects",
-      "sentry project create web api node",
+      "sentry project create web:javascript api:python-django",
     ].join("\n");
 
     expect(
@@ -47,9 +47,11 @@ describe("matchExampleToCommand", () => {
     );
 
     expect(reference).toContain(
-      "### `sentry project create [<org>/]<name...> <platform>`"
+      "### `sentry project create [<org>/]<name>:<platform>...`"
     );
-    expect(reference).toContain('sentry project create "My New App"');
-    expect(reference).toContain("sentry project create web api worker node");
+    expect(reference).not.toContain('sentry project create "My New App":');
+    expect(reference).toContain(
+      "sentry project create web:javascript api:python-django worker:node"
+    );
   });
 });

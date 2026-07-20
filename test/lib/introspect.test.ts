@@ -236,17 +236,17 @@ describe("buildCommandInfo", () => {
 
   test("prefers a public positional syntax override", () => {
     const cmd = makeCommand({
-      __primaryUsage: "<name...> <platform>",
+      __primaryUsage: "<name>:<kind>...",
       parameters: {
         positional: {
           kind: "array",
-          parameter: { placeholder: "name-or-platform" },
+          parameter: { placeholder: "name:kind" },
         },
       },
     });
 
     const info = buildCommandInfo(cmd, "sentry project create");
-    expect(info.positional).toBe("<name...> <platform>");
+    expect(info.positional).toBe("<name>:<kind>...");
   });
 });
 

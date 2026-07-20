@@ -109,15 +109,12 @@ describe("buildCommand", () => {
       auth: false,
       docs: {
         brief: "Create things",
-        customUsage: [
-          "<name...> <platform>",
-          "<name...> --platform <platform>",
-        ],
+        customUsage: ["<name>:<kind>..."],
       },
       parameters: {
         positional: {
           kind: "array",
-          parameter: { brief: "Names and platform", parse: String },
+          parameter: { brief: "Name and kind pairs", parse: String },
         },
       },
       async *func() {
@@ -127,7 +124,7 @@ describe("buildCommand", () => {
 
     expect(
       (command as unknown as { __primaryUsage?: string }).__primaryUsage
-    ).toBe("<name...> <platform>");
+    ).toBe("<name>:<kind>...");
   });
 
   test("re-exports numberParser from Stricli", () => {

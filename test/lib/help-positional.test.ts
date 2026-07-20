@@ -13,7 +13,7 @@
  */
 
 import { generateHelpTextForAllCommands, run } from "@stricli/core";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { app } from "../../src/app.js";
 import type { SentryContext } from "../../src/context.js";
 import { mockFetch, useTestConfigDir } from "../helpers.js";
@@ -183,22 +183,50 @@ describe("help command unchanged", () => {
     const { stdout, stderr } = await runCommand(["help", "project", "create"]);
 
     expect(stdout).toContain(
-      "sentry project create [<org>/]<name...> <platform>"
+      "sentry project create [<org>/]<name>:<platform>..."
     );
     expect(stderr).not.toContain("Tip");
   });
 
-  test("project create --help shows both supported platform forms", () => {
+  test("project create --help shows the required paired syntax", () => {
     const help = generateHelpTextForAllCommands(app).find(
       ([route]) => route === "sentry project create"
     )?.[1];
 
     expect(help).toContain(
-      "sentry project create [<org>/]<name...> <platform>"
+      "sentry project create [<org>/]<name>:<platform>..."
     );
-    expect(help).toContain(
-      "sentry project create [<org>/]<name...> --platform <platform>"
-    );
-    expect(help).not.toContain("<name-or-platform>...");
+    expect(help).not.toContain("--platform");
+    expect(help).not.toContain("<name-or-platform>");
+    expect(help).toContain("cannot contain whitespace");
+  });
+});
+
+describe("project create parser contract", () => {
+  test.each([
+    "--platform",
+    "-p",
+  ])("rejects the removed %s flag", async (flag) => {
+    const captured = { stdout: "", stderr: "" };
+    const mockContext = buildMockContext(captured);
+    const stderrWrite = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+
+    try {
+      await run(
+        app,
+        ["project", "create", "my-app:node", flag, "javascript"],
+        mockContext
+      );
+
+      const errorOutput = stderrWrite.mock.calls
+        .map(([data]) => String(data))
+        .join("");
+      expect(errorOutput).toContain(flag);
+      expect(errorOutput).toMatch(/No (flag|alias) registered/);
+    } finally {
+      stderrWrite.mockRestore();
+    }
   });
 });
