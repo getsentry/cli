@@ -1,3 +1,4 @@
+import { MastraClientError } from "@mastra/client-js";
 import { enrich401Detail } from "../api/infrastructure.js";
 import { ApiError, HostScopeError } from "../errors.js";
 import { isSaaSTrustOrigin, normalizeOrigin } from "../sentry-urls.js";
@@ -15,6 +16,10 @@ export const WORKFLOW_CREATE_RUN_ENDPOINT = `${WORKFLOW_ENDPOINT}/create-run`;
 export const WORKFLOW_RESUME_ASYNC_ENDPOINT = `${WORKFLOW_ENDPOINT}/resume-async`;
 export const WORKFLOW_START_ASYNC_ENDPOINT = `${WORKFLOW_ENDPOINT}/start-async`;
 const MASTRA_HTTP_401_RE = /HTTP error!\s*status:\s*401\b/i;
+const RETRYABLE_AUTH_FAILURE_CODES = new Set([
+  "AUTH_UPSTREAM_TIMEOUT",
+  "AUTH_UPSTREAM_UNAVAILABLE",
+]);
 
 function classifyInitServiceAuthFailure(
   err: unknown,
@@ -32,14 +37,44 @@ function classifyInitServiceAuthFailure(
   );
 }
 
+function isRetryableInitServiceAuthFailure(err: unknown): boolean {
+  if (
+    !(err instanceof MastraClientError) ||
+    err.status !== 503 ||
+    typeof err.body !== "object" ||
+    err.body === null
+  ) {
+    return false;
+  }
+
+  const body = err.body as Record<string, unknown>;
+  return (
+    body.safeToRetry === true &&
+    typeof body.code === "string" &&
+    RETRYABLE_AUTH_FAILURE_CODES.has(body.code)
+  );
+}
+
 export async function withInitServiceAuthClassification<T>(
   operation: () => Promise<T>,
   endpoint: string
 ): Promise<T> {
-  try {
-    return await operation();
-  } catch (err) {
-    throw classifyInitServiceAuthFailure(err, endpoint) ?? err;
+  let retried = false;
+
+  while (true) {
+    try {
+      return await operation();
+    } catch (err) {
+      const classified = classifyInitServiceAuthFailure(err, endpoint);
+      if (classified) {
+        throw classified;
+      }
+      if (!retried && isRetryableInitServiceAuthFailure(err)) {
+        retried = true;
+        continue;
+      }
+      throw err;
+    }
   }
 }
 
