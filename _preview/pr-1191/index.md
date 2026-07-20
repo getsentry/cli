@@ -92,6 +92,7 @@ url: "https://cli.sentry.dev/_preview/pr-1191/"
 ## Pages in this section
 
 - [Installation](https://cli.sentry.dev/_preview/pr-1191/getting-started.md)
+- [Migrating from v3](https://cli.sentry.dev/_preview/pr-1191/migrating-from-v3.md)
 - [Self-Hosted](https://cli.sentry.dev/_preview/pr-1191/self-hosted.md)
 - [Configuration](https://cli.sentry.dev/_preview/pr-1191/configuration.md)
 - [Library Usage](https://cli.sentry.dev/_preview/pr-1191/library-usage.md)

@@ -208,13 +208,17 @@ Concurrent calls are not supported in the current version. Calls should be seque
 | **Output** | Parsed object (zero-copy) | String (needs JSON.parse) |
 | **Errors** | `SentryError` with typed fields | Exit code + stderr string |
 | **Auth** | `token` option or env vars | Env vars only |
-| **Node.js** | >=22 required | Any version |
+| **Node.js** | >=18 required | Any version |
 
 ## Requirements
 
 [Section titled “Requirements”](#requirements)
 
-- **Node.js >= 22** (required for `node:sqlite`)
+- **Node.js >= 18**. On Node.js 22.15+ the built-in `node:sqlite` module is used; on Node.js 18–22.14 the CLI transparently falls back to a bundled WASM SQLite driver, so no native module or extra install step is required.
+
+Caution
+
+The WASM SQLite fallback (Node.js 18–22.14) does not support [WAL mode](https://www.sqlite.org/wal.html), so concurrent access from multiple processes is slower and its local cache reads/writes are less efficient. For the best performance and reliability we **strongly recommend** the [standalone binary](/installation/) (which bundles a modern runtime) or running on **Node.js 22.15+** so the native `node:sqlite` driver is used.
 
 ## Streaming Commands
 
