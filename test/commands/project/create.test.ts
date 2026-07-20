@@ -550,8 +550,31 @@ describe("project create", () => {
       .catch((e: Error) => e)) as ApiError;
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(400);
+    expect(err.message).toContain("Failed to create project 'My Cool App'");
     expect(err.detail).toContain("no more than 50 characters");
     expect(err.message).not.toContain("separate argument");
+  });
+
+  test("handles API platform errors on the org-scoped fallback", async () => {
+    createProjectWithDsnSpy.mockRejectedValue(
+      new ApiError("Forbidden", 403, "You do not have permission")
+    );
+    createProjectWithAutoTeamSpy.mockRejectedValue(
+      new ApiError(
+        "API request failed: 400 Bad Request",
+        400,
+        '{"platform":["Invalid platform"]}'
+      )
+    );
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    const err = await func
+      .call(context, { json: false }, "my-app", "node")
+      .catch((error: Error) => error);
+
+    expect(err).toBeInstanceOf(CliError);
+    expect(err.message).toContain("Invalid platform 'node'");
+    expect(err.message).toContain("Common platforms:");
   });
 
   test("surfaces policy error when org has disabled member project creation", async () => {

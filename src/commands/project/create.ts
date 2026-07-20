@@ -268,6 +268,24 @@ async function resolveDryRunTeam(
   }
 }
 
+/** Inputs shared by both project-creation endpoints. */
+type CreateProjectBaseOpts = {
+  /** Organization slug that will own the project. */
+  orgSlug: string;
+  /** Project display name. */
+  name: string;
+  /** Validated Sentry platform identifier. */
+  platform: string;
+};
+
+/** Inputs required by the team-scoped project-creation endpoint. */
+type CreateProjectOpts = CreateProjectBaseOpts & {
+  /** Team slug that will own the project. */
+  teamSlug: string;
+  /** Source used to resolve the organization, when auto-detected. */
+  detectedFrom?: string;
+};
+
 /**
  * Fallback project creation via POST /organizations/{org}/projects/.
  *
@@ -276,11 +294,9 @@ async function resolveDryRunTeam(
  * server auto-created. Surfaces a clear policy error if the org has disabled
  * member project creation entirely.
  */
-async function createProjectWithAutoTeamFallback(opts: {
-  orgSlug: string;
-  name: string;
-  platform: string;
-}): Promise<
+async function createProjectWithAutoTeamFallback(
+  opts: CreateProjectBaseOpts
+): Promise<
   CreatedProjectDetails & {
     teamSlug: string;
     teamSource: ResolvedConcreteTeam["source"];
@@ -290,27 +306,25 @@ async function createProjectWithAutoTeamFallback(opts: {
   let result: Awaited<ReturnType<typeof createProjectWithAutoTeam>>;
   try {
     result = await createProjectWithAutoTeam(orgSlug, { name, platform });
-  } catch (expError) {
-    if (expError instanceof ApiError) {
-      if (
-        expError.status === 403 &&
-        expError.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)
-      ) {
-        throw new ApiError(
-          `Failed to create project '${name}' in ${orgSlug} (HTTP 403).\n\n` +
-            "Your organization has disabled project creation for members.\n" +
-            "Ask an org owner or manager to enable it in Organization Settings → Member Roles,\n" +
-            "or ask them to create the project and add you to it.",
-          403,
-          expError.detail,
-          expError.endpoint
-        );
-      }
-      if (expError.status === 409) {
-        throw projectExistsError(orgSlug, name);
-      }
+  } catch (error) {
+    if (!(error instanceof ApiError)) {
+      throw error;
     }
-    throw expError;
+    if (
+      error.status === 403 &&
+      error.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)
+    ) {
+      throw new ApiError(
+        `Failed to create project '${name}' in ${orgSlug} (HTTP 403).\n\n` +
+          "Your organization has disabled project creation for members.\n" +
+          "Ask an org owner or manager to enable it in Organization Settings → Member Roles,\n" +
+          "or ask them to create the project and add you to it.",
+        403,
+        error.detail,
+        error.endpoint
+      );
+    }
+    return handleCreateApiError(error, opts);
   }
   return {
     project: result.project,
@@ -334,31 +348,20 @@ function projectExistsError(orgSlug: string, name: string): CliError {
   );
 }
 
-type CreateProjectOpts = {
-  orgSlug: string;
-  teamSlug: string;
-  name: string;
-  platform: string;
-  detectedFrom?: string;
-};
-
 /**
- * Map an ApiError from project creation to an actionable error. Always throws
- * (the 404 branch delegates to {@link handleCreateProject404}, also `never`).
+ * Map errors shared by both project-creation endpoints to actionable output.
+ * Endpoint-specific errors must be handled before calling this function.
  */
-async function handleCreateApiError(
+function handleCreateApiError(
   error: ApiError,
-  opts: CreateProjectOpts
-): Promise<never> {
+  opts: CreateProjectBaseOpts
+): never {
   const { orgSlug, name, platform } = opts;
   if (error.status === 409) {
     throw projectExistsError(orgSlug, name);
   }
   if (error.status === 400 && isPlatformError(error)) {
     throw new CliError(buildPlatformError(`${orgSlug}/${name}`, platform));
-  }
-  if (error.status === 404) {
-    return await handleCreateProject404(opts);
   }
   // Re-throw as ApiError (not CliError) so the 401–499 user-error silencing in
   // error-reporting.ts applies — e.g. a 403 "feature disabled for members" is a
@@ -383,10 +386,13 @@ async function createProjectWithErrors(
   try {
     return await createProjectWithDsn(orgSlug, teamSlug, { name, platform });
   } catch (error) {
-    if (error instanceof ApiError) {
-      return await handleCreateApiError(error, opts);
+    if (!(error instanceof ApiError)) {
+      throw error;
     }
-    throw error;
+    if (error.status === 404) {
+      return await handleCreateProject404(opts);
+    }
+    return handleCreateApiError(error, opts);
   }
 }
 
