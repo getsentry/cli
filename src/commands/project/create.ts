@@ -462,6 +462,8 @@ function parseNames(rawNames: readonly string[]): {
         throw new ContextError("Project name", USAGE_HINT, [
           `'${raw}' looks like an org, not a project name.`,
         ]);
+      case "auto-detect":
+        throw new ValidationError("Project name cannot be empty.", "name");
       default:
         throw new ContextError("Project name", USAGE_HINT, []);
     }

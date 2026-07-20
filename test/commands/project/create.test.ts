@@ -31,6 +31,7 @@ import {
   CliError,
   ContextError,
   ResolutionError,
+  ValidationError,
 } from "../../../src/lib/errors.js";
 import type { ProjectCreatedResult } from "../../../src/lib/formatters/human.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for vi.spyOn mocking
@@ -695,6 +696,20 @@ describe("project create", () => {
     expect(err.message).toContain(
       "sentry project create [<org>/]<name...> <platform>"
     );
+  });
+
+  test.each([
+    "",
+    "   ",
+  ])("rejects an empty project name argument (%j)", async (name) => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+
+    const err = await func
+      .call(context, { json: false }, name, "node")
+      .catch((error: Error) => error);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toContain("Project name cannot be empty");
   });
 
   test("shows helpful error when platform is missing", async () => {
