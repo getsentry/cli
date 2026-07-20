@@ -6,6 +6,7 @@
 
 import type { SentryContext } from "../../context.js";
 import { createDashboard, getProject } from "../../lib/api-client.js";
+import { logger } from "../../lib/logger.js";
 import {
   type ParsedOrgProject,
   parseOrgProjectArg,
@@ -25,6 +26,8 @@ import { buildDashboardUrl } from "../../lib/sentry-urls.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import type { DashboardDetail } from "../../types/dashboard.js";
 import { enrichDashboardError } from "./resolve.js";
+
+const log = logger.withTag("dashboard-create");
 
 type CreateFlags = {
   readonly json: boolean;
@@ -72,7 +75,8 @@ async function enrichTargetProjectIds(
       try {
         const info = await getProject(t.org, t.project);
         return toNumericId(info.id);
-      } catch {
+      } catch (error) {
+        log.debug(`Failed to resolve project ID for ${t.org}/${t.project}`, error);
         return;
       }
     })
