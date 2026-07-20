@@ -40,10 +40,19 @@ export function getVersionCheckInfo(): VersionCheckInfo {
   const latestVersion = m.get(KEY_LATEST_VERSION);
   const lastNotified = m.get(KEY_LAST_NOTIFIED);
 
+  const parsedLastChecked = lastChecked ? Number(lastChecked) : null;
+  const parsedLastNotified = lastNotified ? Number(lastNotified) : null;
+
   return {
-    lastChecked: lastChecked ? Number(lastChecked) : null,
+    lastChecked:
+      parsedLastChecked !== null && !Number.isNaN(parsedLastChecked)
+        ? parsedLastChecked
+        : null,
     latestVersion: latestVersion ?? null,
-    lastNotified: lastNotified ? Number(lastNotified) : null,
+    lastNotified:
+      parsedLastNotified !== null && !Number.isNaN(parsedLastNotified)
+        ? parsedLastNotified
+        : null,
   };
 }
 

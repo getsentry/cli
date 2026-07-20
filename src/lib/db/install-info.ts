@@ -46,7 +46,9 @@ export function getInstallInfo(): StoredInstallInfo | null {
     method: method as InstallationMethod,
     path: m.get(KEY_PATH) ?? "",
     version: m.get(KEY_VERSION) ?? "",
-    recordedAt: m.has(KEY_RECORDED_AT) ? Number(m.get(KEY_RECORDED_AT)) : 0,
+    recordedAt: m.has(KEY_RECORDED_AT) && !Number.isNaN(Number(m.get(KEY_RECORDED_AT)))
+      ? Number(m.get(KEY_RECORDED_AT))
+      : 0,
   };
 }
 
