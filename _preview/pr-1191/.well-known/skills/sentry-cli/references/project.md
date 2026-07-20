@@ -11,32 +11,29 @@ requires:
 
 Work with Sentry projects
 
-### `sentry project create [<org>/]<name...> <platform>`
+### `sentry project create [<org>/]<name>:<platform>...`
 
 Create one or more projects
 
 **Flags:**
 - `-t, --team <value> - Team to create the project under`
-- `-p, --platform <value> - Project platform (e.g., node, python, javascript-nextjs)`
 - `-n, --dry-run - Show what would happen without making changes`
 
 **Examples:**
 
 ```bash
+# Every argument must be name:platform; project names cannot contain whitespace
 # Create a new project
-sentry project create my-new-app javascript-nextjs
+sentry project create my-new-app:javascript-nextjs
 
-# Create a project with a multi-word display name
-sentry project create "My New App" javascript-nextjs
-
-# Create several projects
-sentry project create web api worker node
+# Create several projects with their own platforms
+sentry project create web:javascript api:python-django worker:node
 
 # Create under a specific org and team
-sentry project create my-org/my-new-app python --team backend-team
+sentry project create my-org/my-new-app:python --team backend-team
 
 # Preview without creating
-sentry project create my-new-app node --dry-run
+sentry project create my-new-app:node --dry-run
 ```
 
 ### `sentry project delete <org/project>`

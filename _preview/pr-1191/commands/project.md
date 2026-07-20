@@ -12,9 +12,9 @@ Work with Sentry projects
 
 [Section titled “Commands”](#commands)
 
-### `sentry project create [<org>/]<name...> <platform>`
+### `sentry project create [<org>/]<name>:<platform>...`
 
-[Section titled “sentry project create [<org>/]<name...> <platform>”](#sentry-project-create-orgname-platform)
+[Section titled “sentry project create [<org>/]<name>:<platform>...”](#sentry-project-create-orgnameplatform)
 
 Create one or more projects
 
@@ -22,14 +22,13 @@ Create one or more projects
 
 | Argument | Description |
 | --- | --- |
-| `<name-or-platform...>` | Project name(s), followed by the required platform unless --platform is set |
+| `<name:platform...>` | One or more project name and platform pairs |
 
 **Options:**
 
 | Option | Description |
 | --- | --- |
 | `-t, --team <team>` | Team to create the project under |
-| `-p, --platform <platform>` | Project platform (e.g., node, python, javascript-nextjs) |
 | `-n, --dry-run` | Show what would happen without making changes |
 
 ### `sentry project delete <org/project>`
@@ -135,11 +134,10 @@ Terminal window
 Terminal window
 
 ```
-# Create a new projectsentry project create my-new-app javascript-nextjs
-# Create a project with a multi-word display namesentry project create "My New App" javascript-nextjs
-# Create several projectssentry project create web api worker node
-# Create under a specific org and teamsentry project create my-org/my-new-app python --team backend-team
-# Preview without creatingsentry project create my-new-app node --dry-run
+# Every argument must be name:platform; project names cannot contain whitespace# Create a new projectsentry project create my-new-app:javascript-nextjs
+# Create several projects with their own platformssentry project create web:javascript api:python-django worker:node
+# Create under a specific org and teamsentry project create my-org/my-new-app:python --team backend-team
+# Preview without creatingsentry project create my-new-app:node --dry-run
 ```
 
 
