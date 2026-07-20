@@ -442,7 +442,7 @@ async function spawnWithRetry(
                 "execution_failed",
                 "Downloaded binary was killed by the operating system (SIGKILL). " +
                   "This usually means the binary has an invalid code signature. " +
-                  "Try reinstalling: curl -sL https://sentry.io/get-cli/ | bash"
+                  "Try reinstalling: curl -fsS https://cli.sentry.dev/install | bash"
               )
             );
             return;
