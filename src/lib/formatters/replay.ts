@@ -35,8 +35,71 @@ export type ReplayViewData = {
 
 type MarkdownRow = [string, string];
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+function hasReplayEventData(
+  value: unknown
+): value is { data: unknown; timestamp?: unknown } {
+  return typeof value === "object" && value !== null && "data" in value;
+}
+
+function hasReplayTag(
+  value: unknown
+): value is { payload?: unknown; tag: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "tag" in value &&
+    typeof value.tag === "string" &&
+    value.tag.length > 0
+  );
+}
+
+function hasReplayHref(value: unknown): value is { href: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "href" in value &&
+    typeof value.href === "string" &&
+    value.href.length > 0
+  );
+}
+
+function hasPerformanceSpanFields(
+  value: unknown
+): value is { data?: unknown; description?: unknown; op?: unknown } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    ("data" in value || "description" in value || "op" in value)
+  );
+}
+
+function hasNumericDuration(value: unknown): value is { duration: number } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "duration" in value &&
+    typeof value.duration === "number"
+  );
+}
+
+function hasClickFields(
+  value: unknown
+): value is { label?: unknown; selector?: unknown } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    ("label" in value || "selector" in value)
+  );
+}
+
+function hasBreadcrumbFields(
+  value: unknown
+): value is { category?: unknown; message?: unknown } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    ("category" in value || "message" in value)
+  );
 }
 
 function getEventTimestampMillis(value: unknown): number | null {
@@ -59,14 +122,17 @@ function compactDetails(values: Array<string | null>): string[] {
 }
 
 function summarizePerformanceSpan(
-  payload: Record<string, unknown> | null
+  payload: unknown
 ): Omit<ReplayActivityEvent, "timestampMs"> | null {
-  const op = firstString(payload?.op);
-  const description = firstString(payload?.description);
-  const durationMs =
-    isRecord(payload?.data) && typeof payload.data.duration === "number"
-      ? payload.data.duration
-      : null;
+  if (!hasPerformanceSpanFields(payload)) {
+    return null;
+  }
+
+  const op = firstString(payload.op);
+  const description = firstString(payload.description);
+  const durationMs = hasNumericDuration(payload.data)
+    ? payload.data.duration
+    : null;
 
   if (!(description || op)) {
     return null;
@@ -83,11 +149,15 @@ function summarizePerformanceSpan(
 
 function summarizeClickLikeEvent(
   label: string,
-  payload: Record<string, unknown> | null,
+  payload: unknown,
   includeLabel = false
 ): Omit<ReplayActivityEvent, "timestampMs"> {
-  const selector = firstString(payload?.selector);
-  const clickLabel = firstString(payload?.label);
+  if (!hasClickFields(payload)) {
+    return { label, details: [] };
+  }
+
+  const selector = firstString(payload.selector);
+  const clickLabel = firstString(payload.label);
 
   return {
     label,
@@ -99,10 +169,14 @@ function summarizeClickLikeEvent(
 }
 
 function summarizeBreadcrumb(
-  payload: Record<string, unknown> | null
+  payload: unknown
 ): Omit<ReplayActivityEvent, "timestampMs"> | null {
-  const category = firstString(payload?.category);
-  const message = firstString(payload?.message);
+  if (!hasBreadcrumbFields(payload)) {
+    return null;
+  }
+
+  const category = firstString(payload.category);
+  const message = firstString(payload.message);
   if (!(category || message)) {
     return null;
   }
@@ -115,51 +189,46 @@ function summarizeBreadcrumb(
 
 const TAGGED_REPLAY_EVENT_SUMMARIZERS: Record<
   string,
-  (
-    payload: Record<string, unknown> | null
-  ) => Omit<ReplayActivityEvent, "timestampMs"> | null
+  (payload: unknown) => Omit<ReplayActivityEvent, "timestampMs"> | null
 > = {
   breadcrumb: summarizeBreadcrumb,
-  click: (payload: Record<string, unknown> | null) =>
-    summarizeClickLikeEvent("click", payload, true),
-  deadClick: (payload: Record<string, unknown> | null) =>
+  click: (payload: unknown) => summarizeClickLikeEvent("click", payload, true),
+  deadClick: (payload: unknown) =>
     summarizeClickLikeEvent("dead.click", payload),
   performanceSpan: summarizePerformanceSpan,
-  rageClick: (payload: Record<string, unknown> | null) =>
+  rageClick: (payload: unknown) =>
     summarizeClickLikeEvent("rage.click", payload),
 };
 
 function summarizeTaggedReplayEvent(
   tag: string,
-  payload: Record<string, unknown> | null
+  payload: unknown
 ): Omit<ReplayActivityEvent, "timestampMs"> | null {
   const summarize = TAGGED_REPLAY_EVENT_SUMMARIZERS[tag];
   return summarize ? summarize(payload) : null;
 }
 
 function summarizeReplayEvent(event: unknown): ReplayActivityEvent | null {
-  if (!isRecord(event)) {
+  if (!hasReplayEventData(event)) {
     return null;
   }
 
   const timestampMs = getEventTimestampMillis(event.timestamp);
-  const data = isRecord(event.data) ? event.data : null;
-  const tag = typeof data?.tag === "string" ? data.tag : "";
-  const payload = isRecord(data?.payload) ? data.payload : null;
-
-  if (tag) {
-    const replayEvent = summarizeTaggedReplayEvent(tag, payload);
+  if (hasReplayTag(event.data)) {
+    const replayEvent = summarizeTaggedReplayEvent(
+      event.data.tag,
+      event.data.payload
+    );
     if (replayEvent) {
       return { timestampMs, ...replayEvent };
     }
   }
 
-  const href = firstString(data?.href);
-  if (href) {
+  if (hasReplayHref(event.data)) {
     return {
       timestampMs,
       label: "page.view",
-      details: [`href=${href}`],
+      details: [`href=${event.data.href}`],
     };
   }
 

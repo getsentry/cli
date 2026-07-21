@@ -113,14 +113,47 @@ function nextPhase(
   return names[Math.min(phase - 1, names.length - 1)] ?? "done";
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function hasFileMap(
+  value: unknown
+): value is { files: Record<string, unknown> } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "files" in value &&
+    typeof value.files === "object" &&
+    value.files !== null &&
+    !Array.isArray(value.files)
+  );
+}
+
+function hasHttpStatus(value: unknown): value is { status: number } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "status" in value &&
+    typeof value.status === "number"
+  );
+}
+
+function hasActiveStepsPath(value: Record<string, unknown>): value is Record<
+  string,
+  unknown
+> & {
+  activeStepsPath: Record<string, unknown>;
+} {
+  return (
+    typeof value.activeStepsPath === "object" &&
+    value.activeStepsPath !== null &&
+    !Array.isArray(value.activeStepsPath)
+  );
 }
 
 function filePathMarkersForHistory(
   data: unknown
 ): Record<string, null> | undefined {
-  if (!(isRecord(data) && isRecord(data.files))) {
+  if (!hasFileMap(data)) {
     return;
   }
 
@@ -431,7 +464,7 @@ function assertWorkflowResult(raw: unknown): WorkflowRunResult {
   ) {
     throw new Error(`Unexpected workflow status: ${String(obj.status)}`);
   }
-  if (isRecord(obj.activeStepsPath)) {
+  if (hasActiveStepsPath(obj)) {
     const activeStepIds = Object.keys(obj.activeStepsPath);
     if (activeStepIds.length > 0) {
       obj.suspended = activeStepIds.map((id) => [id]);
@@ -628,10 +661,7 @@ function isStepAlreadyAdvancedError(err: unknown): boolean {
 }
 
 function httpStatus(err: unknown): number | undefined {
-  if (!isRecord(err)) {
-    return;
-  }
-  return typeof err.status === "number" ? err.status : undefined;
+  return hasHttpStatus(err) ? err.status : undefined;
 }
 
 function runStateRecoveryBackoffMs(): number[] {

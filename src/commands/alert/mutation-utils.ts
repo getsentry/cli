@@ -63,12 +63,12 @@ function parseJsonValue(raw: string, field: string): unknown {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isJsonObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function toObject(value: unknown, field: string): Record<string, unknown> {
-  if (!isRecord(value)) {
+  if (!isJsonObject(value)) {
     throw new ValidationError(`${field} entries must be JSON objects.`, field);
   }
   return value;
