@@ -35,9 +35,9 @@ List and search User Feedback
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 | `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
-### `sentry feedback view <org/project/feedback-id>`
+### `sentry feedback view <feedback>`
 
-[Section titled “sentry feedback view <org/project/feedback-id>”](#sentry-feedback-view-orgprojectfeedback-id)
+[Section titled “sentry feedback view <feedback>”](#sentry-feedback-view-feedback)
 
 View a User Feedback item
 
@@ -45,7 +45,7 @@ View a User Feedback item
 
 | Argument | Description |
 | --- | --- |
-| `<org/project/feedback-id>` | Feedback ID: numeric ID, short ID, <org>/SHORT-ID, or <org>/<project>/<suffix> |
+| `<feedback>` | Feedback: @latest, numeric ID, short ID, <org>/SHORT-ID, or <org>/<project>/<suffix> |
 
 **Options:**
 
@@ -91,11 +91,14 @@ Use `--json` for the standard paginated envelope. Navigate pages in either direc
 Terminal window
 
 ```
+# Most recent unresolved Feedback, with detected or explicit organizationsentry feedback view @latestsentry feedback view my-org/@latest
 # Short ID or numeric IDsentry feedback view FRONTEND-2SDJsentry feedback view 5146636313
 # Explicit organizationsentry feedback view my-org/FRONTEND-2SDJ
 # `view` is the default command; `show` is an aliassentry feedback my-org/FRONTEND-2SDJsentry feedback show my-org/FRONTEND-2SDJ
 # Open the Feedback item in Sentrysentry feedback view my-org/FRONTEND-2SDJ --web
 ```
 
+
+`@latest` selects the most recently active unresolved Feedback.
 
 The detail view includes the complete message and, when available, its latest event, linked error, Session Replays, and attachment metadata. If the supplied ID belongs to another issue category, use `sentry issue view` instead.
