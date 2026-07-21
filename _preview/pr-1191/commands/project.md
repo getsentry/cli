@@ -22,7 +22,7 @@ Create one or more projects
 
 | Argument | Description |
 | --- | --- |
-| `<name:platform...>` | One or more project name and platform pairs |
+| `<project-spec...>` | One or more name:platform pairs, or one name followed by its platform |
 
 **Options:**
 
@@ -134,7 +134,8 @@ Terminal window
 Terminal window
 
 ```
-# Every argument must be name:platform; project names cannot contain whitespace# Create a new projectsentry project create my-new-app:javascript-nextjs
+# Multiple projects use name:platform pairs; project names cannot contain whitespace# Create a new projectsentry project create my-new-app:javascript-nextjs
+# The historical single-project syntax remains supportedsentry project create my-new-app javascript-nextjs
 # Create several projects with their own platformssentry project create web:javascript api:python-django worker:node
 # Create under a specific org and teamsentry project create my-org/my-new-app:python --team backend-team
 # Preview without creatingsentry project create my-new-app:node --dry-run
