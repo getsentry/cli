@@ -90,6 +90,17 @@ describe("formatFeedbackList", () => {
     expect(output).not.toContain("Unread");
   });
 
+  test("describes an empty previous page as a page, not an empty result", () => {
+    const output = formatFeedbackList({
+      feedback: [],
+      hasMore: false,
+      hasPrev: true,
+      org: "test-org",
+    });
+
+    expect(output).toBe("No feedback on this page.");
+  });
+
   test("flattens every message line break in compact output", () => {
     const savedColumns = process.stdout.columns;
     process.stdout.columns = 60;

@@ -994,6 +994,7 @@ describe("events.ts", () => {
         expect(url.pathname).toContain(
           "/projects/test-org/test-project/events/evt-abc/attachments/"
         );
+        expect(url.searchParams.get("per_page")).toBe("100");
 
         requestCount += 1;
         const firstPage = url.searchParams.get("cursor") === null;
