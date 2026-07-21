@@ -2,12 +2,15 @@
  * Project Create Command Tests
  *
  * Tests for the project create command in src/commands/project/create.ts.
- * Uses spyOn to mock api-client and resolve-target to test
- * the func() body without real HTTP calls or database access.
+ * Covers the public Stricli parser contract and uses mocked API boundaries for
+ * command behavior without real HTTP calls.
  */
 
+import { run } from "@stricli/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { app } from "../../../src/app.js";
 import { createCommand } from "../../../src/commands/project/create.js";
+import type { SentryContext } from "../../../src/context.js";
 import type { CreatedProjectDetails } from "../../../src/lib/api-client.js";
 
 // Auto-mock at the definition site so internal calls (e.g. createProjectWithDsn
@@ -79,13 +82,21 @@ function createdProjectDetails(name: string): CreatedProjectDetails {
 // from resolveOrgRegion when buildOrgNotFoundError calls resolveEffectiveOrg
 useTestConfigDir("test-project-create-");
 
-function createMockContext() {
+function createMockContext(): {
+  context: SentryContext;
+  stdoutWrite: ReturnType<typeof vi.fn>;
+} {
   const stdoutWrite = vi.fn(() => true);
   return {
     context: {
+      process,
+      env: process.env,
       stdout: { write: stdoutWrite },
       stderr: { write: vi.fn(() => true) },
+      stdin: process.stdin,
       cwd: "/tmp",
+      homeDir: "/tmp",
+      configDir: "/tmp",
     },
     stdoutWrite,
   };
@@ -192,6 +203,75 @@ describe("project create", () => {
       {
         name: "my-app",
         platform: "python-flask",
+      }
+    );
+  });
+
+  test("preserves the historical name and platform positionals", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-app", "python-flask");
+
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme-corp",
+      "engineering",
+      {
+        name: "my-app",
+        platform: "python-flask",
+      }
+    );
+  });
+
+  test("accepts the historical syntax and flags through Stricli", async () => {
+    const { context, stdoutWrite } = createMockContext();
+
+    await run(
+      app,
+      [
+        "project",
+        "create",
+        "my-org/my-app",
+        "node",
+        "--team",
+        "backend",
+        "--dry-run",
+      ],
+      context
+    );
+
+    expect(resolveOrgSpy).toHaveBeenCalledWith({
+      org: "my-org",
+      cwd: "/tmp",
+    });
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+    const output = stdoutWrite.mock.calls.join("");
+    expect(output).toContain("Dry run");
+    expect(output).toContain("my-app");
+    expect(output).toContain("node");
+  });
+
+  test("preserves explicit orgs in the historical syntax", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "my-org/my-app", "python");
+
+    expect(resolveOrgSpy).toHaveBeenCalledWith({
+      org: "my-org",
+      cwd: "/tmp",
+    });
+  });
+
+  test("preserves colons in historical project names", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    await func.call(context, { json: false }, "api:europe", "node");
+
+    expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
+      "acme-corp",
+      "engineering",
+      {
+        name: "api:europe",
+        platform: "node",
       }
     );
   });
@@ -714,12 +794,15 @@ describe("project create", () => {
     expect(err.message).toContain("Project name cannot be empty");
   });
 
-  test("shows helpful error when platform is missing", async () => {
+  test.each([
+    "my-app",
+    "my-app:",
+  ])("shows a helpful error when platform is missing from %s", async (projectArg) => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
 
     const err = await func
-      .call(context, { json: false }, "my-app:")
+      .call(context, { json: false }, projectArg)
       .catch((e: Error) => e);
     expect(err).toBeInstanceOf(ValidationError);
     expect((err as ValidationError).exitCode).toBe(EXIT.VALIDATION);
@@ -729,15 +812,18 @@ describe("project create", () => {
     expect(err.message).toContain("python");
   });
 
-  test("rejects the former separate name and platform syntax", async () => {
+  test("rejects trailing-platform batches that were never supported", async () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
 
     const err = await func
-      .call(context, { json: false }, "my-app", "node")
+      .call(context, { json: false }, "web", "api", "node")
       .catch((error: Error) => error);
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toContain("must use <name>:<platform> syntax");
+    expect(err.message).toContain(
+      "The space-separated form supports one project only"
+    );
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 
@@ -954,11 +1040,14 @@ describe("project create", () => {
     expect(err.message).toContain("sentry project create proj2:<platform>");
   });
 
-  test("rejects whitespace in a project name", async () => {
+  test.each([
+    ["paired", ["My Cool App:node"]],
+    ["historical", ["My Cool App", "node"]],
+  ])("rejects whitespace in a %s project name", async (_syntax, args) => {
     const { context } = createMockContext();
     const func = await createCommand.loader();
     const err = await func
-      .call(context, { json: false }, "My Cool App:node")
+      .call(context, { json: false }, ...args)
       .catch((error: Error) => error);
 
     expect(err).toBeInstanceOf(ValidationError);

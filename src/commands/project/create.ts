@@ -2,19 +2,20 @@
  * sentry project create
  *
  * Create one or more Sentry projects.
- * Supports org/name:platform positional syntax.
+ * Supports both the existing `org/name platform` syntax for one project and
+ * `org/name:platform` pairs for one or more projects.
  *
  * ## Flow
  *
- * 1. Parse each name:platform pair and extract any org prefix
+ * 1. Parse one legacy name/platform tuple or one or more name:platform pairs
  * 2. Resolve org → positional prefix > env vars > config defaults > DSN auto-detection
  *    (all names must share one org)
  * 3. For each name: resolve team + create project (fetch DSN, build URL)
  * 4. Display results (one block per project)
  *
- * Every project uses a `name:platform` positional. Multiple projects are created
- * by passing several pairs (e.g. `sentry project create web:javascript
- * api:python-django`). Project names cannot contain whitespace.
+ * Multiple projects use `name:platform` pairs (e.g. `sentry project create
+ * web:javascript api:python-django`). The historical `name platform` syntax
+ * remains valid for one project. Project names cannot contain whitespace.
  */
 
 import type { SentryContext } from "../../context.js";
@@ -157,9 +158,10 @@ function buildPlatformError(nameArg: string, platform?: string): string {
     `${heading}\n` +
     didYouMean +
     "\nUsage:\n" +
-    `  sentry project create ${nameArg}:<platform>\n\n` +
+    `  sentry project create ${nameArg}:<platform>\n` +
+    `  sentry project create ${nameArg} <platform>\n\n` +
     `Common platforms:\n\n${platformTable}\n` +
-    "Run 'sentry project create <name>:<platform>' with any valid Sentry platform identifier."
+    "Use either form with any valid Sentry platform identifier."
   );
 }
 
@@ -394,7 +396,7 @@ async function createProjectWithErrors(
   }
 }
 
-/** A validated project specification parsed from one positional argument. */
+/** A validated project specification parsed from the command positionals. */
 type ParsedProjectSpec = {
   /** Explicit organization slug, when the name used org/name syntax. */
   org?: string;
@@ -405,9 +407,91 @@ type ParsedProjectSpec = {
 };
 
 /**
- * Parse each `<name>:<platform>` positional and require explicit org prefixes
- * to agree. The final colon is the separator so display names may contain
- * earlier colons.
+ * Parse and validate a project name independently from its platform source.
+ * Project names cannot contain whitespace in either supported syntax.
+ */
+function parseProjectName(
+  rawName: string,
+  platform: string
+): ParsedProjectSpec {
+  if (rawName.trim() === "") {
+    throw new ValidationError("Project name cannot be empty.", "name");
+  }
+  if (WHITESPACE_RE.test(rawName)) {
+    throw new ValidationError(
+      `Project name '${rawName}' cannot contain whitespace.`,
+      "name"
+    );
+  }
+
+  const parsedName = parseOrgProjectArg(rawName);
+  switch (parsedName.type) {
+    case "explicit":
+      return {
+        org: parsedName.org,
+        name: parsedName.project,
+        platform,
+      };
+    case "project-search":
+      return {
+        org: parsedName.org,
+        name: parsedName.projectSlug,
+        platform,
+      };
+    case "org-all":
+      throw new ContextError("Project name", USAGE_HINT, [
+        `'${rawName}' looks like an org, not a project name.`,
+      ]);
+    case "auto-detect":
+      throw new ValidationError("Project name cannot be empty.", "name");
+    default:
+      throw new ContextError("Project name", USAGE_HINT, []);
+  }
+}
+
+/** Validate and normalize a platform associated with a project name. */
+function parseProjectPlatform(rawName: string, rawPlatform: string): string {
+  const trimmedPlatform = rawPlatform.trim();
+  if (trimmedPlatform === "") {
+    throw new ValidationError(buildPlatformError(rawName), "platform");
+  }
+  const platform = normalizePlatform(trimmedPlatform);
+  if (!isValidPlatform(platform)) {
+    throw new ValidationError(
+      buildPlatformError(rawName, platform),
+      "platform"
+    );
+  }
+  return platform;
+}
+
+/**
+ * Parse one required `<name>:<platform>` pair. The final colon is the
+ * separator so project names may contain earlier colons.
+ */
+function parsePairedProjectSpec(rawSpec: string): ParsedProjectSpec {
+  const separatorIndex = rawSpec.lastIndexOf(":");
+  if (separatorIndex === -1) {
+    throw new ValidationError(
+      `Project '${rawSpec}' must use <name>:<platform> syntax. ` +
+        "The space-separated form supports one project only.",
+      "project"
+    );
+  }
+
+  const rawName = rawSpec.slice(0, separatorIndex);
+  const platform = parseProjectPlatform(
+    rawName,
+    rawSpec.slice(separatorIndex + 1)
+  );
+  return parseProjectName(rawName, platform);
+}
+
+/**
+ * Parse either the historical single-project `<name> <platform>` form or one
+ * or more `<name>:<platform>` pairs, then require explicit org prefixes to
+ * agree. Exactly two positionals with no colon in the second are interpreted
+ * as the historical form, which also preserves existing names containing `:`.
  */
 function parseProjectSpecs(rawSpecs: readonly string[]): {
   explicitOrg?: string;
@@ -417,62 +501,19 @@ function parseProjectSpecs(rawSpecs: readonly string[]): {
     throw new ContextError("Project specification", USAGE_HINT, []);
   }
 
-  const parsed: ParsedProjectSpec[] = rawSpecs.map((rawSpec) => {
-    const separatorIndex = rawSpec.lastIndexOf(":");
-    if (separatorIndex === -1) {
-      throw new ValidationError(
-        `Project '${rawSpec}' must use <name>:<platform> syntax.`,
-        "project"
-      );
-    }
-
-    const rawName = rawSpec.slice(0, separatorIndex);
-    if (rawName.trim() === "") {
-      throw new ValidationError("Project name cannot be empty.", "name");
-    }
-    if (WHITESPACE_RE.test(rawName)) {
-      throw new ValidationError(
-        `Project name '${rawName}' cannot contain whitespace.`,
-        "name"
-      );
-    }
-
-    const rawPlatform = rawSpec.slice(separatorIndex + 1).trim();
-    if (rawPlatform === "") {
-      throw new ValidationError(buildPlatformError(rawName), "platform");
-    }
-    const platform = normalizePlatform(rawPlatform);
-    if (!isValidPlatform(platform)) {
-      throw new ValidationError(
-        buildPlatformError(rawName, platform),
-        "platform"
-      );
-    }
-
-    const parsedName = parseOrgProjectArg(rawName);
-    switch (parsedName.type) {
-      case "explicit":
-        return {
-          org: parsedName.org,
-          name: parsedName.project,
-          platform,
-        };
-      case "project-search":
-        return {
-          org: parsedName.org,
-          name: parsedName.projectSlug,
-          platform,
-        };
-      case "org-all":
-        throw new ContextError("Project name", USAGE_HINT, [
-          `'${rawName}' looks like an org, not a project name.`,
-        ]);
-      case "auto-detect":
-        throw new ValidationError("Project name cannot be empty.", "name");
-      default:
-        throw new ContextError("Project name", USAGE_HINT, []);
-    }
-  });
+  let parsed: ParsedProjectSpec[];
+  if (rawSpecs.length === 2 && !rawSpecs[1]?.includes(":")) {
+    const [rawName = "", rawPlatform = ""] = rawSpecs;
+    const platform = parseProjectPlatform(rawName, rawPlatform);
+    parsed = [parseProjectName(rawName, platform)];
+  } else if (rawSpecs.length === 1 && !rawSpecs[0]?.includes(":")) {
+    throw new ValidationError(
+      buildPlatformError(rawSpecs[0] ?? ""),
+      "platform"
+    );
+  } else {
+    parsed = rawSpecs.map(parsePairedProjectSpec);
+  }
 
   const orgs = new Set(
     parsed.map((p) => p.org).filter((o): o is string => Boolean(o))
@@ -602,18 +643,20 @@ async function createOneProject(opts: {
 export const createCommand = buildCommand({
   docs: {
     brief: "Create one or more projects",
-    customUsage: ["[<org>/]<name>:<platform>..."],
+    customUsage: ["[<org>/]<name>:<platform>...", "[<org>/]<name> <platform>"],
     fullDescription:
       "Create Sentry projects in an organization.\n\n" +
       "Names support org/name syntax to specify the organization explicitly.\n" +
       "If omitted, the org is auto-detected from config defaults. Project names\n" +
       "cannot contain whitespace.\n\n" +
-      "Every project is a name:platform pair. Create several projects at once\n" +
-      "by passing multiple pairs as separate arguments. All projects share one org.\n\n" +
+      "Create several projects by passing name:platform pairs as separate arguments.\n" +
+      "For one project, the existing name platform form remains supported. All\n" +
+      "projects in a batch share one org.\n\n" +
       "Projects are created under a team. If the org has one team, it is used\n" +
       "automatically. If no teams exist, one is created. Otherwise, specify --team.\n\n" +
       "Examples:\n" +
       "  sentry project create my-app:node\n" +
+      "  sentry project create my-app node\n" +
       "  sentry project create acme-corp/my-app:javascript-nextjs\n" +
       "  sentry project create web:javascript api:python-django worker:node\n" +
       "  sentry project create my-app:python-django --team backend\n" +
@@ -632,8 +675,9 @@ export const createCommand = buildCommand({
     positional: {
       kind: "array",
       parameter: {
-        placeholder: "name:platform",
-        brief: "One or more project name and platform pairs",
+        placeholder: "project-spec",
+        brief:
+          "One or more name:platform pairs, or one name followed by its platform",
         parse: String,
       },
     },

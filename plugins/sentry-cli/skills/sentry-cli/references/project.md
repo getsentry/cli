@@ -22,9 +22,12 @@ Create one or more projects
 **Examples:**
 
 ```bash
-# Every argument must be name:platform; project names cannot contain whitespace
+# Multiple projects use name:platform pairs; project names cannot contain whitespace
 # Create a new project
 sentry project create my-new-app:javascript-nextjs
+
+# The historical single-project syntax remains supported
+sentry project create my-new-app javascript-nextjs
 
 # Create several projects with their own platforms
 sentry project create web:javascript api:python-django worker:node

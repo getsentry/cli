@@ -123,6 +123,46 @@ describe("getCompletions: context detection", () => {
       value: "web:javascript",
       description: "Platform",
     });
+    expect(getCompletions(["project", "create", "web"], "java")).toContainEqual(
+      {
+        value: "javascript",
+        description: "Platform",
+      }
+    );
+    expect(getCompletions(["project", "create", "web", "node"], "")).toEqual(
+      []
+    );
+  });
+
+  test("completes the historical platform positional around flags", () => {
+    expect(
+      getCompletions(
+        ["project", "create", "--dry-run", "my-project"],
+        "python-d"
+      )
+    ).toContainEqual({
+      value: "python-django",
+      description: "Platform",
+    });
+    expect(
+      getCompletions(
+        ["project", "create", "--team", "backend", "my-project"],
+        "node"
+      )
+    ).toContainEqual({ value: "node", description: "Platform" });
+    expect(
+      getCompletions(["project", "create", "api:europe"], "python-d")
+    ).toContainEqual({
+      value: "python-django",
+      description: "Platform",
+    });
+    expect(
+      getCompletions(["project", "create", "api:node"], "worker:java")
+    ).toContainEqual({
+      value: "worker:javascript",
+      description: "Platform",
+    });
+    expect(getCompletions(["project", "create", "--team"], "back")).toEqual([]);
   });
 });
 

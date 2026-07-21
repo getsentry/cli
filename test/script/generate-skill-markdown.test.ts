@@ -53,5 +53,8 @@ describe("matchExampleToCommand", () => {
     expect(reference).toContain(
       "sentry project create web:javascript api:python-django worker:node"
     );
+    expect(reference).toContain(
+      "sentry project create my-new-app javascript-nextjs"
+    );
   });
 });
