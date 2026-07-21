@@ -264,6 +264,25 @@ describe("sentry feedback view", () => {
     }
   });
 
+  test("recovers organization context from a bare numeric Feedback ID", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run([
+      "feedback",
+      "view",
+      TEST_FEEDBACK_ID,
+      "--json",
+    ]);
+
+    expect(result.exitCode, result.stderr + result.stdout).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      id: TEST_FEEDBACK_ID,
+      org: TEST_ORG,
+      event: { groupID: TEST_FEEDBACK_ID },
+      attachments: [{ name: "screenshot.png" }],
+    });
+  });
+
   test("rejects ordinary issues with an issue-view hint", async () => {
     await ctx.setAuthToken(TEST_TOKEN);
 
