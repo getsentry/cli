@@ -2,18 +2,28 @@
  * Shared resolution utilities for modern User Feedback commands.
  */
 
-import { ApiError, ResolutionError } from "../../lib/errors.js";
+import { listFeedback } from "../../lib/api-client.js";
+import { type IssueSelector, parseIssueArg } from "../../lib/arg-parsing.js";
+import {
+  ApiError,
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../lib/errors.js";
+import { resolveEffectiveOrg } from "../../lib/region.js";
+import { resolveOrg } from "../../lib/resolve-target.js";
+import { setOrgProjectContext } from "../../lib/telemetry.js";
 import type { SentryFeedback } from "../../types/index.js";
 import { buildCommandHint, resolveIssue } from "../issue/utils.js";
 
-/** Positional parameter for a Feedback numeric ID, short ID, or scoped ID. */
+/** Positional parameter for a Feedback selector or issue-style identifier. */
 export const feedbackIdPositional = {
   kind: "tuple",
   parameters: [
     {
-      placeholder: "org/project/feedback-id",
+      placeholder: "feedback",
       brief:
-        "Feedback ID: numeric ID, short ID, <org>/SHORT-ID, or <org>/<project>/<suffix>",
+        "Feedback: @latest, numeric ID, short ID, <org>/SHORT-ID, or <org>/<project>/<suffix>",
       parse: String,
     },
   ],
@@ -27,13 +37,63 @@ export type ResolvedFeedback = {
   feedback: SentryFeedback;
 };
 
+/** Resolve a supported Feedback selector inside the mandatory Feedback category. */
+async function resolveFeedbackSelector(
+  selector: IssueSelector,
+  explicitOrg: string | undefined,
+  cwd: string
+): Promise<ResolvedFeedback> {
+  if (selector !== "@latest") {
+    throw new ValidationError(
+      "Feedback only supports @latest; @most_frequent is not meaningful for Feedback.",
+      "feedback selector"
+    );
+  }
+
+  const org = explicitOrg
+    ? await resolveEffectiveOrg(explicitOrg)
+    : (await resolveOrg({ cwd }))?.org;
+  if (!org) {
+    throw new ContextError(
+      "Organization",
+      "sentry feedback view <org>/@latest"
+    );
+  }
+
+  const { feedback } = await listFeedback(org, "", {
+    limit: 1,
+    status: "unresolved",
+  });
+  const latest = feedback[0];
+  if (!latest) {
+    throw new ResolutionError(
+      "Selector '@latest'",
+      "found no unresolved User Feedback",
+      `sentry feedback list ${org}/ --status all`,
+      ["The @latest selector only matches unresolved Feedback."]
+    );
+  }
+
+  setOrgProjectContext(
+    [org],
+    latest.project?.slug ? [latest.project.slug] : []
+  );
+  return { org, feedback: latest };
+}
+
 /**
- * Resolve an issue-style identifier and require the result to be User Feedback.
+ * Resolve an issue-style identifier or the newest unresolved Feedback via
+ * `@latest`, and require the result to remain inside the Feedback category.
  */
 export async function resolveFeedback(
   feedbackArg: string,
   cwd: string
 ): Promise<ResolvedFeedback> {
+  const parsed = parseIssueArg(feedbackArg);
+  if (parsed.type === "selector") {
+    return resolveFeedbackSelector(parsed.selector, parsed.org, cwd);
+  }
+
   let resolved: Awaited<ReturnType<typeof resolveIssue>>;
   try {
     resolved = await resolveIssue({

@@ -34,6 +34,7 @@ export const TEST_EVENT_ID = "abc123def456abc123def456abc12345";
 export const TEST_FEEDBACK_ID = "5146636313";
 export const TEST_FEEDBACK_SHORT_ID = "TEST-PROJECT-2SDJ";
 export const TEST_FEEDBACK_EVENT_ID = "feed123def456abc123def456abc1234";
+export const TEST_FEEDBACK_LATEST_ORG = "test-feedback-latest-org";
 export const TEST_DSN = "https://abc123@o123.ingest.sentry.io/456789";
 export const TEST_LOG_ID = "a0a1a2a3a4a5a6a7a8a9b0b1b2b3b4b5";
 export const TEST_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
@@ -78,6 +79,74 @@ function feedbackLimitContextResponse(
       Link: `<${serverUrl}/next>; rel="next"; results="true"; cursor="${expectedCursor}"`,
     },
   };
+}
+
+/** Validate the org-wide issue-index request made by `feedback view @latest`. */
+function feedbackLatestValidationResponse(url: URL): MockResponse | undefined {
+  const query = url.searchParams.get("query") ?? "";
+  if (
+    url.searchParams.get("limit") === "1" &&
+    query.includes("status:unresolved") &&
+    url.searchParams.get("sort") === "date"
+  ) {
+    return;
+  }
+
+  return {
+    status: 400,
+    body: { detail: "Invalid @latest Feedback query" },
+  };
+}
+
+/** Build the Feedback-specific response for the shared issue-index route. */
+function feedbackIssueIndexResponse(
+  url: URL,
+  orgSlug: string,
+  serverUrl: string
+): MockResponse {
+  if (orgSlug === TEST_FEEDBACK_LATEST_ORG) {
+    const latestValidationResponse = feedbackLatestValidationResponse(url);
+    if (latestValidationResponse) {
+      return latestValidationResponse;
+    }
+  }
+
+  const paginationResponse = feedbackLimitContextResponse(url, serverUrl);
+  if (paginationResponse) {
+    return paginationResponse;
+  }
+
+  const query = url.searchParams.get("query") ?? "";
+  if (
+    query.includes("e2e-status-check") &&
+    !query.includes("status:unresolved")
+  ) {
+    return {
+      status: 400,
+      body: { detail: "Missing default Feedback status filter" },
+    };
+  }
+
+  return { body: feedbacksFixture };
+}
+
+/** Build the org issue-index response for issue and Feedback E2E tests. */
+function issueIndexResponse(
+  req: Request,
+  params: Record<string, string>,
+  serverUrl: string
+): MockResponse {
+  const supportedOrgs = [TEST_ORG, TEST_FEEDBACK_LATEST_ORG];
+  if (!supportedOrgs.includes(params.orgSlug)) {
+    return { status: 404, body: notFoundFixture };
+  }
+
+  const url = new URL(req.url);
+  const query = url.searchParams.get("query") ?? "";
+  if (query.includes("issue.category:feedback")) {
+    return feedbackIssueIndexResponse(url, params.orgSlug, serverUrl);
+  }
+  return { body: issuesFixture };
 }
 
 export const apiRoutes: MockRoute[] = [
@@ -177,33 +246,7 @@ export const apiRoutes: MockRoute[] = [
   {
     method: "GET",
     path: "/api/0/organizations/:orgSlug/issues/",
-    response: (req, params, serverUrl) => {
-      if (params.orgSlug === TEST_ORG) {
-        const url = new URL(req.url);
-        const query = url.searchParams.get("query") ?? "";
-        if (query.includes("issue.category:feedback")) {
-          const paginationResponse = feedbackLimitContextResponse(
-            url,
-            serverUrl
-          );
-          if (paginationResponse) {
-            return paginationResponse;
-          }
-          if (
-            query.includes("e2e-status-check") &&
-            !query.includes("status:unresolved")
-          ) {
-            return {
-              status: 400,
-              body: { detail: "Missing default Feedback status filter" },
-            };
-          }
-          return { body: feedbacksFixture };
-        }
-        return { body: issuesFixture };
-      }
-      return { status: 404, body: notFoundFixture };
-    },
+    response: issueIndexResponse,
   },
   // Issues (legacy project-scoped endpoint)
   {

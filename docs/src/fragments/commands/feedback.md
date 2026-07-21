@@ -36,6 +36,10 @@ direction with `--cursor next` and `--cursor prev`.
 ### View User Feedback
 
 ```bash
+# Most recent unresolved Feedback, with detected or explicit organization
+sentry feedback view @latest
+sentry feedback view my-org/@latest
+
 # Short ID or numeric ID
 sentry feedback view FRONTEND-2SDJ
 sentry feedback view 5146636313
@@ -50,6 +54,8 @@ sentry feedback show my-org/FRONTEND-2SDJ
 # Open the Feedback item in Sentry
 sentry feedback view my-org/FRONTEND-2SDJ --web
 ```
+
+`@latest` selects the most recently active unresolved Feedback.
 
 The detail view includes the complete message and, when available, its latest
 event, linked error, Session Replays, and attachment metadata. If the supplied

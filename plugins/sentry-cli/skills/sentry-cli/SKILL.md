@@ -517,7 +517,7 @@ Query aggregate event data (Explore)
 Search and inspect User Feedback
 
 - `sentry feedback list <org/project>` — List and search User Feedback
-- `sentry feedback view <org/project/feedback-id>` — View a User Feedback item
+- `sentry feedback view <feedback>` — View a User Feedback item
 
 → Full flags and examples: `references/feedback.md`
 

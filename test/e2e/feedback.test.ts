@@ -20,6 +20,7 @@ import { cleanupTestDir, createTestConfigDir } from "../helpers.js";
 import {
   createSentryMockServer,
   TEST_FEEDBACK_ID,
+  TEST_FEEDBACK_LATEST_ORG,
   TEST_FEEDBACK_SHORT_ID,
   TEST_ORG,
   TEST_PROJECT,
@@ -147,6 +148,46 @@ describe("sentry feedback list", () => {
 });
 
 describe("sentry feedback view", () => {
+  test("resolves @latest with explicit and detected organization context", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+    const defaultsResult = await ctx.run([
+      "cli",
+      "defaults",
+      "org",
+      TEST_FEEDBACK_LATEST_ORG,
+    ]);
+    expect(
+      defaultsResult.exitCode,
+      defaultsResult.stderr + defaultsResult.stdout
+    ).toBe(0);
+
+    for (const input of ["@latest", `${TEST_FEEDBACK_LATEST_ORG}/@latest`]) {
+      const result = await ctx.run([
+        "feedback",
+        "view",
+        input,
+        "--json",
+        "--fields",
+        "id",
+      ]);
+      expect(result.exitCode, result.stderr + result.stdout).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({ id: TEST_FEEDBACK_ID });
+    }
+  });
+
+  test("rejects @most_frequent with a Feedback-specific error", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run([
+      "feedback",
+      "view",
+      `${TEST_ORG}/@most_frequent`,
+    ]);
+
+    expect(result.exitCode).toBe(EXIT.VALIDATION);
+    expect(result.stderr + result.stdout).toContain("only supports @latest");
+  });
+
   test("returns flattened event, replay, and attachment data", async () => {
     await ctx.setAuthToken(TEST_TOKEN);
 
