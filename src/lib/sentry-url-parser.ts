@@ -158,6 +158,10 @@ function matchSubdomainTailPath(
   if (segments[0] === "share" && segments[1] === "issue" && segments[2]) {
     return { shareId: segments[2] };
   }
+  // /feedback/?feedbackSlug={project}:{id}
+  if (segments[0] === "feedback" && segments.length === 1) {
+    return {};
+  }
   // Bare org subdomain URL (no path segments)
   if (segments.length === 0) {
     return {};
@@ -271,6 +275,7 @@ function matchSharePath(
  * - `https://{org}.sentry.io/issues/{id}/events/{eventId}/`
  * - `https://{org}.sentry.io/dashboard/{id}/`
  * - `https://{org}.sentry.io/share/issue/{shareId}/`
+ * - `https://{org}.sentry.io/feedback/?feedbackSlug={project}:{id}`
  *
  * @param input - Raw string that may or may not be a URL
  * @returns Parsed components, or null if input is not a recognized Sentry URL

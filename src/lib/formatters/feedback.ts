@@ -31,7 +31,7 @@ import { formatRelativeTime } from "./time-utils.js";
 const MAX_REPLAY_IDS_SHOWN = 3;
 const MAX_LIST_MESSAGE_LENGTH = 160;
 const COMPACT_LIST_BREAKPOINT = 100;
-const LINE_BREAK_RE = /\n/;
+const LINE_BREAK_RE = /\n/g;
 const C1_CSI_RE = /\u009b[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g;
 const FEEDBACK_UNSAFE_TERMINAL_RE =
   // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal sanitization requires matching control characters

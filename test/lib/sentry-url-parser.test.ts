@@ -420,6 +420,16 @@ describe("parseSentryUrl", () => {
       });
     });
 
+    test("modern Feedback permalink returns its org", () => {
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/feedback/?feedbackSlug=my-project%3A5146636313"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+      });
+    });
+
     test("hyphenated org slug", () => {
       const result = parseSentryUrl(
         "https://acme-corp.sentry.io/issues/12345/"

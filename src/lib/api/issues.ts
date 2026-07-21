@@ -267,6 +267,8 @@ export async function listIssuesAllPages(
     // Keep the defensive overshoot branch for servers that ignore `limit`.
     if (allResults.length >= options.limit || !response.nextCursor) {
       if (allResults.length > options.limit) {
+        // The cursor resumes after the oversized page; exposing it would skip
+        // the trimmed items that the caller has not received.
         return { issues: allResults.slice(0, options.limit) };
       }
       return { issues: allResults, nextCursor: response.nextCursor };

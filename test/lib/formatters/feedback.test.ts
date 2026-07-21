@@ -89,6 +89,26 @@ describe("formatFeedbackList", () => {
     expect(output).toContain("Unknown");
     expect(output).not.toContain("Unread");
   });
+
+  test("flattens every message line break in compact output", () => {
+    const savedColumns = process.stdout.columns;
+    process.stdout.columns = 60;
+
+    try {
+      const output = formatFeedbackList({
+        feedback: [feedback({ metadata: { message: "First\nSecond\nThird" } })],
+        hasMore: false,
+        hasPrev: false,
+        org: "test-org",
+      });
+
+      expect(output).toContain("First Second Third");
+      expect(output).not.toContain("\nSecond");
+      expect(output).not.toContain("\nThird");
+    } finally {
+      process.stdout.columns = savedColumns;
+    }
+  });
 });
 
 describe("formatFeedbackView", () => {
