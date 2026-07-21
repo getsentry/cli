@@ -22,7 +22,7 @@ import projectsFixture from "../fixtures/projects.json";
 import traceSpansFixture from "../fixtures/trace-spans.json";
 import transactionsFixture from "../fixtures/transactions.json";
 import userFixture from "../fixtures/user.json";
-import type { MockRoute, MockServer } from "./server.js";
+import type { MockResponse, MockRoute, MockServer } from "./server.js";
 import { createMockServer } from "./server.js";
 
 export const TEST_ORG = "test-org";
@@ -50,6 +50,35 @@ const projectKeysFixture = [
     dateCreated: "2024-01-01T00:00:00.000Z",
   },
 ];
+
+function feedbackLimitContextResponse(
+  url: URL,
+  serverUrl: string
+): MockResponse | undefined {
+  const query = url.searchParams.get("query") ?? "";
+  if (!query.includes("e2e-limit-context")) {
+    return;
+  }
+
+  const limit = url.searchParams.get("limit") ?? "unknown";
+  const expectedCursor = `feedback-limit-${limit}-next`;
+  const cursor = url.searchParams.get("cursor");
+  if (cursor && cursor !== expectedCursor) {
+    return {
+      status: 400,
+      body: { detail: `Unexpected cursor ${cursor}` },
+    };
+  }
+  return {
+    body: Array.from(
+      { length: Number.parseInt(limit, 10) },
+      () => feedbacksFixture[0]
+    ),
+    headers: {
+      Link: `<${serverUrl}/next>; rel="next"; results="true"; cursor="${expectedCursor}"`,
+    },
+  };
+}
 
 export const apiRoutes: MockRoute[] = [
   // User Regions (multi-region support)
@@ -148,10 +177,18 @@ export const apiRoutes: MockRoute[] = [
   {
     method: "GET",
     path: "/api/0/organizations/:orgSlug/issues/",
-    response: (req, params) => {
+    response: (req, params, serverUrl) => {
       if (params.orgSlug === TEST_ORG) {
-        const query = new URL(req.url).searchParams.get("query") ?? "";
+        const url = new URL(req.url);
+        const query = url.searchParams.get("query") ?? "";
         if (query.includes("issue.category:feedback")) {
+          const paginationResponse = feedbackLimitContextResponse(
+            url,
+            serverUrl
+          );
+          if (paginationResponse) {
+            return paginationResponse;
+          }
           if (
             query.includes("e2e-status-check") &&
             !query.includes("status:unresolved")

@@ -88,11 +88,14 @@ async function projectIdFor(
 
 function appendFeedbackFlags(
   base: string,
-  flags: Pick<ListFlags, "status" | "query" | "period">
+  flags: Pick<ListFlags, "status" | "limit" | "query" | "period">
 ): string {
   const parts: string[] = [];
   if (flags.status !== DEFAULT_STATUS) {
     parts.push(`--status ${flags.status}`);
+  }
+  if (flags.limit !== LIST_DEFAULT_LIMIT) {
+    parts.push(`--limit ${flags.limit}`);
   }
   appendQueryHint(parts, flags.query);
   appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
@@ -103,7 +106,7 @@ function pageHint(
   direction: "next" | "prev",
   org: string,
   project: string | undefined,
-  flags: Pick<ListFlags, "status" | "query" | "period">
+  flags: Pick<ListFlags, "status" | "limit" | "query" | "period">
 ): string {
   return appendFeedbackFlags(
     `sentry feedback list ${formatScope(org, project)} -c ${direction}`,
@@ -207,6 +210,7 @@ export const listCommand = buildListCommand("feedback", {
       formatScope(resolved.org, resolved.project),
       {
         status: flags.status,
+        limit: String(flags.limit),
         q: flags.query,
         period: serializeTimeRange(flags.period),
       }

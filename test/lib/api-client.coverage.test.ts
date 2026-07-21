@@ -25,6 +25,7 @@ import {
   getLatestEvent,
   getLogs,
   getProjectKeys,
+  listEventAttachments,
   listIssuesAllPages,
   listLogs,
   listProjects,
@@ -981,6 +982,55 @@ describe("events.ts", () => {
 
       const result = await getEvent("test-org", "test-project", "evt-abc");
       expect(result.eventID).toBe("evt-abc");
+    });
+  });
+
+  describe("listEventAttachments", () => {
+    test("returns attachment metadata from every API page", async () => {
+      let requestCount = 0;
+      globalThis.fetch = mockFetch(async (input, init) => {
+        const req = new Request(input!, init);
+        const url = new URL(req.url);
+        expect(url.pathname).toContain(
+          "/projects/test-org/test-project/events/evt-abc/attachments/"
+        );
+
+        requestCount += 1;
+        const firstPage = url.searchParams.get("cursor") === null;
+        if (firstPage) {
+          return new Response(
+            JSON.stringify([{ id: "attachment-1", name: "first.png" }]),
+            {
+              status: 200,
+              headers: {
+                "Content-Type": "application/json",
+                Link: linkHeader("attachments-next", true),
+              },
+            }
+          );
+        }
+
+        expect(url.searchParams.get("cursor")).toBe("attachments-next");
+        return new Response(
+          JSON.stringify([{ id: "attachment-2", name: "second.png" }]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      });
+
+      const result = await listEventAttachments(
+        "test-org",
+        "test-project",
+        "evt-abc"
+      );
+
+      expect(result.map((attachment) => attachment.id)).toEqual([
+        "attachment-1",
+        "attachment-2",
+      ]);
+      expect(requestCount).toBe(2);
     });
   });
 
