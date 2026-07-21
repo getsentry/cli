@@ -427,6 +427,22 @@ describe("parseSentryUrl", () => {
       expect(result).toEqual({
         baseUrl: "https://my-org.sentry.io",
         org: "my-org",
+        project: "my-project",
+        issueId: "5146636313",
+      });
+    });
+
+    test.each([
+      "my-project%3Aa%3A5146636313",
+      "my-project%3Aabc%2Fdef",
+      "my-project%250A%3A5146636313",
+    ])("does not extract malformed Feedback slug %s", (feedbackSlug) => {
+      const result = parseSentryUrl(
+        `https://my-org.sentry.io/feedback/?feedbackSlug=${feedbackSlug}`
+      );
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
       });
     });
 

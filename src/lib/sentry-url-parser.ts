@@ -15,6 +15,8 @@ import { tryNormalizeHexId } from "./hex-id.js";
 import { isSaaSTrustOrigin } from "./sentry-urls.js";
 import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 
+const FEEDBACK_SLUG_RE = /^([a-z0-9][a-z0-9_-]*):(\d+)$/;
+
 /**
  * Components extracted from a Sentry web URL.
  *
@@ -117,7 +119,8 @@ function matchSettingsPath(
  * or null if no pattern matches.
  */
 function matchSubdomainPath(
-  segments: string[]
+  segments: string[],
+  searchParams: URLSearchParams
 ): Omit<ParsedSentryUrl, "baseUrl" | "org"> | null {
   // /issues/{id}/ (optionally with /events/{eventId}/)
   if (segments[0] === "issues" && segments[1]) {
@@ -140,11 +143,12 @@ function matchSubdomainPath(
   if (replayPath.status === "list") {
     return {};
   }
-  return matchSubdomainTailPath(segments);
+  return matchSubdomainTailPath(segments, searchParams);
 }
 
 function matchSubdomainTailPath(
-  segments: string[]
+  segments: string[],
+  searchParams: URLSearchParams
 ): Omit<ParsedSentryUrl, "baseUrl" | "org"> | null {
   // /settings/projects/{project}/ (org-scoped subdomain settings URL)
   if (segments[0] === "settings" && segments[1] === "projects" && segments[2]) {
@@ -158,15 +162,32 @@ function matchSubdomainTailPath(
   if (segments[0] === "share" && segments[1] === "issue" && segments[2]) {
     return { shareId: segments[2] };
   }
-  // /feedback/?feedbackSlug={project}:{id}
-  if (segments[0] === "feedback" && segments.length === 1) {
-    return {};
+  const feedbackPath = matchFeedbackSubdomainPath(segments, searchParams);
+  if (feedbackPath) {
+    return feedbackPath;
   }
   // Bare org subdomain URL (no path segments)
   if (segments.length === 0) {
     return {};
   }
   return null;
+}
+
+/** Match `/feedback/?feedbackSlug={project}:{id}` on an org subdomain. */
+function matchFeedbackSubdomainPath(
+  segments: string[],
+  searchParams: URLSearchParams
+): Omit<ParsedSentryUrl, "baseUrl" | "org"> | null {
+  if (segments[0] !== "feedback" || segments.length !== 1) {
+    return null;
+  }
+
+  const feedbackSlug = searchParams.get("feedbackSlug");
+  const match = feedbackSlug?.match(FEEDBACK_SLUG_RE);
+  if (!match) {
+    return {};
+  }
+  return { project: match[1], issueId: match[2] };
 }
 
 function matchReplayPath(
@@ -212,7 +233,8 @@ function matchReplayPath(
 function matchSubdomainOrg(
   baseUrl: string,
   hostname: string,
-  segments: string[]
+  segments: string[],
+  searchParams: URLSearchParams
 ): ParsedSentryUrl | null {
   // Must be a subdomain of sentry.io (e.g., "my-org.sentry.io")
   if (!hostname.endsWith(`.${DEFAULT_SENTRY_HOST}`)) {
@@ -227,7 +249,7 @@ function matchSubdomainOrg(
     return null;
   }
 
-  const pathResult = matchSubdomainPath(segments);
+  const pathResult = matchSubdomainPath(segments, searchParams);
   if (!pathResult) {
     return null;
   }
@@ -299,7 +321,7 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
   return (
     matchOrganizationsPath(baseUrl, segments) ??
     matchSettingsPath(baseUrl, segments) ??
-    matchSubdomainOrg(baseUrl, url.hostname, segments) ??
+    matchSubdomainOrg(baseUrl, url.hostname, segments, url.searchParams) ??
     matchSharePath(baseUrl, segments)
   );
 }
