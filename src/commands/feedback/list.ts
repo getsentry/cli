@@ -19,7 +19,6 @@ import {
 } from "../../lib/db/pagination.js";
 import { toSearchQueryError } from "../../lib/errors.js";
 import { formatFeedbackList } from "../../lib/formatters/feedback.js";
-import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   appendQueryHint,
@@ -31,6 +30,7 @@ import {
   paginationHint,
   targetPatternExplanation,
 } from "../../lib/list-command.js";
+import { jsonTransformListResult } from "../../lib/org-list.js";
 import { withProgress } from "../../lib/polling.js";
 import {
   type ResolvedOrgOptionalProject,
@@ -118,18 +118,15 @@ function jsonTransformFeedbackList(
   result: FeedbackListResult,
   fields?: string[]
 ): unknown {
-  const items = fields?.length
-    ? result.feedback.map((item) => filterFields(item, fields))
-    : result.feedback;
-  const envelope: Record<string, unknown> = {
-    data: items,
-    hasMore: result.hasMore,
-    hasPrev: result.hasPrev,
-  };
-  if (result.nextCursor) {
-    envelope.nextCursor = result.nextCursor;
-  }
-  return envelope;
+  return jsonTransformListResult(
+    {
+      items: result.feedback,
+      hasMore: result.hasMore,
+      hasPrev: result.hasPrev,
+      nextCursor: result.nextCursor,
+    },
+    fields
+  );
 }
 
 export const listCommand = buildListCommand("feedback", {
