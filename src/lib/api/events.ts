@@ -92,6 +92,13 @@ export async function listEventAttachments(
   const config = await getOrgSdkConfig(orgSlug);
   const { data } = await autoPaginate(
     async (cursor) => {
+      // The endpoint accepts `per_page`, but its generated SDK type omits it.
+      // Keeping the query in a variable permits the server-supported parameter
+      // without weakening the generated client type.
+      const query = {
+        per_page: API_MAX_PER_PAGE,
+        ...(cursor ? { cursor } : {}),
+      };
       const result = await listProjectEventAttachments({
         ...config,
         path: {
@@ -99,7 +106,7 @@ export async function listEventAttachments(
           project_id_or_slug: projectSlug,
           event_id: eventId,
         },
-        ...(cursor ? { query: { cursor } } : {}),
+        query,
       });
       return unwrapPaginatedResult<EventAttachmentDetailsResponse[]>(
         result,

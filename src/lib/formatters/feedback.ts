@@ -218,7 +218,9 @@ function formatCompactFeedbackList(
 /** Format a page of Feedback as a terminal-width-aware table. */
 export function formatFeedbackList(result: FeedbackListResult): string {
   if (result.feedback.length === 0) {
-    return result.hasMore ? "No feedback on this page." : "No feedback found.";
+    return result.hasMore || result.hasPrev
+      ? "No feedback on this page."
+      : "No feedback found.";
   }
 
   const scope = result.project
