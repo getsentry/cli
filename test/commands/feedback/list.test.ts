@@ -165,7 +165,7 @@ describe("feedback list", () => {
     });
   });
 
-  test("preserves status, query, period, and bidirectional pagination hints", async () => {
+  test("preserves filters, limit, and bidirectional pagination hints", async () => {
     resolveTargetSpy.mockResolvedValue({ org: "test-org" });
     resolveCursorSpy.mockReturnValue({ cursor: "previous", direction: "prev" });
     hasPreviousPageSpy.mockReturnValue(true);
@@ -204,15 +204,14 @@ describe("feedback list", () => {
       "prev",
       "next"
     );
-
     const output = stdoutWrite.mock.calls.map((call) => call[0]).join("");
     expect(output).toContain("Spam");
     expect(output).toContain("Read");
     expect(output).toContain(
-      'sentry feedback list test-org/ -c prev --status spam -q "browser:Chrome" --period 30d'
+      'sentry feedback list test-org/ -c prev --status spam --limit 250 -q "browser:Chrome" --period 30d'
     );
     expect(output).toContain(
-      'sentry feedback list test-org/ -c next --status spam -q "browser:Chrome" --period 30d'
+      'sentry feedback list test-org/ -c next --status spam --limit 250 -q "browser:Chrome" --period 30d'
     );
   });
 

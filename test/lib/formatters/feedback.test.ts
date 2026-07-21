@@ -143,4 +143,78 @@ describe("formatFeedbackView", () => {
       process.stdout.columns = savedColumns;
     }
   });
+
+  test("removes terminal control sequences from untrusted fields", () => {
+    const savedPlain = process.env.SENTRY_PLAIN_OUTPUT;
+    process.env.SENTRY_PLAIN_OUTPUT = "0";
+    const maliciousControlSequences = [
+      "\u001b[2J",
+      "\u001b]52;c;dGVzdA==\u0007",
+      "\u009b2J",
+      "\u202e",
+    ];
+    const item = feedback({
+      metadata: {
+        message: `Checkout ${maliciousControlSequences.join("")}failed`,
+        name: `Ada${maliciousControlSequences.join("")}`,
+        summary: `Summary${maliciousControlSequences.join("")}`,
+      },
+    });
+
+    try {
+      const listOutput = formatFeedbackList({
+        feedback: [item],
+        hasMore: false,
+        hasPrev: false,
+        org: "test-org",
+        project: "web",
+      });
+      const viewOutput = formatFeedbackView({
+        org: "test-org",
+        feedback: item,
+        event: {
+          eventID: "abc123def456abc123def456abc12345",
+          title: "User Feedback",
+          user: {
+            name: `Mallory${maliciousControlSequences.join("")}`,
+          },
+          tags: [
+            {
+              key: "unsafe",
+              value: `tag${maliciousControlSequences.join("")}`,
+            },
+          ],
+        },
+        replayIds: [],
+        attachments: [
+          {
+            id: "attachment-1",
+            event_id: "event-1",
+            type: "event.attachment",
+            name: `screen${maliciousControlSequences.join("")}.png`,
+            mimetype: "image/png",
+            dateCreated: "2026-07-16T12:00:00Z",
+            size: 10,
+            headers: {},
+            sha1: null,
+          },
+        ],
+      });
+
+      for (const sequence of maliciousControlSequences) {
+        expect(listOutput).not.toContain(sequence);
+        expect(viewOutput).not.toContain(sequence);
+      }
+      expect(listOutput).toContain("Ada");
+      expect(viewOutput).toContain("Checkout");
+      expect(viewOutput).toContain("Mallory");
+      expect(viewOutput).toContain("screen.png");
+    } finally {
+      if (savedPlain === undefined) {
+        delete process.env.SENTRY_PLAIN_OUTPUT;
+      } else {
+        process.env.SENTRY_PLAIN_OUTPUT = savedPlain;
+      }
+    }
+  });
 });

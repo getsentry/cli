@@ -1,5 +1,8 @@
 /**
  * Human-readable formatting for modern Sentry User Feedback.
+ *
+ * Feedback and enriched event strings are untrusted. Sanitize them before
+ * passing them to Markdown, table, or shared event renderers.
  */
 
 import type { EventAttachmentDetailsResponse } from "@sentry/api";
@@ -21,17 +24,74 @@ import {
   safeCodeSpan,
 } from "./markdown.js";
 import { formatBytes } from "./numbers.js";
+import { stripAnsi } from "./plain-detect.js";
 import { type Column, formatTable } from "./table.js";
 import { formatRelativeTime } from "./time-utils.js";
 
 const MAX_REPLAY_IDS_SHOWN = 3;
 const MAX_LIST_MESSAGE_LENGTH = 160;
 const COMPACT_LIST_BREAKPOINT = 100;
-const LINE_BREAK_RE = /\r?\n/;
+const LINE_BREAK_RE = /\n/;
+const C1_CSI_RE = /\u009b[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g;
+const FEEDBACK_UNSAFE_TERMINAL_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal sanitization requires matching control characters
+  /[\x00-\x09\x0b\x0c\x0e-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+/** Remove terminal controls while preserving intentional message line breaks. */
+function sanitizeFeedbackText(value: string): string {
+  return stripAnsi(value)
+    .replace(C1_CSI_RE, "")
+    .replace(/\r\n?/g, "\n")
+    .replace(FEEDBACK_UNSAFE_TERMINAL_RE, "");
+}
+
+function sanitizeFeedbackInline(value: string): string {
+  return sanitizeFeedbackText(value).replace(/\n+/g, " ");
+}
+
+function escapeFeedbackInline(value: string): string {
+  return escapeMarkdownInline(sanitizeFeedbackInline(value));
+}
+
+function escapeFeedbackCell(value: string): string {
+  return escapeMarkdownCell(sanitizeFeedbackInline(value));
+}
+
+function feedbackCodeSpan(value: string): string {
+  return safeCodeSpan(sanitizeFeedbackInline(value));
+}
+
+/** Recursively sanitize event strings and keys before human rendering. */
+function sanitizeFeedbackEventValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return sanitizeFeedbackText(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(sanitizeFeedbackEventValue);
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nestedValue]) => [
+        sanitizeFeedbackInline(key),
+        sanitizeFeedbackEventValue(nestedValue),
+      ])
+    );
+  }
+  return value;
+}
+
+/** Build a human-only event copy; the raw event used for JSON remains unchanged. */
+function sanitizeFeedbackEvent(event: SentryEvent): SentryEvent {
+  return sanitizeFeedbackEventValue(event) as SentryEvent;
+}
 
 function feedbackSender(feedback: SentryFeedback): string {
-  const name = feedback.metadata.name?.trim();
-  const email = feedback.metadata.contact_email?.trim();
+  const name = feedback.metadata.name
+    ? sanitizeFeedbackInline(feedback.metadata.name).trim()
+    : undefined;
+  const email = feedback.metadata.contact_email
+    ? sanitizeFeedbackInline(feedback.metadata.contact_email).trim()
+    : undefined;
   if (name && email && name !== email) {
     return `${name} <${email}>`;
   }
@@ -39,11 +99,11 @@ function feedbackSender(feedback: SentryFeedback): string {
 }
 
 function feedbackMessage(feedback: SentryFeedback): string {
-  return (
+  return sanitizeFeedbackText(
     feedback.metadata.message ||
-    feedback.metadata.value ||
-    feedback.metadata.title ||
-    feedback.title
+      feedback.metadata.value ||
+      feedback.metadata.title ||
+      feedback.title
   );
 }
 
@@ -63,7 +123,7 @@ function feedbackStatus(feedback: SentryFeedback): string {
     case "unresolved":
       return colorTag("yellow", "Unresolved");
     default:
-      return escapeMarkdownInline(feedback.status ?? "Unknown");
+      return escapeFeedbackInline(feedback.status ?? "Unknown");
   }
 }
 
@@ -81,8 +141,8 @@ const FEEDBACK_COLUMNS: Column<SentryFeedback>[] = [
     header: "ID",
     value: (feedback) =>
       feedback.permalink
-        ? `[${feedback.shortId}](${feedback.permalink})`
-        : safeCodeSpan(feedback.shortId),
+        ? `[${escapeFeedbackInline(feedback.shortId)}](${feedback.permalink})`
+        : feedbackCodeSpan(feedback.shortId),
     minWidth: 8,
     shrinkable: false,
   },
@@ -93,13 +153,13 @@ const FEEDBACK_COLUMNS: Column<SentryFeedback>[] = [
   },
   {
     header: "FROM",
-    value: (feedback) => escapeMarkdownCell(feedbackSender(feedback)),
+    value: (feedback) => escapeFeedbackCell(feedbackSender(feedback)),
     minWidth: 12,
     truncate: true,
   },
   {
     header: "MESSAGE",
-    value: (feedback) => escapeMarkdownCell(feedbackMessage(feedback)),
+    value: (feedback) => escapeFeedbackCell(feedbackMessage(feedback)),
     minWidth: 16,
     truncate: true,
   },
@@ -118,7 +178,7 @@ const FEEDBACK_COLUMNS: Column<SentryFeedback>[] = [
   {
     header: "PROJECT",
     value: (feedback) =>
-      escapeMarkdownCell(feedback.project?.slug ?? "unknown"),
+      escapeFeedbackCell(feedback.project?.slug ?? "unknown"),
     minWidth: 7,
   },
 ];
@@ -130,21 +190,21 @@ function formatCompactFeedbackList(
 ): string {
   const sections = result.feedback.map((feedback) => {
     const id = feedback.permalink
-      ? `[${escapeMarkdownInline(feedback.shortId)}](${feedback.permalink})`
-      : safeCodeSpan(feedback.shortId);
+      ? `[${escapeFeedbackInline(feedback.shortId)}](${feedback.permalink})`
+      : feedbackCodeSpan(feedback.shortId);
     return [
       `### ${id}`,
       "",
       `- **Received:** ${formatRelativeTime(feedback.firstSeen ?? undefined)}`,
-      `- **From:** ${escapeMarkdownInline(feedbackSender(feedback))}`,
-      `- **Message:** ${escapeMarkdownInline(feedbackMessagePreview(feedback))}`,
+      `- **From:** ${escapeFeedbackInline(feedbackSender(feedback))}`,
+      `- **Message:** ${escapeFeedbackInline(feedbackMessagePreview(feedback))}`,
       `- **Status:** ${feedbackStatus(feedback)}`,
       `- **Read:** ${feedbackReadState(feedback)}`,
-      `- **Project:** ${escapeMarkdownInline(feedback.project?.slug ?? "unknown")}`,
+      `- **Project:** ${escapeFeedbackInline(feedback.project?.slug ?? "unknown")}`,
     ].join("\n");
   });
   const markdown = [
-    `## Feedback in ${escapeMarkdownInline(scope)}`,
+    `## Feedback in ${escapeFeedbackInline(scope)}`,
     "",
     ...sections,
   ].join("\n\n");
@@ -204,26 +264,26 @@ function formatFeedbackOverview(data: FeedbackViewResult): string {
   const rows: [string, string][] = [
     ["Status", feedbackStatus(feedback)],
     ["Read", feedbackReadState(feedback)],
-    ["From", escapeMarkdownInline(feedbackSender(feedback))],
+    ["From", escapeFeedbackInline(feedbackSender(feedback))],
     ["Received", formatRelativeTime(feedback.firstSeen ?? undefined)],
   ];
 
   if (feedback.project) {
     rows.push([
       "Project",
-      `${escapeMarkdownInline(feedback.project.name ?? feedback.project.slug)} (${safeCodeSpan(feedback.project.slug)})`,
+      `${escapeFeedbackInline(feedback.project.name ?? feedback.project.slug)} (${feedbackCodeSpan(feedback.project.slug)})`,
     ]);
   }
   if (feedback.assignedTo?.name) {
-    rows.push(["Assignee", escapeMarkdownInline(feedback.assignedTo.name)]);
+    rows.push(["Assignee", escapeFeedbackInline(feedback.assignedTo.name)]);
   }
   if (feedback.metadata.source) {
-    rows.push(["Source", safeCodeSpan(feedback.metadata.source)]);
+    rows.push(["Source", feedbackCodeSpan(feedback.metadata.source)]);
   }
   if (feedback.metadata.sdk?.name) {
     rows.push([
       "SDK",
-      safeCodeSpan(
+      feedbackCodeSpan(
         feedback.metadata.sdk.name_normalized ?? feedback.metadata.sdk.name
       ),
     ]);
@@ -231,7 +291,7 @@ function formatFeedbackOverview(data: FeedbackViewResult): string {
 
   const url = feedbackUrl(data.event);
   if (url) {
-    rows.push(["URL", safeCodeSpan(url)]);
+    rows.push(["URL", feedbackCodeSpan(url)]);
   }
 
   const associatedEventId = linkedEventId(data);
@@ -241,7 +301,7 @@ function formatFeedbackOverview(data: FeedbackViewResult): string {
       data.org && project
         ? `sentry event view ${data.org}/${project}/${associatedEventId}`
         : `sentry event view ${associatedEventId}`;
-    rows.push(["Linked error", safeCodeSpan(command)]);
+    rows.push(["Linked error", feedbackCodeSpan(command)]);
   }
 
   if (feedback.permalink) {
@@ -249,7 +309,7 @@ function formatFeedbackOverview(data: FeedbackViewResult): string {
   }
 
   const lines = [
-    `## ${escapeMarkdownInline(feedback.shortId)}: User Feedback`,
+    `## ${escapeFeedbackInline(feedback.shortId)}: User Feedback`,
     "",
     mdKvTable(rows),
     "",
@@ -257,7 +317,7 @@ function formatFeedbackOverview(data: FeedbackViewResult): string {
     "",
     ...feedbackMessage(feedback)
       .split(LINE_BREAK_RE)
-      .map((line) => `> ${escapeMarkdownInline(line)}`),
+      .map((line) => `> ${escapeFeedbackInline(line)}`),
   ];
 
   if (feedback.metadata.summary) {
@@ -265,7 +325,7 @@ function formatFeedbackOverview(data: FeedbackViewResult): string {
       "",
       "### Summary",
       "",
-      escapeMarkdownInline(feedback.metadata.summary)
+      escapeFeedbackInline(feedback.metadata.summary)
     );
   }
 
@@ -288,7 +348,9 @@ function formatRelatedReplays(data: FeedbackViewResult): string {
     const command = data.org
       ? `sentry replay view ${data.org}/${replayId}`
       : `sentry replay view ${replayId}`;
-    lines.push(`- ${safeCodeSpan(replayId)} (${safeCodeSpan(command)})`);
+    lines.push(
+      `- ${feedbackCodeSpan(replayId)} (${feedbackCodeSpan(command)})`
+    );
   }
   const remaining = additionalIds.length - MAX_REPLAY_IDS_SHOWN;
   if (remaining > 0) {
@@ -301,7 +363,7 @@ function formatAttachment(attachment: EventAttachmentDetailsResponse): string {
   const details = [attachment.mimetype, formatBytes(attachment.size)]
     .filter(Boolean)
     .join(", ");
-  return `- ${escapeMarkdownInline(attachment.name)}${details ? ` (${escapeMarkdownInline(details)})` : ""} — ${safeCodeSpan(attachment.id)}`;
+  return `- ${escapeFeedbackInline(attachment.name)}${details ? ` (${escapeFeedbackInline(details)})` : ""} — ${feedbackCodeSpan(attachment.id)}`;
 }
 
 function formatAttachments(
@@ -321,7 +383,7 @@ export function formatFeedbackView(data: FeedbackViewResult): string {
   if (data.event) {
     sections.push(
       formatEventDetails(
-        data.event,
+        sanitizeFeedbackEvent(data.event),
         "Latest Feedback Event",
         data.feedback.permalink
       )

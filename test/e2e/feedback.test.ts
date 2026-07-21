@@ -107,6 +107,43 @@ describe("sentry feedback list", () => {
       hasPrev: false,
     });
   });
+
+  test("isolates stored cursors for different limits", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    for (const limit of [25, 50]) {
+      const firstPage = await ctx.run([
+        "feedback",
+        "list",
+        `${TEST_ORG}/${TEST_PROJECT}`,
+        "--query",
+        "e2e-limit-context",
+        "--limit",
+        String(limit),
+        "--json",
+      ]);
+      expect(firstPage.exitCode, firstPage.stderr + firstPage.stdout).toBe(0);
+      expect(JSON.parse(firstPage.stdout).nextCursor).toBe(
+        `feedback-limit-${limit}-next`
+      );
+    }
+
+    for (const limit of [25, 50]) {
+      const nextPage = await ctx.run([
+        "feedback",
+        "list",
+        `${TEST_ORG}/${TEST_PROJECT}`,
+        "--query",
+        "e2e-limit-context",
+        "--limit",
+        String(limit),
+        "--cursor",
+        "next",
+        "--json",
+      ]);
+      expect(nextPage.exitCode, nextPage.stderr + nextPage.stdout).toBe(0);
+    }
+  });
 });
 
 describe("sentry feedback view", () => {

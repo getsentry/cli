@@ -20,6 +20,7 @@ import { ApiError, AuthError } from "../errors.js";
 
 import {
   API_MAX_PER_PAGE,
+  autoPaginate,
   getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
   ORG_FANOUT_CONCURRENCY,
@@ -80,6 +81,8 @@ export async function getEvent(
 /**
  * List metadata for attachments on a project event.
  * Uses the generated Sentry API client and region-aware organization routing.
+ * The extra result sentinel lets the shared page bound emit its incomplete-data
+ * warning instead of stopping silently at the exact theoretical capacity.
  */
 export async function listEventAttachments(
   orgSlug: string,
@@ -87,19 +90,25 @@ export async function listEventAttachments(
   eventId: string
 ): Promise<EventAttachmentDetailsResponse[]> {
   const config = await getOrgSdkConfig(orgSlug);
-  const result = await listProjectEventAttachments({
-    ...config,
-    path: {
-      organization_id_or_slug: orgSlug,
-      project_id_or_slug: projectSlug,
-      event_id: eventId,
+  const { data } = await autoPaginate(
+    async (cursor) => {
+      const result = await listProjectEventAttachments({
+        ...config,
+        path: {
+          organization_id_or_slug: orgSlug,
+          project_id_or_slug: projectSlug,
+          event_id: eventId,
+        },
+        ...(cursor ? { query: { cursor } } : {}),
+      });
+      return unwrapPaginatedResult<EventAttachmentDetailsResponse[]>(
+        result,
+        "Failed to list event attachments"
+      );
     },
-  });
-
-  return unwrapResult<EventAttachmentDetailsResponse[]>(
-    result,
-    "Failed to list event attachments"
+    API_MAX_PER_PAGE * MAX_PAGINATION_PAGES + 1
   );
+  return data;
 }
 
 /**
