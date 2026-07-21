@@ -1242,9 +1242,11 @@ export function buildProjectQuery(
  * @param arg - Raw argument string, possibly containing newlines
  * @returns Non-empty trimmed lines
  */
+const WHITESPACE_RE = /\s+/;
+
 export function splitNewlineArg(arg: string): string[] {
   return arg
-    .split(/\s+/)
+    .split(WHITESPACE_RE)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
