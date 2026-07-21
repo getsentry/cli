@@ -2015,6 +2015,17 @@ describe("resolveOrgAndIssueId: magic @ selectors", () => {
     expect(String(err)).toContain("most recent");
     expect(String(err)).toContain("sentry issue list");
     expect(String(err)).toContain('-q "is:resolved"');
+
+    const eventError = await resolveIssue({
+      issueArg: "@latest",
+      cwd: getConfigDir(),
+      command: "list",
+      commandBase: "sentry event",
+    }).catch((error) => error);
+    expect(eventError).toBeInstanceOf(ResolutionError);
+    expect(eventError.hint).toBe(
+      'sentry issue list test-org/ -q "is:resolved"'
+    );
   });
 
   test("throws ContextError when org cannot be resolved for bare @selector", async () => {

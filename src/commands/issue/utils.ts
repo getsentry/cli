@@ -448,7 +448,7 @@ async function resolveSelector(
   cwd: string,
   commandContext: IssueCommandContext
 ): Promise<StrictResolvedIssue> {
-  const { commandBase, commandHint } = commandContext;
+  const { commandHint } = commandContext;
   // Resolve org: explicit from `org/@latest` or auto-detected from DSN/defaults
   let orgSlug: string;
   if (explicitOrg) {
@@ -478,7 +478,7 @@ async function resolveSelector(
     throw new ResolutionError(
       `Selector '${selector}'`,
       "no unresolved issues found",
-      `${commandBase} list ${orgSlug}/ -q "is:resolved"`,
+      `sentry issue list ${orgSlug}/ -q "is:resolved"`,
       [`The ${label} issue selector only matches unresolved issues.`]
     );
   }
