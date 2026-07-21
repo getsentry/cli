@@ -72,7 +72,7 @@ sentry feedback list my-org/frontend --status all --period 90d
 sentry feedback list my-org/frontend --query "message:*checkout*"
 ```
 
-### `sentry feedback view <org/project/feedback-id>`
+### `sentry feedback view <feedback>`
 
 View a User Feedback item
 
@@ -115,6 +115,10 @@ View a User Feedback item
 **Examples:**
 
 ```bash
+# Most recent unresolved Feedback, with detected or explicit organization
+sentry feedback view @latest
+sentry feedback view my-org/@latest
+
 # Short ID or numeric ID
 sentry feedback view FRONTEND-2SDJ
 sentry feedback view 5146636313

@@ -97,8 +97,10 @@ export const viewCommand = buildCommand({
   docs: {
     brief: "View a User Feedback item",
     fullDescription:
-      "View modern User Feedback by numeric ID or short ID. The latest event, linked error, Session Replays, and attachment metadata are included when available.\n\n" +
+      "View modern User Feedback by ID or select the most recent unresolved Feedback with @latest. The latest event, linked error, Session Replays, and attachment metadata are included when available.\n\n" +
       "Feedback formats:\n" +
+      "  @latest                     Most recent unresolved Feedback\n" +
+      "  <org>/@latest               Most recent unresolved Feedback in an organization\n" +
       "  <short-id>                  Search accessible organizations\n" +
       "  <numeric-id>                Resolve by numeric issue ID\n" +
       "  <org>/<short-id>            Explicit organization\n" +
