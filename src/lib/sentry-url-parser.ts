@@ -15,7 +15,7 @@ import { tryNormalizeHexId } from "./hex-id.js";
 import { isSaaSTrustOrigin } from "./sentry-urls.js";
 import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
 
-const FEEDBACK_SLUG_RE = /^([a-z0-9][a-z0-9_-]*):(\d+)$/;
+const FEEDBACK_SLUG_RE = /^([a-z0-9][a-z0-9_-]*):(\d+)$/i;
 
 /**
  * Components extracted from a Sentry web URL.
@@ -53,7 +53,8 @@ export type ParsedSentryUrl = {
  */
 function matchOrganizationsPath(
   baseUrl: string,
-  segments: string[]
+  segments: string[],
+  searchParams: URLSearchParams
 ): ParsedSentryUrl | null {
   if (segments[0] !== "organizations" || !segments[1]) {
     return null;
@@ -79,6 +80,11 @@ function matchOrganizationsPath(
   }
   if (replayPath.status === "invalid") {
     return null;
+  }
+
+  const feedbackPath = matchFeedbackPath(segments, 2, searchParams);
+  if (feedbackPath) {
+    return { baseUrl, org, ...feedbackPath };
   }
 
   // /organizations/{org}/dashboard/{id}/
@@ -162,7 +168,7 @@ function matchSubdomainTailPath(
   if (segments[0] === "share" && segments[1] === "issue" && segments[2]) {
     return { shareId: segments[2] };
   }
-  const feedbackPath = matchFeedbackSubdomainPath(segments, searchParams);
+  const feedbackPath = matchFeedbackPath(segments, 0, searchParams);
   if (feedbackPath) {
     return feedbackPath;
   }
@@ -173,12 +179,16 @@ function matchSubdomainTailPath(
   return null;
 }
 
-/** Match `/feedback/?feedbackSlug={project}:{id}` on an org subdomain. */
-function matchFeedbackSubdomainPath(
+/** Match a Feedback detail path and extract its project slug and group ID. */
+function matchFeedbackPath(
   segments: string[],
+  startIndex: number,
   searchParams: URLSearchParams
 ): Omit<ParsedSentryUrl, "baseUrl" | "org"> | null {
-  if (segments[0] !== "feedback" || segments.length !== 1) {
+  if (
+    segments[startIndex] !== "feedback" ||
+    segments.length !== startIndex + 1
+  ) {
     return null;
   }
 
@@ -286,6 +296,7 @@ function matchSharePath(
  * - `/organizations/{org}/explore/replays/{replayId}/`
  * - `/organizations/{org}/replays/{replayId}/`
  * - `/organizations/{org}/dashboard/{id}/`
+ * - `/organizations/{org}/feedback/?feedbackSlug={project}:{id}`
  * - `/organizations/{org}/`
  * - `/share/issue/{shareId}/`
  *
@@ -319,7 +330,7 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
   const segments = url.pathname.split("/").filter(Boolean);
 
   return (
-    matchOrganizationsPath(baseUrl, segments) ??
+    matchOrganizationsPath(baseUrl, segments, url.searchParams) ??
     matchSettingsPath(baseUrl, segments) ??
     matchSubdomainOrg(baseUrl, url.hostname, segments, url.searchParams) ??
     matchSharePath(baseUrl, segments)

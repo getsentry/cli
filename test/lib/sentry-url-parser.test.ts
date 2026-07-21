@@ -58,6 +58,18 @@ describe("parseSentryUrl", () => {
       });
     });
 
+    test("self-hosted Feedback permalink supports legacy mixed-case project slugs", () => {
+      const result = parseSentryUrl(
+        "https://sentry.example.com/organizations/acme-corp/feedback/?feedbackSlug=Legacy_Project%3A5146636313"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.example.com",
+        org: "acme-corp",
+        project: "Legacy_Project",
+        issueId: "5146636313",
+      });
+    });
+
     test("strips trailing path segments after org", () => {
       // /organizations/{org}/ with no further recognized segments → org only
       const result = parseSentryUrl("https://sentry.io/organizations/my-org/");
