@@ -242,13 +242,14 @@ describe("sentry feedback view", () => {
     expect(JSON.parse(aliasResult.stdout)).toEqual({ id: TEST_FEEDBACK_ID });
   });
 
-  test("accepts numeric, bare short, and fully scoped IDs", async () => {
+  test("accepts issue-style identifiers and modern Feedback URLs", async () => {
     await ctx.setAuthToken(TEST_TOKEN);
 
     const inputs = [
       TEST_FEEDBACK_ID,
       TEST_FEEDBACK_SHORT_ID,
       `${TEST_ORG}/${TEST_PROJECT}/2SDJ`,
+      `https://${TEST_ORG}.sentry.io/feedback/?feedbackSlug=${TEST_PROJECT}%3A${TEST_FEEDBACK_ID}`,
     ];
     for (const input of inputs) {
       const result = await ctx.run([
