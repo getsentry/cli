@@ -95,7 +95,9 @@ type SpanViewArgs =
  */
 function tryAutoSplitSpanArg(arg: string): SpanViewArgs | null {
   const lastSlashIdx = arg.lastIndexOf("/");
-  if (lastSlashIdx === -1) return null;
+  if (lastSlashIdx === -1) {
+    return null;
+  }
 
   const tracePrefix = arg.slice(0, lastSlashIdx);
   const possibleSpanId = arg
@@ -109,14 +111,11 @@ function tryAutoSplitSpanArg(arg: string): SpanViewArgs | null {
   }
 
   const hasMultipleSlashes = tracePrefix.includes("/");
-  const normalizedPrefix = tracePrefix
-    .trim()
-    .toLowerCase()
-    .replace(/-/g, "");
+  const normalizedPrefix = tracePrefix.trim().toLowerCase().replace(/-/g, "");
 
   // For single-slash form the prefix must be a hex trace ID.
   // For multi-slash (org/project/trace-id) always attempt the split.
-  if (!hasMultipleSlashes && !HEX_ID_RE.test(normalizedPrefix)) {
+  if (!(hasMultipleSlashes || HEX_ID_RE.test(normalizedPrefix))) {
     return null;
   }
 
