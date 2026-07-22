@@ -859,7 +859,8 @@ function formatLogJson(
 /** Format a standalone span item as JSON objects (one per span). */
 function formatSpanJson(
   payload: Record<string, unknown>,
-  header: Record<string, unknown>
+  header: Record<string, unknown>,
+  includeAttributes = false
 ): string[] {
   const items = payload.items as StreamedSpan[] | undefined;
   if (!items?.length) {
@@ -889,6 +890,9 @@ function formatSpanJson(
           : undefined,
       duration_ms: durationMs,
       status: span.status,
+      attributes: includeAttributes
+        ? buildJsonAttributes({ contexts: { trace: { data: flat } } })
+        : undefined,
       source,
     });
   });
@@ -921,7 +925,7 @@ export function formatItemJson(
     return [formatTransactionJson(payload, header, showAttributes)];
   }
   if (itemType === "span") {
-    return formatSpanJson(payload, header);
+    return formatSpanJson(payload, header, showAttributes);
   }
   if (itemType === "log") {
     return formatLogJson(payload, header);
