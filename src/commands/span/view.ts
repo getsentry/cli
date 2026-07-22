@@ -23,10 +23,7 @@ import {
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { computeSpanDurationMs } from "../../lib/formatters/time-utils.js";
-import {
-  SPAN_ID_RE,
-  validateSpanId,
-} from "../../lib/hex-id.js";
+import { HEX_ID_RE, SPAN_ID_RE, validateSpanId } from "../../lib/hex-id.js";
 import {
   handleRecoveryResult,
   recoverHexId,
@@ -98,9 +95,9 @@ export function parsePositionalArgs(args: string[]): SpanViewArgs {
   }
 
   // Auto-detect single-arg forms where the last slash-segment is a span ID.
-  // This handles both:
-  //   <trace-id>/<span-id>           (one slash)
-  //   [<org>/][<project>/]<trace-id>/<span-id>  (two+ slashes, e.g. copy-paste from `span list`)
+  // This handles:
+  //   <trace-id>/<span-id>                       (one slash)
+  //   [<org>/][<project>/]<trace-id>/<span-id>   (two+ slashes, e.g. copy-paste from `span list`)
   // Without this check, parseSlashSeparatedTraceTarget treats the span
   // ID as a trace ID and fails validation (CLI-G6 / CLI-1BD).
   if (args.length === 1) {
@@ -113,19 +110,26 @@ export function parsePositionalArgs(args: string[]): SpanViewArgs {
         .toLowerCase()
         .replace(/-/g, "");
       if (SPAN_ID_RE.test(possibleSpanId) && tracePrefix.length > 0) {
-        const traceTarget = parseSlashSeparatedTraceTarget(
-          tracePrefix,
-          USAGE_HINT
-        );
-        log.warn(
-          `Interpreting '${first}' as <trace-target>/<span-id>. ` +
-            `Use separate arguments: sentry span view ${tracePrefix} ${possibleSpanId}`
-        );
-        return {
-          kind: "resolved",
-          traceTarget,
-          rawSpanIds: [possibleSpanId],
-        };
+        const hasMultipleSlashes = tracePrefix.includes("/");
+        // For single-slash form, the prefix must look like a hex trace ID.
+        // For multi-slash form (org/project/trace-id), always attempt the split —
+        // parseSlashSeparatedTraceTarget will validate the trace ID portion.
+        const normalizedPrefix = tracePrefix.trim().toLowerCase().replace(/-/g, "");
+        if (hasMultipleSlashes || HEX_ID_RE.test(normalizedPrefix)) {
+          const traceTarget = parseSlashSeparatedTraceTarget(
+            tracePrefix,
+            USAGE_HINT
+          );
+          log.warn(
+            `Interpreting '${first}' as <trace-target>/<span-id>. ` +
+              `Use separate arguments: sentry span view ${tracePrefix} ${possibleSpanId}`
+          );
+          return {
+            kind: "resolved",
+            traceTarget,
+            rawSpanIds: [possibleSpanId],
+          };
+        }
       }
     }
   }
