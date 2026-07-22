@@ -84,6 +84,50 @@ type SpanViewArgs =
  *
  * @throws {ContextError} If insufficient arguments or a single bare span ID
  */
+
+/**
+ * Try to auto-split a single arg of the form `<trace-target>/<span-id>`.
+ *
+ * Handles one-slash (`<trace-id>/<span-id>`) and multi-slash
+ * (`org/project/<trace-id>/<span-id>`) forms. Returns null when the arg
+ * cannot be unambiguously split (e.g. left side is not a hex trace ID in
+ * the single-slash case).
+ */
+function tryAutoSplitSpanArg(arg: string): SpanViewArgs | null {
+  const lastSlashIdx = arg.lastIndexOf("/");
+  if (lastSlashIdx === -1) return null;
+
+  const tracePrefix = arg.slice(0, lastSlashIdx);
+  const possibleSpanId = arg
+    .slice(lastSlashIdx + 1)
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "");
+
+  if (!SPAN_ID_RE.test(possibleSpanId) || tracePrefix.length === 0) {
+    return null;
+  }
+
+  const hasMultipleSlashes = tracePrefix.includes("/");
+  const normalizedPrefix = tracePrefix
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "");
+
+  // For single-slash form the prefix must be a hex trace ID.
+  // For multi-slash (org/project/trace-id) always attempt the split.
+  if (!hasMultipleSlashes && !HEX_ID_RE.test(normalizedPrefix)) {
+    return null;
+  }
+
+  const traceTarget = parseSlashSeparatedTraceTarget(tracePrefix, USAGE_HINT);
+  log.warn(
+    `Interpreting '${arg}' as <trace-target>/<span-id>. ` +
+      `Use separate arguments: sentry span view ${tracePrefix} ${possibleSpanId}`
+  );
+  return { kind: "resolved", traceTarget, rawSpanIds: [possibleSpanId] };
+}
+
 export function parsePositionalArgs(args: string[]): SpanViewArgs {
   if (args.length === 0) {
     throw new ContextError("Trace ID and span ID", USAGE_HINT, []);
@@ -101,36 +145,9 @@ export function parsePositionalArgs(args: string[]): SpanViewArgs {
   // Without this check, parseSlashSeparatedTraceTarget treats the span
   // ID as a trace ID and fails validation (CLI-G6 / CLI-1BD).
   if (args.length === 1) {
-    const lastSlashIdx = first.lastIndexOf("/");
-    if (lastSlashIdx !== -1) {
-      const tracePrefix = first.slice(0, lastSlashIdx);
-      const possibleSpanId = first
-        .slice(lastSlashIdx + 1)
-        .trim()
-        .toLowerCase()
-        .replace(/-/g, "");
-      if (SPAN_ID_RE.test(possibleSpanId) && tracePrefix.length > 0) {
-        const hasMultipleSlashes = tracePrefix.includes("/");
-        // For single-slash form, the prefix must look like a hex trace ID.
-        // For multi-slash form (org/project/trace-id), always attempt the split —
-        // parseSlashSeparatedTraceTarget will validate the trace ID portion.
-        const normalizedPrefix = tracePrefix.trim().toLowerCase().replace(/-/g, "");
-        if (hasMultipleSlashes || HEX_ID_RE.test(normalizedPrefix)) {
-          const traceTarget = parseSlashSeparatedTraceTarget(
-            tracePrefix,
-            USAGE_HINT
-          );
-          log.warn(
-            `Interpreting '${first}' as <trace-target>/<span-id>. ` +
-              `Use separate arguments: sentry span view ${tracePrefix} ${possibleSpanId}`
-          );
-          return {
-            kind: "resolved",
-            traceTarget,
-            rawSpanIds: [possibleSpanId],
-          };
-        }
-      }
+    const resolved = tryAutoSplitSpanArg(first);
+    if (resolved) {
+      return resolved;
     }
   }
 
