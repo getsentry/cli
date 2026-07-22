@@ -476,6 +476,63 @@ async function loadOldBinary(oldPath: string): Promise<OldReader> {
 }
 
 /**
+ * Wrapping unsigned byte addition (`old + diff mod 256`) for a diff window.
+ *
+ * This is the hot inner loop of bspatch apply. Doing it byte-at-a-time in JS
+ * (two typed-array property accesses + a `% 256` per byte) is the dominant CPU
+ * cost on a large binary. We instead process 4 bytes per iteration with a
+ * SWAR (SIMD-within-a-register) add on `Uint32Array`:
+ *
+ *   lows  = (a & 0x7f7f7f7f) + (b & 0x7f7f7f7f)   // top bit of each byte is 0,
+ *                                                 // so carries stay in-lane
+ *   highs = (a ^ b) & 0x80808080                  // high-bit carry per byte
+ *   result = lows ^ highs                         // per-byte sum mod 256
+ *
+ * This is carry-less (each byte lane sums independently mod 256) and is
+ * verified exhaustively (all byte values + every 4-byte alignment + tail 0-3).
+ * A short tail loop handles the trailing `n % 4` bytes. The old bytes are read
+ * as raw bytes (no `?? 0` per element) because the OldReader already zero-fills
+ * out-of-range positions.
+ *
+ * INVARIANT: the carry masks must match the word width. The low mask clears
+ * the top bit of EVERY byte lane and the high mask isolates the top bit of
+ * EVERY lane — both are 0x7f7f7f7f / 0x80808080 because words are 32-bit. A
+ * wider-word (BigUint64Array) variant must widen BOTH masks to 64-bit
+ * (0x7f7f7f7f7f7f7f7f / 0x8080808080808080); pairing 64-bit words with the
+ * 32-bit carry mask silently drops carries in the upper 4 bytes and corrupts
+ * the output (caught by the exhaustive tests).
+ */
+function addDiffChunk(
+  output: Uint8Array,
+  oldChunk: Uint8Array,
+  diffChunk: Uint8Array,
+  n: number
+): void {
+  const words = Math.floor(n / 4);
+  const oldWords = new Uint32Array(oldChunk.buffer, oldChunk.byteOffset, words);
+  const diffWords = new Uint32Array(
+    diffChunk.buffer,
+    diffChunk.byteOffset,
+    words
+  );
+  const outWords = new Uint32Array(output.buffer, output.byteOffset, words);
+  const LOW = 0x7f_7f_7f_7f;
+  const HIGH = 0x80_80_80_80;
+  for (let i = 0; i < words; i++) {
+    const a = oldWords[i] ?? 0;
+    const b = diffWords[i] ?? 0;
+    // biome-ignore lint/suspicious/noBitwiseOperators: SWAR per-lane add uses bitmask/xor by design
+    const sum = ((a & LOW) + (b & LOW)) ^ ((a ^ b) & HIGH);
+    // biome-ignore lint/suspicious/noBitwiseOperators: coerce to uint32
+    outWords[i] = sum >>> 0;
+  }
+  const tailStart = words * 4;
+  for (let i = tailStart; i < n; i++) {
+    output[i] = ((oldChunk[i] ?? 0) + (diffChunk[i] ?? 0)) % 256;
+  }
+}
+
+/**
  * Core TRDIFF10 transform.
  *
  * Applies a patch to in-memory old bytes, emitting output chunks in order via
@@ -540,10 +597,9 @@ async function transformPatch(
         const oldChunk = await oldReader.read(oldpos, readDiffBy);
         const outputChunk = new Uint8Array(readDiffBy);
 
-        for (let i = 0; i < readDiffBy; i++) {
-          // Wrapping unsigned byte addition, matching zig-bsdiff's @addWithOverflow
-          outputChunk[i] = ((oldChunk[i] ?? 0) + (diffChunk[i] ?? 0)) % 256;
-        }
+        // Wrapping unsigned byte addition, matching zig-bsdiff's @addWithOverflow.
+        // SWAR on Uint32Array — see addDiffChunk.
+        addDiffChunk(outputChunk, oldChunk, diffChunk, readDiffBy);
 
         onChunk(outputChunk);
         oldpos += readDiffBy;
