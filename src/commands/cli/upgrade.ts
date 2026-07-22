@@ -558,7 +558,8 @@ async function executeStandardUpgrade(opts: {
     channel === "nightly" && !versionArg ? NIGHTLY_TAG : undefined;
   const downloadResult = await withProgress(
     { message: `Downloading ${target}...`, json },
-    async () => executeUpgrade(method, target, downloadTag, offline)
+    async (setMessage) =>
+      executeUpgrade(method, target, downloadTag, offline, setMessage)
   );
 
   if (downloadResult?.patchBytes) {
@@ -629,7 +630,8 @@ async function migrateToStandaloneForNightly(
   const downloadTag = versionArg ? undefined : NIGHTLY_TAG;
   const downloadResult = await withProgress(
     { message: `Downloading ${target}...`, json },
-    async () => executeUpgrade("curl", target, downloadTag)
+    async (setMessage) =>
+      executeUpgrade("curl", target, downloadTag, undefined, setMessage)
   );
 
   if (downloadResult?.patchBytes) {

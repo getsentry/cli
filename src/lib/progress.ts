@@ -1,35 +1,36 @@
 /**
- * Byte-driven progress bar for long-running upgrade phases (patch apply,
+ * Byte-driven progress reporting for long-running upgrade phases (patch apply,
  * full-binary download).
  *
- * Design contract:
- * - Renders only when output is interactive (respects `isPlainOutput()`, so
- *   `NO_COLOR`, piped stdout, and CI all suppress the bar). In plain mode it
- *   prints the label once.
- * - Cosmetic ONLY — rendering must never throw or abort the underlying work.
- * - Determinate when a byte `total` is supplied; an indeterminate byte counter
- *   otherwise (the decompressed download size isn't known ahead of time).
+ * sentry upgrade already runs under `withProgress`, which animates a spinner
+ * and passes down a `setMessage(text)` callback. To avoid two competing
+ * in-place redraws fighting over the same terminal line, this helper does NOT
+ * draw its own bar — it formats a compact progress string and pushes it into
+ * that `setMessage` callback, so the byte counter rides on the existing spinner.
  *
- * One line, redrawn in place via carriage return; `done()` clears the line so
- * the next message prints cleanly.
+ * Design contract:
+ * - Cosmetic ONLY — a formatting/callback failure must never abort the work.
+ * - Determinate ("152 MB / 310 MB [====> ] 49%") when a byte `total` is given;
+ *   an indeterminate byte counter ("38 MB") otherwise (the decompressed
+ *   download size isn't known ahead of time).
+ * - Updates are throttled so a fast byte stream doesn't spam the spinner.
  */
 
 import { formatBytes } from "./formatters/numbers.js";
-import { isPlainOutput } from "./formatters/plain-detect.js";
 
-export type ByteProgressOut = {
-  isTTY?: boolean;
-  write: (s: string) => unknown;
-};
+/** Callback that sets the surrounding spinner's message text. */
+export type SetMessage = (message: string) => void;
 
 export type ByteProgress = {
   /** Report `bytes` additional bytes processed since the last call. */
   onProgress: (bytes: number) => void;
-  /** Clear the progress line (call before printing the next message). */
+  /** Emit a final message reflecting the total processed (best-effort). */
   done: () => void;
 };
 
 const BAR_WIDTH = 16;
+/** Minimum gap between spinner message updates. */
+const THROTTLE_MS = 100;
 
 function renderBar(frac: number, width = BAR_WIDTH): string {
   const filled = Math.max(0, Math.min(width, Math.round(width * frac)));
@@ -37,68 +38,62 @@ function renderBar(frac: number, width = BAR_WIDTH): string {
 }
 
 /**
- * Create a byte-progress bar.
+ * Create a byte-progress reporter that feeds a spinner `setMessage` callback.
  *
- * @param label - Short label shown before the bar (e.g. "Applying 3 patches").
+ * @param label - Short label prefix (e.g. "Applying 3 patch(es)").
  * @param totalBytes - Expected total bytes; `null` renders an indeterminate
  *   byte counter instead of a bar.
- * @param out - Output stream (defaults to stderr, the CLI's progress channel).
+ * @param setMessage - Spinner message setter (from `withProgress`). When
+ *   undefined (JSON mode / non-TTY / no surrounding spinner), this is a no-op
+ *   so nothing is drawn.
+ * @param nowMs - Injectable clock for tests.
  */
 export function makeByteProgress(
   label: string,
   totalBytes: number | null,
-  out: ByteProgressOut = process.stderr
+  setMessage?: SetMessage,
+  nowMs: () => number = Date.now
 ): ByteProgress {
-  // Interactive only: a real TTY AND not forced into plain output.
-  const interactive = !!out.isTTY && !isPlainOutput();
   let written = 0;
-  let lastLen = 0;
-  let headerShown = false;
+  let lastEmit = 0;
 
-  const line = (): string => {
+  const format = (): string => {
     if (totalBytes === null || totalBytes <= 0) {
-      return `${label}  ${formatBytes(written)}`;
+      return `${label} ${formatBytes(written)}`;
     }
     const frac = Math.min(written / totalBytes, 1);
+    const pct = Math.round(frac * 100);
     return (
       `${label} [${renderBar(frac)}] ` +
-      `${formatBytes(written)} / ${formatBytes(totalBytes)}`
+      `${formatBytes(written)} / ${formatBytes(totalBytes)} (${pct}%)`
     );
   };
 
-  const onProgress = (bytes: number): void => {
-    // Cosmetic only — a rendering failure must never abort the operation.
+  const emit = (): void => {
+    // Cosmetic only — a formatting or callback failure must never propagate.
     try {
-      written += bytes;
-      if (!interactive) {
-        if (!headerShown) {
-          out.write(`${label}\n`);
-          headerShown = true;
-        }
-        return;
-      }
-      const l = line();
-      // Pad with spaces to overwrite any leftover tail from a longer previous
-      // frame (e.g. when formatBytes shrinks at the KB→MB boundary), then track
-      // the full printed width so done() clears it completely.
-      const padded =
-        l.length < lastLen ? l + " ".repeat(lastLen - l.length) : l;
-      lastLen = padded.length;
-      out.write(`\r${padded}`);
+      setMessage?.(format());
     } catch {
       // ignore — progress is cosmetic
     }
   };
 
-  const done = (): void => {
-    // Cosmetic only — must never throw, matching onProgress's contract.
-    try {
-      if (interactive && lastLen > 0) {
-        out.write(`\r${" ".repeat(lastLen)}\r`);
-      }
-    } catch {
-      // ignore — progress is cosmetic
+  const onProgress = (bytes: number): void => {
+    written += bytes;
+    if (!setMessage) {
+      return;
     }
+    const now = nowMs();
+    if (now - lastEmit < THROTTLE_MS) {
+      return;
+    }
+    lastEmit = now;
+    emit();
+  };
+
+  // Emit a final, un-throttled message so the last state is always shown.
+  const done = (): void => {
+    emit();
   };
 
   return { onProgress, done };
