@@ -681,7 +681,8 @@ async function transformPatch(
 async function applyReaderToFile(
   oldReader: OldReader,
   patchData: Uint8Array,
-  destPath: string
+  destPath: string,
+  onBytes?: (bytes: number) => void
 ): Promise<string> {
   const writer = createWriteStream(destPath);
   const hasher = createHash("sha256");
@@ -703,6 +704,7 @@ async function applyReaderToFile(
       }
       writer.write(chunk);
       hasher.update(chunk);
+      onBytes?.(chunk.byteLength);
     });
   } finally {
     await new Promise<void>((resolve, reject) => {
@@ -735,7 +737,8 @@ async function applyReaderToFile(
  */
 async function applyReaderToMemory(
   oldReader: OldReader,
-  patchData: Uint8Array
+  patchData: Uint8Array,
+  onBytes?: (bytes: number) => void
 ): Promise<Uint8Array> {
   // Preallocate the exact output size from the header so chunks can be copied
   // in place — avoids a final concat pass over ~100 MB of output.
@@ -746,6 +749,7 @@ async function applyReaderToMemory(
   await transformPatch(oldReader, patchData, (chunk) => {
     output.set(chunk, offset);
     offset += chunk.byteLength;
+    onBytes?.(chunk.byteLength);
   });
 
   return output;
@@ -794,7 +798,8 @@ export function applyPatchToMemory(
 export async function applyPatchChainInMemory(
   oldPath: string,
   patches: Uint8Array[],
-  destPath: string
+  destPath: string,
+  onBytes?: (bytes: number) => void
 ): Promise<string> {
   if (patches.length === 0) {
     throw new Error("Cannot apply an empty patch chain");
@@ -812,7 +817,7 @@ export async function applyPatchChainInMemory(
       if (!patch) {
         throw new Error(`Missing patch at index ${i}`);
       }
-      const next = await applyReaderToMemory(reader, patch);
+      const next = await applyReaderToMemory(reader, patch, onBytes);
       await reader.close();
       reader = new MemoryOldReader(next);
     }
@@ -822,7 +827,7 @@ export async function applyPatchChainInMemory(
     if (!finalPatch) {
       throw new Error("Missing final patch");
     }
-    return await applyReaderToFile(reader, finalPatch, destPath);
+    return await applyReaderToFile(reader, finalPatch, destPath, onBytes);
   } finally {
     await reader.close();
   }

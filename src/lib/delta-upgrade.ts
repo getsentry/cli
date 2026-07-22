@@ -27,7 +27,7 @@ import {
   isDowngrade,
   isNightlyVersion,
 } from "./binary.js";
-import { applyPatchChainInMemory } from "./bspatch.js";
+import { applyPatchChainInMemory, parsePatchHeader } from "./bspatch.js";
 import { CLI_VERSION } from "./constants.js";
 import { customFetch } from "./custom-ca.js";
 import { formatBytes } from "./formatters/numbers.js";
@@ -40,6 +40,7 @@ import {
 } from "./ghcr.js";
 import { logger } from "./logger.js";
 import { loadCachedChain, savePatchesToCache } from "./patch-cache.js";
+import { makeByteProgress, type SetMessage } from "./progress.js";
 import { withTracing, withTracingSpan } from "./telemetry.js";
 
 /** Scoped logger for delta upgrade operations */
@@ -835,11 +836,13 @@ export async function resolveNightlyChain(opts: {
  * @param destPath - Path to write the patched binary
  * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
+// biome-ignore lint/nursery/useMaxParams: established 4-param shape; setMessage is a defaulted spinner-progress extension
 export function attemptDeltaUpgrade(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string,
-  offline?: boolean
+  offline?: boolean,
+  setMessage?: SetMessage
 ): Promise<DeltaResult | null> {
   if (!canAttemptDelta(targetVersion)) {
     return Promise.resolve(null);
@@ -865,13 +868,15 @@ export function attemptDeltaUpgrade(
                 targetVersion,
                 oldBinaryPath,
                 destPath,
-                offline
+                offline,
+                setMessage
               )
             : await resolveStableDelta(
                 targetVersion,
                 oldBinaryPath,
                 destPath,
-                offline
+                offline,
+                setMessage
               );
 
         if (result) {
@@ -977,13 +982,41 @@ async function tryLoadCachedChain(
 async function applyChainAndReturn(
   chain: PatchChain,
   oldBinaryPath: string,
-  destPath: string
+  destPath: string,
+  setMessage?: SetMessage
 ): Promise<DeltaResult> {
-  const sha256 = await withTracing(
-    "apply-patch-chain",
-    "upgrade.delta.apply",
-    () => applyPatchChain(chain, oldBinaryPath, destPath)
+  // Progress for the apply phase. The `onBytes` callback fires for every
+  // output byte of every hop — intermediate in-memory hops AND the final disk
+  // write — so the total must be the SUM of all hops' output sizes (each
+  // patch's declared `newSize`), not just the final binary size. Using only
+  // the last patch's size would make a multi-hop bar hit 100% after hop 1 and
+  // then freeze. Feeds the surrounding spinner via setMessage — cosmetic, a
+  // render failure never aborts the apply.
+  let totalBytes: number | null = 0;
+  try {
+    for (const p of chain.patches) {
+      totalBytes += parsePatchHeader(p.data).newSize;
+    }
+  } catch {
+    // Header parse is best-effort for the bar; a corrupt header is rejected
+    // properly downstream. Leave the bar indeterminate in that case.
+    totalBytes = null;
+  }
+  const progress = makeByteProgress(
+    `Applying ${chain.patches.length} patch(es)`,
+    totalBytes,
+    setMessage
   );
+
+  let sha256: string;
+  try {
+    sha256 = await withTracing("apply-patch-chain", "upgrade.delta.apply", () =>
+      applyPatchChain(chain, oldBinaryPath, destPath, progress.onProgress)
+    );
+  } finally {
+    progress.done();
+  }
+
   return {
     sha256,
     patchBytes: chain.totalSize,
@@ -1002,6 +1035,8 @@ type ResolveAndApplyOpts = {
   channel: string;
   /** When true, skip the network fallback — only use cached patches */
   offline?: boolean;
+  /** Spinner message setter for apply-phase progress (from withProgress) */
+  setMessage?: SetMessage;
 };
 
 /**
@@ -1021,6 +1056,7 @@ async function resolveAndApplyDelta(
     resolveFromNetwork,
     channel,
     offline,
+    setMessage,
   } = opts;
   // Check patch cache first — enables fully offline upgrades
   const cached = await tryLoadCachedChain(CLI_VERSION, targetVersion);
@@ -1029,7 +1065,12 @@ async function resolveAndApplyDelta(
     log.debug(
       `Using cached patches: ${cached.patches.length} patch(es), ${formatBytes(cached.totalSize)} total`
     );
-    return await applyChainAndReturn(cached, oldBinaryPath, destPath);
+    return await applyChainAndReturn(
+      cached,
+      oldBinaryPath,
+      destPath,
+      setMessage
+    );
   }
 
   // In offline mode, skip the network resolution entirely — if the cache
@@ -1051,7 +1092,7 @@ async function resolveAndApplyDelta(
     return null;
   }
 
-  return await applyChainAndReturn(chain, oldBinaryPath, destPath);
+  return await applyChainAndReturn(chain, oldBinaryPath, destPath, setMessage);
 }
 
 /**
@@ -1062,11 +1103,13 @@ async function resolveAndApplyDelta(
  *
  * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
+// biome-ignore lint/nursery/useMaxParams: established 4-param shape; setMessage is a defaulted spinner-progress extension
 export function resolveStableDelta(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string,
-  offline?: boolean
+  offline?: boolean,
+  setMessage?: SetMessage
 ): Promise<DeltaResult | null> {
   return resolveAndApplyDelta({
     targetVersion,
@@ -1078,6 +1121,7 @@ export function resolveStableDelta(
       ),
     channel: "stable",
     offline,
+    setMessage,
   });
 }
 
@@ -1089,11 +1133,13 @@ export function resolveStableDelta(
  *
  * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
+// biome-ignore lint/nursery/useMaxParams: established 4-param shape; setMessage is a defaulted spinner-progress extension
 export function resolveNightlyDelta(
   targetVersion: string,
   oldBinaryPath: string,
   destPath: string,
-  offline?: boolean
+  offline?: boolean,
+  setMessage?: SetMessage
 ): Promise<DeltaResult | null> {
   return resolveAndApplyDelta({
     targetVersion,
@@ -1102,6 +1148,7 @@ export function resolveNightlyDelta(
     resolveFromNetwork: () => resolveNightlyChainWithContext(targetVersion),
     channel: "nightly",
     offline,
+    setMessage,
   });
 }
 
@@ -1178,7 +1225,8 @@ async function resolveNightlyChainWithContext(
 export function applyPatchChain(
   chain: PatchChain,
   oldBinaryPath: string,
-  destPath: string
+  destPath: string,
+  onBytes?: (bytes: number) => void
 ): Promise<string> {
   return withTracingSpan(
     "apply-patches",
@@ -1197,7 +1245,8 @@ export function applyPatchChain(
       const sha256 = await applyPatchChainInMemory(
         oldBinaryPath,
         chain.patches.map((p) => p.data),
-        destPath
+        destPath,
+        onBytes
       );
 
       // Verify the final SHA-256 matches

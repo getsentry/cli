@@ -313,6 +313,38 @@ describe("applyPatchChainInMemory", () => {
     }
   });
 
+  test("onBytes reports every hop's output — total = sum of all newSizes", async () => {
+    // The progress callback fires for the output bytes of EVERY hop (the
+    // in-memory intermediate AND the final disk write), so a multi-hop total
+    // must be the sum of all hops' newSize, not just the final binary's.
+    // (Guards the delta-upgrade progress-bar total; a last-hop-only total
+    // would freeze the bar at 100% after hop 1.)
+    const oldBytes = makeBytes(1, 4096);
+    const midBytes = makeBytes(2, 4096);
+    const newBytes = makeBytes(3, 4096);
+    const p1 = buildDiffOnlyPatch(oldBytes, midBytes);
+    const p2 = buildDiffOnlyPatch(midBytes, newBytes);
+
+    const oldPath = tempFile("old-ob.bin");
+    const destPath = tempFile("out-ob.bin");
+    await writeFile(oldPath, oldBytes);
+
+    try {
+      let reported = 0;
+      await applyPatchChainInMemory(oldPath, [p1, p2], destPath, (n) => {
+        reported += n;
+      });
+      // Two hops, each emitting 4096 output bytes.
+      expect(reported).toBe(midBytes.length + newBytes.length);
+    } finally {
+      for (const p of [oldPath, destPath]) {
+        if (existsSync(p)) {
+          unlinkSync(p);
+        }
+      }
+    }
+  });
+
   test("single-element chain matches the on-disk patcher on a real fixture", async () => {
     // Exercises the fd-backed reader against a real zig-bsdiff patch whose
     // control entries include diff, extra, and seek operations.

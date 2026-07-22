@@ -50,6 +50,7 @@ import {
 } from "./ghcr.js";
 import { logger } from "./logger.js";
 import { clearPatchCache } from "./patch-cache.js";
+import { makeByteProgress, type SetMessage } from "./progress.js";
 
 /** Scoped logger for upgrade operations */
 const log = logger.withTag("upgrade");
@@ -574,22 +575,34 @@ export type DownloadResult = {
  */
 async function streamDecompressToFile(
   body: ReadableStream<Uint8Array>,
-  destPath: string
+  destPath: string,
+  setMessage?: SetMessage
 ): Promise<void> {
   const stream = body.pipeThrough(new DecompressionStream("gzip"));
   const writer = createWriteStream(destPath);
+  // Indeterminate byte counter: the decompressed size isn't known ahead of
+  // time (Content-Length covers only the compressed stream), so we show a live
+  // byte count rather than a misleading fraction. Feeds the surrounding
+  // spinner via setMessage — cosmetic, never aborts.
+  const progress = makeByteProgress("Downloading", null, setMessage);
   // Capture write errors early — without a listener, Node crashes with
   // ERR_UNHANDLED_ERROR if a write fails (ENOSPC, EIO, etc.) during the loop.
   let writeError: Error | undefined;
   writer.on("error", (err) => {
     writeError ??= err;
   });
+
+  // Track the original streaming error so a later writer.end() rejection can't
+  // mask it: an exception thrown from a finally overwrites a pending try
+  // exception. We rethrow the ORIGINAL error preferentially.
+  let streamError: unknown;
   try {
     for await (const chunk of stream) {
       if (writeError) {
         break;
       }
       const ok = writer.write(chunk);
+      progress.onProgress(chunk.byteLength);
       if (!(ok || writeError)) {
         // Race drain against error — an I/O failure (ENOSPC) while the
         // buffer is full would never emit 'drain', causing a hang.
@@ -608,7 +621,16 @@ async function streamDecompressToFile(
         });
       }
     }
+  } catch (err) {
+    streamError = err;
   } finally {
+    progress.done();
+  }
+
+  // Always flush/close the writer. If the stream already failed, surface THAT
+  // error (the root cause) and demote any end() rejection to a debug log so it
+  // can't mask the original.
+  try {
     await new Promise<void>((resolve, reject) => {
       writer.end((err?: Error | null) => {
         const finalErr = err ?? writeError;
@@ -619,6 +641,15 @@ async function streamDecompressToFile(
         }
       });
     });
+  } catch (endErr) {
+    if (streamError === undefined) {
+      throw endErr;
+    }
+    log.debug(`writer.end failed after a stream error: ${String(endErr)}`);
+  }
+
+  if (streamError !== undefined) {
+    throw streamError;
   }
 }
 
@@ -651,7 +682,8 @@ function getNightlyGzFilename(): string {
  */
 async function downloadNightlyToPath(
   destPath: string,
-  version?: string
+  version?: string,
+  setMessage?: SetMessage
 ): Promise<void> {
   const token = await getAnonymousToken();
   const manifest = version
@@ -667,7 +699,7 @@ async function downloadNightlyToPath(
       "GHCR blob response had no body"
     );
   }
-  await streamDecompressToFile(response.body, destPath);
+  await streamDecompressToFile(response.body, destPath, setMessage);
 }
 
 /**
@@ -683,7 +715,8 @@ async function downloadNightlyToPath(
  */
 async function downloadStableToPath(
   version: string,
-  destPath: string
+  destPath: string,
+  setMessage?: SetMessage
 ): Promise<void> {
   const url = getBinaryDownloadUrl(version);
   const headers = getGitHubHeaders();
@@ -696,7 +729,7 @@ async function downloadStableToPath(
       "GitHub"
     );
     if (gzResponse.ok && gzResponse.body) {
-      await streamDecompressToFile(gzResponse.body, destPath);
+      await streamDecompressToFile(gzResponse.body, destPath, setMessage);
       return;
     }
   } catch {
@@ -823,7 +856,8 @@ async function waitForBinaryVisible(path: string): Promise<number> {
 export async function downloadBinaryToTemp(
   version: string,
   downloadTag?: string,
-  offline?: OfflineMode
+  offline?: OfflineMode,
+  setMessage?: SetMessage
 ): Promise<DownloadResult> {
   const { tempPath, lockPath } = getCurlInstallPaths();
 
@@ -839,7 +873,12 @@ export async function downloadBinaryToTemp(
 
     // Try delta upgrade first — downloads tiny patches instead of full binary.
     // Falls back to full download on any failure (missing patches, hash mismatch, etc.)
-    const deltaResult = await tryDeltaUpgrade(version, tempPath, !!offline);
+    const deltaResult = await tryDeltaUpgrade(
+      version,
+      tempPath,
+      !!offline,
+      setMessage
+    );
     let patchBytes: number | undefined;
     if (deltaResult) {
       patchBytes = deltaResult.patchBytes;
@@ -854,7 +893,7 @@ export async function downloadBinaryToTemp(
       );
     } else {
       log.debug("Downloading full binary");
-      await downloadFullBinary(version, downloadTag, tempPath);
+      await downloadFullBinary(version, downloadTag, tempPath, setMessage);
     }
 
     // Verify the download produced a real, non-empty file before the caller
@@ -898,13 +937,15 @@ export async function downloadBinaryToTemp(
 async function tryDeltaUpgrade(
   version: string,
   destPath: string,
-  offline?: boolean
+  offline?: boolean,
+  setMessage?: SetMessage
 ): Promise<DeltaResult | null> {
   return await attemptDeltaUpgrade(
     version,
     process.execPath,
     destPath,
-    offline
+    offline,
+    setMessage
   );
 }
 
@@ -918,12 +959,13 @@ async function tryDeltaUpgrade(
 async function downloadFullBinary(
   version: string,
   downloadTag: string | undefined,
-  destPath: string
+  destPath: string,
+  setMessage?: SetMessage
 ): Promise<void> {
   if (isNightlyVersion(version)) {
-    await downloadNightlyToPath(destPath, version);
+    await downloadNightlyToPath(destPath, version, setMessage);
   } else {
-    await downloadStableToPath(downloadTag ?? version, destPath);
+    await downloadStableToPath(downloadTag ?? version, destPath, setMessage);
   }
 }
 
@@ -1028,15 +1070,17 @@ function executeUpgradePackageManager(
  * @returns Download result with paths (curl), or null (package manager)
  * @throws {UpgradeError} When method is unknown or installation fails
  */
+// biome-ignore lint/nursery/useMaxParams: established 4-param shape; setMessage is a defaulted spinner-progress extension
 export async function executeUpgrade(
   method: InstallationMethod,
   version: string,
   downloadTag?: string,
-  offline?: OfflineMode
+  offline?: OfflineMode,
+  setMessage?: SetMessage
 ): Promise<DownloadResult | null> {
   switch (method) {
     case "curl":
-      return downloadBinaryToTemp(version, downloadTag, offline);
+      return downloadBinaryToTemp(version, downloadTag, offline, setMessage);
     case "brew":
       await executeUpgradeHomebrew();
       return null;
