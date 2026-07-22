@@ -118,7 +118,7 @@ function metricDetector(overrides: Record<string, unknown>) {
     name: "P95 latency",
     type: "metric_issue",
     enabled: true,
-    projects: ["backend"],
+    projectSlug: "backend",
     owner: null,
     dateCreated: "2026-01-01T00:00:00Z",
     dataSources: [
@@ -126,7 +126,8 @@ function metricDetector(overrides: Record<string, unknown>) {
         aggregate: "p95(transaction.duration)",
         dataset: "transactions",
         query: "environment:prod",
-        timeWindow: 5,
+        // Detectors expose the window in seconds; 300s == 5m.
+        timeWindow: 300,
         environment: "prod",
       },
     ],
@@ -154,6 +155,7 @@ describe("listMetricAlertsPaginated", () => {
       aggregate: "p95(transaction.duration)",
       dataset: "transactions",
       query: "environment:prod",
+      // 300s from the detector payload is normalized to 5 minutes.
       timeWindow: 5,
       environment: "prod",
       projects: ["backend"],
@@ -187,7 +189,8 @@ describe("getMetricAlertRule", () => {
                 aggregate: "count()",
                 dataset: "errors",
                 query: "event.type:error",
-                timeWindow: 15,
+                // 900s == 15m after normalization.
+                timeWindow: 900,
               },
             },
           ],
@@ -200,6 +203,30 @@ describe("getMetricAlertRule", () => {
     expect(rule.dataset).toBe("errors");
     expect(rule.query).toBe("event.type:error");
     expect(rule.timeWindow).toBe(15);
+  });
+
+  test("prefers projectSlug and falls back to a projects array for projects", async () => {
+    globalThis.fetch = mockFetch(async () =>
+      Response.json(
+        metricDetector({ projectSlug: undefined, projects: ["frontend"] })
+      )
+    );
+
+    const rule = await getMetricAlertRule("test-org", "9");
+    expect(rule.projects).toEqual(["frontend"]);
+  });
+
+  test("coerces a non-numeric timeWindow to 0 instead of NaN", async () => {
+    globalThis.fetch = mockFetch(async () =>
+      Response.json(
+        metricDetector({
+          dataSources: [{ snubaQuery: { timeWindow: "not-a-number" } }],
+        })
+      )
+    );
+
+    const rule = await getMetricAlertRule("test-org", "9");
+    expect(rule.timeWindow).toBe(0);
   });
 });
 

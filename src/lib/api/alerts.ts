@@ -91,12 +91,41 @@ function pickDetectorString(value: unknown): string {
 
 function pickDetectorNumber(value: unknown): number {
   if (typeof value === "number") {
-    return value;
+    return Number.isFinite(value) ? value : 0;
   }
   if (typeof value === "string" && value.trim() !== "") {
-    return Number(value);
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+}
+
+/**
+ * Convert a detector `timeWindow` (seconds) to the minutes the CLI expects.
+ *
+ * The detectors/`snubaQuery` payload exposes `timeWindow` in seconds, while the
+ * legacy `/alert-rules/` serializer (and every CLI formatter — list/view append
+ * `m`) treats `MetricAlertRule.timeWindow` as minutes. Without this conversion
+ * windows render ~60× too large. Metric windows are always whole minutes, so we
+ * round to guard against float drift.
+ */
+function detectorTimeWindowToMinutes(value: unknown): number {
+  const seconds = pickDetectorNumber(value);
+  return seconds > 0 ? Math.round(seconds / 60) : 0;
+}
+
+/**
+ * Resolve the project slug list for a detector.
+ *
+ * Detectors are project-scoped and expose a single `projectSlug`, not the
+ * legacy `projects` slug array; fall back to `projects` for deployments that
+ * still return it so metric alert view doesn't incorrectly show `(all)`.
+ */
+function pickDetectorProjects(detector: MetricDetector): string[] {
+  if (detector.projectSlug) {
+    return [detector.projectSlug];
+  }
+  return detector.projects ?? [];
 }
 
 /** Reduce a detector owner (object or bare string) to the flat owner value. */
@@ -129,10 +158,10 @@ function mapDetectorToMetricAlertRule(
     query: pickDetectorString(nested.query),
     aggregate: pickDetectorString(nested.aggregate),
     dataset: pickDetectorString(nested.dataset),
-    timeWindow: pickDetectorNumber(nested.timeWindow),
+    timeWindow: detectorTimeWindowToMinutes(nested.timeWindow),
     environment,
     owner: pickDetectorOwner(detector.owner),
-    projects: detector.projects ?? [],
+    projects: pickDetectorProjects(detector),
     dateCreated: detector.dateCreated ?? "",
   };
 }

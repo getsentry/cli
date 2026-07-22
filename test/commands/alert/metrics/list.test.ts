@@ -31,12 +31,15 @@ function detector(fields: {
   projects?: string[];
   dateCreated?: string;
 }) {
+  // Detectors are project-scoped (`projectSlug`) and expose the window in
+  // seconds, so mirror that here; the builder accepts minutes for readability.
+  const [projectSlug] = fields.projects ?? [];
   return {
     id: fields.id,
     name: fields.name,
     type: "metric_issue",
     enabled: fields.status !== 1,
-    projects: fields.projects ?? [],
+    projectSlug: projectSlug ?? null,
     owner: null,
     dateCreated: fields.dateCreated ?? "2026-01-01T00:00:00Z",
     dataSources: [
@@ -44,7 +47,7 @@ function detector(fields: {
         aggregate: fields.aggregate ?? "count()",
         dataset: fields.dataset ?? "errors",
         query: fields.query ?? "event.type:error",
-        timeWindow: fields.timeWindow ?? 5,
+        timeWindow: (fields.timeWindow ?? 5) * 60,
         environment: fields.environment ?? null,
       },
     ],
