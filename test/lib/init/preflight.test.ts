@@ -712,4 +712,54 @@ describe("resolveInitContext", () => {
 
     expect(context?.team).toBeUndefined();
   });
+
+  test("allows org-scoped creation when member creation is disabled but user is an admin (project:admin scope)", async () => {
+    listTeamsSpy.mockResolvedValueOnce([]);
+    getOrganizationSpy.mockResolvedValueOnce({
+      id: "1",
+      slug: "acme",
+      name: "Acme",
+      access: ["project:read", "project:write", "project:admin", "team:admin"],
+      allowMemberProjectCreation: false,
+    } as any);
+
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
+
+    expect(context?.team).toBeUndefined();
+  });
+
+  test("allows org-scoped creation when member creation is disabled but user has project:write scope", async () => {
+    listTeamsSpy.mockResolvedValueOnce([]);
+    getOrganizationSpy.mockResolvedValueOnce({
+      id: "1",
+      slug: "acme",
+      name: "Acme",
+      access: ["project:read", "project:write"],
+      allowMemberProjectCreation: false,
+    } as any);
+
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
+
+    expect(context?.team).toBeUndefined();
+  });
+
+  test("allows org-scoped creation when listTeams returns 403 and user has project:admin scope", async () => {
+    listTeamsSpy.mockRejectedValueOnce(
+      new ApiError("Forbidden", 403, "No team:read access")
+    );
+    getOrganizationSpy.mockResolvedValueOnce({
+      id: "1",
+      slug: "acme",
+      name: "Acme",
+      access: ["project:read", "project:write", "project:admin"],
+      allowMemberProjectCreation: false,
+    } as any);
+
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
+
+    expect(context?.team).toBeUndefined();
+  });
 });

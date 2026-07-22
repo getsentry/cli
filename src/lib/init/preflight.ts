@@ -359,8 +359,28 @@ function canCreateProjectInTeam(team: SentryTeam): boolean {
   return Array.isArray(team.access) && team.access.includes("team:admin");
 }
 
-function hasOrgWriteAccess(access: unknown): boolean {
-  return Array.isArray(access) && access.includes("org:write");
+/**
+ * Whether the user's access scopes indicate they can create projects
+ * regardless of the org's `allowMemberProjectCreation` flag.
+ *
+ * Sentry's role hierarchy (from server.py SENTRY_ROLES):
+ * - member:  project:read only — blocked when flag is disabled
+ * - admin:   project:write, project:admin, team:admin — CAN create projects
+ * - manager: org:write, project:admin, is_global — CAN create projects
+ * - owner:   org:write, org:admin, is_global — CAN create projects
+ *
+ * The previous check only looked for `org:write`, which excluded org admins
+ * who have `project:write` / `project:admin` but not `org:write`.
+ */
+function canBypassMemberCreationRestriction(access: unknown): boolean {
+  if (!Array.isArray(access)) {
+    return false;
+  }
+  return (
+    access.includes("org:write") ||
+    access.includes("project:admin") ||
+    access.includes("project:write")
+  );
 }
 
 async function assertOrgScopedCreationCanProceed(org: string): Promise<void> {
@@ -375,7 +395,7 @@ async function assertOrgScopedCreationCanProceed(org: string): Promise<void> {
 
   if (
     organization.allowMemberProjectCreation === false &&
-    !hasOrgWriteAccess(organization.access)
+    !canBypassMemberCreationRestriction(organization.access)
   ) {
     throw new WizardError(formatMemberProjectCreationDisabledError(org));
   }
