@@ -125,6 +125,7 @@ const LEVEL_COLORS: Record<string, (s: string) => string> = {
   error: (s) => red(bold(s)),
   fatal: (s) => red(bold(s)),
   warning: yellow,
+  warn: yellow,
   info: cyan,
   trace: green,
   debug: muted,
@@ -157,6 +158,7 @@ const SERVER_JS_MARKERS = [
   "astro",
   "nuxt",
   "sveltekit",
+  "cloudflare",
 ];
 
 /** Source → color map for tail output. */
@@ -552,11 +554,133 @@ export function formatLogItem(
   return items.map((logEntry) => formatSingleLog(logEntry, source));
 }
 
+/** Shape of a single span in a standalone span envelope item (v2 span streaming). */
+export type StreamedSpan = {
+  trace_id?: string;
+  span_id?: string;
+  name?: string;
+  start_timestamp?: number;
+  end_timestamp?: number;
+  status?: string;
+  attributes?: Record<string, { type?: string; value?: unknown }>;
+};
+
+/**
+ * Flatten typed span attributes (`{ key: { type, value } }`) into a plain
+ * `Record<string, unknown>` compatible with the semantic display pipeline.
+ */
+function flattenSpanAttributes(
+  attrs: Record<string, { type?: string; value?: unknown }> | undefined
+): Record<string, unknown> {
+  if (!attrs) {
+    return {};
+  }
+  const flat: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(attrs)) {
+    if (entry?.value !== undefined) {
+      flat[key] = entry.value;
+    }
+  }
+  return flat;
+}
+
+/**
+ * Format a single standalone span into a colored one-liner, using the same
+ * semantic rendering as transactions.
+ */
+export function formatSingleSpan(
+  span: StreamedSpan,
+  header: Record<string, unknown>
+): string {
+  const spanName = sanitize(span.name ?? "unnamed span");
+  const flat = flattenSpanAttributes(span.attributes);
+  const semantic = formatSemanticSpanDisplay(flat, spanName);
+
+  let msg = sanitize(semantic.label);
+  if (semantic.metadata.length > 0) {
+    msg += ` ${semantic.metadata.map((m) => muted(`[${sanitize(m)}]`)).join(" ")}`;
+  }
+
+  const semanticOp = inferSemanticOp(flat);
+  const op =
+    semanticOp ??
+    (typeof flat["sentry.op"] === "string"
+      ? (flat["sentry.op"] as string)
+      : undefined);
+  if (op && op !== "default" && op !== "unknown") {
+    msg = `[${sanitize(op)}] ${msg}`;
+  }
+
+  if (span.start_timestamp !== undefined && span.end_timestamp !== undefined) {
+    const durationMs = Math.round(
+      (span.end_timestamp - span.start_timestamp) * 1000
+    );
+    msg += ` ${muted(`[${durationMs}ms]`)}`;
+  }
+
+  if (span.status && span.status !== "ok") {
+    msg += ` ${muted(`[${sanitize(span.status)}]`)}`;
+  }
+
+  if (span.trace_id && TRACE_ID_RE.test(span.trace_id)) {
+    msg += ` ${muted(`[trace:${span.trace_id.toLowerCase().slice(0, TRACE_ID_SHORT_LEN)}]`)}`;
+  }
+
+  const ts = formatTime(span.end_timestamp);
+  return `${muted(ts)} ${formatType("trace")} ${inferSource(header)} ${msg}`;
+}
+
+/**
+ * Format a standalone span envelope item. A span item contains an `items`
+ * array of individual spans (v2 span streaming format); each gets its own line.
+ */
+export function formatSpanItem(
+  event: Record<string, unknown>,
+  header: Record<string, unknown>,
+  showAttributes = false
+): string[] {
+  const items = event.items as StreamedSpan[] | undefined;
+  if (!items?.length) {
+    return [];
+  }
+  const lines: string[] = [];
+  for (const span of items) {
+    lines.push(formatSingleSpan(span, header));
+    if (showAttributes) {
+      const flat = flattenSpanAttributes(span.attributes);
+      const table = formatAttributeTable({
+        contexts: { trace: { data: flat } },
+      });
+      lines.push(...table);
+    }
+  }
+  return lines;
+}
+
+/**
+ * Whether a standalone span item carries AI (GenAI/MCP) activity.
+ * Checks all spans in the container for AI-prefixed attributes.
+ */
+function spanItemHasAiActivity(payload: Record<string, unknown>): boolean {
+  const items = payload.items as StreamedSpan[] | undefined;
+  if (!items?.length) {
+    return false;
+  }
+  for (const span of items) {
+    if (hasAiAttributes(flattenSpanAttributes(span.attributes))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Item types that map to the error formatter. */
 export const ERROR_TYPES = new Set(["event", "error"]);
 
 /**
  * Map envelope item `type` to the corresponding `FilterValue`.
+ * Standalone `span` items map to `"transaction"` since they represent
+ * trace data (the same category transactions occupy).
  * Returns undefined for item types that don't map to a filter category.
  */
 export function itemTypeToFilterCategory(
@@ -568,8 +692,8 @@ export function itemTypeToFilterCategory(
   if (ERROR_TYPES.has(itemType)) {
     return "error";
   }
-  if (itemType === "transaction" || itemType === "log") {
-    return itemType;
+  if (itemType === "transaction" || itemType === "span" || itemType === "log") {
+    return itemType === "span" ? "transaction" : itemType;
   }
 }
 
@@ -732,6 +856,48 @@ function formatLogJson(
   );
 }
 
+/** Format a standalone span item as JSON objects (one per span). */
+function formatSpanJson(
+  payload: Record<string, unknown>,
+  header: Record<string, unknown>,
+  includeAttributes = false
+): string[] {
+  const items = payload.items as StreamedSpan[] | undefined;
+  if (!items?.length) {
+    return [];
+  }
+  const source = inferSourceName(header);
+  return items.map((span) => {
+    const flat = flattenSpanAttributes(span.attributes);
+    const semantic = formatSemanticSpanDisplay(
+      flat,
+      span.name ?? "unnamed span"
+    );
+    const durationMs =
+      span.start_timestamp !== undefined && span.end_timestamp !== undefined
+        ? Math.round((span.end_timestamp - span.start_timestamp) * 1000)
+        : undefined;
+    return JSON.stringify({
+      type: "span",
+      timestamp: span.end_timestamp,
+      trace_id: span.trace_id,
+      span_id: span.span_id,
+      op: inferSemanticOp(flat) ?? flat["sentry.op"],
+      label: stripBidi(semantic.label),
+      metadata:
+        semantic.metadata.length > 0
+          ? semantic.metadata.map(stripBidi)
+          : undefined,
+      duration_ms: durationMs,
+      status: span.status,
+      attributes: includeAttributes
+        ? buildJsonAttributes({ contexts: { trace: { data: flat } } })
+        : undefined,
+      source,
+    });
+  });
+}
+
 /**
  * Format a single envelope item as a JSON line (NDJSON).
  *
@@ -757,6 +923,9 @@ export function formatItemJson(
   }
   if (itemType === "transaction") {
     return [formatTransactionJson(payload, header, showAttributes)];
+  }
+  if (itemType === "span") {
+    return formatSpanJson(payload, header, showAttributes);
   }
   if (itemType === "log") {
     return formatLogJson(payload, header);
@@ -809,6 +978,9 @@ export function formatItem(
     }
     return lines;
   }
+  if (itemType === "span") {
+    return formatSpanItem(payload, header, showAttributes);
+  }
   if (itemType === "log") {
     return formatLogItem(payload, header);
   }
@@ -833,9 +1005,14 @@ export function isItemIncluded(
   if (category !== undefined && activeFilters.has(category)) {
     return true;
   }
-  // The "ai" filter matches transactions with GenAI or MCP attributes.
-  if (activeFilters.has("ai") && itemType === "transaction" && payload) {
-    return transactionHasAiActivity(payload);
+  // The "ai" filter matches transactions and standalone spans with GenAI or MCP attributes.
+  if (activeFilters.has("ai") && payload) {
+    if (itemType === "transaction") {
+      return transactionHasAiActivity(payload);
+    }
+    if (itemType === "span") {
+      return spanItemHasAiActivity(payload);
+    }
   }
   return false;
 }
