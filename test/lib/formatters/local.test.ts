@@ -15,6 +15,8 @@ import {
   formatItem,
   formatItemJson,
   formatSingleLog,
+  formatSingleSpan,
+  formatSpanItem,
   formatTime,
   formatTransactionItem,
   inferSource,
@@ -1018,5 +1020,171 @@ describe("formatItem with attributes", () => {
     const event = { timestamp: 1_700_000_000, message: "boom" };
     const lines = formatItem("error", event, serverHeader, "e", true);
     expect(lines).toHaveLength(1);
+  });
+});
+
+describe("standalone span support", () => {
+  const cfHeader = { sdk: { name: "sentry.javascript.cloudflare" } };
+
+  const aiSpan = {
+    trace_id: "a".repeat(32),
+    span_id: "b".repeat(16),
+    name: "chat anthropic/claude-4-sonnet",
+    start_timestamp: 1_700_000_000,
+    end_timestamp: 1_700_000_001.2,
+    status: "ok",
+    attributes: {
+      "gen_ai.system": { type: "string", value: "anthropic" },
+      "gen_ai.request.model": { type: "string", value: "claude-4-sonnet" },
+      "gen_ai.usage.input_tokens": { type: "integer", value: 512 },
+      "gen_ai.usage.output_tokens": { type: "integer", value: 128 },
+      "sentry.op": { type: "string", value: "gen_ai.chat" },
+    },
+  };
+
+  const mcpSpan = {
+    trace_id: "c".repeat(32),
+    span_id: "d".repeat(16),
+    name: "tools/call list_files",
+    start_timestamp: 1_700_000_000,
+    end_timestamp: 1_700_000_000.4,
+    status: "ok",
+    attributes: {
+      "mcp.method.name": { type: "string", value: "tools/call" },
+      "mcp.tool.name": { type: "string", value: "list_files" },
+      "sentry.op": { type: "string", value: "mcp.server" },
+    },
+  };
+
+  describe("formatSingleSpan", () => {
+    test("formats a gen_ai span with semantic labels", () => {
+      const line = stripAnsi(formatSingleSpan(aiSpan, cfHeader));
+      expect(line).toContain("[gen_ai");
+      expect(line).toContain("claude-4-sonnet");
+      expect(line).toContain("[1200ms]");
+      expect(line).toContain("[trace:aaaaaaaa]");
+      expect(line).toContain("[SERVER]");
+    });
+
+    test("formats an MCP span", () => {
+      const line = stripAnsi(formatSingleSpan(mcpSpan, cfHeader));
+      expect(line).toContain("mcp");
+      expect(line).toContain("tools/call");
+      expect(line).toContain("[400ms]");
+    });
+
+    test("handles missing name gracefully", () => {
+      const span = {
+        trace_id: "a".repeat(32),
+        start_timestamp: 1_700_000_000,
+        end_timestamp: 1_700_000_000.5,
+        status: "ok",
+        attributes: {
+          "http.method": { type: "string", value: "GET" },
+        },
+      };
+      const line = stripAnsi(formatSingleSpan(span, cfHeader));
+      expect(line).toContain("[TRACE]");
+      expect(line).toContain("[SERVER]");
+      expect(line).toContain("[500ms]");
+    });
+  });
+
+  describe("formatSpanItem", () => {
+    test("formats each span in the container", () => {
+      const payload = { items: [aiSpan, mcpSpan] };
+      const lines = formatSpanItem(payload, cfHeader);
+      expect(lines).toHaveLength(2);
+      expect(stripAnsi(lines[0]!)).toContain("gen_ai");
+      expect(stripAnsi(lines[1]!)).toContain("mcp");
+    });
+
+    test("returns empty for missing items", () => {
+      expect(formatSpanItem({}, cfHeader)).toHaveLength(0);
+      expect(formatSpanItem({ items: [] }, cfHeader)).toHaveLength(0);
+    });
+  });
+
+  describe("formatItem routes span type", () => {
+    test("routes span items to span formatter", () => {
+      const payload = { items: [aiSpan] };
+      const lines = formatItem("span", payload, cfHeader, "span");
+      expect(lines.length).toBeGreaterThanOrEqual(1);
+      expect(stripAnsi(lines[0]!)).toContain("gen_ai");
+    });
+  });
+
+  describe("formatItemJson routes span type", () => {
+    test("produces structured JSON for standalone spans", () => {
+      const payload = { items: [aiSpan] };
+      const lines = formatItemJson("span", payload, cfHeader);
+      expect(lines).toHaveLength(1);
+      const parsed = JSON.parse(lines[0]!);
+      expect(parsed.type).toBe("span");
+      expect(parsed.trace_id).toBe("a".repeat(32));
+      expect(parsed.span_id).toBe("b".repeat(16));
+      expect(parsed.op).toBe("gen_ai.chat");
+      expect(parsed.duration_ms).toBe(1200);
+      expect(parsed.source).toBe("server");
+    });
+  });
+
+  describe("itemTypeToFilterCategory maps span to transaction", () => {
+    test("maps span to transaction category", () => {
+      expect(itemTypeToFilterCategory("span")).toBe("transaction");
+    });
+  });
+
+  describe("isItemIncluded handles standalone spans", () => {
+    test("ai filter matches span items with gen_ai attributes", () => {
+      const filters = new Set<FilterValue>(["ai"]);
+      const payload = { items: [aiSpan] };
+      expect(isItemIncluded("span", filters, payload)).toBe(true);
+    });
+
+    test("ai filter matches span items with mcp attributes", () => {
+      const filters = new Set<FilterValue>(["ai"]);
+      const payload = { items: [mcpSpan] };
+      expect(isItemIncluded("span", filters, payload)).toBe(true);
+    });
+
+    test("ai filter does not match span items without ai attributes", () => {
+      const filters = new Set<FilterValue>(["ai"]);
+      const plainSpan = {
+        ...aiSpan,
+        attributes: {
+          "http.method": { type: "string", value: "GET" },
+        },
+      };
+      const payload = { items: [plainSpan] };
+      expect(isItemIncluded("span", filters, payload)).toBe(false);
+    });
+
+    test("transaction filter matches standalone spans", () => {
+      const filters = new Set<FilterValue>(["transaction"]);
+      const payload = { items: [aiSpan] };
+      expect(isItemIncluded("span", filters, payload)).toBe(true);
+    });
+  });
+});
+
+describe("inferSource cloudflare SDK", () => {
+  test("detects Cloudflare Workers SDK as server", () => {
+    const result = stripAnsi(
+      inferSource({ sdk: { name: "sentry.javascript.cloudflare" } })
+    );
+    expect(result).toContain("[SERVER]");
+  });
+});
+
+describe("warn level coloring", () => {
+  test("warn level gets formatted with brackets", () => {
+    const log = {
+      level: "warn",
+      body: "Rate limit approaching",
+      timestamp: 1_700_000_000,
+    };
+    const result = formatSingleLog(log, "[SERVER]  ");
+    expect(stripAnsi(result)).toContain("[WARN]");
   });
 });
