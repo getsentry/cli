@@ -266,6 +266,17 @@ describe("getMetricAlertRule", () => {
       status: 404,
     });
   });
+
+  test("reconstructs the legacy actor identifier from an object owner", async () => {
+    globalThis.fetch = mockFetch(async () =>
+      Response.json(
+        metricDetector({ owner: { type: "team", id: "42", name: "backend" } })
+      )
+    );
+
+    const rule = await getMetricAlertRule("test-org", "9");
+    expect(rule.owner).toBe("team:42");
+  });
 });
 
 describe("deleteMetricAlertRule", () => {

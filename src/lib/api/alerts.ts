@@ -131,13 +131,23 @@ function pickDetectorProjects(detector: MetricDetector): string[] {
   return detector.projects ?? [];
 }
 
-/** Reduce a detector owner (object or bare string) to the flat owner value. */
+/**
+ * Reduce a detector owner (object or bare string) to the flat actor identifier.
+ *
+ * Legacy `/alert-rules/` returned `owner` as an actor string like `user:123`
+ * or `team:456`, and the CLI formatters/JSON still treat it that way. Detectors
+ * expose the owner as `{ type, id, name }`, so reconstruct `type:id` to preserve
+ * that shape; fall back to a bare `id`/`name` when `type` is absent.
+ */
 function pickDetectorOwner(owner: MetricDetector["owner"]): string | null {
   if (typeof owner === "string") {
     return owner;
   }
   if (owner && typeof owner === "object") {
-    return owner.name ?? owner.id ?? null;
+    if (owner.type && owner.id) {
+      return `${owner.type}:${owner.id}`;
+    }
+    return owner.id ?? owner.name ?? null;
   }
   return null;
 }
