@@ -24,8 +24,6 @@ import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { computeSpanDurationMs } from "../../lib/formatters/time-utils.js";
 import {
-  HEX_ID_RE,
-  normalizeHexId,
   SPAN_ID_RE,
   validateSpanId,
 } from "../../lib/hex-id.js";
@@ -40,7 +38,7 @@ import {
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import {
-  type parseSlashSeparatedTraceTarget,
+  parseSlashSeparatedTraceTarget,
   parseTraceTargetWithRecovery,
   resolveTraceOrgProject,
   warnIfNormalized,
