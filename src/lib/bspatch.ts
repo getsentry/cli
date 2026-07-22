@@ -45,6 +45,17 @@ const TRDIFF10_MAGIC = "TRDIFF10";
 /** Header size in bytes (magic + 3 × i64) */
 const HEADER_SIZE = 32;
 
+/**
+ * Upper bound on the declared output size (`newSize`) a patch may claim.
+ *
+ * The header's `newSize` is attacker-controlled and used to preallocate the
+ * output buffer BEFORE the patch content is verified, so an unbounded value
+ * would let a malicious or corrupt patch force an out-of-memory allocation.
+ * 2 GiB is far above any realistic binary (sentry-cli binaries are ~30 MB);
+ * legitimate patched outputs never approach it.
+ */
+export const MAX_OUTPUT_SIZE = 2_147_483_648; // 2 GiB
+
 /** Parsed TRDIFF10 header fields */
 export type PatchHeader = {
   /** Compressed size of the control block (bytes) */
@@ -112,6 +123,14 @@ export function parsePatchHeader(patch: Uint8Array): PatchHeader {
 
   if (controlLen < 0 || diffLen < 0 || newSize < 0) {
     throw new Error("Corrupt patch: negative length in header");
+  }
+
+  // Bound the attacker-controlled newSize before it is used to preallocate
+  // the output buffer (applyReaderToMemory) — see MAX_OUTPUT_SIZE.
+  if (newSize > MAX_OUTPUT_SIZE) {
+    throw new Error(
+      `Corrupt patch: declared output size ${newSize} exceeds maximum ${MAX_OUTPUT_SIZE} bytes`
+    );
   }
 
   const totalCompressed = HEADER_SIZE + controlLen + diffLen;

@@ -21,6 +21,7 @@ import {
   applyPatch,
   applyPatchChainInMemory,
   applyPatchToMemory,
+  MAX_OUTPUT_SIZE,
   parsePatchHeader,
 } from "../../src/lib/bspatch.js";
 
@@ -148,6 +149,30 @@ describe("parsePatchHeader: fixtures", () => {
     buf[8] = 1; // non-zero low byte → magnitude > 0
     buf[15] = 0x80; // Set sign bit → negative controlLen
     expect(() => parsePatchHeader(buf)).toThrow("negative");
+  });
+
+  test("rejects an attacker-controlled newSize above MAX_OUTPUT_SIZE", () => {
+    // The header's newSize is used to preallocate the output buffer before the
+    // patch content is verified. An unbounded value lets a malicious/corrupt
+    // patch force an OOM via `new Uint8Array(newSize)` in applyReaderToMemory.
+    // Regression test: a header claiming newSize > MAX_OUTPUT_SIZE must be
+    // rejected here, before any allocation.
+    const buf = new Uint8Array(64);
+    buf.set(new TextEncoder().encode("TRDIFF10"));
+    writeI64LE(buf, 8, 0); // controlLen = 0
+    writeI64LE(buf, 16, 0); // diffLen = 0
+    writeI64LE(buf, 24, MAX_OUTPUT_SIZE + 1); // newSize just over the cap
+    expect(() => parsePatchHeader(buf)).toThrow("exceeds maximum");
+  });
+
+  test("accepts a newSize at MAX_OUTPUT_SIZE (boundary)", () => {
+    const buf = new Uint8Array(64);
+    buf.set(new TextEncoder().encode("TRDIFF10"));
+    writeI64LE(buf, 8, 0);
+    writeI64LE(buf, 16, 0);
+    writeI64LE(buf, 24, MAX_OUTPUT_SIZE); // exactly the cap — allowed
+    const header = parsePatchHeader(buf);
+    expect(header.newSize).toBe(MAX_OUTPUT_SIZE);
   });
 });
 
