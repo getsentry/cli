@@ -50,6 +50,7 @@ import {
 } from "./ghcr.js";
 import { logger } from "./logger.js";
 import { clearPatchCache } from "./patch-cache.js";
+import { makeByteProgress } from "./progress.js";
 
 /** Scoped logger for upgrade operations */
 const log = logger.withTag("upgrade");
@@ -578,6 +579,10 @@ async function streamDecompressToFile(
 ): Promise<void> {
   const stream = body.pipeThrough(new DecompressionStream("gzip"));
   const writer = createWriteStream(destPath);
+  // Indeterminate byte counter: the decompressed size isn't known ahead of
+  // time (Content-Length covers only the compressed stream), so we show a live
+  // byte count rather than a misleading fraction. Cosmetic — never aborts.
+  const progress = makeByteProgress("Downloading", null);
   // Capture write errors early — without a listener, Node crashes with
   // ERR_UNHANDLED_ERROR if a write fails (ENOSPC, EIO, etc.) during the loop.
   let writeError: Error | undefined;
@@ -590,6 +595,7 @@ async function streamDecompressToFile(
         break;
       }
       const ok = writer.write(chunk);
+      progress.onProgress(chunk.byteLength);
       if (!(ok || writeError)) {
         // Race drain against error — an I/O failure (ENOSPC) while the
         // buffer is full would never emit 'drain', causing a hang.
@@ -619,6 +625,7 @@ async function streamDecompressToFile(
         }
       });
     });
+    progress.done();
   }
 }
 

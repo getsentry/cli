@@ -27,7 +27,7 @@ import {
   isDowngrade,
   isNightlyVersion,
 } from "./binary.js";
-import { applyPatchChainInMemory } from "./bspatch.js";
+import { applyPatchChainInMemory, parsePatchHeader } from "./bspatch.js";
 import { CLI_VERSION } from "./constants.js";
 import { customFetch } from "./custom-ca.js";
 import { formatBytes } from "./formatters/numbers.js";
@@ -40,6 +40,7 @@ import {
 } from "./ghcr.js";
 import { logger } from "./logger.js";
 import { loadCachedChain, savePatchesToCache } from "./patch-cache.js";
+import { makeByteProgress } from "./progress.js";
 import { withTracing, withTracingSpan } from "./telemetry.js";
 
 /** Scoped logger for delta upgrade operations */
@@ -979,11 +980,37 @@ async function applyChainAndReturn(
   oldBinaryPath: string,
   destPath: string
 ): Promise<DeltaResult> {
-  const sha256 = await withTracing(
-    "apply-patch-chain",
-    "upgrade.delta.apply",
-    () => applyPatchChain(chain, oldBinaryPath, destPath)
+  // Progress bar for the apply phase. Total is the final binary size (the last
+  // patch's declared `newSize`), so the number shown is the real output the
+  // user gets — not the sum of intermediate hop writes. The bar advances per
+  // byte written across all hops, staying smooth through the chain. Cosmetic
+  // only: a render failure never aborts the apply, and it self-suppresses off
+  // an interactive TTY.
+  let finalSize: number | null = null;
+  try {
+    const last = chain.patches.at(-1);
+    if (last) {
+      finalSize = parsePatchHeader(last.data).newSize;
+    }
+  } catch {
+    // Header parse is best-effort for the bar; a corrupt header is rejected
+    // properly downstream. Leave the bar indeterminate in that case.
+    finalSize = null;
+  }
+  const progress = makeByteProgress(
+    `Applying ${chain.patches.length} patch(es)`,
+    finalSize
   );
+
+  let sha256: string;
+  try {
+    sha256 = await withTracing("apply-patch-chain", "upgrade.delta.apply", () =>
+      applyPatchChain(chain, oldBinaryPath, destPath, progress.onProgress)
+    );
+  } finally {
+    progress.done();
+  }
+
   return {
     sha256,
     patchBytes: chain.totalSize,
@@ -1178,7 +1205,8 @@ async function resolveNightlyChainWithContext(
 export function applyPatchChain(
   chain: PatchChain,
   oldBinaryPath: string,
-  destPath: string
+  destPath: string,
+  onBytes?: (bytes: number) => void
 ): Promise<string> {
   return withTracingSpan(
     "apply-patches",
@@ -1197,7 +1225,8 @@ export function applyPatchChain(
       const sha256 = await applyPatchChainInMemory(
         oldBinaryPath,
         chain.patches.map((p) => p.data),
-        destPath
+        destPath,
+        onBytes
       );
 
       // Verify the final SHA-256 matches
