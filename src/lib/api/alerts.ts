@@ -6,13 +6,20 @@
  * - Metric alerts: threshold-based rules that trigger on metric queries (org-wide)
  */
 
+import {
+  getOrganizationDetector,
+  listOrganizationDetectors,
+} from "@sentry/api";
 import { ApiError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import {
   apiRequestToRegion,
   apiRequestToRegionNoContent,
+  getOrgSdkConfig,
   type PaginatedResponse,
   parseLinkHeader,
+  unwrapPaginatedResult,
+  unwrapResult,
 } from "./infrastructure.js";
 
 // Types
@@ -104,20 +111,6 @@ function pickDetectorNumber(value: unknown): number {
 }
 
 /**
- * Convert a detector `timeWindow` (seconds) to the minutes the CLI expects.
- *
- * The detectors/`snubaQuery` payload exposes `timeWindow` in seconds, while the
- * legacy `/alert-rules/` serializer (and every CLI formatter — list/view append
- * `m`) treats `MetricAlertRule.timeWindow` as minutes. Without this conversion
- * windows render ~60× too large. Metric windows are always whole minutes, so we
- * round to guard against float drift.
- */
-function detectorTimeWindowToMinutes(value: unknown): number {
-  const seconds = pickDetectorNumber(value);
-  return seconds > 0 ? Math.round(seconds / 60) : 0;
-}
-
-/**
  * Resolve the project slug list for a detector.
  *
  * Detectors are project-scoped and expose a single `projectSlug`, not the
@@ -196,6 +189,10 @@ function mapDetectorToMetricAlertRule(
   const environment =
     pickDetectorString(nested.environment) || detector.environment || null;
 
+  // The detector payload exposes timeWindow in seconds, but MetricAlertRule
+  // (and every CLI formatter, which appends "m") treats it as whole minutes.
+  const timeWindowSeconds = pickDetectorNumber(nested.timeWindow);
+
   return {
     id: String(detector.id),
     name: detector.name,
@@ -203,7 +200,7 @@ function mapDetectorToMetricAlertRule(
     query: pickDetectorString(nested.query),
     aggregate: pickDetectorString(nested.aggregate),
     dataset: pickDetectorString(nested.dataset),
-    timeWindow: detectorTimeWindowToMinutes(nested.timeWindow),
+    timeWindow: timeWindowSeconds > 0 ? Math.round(timeWindowSeconds / 60) : 0,
     environment,
     owner: pickDetectorOwner(detector.owner),
     projects: pickDetectorProjects(detector),
@@ -348,20 +345,26 @@ export async function listMetricAlertsPaginated(
   orgSlug: string,
   options: { perPage?: number; cursor?: string } = {}
 ): Promise<PaginatedResponse<MetricAlertRule[]>> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data, headers } = await apiRequestToRegion<MetricDetector[]>(
-    regionUrl,
-    `/organizations/${orgSlug}/detectors/`,
-    {
-      params: {
-        query: METRIC_DETECTOR_QUERY,
-        sortBy: "-id",
-        per_page: options.perPage,
-        cursor: options.cursor,
-      },
-    }
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await listOrganizationDetectors({
+    ...config,
+    path: { organization_id_or_slug: orgSlug },
+    query: {
+      query: METRIC_DETECTOR_QUERY,
+      sortBy: "-id",
+      cursor: options.cursor,
+      per_page: options.perPage,
+    } as {
+      query?: string;
+      sortBy?: string;
+      cursor?: string;
+      per_page?: number;
+    },
+  });
+  const { data, nextCursor } = unwrapPaginatedResult<MetricDetector[]>(
+    result,
+    "Failed to list metric alert rules"
   );
-  const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
   return { data: data.map(mapDetectorToMetricAlertRule), nextCursor };
 }
 
@@ -397,18 +400,29 @@ export async function getMetricAlertRule(
   orgSlug: string,
   ruleId: string
 ): Promise<MetricAlertRule> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  const endpoint = `/organizations/${orgSlug}/detectors/${encodeURIComponent(ruleId)}/`;
-  const { data } = await apiRequestToRegion<MetricDetector>(
-    regionUrl,
-    endpoint
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await getOrganizationDetector({
+    ...config,
+    // The SDK types detector_id as number, but detector IDs are opaque strings
+    // the API accepts verbatim; pass the string through the string-keyed path.
+    path: {
+      organization_id_or_slug: orgSlug,
+      detector_id: ruleId,
+    } as unknown as {
+      organization_id_or_slug: string;
+      detector_id: number;
+    },
+  });
+  const data = unwrapResult<MetricDetector>(
+    result,
+    `Failed to get metric alert rule '${ruleId}'`
   );
   if (data.type !== undefined && data.type !== "metric_issue") {
     throw new ApiError(
       `Metric alert rule '${ruleId}' not found`,
       404,
       `Detector '${ruleId}' is of type '${data.type}', not a metric alert.`,
-      endpoint
+      `/organizations/${orgSlug}/detectors/${encodeURIComponent(ruleId)}/`
     );
   }
   return mapDetectorToMetricAlertRule(data);

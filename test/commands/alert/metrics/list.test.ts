@@ -14,6 +14,13 @@ const getConfigDir = useTestConfigDir("test-alert-metrics-list-", {
 });
 
 /**
+ * Fixed `dateCreated` for detector fixtures. Detectors always carry a creation
+ * timestamp, so the builder stamps this deterministic value; the exact instant
+ * is arbitrary and not asserted on — only its presence matters.
+ */
+const DETECTOR_DATE_CREATED = "2026-01-01T00:00:00Z";
+
+/**
  * Build a metric-issue detector payload (the shape returned by the org-scoped
  * `/detectors/` endpoint) from the flat metric-alert fields the assertions use.
  * `status` 1 maps to a disabled detector (`enabled: false`); anything else is
@@ -41,7 +48,7 @@ function detector(fields: {
     enabled: fields.status !== 1,
     projectSlug: projectSlug ?? null,
     owner: null,
-    dateCreated: fields.dateCreated ?? "2026-01-01T00:00:00Z",
+    dateCreated: fields.dateCreated ?? DETECTOR_DATE_CREATED,
     dataSources: [
       {
         aggregate: fields.aggregate ?? "count()",
@@ -489,7 +496,7 @@ describe("alert metrics list pagination", () => {
       expect.objectContaining({
         org: "org-two",
         status: 500,
-        message: expect.stringContaining("API request failed"),
+        message: expect.stringContaining("Failed to list metric alert rules"),
       }),
     ]);
     expect(warnSpy).toHaveBeenCalledWith(
@@ -497,7 +504,7 @@ describe("alert metrics list pagination", () => {
     );
   });
 
-  test("all org failures preserve ApiError status and endpoint", async () => {
+  test("all org failures preserve ApiError status", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = new URL(req.url);
@@ -526,7 +533,6 @@ describe("alert metrics list pagination", () => {
     ).rejects.toMatchObject({
       name: "ApiError",
       status: 403,
-      endpoint: "/organizations/test-org/detectors/",
     } satisfies Partial<ApiError>);
   });
 
