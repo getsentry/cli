@@ -80,10 +80,11 @@ type MetricDetector = {
  * Map a metric-issue detector onto the flat `MetricAlertRule` shape the CLI
  * commands (list/view/resolve) already consume.
  *
- * The threshold query fields live in the first data source. Some deployments
- * nest them under a `queryObj`/`snubaQuery` sub-object, so we look there as a
- * fallback. `enabled === false` maps to the legacy disabled status (1); an
- * enabled or absent flag maps to active (0), matching `metricAlertStatusLabel`.
+ * The threshold query fields live in the first data source, possibly nested
+ * under `queryObj`, `snubaQuery`, or `queryObj.snubaQuery` — `resolveThresholdSource`
+ * picks the right container. `enabled === false` maps to the legacy disabled
+ * status (1); an enabled or absent flag maps to active (0), matching
+ * `metricAlertStatusLabel`.
  */
 function pickDetectorString(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -139,14 +140,46 @@ function pickDetectorOwner(owner: MetricDetector["owner"]): string | null {
   return null;
 }
 
+/**
+ * Locate the object holding the threshold query fields for a detector.
+ *
+ * Depending on deployment the `SnubaQuery` fields (aggregate/dataset/query/
+ * timeWindow) sit directly on `dataSources[0]`, under a `queryObj`, under a
+ * `snubaQuery`, or nested at `queryObj.snubaQuery`. Walk those candidates
+ * breadth-first and return the first that actually exposes an `aggregate` or
+ * `query`, so a wrapper object (e.g. a `queryObj` whose real fields live in a
+ * nested `snubaQuery`) doesn't flatten everything to empty.
+ */
+function resolveThresholdSource(
+  source: Record<string, unknown>
+): Record<string, unknown> {
+  const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+
+  const queryObj = asRecord(source.queryObj);
+  const snubaQuery = asRecord(source.snubaQuery);
+  const candidates = [
+    queryObj && asRecord(queryObj.snubaQuery),
+    queryObj,
+    snubaQuery,
+    source,
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && ("aggregate" in candidate || "query" in candidate)) {
+      return candidate;
+    }
+  }
+  return source;
+}
+
 function mapDetectorToMetricAlertRule(
   detector: MetricDetector
 ): MetricAlertRule {
   const source = detector.dataSources?.[0] ?? {};
-  const nested =
-    (source.queryObj as Record<string, unknown> | undefined) ??
-    (source.snubaQuery as Record<string, unknown> | undefined) ??
-    source;
+  const nested = resolveThresholdSource(source);
 
   const environment =
     pickDetectorString(nested.environment) || detector.environment || null;

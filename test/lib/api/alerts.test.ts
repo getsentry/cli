@@ -205,6 +205,33 @@ describe("getMetricAlertRule", () => {
     expect(rule.timeWindow).toBe(15);
   });
 
+  test("reads threshold fields nested under queryObj.snubaQuery", async () => {
+    globalThis.fetch = mockFetch(async () =>
+      Response.json(
+        metricDetector({
+          dataSources: [
+            {
+              queryObj: {
+                snubaQuery: {
+                  aggregate: "p75(measurements.lcp)",
+                  dataset: "transactions",
+                  query: "transaction.op:pageload",
+                  timeWindow: 600,
+                },
+              },
+            },
+          ],
+        })
+      )
+    );
+
+    const rule = await getMetricAlertRule("test-org", "9");
+    expect(rule.aggregate).toBe("p75(measurements.lcp)");
+    expect(rule.dataset).toBe("transactions");
+    expect(rule.query).toBe("transaction.op:pageload");
+    expect(rule.timeWindow).toBe(10);
+  });
+
   test("prefers projectSlug and falls back to a projects array for projects", async () => {
     globalThis.fetch = mockFetch(async () =>
       Response.json(
