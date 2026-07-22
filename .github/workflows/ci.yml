@@ -818,6 +818,16 @@ jobs:
           # exact patched version from the central env block here.
           node-version: ${{ matrix.node == '24' && env.NODE_VERSION_24 || matrix.node == '20' && env.NODE_VERSION_20 || env.NODE_VERSION_22 }}
       - name: Smoke test (Node.js)
+        env:
+          # Clear auth tokens so the CLI doesn't attempt API calls or
+          # telemetry uploads during the smoke test. On main, the job
+          # inherits SENTRY_AUTH_TOKEN from the `production` environment
+          # (needed by the Bundle step); without clearing it here, the
+          # CLI tries to initialize telemetry → SQLite, which crashes on
+          # the WASM fallback path (Node 20) because the runner's home
+          # directory may not have a writable ~/.sentry config dir yet.
+          SENTRY_AUTH_TOKEN: ""
+          SENTRY_TOKEN: ""
         run: node dist/bin.cjs --help
       - name: Smoke test (Node.js — deep)
         shell: bash
