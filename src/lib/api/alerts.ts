@@ -67,6 +67,8 @@ export type MetricAlertRule = {
 type MetricDetector = {
   id: string | number;
   name: string;
+  /** Detector kind, e.g. `metric_issue`. Other kinds (uptime, cron) are rejected on read. */
+  type?: string;
   enabled?: boolean;
   environment?: string | null;
   projectSlug?: string | null;
@@ -372,6 +374,11 @@ async function fetchMetricAlertRuleJson(
  * Reads from the org-scoped `/detectors/{id}/` endpoint and maps the detector
  * onto the flat `MetricAlertRule` shape.
  *
+ * The `/detectors/{id}/` endpoint returns any detector kind (uptime, cron,
+ * error, …), unlike the `type:metric_issue`-filtered list. A non-metric id is
+ * rejected with a 404 so view/edit/delete don't silently render an unrelated
+ * detector as a metric alert with empty threshold fields.
+ *
  * @param orgSlug - Organization slug
  * @param ruleId - Detector (alert rule) ID
  * @returns The metric alert rule
@@ -381,10 +388,19 @@ export async function getMetricAlertRule(
   ruleId: string
 ): Promise<MetricAlertRule> {
   const regionUrl = await resolveOrgRegion(orgSlug);
+  const endpoint = `/organizations/${orgSlug}/detectors/${encodeURIComponent(ruleId)}/`;
   const { data } = await apiRequestToRegion<MetricDetector>(
     regionUrl,
-    `/organizations/${orgSlug}/detectors/${encodeURIComponent(ruleId)}/`
+    endpoint
   );
+  if (data.type !== undefined && data.type !== "metric_issue") {
+    throw new ApiError(
+      `Metric alert rule '${ruleId}' not found`,
+      404,
+      `Detector '${ruleId}' is of type '${data.type}', not a metric alert.`,
+      endpoint
+    );
+  }
   return mapDetectorToMetricAlertRule(data);
 }
 

@@ -255,6 +255,17 @@ describe("getMetricAlertRule", () => {
     const rule = await getMetricAlertRule("test-org", "9");
     expect(rule.timeWindow).toBe(0);
   });
+
+  test("rejects a non-metric detector with a 404 instead of mapping it", async () => {
+    globalThis.fetch = mockFetch(async () =>
+      Response.json(metricDetector({ type: "uptime_domain_failure" }))
+    );
+
+    await expect(getMetricAlertRule("test-org", "9")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+    });
+  });
 });
 
 describe("deleteMetricAlertRule", () => {
