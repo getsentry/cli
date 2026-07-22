@@ -99,29 +99,34 @@ export function parsePositionalArgs(args: string[]): SpanViewArgs {
     throw new ContextError("Trace ID and span ID", USAGE_HINT, []);
   }
 
-  // Auto-detect `<trace-id>/<span-id>` single-arg form. When a single
-  // arg contains exactly one slash separating a 32-char hex trace ID
-  // from a 16-char hex span ID, the user clearly intended to pass both.
+  // Auto-detect single-arg forms where the last slash-segment is a span ID.
+  // This handles both:
+  //   <trace-id>/<span-id>           (one slash)
+  //   [<org>/][<project>/]<trace-id>/<span-id>  (two+ slashes, e.g. copy-paste from `span list`)
   // Without this check, parseSlashSeparatedTraceTarget treats the span
-  // ID as a trace ID and fails validation (CLI-G6).
+  // ID as a trace ID and fails validation (CLI-G6 / CLI-1BD).
   if (args.length === 1) {
-    const slashIdx = first.indexOf("/");
-    if (slashIdx !== -1 && first.indexOf("/", slashIdx + 1) === -1) {
-      const left = normalizeHexId(first.slice(0, slashIdx));
-      const right = first
-        .slice(slashIdx + 1)
+    const lastSlashIdx = first.lastIndexOf("/");
+    if (lastSlashIdx !== -1) {
+      const tracePrefix = first.slice(0, lastSlashIdx);
+      const possibleSpanId = first
+        .slice(lastSlashIdx + 1)
         .trim()
         .toLowerCase()
         .replace(/-/g, "");
-      if (HEX_ID_RE.test(left) && SPAN_ID_RE.test(right)) {
+      if (SPAN_ID_RE.test(possibleSpanId) && tracePrefix.length > 0) {
+        const traceTarget = parseSlashSeparatedTraceTarget(
+          tracePrefix,
+          USAGE_HINT
+        );
         log.warn(
-          `Interpreting '${first}' as <trace-id>/<span-id>. ` +
-            `Use separate arguments: sentry span view ${left} ${right}`
+          `Interpreting '${first}' as <trace-target>/<span-id>. ` +
+            `Use separate arguments: sentry span view ${tracePrefix} ${possibleSpanId}`
         );
         return {
           kind: "resolved",
-          traceTarget: { type: "auto-detect" as const, traceId: left },
-          rawSpanIds: [right],
+          traceTarget,
+          rawSpanIds: [possibleSpanId],
         };
       }
     }
