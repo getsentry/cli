@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { zstdCompressSync } from "node:zlib";
 import { describe, expect, test } from "vitest";
 import {
+  addDiffChunk,
   applyPatch,
   applyPatchChainInMemory,
   applyPatchToMemory,
@@ -383,6 +384,99 @@ describe("applyPatchToMemory", () => {
     } finally {
       if (existsSync(destPath)) {
         unlinkSync(destPath);
+      }
+    }
+  });
+});
+
+describe("addDiffChunk SWAR wrapping-add", () => {
+  // The diff-add loop is the hot path of bspatch apply. The SWAR (Uint32Array)
+  // implementation must match a per-byte `(old + diff) % 256` reference for
+  // EVERY byte value, every 4-byte alignment, and every tail length 0-3 — a
+  // carry bug (e.g. a BigUint64Array variant, where carries cross byte lanes)
+  // corrupts the output silently.
+
+  /** Per-byte wrapping-add reference (the specification addDiffChunk must meet). */
+  function referenceAdd(old: Uint8Array, diff: Uint8Array): Uint8Array {
+    const out = new Uint8Array(old.length);
+    for (let i = 0; i < old.length; i++) {
+      out[i] = ((old[i] ?? 0) + (diff[i] ?? 0)) % 256;
+    }
+    return out;
+  }
+
+  test("matches the byte-loop reference for all byte values and alignments", async () => {
+    // Build a base covering many window sizes so every (old, diff) byte pair
+    // appears across several 4-byte SWAR boundaries and tail lengths 0-3.
+    // newBytes is derived from old+diff, so applyPatchToMemory must reproduce
+    // exactly referenceAdd(old, diff).
+    const total = 4096 + 3; // odd length hits a 3-byte tail
+    const oldBytes = new Uint8Array(total);
+    for (let i = 0; i < total; i++) {
+      // Knuth multiplicative hash spread, folded to a byte — hits all 256 values.
+      oldBytes[i] = Math.floor((i * 2_654_435_761) / 256) % 256;
+    }
+    // Vary the diff so (old, diff) pairs cover many high/low-bit combos.
+    const diffBytes = new Uint8Array(total);
+    for (let i = 0; i < total; i++) {
+      diffBytes[i] = (i * 31 + (i % 256 >= 128 ? 128 : 0) + 7) % 256;
+    }
+    const expected = referenceAdd(oldBytes, diffBytes);
+    const patch = buildDiffOnlyPatch(oldBytes, expected);
+
+    const out = await applyPatchToMemory(oldBytes, patch);
+    expect(out).toEqual(expected);
+  });
+
+  test("handles wrap-around at the byte max (255 + k) in every lane", async () => {
+    // old=255 forces a carry in every byte; ensure it wraps to (255+diff)%256,
+    // not into the adjacent lane. A cross-lane carry bug shows up here.
+    const n = 64;
+    const oldBytes = new Uint8Array(n).fill(0xff);
+    const expected = new Uint8Array(n);
+    for (let i = 0; i < n; i++) expected[i] = (0xff + i) % 256;
+    const patch = buildDiffOnlyPatch(oldBytes, expected);
+
+    const out = await applyPatchToMemory(oldBytes, patch);
+    expect(out).toEqual(expected);
+  });
+
+  test("handles tail lengths 0-3 across many window sizes", async () => {
+    for (const n of [1, 2, 3, 4, 5, 7, 8, 9, 21, 1023]) {
+      const oldBytes = new Uint8Array(n);
+      for (let i = 0; i < n; i++) oldBytes[i] = (i * 17) % 256;
+      const expected = referenceAdd(
+        oldBytes,
+        Uint8Array.from({ length: n }, (_, i) => (i * 29) % 256)
+      );
+      const patch = buildDiffOnlyPatch(oldBytes, expected);
+      const out = await applyPatchToMemory(oldBytes, patch);
+      expect(out).toEqual(expected);
+    }
+  });
+
+  test("produces correct output when a buffer view is misaligned (SWAR fallback)", () => {
+    // The SWAR fast path needs a 4-byte-aligned byteOffset; addDiffChunk falls
+    // back to the byte loop otherwise. No current caller passes a misaligned
+    // view (MemoryOldReader/FileOldReader and the output chunk are all fresh,
+    // offset-0 allocations), so this directly unit-tests the guard against a
+    // future caller that might pass a pooled/subarray view. Every offset combo
+    // (0-3 on each of old/diff/output) must match the per-byte reference.
+    const n = 4096 + 3; // exercises a 3-byte tail too
+    for (const oldOff of [0, 1, 2, 3]) {
+      for (const diffOff of [0, 3]) {
+        for (const outOff of [0, 2]) {
+          const oldBuf = new Uint8Array(n + oldOff).subarray(oldOff);
+          const diffBuf = new Uint8Array(n + diffOff).subarray(diffOff);
+          const outBuf = new Uint8Array(n + outOff).subarray(outOff);
+          for (let i = 0; i < n; i++) {
+            oldBuf[i] = (i * 37) % 256;
+            diffBuf[i] = (i * 53 + 3) % 256;
+          }
+          const expected = referenceAdd(oldBuf, diffBuf);
+          addDiffChunk(outBuf, oldBuf, diffBuf, n);
+          expect(outBuf).toEqual(expected);
+        }
       }
     }
   });
