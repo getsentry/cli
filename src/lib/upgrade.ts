@@ -590,41 +590,46 @@ async function streamDecompressToFile(
     writeError ??= err;
   });
   try {
-    for await (const chunk of stream) {
-      if (writeError) {
-        break;
+    try {
+      for await (const chunk of stream) {
+        if (writeError) {
+          break;
+        }
+        const ok = writer.write(chunk);
+        progress.onProgress(chunk.byteLength);
+        if (!(ok || writeError)) {
+          // Race drain against error — an I/O failure (ENOSPC) while the
+          // buffer is full would never emit 'drain', causing a hang.
+          // Clean up the unused listener to avoid MaxListenersExceededWarning.
+          await new Promise<void>((resolve) => {
+            const onDrain = (): void => {
+              writer.removeListener("error", onError);
+              resolve();
+            };
+            const onError = (): void => {
+              writer.removeListener("drain", onDrain);
+              resolve();
+            };
+            writer.once("drain", onDrain);
+            writer.once("error", onError);
+          });
+        }
       }
-      const ok = writer.write(chunk);
-      progress.onProgress(chunk.byteLength);
-      if (!(ok || writeError)) {
-        // Race drain against error — an I/O failure (ENOSPC) while the
-        // buffer is full would never emit 'drain', causing a hang.
-        // Clean up the unused listener to avoid MaxListenersExceededWarning.
-        await new Promise<void>((resolve) => {
-          const onDrain = (): void => {
-            writer.removeListener("error", onError);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        writer.end((err?: Error | null) => {
+          const finalErr = err ?? writeError;
+          if (finalErr) {
+            reject(finalErr);
+          } else {
             resolve();
-          };
-          const onError = (): void => {
-            writer.removeListener("drain", onDrain);
-            resolve();
-          };
-          writer.once("drain", onDrain);
-          writer.once("error", onError);
+          }
         });
-      }
+      });
     }
   } finally {
-    await new Promise<void>((resolve, reject) => {
-      writer.end((err?: Error | null) => {
-        const finalErr = err ?? writeError;
-        if (finalErr) {
-          reject(finalErr);
-        } else {
-          resolve();
-        }
-      });
-    });
+    // Always clear the progress line, even if writer.end rejected (ENOSPC/EIO),
+    // so a stale bar never merges with the following error output.
     progress.done();
   }
 }

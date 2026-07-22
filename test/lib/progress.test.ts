@@ -101,6 +101,24 @@ describe("makeByteProgress", () => {
     expect(last).not.toContain("░");
   });
 
+  test("overwrites the previous frame's tail when a redraw is shorter", () => {
+    // Indeterminate counter: a large byte count renders a long line, then a
+    // hypothetically shorter one would leave stale chars without padding.
+    // We can't easily shrink formatBytes mid-run, so assert the padding logic
+    // directly: after a long frame then a short one, the short frame is padded
+    // to the long frame's width so no stale tail remains.
+    const out = fakeOut(true);
+    const p = makeByteProgress("D", null, out);
+    p.onProgress(1024 * 1024 * 100); // "D  100 MB" — long
+    const longFrame = out.writes.at(-1) ?? "";
+    p.onProgress(-(1024 * 1024 * 100 - 5)); // net 5 bytes → "D  5 B" — shorter
+    const shortFrame = out.writes.at(-1) ?? "";
+    // The short frame (minus the leading \r) must be at least as wide as the
+    // long frame's content, i.e. padded to erase the tail.
+    expect(shortFrame.length).toBeGreaterThanOrEqual(longFrame.length);
+    expect(shortFrame).toContain("5 B");
+  });
+
   test("prints the header once (no bar) in plain output", () => {
     process.env.SENTRY_PLAIN_OUTPUT = "1"; // force plain
     const out = fakeOut(true);

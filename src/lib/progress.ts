@@ -78,8 +78,13 @@ export function makeByteProgress(
         return;
       }
       const l = line();
-      lastLen = l.length;
-      out.write(`\r${l}`);
+      // Pad with spaces to overwrite any leftover tail from a longer previous
+      // frame (e.g. when formatBytes shrinks at the KB→MB boundary), then track
+      // the full printed width so done() clears it completely.
+      const padded =
+        l.length < lastLen ? l + " ".repeat(lastLen - l.length) : l;
+      lastLen = padded.length;
+      out.write(`\r${padded}`);
     } catch {
       // ignore — progress is cosmetic
     }
