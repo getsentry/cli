@@ -55,6 +55,88 @@ export type MetricAlertRule = {
   dateCreated: string;
 };
 
+/**
+ * A metric-issue detector as returned by the org-scoped `/detectors/` endpoint.
+ *
+ * The new detectors API replaces the legacy `/alert-rules/` endpoint. The
+ * threshold query fields (aggregate, dataset, query, timeWindow) live inside
+ * the first entry of `dataSources`, and the active/disabled state is the
+ * top-level `enabled` boolean. Only the fields the CLI reads are typed; the
+ * nested `dataSources`/`config` objects are otherwise opaque.
+ */
+type MetricDetector = {
+  id: string | number;
+  name: string;
+  enabled?: boolean;
+  environment?: string | null;
+  projectSlug?: string | null;
+  projects?: string[] | null;
+  owner?: { type: string; name?: string; id?: string } | string | null;
+  dateCreated?: string;
+  dataSources?: Record<string, unknown>[] | null;
+};
+
+/**
+ * Map a metric-issue detector onto the flat `MetricAlertRule` shape the CLI
+ * commands (list/view/resolve) already consume.
+ *
+ * The threshold query fields live in the first data source. Some deployments
+ * nest them under a `queryObj`/`snubaQuery` sub-object, so we look there as a
+ * fallback. `enabled === false` maps to the legacy disabled status (1); an
+ * enabled or absent flag maps to active (0), matching `metricAlertStatusLabel`.
+ */
+function pickDetectorString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function pickDetectorNumber(value: unknown): number {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    return Number(value);
+  }
+  return 0;
+}
+
+/** Reduce a detector owner (object or bare string) to the flat owner value. */
+function pickDetectorOwner(owner: MetricDetector["owner"]): string | null {
+  if (typeof owner === "string") {
+    return owner;
+  }
+  if (owner && typeof owner === "object") {
+    return owner.name ?? owner.id ?? null;
+  }
+  return null;
+}
+
+function mapDetectorToMetricAlertRule(
+  detector: MetricDetector
+): MetricAlertRule {
+  const source = detector.dataSources?.[0] ?? {};
+  const nested =
+    (source.queryObj as Record<string, unknown> | undefined) ??
+    (source.snubaQuery as Record<string, unknown> | undefined) ??
+    source;
+
+  const environment =
+    pickDetectorString(nested.environment) || detector.environment || null;
+
+  return {
+    id: String(detector.id),
+    name: detector.name,
+    status: detector.enabled === false ? 1 : 0,
+    query: pickDetectorString(nested.query),
+    aggregate: pickDetectorString(nested.aggregate),
+    dataset: pickDetectorString(nested.dataset),
+    timeWindow: pickDetectorNumber(nested.timeWindow),
+    environment,
+    owner: pickDetectorOwner(detector.owner),
+    projects: detector.projects ?? [],
+    dateCreated: detector.dateCreated ?? "",
+  };
+}
+
 // Issue alerts
 //
 // Issue alert rules are read from the org-scoped `/organizations/{org}/workflows/`
@@ -164,9 +246,25 @@ export async function getIssueAlertRule(
 }
 
 // Metric alerts
+//
+// Metric alert rules are read from the org-scoped
+// `/organizations/{org}/detectors/` endpoint (filtered to `type:metric_issue`).
+// The legacy `/organizations/{org}/alert-rules/` endpoint is being retired on
+// 2026-08-17 (getsentry/cli#1274, #1182). Detectors return a nested shape, so
+// `mapDetectorToMetricAlertRule` flattens each detector into the existing
+// `MetricAlertRule` shape the commands already consume. Mutations
+// (create/update/delete) still use the legacy endpoint pending a follow-up
+// migration to the detectors/monitors + workflows write APIs.
+
+/** Search query that limits the detectors endpoint to metric alert rules. */
+const METRIC_DETECTOR_QUERY = "type:metric_issue";
 
 /**
  * List metric alert rules for an organization with cursor-based pagination.
+ *
+ * Reads from the org-scoped `/detectors/` endpoint filtered to
+ * `type:metric_issue` and maps each detector onto the flat `MetricAlertRule`
+ * shape.
  *
  * @param orgSlug - Organization slug
  * @param options - Pagination parameters (perPage, cursor)
@@ -177,13 +275,20 @@ export async function listMetricAlertsPaginated(
   options: { perPage?: number; cursor?: string } = {}
 ): Promise<PaginatedResponse<MetricAlertRule[]>> {
   const regionUrl = await resolveOrgRegion(orgSlug);
-  const { data, headers } = await apiRequestToRegion<MetricAlertRule[]>(
+  const { data, headers } = await apiRequestToRegion<MetricDetector[]>(
     regionUrl,
-    `/organizations/${orgSlug}/alert-rules/`,
-    { params: { per_page: options.perPage, cursor: options.cursor } }
+    `/organizations/${orgSlug}/detectors/`,
+    {
+      params: {
+        query: METRIC_DETECTOR_QUERY,
+        sortBy: "-id",
+        per_page: options.perPage,
+        cursor: options.cursor,
+      },
+    }
   );
   const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
-  return { data, nextCursor };
+  return { data: data.map(mapDetectorToMetricAlertRule), nextCursor };
 }
 
 /** Single GET for org metric alert rule (typed or full JSON for PUT). */
@@ -202,16 +307,23 @@ async function fetchMetricAlertRuleJson(
 /**
  * Get a single metric alert rule by ID.
  *
+ * Reads from the org-scoped `/detectors/{id}/` endpoint and maps the detector
+ * onto the flat `MetricAlertRule` shape.
+ *
  * @param orgSlug - Organization slug
- * @param ruleId - Alert rule ID
+ * @param ruleId - Detector (alert rule) ID
  * @returns The metric alert rule
  */
 export async function getMetricAlertRule(
   orgSlug: string,
   ruleId: string
 ): Promise<MetricAlertRule> {
-  const data = await fetchMetricAlertRuleJson(orgSlug, ruleId);
-  return data as MetricAlertRule;
+  const regionUrl = await resolveOrgRegion(orgSlug);
+  const { data } = await apiRequestToRegion<MetricDetector>(
+    regionUrl,
+    `/organizations/${orgSlug}/detectors/${encodeURIComponent(ruleId)}/`
+  );
+  return mapDetectorToMetricAlertRule(data);
 }
 
 // Issue alert write operations

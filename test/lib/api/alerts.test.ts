@@ -3,7 +3,9 @@ import {
   deleteIssueAlertRule,
   deleteMetricAlertRule,
   getIssueAlertRule,
+  getMetricAlertRule,
   listIssueAlertsPaginated,
+  listMetricAlertsPaginated,
 } from "../../../src/lib/api/alerts.js";
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
@@ -106,6 +108,98 @@ describe("getIssueAlertRule", () => {
     await expect(
       getIssueAlertRule("test-org", "test-project", "42")
     ).rejects.toMatchObject({ name: "ApiError", status: 404 });
+  });
+});
+
+/** Minimal metric-issue detector payload from the org-scoped `/detectors/` endpoint. */
+function metricDetector(overrides: Record<string, unknown>) {
+  return {
+    id: "9",
+    name: "P95 latency",
+    type: "metric_issue",
+    enabled: true,
+    projects: ["backend"],
+    owner: null,
+    dateCreated: "2026-01-01T00:00:00Z",
+    dataSources: [
+      {
+        aggregate: "p95(transaction.duration)",
+        dataset: "transactions",
+        query: "environment:prod",
+        timeWindow: 5,
+        environment: "prod",
+      },
+    ],
+    conditionGroup: null,
+    config: { detectionType: "static" },
+    ...overrides,
+  };
+}
+
+describe("listMetricAlertsPaginated", () => {
+  test("reads from org-scoped /detectors/ filtered to metric_issue and flattens the payload", async () => {
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const url = new URL(new Request(input!, init).url);
+      expect(url.pathname).toBe("/api/0/organizations/test-org/detectors/");
+      expect(url.searchParams.get("query")).toBe("type:metric_issue");
+      return Response.json([metricDetector({ id: "9", name: "P95 latency" })]);
+    });
+
+    const { data } = await listMetricAlertsPaginated("test-org");
+    expect(data).toHaveLength(1);
+    expect(data[0]).toMatchObject({
+      id: "9",
+      name: "P95 latency",
+      status: 0,
+      aggregate: "p95(transaction.duration)",
+      dataset: "transactions",
+      query: "environment:prod",
+      timeWindow: 5,
+      environment: "prod",
+      projects: ["backend"],
+    });
+  });
+});
+
+describe("getMetricAlertRule", () => {
+  test("reads from /detectors/{id}/ and maps disabled detectors to status 1", async () => {
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const url = new URL(new Request(input!, init).url);
+      expect(url.pathname).toBe("/api/0/organizations/test-org/detectors/9/");
+      return Response.json(
+        metricDetector({ id: "9", name: "Disabled rule", enabled: false })
+      );
+    });
+
+    const rule = await getMetricAlertRule("test-org", "9");
+    expect(rule.id).toBe("9");
+    expect(rule.name).toBe("Disabled rule");
+    expect(rule.status).toBe(1);
+  });
+
+  test("reads threshold fields nested under snubaQuery", async () => {
+    globalThis.fetch = mockFetch(async () =>
+      Response.json(
+        metricDetector({
+          dataSources: [
+            {
+              snubaQuery: {
+                aggregate: "count()",
+                dataset: "errors",
+                query: "event.type:error",
+                timeWindow: 15,
+              },
+            },
+          ],
+        })
+      )
+    );
+
+    const rule = await getMetricAlertRule("test-org", "9");
+    expect(rule.aggregate).toBe("count()");
+    expect(rule.dataset).toBe("errors");
+    expect(rule.query).toBe("event.type:error");
+    expect(rule.timeWindow).toBe(15);
   });
 });
 
