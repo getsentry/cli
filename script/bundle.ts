@@ -114,7 +114,10 @@ const sentrySourcemapPlugin: Plugin = {
     pluginBuild.onEnd(async (buildResult) => {
       const outputs = Object.keys(buildResult.metafile?.outputs ?? {});
       const jsFiles = outputs.filter(
-        (p) => p.endsWith(".cjs") || (p.endsWith(".js") && !p.endsWith(".map"))
+        (p) =>
+          p.endsWith(".cjs") ||
+          p.endsWith(".mjs") ||
+          (p.endsWith(".js") && !p.endsWith(".map"))
       );
 
       if (jsFiles.length === 0) {
@@ -179,6 +182,65 @@ const requireAliasPlugin: Plugin = {
   },
 };
 
+/**
+ * ESM-only: make `node:zlib` imports resolve through a namespace shim so that
+ * named imports of version-gated exports (the `zstd*` family, added in Node
+ * 22.15) become dynamic property reads instead of static named imports.
+ *
+ * In the CJS build these are `require("node:zlib").zstdCompress` — a lazy
+ * property that is simply `undefined` on older Node, which the code
+ * feature-detects and falls back to gzip. In ESM, esbuild hoists them to
+ * `import { zstdCompress } from "node:zlib"`, which Node validates at link
+ * time; on Node < 22.15 the missing export makes the WHOLE module fail to
+ * load, breaking the package's advertised Node 18+ support. Routing through
+ * `import * as zlib` keeps every access dynamic and link-safe.
+ */
+const zlibNamespaceShimPlugin: Plugin = {
+  name: "zlib-namespace-shim",
+  setup(b) {
+    const NS = "sentry:node-zlib-shim";
+
+    // Re-export every name node:zlib exposes on the (newest) build runtime plus
+    // the zstd family, each as a dynamic property read. The build node is a
+    // superset of older runtimes, so this covers every name any consumer imports
+    // (createGzip, brotli*, zstd*, …); names absent at runtime read as undefined,
+    // which the code feature-detects. `\bimport`/valid-identifier filtering keeps
+    // the generated module syntactically valid.
+    // biome-ignore lint/style/useNodejsImportProtocol: dynamic require to enumerate exports at build time
+    const zlibExportNames = Object.keys(require("node:zlib"));
+    const names = new Set(
+      [
+        ...zlibExportNames,
+        "zstdCompress",
+        "zstdCompressSync",
+        "zstdDecompress",
+        "zstdDecompressSync",
+        "createZstdCompress",
+        "createZstdDecompress",
+      ].filter((n) => /^[A-Za-z_$][\w$]*$/.test(n) && n !== "default")
+    );
+
+    // Redirect node:zlib to the shim — EXCEPT the shim's own re-export below,
+    // which must reach the real builtin (otherwise it resolves to itself and
+    // every member reads back as undefined). esbuild marks the real builtin
+    // external so it stays a runtime lookup.
+    b.onResolve({ filter: /^node:zlib$/ }, args =>
+      args.namespace === NS ? { path: "node:zlib", external: true } : { path: NS, namespace: NS }
+    );
+
+    b.onLoad({ filter: /.*/, namespace: NS }, () => ({
+      contents: [
+        `import * as zlib from "node:zlib";`,
+        `export default zlib;`,
+        ...[...names].map(
+          (n) => `export const ${n} = zlib[${JSON.stringify(n)}];`
+        ),
+      ].join("\n"),
+      loader: "js",
+    }));
+  },
+};
+
 const plugins: Plugin[] = [
   sentrySourcemapPlugin,
   textImportPlugin,
@@ -193,40 +255,29 @@ if (process.env.SENTRY_AUTH_TOKEN) {
   );
 }
 
-const result = await build({
+// Options shared by both the CJS and ESM library builds. Only the module
+// format, output path, and format-specific interop shims differ between them.
+const commonBuildOptions = {
   entryPoints: ["./src/index.ts"],
   bundle: true,
   minify: true,
   treeShaking: true,
-  // No banner — warning suppression moved to dist/bin.cjs (CLI-only).
-  // The library bundle must not suppress the host application's warnings.
+  // No banner (beyond format shims) — warning suppression moved to dist/bin.cjs
+  // (CLI-only). The library bundle must not suppress the host app's warnings.
   sourcemap: true,
   platform: "node",
   // Target Node.js 18 — the published package's floor (engines.node).
   // Older Node.js uses the bundled WASM SQLite driver (node-sqlite3-wasm);
   // 22.15+ uses the native node:sqlite. Downlevels newer syntax accordingly.
   target: "node18",
-  format: "cjs",
-  outfile: "./dist/index.cjs",
-  // Inject Bun polyfills and import.meta.url shim for CJS compatibility
-  inject: ["./script/node-polyfills.ts", "./script/import-meta-url.js"],
-  define: {
-    SENTRY_CLI_VERSION: JSON.stringify(VERSION),
-    SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
-    "process.env.NODE_ENV": JSON.stringify("production"),
-    __SENTRY_DEBUG_ID__: JSON.stringify(PLACEHOLDER_DEBUG_ID),
-    // Replace import.meta.url with the injected shim variable for CJS
-    "import.meta.url": "import_meta_url",
-  },
   // Externalize Node.js built-ins, plus Ink + React + companions.
-  // These packages are NOT bundled into the main CJS output because
-  // they use top-level await (esbuild can't emit that in CJS).
-  // Instead, the Ink UI lives in a separate self-contained ESM
-  // sidecar (`dist/ink-app.js`) that the text-import-plugin
-  // pre-bundles with all deps inlined. The main bundle references
-  // the sidecar via a path string and loads it lazily via dynamic
-  // `import()` at runtime. The external list here prevents esbuild
-  // from trying to resolve these packages in the main bundle graph.
+  // These packages are NOT bundled into the main output because they use
+  // top-level await (esbuild can't emit that in CJS). Instead, the Ink UI
+  // lives in a separate self-contained ESM sidecar (`dist/ink-app.js`) that
+  // the text-import-plugin pre-bundles with all deps inlined. The main bundle
+  // references the sidecar via a path string and loads it lazily via dynamic
+  // `import()` at runtime. The external list here prevents esbuild from trying
+  // to resolve these packages in the main bundle graph.
   external: [
     "node:*",
     // The DIF loader resolves this .wasm at runtime (dev only); never bundle it.
@@ -242,6 +293,54 @@ const result = await build({
   ],
   metafile: true,
   plugins,
+} satisfies Parameters<typeof build>[0];
+
+// Defines shared by both formats. The CJS build additionally rewrites
+// `import.meta.url` to a shim; the ESM build uses it natively.
+const commonDefine: Record<string, string> = {
+  SENTRY_CLI_VERSION: JSON.stringify(VERSION),
+  SENTRY_CLIENT_ID_BUILD: JSON.stringify(SENTRY_CLIENT_ID),
+  "process.env.NODE_ENV": JSON.stringify("production"),
+  __SENTRY_DEBUG_ID__: JSON.stringify(PLACEHOLDER_DEBUG_ID),
+};
+
+// In an ESM bundle, `require`, `__dirname`, and `__filename` don't exist, but
+// the inlined `node-sqlite3-wasm` Emscripten glue (and other lazily-required
+// modules) still reference them. Recreate them from `import.meta.url` so the
+// WASM SQLite fallback resolves `dist/node-sqlite3-wasm.wasm` correctly.
+const ESM_INTEROP_BANNER = [
+  `import { createRequire as __sentryCreateRequire } from "node:module";`,
+  `import { fileURLToPath as __sentryFileURLToPath } from "node:url";`,
+  `import { dirname as __sentryDirname } from "node:path";`,
+  "const require = __sentryCreateRequire(import.meta.url);",
+  "const __filename = __sentryFileURLToPath(import.meta.url);",
+  "const __dirname = __sentryDirname(__filename);",
+].join("\n");
+
+const result = await build({
+  ...commonBuildOptions,
+  format: "cjs",
+  outfile: "./dist/index.cjs",
+  // Inject Bun polyfills and import.meta.url shim for CJS compatibility
+  inject: ["./script/node-polyfills.ts", "./script/import-meta-url.js"],
+  define: {
+    ...commonDefine,
+    // Replace import.meta.url with the injected shim variable for CJS
+    "import.meta.url": "import_meta_url",
+  },
+});
+
+const esmResult = await build({
+  ...commonBuildOptions,
+  format: "esm",
+  outfile: "./dist/index.mjs",
+  // ESM has native import.meta.url — only the Bun polyfills need injecting.
+  inject: ["./script/node-polyfills.ts"],
+  define: { ...commonDefine },
+  banner: { js: ESM_INTEROP_BANNER },
+  // ESM-only: keep node:zlib access dynamic so version-gated zstd exports don't
+  // become link-time-fatal named imports on Node < 22.15 (see plugin comment).
+  plugins: [...commonBuildOptions.plugins, zlibNamespaceShimPlugin],
 });
 
 // Write the CLI bin wrapper (tiny — shebang + version check + dispatch).
@@ -296,10 +395,14 @@ export default createSentrySDK;
 const sdkTypes = await readFile("./src/sdk.generated.d.cts", "utf-8");
 
 const TYPE_DECLARATIONS = `${CORE_DECLARATIONS}\n${sdkTypes}\n`;
+// The declarations are self-contained (no relative imports), so the same content
+// serves both module systems: `.d.cts` for the `require` condition and `.d.mts`
+// for the `import` condition.
 await writeFile("./dist/index.d.cts", TYPE_DECLARATIONS);
+await writeFile("./dist/index.d.mts", TYPE_DECLARATIONS);
 
 console.log("  -> dist/bin.cjs (CLI wrapper)");
-console.log("  -> dist/index.d.cts (type declarations)");
+console.log("  -> dist/index.d.cts + dist/index.d.mts (type declarations)");
 
 // The `ink-app.js` sidecar (pre-bundled by text-import-plugin) ships
 // with the npm package so `npx sentry@latest init` can load the
@@ -330,10 +433,14 @@ await copyFile(
 console.log("  -> dist/node-sqlite3-wasm.wasm (WASM SQLite fallback)");
 
 // Calculate bundle size (only the main bundle, not source maps)
-const bundleOutput = result.metafile?.outputs["dist/index.cjs"];
-const bundleSize = bundleOutput?.bytes ?? 0;
-const bundleSizeKB = (bundleSize / 1024).toFixed(1);
+const bundleSizeKB = (
+  (result.metafile?.outputs["dist/index.cjs"]?.bytes ?? 0) / 1024
+).toFixed(1);
+const esmBundleSizeKB = (
+  (esmResult.metafile?.outputs["dist/index.mjs"]?.bytes ?? 0) / 1024
+).toFixed(1);
 
 console.log(`\n  -> dist/index.cjs (${bundleSizeKB} KB)`);
+console.log(`  -> dist/index.mjs (${esmBundleSizeKB} KB)`);
 console.log(`\n${"=".repeat(40)}`);
 console.log("Bundle complete!");
