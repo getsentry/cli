@@ -31,6 +31,7 @@ import {
   stripColorTags,
 } from "../formatters/markdown.js";
 import { logger } from "../logger.js";
+import { runViaAgentDO } from "./agent-do-runner.js";
 import {
   abortIfCancelled,
   PROGRESS_ROTATE_INTERVAL_MS,
@@ -41,9 +42,11 @@ import {
 } from "./clack-utils.js";
 import {
   API_TIMEOUT_MS,
+  agentDoTrafficPercent,
   EXIT_DEPENDENCY_INSTALL_FAILED,
   EXIT_PLATFORM_NOT_DETECTED,
   EXIT_VERIFICATION_FAILED,
+  INIT_AGENT_DO_URL,
   MASTRA_API_URL,
   VERIFY_CHANGES_STEP,
   WORKFLOW_ID,
@@ -408,6 +411,70 @@ async function handleSuspendedStep(
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+type TransportChoice = { useAgentDo: boolean; agentDoUrl?: string };
+
+const ROUTE_DECISION_TIMEOUT_MS = 3000;
+
+/** Local fallback split, used only when the server routing decision is unavailable. */
+function localFallbackChoice(): TransportChoice {
+  const pct = agentDoTrafficPercent();
+  if (pct >= 100) {
+    return { useAgentDo: true };
+  }
+  if (pct <= 0) {
+    return { useAgentDo: false };
+  }
+  return { useAgentDo: Math.random() * 100 < pct };
+}
+
+/**
+ * Decide which transport to use. The canary split is controlled SERVER-SIDE: we
+ * ask the DO worker's `/route` endpoint, which performs the random roll against a
+ * server-held percentage. This lets the split change without shipping a new CLI.
+ *
+ * - `SENTRY_INIT_AGENT_DO=1|0` forces a transport (dev/ops override).
+ * - Otherwise the server decides. On any error we fall back to a local percent
+ *   (`SENTRY_INIT_AGENT_DO_PERCENT`) or, by default, the proven Mastra path.
+ */
+async function resolveTransport(): Promise<TransportChoice> {
+  const forced = process.env.SENTRY_INIT_AGENT_DO;
+  if (forced === "1" || forced === "true") {
+    return { useAgentDo: true };
+  }
+  if (forced === "0" || forced === "false") {
+    return { useAgentDo: false };
+  }
+
+  try {
+    let base = INIT_AGENT_DO_URL;
+    if (base.startsWith("wss:")) {
+      base = `https:${base.slice(4)}`;
+    } else if (base.startsWith("ws:")) {
+      base = `http:${base.slice(3)}`;
+    }
+    while (base.endsWith("/")) {
+      base = base.slice(0, -1);
+    }
+    const res = await customFetch(`${base}/route`, {
+      signal: AbortSignal.timeout(ROUTE_DECISION_TIMEOUT_MS),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as {
+        transport?: string;
+        agentDoUrl?: string;
+      };
+      if (data.transport === "agent-do") {
+        return { useAgentDo: true, agentDoUrl: data.agentDoUrl };
+      }
+      return { useAgentDo: false };
+    }
+  } catch {
+    // Server routing unreachable — fall back to the local decision below.
+  }
+
+  return localFallbackChoice();
 }
 
 function showCancelledFeedback(ui: WizardUI): void {
@@ -857,6 +924,17 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     setTag("wizard.outcome", "bailed");
     return;
   }
+
+  // Canary split (decided server-side via the DO worker's /route endpoint, so
+  // the percentage changes without a CLI release). Preamble/readiness/preflight
+  // already ran, so both transports share the same local context. The Mastra
+  // path below is the untouched production flow.
+  const transport = await resolveTransport();
+  if (transport.useAgentDo) {
+    await runViaAgentDO({ context, ui, agentDoUrl: transport.agentDoUrl });
+    return;
+  }
+  setTag("wizard.transport", "mastra");
 
   const tracingOptions = {
     traceId: randomBytes(16).toString("hex"),
