@@ -10,11 +10,7 @@ Make an authenticated API request
 
 ## Usage
 
-[Section titled “Usage”](#usage)
-
 ### `sentry api <endpoint>`
-
-[Section titled “sentry api <endpoint>”](#sentry-api-endpoint)
 
 Make an authenticated API request
 
@@ -42,70 +38,84 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-
 Endpoints are relative to `/api/0/` — the prefix is added automatically.
 
 ### GET requests
 
-[Section titled “GET requests”](#get-requests)
-Terminal window
+```bash
+# List organizations
+sentry api organizations/
 
-```
-# List organizationssentry api organizations/
-# Get a specific issuesentry api issues/123456789/
+
+# Get a specific issue
+sentry api issues/123456789/
 ```
 
 
 ### POST requests
 
-[Section titled “POST requests”](#post-requests)
-Terminal window
+```bash
+# Create a release
+sentry api organizations/my-org/releases/ \
+  -X POST -F version=1.0.0
 
-```
-# Create a releasesentry api organizations/my-org/releases/ \  -X POST -F version=1.0.0
-# With inline JSON bodysentry api issues/123456789/ \  -X POST -d '{"status": "resolved"}'
+
+# With inline JSON body
+sentry api issues/123456789/ \
+  -X POST -d '{"status": "resolved"}'
 ```
 
 
 ### PUT requests
 
-[Section titled “PUT requests”](#put-requests)
-Terminal window
+```bash
+# Update an issue status
+sentry api issues/123456789/ \
+  -X PUT -F status=resolved
 
-```
-# Update an issue statussentry api issues/123456789/ \  -X PUT -F status=resolved
-# Assign an issuesentry api issues/123456789/ \  -X PUT --field assignedTo="user@example.com"
+
+# Assign an issue
+sentry api issues/123456789/ \
+  -X PUT --field assignedTo="user@example.com"
 ```
 
 
 ### DELETE requests
 
-[Section titled “DELETE requests”](#delete-requests)
-Terminal window
-
-```
+```bash
 sentry api projects/my-org/my-project/ -X DELETE
 ```
 
 
 ### Advanced usage
 
-[Section titled “Advanced usage”](#advanced-usage)
-Terminal window
+```bash
+# Add custom headers
+sentry api organizations/ -H "X-Custom: value"
 
-```
-# Add custom headerssentry api organizations/ -H "X-Custom: value"
-# Read body from a filesentry api projects/my-org/my-project/releases/ -X POST --input release.json
-# Verbose mode (shows full HTTP request/response)sentry api organizations/ --verbose
-# Preview the request without sendingsentry api organizations/ --dry-run
+
+# Read body from a file
+sentry api projects/my-org/my-project/releases/ -X POST --input release.json
+
+
+# Verbose mode (shows full HTTP request/response)
+sentry api organizations/ --verbose
+
+
+# Preview the request without sending
+sentry api organizations/ --dry-run
 ```
 
 
 ### Dataset Names
 
-[Section titled “Dataset Names”](#dataset-names)
-
 When querying the Events API (`/events/` endpoint), valid dataset values are: `spans`, `transactions`, `logs`, `errors`, `discover`.
 
 For full API documentation, see the [Sentry API Reference](https://docs.sentry.io/api/).
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: alert](https://cli.sentry.dev/_preview/pr-main/commands/alert.md)
+- [Next: auth](https://cli.sentry.dev/_preview/pr-main/commands/auth.md)

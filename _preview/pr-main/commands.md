@@ -10,8 +10,6 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 
 ## Available Commands
 
-[Section titled “Available Commands”](#available-commands)
-
 | Command | Description |
 | --- | --- |
 | [`alert`](https://cli.sentry.dev/_preview/pr-main/commands/alert.md) | Manage Sentry alert rules |
@@ -48,8 +46,6 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 
 ## Global Options
 
-[Section titled “Global Options”](#global-options)
-
 All commands support the following global options:
 
 - `--help` - Show help for the command
@@ -59,28 +55,26 @@ All commands support the following global options:
 
 ## JSON Output
 
-[Section titled “JSON Output”](#json-output)
-
 Most list and view commands support `--json` flag for JSON output, making it easy to integrate with other tools:
 
-Terminal window
-
-```
+```bash
 sentry org list --json | jq '.[] | .slug'
 ```
 
 
 ## Opening in Browser
 
-[Section titled “Opening in Browser”](#opening-in-browser)
-
 View commands support `-w` or `--web` flag to open the resource in your browser:
 
-Terminal window
-
-```
+```bash
 sentry issue view PROJ-123 -w
 ```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Previous: Agent Guidance](https://cli.sentry.dev/_preview/pr-main/agent-guidance.md)
+- [Next: Exit Codes](https://cli.sentry.dev/_preview/pr-main/exit-codes.md)
 
 ## Pages in this section
 

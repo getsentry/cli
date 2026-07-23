@@ -10,11 +10,7 @@ Query aggregate event data (Explore)
 
 ## Usage
 
-[Section titled “Usage”](#usage)
-
 ### `sentry explore <target>`
-
-[Section titled “sentry explore <target>”](#sentry-explore-target)
 
 Query aggregate event data (Explore)
 
@@ -44,91 +40,105 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-
 ### Top errors (default)
 
-[Section titled “Top errors (default)”](#top-errors-default)
-Terminal window
+```bash
+# Top errors in the last 24 hours, scoped to a project
+sentry explore my-org/cli
 
-```
-# Top errors in the last 24 hours, scoped to a projectsentry explore my-org/cli
-# All projects in an orgsentry explore my-org/
-# Bare project slug (searches across orgs)sentry explore cli
-# Auto-detect from DSN/configsentry explore
+
+# All projects in an org
+sentry explore my-org/
+
+
+# Bare project slug (searches across orgs)
+sentry explore cli
+
+
+# Auto-detect from DSN/config
+sentry explore
 ```
 
 
 ### Spike analysis
 
-[Section titled “Spike analysis”](#spike-analysis)
-Terminal window
+```bash
+# Errors with user impact for a specific UTC window
+sentry explore my-org/cli -F title -F "count()" -F "count_unique(user)" \
+  --period "2024-01-15T00:00:00Z/2024-01-16T00:00:00Z"
 
-```
-# Errors with user impact for a specific UTC windowsentry explore my-org/cli -F title -F "count()" -F "count_unique(user)" \  --period "2024-01-15T00:00:00Z/2024-01-16T00:00:00Z"
-# Filter by specific error type (combines with auto-injected project filter)sentry explore my-org/cli -F title -F "count()" \  -q "error.type:TypeError" --period 1h
+
+# Filter by specific error type (combines with auto-injected project filter)
+sentry explore my-org/cli -F title -F "count()" \
+  -q "error.type:TypeError" --period 1h
 ```
 
 
 ### Span queries (performance)
 
-[Section titled “Span queries (performance)”](#span-queries-performance)
-Terminal window
+```bash
+# Span operation latency by route
+sentry explore my-org/cli -F span.op -F "p50(span.duration)" \
+  -F "p95(span.duration)" --dataset spans --period 1h
 
-```
-# Span operation latency by routesentry explore my-org/cli -F span.op -F "p50(span.duration)" \  -F "p95(span.duration)" --dataset spans --period 1h
-# Top spans by countsentry explore my-org/cli -F span.op -F "count()" \  --dataset spans --sort "-count()"
+
+# Top spans by count
+sentry explore my-org/cli -F span.op -F "count()" \
+  --dataset spans --sort "-count()"
 ```
 
 
 ### Metrics
 
-[Section titled “Metrics”](#metrics)
-
 Use `--metric` (`-m`) to query metrics by name. The CLI auto-resolves the metric's type and unit.
 
-Terminal window
+```bash
+# Sum a custom metric (e.g., LLM token usage) across an org
+sentry explore my-org/ -m llm.token_usage --dataset metrics --period 7d
 
-```
-# Sum a custom metric (e.g., LLM token usage) across an orgsentry explore my-org/ -m llm.token_usage --dataset metrics --period 7d
-# Break down by a tag column (e.g., model name)sentry explore my-org/seer -F gen_ai.request.model \  -m llm.token_usage --dataset metrics --period 7d
-# Use a different aggregation (default is sum)sentry explore my-org/ -m cache.hit_rate --agg avg --dataset metrics
+
+# Break down by a tag column (e.g., model name)
+sentry explore my-org/seer -F gen_ai.request.model \
+  -m llm.token_usage --dataset metrics --period 7d
+
+
+# Use a different aggregation (default is sum)
+sentry explore my-org/ -m cache.hit_rate --agg avg --dataset metrics
 ```
 
 
 You can also use the raw tracemetrics format: `aggregation(value,metric_name,metric_type,unit)`.
 
-Terminal window
-
-```
-sentry explore my-org/ \  -F "sum(value,llm.token_usage,distribution,none)" \  --dataset metrics --period 7d
+```bash
+sentry explore my-org/ \
+  -F "sum(value,llm.token_usage,distribution,none)" \
+  --dataset metrics --period 7d
 ```
 
 
 ### Logs
 
-[Section titled “Logs”](#logs)
-Terminal window
-
-```
-# Log severity counts in the last hoursentry explore my-org/cli -F severity -F "count()" \  --dataset logs --period 1h
+```bash
+# Log severity counts in the last hour
+sentry explore my-org/cli -F severity -F "count()" \
+  --dataset logs --period 1h
 ```
 
 
 ### JSON output for scripting
 
-[Section titled “JSON output for scripting”](#json-output-for-scripting)
-Terminal window
+```bash
+# Pipe to jq for filtering
+sentry explore my-org/cli -F title -F "count()" --json | jq '.data[:5]'
 
-```
-# Pipe to jq for filteringsentry explore my-org/cli -F title -F "count()" --json | jq '.data[:5]'
-# Get raw data for analysissentry explore my-org/cli -F title -F "count()" -F "count_unique(user)" \  --json --limit 100
+
+# Get raw data for analysis
+sentry explore my-org/cli -F title -F "count()" -F "count_unique(user)" \
+  --json --limit 100
 ```
 
 
 ## Target Patterns
-
-[Section titled “Target Patterns”](#target-patterns)
 
 | Target | Behavior |
 | --- | --- |
@@ -136,3 +146,10 @@ Terminal window
 | `<org>/` | All projects in org (no project filter) |
 | `<project>` | Searches for project across all accessible orgs |
 | (omitted) | Auto-detect from DSN/config |
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: event](https://cli.sentry.dev/_preview/pr-main/commands/event.md)
+- [Next: info](https://cli.sentry.dev/_preview/pr-main/commands/info.md)

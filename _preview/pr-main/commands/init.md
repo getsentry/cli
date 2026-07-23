@@ -10,11 +10,7 @@ Initialize Sentry in your project (experimental)
 
 ## Usage
 
-[Section titled “Usage”](#usage)
-
 ### `sentry init <target> <directory>`
-
-[Section titled “sentry init <target> <directory>”](#sentry-init-target-directory)
 
 Initialize Sentry in your project (experimental)
 
@@ -44,24 +40,41 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
+```bash
+# Interactive setup
+sentry init
 
-```
-# Interactive setupsentry init
-# Non-interactive agent/CI setupsentry init --yes --features errors,tracing,replay
-# Dry run to preview changessentry init --dry-run
-# Target a subdirectorysentry init ./my-app
-# Use a specific org (auto-detect project)sentry init acme/
-# Use a specific org and projectsentry init acme/my-app
-# Assign a team when creating a new projectsentry init acme/ --team backend
-# Enable specific featuressentry init --features profiling,replay
+
+# Non-interactive agent/CI setup
+sentry init --yes --features errors,tracing,replay
+
+
+# Dry run to preview changes
+sentry init --dry-run
+
+
+# Target a subdirectory
+sentry init ./my-app
+
+
+# Use a specific org (auto-detect project)
+sentry init acme/
+
+
+# Use a specific org and project
+sentry init acme/my-app
+
+
+# Assign a team when creating a new project
+sentry init acme/ --team backend
+
+
+# Enable specific features
+sentry init --features profiling,replay
 ```
 
 
 ## Target Syntax
-
-[Section titled “Target Syntax”](#target-syntax)
 
 | Syntax | Meaning |
 | --- | --- |
@@ -73,8 +86,6 @@ Terminal window
 Path-like arguments (starting with `.`, `/`, or `~`) are always treated as the directory. The order of target and directory can be swapped — the CLI will auto-correct with a warning.
 
 ## Available Features
-
-[Section titled “Available Features”](#available-features)
 
 | Feature | Description |
 | --- | --- |
@@ -91,17 +102,20 @@ Path-like arguments (starting with `.`, `/`, or `~`) are always treated as the d
 
 ## What the Wizard Does
 
-[Section titled “What the Wizard Does”](#what-the-wizard-does)
-
 1. **Detects your framework** — scans your project files to identify the platform and framework
 2. **Installs the SDK** — adds the appropriate Sentry SDK package to your project
 3. **Instruments your code** — configures error monitoring, tracing, and any selected features
 
 ### Supported Platforms
 
-[Section titled “Supported Platforms”](#supported-platforms)
-
 - **JavaScript / TypeScript** — Next.js, Express, SvelteKit, React
 - **Python** — Flask, FastAPI
 
 More platforms and frameworks are coming soon.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: info](https://cli.sentry.dev/_preview/pr-main/commands/info.md)
+- [Next: issue](https://cli.sentry.dev/_preview/pr-main/commands/issue.md)

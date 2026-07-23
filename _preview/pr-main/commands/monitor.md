@@ -10,11 +10,7 @@ Work with Sentry cron monitors
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry monitor run <monitor-slug command...>`
-
-[Section titled “sentry monitor run <monitor-slug command...>”](#sentry-monitor-run-monitor-slug-command)
 
 Wrap a command with cron monitor check-ins
 
@@ -39,8 +35,6 @@ Wrap a command with cron monitor check-ins
 
 ### `sentry monitor list <org/project>`
 
-[Section titled “sentry monitor list <org/project>”](#sentry-monitor-list-orgproject)
-
 List cron monitors
 
 **Arguments:**
@@ -61,21 +55,40 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
+```bash
+# Wrap a command with cron monitor check-ins (DSN-based)
+SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0 \
+  sentry monitor run nightly-job -- python manage.py cron
 
-```
-# Wrap a command with cron monitor check-ins (DSN-based)SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0 \  sentry monitor run nightly-job -- python manage.py cron
-# The -- separator is optional when the command has no flagssentry monitor run nightly-job npm run task
-# Create/update the monitor on the first check-in via --schedule (crontab)sentry monitor run nightly-job -s "0 0 * * *" --max-runtime 30 --timezone UTC -- ./backup.sh
-# List cron monitors in an orgsentry monitor list my-org/
-# Paginate through monitorssentry monitor list my-org/ -c next
-# Output as JSONsentry monitor list --json
+
+# The -- separator is optional when the command has no flags
+sentry monitor run nightly-job npm run task
+
+
+# Create/update the monitor on the first check-in via --schedule (crontab)
+sentry monitor run nightly-job -s "0 0 * * *" --max-runtime 30 --timezone UTC -- ./backup.sh
+
+
+# List cron monitors in an org
+sentry monitor list my-org/
+
+
+# Paginate through monitors
+sentry monitor list my-org/ -c next
+
+
+# Output as JSON
+sentry monitor list --json
 ```
 
 
 ## Check-in lifecycle
 
-[Section titled “Check-in lifecycle”](#check-in-lifecycle)
-
 `monitor run` sends an `in_progress` check-in when the wrapped command starts, then an `ok` or `error` check-in (with duration) when it finishes, based on the exit code. The wrapped command inherits stdio, has `SIGINT`/`SIGTERM` forwarded, receives the `SENTRY_MONITOR_SLUG` environment variable, and its exit code is preserved. Check-in delivery failures are non-fatal — the wrapped command still runs and exits with its own code.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: log](https://cli.sentry.dev/_preview/pr-main/commands/log.md)
+- [Next: org](https://cli.sentry.dev/_preview/pr-main/commands/org.md)

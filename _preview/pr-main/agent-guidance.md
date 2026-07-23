@@ -10,8 +10,6 @@ Best practices and operational guidance for AI coding agents using the Sentry CL
 
 ## Key Principles
 
-[Section titled “Key Principles”](#key-principles)
-
 - **Just run the command** — the CLI handles authentication and org/project detection automatically. Don't pre-authenticate or look up org/project before running commands. If auth is needed, the CLI prompts interactively.
 - **Prefer CLI commands over raw API calls** — the CLI has dedicated commands for most tasks. Reach for `sentry issue view`, `sentry issue list`, `sentry trace view`, etc. before constructing API calls manually or fetching external documentation.
 - **Use `sentry schema` to explore the API** — if you need to discover API endpoints, run `sentry schema` to browse interactively or `sentry schema <resource>` to search. This is faster than fetching OpenAPI specs externally.
@@ -21,16 +19,12 @@ Best practices and operational guidance for AI coding agents using the Sentry CL
 
 ## Design Principles
 
-[Section titled “Design Principles”](#design-principles)
-
 The `sentry` CLI follows conventions from well-known tools — if you're familiar with them, that knowledge transfers directly:
 
 - **`gh` (GitHub CLI) conventions**: The `sentry` CLI uses the same `<noun> <verb>` command pattern (e.g., `sentry issue list`, `sentry org view`). Flags follow `gh` conventions: `--json` for machine-readable output, `--fields` to select specific fields, `-w`/`--web` to open in browser, `-q`/`--query` for filtering, `-n`/`--limit` for result count.
 - **`sentry api` mimics `curl`**: The `sentry api` command provides direct API access with a `curl`-like interface — `--method` for HTTP method, `--data` for request body, `--header` for custom headers. It handles authentication automatically. If you know how to call a REST API with `curl`, the same patterns apply.
 
 ## Context Window Tips
-
-[Section titled “Context Window Tips”](#context-window-tips)
 
 - Use `--json --fields` to select specific fields and reduce output size. Run `<command> --help` to see available fields. Example: `sentry issue list --json --fields shortId,title,priority,level,status`
 - Use `--json` when piping output between commands or processing programmatically
@@ -40,16 +34,12 @@ The `sentry` CLI follows conventions from well-known tools — if you're familia
 
 ## Safety Rules
 
-[Section titled “Safety Rules”](#safety-rules)
-
 - Always confirm with the user before running destructive commands: `project delete`, `trial start`
 - For mutations, verify the org/project context looks correct in the command output before proceeding with further changes
 - Never store or log authentication tokens — the CLI manages credentials automatically
 - If the CLI reports the wrong org/project, override with explicit `<org>/<project>` arguments
 
 ## Exit Codes
-
-[Section titled “Exit Codes”](#exit-codes)
 
 The CLI uses semantic exit codes. Key ranges for agents:
 
@@ -67,80 +57,118 @@ See [Exit Codes](/exit-codes/) for the complete reference.
 
 ## Workflow Patterns
 
-[Section titled “Workflow Patterns”](#workflow-patterns)
-
 ### Investigate an Issue
 
-[Section titled “Investigate an Issue”](#investigate-an-issue)
-Terminal window
+```bash
+# 1. Find the issue (auto-detects org/project from DSN or config)
+sentry issue list --query "is:unresolved" --limit 5
 
-```
-# 1. Find the issue (auto-detects org/project from DSN or config)sentry issue list --query "is:unresolved" --limit 5
-# 2. Get detailssentry issue view PROJECT-123
-# 3. Get AI root cause analysissentry issue explain PROJECT-123
-# 4. Get a fix plansentry issue plan PROJECT-123
+
+# 2. Get details
+sentry issue view PROJECT-123
+
+
+# 3. Get AI root cause analysis
+sentry issue explain PROJECT-123
+
+
+# 4. Get a fix plan
+sentry issue plan PROJECT-123
 ```
 
 
 ### Explore Traces and Performance
 
-[Section titled “Explore Traces and Performance”](#explore-traces-and-performance)
-Terminal window
+```bash
+# 1. List recent traces (auto-detects org/project)
+sentry trace list --limit 5
 
-```
-# 1. List recent traces (auto-detects org/project)sentry trace list --limit 5
-# 2. View a specific trace with span treesentry trace view abc123def456...
-# 3. View spans for a tracesentry span list abc123def456...
-# 4. View logs associated with a tracesentry trace logs abc123def456...
+
+# 2. View a specific trace with span tree
+sentry trace view abc123def456...
+
+
+# 3. View spans for a trace
+sentry span list abc123def456...
+
+
+# 4. View logs associated with a trace
+sentry trace logs abc123def456...
 ```
 
 
 ### Stream Logs
 
-[Section titled “Stream Logs”](#stream-logs)
-Terminal window
+```bash
+# Stream logs in real-time (auto-detects org/project)
+sentry log list --follow
 
-```
-# Stream logs in real-time (auto-detects org/project)sentry log list --follow
-# Filter logs by severitysentry log list --query "severity:error"
+
+# Filter logs by severity
+sentry log list --query "severity:error"
 ```
 
 
 ### Capture Events Locally (Spotlight)
 
-[Section titled “Capture Events Locally (Spotlight)”](#capture-events-locally-spotlight)
-Terminal window
+```bash
+# Run the app with the local server auto-enabled; tail errors/traces/logs.
+# No DSN needed — with no DSN, events go ONLY to the local server (nothing
+# reaches the user's Sentry org, no production quota). With a DSN set, the
+# SDK sends to both.
+sentry local run -- npm run dev          # or: python manage.py runserver, etc.
 
-```
-# Run the app with the local server auto-enabled; tail errors/traces/logs.# No DSN needed — with no DSN, events go ONLY to the local server (nothing# reaches the user's Sentry org, no production quota). With a DSN set, the# SDK sends to both.sentry local run -- npm run dev          # or: python manage.py runserver, etc.
-# Watch only AI/agent (gen_ai, mcp) spans while iterating on an agent.sentry local -f ai
-# Server-side SDKs read SENTRY_SPOTLIGHT automatically. The CLI also injects# the URL under every framework client prefix (NEXT_PUBLIC_, VITE_, PUBLIC_,# NUXT_PUBLIC_, REACT_APP_, VUE_APP_, GATSBY_). Until the browser SDK reads# these automatically (getsentry/sentry-javascript#18198), reference the var# matching your framework in the client config:# Sentry.init({ spotlight: process.env.NEXT_PUBLIC_SENTRY_SPOTLIGHT ?? false })
+
+# Watch only AI/agent (gen_ai, mcp) spans while iterating on an agent.
+sentry local -f ai
+
+
+# Server-side SDKs read SENTRY_SPOTLIGHT automatically. The CLI also injects
+# the URL under every framework client prefix (NEXT_PUBLIC_, VITE_, PUBLIC_,
+# NUXT_PUBLIC_, REACT_APP_, VUE_APP_, GATSBY_). Until the browser SDK reads
+# these automatically (getsentry/sentry-javascript#18198), reference the var
+# matching your framework in the client config:
+# Sentry.init({ spotlight: process.env.NEXT_PUBLIC_SENTRY_SPOTLIGHT ?? false })
 ```
 
 
 ### Explore the API Schema
 
-[Section titled “Explore the API Schema”](#explore-the-api-schema)
-Terminal window
+```bash
+# Browse all API resource categories
+sentry schema
 
-```
-# Browse all API resource categoriessentry schema
-# Search for endpoints related to a resourcesentry schema issues
-# Get details about a specific endpointsentry schema "GET /api/0/organizations/{organization_id_or_slug}/issues/"
+
+# Search for endpoints related to a resource
+sentry schema issues
+
+
+# Get details about a specific endpoint
+sentry schema "GET /api/0/organizations/{organization_id_or_slug}/issues/"
 ```
 
 
 ### Manage Releases
 
-[Section titled “Manage Releases”](#manage-releases)
-Terminal window
+```bash
+# Create a release — version must match Sentry.init({ release }) exactly
+sentry release create my-org/1.0.0 --project my-project
 
-```
-# Create a release — version must match Sentry.init({ release }) exactlysentry release create my-org/1.0.0 --project my-project
-# Associate commits via repository integration (needs local git checkout)sentry release set-commits my-org/1.0.0 --auto
-# Or read commits from local git history (no integration needed)sentry release set-commits my-org/1.0.0 --local
-# Mark the release as finalizedsentry release finalize my-org/1.0.0
-# Record a production deploysentry release deploy my-org/1.0.0 production
+
+# Associate commits via repository integration (needs local git checkout)
+sentry release set-commits my-org/1.0.0 --auto
+
+
+# Or read commits from local git history (no integration needed)
+sentry release set-commits my-org/1.0.0 --local
+
+
+# Mark the release as finalized
+sentry release finalize my-org/1.0.0
+
+
+# Record a production deploy
+sentry release deploy my-org/1.0.0 production
 ```
 
 
@@ -153,18 +181,17 @@ Terminal window
 
 ### Arbitrary API Access
 
-[Section titled “Arbitrary API Access”](#arbitrary-api-access)
-Terminal window
+```bash
+# GET request (default)
+sentry api /api/0/organizations/my-org/
 
-```
-# GET request (default)sentry api /api/0/organizations/my-org/
-# POST request with datasentry api /api/0/organizations/my-org/projects/ --method POST --data '{"name":"new-project","platform":"python"}'
+
+# POST request with data
+sentry api /api/0/organizations/my-org/projects/ --method POST --data '{"name":"new-project","platform":"python"}'
 ```
 
 
 ## Dashboard Layout
-
-[Section titled “Dashboard Layout”](#dashboard-layout)
 
 Sentry dashboards use a **6-column grid**. When adding widgets, aim to fill complete rows (widths should sum to 6).
 
@@ -193,10 +220,26 @@ Available datasets: `spans` (default), `tracemetrics`, `discover`, `issue`, `err
 
 **Row-filling examples:**
 
-Terminal window
+```bash
+# 3 KPIs filling one row (2+2+2 = 6)
+sentry dashboard widget add <dashboard> "Error Count" --display big_number --query count
+sentry dashboard widget add <dashboard> "P95 Duration" --display big_number --query p95:span.duration
+sentry dashboard widget add <dashboard> "Throughput" --display big_number --query epm
 
+
+# 2 charts filling one row (3+3 = 6)
+sentry dashboard widget add <dashboard> "Errors Over Time" --display line --query count
+sentry dashboard widget add <dashboard> "Latency Over Time" --display line --query p95:span.duration
+
+
+# Full-width table (6 = 6)
+sentry dashboard widget add <dashboard> "Top Endpoints" --display table \
+  --query count --query p95:span.duration \
+  --group-by transaction --sort -count --limit 10
 ```
-# 3 KPIs filling one row (2+2+2 = 6)sentry dashboard widget add <dashboard> "Error Count" --display big_number --query countsentry dashboard widget add <dashboard> "P95 Duration" --display big_number --query p95:span.durationsentry dashboard widget add <dashboard> "Throughput" --display big_number --query epm
-# 2 charts filling one row (3+3 = 6)sentry dashboard widget add <dashboard> "Errors Over Time" --display line --query countsentry dashboard widget add <dashboard> "Latency Over Time" --display line --query p95:span.duration
-# Full-width table (6 = 6)sentry dashboard widget add <dashboard> "Top Endpoints" --display table \  --query count --query p95:span.duration \  --group-by transaction --sort -count --limit 10
-```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Previous: Contributing](https://cli.sentry.dev/_preview/pr-main/contributing.md)
+- [Next: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)

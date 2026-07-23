@@ -10,11 +10,7 @@ Manage product trials
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry trial list <org>`
-
-[Section titled “sentry trial list <org>”](#sentry-trial-list-org)
 
 List product trials
 
@@ -25,8 +21,6 @@ List product trials
 | `<org>` | Organization slug (auto-detected if omitted) |
 
 ### `sentry trial start <name> <org>`
-
-[Section titled “sentry trial start <name> <org>”](#sentry-trial-start-name-org)
 
 Start a product trial
 
@@ -41,13 +35,29 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
+```bash
+# List all trials for the current org
+sentry trial list
 
+
+# List trials for a specific org
+sentry trial list my-org
+
+
+# Start a Seer trial
+sentry trial start seer
+
+
+# Start a trial for a specific org
+sentry trial start replays my-org
+
+
+# Start a Business plan trial (opens browser)
+sentry trial start plan
 ```
-# List all trials for the current orgsentry trial list
-# List trials for a specific orgsentry trial list my-org
-# Start a Seer trialsentry trial start seer
-# Start a trial for a specific orgsentry trial start replays my-org
-# Start a Business plan trial (opens browser)sentry trial start plan
-```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: trace](https://cli.sentry.dev/_preview/pr-main/commands/trace.md)

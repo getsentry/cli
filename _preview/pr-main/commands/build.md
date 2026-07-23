@@ -10,11 +10,7 @@ Manage mobile build artifacts
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry build upload <path...>`
-
-[Section titled “sentry build upload <path...>”](#sentry-build-upload-path)
 
 Upload builds to a project
 
@@ -44,8 +40,6 @@ Upload builds to a project
 
 ### `sentry build download <build-id>`
 
-[Section titled “sentry build download <build-id>”](#sentry-build-download-build-id)
-
 Download a build artifact
 
 **Arguments:**
@@ -64,24 +58,42 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
+```bash
+# Upload an Android build (APK or AAB) for size analysis
+sentry build upload ./app-release.apk
 
-```
-# Upload an Android build (APK or AAB) for size analysissentry build upload ./app-release.apk
-# Upload an iOS build (XCArchive directory or IPA)sentry build upload ./MyApp.xcarchivesentry build upload ./MyApp.ipa
-# Upload with a build configuration and release notessentry build upload ./app.aab --build-configuration Release --release-notes "Nightly"
-# Tag a build with install groups (repeatable)sentry build upload ./app.aab --install-group qa --install-group beta
-# Attach explicit git metadata (otherwise auto-collected in CI)sentry build upload ./app.aab --head-sha "$GIT_SHA" --pr-number 42 --base-ref main
-# Download a build artifact by IDsentry build download 1234567890
-# Download to a specific pathsentry build download 1234567890 --output ./app.ipa
-# Output the result as JSONsentry build download 1234567890 --json
+
+# Upload an iOS build (XCArchive directory or IPA)
+sentry build upload ./MyApp.xcarchive
+sentry build upload ./MyApp.ipa
+
+
+# Upload with a build configuration and release notes
+sentry build upload ./app.aab --build-configuration Release --release-notes "Nightly"
+
+
+# Tag a build with install groups (repeatable)
+sentry build upload ./app.aab --install-group qa --install-group beta
+
+
+# Attach explicit git metadata (otherwise auto-collected in CI)
+sentry build upload ./app.aab --head-sha "$GIT_SHA" --pr-number 42 --base-ref main
+
+
+# Download a build artifact by ID
+sentry build download 1234567890
+
+
+# Download to a specific path
+sentry build download 1234567890 --output ./app.ipa
+
+
+# Output the result as JSON
+sentry build download 1234567890 --json
 ```
 
 
 ## Important Notes
-
-[Section titled “Important Notes”](#important-notes)
 
 - `build upload` supports **Android APK/AAB** and **iOS XCArchive/IPA**. An
   XCArchive is a directory; an IPA is converted to an XCArchive layout for
@@ -105,3 +117,10 @@ Terminal window
   `preprod_artifact_<build-id>.<ext>` in the current directory.
 - The organization is resolved from `--org`, `SENTRY_ORG`, config defaults, or a
   detected DSN.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: auth](https://cli.sentry.dev/_preview/pr-main/commands/auth.md)
+- [Next: cli](https://cli.sentry.dev/_preview/pr-main/commands/cli.md)

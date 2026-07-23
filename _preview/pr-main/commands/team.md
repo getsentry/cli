@@ -10,11 +10,7 @@ Work with Sentry teams
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry team list <org/project>`
-
-[Section titled “sentry team list <org/project>”](#sentry-team-list-orgproject)
 
 List teams
 
@@ -36,11 +32,22 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
+```bash
+# List teams
+sentry team list my-org/
 
+
+# Paginate through teams
+sentry team list my-org/ -c next
+
+
+# Output as JSON
+sentry team list --json
 ```
-# List teamssentry team list my-org/
-# Paginate through teamssentry team list my-org/ -c next
-# Output as JSONsentry team list --json
-```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: span](https://cli.sentry.dev/_preview/pr-main/commands/span.md)
+- [Next: trace](https://cli.sentry.dev/_preview/pr-main/commands/trace.md)

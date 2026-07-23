@@ -10,11 +10,7 @@ Print configuration and verify authentication
 
 ## Usage
 
-[Section titled “Usage”](#usage)
-
 ### `sentry info`
-
-[Section titled “sentry info”](#sentry-info)
 
 Print configuration and verify authentication
 
@@ -28,18 +24,22 @@ Print configuration and verify authentication
 All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
 
 ## Examples
-Terminal window
 
-```
-# Print the resolved config and verify authenticationsentry info
-# Verify only authentication (don't require a default org/project)sentry info --no-defaults
-# Machine-readable status for external tooling (always exits 0)sentry info --config-status-json
+```bash
+# Print the resolved config and verify authentication
+sentry info
+
+
+# Verify only authentication (don't require a default org/project)
+sentry info --no-defaults
+
+
+# Machine-readable status for external tooling (always exits 0)
+sentry info --config-status-json
 ```
 
 
 ## Important Notes
-
-[Section titled “Important Notes”](#important-notes)
 
 - `info` prints the resolved Sentry server URL and the default organization and
   project, then verifies your credentials against the server.
@@ -51,3 +51,10 @@ Terminal window
 - `--config-status-json` emits a JSON status object (`config`, `auth`,
   `have_dsn`) for external tooling and **always exits 0** — it is a status
   report, not a check. For general machine-readable output use `--json`.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: explore](https://cli.sentry.dev/_preview/pr-main/commands/explore.md)
+- [Next: init](https://cli.sentry.dev/_preview/pr-main/commands/init.md)

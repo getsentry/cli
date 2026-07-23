@@ -10,21 +10,15 @@ AI coding agents like Claude Code — and any agent that reads skills from `~/.a
 
 ## Automatic Installation
 
-[Section titled “Automatic Installation”](#automatic-installation)
-
 When you install the CLI (via `curl`, Homebrew, or a package manager), `sentry cli setup` automatically installs agent skills into any detected agent root directories (`~/.claude`, `~/.agents`). Skills are also refreshed on `sentry cli upgrade`. No network fetch is needed — skill files are embedded in the binary.
 
 To skip automatic skill installation, pass `--no-agent-skills` to `sentry cli setup`.
 
 ## Manual Installation
 
-[Section titled “Manual Installation”](#manual-installation)
-
 Add the Sentry CLI skill to your agent manually:
 
-Terminal window
-
-```
+```bash
 npx skills add https://cli.sentry.dev
 ```
 
@@ -32,8 +26,6 @@ npx skills add https://cli.sentry.dev
 This registers the Sentry CLI as a skill that your agent can invoke when needed.
 
 ## Capabilities
-
-[Section titled “Capabilities”](#capabilities)
 
 With this skill, agents can:
 
@@ -46,8 +38,6 @@ With this skill, agents can:
 - **Authenticate** - Help you set up CLI authentication
 
 ## How It Works
-
-[Section titled “How It Works”](#how-it-works)
 
 When you ask your agent about Sentry errors or want to investigate an issue, the agent uses CLI commands to fetch real data from your Sentry account. For example:
 
@@ -62,7 +52,11 @@ The skill uses your existing CLI authentication, so you'll need to run `sentry a
 
 ## Requirements
 
-[Section titled “Requirements”](#requirements)
-
 - An authenticated Sentry CLI installation (`sentry auth login`)
 - An AI coding agent that supports the skills system (e.g., Claude Code, or any agent that reads from `~/.agents` such as Cursor)
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Previous: Library Usage](https://cli.sentry.dev/_preview/pr-main/library-usage.md)
+- [Next: Contributing](https://cli.sentry.dev/_preview/pr-main/contributing.md)

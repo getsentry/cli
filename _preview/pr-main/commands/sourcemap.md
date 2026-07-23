@@ -10,11 +10,7 @@ Manage sourcemaps
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry sourcemap inject <directory>`
-
-[Section titled “sentry sourcemap inject <directory>”](#sentry-sourcemap-inject-directory)
 
 Inject debug IDs into JavaScript files and sourcemaps
 
@@ -35,8 +31,6 @@ Inject debug IDs into JavaScript files and sourcemaps
 | `--allow-empty` | Exit successfully when no JS + sourcemap pairs are found (default: error out to catch silent build misconfigurations) |
 
 ### `sentry sourcemap upload <directory>`
-
-[Section titled “sentry sourcemap upload <directory>”](#sentry-sourcemap-upload-directory)
 
 Upload sourcemaps to Sentry
 
@@ -63,8 +57,6 @@ Upload sourcemaps to Sentry
 
 ### `sentry sourcemap resolve <directory>`
 
-[Section titled “sentry sourcemap resolve <directory>”](#sentry-sourcemap-resolve-directory)
-
 Resolve and report sourcemap linkage for JavaScript files
 
 **Arguments:**
@@ -85,40 +77,48 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-
 ### Inject debug IDs
 
-[Section titled “Inject debug IDs”](#inject-debug-ids)
-Terminal window
+```bash
+# Inject debug IDs into all JS files in dist/
+sentry sourcemap inject ./dist
 
-```
-# Inject debug IDs into all JS files in dist/sentry sourcemap inject ./dist
-# Preview changes without writingsentry sourcemap inject ./dist --dry-run
-# Only process specific extensionssentry sourcemap inject ./build --ext .js,.mjs
+
+# Preview changes without writing
+sentry sourcemap inject ./dist --dry-run
+
+
+# Only process specific extensions
+sentry sourcemap inject ./build --ext .js,.mjs
 ```
 
 
 ### Upload sourcemaps
 
-[Section titled “Upload sourcemaps”](#upload-sourcemaps)
-Terminal window
+```bash
+# Upload sourcemaps from dist/
+sentry sourcemap upload ./dist
 
-```
-# Upload sourcemaps from dist/sentry sourcemap upload ./dist
-# Associate with a releasesentry sourcemap upload ./dist --release 1.0.0
-# Set a custom URL prefixsentry sourcemap upload ./dist --url-prefix '~/static/js/'
+
+# Associate with a release
+sentry sourcemap upload ./dist --release 1.0.0
+
+
+# Set a custom URL prefix
+sentry sourcemap upload ./dist --url-prefix '~/static/js/'
 ```
 
 
 ### Resolve sourcemap linkage
 
-[Section titled “Resolve sourcemap linkage”](#resolve-sourcemap-linkage)
-Terminal window
+```bash
+# Report how each JS file's sourcemap resolves and whether a debug ID
+# has been injected (read-only — never modifies files)
+sentry sourcemap resolve ./dist
 
-```
-# Report how each JS file's sourcemap resolves and whether a debug ID# has been injected (read-only — never modifies files)sentry sourcemap resolve ./dist
-# Machine-readable outputsentry sourcemap resolve ./dist --json
+
+# Machine-readable output
+sentry sourcemap resolve ./dist --json
 ```
 
 
@@ -126,21 +126,29 @@ Use `sentry sourcemap resolve` to debug why `sentry sourcemap upload` may not fi
 
 ## Error handling
 
-[Section titled “Error handling”](#error-handling)
-
 Both `sentry sourcemap inject` and `sentry sourcemap upload` exit with an error if zero JS + sourcemap pairs are discovered in the target directory. This catches silent bundler misconfigurations — the most common cause is a bundler that isn't emitting `.map` files:
 
-```
-# Vite / Astro: set `vite.build.sourcemap: "hidden"` (Astro 5) or# `vite.environments.client.build.sourcemap: "hidden"` (Astro 6+).
+```plaintext
+# Vite / Astro: set `vite.build.sourcemap: "hidden"` (Astro 5) or
+# `vite.environments.client.build.sourcemap: "hidden"` (Astro 6+).
+
+
 # webpack: set `devtool: "hidden-source-map"`.
+
+
 # esbuild: set `sourcemap: true` or `sourcemap: "linked"`.
 ```
 
 
 For CI steps that may run against legitimately-empty directories (e.g., library-only repos, conditional release skips), pass `--allow-empty` to suppress the error:
 
-Terminal window
-
-```
+```bash
 sentry sourcemap upload ./dist --allow-empty
 ```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: snapshots](https://cli.sentry.dev/_preview/pr-main/commands/snapshots.md)
+- [Next: span](https://cli.sentry.dev/_preview/pr-main/commands/span.md)

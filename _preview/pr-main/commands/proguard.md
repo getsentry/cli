@@ -10,11 +10,7 @@ Work with ProGuard/R8 mapping files
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry proguard upload <path...>`
-
-[Section titled “sentry proguard upload <path...>”](#sentry-proguard-upload-path)
 
 Upload ProGuard/R8 mapping files to Sentry
 
@@ -34,8 +30,6 @@ Upload ProGuard/R8 mapping files to Sentry
 
 ### `sentry proguard uuid <path>`
 
-[Section titled “sentry proguard uuid <path>”](#sentry-proguard-uuid-path)
-
 Compute the UUID for a ProGuard mapping file
 
 **Arguments:**
@@ -48,21 +42,27 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
+```bash
+# Compute the UUID for a ProGuard/R8 mapping file
+sentry proguard uuid ./app/build/outputs/mapping/release/mapping.txt
 
-```
-# Compute the UUID for a ProGuard/R8 mapping filesentry proguard uuid ./app/build/outputs/mapping/release/mapping.txt
-# Output as JSON (includes the file path)sentry proguard uuid mapping.txt --json
+
+# Output as JSON (includes the file path)
+sentry proguard uuid mapping.txt --json
 ```
 
 
 ## Important Notes
-
-[Section titled “Important Notes”](#important-notes)
 
 - The UUID is **deterministically derived from the mapping file contents** —
   identical files always produce the same UUID. This is the same value
   Sentry uses to associate a mapping with obfuscated Android stack traces.
 - This matches the UUID computed by the legacy `sentry-cli proguard uuid`
   command byte-for-byte.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: org](https://cli.sentry.dev/_preview/pr-main/commands/org.md)
+- [Next: project](https://cli.sentry.dev/_preview/pr-main/commands/project.md)

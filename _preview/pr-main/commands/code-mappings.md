@@ -10,11 +10,7 @@ Manage code mappings for stack trace linking
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry code-mappings upload <path>`
-
-[Section titled “sentry code-mappings upload <path>”](#sentry-code-mappings-upload-path)
 
 Upload code mappings for stack trace linking
 
@@ -35,33 +31,46 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
+```bash
+# Upload code mappings from a JSON file
+sentry code-mappings upload mappings.json
 
-```
-# Upload code mappings from a JSON filesentry code-mappings upload mappings.json
-# Specify repository explicitlysentry code-mappings upload mappings.json --repo owner/repo
-# Specify repository and default branchsentry code-mappings upload mappings.json --repo owner/repo --default-branch develop
-# Output as JSONsentry code-mappings upload mappings.json --json
+
+# Specify repository explicitly
+sentry code-mappings upload mappings.json --repo owner/repo
+
+
+# Specify repository and default branch
+sentry code-mappings upload mappings.json --repo owner/repo --default-branch develop
+
+
+# Output as JSON
+sentry code-mappings upload mappings.json --json
 ```
 
 
 ## Input Format
 
-[Section titled “Input Format”](#input-format)
-
 The JSON file must contain an array of objects with `stackRoot` and `sourceRoot`:
 
-```
-[  { "stackRoot": "com/example/module", "sourceRoot": "src/main/java/com/example/module" },  { "stackRoot": "com/example/other", "sourceRoot": "src/main/java/com/example/other" }]
+```json
+[
+  { "stackRoot": "com/example/module", "sourceRoot": "src/main/java/com/example/module" },
+  { "stackRoot": "com/example/other", "sourceRoot": "src/main/java/com/example/other" }
+]
 ```
 
 
 ## Important Notes
 
-[Section titled “Important Notes”](#important-notes)
-
 - Repository name and default branch are **auto-detected** from git remotes if
   not provided via `--repo` and `--default-branch`.
 - Requires an Organization Token with `org:ci` scope.
 - Mappings are uploaded in batches of 300 per API request.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: cli](https://cli.sentry.dev/_preview/pr-main/commands/cli.md)
+- [Next: dart-symbol-map](https://cli.sentry.dev/_preview/pr-main/commands/dart-symbol-map.md)

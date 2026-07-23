@@ -10,11 +10,7 @@ CLI-related commands
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry cli defaults <key value...>`
-
-[Section titled “sentry cli defaults <key value...>”](#sentry-cli-defaults-key-value)
 
 View and manage default settings
 
@@ -34,8 +30,6 @@ View and manage default settings
 
 ### `sentry cli feedback <message...>`
 
-[Section titled “sentry cli feedback <message...>”](#sentry-cli-feedback-message)
-
 Send feedback about the CLI
 
 **Arguments:**
@@ -46,8 +40,6 @@ Send feedback about the CLI
 
 ### `sentry cli fix`
 
-[Section titled “sentry cli fix”](#sentry-cli-fix)
-
 Diagnose and repair CLI database issues
 
 **Options:**
@@ -57,8 +49,6 @@ Diagnose and repair CLI database issues
 | `--dry-run` | Show what would be fixed without making changes |
 
 ### `sentry cli import`
-
-[Section titled “sentry cli import”](#sentry-cli-import)
 
 Import settings from legacy .sentryclirc files
 
@@ -72,8 +62,6 @@ Import settings from legacy .sentryclirc files
 | `--skip-validation` | Skip token validation against the Sentry API |
 
 ### `sentry cli setup`
-
-[Section titled “sentry cli setup”](#sentry-cli-setup)
 
 Configure shell integration
 
@@ -91,8 +79,6 @@ Configure shell integration
 
 ### `sentry cli uninstall`
 
-[Section titled “sentry cli uninstall”](#sentry-cli-uninstall)
-
 Uninstall Sentry CLI
 
 **Options:**
@@ -105,8 +91,6 @@ Uninstall Sentry CLI
 | `-n, --dry-run` | Show what would happen without making changes |
 
 ### `sentry cli upgrade <version>`
-
-[Section titled “sentry cli upgrade <version>”](#sentry-cli-upgrade-version)
 
 Update the Sentry CLI to the latest version
 
@@ -129,44 +113,49 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-
 ### Check for updates
 
-[Section titled “Check for updates”](#check-for-updates)
-Terminal window
-
-```
+```bash
 sentry cli upgrade --check
 ```
 
 
-```
-Installation method: curlCurrent version: 0.4.0Channel: stableLatest version: 0.5.0
+```plaintext
+Installation method: curl
+Current version: 0.4.0
+Channel: stable
+Latest version: 0.5.0
+
+
 Run 'sentry cli upgrade' to update.
 ```
 
 
 ### Upgrade
 
-[Section titled “Upgrade”](#upgrade)
-Terminal window
+```bash
+# Upgrade to latest stable
+sentry cli upgrade
 
-```
-# Upgrade to latest stablesentry cli upgrade
-# Upgrade to a specific versionsentry cli upgrade 0.5.0
-# Force re-downloadsentry cli upgrade --force
+
+# Upgrade to a specific version
+sentry cli upgrade 0.5.0
+
+
+# Force re-download
+sentry cli upgrade --force
 ```
 
 
 ### Release Channels
 
-[Section titled “Release Channels”](#release-channels)
-Terminal window
+```bash
+# Switch to nightly builds
+sentry cli upgrade nightly
 
-```
-# Switch to nightly buildssentry cli upgrade nightly
-# Switch back to stablesentry cli upgrade stable
+
+# Switch back to stable
+sentry cli upgrade stable
 ```
 
 
@@ -178,8 +167,6 @@ After switching, bare `sentry cli upgrade` will continue tracking that channel.
 | `nightly` | Built from `main`, updated on every commit |
 
 ### Installation Detection
-
-[Section titled “Installation Detection”](#installation-detection)
 
 The CLI detects how it was installed and uses the appropriate upgrade method:
 
@@ -195,47 +182,79 @@ Nightly builds are only available as standalone binaries (via the curl install m
 
 ### View and manage defaults
 
-[Section titled “View and manage defaults”](#view-and-manage-defaults)
-Terminal window
+```bash
+# Show all current defaults
+sentry cli defaults
 
-```
-# Show all current defaultssentry cli defaults
-# Set default organizationsentry cli defaults org my-org
-# Set default projectsentry cli defaults project my-project
-# Set default Sentry URL (self-hosted)sentry cli defaults url https://sentry.example.com
-# Set custom HTTP headers (self-hosted, e.g. for IAP/proxies)sentry cli defaults headers "X-IAP: token"
-# Set a custom CA certificate (self-hosted, behind a TLS proxy)sentry cli defaults ca-cert /path/to/ca.pem
-# Disable telemetrysentry cli defaults telemetry off
-# Clear a single defaultsentry cli defaults org --clear
-# Clear all defaultssentry cli defaults --clear
+
+# Set default organization
+sentry cli defaults org my-org
+
+
+# Set default project
+sentry cli defaults project my-project
+
+
+# Set default Sentry URL (self-hosted)
+sentry cli defaults url https://sentry.example.com
+
+
+# Set custom HTTP headers (self-hosted, e.g. for IAP/proxies)
+sentry cli defaults headers "X-IAP: token"
+
+
+# Set a custom CA certificate (self-hosted, behind a TLS proxy)
+sentry cli defaults ca-cert /path/to/ca.pem
+
+
+# Disable telemetry
+sentry cli defaults telemetry off
+
+
+# Clear a single default
+sentry cli defaults org --clear
+
+
+# Clear all defaults
+sentry cli defaults --clear
 ```
 
 
 ### Import legacy settings
 
-[Section titled “Import legacy settings”](#import-legacy-settings)
-
 Import settings from `.sentryclirc` files used by the legacy `sentry-cli`:
 
-Terminal window
+```bash
+# Auto-detect and import .sentryclirc
+sentry cli import
 
-```
-# Auto-detect and import .sentryclircsentry cli import
-# Preview what would be importedsentry cli import --dry-run
-# Skip confirmation promptsentry cli import --yes
-# Explicitly trust a self-hosted URLsentry cli import --url https://sentry.example.com
-# Skip API validation of the imported tokensentry cli import --skip-validation
+
+# Preview what would be imported
+sentry cli import --dry-run
+
+
+# Skip confirmation prompt
+sentry cli import --yes
+
+
+# Explicitly trust a self-hosted URL
+sentry cli import --url https://sentry.example.com
+
+
+# Skip API validation of the imported token
+sentry cli import --skip-validation
 ```
 
 
 ### Send feedback
 
-[Section titled “Send feedback”](#send-feedback)
-Terminal window
+```bash
+# Send positive feedback
+sentry cli feedback i love this tool
 
-```
-# Send positive feedbacksentry cli feedback i love this tool
-# Report an issuesentry cli feedback the issue view is confusing
+
+# Report an issue
+sentry cli feedback the issue view is confusing
 ```
 
 
@@ -243,33 +262,45 @@ Feedback is sent via Sentry's telemetry system. If telemetry is disabled (`SENTR
 
 ### Fix configuration issues
 
-[Section titled “Fix configuration issues”](#fix-configuration-issues)
-Terminal window
-
-```
+```bash
 sentry cli fix
 ```
 
 
 ### Configure shell integration
 
-[Section titled “Configure shell integration”](#configure-shell-integration)
-Terminal window
+```bash
+# Run full setup (PATH, completions, agent skills)
+sentry cli setup
 
-```
-# Run full setup (PATH, completions, agent skills)sentry cli setup
-# Skip agent skill installationsentry cli setup --no-agent-skills
-# Skip PATH and completion modificationssentry cli setup --no-modify-path --no-completions
+
+# Skip agent skill installation
+sentry cli setup --no-agent-skills
+
+
+# Skip PATH and completion modifications
+sentry cli setup --no-modify-path --no-completions
 ```
 
 
 ### Uninstall
 
-[Section titled “Uninstall”](#uninstall)
-Terminal window
+```bash
+# Show what would be removed (dry run)
+sentry cli uninstall --dry-run
 
+
+# Uninstall, keeping config directory
+sentry cli uninstall --yes --keep-config
+
+
+# Full uninstall with confirmation
+sentry cli uninstall
 ```
-# Show what would be removed (dry run)sentry cli uninstall --dry-run
-# Uninstall, keeping config directorysentry cli uninstall --yes --keep-config
-# Full uninstall with confirmationsentry cli uninstall
-```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: build](https://cli.sentry.dev/_preview/pr-main/commands/build.md)
+- [Next: code-mappings](https://cli.sentry.dev/_preview/pr-main/commands/code-mappings.md)

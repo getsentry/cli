@@ -8,26 +8,18 @@ url: "https://cli.sentry.dev/_preview/pr-main/self-hosted/"
 
 The CLI works with self-hosted Sentry instances. Set the `SENTRY_HOST` (or `SENTRY_URL`) environment variable to point at your instance:
 
-Terminal window
-
-```
+```bash
 export SENTRY_HOST=https://sentry.example.com
 ```
 
 
 ## Authenticating
 
-[Section titled “Authenticating”](#authenticating)
-
 ### With OAuth (Sentry 26.1.0+)
-
-[Section titled “With OAuth (Sentry 26.1.0+)”](#with-oauth-sentry-2610)
 
 The OAuth device flow requires **Sentry 26.1.0 or later** and a public OAuth application registered on your instance.
 
 #### 1. Create a Public OAuth Application
-
-[Section titled “1. Create a Public OAuth Application”](#1-create-a-public-oauth-application)
 
 1. In your Sentry instance, go to **Settings → Developer Settings → Applications → Create New Application** (or visit `https://sentry.example.com/settings/account/api/applications/`)
 2. Select **Public** as the application type
@@ -36,22 +28,16 @@ The OAuth device flow requires **Sentry 26.1.0 or later** and a public OAuth app
 
 #### 2. Log In
 
-[Section titled “2. Log In”](#2-log-in)
-
 Use the `--url` flag to authenticate against your instance (recommended — this registers the host as trusted):
 
-Terminal window
-
-```
+```bash
 SENTRY_CLIENT_ID=your-client-id sentry auth login --url https://sentry.example.com
 ```
 
 
 Or pass the instance URL via environment variable:
 
-Terminal window
-
-```
+```bash
 SENTRY_HOST=https://sentry.example.com SENTRY_CLIENT_ID=your-client-id sentry auth login
 ```
 
@@ -60,10 +46,9 @@ Tip
 
 You can export both variables in your shell profile so every CLI invocation picks them up:
 
-Terminal window
-
-```
-export SENTRY_HOST=https://sentry.example.comexport SENTRY_CLIENT_ID=your-client-id
+```bash
+export SENTRY_HOST=https://sentry.example.com
+export SENTRY_CLIENT_ID=your-client-id
 ```
 
 
@@ -72,8 +57,6 @@ Note
 The `--url` flag is the most secure way to authenticate with a new host — it is the only way to register a trust anchor for that host. Without it, the CLI refuses to log in to an instance URL that was picked up from an untrusted channel (e.g. a `.sentryclirc` file), protecting you from credential leaks and OAuth phishing.
 
 ### With an API Token
-
-[Section titled “With an API Token”](#with-an-api-token)
 
 If your instance is on an older version or you prefer not to create an OAuth application, you can use an API token instead:
 
@@ -84,23 +67,18 @@ If your instance is on an older version or you prefer not to create an OAuth app
 
 1. Pass it to the CLI:
 
-Terminal window
-
-```
+```bash
 SENTRY_HOST=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 ```
 
 
 ## After Login
 
-[Section titled “After Login”](#after-login)
-
 Once authenticated, the CLI stores your instance URL — you don't need to set `SENTRY_URL` on every command. All subsequent commands automatically use the correct instance:
 
-Terminal window
-
-```
-sentry issue listsentry org list
+```bash
+sentry issue list
+sentry org list
 ```
 
 
@@ -108,38 +86,28 @@ If you pass a self-hosted Sentry URL as a command argument (e.g., an issue or ev
 
 ## TLS / Corporate Proxies
 
-[Section titled “TLS / Corporate Proxies”](#tls--corporate-proxies)
-
 If your self-hosted instance sits behind a private CA certificate (common with corporate TLS-intercepting proxies like Zscaler or Netskope), point `NODE_EXTRA_CA_CERTS` at your CA bundle:
 
-Terminal window
-
-```
+```bash
 export NODE_EXTRA_CA_CERTS=/path/to/corporate-ca.pem
 ```
 
 
 You can also persist this so you don't need the env var on every invocation:
 
-Terminal window
-
-```
+```bash
 sentry cli defaults ca-cert /path/to/corporate-ca.pem
 ```
 
 
 If your proxy requires custom HTTP headers (e.g. an IAP token), set them with `SENTRY_CUSTOM_HEADERS` or persist them:
 
-Terminal window
-
-```
+```bash
 sentry cli defaults headers "X-IAP: token"
 ```
 
 
 ## Relevant Environment Variables
-
-[Section titled “Relevant Environment Variables”](#relevant-environment-variables)
 
 | Variable | Description |
 | --- | --- |
@@ -153,3 +121,9 @@ sentry cli defaults headers "X-IAP: token"
 | `NODE_EXTRA_CA_CERTS` | Path to PEM file with additional CA certificates (for corporate proxies) |
 
 See [Configuration](https://cli.sentry.dev/_preview/pr-main/self-hosted/configuration.md) for the full environment variable reference.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Previous: Migrating from v3](https://cli.sentry.dev/_preview/pr-main/migrating-from-v3.md)
+- [Next: Configuration](https://cli.sentry.dev/_preview/pr-main/configuration.md)

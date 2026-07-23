@@ -10,11 +10,7 @@ Work with Sentry repositories
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry repo list <org/project>`
-
-[Section titled “sentry repo list <org/project>”](#sentry-repo-list-orgproject)
 
 List repositories
 
@@ -36,11 +32,22 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
+```bash
+# List repositories (auto-detect org)
+sentry repo list
 
+
+# List repos in a specific org with pagination
+sentry repo list my-org/ -c next
+
+
+# Output as JSON
+sentry repo list --json
 ```
-# List repositories (auto-detect org)sentry repo list
-# List repos in a specific org with paginationsentry repo list my-org/ -c next
-# Output as JSONsentry repo list --json
-```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: replay](https://cli.sentry.dev/_preview/pr-main/commands/replay.md)
+- [Next: schema](https://cli.sentry.dev/_preview/pr-main/commands/schema.md)

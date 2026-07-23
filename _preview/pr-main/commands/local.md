@@ -10,11 +10,7 @@ Sentry for local development
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry local serve`
-
-[Section titled “sentry local serve”](#sentry-local-serve)
 
 Start the local dev server and tail events
 
@@ -30,8 +26,6 @@ Start the local dev server and tail events
 | `-a, --attributes` | Show a grouped attribute table (user vs SDK) under each transaction |
 
 ### `sentry local run <command...>`
-
-[Section titled “sentry local run <command...>”](#sentry-local-run-command)
 
 Run a command with the local dev server enabled
 
@@ -60,21 +54,30 @@ If a server is already running on the port, the command attaches as an SSE consu
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
+```bash
+# Start the server and tail events (default)
+sentry local
 
-```
-# Start the server and tail events (default)sentry local
-# Run your app with the local server auto-enabledsentry local run -- npm run devsentry local run -- python manage.py runserver
-# Use a custom portsentry local --port 9000
-# Only show errors and logs (filter out transactions)sentry local -f error -f log
-# Run quietly (suppress per-envelope tail output)sentry local --quiet
+
+# Run your app with the local server auto-enabled
+sentry local run -- npm run dev
+sentry local run -- python manage.py runserver
+
+
+# Use a custom port
+sentry local --port 9000
+
+
+# Only show errors and logs (filter out transactions)
+sentry local -f error -f log
+
+
+# Run quietly (suppress per-envelope tail output)
+sentry local --quiet
 ```
 
 
 ## `sentry local run`
-
-[Section titled “sentry local run”](#sentry-local-run)
 
 Runs a command with `SENTRY_SPOTLIGHT` injected into the environment. The Sentry SDK automatically detects this variable and sends envelopes to the local server. No code changes needed.
 
@@ -92,14 +95,14 @@ The `<PREFIX>` variants cover every common framework client prefix so the spotli
 
 For browser/client events, the CLI exposes the spotlight URL under every framework client prefix above. Once the [browser SDK reads these variables automatically](https://github.com/getsentry/sentry-javascript/pull/18198), client-side capture will be zero-config too. **Until then**, reference the variable matching your framework in your client config:
 
-```
-// Next.js example — other frameworks use their own env access pattern// (e.g. import.meta.env.VITE_SENTRY_SPOTLIGHT for Vite-based frameworks).Sentry.init({ spotlight: process.env.NEXT_PUBLIC_SENTRY_SPOTLIGHT ?? false });
+```ts
+// Next.js example — other frameworks use their own env access pattern
+// (e.g. import.meta.env.VITE_SENTRY_SPOTLIGHT for Vite-based frameworks).
+Sentry.init({ spotlight: process.env.NEXT_PUBLIC_SENTRY_SPOTLIGHT ?? false });
 ```
 
 
 ## Endpoints
-
-[Section titled “Endpoints”](#endpoints)
 
 | Method | Path | Description |
 | --- | --- | --- |
@@ -110,12 +113,12 @@ For browser/client events, the CLI exposes the spotlight URL under every framewo
 
 ## Tail output
 
-[Section titled “Tail output”](#tail-output)
-
 By default, incoming envelopes are pretty-printed to the terminal:
 
-```
-14:32:01 [ERROR]   [SERVER]  TypeError: x is not a function [app.ts:42:5] [handleRequest]14:32:02 [TRACE]   [BROWSER] [http.client] GET /api/users [245ms] [3 spans]14:32:03 [INFO]    [SERVER]  User logged in [user_id=1234] [region=us]
+```plaintext
+14:32:01 [ERROR]   [SERVER]  TypeError: x is not a function [app.ts:42:5] [handleRequest]
+14:32:02 [TRACE]   [BROWSER] [http.client] GET /api/users [245ms] [3 spans]
+14:32:03 [INFO]    [SERVER]  User logged in [user_id=1234] [region=us]
 ```
 
 
@@ -123,9 +126,7 @@ Errors show the exception type, message, and top stack frame. Transactions show 
 
 Use `--filter` / `-f` to narrow the output to specific event types (repeatable):
 
-Terminal window
-
-```
+```bash
 sentry local -f error -f log    # only errors and logs
 ```
 
@@ -134,12 +135,13 @@ Use `--quiet` to suppress tail output entirely if you only need the SSE stream.
 
 ## Agent monitoring
 
-[Section titled “Agent monitoring”](#agent-monitoring)
-
 `sentry local` shows rich output for AI agent spans when your SDK instruments with [OpenTelemetry semantic attributes](https://opentelemetry.io/docs/specs/semconv/gen-ai/):
 
-```
-14:32:01 [TRACE]   [SERVER]  [gen_ai] chat anthropic/claude-4-sonnet [1200ms] [5 spans]14:32:02 [TRACE]   [SERVER]  [mcp] tools/call search_files [320ms]14:32:03 [TRACE]   [SERVER]  [db] SELECT users [postgresql] [12ms]14:32:04 [ERROR]   [SERVER]  RateLimitError: API quota exceeded [api_client.py:42]
+```plaintext
+14:32:01 [TRACE]   [SERVER]  [gen_ai] chat anthropic/claude-4-sonnet [1200ms] [5 spans]
+14:32:02 [TRACE]   [SERVER]  [mcp] tools/call search_files [320ms]
+14:32:03 [TRACE]   [SERVER]  [db] SELECT users [postgresql] [12ms]
+14:32:04 [ERROR]   [SERVER]  RateLimitError: API quota exceeded [api_client.py:42]
 ```
 
 
@@ -147,29 +149,33 @@ GenAI operations show the model name, MCP tool calls show the tool being invoked
 
 To watch only agent activity, filter to the `ai` item type:
 
-Terminal window
-
-```
-sentry local -f ai          # only AI/agent spanssentry local -f ai -f error # agent spans and errors
+```bash
+sentry local -f ai          # only AI/agent spans
+sentry local -f ai -f error # agent spans and errors
 ```
 
 
 ## JSON output
 
-[Section titled “JSON output”](#json-output)
-
 Use `--format json` (or `-F json`) for machine-readable NDJSON output, one JSON object per envelope item:
 
-Terminal window
-
-```
+```bash
 sentry local --format json
 ```
 
 
-```
-{"type":"transaction","timestamp":1700000001,"op":"gen_ai","label":"chat anthropic/claude-4-sonnet","duration_ms":1200,"span_count":5,"source":"server"}{"type":"error","timestamp":1700000002,"error_type":"RateLimitError","message":"API quota exceeded","source":"server"}{"type":"log","timestamp":1700000003,"level":"info","message":"User logged in","attributes":{"user_id":1234},"source":"server"}
+```json
+{"type":"transaction","timestamp":1700000001,"op":"gen_ai","label":"chat anthropic/claude-4-sonnet","duration_ms":1200,"span_count":5,"source":"server"}
+{"type":"error","timestamp":1700000002,"error_type":"RateLimitError","message":"API quota exceeded","source":"server"}
+{"type":"log","timestamp":1700000003,"level":"info","message":"User logged in","attributes":{"user_id":1234},"source":"server"}
 ```
 
 
 This is useful for AI coding agents and automation tools that need to consume Sentry events programmatically.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: issue](https://cli.sentry.dev/_preview/pr-main/commands/issue.md)
+- [Next: log](https://cli.sentry.dev/_preview/pr-main/commands/log.md)

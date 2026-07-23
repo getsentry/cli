@@ -10,11 +10,7 @@ Work with Sentry projects
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry project create <name> <platform>`
-
-[Section titled “sentry project create <name> <platform>”](#sentry-project-create-name-platform)
 
 Create a new project
 
@@ -34,8 +30,6 @@ Create a new project
 
 ### `sentry project delete <org/project>`
 
-[Section titled “sentry project delete <org/project>”](#sentry-project-delete-orgproject)
-
 Delete a project
 
 **Arguments:**
@@ -53,8 +47,6 @@ Delete a project
 | `-n, --dry-run` | Show what would happen without making changes |
 
 ### `sentry project list <org/project>`
-
-[Section titled “sentry project list <org/project>”](#sentry-project-list-orgproject)
 
 List projects
 
@@ -75,8 +67,6 @@ List projects
 
 ### `sentry project view <org/project>`
 
-[Section titled “sentry project view <org/project>”](#sentry-project-view-orgproject)
-
 View details of a project
 
 **Arguments:**
@@ -96,57 +86,75 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
-
-```
-# List all projects in an orgsentry project list my-org/
+```bash
+# List all projects in an org
+sentry project list my-org/
 ```
 
 
-```
-ORG         SLUG           PLATFORM      TEAMmy-org      frontend       javascript    web-teammy-org      backend        python        api-teammy-org      mobile-ios     cocoa         mobile-team
-```
-
-
-Terminal window
-
-```
-# Filter by platformsentry project list my-org/ --platform javascript
-# View project detailssentry project view my-org/frontend
+```plaintext
+ORG         SLUG           PLATFORM      TEAM
+my-org      frontend       javascript    web-team
+my-org      backend        python        api-team
+my-org      mobile-ios     cocoa         mobile-team
 ```
 
 
-```
-Project: frontendOrganization: my-orgPlatform: javascriptTeam: web-teamDSN: https://abc123@sentry.io/123456
+```bash
+# Filter by platform
+sentry project list my-org/ --platform javascript
+
+
+# View project details
+sentry project view my-org/frontend
 ```
 
 
-Terminal window
-
+```plaintext
+Project: frontend
+Organization: my-org
+Platform: javascript
+Team: web-team
+DSN: https://abc123@sentry.io/123456
 ```
-# Open project in browsersentry project view my-org/frontend -w
+
+
+```bash
+# Open project in browser
+sentry project view my-org/frontend -w
 ```
 
 
 ### Create a project
 
-[Section titled “Create a project”](#create-a-project)
-Terminal window
+```bash
+# Create a new project
+sentry project create my-new-app javascript-nextjs
 
-```
-# Create a new projectsentry project create my-new-app javascript-nextjs
-# Create under a specific org and teamsentry project create my-org/my-new-app python --team backend-team
-# Preview without creatingsentry project create my-new-app node --dry-run
+
+# Create under a specific org and team
+sentry project create my-org/my-new-app python --team backend-team
+
+
+# Preview without creating
+sentry project create my-new-app node --dry-run
 ```
 
 
 ### Delete a project
 
-[Section titled “Delete a project”](#delete-a-project)
-Terminal window
+```bash
+# Delete a project (will prompt for confirmation)
+sentry project delete my-org/old-project
 
+
+# Delete without confirmation
+sentry project delete my-org/old-project --yes
 ```
-# Delete a project (will prompt for confirmation)sentry project delete my-org/old-project
-# Delete without confirmationsentry project delete my-org/old-project --yes
-```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: proguard](https://cli.sentry.dev/_preview/pr-main/commands/proguard.md)
+- [Next: react-native](https://cli.sentry.dev/_preview/pr-main/commands/react-native.md)

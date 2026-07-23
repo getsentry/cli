@@ -10,11 +10,7 @@ Authenticate with Sentry
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry auth login`
-
-[Section titled “sentry auth login”](#sentry-auth-login)
 
 Authenticate with Sentry
 
@@ -31,13 +27,9 @@ Authenticate with Sentry
 
 ### `sentry auth logout`
 
-[Section titled “sentry auth logout”](#sentry-auth-logout)
-
 Log out of Sentry
 
 ### `sentry auth refresh`
-
-[Section titled “sentry auth refresh”](#sentry-auth-refresh)
 
 Refresh your authentication token
 
@@ -51,8 +43,6 @@ Refresh your authentication token
 
 ### `sentry auth status`
 
-[Section titled “sentry auth status”](#sentry-auth-status)
-
 View authentication status
 
 **Options:**
@@ -64,13 +54,9 @@ View authentication status
 
 ### `sentry auth token`
 
-[Section titled “sentry auth token”](#sentry-auth-token)
-
 Print the stored authentication token
 
 ### `sentry auth whoami`
-
-[Section titled “sentry auth whoami”](#sentry-auth-whoami)
 
 Show the currently authenticated identity
 
@@ -84,14 +70,9 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-
 ### OAuth login (recommended)
 
-[Section titled “OAuth login (recommended)”](#oauth-login-recommended)
-Terminal window
-
-```
+```bash
 sentry auth login
 ```
 
@@ -104,29 +85,21 @@ sentry auth login
 
 ### Token login
 
-[Section titled “Token login”](#token-login)
-Terminal window
-
-```
+```bash
 sentry auth login --token YOUR_SENTRY_API_TOKEN
 ```
 
 
 ### Self-hosted Sentry
 
-[Section titled “Self-hosted Sentry”](#self-hosted-sentry)
-Terminal window
-
-```
+```bash
 SENTRY_URL=https://sentry.example.com sentry auth login
 ```
 
 
 For token-based auth with self-hosted:
 
-Terminal window
-
-```
+```bash
 SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 ```
 
@@ -135,66 +108,54 @@ See [Self-Hosted Sentry](https://cli.sentry.dev/_preview/pr-main/commands/self-h
 
 ### Logout
 
-[Section titled “Logout”](#logout)
-Terminal window
-
-```
+```bash
 sentry auth logout
 ```
 
 
 ### Refresh token
 
-[Section titled “Refresh token”](#refresh-token)
-Terminal window
-
-```
+```bash
 sentry auth refresh
 ```
 
 
 ### Print stored token
 
-[Section titled “Print stored token”](#print-stored-token)
-Terminal window
-
-```
+```bash
 sentry auth token
 ```
 
 
 ### Check auth status
 
-[Section titled “Check auth status”](#check-auth-status)
-Terminal window
-
-```
+```bash
 sentry auth status
 ```
 
 
-```
-Authenticated as: usernameOrganization: my-orgToken expires: 2024-12-31
+```plaintext
+Authenticated as: username
+Organization: my-org
+Token expires: 2024-12-31
 ```
 
 
-Terminal window
+```bash
+# Show the raw token
+sentry auth status --show-token
 
-```
-# Show the raw tokensentry auth status --show-token
-# View current usersentry auth whoami
+
+# View current user
+sentry auth whoami
 ```
 
 
 ## Credential Storage
 
-[Section titled “Credential Storage”](#credential-storage)
-
 Auth tokens are stored in a SQLite database at `~/.sentry/cli.db` with restricted file permissions.
 
 ## Token Precedence
-
-[Section titled “Token Precedence”](#token-precedence)
 
 By default, the CLI checks for auth tokens in the following order:
 
@@ -205,3 +166,10 @@ By default, the CLI checks for auth tokens in the following order:
 The stored OAuth token takes priority because it supports automatic refresh. To override this and force environment tokens to win, set `SENTRY_FORCE_ENV_TOKEN=1`.
 
 When a token comes from an environment variable, the CLI skips expiry checks and automatic refresh.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: api](https://cli.sentry.dev/_preview/pr-main/commands/api.md)
+- [Next: build](https://cli.sentry.dev/_preview/pr-main/commands/build.md)

@@ -16,8 +16,6 @@ Add the [compatibility shim](#drop-in-compatibility-shim) to your shell profile 
 
 ## What changed at a glance
 
-[Section titled “What changed at a glance”](#what-changed-at-a-glance)
-
 | Area | v3 (`sentry-cli`) | v4 (`sentry`) |
 | --- | --- | --- |
 | Binary name | `sentry-cli` | `sentry` |
@@ -33,39 +31,43 @@ Your **environment variables** (`SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJE
 
 ## Installation
 
-[Section titled “Installation”](#installation)
-
 Uninstall the old package/binary and install the new one.
 
-Terminal window
+```bash
+# npm / pnpm / yarn / bun
+npm uninstall -g @sentry/cli
+npm install -g sentry            # or: pnpm add -g sentry / yarn global add sentry / bun add -g sentry
 
-```
-# npm / pnpm / yarn / bunnpm uninstall -g @sentry/clinpm install -g sentry            # or: pnpm add -g sentry / yarn global add sentry / bun add -g sentry
-# Homebrewbrew uninstall sentry-clibrew install getsentry/tools/sentry
-# Install scriptcurl https://cli.sentry.dev/install -fsS | bash
-# One-off, no installnpx sentry@latest --help
+
+# Homebrew
+brew uninstall sentry-cli
+brew install getsentry/tools/sentry
+
+
+# Install script
+curl https://cli.sentry.dev/install -fsS | bash
+
+
+# One-off, no install
+npx sentry@latest --help
 ```
 
 
 Verify:
 
-Terminal window
-
-```
-sentry --versionsentry auth status
+```bash
+sentry --version
+sentry auth status
 ```
 
 
 ## The `sentry-cli` → `sentry` rename
 
-[Section titled “The sentry-cli → sentry rename”](#the-sentry-cli--sentry-rename)
-
 If you only ever call the top-level binary, the simplest bridge is a plain alias so old commands and scripts resolve to the new binary:
 
-Terminal window
-
-```
-# ~/.bashrc or ~/.zshrcalias sentry-cli='sentry'
+```bash
+# ~/.bashrc or ~/.zshrc
+alias sentry-cli='sentry'
 ```
 
 
@@ -73,20 +75,16 @@ This is enough **if** you only used commands whose names didn't move (see the [t
 
 For CI, either update your install step to `npm install -g sentry` and call `sentry`, or add a one-line shim in your job:
 
-Terminal window
-
-```
-# GitHub Actions / any CI shellnpm install -g sentrysentry-cli() { sentry "$@"; }   # if you didn't use any moved commands
+```bash
+# GitHub Actions / any CI shell
+npm install -g sentry
+sentry-cli() { sentry "$@"; }   # if you didn't use any moved commands
 ```
 
 
 ## Command changes
 
-[Section titled “Command changes”](#command-changes)
-
 ### Still work unchanged
-
-[Section titled “Still work unchanged”](#still-work-unchanged)
 
 These are identical, or the old plural form still works as a shortcut:
 
@@ -103,8 +101,6 @@ These are identical, or the old plural form still works as a shortcut:
 
 ### Renamed groups (plural → singular)
 
-[Section titled “Renamed groups (plural → singular)”](#renamed-groups-plural--singular)
-
 Command **groups** are singular now. The plural name still works as a shortcut for the bare **list** (`sentry releases` → lists releases), but any **subcommand** must use the singular form:
 
 | v3 | v4 |
@@ -117,16 +113,15 @@ Command **groups** are singular now. The plural name still works as a shortcut f
 | `sentry-cli repos …` | `sentry repo …` |
 | `sentry-cli events …` | `sentry event …` |
 
-Terminal window
-
-```
-# v3sentry-cli releases new 1.0.0# v4sentry release new 1.0.0
+```bash
+# v3
+sentry-cli releases new 1.0.0
+# v4
+sentry release new 1.0.0
 ```
 
 
 ### Moved commands
-
-[Section titled “Moved commands”](#moved-commands)
 
 These live under a different group now:
 
@@ -147,19 +142,115 @@ Most of these were already soft-deprecated in v3 (hidden from `--help` in favor 
 
 ## Drop-in compatibility shim
 
-[Section titled “Drop-in compatibility shim”](#drop-in-compatibility-shim)
-
 Paste this shell function into your `~/.bashrc` / `~/.zshrc` (or a CI step). It transparently translates every moved/renamed command to its v4 equivalent, so existing `sentry-cli …` calls keep working. Anything it doesn't special-case is passed straight through to `sentry`.
 
-Terminal window
+```bash
+sentry-cli() {
+  # v3 GLOBAL flags that became environment variables in v4 (see the "Global
+  # flags" section below). They precede the command, so translate only the
+  # LEADING run and stop at the first command word — this leaves command-level
+  # flags untouched (notably `--url`, which `release create`/`deploy` use for
+  # the release/deploy URL, not the Sentry host). Other still-valid v4 globals
+  # are collected into `lead` and re-applied before the command.
+  local envs=() lead=() headers="" allow_failure=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --auth-token)   envs+=("SENTRY_AUTH_TOKEN=$2"); shift 2 2>/dev/null || shift ;;
+      --auth-token=*) envs+=("SENTRY_AUTH_TOKEN=${1#*=}"); shift ;;
+      --url)          envs+=("SENTRY_URL=$2"); shift 2 2>/dev/null || shift ;;
+      --url=*)        envs+=("SENTRY_URL=${1#*=}"); shift ;;
+      # Multiple --header flags merge into one semicolon-separated var.
+      --header)       headers="${headers:+$headers; }$2"; shift 2 2>/dev/null || shift ;;
+      --header=*)     headers="${headers:+$headers; }${1#*=}"; shift ;;
+      # Still-valid v4 globals: keep them (value-taking ones consume a value).
+      --org|--project|--log-level|--fields) lead+=("$1" "$2"); shift 2 2>/dev/null || shift ;;
+      --org=*|--project=*|--log-level=*|--fields=*) lead+=("$1"); shift ;;
+      -v|--verbose|--json) lead+=("$1"); shift ;;
+      # v3 `--allow-failure` (and SENTRY_ALLOW_FAILURE) is gone in v4 and would
+      # be rejected as unknown. Strip it and emulate its "never fail" behavior.
+      --allow-failure) allow_failure=1; shift ;;
+      *)              break ;;
+    esac
+  done
+  [ "${SENTRY_ALLOW_FAILURE:-}" = "1" ] && allow_failure=1
+  [ -n "$headers" ] && envs+=("SENTRY_CUSTOM_HEADERS=$headers")
 
+
+  # `env` runs the real `sentry` (bypassing this function → no recursion),
+  # re-applying any leading global flags before the translated command.
+  local run=(env "${envs[@]}" sentry "${lead[@]}")
+
+
+  # `deploys` handling (top-level or nested under `releases`). Bare/`list` map to
+  # `release deploys` (list); only `new` (create) can't be shimmed — v4 takes the
+  # environment/name as positionals, not v3's `-e`/`-n` flags — so flag those.
+  local deploy_msg='sentry-cli: `deploys new` changed in v4 — environment/name are positionals now:\n  sentry release deploy <version> <environment> [name] [--url … --started … --finished …]\n'
+  _scli_deploys() {
+    local a dargs=()
+    for a in "$@"; do [ "$a" = "new" ] && { printf '%b' "$deploy_msg" >&2; return 64; }; done
+    for a in "$@"; do [ "$a" = "list" ] || dargs+=("$a"); done  # drop v3 `list`
+    "${run[@]}" release deploys "${dargs[@]}"
+  }
+
+
+  _scli_dispatch() {
+    case "$1" in
+    # Moved commands
+    login|logout)            local c=$1; shift; "${run[@]}" auth "$c" "$@" ;;
+    update)                  shift; "${run[@]}" cli upgrade "$@" ;;
+    uninstall)               shift; "${run[@]}" cli uninstall "$@" ;;
+    deploys)                 shift; _scli_deploys "$@" ;;
+    upload-dif|upload-dsym)  shift; "${run[@]}" debug-files upload "$@" ;;
+    upload-proguard)         shift; "${run[@]}" proguard upload "$@" ;;
+    difutil)                 shift; "${run[@]}" debug-files "$@" ;;
+
+
+    # `releases` → `release` (bare lists). v3 nested deploys under `releases`.
+    releases)
+      shift
+      if [ "$1" = "deploys" ]; then shift; _scli_deploys "$@"; return; fi
+      # v3 `releases` lists; insert `list` when there's no subcommand (only flags).
+      if [ "$#" -eq 0 ] || [ "${1#-}" != "$1" ]; then "${run[@]}" release list "$@";
+      else "${run[@]}" release "$@"; fi ;;
+
+
+    # Other renamed groups (plural → singular). Bare (or flags-only) form lists
+    # (matches v4's native aliases); a subcommand uses the singular group (v4
+    # aliases `new`→`create`, `ls`→`list`, so subcommands keep working).
+    organizations|projects|issues|monitors|repos|events)
+      local grp=$1; shift
+      case "$grp" in
+        organizations) grp=org ;;
+        projects)       grp=project ;;
+        issues)         grp=issue ;;
+        monitors)       grp=monitor ;;
+        repos)          grp=repo ;;
+        events)         grp=event ;;
+      esac
+      # No subcommand (empty or a leading flag like `--json`) → explicit `list`,
+      # since some groups (e.g. project) default to `view`, not `list`.
+      if [ "$#" -eq 0 ] || [ "${1#-}" != "$1" ]; then "${run[@]}" "$grp" list "$@";
+      else "${run[@]}" "$grp" "$@"; fi ;;
+
+
+    # Everything else is unchanged
+    *) "${run[@]}" "$@" ;;
+  esac
+  }
+
+
+  # v3's `--allow-failure`/`SENTRY_ALLOW_FAILURE` made any command exit 0. v4
+  # dropped it, so emulate here: swallow a non-zero status when it was set.
+  if [ -n "$allow_failure" ]; then
+    _scli_dispatch "$@" || { printf 'sentry-cli: command failed, but --allow-failure/SENTRY_ALLOW_FAILURE was set — exiting 0\n' >&2; return 0; }
+  else
+    _scli_dispatch "$@"
+  fi
+}
 ```
-sentry-cli() {  # v3 GLOBAL flags that became environment variables in v4 (see the "Global  # flags" section below). They precede the command, so translate only the  # LEADING run and stop at the first command word — this leaves command-level  # flags untouched (notably `--url`, which `release create`/`deploy` use for  # the release/deploy URL, not the Sentry host). Other still-valid v4 globals  # are collected into `lead` and re-applied before the command.  local envs=() lead=() headers="" allow_failure=""  while [ "$#" -gt 0 ]; do    case "$1" in      --auth-token)   envs+=("SENTRY_AUTH_TOKEN=$2"); shift 2 2>/dev/null || shift ;;      --auth-token=*) envs+=("SENTRY_AUTH_TOKEN=${1#*=}"); shift ;;      --url)          envs+=("SENTRY_URL=$2"); shift 2 2>/dev/null || shift ;;      --url=*)        envs+=("SENTRY_URL=${1#*=}"); shift ;;      # Multiple --header flags merge into one semicolon-separated var.      --header)       headers="${headers:+$headers; }$2"; shift 2 2>/dev/null || shift ;;      --header=*)     headers="${headers:+$headers; }${1#*=}"; shift ;;      # Still-valid v4 globals: keep them (value-taking ones consume a value).      --org|--project|--log-level|--fields) lead+=("$1" "$2"); shift 2 2>/dev/null || shift ;;      --org=*|--project=*|--log-level=*|--fields=*) lead+=("$1"); shift ;;      -v|--verbose|--json) lead+=("$1"); shift ;;      # v3 `--allow-failure` (and SENTRY_ALLOW_FAILURE) is gone in v4 and would      # be rejected as unknown. Strip it and emulate its "never fail" behavior.      --allow-failure) allow_failure=1; shift ;;      *)              break ;;    esac  done  [ "${SENTRY_ALLOW_FAILURE:-}" = "1" ] && allow_failure=1  [ -n "$headers" ] && envs+=("SENTRY_CUSTOM_HEADERS=$headers")
-  # `env` runs the real `sentry` (bypassing this function → no recursion),  # re-applying any leading global flags before the translated command.  local run=(env "${envs[@]}" sentry "${lead[@]}")
-  # `deploys` handling (top-level or nested under `releases`). Bare/`list` map to  # `release deploys` (list); only `new` (create) can't be shimmed — v4 takes the  # environment/name as positionals, not v3's `-e`/`-n` flags — so flag those.  local deploy_msg='sentry-cli: `deploys new` changed in v4 — environment/name are positionals now:\n  sentry release deploy <version> <environment> [name] [--url … --started … --finished …]\n'  _scli_deploys() {    local a dargs=()    for a in "$@"; do [ "$a" = "new" ] && { printf '%b' "$deploy_msg" >&2; return 64; }; done    for a in "$@"; do [ "$a" = "list" ] || dargs+=("$a"); done  # drop v3 `list`    "${run[@]}" release deploys "${dargs[@]}"  }
-  _scli_dispatch() {    case "$1" in    # Moved commands    login|logout)            local c=$1; shift; "${run[@]}" auth "$c" "$@" ;;    update)                  shift; "${run[@]}" cli upgrade "$@" ;;    uninstall)               shift; "${run[@]}" cli uninstall "$@" ;;    deploys)                 shift; _scli_deploys "$@" ;;    upload-dif|upload-dsym)  shift; "${run[@]}" debug-files upload "$@" ;;    upload-proguard)         shift; "${run[@]}" proguard upload "$@" ;;    difutil)                 shift; "${run[@]}" debug-files "$@" ;;
-    # `releases` → `release` (bare lists). v3 nested deploys under `releases`.    releases)      shift      if [ "$1" = "deploys" ]; then shift; _scli_deploys "$@"; return; fi      # v3 `releases` lists; insert `list` when there's no subcommand (only flags).      if [ "$#" -eq 0 ] || [ "${1#-}" != "$1" ]; then "${run[@]}" release list "$@";      else "${run[@]}" release "$@"; fi ;;
-    # Other renamed groups (plural → singular). Bare (or flags-only) form lists    # (matches v4's native aliases); a subcommand uses the singular group (v4    # aliases `new`→`create`, `ls`→`list`, so subcommands keep working).    organizations|projects|issues|monitors|repos|events)      local grp=$1; shift      case "$grp" in        organizations) grp=org ;;        projects)       grp=project ;;        issues)         grp=issue ;;        monitors)       grp=monitor ;;        repos)          grp=repo ;;        events)         grp=event ;;      esac      # No subcommand (empty or a leading flag like `--json`) → explicit `list`,      # since some groups (e.g. project) default to `view`, not `list`.      if [ "$#" -eq 0 ] || [ "${1#-}" != "$1" ]; then "${run[@]}" "$grp" list "$@";      else "${run[@]}" "$grp" "$@"; fi ;;
-    # Everything else is unchanged    *) "${run[@]}" "$@" ;;  esac  }
-  # v3's `--allow-failure`/`SENTRY_ALLOW_FAILURE` made any command exit 0. v4  # dropped it, so emulate here: swallow a non-zero status when it was set.  if [ -n "$allow_failure" ]; then    _scli_dispatch "$@" || { printf 'sentry-cli: command failed, but --allow-failure/SENTRY_ALLOW_FAILURE was set — exiting 0\n' >&2; return 0; }  else    _scli_dispatch "$@"  fi}
-```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Previous: Installation](https://cli.sentry.dev/_preview/pr-main/getting-started.md)
+- [Next: Self-Hosted](https://cli.sentry.dev/_preview/pr-main/self-hosted.md)

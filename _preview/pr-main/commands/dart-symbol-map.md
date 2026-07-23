@@ -10,11 +10,7 @@ Work with Dart/Flutter symbol maps
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry dart-symbol-map upload <path>`
-
-[Section titled “sentry dart-symbol-map upload <path>”](#sentry-dart-symbol-map-upload-path)
 
 Upload a Dart/Flutter symbol map to Sentry
 
@@ -35,22 +31,31 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
+```bash
+# Upload a dart symbol map with a debug ID
+sentry dart-symbol-map upload --debug-id 12345678-1234-1234-1234-123456789abc mapping.json
 
-```
-# Upload a dart symbol map with a debug IDsentry dart-symbol-map upload --debug-id 12345678-1234-1234-1234-123456789abc mapping.json
-# Validate without uploadingsentry dart-symbol-map upload --debug-id 12345678-1234-1234-1234-123456789abc mapping.json --no-upload
-# Output as JSONsentry dart-symbol-map upload --debug-id 12345678-1234-1234-1234-123456789abc mapping.json --json
+
+# Validate without uploading
+sentry dart-symbol-map upload --debug-id 12345678-1234-1234-1234-123456789abc mapping.json --no-upload
+
+
+# Output as JSON
+sentry dart-symbol-map upload --debug-id 12345678-1234-1234-1234-123456789abc mapping.json --json
 ```
 
 
 ## Important Notes
-
-[Section titled “Important Notes”](#important-notes)
 
 - The `--debug-id` flag is **required** — it associates the map with a native
   debug file (dSYM/ELF). The sentry-dart-plugin extracts this automatically.
 - The mapping file must be a **JSON array of strings** with an even number of
   entries (alternating obfuscated/original name pairs).
 - Supported on Sentry SaaS and self-hosted >= 25.8.0.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: code-mappings](https://cli.sentry.dev/_preview/pr-main/commands/code-mappings.md)
+- [Next: dashboard](https://cli.sentry.dev/_preview/pr-main/commands/dashboard.md)

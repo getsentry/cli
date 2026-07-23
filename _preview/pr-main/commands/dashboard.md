@@ -10,11 +10,7 @@ Manage Sentry dashboards
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry dashboard list <org/title-filter...>`
-
-[Section titled “sentry dashboard list <org/title-filter...>”](#sentry-dashboard-list-orgtitle-filter)
 
 List dashboards
 
@@ -35,8 +31,6 @@ List dashboards
 
 ### `sentry dashboard view <org/project/dashboard...>`
 
-[Section titled “sentry dashboard view <org/project/dashboard...>”](#sentry-dashboard-view-orgprojectdashboard)
-
 View a dashboard
 
 **Arguments:**
@@ -56,8 +50,6 @@ View a dashboard
 
 ### `sentry dashboard create <org/project/title...>`
 
-[Section titled “sentry dashboard create <org/project/title...>”](#sentry-dashboard-create-orgprojecttitle)
-
 Create a dashboard
 
 **Arguments:**
@@ -67,8 +59,6 @@ Create a dashboard
 | `<org/project/title...>` | [<org/project>] <title> |
 
 ### `sentry dashboard widget add <org/project/dashboard/title...>`
-
-[Section titled “sentry dashboard widget add <org/project/dashboard/title...>”](#sentry-dashboard-widget-add-orgprojectdashboardtitle)
 
 Add a widget to a dashboard
 
@@ -96,8 +86,6 @@ Add a widget to a dashboard
 | `-l, --layout <layout>` | Layout mode: sequential (append in order) or dense (fill gaps) (default: "sequential") |
 
 ### `sentry dashboard widget edit <org/project/dashboard...>`
-
-[Section titled “sentry dashboard widget edit <org/project/dashboard...>”](#sentry-dashboard-widget-edit-orgprojectdashboard)
 
 Edit a widget in a dashboard
 
@@ -128,8 +116,6 @@ Edit a widget in a dashboard
 
 ### `sentry dashboard widget delete <org/project/dashboard...>`
 
-[Section titled “sentry dashboard widget delete <org/project/dashboard...>”](#sentry-dashboard-widget-delete-orgprojectdashboard)
-
 Delete a widget from a dashboard
 
 **Arguments:**
@@ -150,8 +136,6 @@ Delete a widget from a dashboard
 
 ### `sentry dashboard revisions <org/dashboard...>`
 
-[Section titled “sentry dashboard revisions <org/dashboard...>”](#sentry-dashboard-revisions-orgdashboard)
-
 List dashboard revisions
 
 **Arguments:**
@@ -168,8 +152,6 @@ List dashboard revisions
 | `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
 ### `sentry dashboard restore <org/dashboard...>`
-
-[Section titled “sentry dashboard restore <org/dashboard...>”](#sentry-dashboard-restore-orgdashboard)
 
 Restore a dashboard revision
 
@@ -189,116 +171,162 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-
 ### List dashboards
 
-[Section titled “List dashboards”](#list-dashboards)
-Terminal window
-
-```
-# List all dashboardssentry dashboard list
-# Filter by name patternsentry dashboard list "Backend*"
-# Open dashboard list in browsersentry dashboard list -w
-```
+```bash
+# List all dashboards
+sentry dashboard list
 
 
+# Filter by name pattern
+sentry dashboard list "Backend*"
+
+
+# Open dashboard list in browser
+sentry dashboard list -w
 ```
-ID      TITLE                   WIDGETS  CREATED12345   General                 4        2024-01-1512346   Frontend Performance    6        2024-02-2012347   Backend Errors          3        2024-03-10
+
+
+```plaintext
+ID      TITLE                   WIDGETS  CREATED
+12345   General                 4        2024-01-15
+12346   Frontend Performance    6        2024-02-20
+12347   Backend Errors          3        2024-03-10
 ```
 
 
 ### View a dashboard
 
-[Section titled “View a dashboard”](#view-a-dashboard)
-Terminal window
-
-```
-# View by titlesentry dashboard view 'Frontend Performance'
-# View by IDsentry dashboard view 12345
-# Auto-refresh every 30 secondssentry dashboard view "Backend Performance" --refresh 30
-# Open in browsersentry dashboard view 12345 -w
-```
+```bash
+# View by title
+sentry dashboard view 'Frontend Performance'
 
 
+# View by ID
+sentry dashboard view 12345
+
+
+# Auto-refresh every 30 seconds
+sentry dashboard view "Backend Performance" --refresh 30
+
+
+# Open in browser
+sentry dashboard view 12345 -w
 ```
-Dashboard: Frontend Performance (ID: 12345)URL: https://my-org.sentry.io/dashboard/12345/
-Widgets:  #0  Error Count          big_number   count()  #1  Errors Over Time     line         count()  #2  Errors by Browser    bar          count() group by browser.name  #3  Top Endpoints        table        count(), p95(span.duration) group by transaction
+
+
+```plaintext
+Dashboard: Frontend Performance (ID: 12345)
+URL: https://my-org.sentry.io/dashboard/12345/
+
+
+Widgets:
+  #0  Error Count          big_number   count()
+  #1  Errors Over Time     line         count()
+  #2  Errors by Browser    bar          count() group by browser.name
+  #3  Top Endpoints        table        count(), p95(span.duration) group by transaction
 ```
 
 
 ### Create a dashboard
 
-[Section titled “Create a dashboard”](#create-a-dashboard)
-Terminal window
-
-```
+```bash
 sentry dashboard create 'Frontend Performance'
 ```
 
 
-```
-Created dashboard: Frontend Performance (ID: 12348)URL: https://my-org.sentry.io/dashboard/12348/
+```plaintext
+Created dashboard: Frontend Performance (ID: 12348)
+URL: https://my-org.sentry.io/dashboard/12348/
 ```
 
 
 ### Add widgets
 
-[Section titled “Add widgets”](#add-widgets)
-Terminal window
+```bash
+# Simple counter widget
+sentry dashboard widget add 'My Dashboard' "Error Count" \
+  --display big_number --query count
 
-```
-# Simple counter widgetsentry dashboard widget add 'My Dashboard' "Error Count" \  --display big_number --query count
-# Line chart with group-bysentry dashboard widget add 'My Dashboard' "Errors by Browser" \  --display line --query count --group-by browser.name
-# Table with multiple aggregates, sorted descendingsentry dashboard widget add 'My Dashboard' "Top Endpoints" \  --display table \  --query count --query p95:span.duration \  --group-by transaction \  --sort -count --limit 10
-# With search filtersentry dashboard widget add 'My Dashboard' "Slow Requests" \  --display bar --query p95:span.duration \  --where "span.op:http.client" \  --group-by span.description
+
+# Line chart with group-by
+sentry dashboard widget add 'My Dashboard' "Errors by Browser" \
+  --display line --query count --group-by browser.name
+
+
+# Table with multiple aggregates, sorted descending
+sentry dashboard widget add 'My Dashboard' "Top Endpoints" \
+  --display table \
+  --query count --query p95:span.duration \
+  --group-by transaction \
+  --sort -count --limit 10
+
+
+# With search filter
+sentry dashboard widget add 'My Dashboard' "Slow Requests" \
+  --display bar --query p95:span.duration \
+  --where "span.op:http.client" \
+  --group-by span.description
 ```
 
 
 ### Edit widgets
 
-[Section titled “Edit widgets”](#edit-widgets)
-Terminal window
+```bash
+# Change display type
+sentry dashboard widget edit 12345 --title 'Error Count' --display bar
 
-```
-# Change display typesentry dashboard widget edit 12345 --title 'Error Count' --display bar
-# Rename a widgetsentry dashboard widget edit 'My Dashboard' --index 0 --new-title 'Total Errors'
-# Change the querysentry dashboard widget edit 12345 --title 'Error Rate' --query p95:span.duration
+
+# Rename a widget
+sentry dashboard widget edit 'My Dashboard' --index 0 --new-title 'Total Errors'
+
+
+# Change the query
+sentry dashboard widget edit 12345 --title 'Error Rate' --query p95:span.duration
 ```
 
 
 ### Delete widgets
 
-[Section titled “Delete widgets”](#delete-widgets)
-Terminal window
+```bash
+# Delete by title
+sentry dashboard widget delete 'My Dashboard' --title 'Error Count'
 
-```
-# Delete by titlesentry dashboard widget delete 'My Dashboard' --title 'Error Count'
-# Delete by indexsentry dashboard widget delete 12345 --index 2
+
+# Delete by index
+sentry dashboard widget delete 12345 --index 2
 ```
 
 
 ### View revision history
 
-[Section titled “View revision history”](#view-revision-history)
-Terminal window
+```bash
+# List revisions by dashboard title
+sentry dashboard revisions 'Frontend Performance'
 
-```
-# List revisions by dashboard titlesentry dashboard revisions 'Frontend Performance'
-# List revisions by dashboard IDsentry dashboard revisions 12345
-# With explicit orgsentry dashboard revisions my-org 12345
+
+# List revisions by dashboard ID
+sentry dashboard revisions 12345
+
+
+# With explicit org
+sentry dashboard revisions my-org 12345
 ```
 
 
 ### Restore a previous revision
 
-[Section titled “Restore a previous revision”](#restore-a-previous-revision)
-Terminal window
+```bash
+# Restore by dashboard title and revision number
+sentry dashboard restore 'Frontend Performance' --revision 3
 
-```
-# Restore by dashboard title and revision numbersentry dashboard restore 'Frontend Performance' --revision 3
-# Restore by dashboard IDsentry dashboard restore 12345 --revision 1
-# With explicit orgsentry dashboard restore my-org 12345 --revision 1
+
+# Restore by dashboard ID
+sentry dashboard restore 12345 --revision 1
+
+
+# With explicit org
+sentry dashboard restore my-org 12345 --revision 1
 ```
 
 
@@ -307,8 +335,6 @@ Tip
 Use `sentry dashboard revisions` to find the revision number before restoring.
 
 ## Query Shorthand
-
-[Section titled “Query Shorthand”](#query-shorthand)
 
 The `--query` flag supports shorthand for aggregate functions:
 
@@ -321,9 +347,14 @@ The `--query` flag supports shorthand for aggregate functions:
 
 ## Sort Shorthand
 
-[Section titled “Sort Shorthand”](#sort-shorthand)
-
 | Input | Meaning |
 | --- | --- |
 | `count` | Sort by `count()` ascending |
 | `-count` | Sort by `count()` descending |
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: dart-symbol-map](https://cli.sentry.dev/_preview/pr-main/commands/dart-symbol-map.md)
+- [Next: debug-files](https://cli.sentry.dev/_preview/pr-main/commands/debug-files.md)

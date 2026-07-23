@@ -10,11 +10,7 @@ Work with Sentry organizations
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry org list`
-
-[Section titled “sentry org list”](#sentry-org-list)
 
 List organizations
 
@@ -26,8 +22,6 @@ List organizations
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 
 ### `sentry org view <org>`
-
-[Section titled “sentry org view <org>”](#sentry-org-view-org)
 
 View details of an organization
 
@@ -48,34 +42,47 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
-
-```
-# List organizationssentry org list
+```bash
+# List organizations
+sentry org list
 ```
 
 
-```
-SLUG           NAME                 ROLEmy-org         My Organization      owneranother-org    Another Org          member
-```
-
-
-Terminal window
-
-```
-# View organization detailssentry org view my-org
+```plaintext
+SLUG           NAME                 ROLE
+my-org         My Organization      owner
+another-org    Another Org          member
 ```
 
 
-```
-Organization: My OrganizationSlug: my-orgRole: ownerProjects: 5Teams: 3Members: 12
+```bash
+# View organization details
+sentry org view my-org
 ```
 
 
-Terminal window
+```plaintext
+Organization: My Organization
+Slug: my-org
+Role: owner
+Projects: 5
+Teams: 3
+Members: 12
+```
 
+
+```bash
+# Open in browser
+sentry org view my-org -w
+
+
+# JSON output
+sentry org list --json
 ```
-# Open in browsersentry org view my-org -w
-# JSON outputsentry org list --json
-```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: monitor](https://cli.sentry.dev/_preview/pr-main/commands/monitor.md)
+- [Next: proguard](https://cli.sentry.dev/_preview/pr-main/commands/proguard.md)

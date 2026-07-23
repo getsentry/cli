@@ -10,8 +10,6 @@ The CLI uses semantic exit codes so scripts, CI pipelines, and AI agents can rea
 
 ## Exit Code Ranges
 
-[Section titled “Exit Code Ranges”](#exit-code-ranges)
-
 | Range | Category | Description |
 | --- | --- | --- |
 | 0 | Success | Command completed successfully |
@@ -24,8 +22,6 @@ The CLI uses semantic exit codes so scripts, CI pipelines, and AI agents can rea
 | 60–69 | Command | Command-specific non-standard exits |
 
 ## Complete Reference
-
-[Section titled “Complete Reference”](#complete-reference)
 
 | Code | Name | Description |
 | --- | --- | --- |
@@ -54,33 +50,47 @@ The CLI uses semantic exit codes so scripts, CI pipelines, and AI agents can rea
 
 ## Scripting Examples
 
-[Section titled “Scripting Examples”](#scripting-examples)
-
 ### Bash
 
-[Section titled “Bash”](#bash)
-Terminal window
+```bash
+sentry issue list my-org/
+code=$?
 
-```
-sentry issue list my-org/code=$?
-case $code in  0)   echo "Success" ;;  1?)  echo "Auth problem (code $code) — run: sentry auth login" ;;  2?)  echo "Input/config problem (code $code)" ;;  3?)  echo "API/network error (code $code)" ;;  4?)  echo "Feature not available (code $code)" ;;  *)   echo "Failed with exit code $code" ;;esac
+
+case $code in
+  0)   echo "Success" ;;
+  1?)  echo "Auth problem (code $code) — run: sentry auth login" ;;
+  2?)  echo "Input/config problem (code $code)" ;;
+  3?)  echo "API/network error (code $code)" ;;
+  4?)  echo "Feature not available (code $code)" ;;
+  *)   echo "Failed with exit code $code" ;;
+esac
 ```
 
 
 ### Python
 
-[Section titled “Python”](#python)
-
-```
+```python
 import subprocess
+
+
 result = subprocess.run(["sentry", "issue", "list", "my-org/"], capture_output=True)
-if result.returncode == 0:    print("Success")elif 10 <= result.returncode <= 19:    print("Auth error — run: sentry auth login")elif 20 <= result.returncode <= 29:    print("Input/config error")elif 30 <= result.returncode <= 39:    print("API/network error")elif 40 <= result.returncode <= 49:    print("Feature not available")
+
+
+if result.returncode == 0:
+    print("Success")
+elif 10 <= result.returncode <= 19:
+    print("Auth error — run: sentry auth login")
+elif 20 <= result.returncode <= 29:
+    print("Input/config error")
+elif 30 <= result.returncode <= 39:
+    print("API/network error")
+elif 40 <= result.returncode <= 49:
+    print("Feature not available")
 ```
 
 
 ## Notes
-
-[Section titled “Notes”](#notes)
 
 - Exit codes below 128 are safe from collision with Unix signal exits (128+N).
 - The `sentry api` command renders API error responses to stdout and exits
@@ -95,3 +105,9 @@ if result.returncode == 0:    print("Success")elif 10 <= result.returncode <= 19
 - [Stricli](https://bloomberg.github.io/stricli/) (the CLI framework) uses
   negative exit codes (-5 to -1) for framework-level errors like unknown
   commands or invalid arguments. These appear as 251–255 in unsigned form.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Previous: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Next: Features](https://cli.sentry.dev/_preview/pr-main/features.md)

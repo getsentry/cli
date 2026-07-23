@@ -10,11 +10,7 @@ Manage and compare snapshots
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry snapshots diff <base-dir> <head-dir>`
-
-[Section titled “sentry snapshots diff <base-dir> <head-dir>”](#sentry-snapshots-diff-base-dir-head-dir)
 
 Compare two directories of snapshot images
 
@@ -37,8 +33,6 @@ Compare two directories of snapshot images
 
 ### `sentry snapshots download`
 
-[Section titled “sentry snapshots download”](#sentry-snapshots-download)
-
 Download baseline snapshot images
 
 **Options:**
@@ -51,8 +45,6 @@ Download baseline snapshot images
 | `-o, --output <output>` | Directory for extracted images (default: ./snapshots-base/) |
 
 ### `sentry snapshots upload <path>`
-
-[Section titled “sentry snapshots upload <path>”](#sentry-snapshots-upload-path)
 
 Upload snapshots to a project
 
@@ -86,24 +78,41 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
+```bash
+# Upload a folder of screenshots as a snapshot for an app
+sentry snapshots upload ./screenshots --app-id com.example.app
 
-```
-# Upload a folder of screenshots as a snapshot for an appsentry snapshots upload ./screenshots --app-id com.example.app
-# Upload only a subset of images (removals/renames not inferred on PRs)sentry snapshots upload ./screenshots --app-id my-app --selective
-# Only flag images that differ by more than 1%sentry snapshots upload ./screenshots --app-id my-app --diff-threshold 0.01
-# Compare two directories of snapshot images locallysentry snapshots diff ./baseline ./head
-# Fail (non-zero exit) if any images changed, with a custom thresholdsentry snapshots diff ./baseline ./head --fail-on-diff --threshold 0.02
-# Download a specific baseline snapshot by IDsentry snapshots download --snapshot-id 1234567890
-# Download the latest baseline for an app, filtered by branchsentry snapshots download --app-id my-app --branch main
-# Extract images to a specific directorysentry snapshots download --app-id my-app --output ./baseline/
+
+# Upload only a subset of images (removals/renames not inferred on PRs)
+sentry snapshots upload ./screenshots --app-id my-app --selective
+
+
+# Only flag images that differ by more than 1%
+sentry snapshots upload ./screenshots --app-id my-app --diff-threshold 0.01
+
+
+# Compare two directories of snapshot images locally
+sentry snapshots diff ./baseline ./head
+
+
+# Fail (non-zero exit) if any images changed, with a custom threshold
+sentry snapshots diff ./baseline ./head --fail-on-diff --threshold 0.02
+
+
+# Download a specific baseline snapshot by ID
+sentry snapshots download --snapshot-id 1234567890
+
+
+# Download the latest baseline for an app, filtered by branch
+sentry snapshots download --app-id my-app --branch main
+
+
+# Extract images to a specific directory
+sentry snapshots download --app-id my-app --output ./baseline/
 ```
 
 
 ## Important Notes
-
-[Section titled “Important Notes”](#important-notes)
 
 - `snapshots upload` scans a folder for PNG/JPEG images (skipping hidden files),
   uploads each to Sentry's object store — images already present are skipped by
@@ -129,3 +138,10 @@ Terminal window
   `--output`.
 - The organization is resolved from `--org`, `SENTRY_ORG`, config defaults, or a
   detected DSN.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: schema](https://cli.sentry.dev/_preview/pr-main/commands/schema.md)
+- [Next: sourcemap](https://cli.sentry.dev/_preview/pr-main/commands/sourcemap.md)

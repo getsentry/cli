@@ -10,11 +10,7 @@ View, list, and send Sentry events
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry event view <org/project/event-id...>`
-
-[Section titled “sentry event view <org/project/event-id...>”](#sentry-event-view-orgprojectevent-id)
 
 View details of one or more events
 
@@ -33,8 +29,6 @@ View details of one or more events
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 
 ### `sentry event list <issue>`
-
-[Section titled “sentry event list <issue>”](#sentry-event-list-issue)
 
 List events for an issue
 
@@ -56,8 +50,6 @@ List events for an issue
 | `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
 ### `sentry event send <args...>`
-
-[Section titled “sentry event send <args...>”](#sentry-event-send-args)
 
 Send a Sentry event
 
@@ -93,36 +85,44 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-
 ### Sending Events
 
-[Section titled “Sending Events”](#sending-events)
-Terminal window
+```bash
+# Send an error event (default level)
+sentry event send -m "Something went wrong"
 
-```
-# Send an error event (default level)sentry event send -m "Something went wrong"
-# Specify level, release, and environmentsentry event send -m "Deploy check" -l info -r 1.0.0 -E production
-# Add tags and extra datasentry event send -m "Payment failed" --tag env:prod --tag region:us-east --extra amount:99.99
-# Set user contextsentry event send -m "Login error" --user id:42 --user email:alice@example.com
-# Custom fingerprint to group related events togethersentry event send -m "DB timeout" --fingerprint db-timeout --fingerprint {{ default }}
+
+# Specify level, release, and environment
+sentry event send -m "Deploy check" -l info -r 1.0.0 -E production
+
+
+# Add tags and extra data
+sentry event send -m "Payment failed" --tag env:prod --tag region:us-east --extra amount:99.99
+
+
+# Set user context
+sentry event send -m "Login error" --user id:42 --user email:alice@example.com
+
+
+# Custom fingerprint to group related events together
+sentry event send -m "DB timeout" --fingerprint db-timeout --fingerprint {{ default }}
 ```
 
 
 ### Send from a JSON file
 
-[Section titled “Send from a JSON file”](#send-from-a-json-file)
-Terminal window
+```bash
+# Send a serialized Sentry Event object
+sentry event send ./crash.json
 
-```
-# Send a serialized Sentry Event objectsentry event send ./crash.json
-# Send without re-parsing (raw mode — also supports pre-built envelopes)sentry event send --raw ./crash.jsonsentry event send --raw ./captured.envelope
+
+# Send without re-parsing (raw mode — also supports pre-built envelopes)
+sentry event send --raw ./crash.json
+sentry event send --raw ./captured.envelope
 ```
 
 
 ### DSN authentication
-
-[Section titled “DSN authentication”](#dsn-authentication)
 
 `sentry event send` authenticates via a **DSN** rather than a user token. No `sentry auth login` is required.
 
@@ -131,58 +131,90 @@ The DSN is resolved in priority order:
 1. `--dsn <value>` flag (explicit)
 2. `SENTRY_DSN` environment variable
 
-Terminal window
+```bash
+# Explicit DSN
+sentry event send -m "Test" --dsn "https://key@o123.ingest.us.sentry.io/456"
 
-```
-# Explicit DSNsentry event send -m "Test" --dsn "https://key@o123.ingest.us.sentry.io/456"
-# Via environment variableexport SENTRY_DSN="https://key@o123.ingest.us.sentry.io/456"sentry event send -m "Test"
+
+# Via environment variable
+export SENTRY_DSN="https://key@o123.ingest.us.sentry.io/456"
+sentry event send -m "Test"
 ```
 
 
 ### Listing Events
 
-[Section titled “Listing Events”](#listing-events)
-Terminal window
+```bash
+# List events for an issue (using short ID)
+sentry event list PROJ-ABC
 
-```
-# List events for an issue (using short ID)sentry event list PROJ-ABC
-# List events for an issue (using numeric ID)sentry event list 123456789
-# Filter by search querysentry event list PROJ-ABC --query "browser:Chrome"
-# Include full event bodies (stacktraces)sentry event list PROJ-ABC --full
-# Limit results and time rangesentry event list PROJ-ABC --limit 50 --period 24h
-# Paginate through resultssentry event list PROJ-ABC -c nextsentry event list PROJ-ABC -c prev
-# Output as JSONsentry event list PROJ-ABC --json
+
+# List events for an issue (using numeric ID)
+sentry event list 123456789
+
+
+# Filter by search query
+sentry event list PROJ-ABC --query "browser:Chrome"
+
+
+# Include full event bodies (stacktraces)
+sentry event list PROJ-ABC --full
+
+
+# Limit results and time range
+sentry event list PROJ-ABC --limit 50 --period 24h
+
+
+# Paginate through results
+sentry event list PROJ-ABC -c next
+sentry event list PROJ-ABC -c prev
+
+
+# Output as JSON
+sentry event list PROJ-ABC --json
 ```
 
 
 ### Viewing Events
 
-[Section titled “Viewing Events”](#viewing-events)
-Terminal window
-
-```
+```bash
 sentry event view abc123def456abc123def456abc12345
 ```
 
 
-```
-Event: abc123def456abc123def456abc12345Issue: FRONT-ABCTimestamp: 2024-01-20 14:22:00
-Exception:  TypeError: Cannot read property 'foo' of undefined    at processData (app.js:123:45)    at handleClick (app.js:89:12)    at HTMLButtonElement.onclick (app.js:45:8)
-Tags:  browser: Chrome 120  os: Windows 10  environment: production  release: 1.2.3
-Context:  url: https://example.com/app  user_id: 12345
+```plaintext
+Event: abc123def456abc123def456abc12345
+Issue: FRONT-ABC
+Timestamp: 2024-01-20 14:22:00
+
+
+Exception:
+  TypeError: Cannot read property 'foo' of undefined
+    at processData (app.js:123:45)
+    at handleClick (app.js:89:12)
+    at HTMLButtonElement.onclick (app.js:45:8)
+
+
+Tags:
+  browser: Chrome 120
+  os: Windows 10
+  environment: production
+  release: 1.2.3
+
+
+Context:
+  url: https://example.com/app
+  user_id: 12345
 ```
 
 
-Terminal window
-
-```
-# Open in browsersentry event view abc123def456abc123def456abc12345 -w
+```bash
+# Open in browser
+sentry event view abc123def456abc123def456abc12345 -w
 ```
 
 
 ## Finding Event IDs
-
-[Section titled “Finding Event IDs”](#finding-event-ids)
 
 Event IDs can be found:
 
@@ -192,12 +224,15 @@ Event IDs can be found:
 
 ## Backward compatibility
 
-[Section titled “Backward compatibility”](#backward-compatibility)
-
 The old sentry-cli top-level command is available as a hidden alias:
 
-Terminal window
-
-```
+```bash
 sentry send-event    # same as: sentry event send
 ```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: debug-files](https://cli.sentry.dev/_preview/pr-main/commands/debug-files.md)
+- [Next: explore](https://cli.sentry.dev/_preview/pr-main/commands/explore.md)

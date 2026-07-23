@@ -10,11 +10,7 @@ Upload React Native sourcemaps from build steps
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry react-native gradle`
-
-[Section titled “sentry react-native gradle”](#sentry-react-native-gradle)
 
 Upload a React Native bundle + sourcemap (Gradle build step)
 
@@ -30,8 +26,6 @@ Upload a React Native bundle + sourcemap (Gradle build step)
 | `--wait-for <wait-for>` | Wait for processing, but at most this many seconds |
 
 ### `sentry react-native xcode <script-arg...>`
-
-[Section titled “sentry react-native xcode <script-arg...>”](#sentry-react-native-xcode-script-arg)
 
 Upload React Native sourcemaps (Xcode build step)
 
@@ -58,18 +52,28 @@ Upload React Native sourcemaps (Xcode build step)
 All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
 
 ## Examples
-Terminal window
 
-```
-# Upload a bundle + sourcemap by debug ID (called by the Gradle plugin)sentry react-native gradle \  --bundle index.android.bundle \  --sourcemap index.android.bundle.map
-# Also associate with a release and distribution(s)sentry react-native gradle \  --bundle index.android.bundle \  --sourcemap index.android.bundle.map \  --release com.example.app@1.0.0 \  --dist 1000
-# Xcode build phase (usually added automatically to your build script)../node_modules/.bin/sentry-cli react-native xcode
+```bash
+# Upload a bundle + sourcemap by debug ID (called by the Gradle plugin)
+sentry react-native gradle \
+  --bundle index.android.bundle \
+  --sourcemap index.android.bundle.map
+
+
+# Also associate with a release and distribution(s)
+sentry react-native gradle \
+  --bundle index.android.bundle \
+  --sourcemap index.android.bundle.map \
+  --release com.example.app@1.0.0 \
+  --dist 1000
+
+
+# Xcode build phase (usually added automatically to your build script)
+../node_modules/.bin/sentry-cli react-native xcode
 ```
 
 
 ## Xcode build step (`react-native xcode`)
-
-[Section titled “Xcode build step (react-native xcode)”](#xcode-build-step-react-native-xcode)
 
 `react-native xcode` runs inside an Xcode "Bundle React Native code and images" build phase. It has three modes:
 
@@ -84,8 +88,6 @@ Release/distribution come from `SENTRY_RELEASE`/`SENTRY_DIST` or the app's `Info
 
 ## Important Notes
 
-[Section titled “Important Notes”](#important-notes)
-
 - `react-native gradle` is normally invoked automatically by the
   [sentry-android-gradle-plugin](https://docs.sentry.io/platforms/react-native/sourcemaps/);
   you rarely run it by hand.
@@ -96,3 +98,10 @@ Release/distribution come from `SENTRY_RELEASE`/`SENTRY_DIST` or the app's `Info
 - `--wait`/`--wait-for` block until the server finishes processing the upload.
 - Indexed/file RAM bundles (a pre-Hermes format that React Native has since
   deprecated) are not supported — use a plain or Hermes bundle.
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: project](https://cli.sentry.dev/_preview/pr-main/commands/project.md)
+- [Next: release](https://cli.sentry.dev/_preview/pr-main/commands/release.md)

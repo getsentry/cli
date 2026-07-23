@@ -10,11 +10,7 @@ View distributed traces
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry trace list <org/project>`
-
-[Section titled “sentry trace list <org/project>”](#sentry-trace-list-orgproject)
 
 List recent traces in a project
 
@@ -37,8 +33,6 @@ List recent traces in a project
 
 ### `sentry trace view <org/project/trace-id...>`
 
-[Section titled “sentry trace view <org/project/trace-id...>”](#sentry-trace-view-orgprojecttrace-id)
-
 View details of a specific trace
 
 **Arguments:**
@@ -57,8 +51,6 @@ View details of a specific trace
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 
 ### `sentry trace logs <org/project/trace-id...>`
-
-[Section titled “sentry trace logs <org/project/trace-id...>”](#sentry-trace-logs-orgprojecttrace-id)
 
 View logs associated with a trace
 
@@ -83,53 +75,80 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-
 ### List traces
 
-[Section titled “List traces”](#list-traces)
-Terminal window
+```bash
+# List last 20 traces (default)
+sentry trace list
 
-```
-# List last 20 traces (default)sentry trace list
-# Sort by slowest firstsentry trace list --sort duration
-# Filter by transaction name, last 24 hourssentry trace list -q "transaction:GET /api/users" --period 24h
-# Paginate through resultssentry trace list my-org/backend -c next
+
+# Sort by slowest first
+sentry trace list --sort duration
+
+
+# Filter by transaction name, last 24 hours
+sentry trace list -q "transaction:GET /api/users" --period 24h
+
+
+# Paginate through results
+sentry trace list my-org/backend -c next
 ```
 
 
 ### View a trace
 
-[Section titled “View a trace”](#view-a-trace)
-Terminal window
+```bash
+# View trace details with span tree
+sentry trace view abc123def456abc123def456abc12345
 
-```
-# View trace details with span treesentry trace view abc123def456abc123def456abc12345
-# Open trace in browsersentry trace view abc123def456abc123def456abc12345 -w
-# Auto-recover from an issue short IDsentry trace view PROJ-123
+
+# Open trace in browser
+sentry trace view abc123def456abc123def456abc12345 -w
+
+
+# Auto-recover from an issue short ID
+sentry trace view PROJ-123
 ```
 
 
 ### Cross-project traces
 
-[Section titled “Cross-project traces”](#cross-project-traces)
-Terminal window
+```bash
+# Filter trace view to one project's spans
+sentry trace view my-org/cli-server/abc123def456abc123def456abc12345
 
-```
-# Filter trace view to one project's spanssentry trace view my-org/cli-server/abc123def456abc123def456abc12345
-# Full trace across all projects (default)sentry trace view my-org/abc123def456abc123def456abc12345
-# Filter trace logs by projectsentry trace logs my-org/cli-server/abc123def456abc123def456abc12345
-# Multiple projects via --querysentry trace logs abc123def456abc123def456abc12345 -q "project:[cli-server,api]"
+
+# Full trace across all projects (default)
+sentry trace view my-org/abc123def456abc123def456abc12345
+
+
+# Filter trace logs by project
+sentry trace logs my-org/cli-server/abc123def456abc123def456abc12345
+
+
+# Multiple projects via --query
+sentry trace logs abc123def456abc123def456abc12345 -q "project:[cli-server,api]"
 ```
 
 
 ### View trace logs
 
-[Section titled “View trace logs”](#view-trace-logs)
-Terminal window
+```bash
+# View logs for a trace
+sentry trace logs abc123def456abc123def456abc12345
 
+
+# Search with a longer time window
+sentry trace logs --period 30d abc123def456abc123def456abc12345
+
+
+# Filter logs within a trace
+sentry trace logs -q 'level:error' abc123def456abc123def456abc12345
 ```
-# View logs for a tracesentry trace logs abc123def456abc123def456abc12345
-# Search with a longer time windowsentry trace logs --period 30d abc123def456abc123def456abc12345
-# Filter logs within a tracesentry trace logs -q 'level:error' abc123def456abc123def456abc12345
-```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: team](https://cli.sentry.dev/_preview/pr-main/commands/team.md)
+- [Next: trial](https://cli.sentry.dev/_preview/pr-main/commands/trial.md)

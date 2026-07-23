@@ -10,11 +10,7 @@ Browse the Sentry API schema
 
 ## Usage
 
-[Section titled “Usage”](#usage)
-
 ### `sentry schema <resource...>`
-
-[Section titled “sentry schema <resource...>”](#sentry-schema-resource)
 
 Browse the Sentry API schema
 
@@ -35,13 +31,30 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-Terminal window
+```bash
+# List all API resources
+sentry schema
 
+
+# Browse issue endpoints
+sentry schema issues
+
+
+# View details for a specific operation
+sentry schema issues list
+
+
+# Search for monitoring-related endpoints
+sentry schema --search monitor
+
+
+# Flat list of every endpoint
+sentry schema --all
 ```
-# List all API resourcessentry schema
-# Browse issue endpointssentry schema issues
-# View details for a specific operationsentry schema issues list
-# Search for monitoring-related endpointssentry schema --search monitor
-# Flat list of every endpointsentry schema --all
-```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: repo](https://cli.sentry.dev/_preview/pr-main/commands/repo.md)
+- [Next: snapshots](https://cli.sentry.dev/_preview/pr-main/commands/snapshots.md)

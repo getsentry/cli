@@ -10,11 +10,7 @@ Search and inspect Session Replays
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry replay list <org/project>`
-
-[Section titled “sentry replay list <org/project>”](#sentry-replay-list-orgproject)
 
 List recent Session Replays
 
@@ -38,8 +34,6 @@ List recent Session Replays
 
 ### `sentry replay view <replay-id-or-url...>`
 
-[Section titled “sentry replay view <replay-id-or-url...>”](#sentry-replay-view-replay-id-or-url)
-
 View a Session Replay
 
 **Arguments:**
@@ -59,30 +53,53 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-
 ### List replays
 
-[Section titled “List replays”](#list-replays)
-Terminal window
+```bash
+# List recent replays for a project
+sentry replay list my-org/frontend
 
-```
-# List recent replays for a projectsentry replay list my-org/frontend
-# Search across all projects in an orgsentry replay list my-org/ --query "environment:production"
-# Change the time window and sortsentry replay list my-org/frontend --period 24h --sort errors
-# Paginate through resultssentry replay list my-org/frontend -c nextsentry replay list my-org/frontend -c prev
-# Output machine-readable datasentry replay list my-org/frontend --json
+
+# Search across all projects in an org
+sentry replay list my-org/ --query "environment:production"
+
+
+# Change the time window and sort
+sentry replay list my-org/frontend --period 24h --sort errors
+
+
+# Paginate through results
+sentry replay list my-org/frontend -c next
+sentry replay list my-org/frontend -c prev
+
+
+# Output machine-readable data
+sentry replay list my-org/frontend --json
 ```
 
 
 ### View a replay
 
-[Section titled “View a replay”](#view-a-replay)
-Terminal window
+```bash
+# View a replay by ID using auto-detected org/project context
+sentry replay view 346789a703f6454384f1de473b8b9fcc
 
+
+# View a replay with an explicit org
+sentry replay view my-org/346789a703f6454384f1de473b8b9fcc
+
+
+# View a replay with explicit org/project context
+sentry replay view my-org/frontend/346789a703f6454384f1de473b8b9fcc
+
+
+# Open a replay in the browser
+sentry replay view my-org/346789a703f6454384f1de473b8b9fcc --web
 ```
-# View a replay by ID using auto-detected org/project contextsentry replay view 346789a703f6454384f1de473b8b9fcc
-# View a replay with an explicit orgsentry replay view my-org/346789a703f6454384f1de473b8b9fcc
-# View a replay with explicit org/project contextsentry replay view my-org/frontend/346789a703f6454384f1de473b8b9fcc
-# Open a replay in the browsersentry replay view my-org/346789a703f6454384f1de473b8b9fcc --web
-```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
+- [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
+- [Previous: release](https://cli.sentry.dev/_preview/pr-main/commands/release.md)
+- [Next: repo](https://cli.sentry.dev/_preview/pr-main/commands/repo.md)
