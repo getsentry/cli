@@ -5,7 +5,11 @@
  */
 
 import type { SentryContext } from "../../context.js";
-import { type LogSortDirection, listTraceLogs } from "../../lib/api-client.js";
+import {
+  API_MAX_PER_PAGE,
+  type LogSortDirection,
+  listTraceLogs,
+} from "../../lib/api-client.js";
 import {
   buildProjectQuery,
   parseLogSort,
@@ -214,7 +218,8 @@ export const logsCommand = buildCommand({
         })
     );
 
-    const hasMore = logs.length >= flags.limit;
+    const effectivePerPage = Math.min(flags.limit, API_MAX_PER_PAGE);
+    const hasMore = logs.length >= effectivePerPage;
 
     const emptyMessage =
       `No logs found for trace ${traceId} in the last ${formatTimeRangeFlag(flags.period)}.\n\n` +

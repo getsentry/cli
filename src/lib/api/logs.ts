@@ -343,7 +343,7 @@ export async function listTraceLogs(
             : (options.statsPeriod ?? "14d"),
         start: options.start,
         end: options.end,
-        per_page: options.limit ?? API_MAX_PER_PAGE,
+        per_page: Math.min(options.limit ?? API_MAX_PER_PAGE, API_MAX_PER_PAGE),
         query: options.query,
         sort: toApiSort(options.sort),
       },
