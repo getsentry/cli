@@ -556,7 +556,7 @@ function formatIdCell(
  * @returns Cell string
  */
 function formatIssueCell(issue: SentryIssue, compact = false): string {
-  const title = `**${escapeMarkdownInline(issue.title)}**`;
+  const title = `**${escapeMarkdownInline(issue.title ?? "")}**`;
   if (compact) {
     return title;
   }
@@ -1845,7 +1845,7 @@ function formatVerificationSection(
       lines.push("");
       for (const org of orgs.slice(0, MAX_VERIFY_DISPLAY)) {
         lines.push(
-          `- ${escapeMarkdownInline(org.name)} (${safeCodeSpan(org.slug)})`
+          `- ${escapeMarkdownInline(org.name || "(unnamed)")} (${safeCodeSpan(org.slug)})`
         );
       }
       if (orgs.length > MAX_VERIFY_DISPLAY) {
