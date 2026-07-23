@@ -20,8 +20,8 @@ importers:
         specifier: ^10.38.0
         version: 10.58.0(astro@6.4.6(@types/node@25.9.1)(rollup@4.62.0))(rollup@4.62.0)
       '@sentry/starlight-theme':
-        specifier: ^0.7.0
-        version: 0.7.0(@astrojs/starlight@0.39.3(astro@6.4.6(@types/node@25.9.1)(rollup@4.62.0)))
+        specifier: ^0.8.0
+        version: 0.8.0(@astrojs/starlight@0.39.3(astro@6.4.6(@types/node@25.9.1)(rollup@4.62.0)))
       astro:
         specifier: ^6.4.6
         version: 6.4.6(@types/node@25.9.1)(rollup@4.62.0)
@@ -946,8 +946,8 @@ packages:
     resolution: {integrity: sha512-PywIl2jvl+tO5R4j+n72Lcf3ItanHcaMN/oL1U9ZHE8icaT2zpo2W4uOaslpQeQvqPC24HGZ3BW2etzsCFQbag==}
     engines: {node: '>=18'}
 
-  '@sentry/starlight-theme@0.7.0':
-    resolution: {integrity: sha512-yDVa7JMKKRsH3BwTFezudPJYHoZbMPi0Kvz28Szj1GT2Q7gj3Kh9cVZrooJbWqO5aexj0MFGYe3ejbTK1VXvcg==}
+  '@sentry/starlight-theme@0.8.0':
+    resolution: {integrity: sha512-Stcb8D2EqO309jfhugJJxM3tf0vq+zg1XV1dA0AVJMK81sMa8AWHKajqgy60rhLvr22rpJnc2UextZw/szd2BA==}
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@astrojs/starlight': '>=0.39.0'
@@ -3247,7 +3247,7 @@ snapshots:
     dependencies:
       '@sentry/core': 10.58.0
 
-  '@sentry/starlight-theme@0.7.0(@astrojs/starlight@0.39.3(astro@6.4.6(@types/node@25.9.1)(rollup@4.62.0)))':
+  '@sentry/starlight-theme@0.8.0(@astrojs/starlight@0.39.3(astro@6.4.6(@types/node@25.9.1)(rollup@4.62.0)))':
     dependencies:
       '@astrojs/starlight': 0.39.3(astro@6.4.6(@types/node@25.9.1)(rollup@4.62.0))
       '@fontsource-variable/rubik': 5.2.8
