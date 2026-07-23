@@ -20,6 +20,18 @@ import { getProjectAliases } from "./db/project-aliases.js";
 import { getCachedProjectsForOrg } from "./db/project-cache.js";
 import { getCachedOrganizations } from "./db/regions.js";
 import { fuzzyMatch } from "./fuzzy.js";
+import { GLOBAL_FLAGS } from "./global-flags.js";
+import { COMMON_PLATFORMS, VALID_PLATFORMS } from "./platforms.js";
+
+const WHITESPACE_RE = /\s/;
+const PROJECT_CREATE_VALUE_FLAGS = new Set([
+  "--team",
+  "-t",
+  ...GLOBAL_FLAGS.filter((flag) => flag.kind === "value").flatMap((flag) => [
+    `--${flag.name}`,
+    ...(flag.short ? [`-${flag.short}`] : []),
+  ]),
+]);
 
 /**
  * Completion result with optional description for rich shell display.
@@ -100,7 +112,6 @@ export const ORG_PROJECT_COMMANDS = new Set([
   "project list",
   "project view",
   "project delete",
-  "project create",
   "replay list",
   "replay view",
   "trace list",
@@ -162,6 +173,32 @@ export function getCompletions(
       ? `${precedingWords[0]} ${precedingWords[1]}`
       : "";
 
+  if (cmdPath === "project create") {
+    const completionContext = parseProjectCreateCompletionContext(
+      precedingWords.slice(2)
+    );
+    if (completionContext.expectsFlagValue) {
+      return [];
+    }
+    const [first, second] = completionContext.positionals;
+    if (completionContext.positionals.length === 1 && first) {
+      const legacyPlatforms = completeProjectPlatform(partial);
+      return first.includes(":")
+        ? [...completeProjectCreateSpec(partial), ...legacyPlatforms]
+        : legacyPlatforms;
+    }
+    if (
+      completionContext.positionals.length === 2 &&
+      first &&
+      second &&
+      !first.includes(":") &&
+      !second.includes(":")
+    ) {
+      return [];
+    }
+    return completeProjectCreateSpec(partial);
+  }
+
   if (ORG_PROJECT_COMMANDS.has(cmdPath)) {
     return completeOrgSlashProject(partial);
   }
@@ -172,6 +209,102 @@ export function getCompletions(
 
   // Not a known command path — no dynamic completions
   return [];
+}
+
+/**
+ * Extract project-create positionals while skipping known flags and their
+ * values. This keeps legacy platform completion correct when flags appear
+ * before the project name.
+ */
+function parseProjectCreateCompletionContext(words: readonly string[]): {
+  positionals: string[];
+  expectsFlagValue: boolean;
+} {
+  const positionals: string[] = [];
+  let expectsFlagValue = false;
+  let flagsEnded = false;
+
+  for (const word of words) {
+    if (expectsFlagValue) {
+      expectsFlagValue = false;
+      continue;
+    }
+    if (flagsEnded) {
+      positionals.push(word);
+      continue;
+    }
+    if (word === "--") {
+      flagsEnded = true;
+      continue;
+    }
+
+    const [flagName] = word.split("=", 1);
+    if (flagName && PROJECT_CREATE_VALUE_FLAGS.has(flagName)) {
+      expectsFlagValue = !word.includes("=");
+      continue;
+    }
+    if (word.startsWith("-")) {
+      continue;
+    }
+    positionals.push(word);
+  }
+
+  return { positionals, expectsFlagValue };
+}
+
+/** Complete the historical separate platform positional. */
+function completeProjectPlatform(partial: string): Completion[] {
+  const candidates = partial === "" ? COMMON_PLATFORMS : VALID_PLATFORMS;
+  return fuzzyMatch(partial, candidates).map((platform) => ({
+    value: platform,
+    description: "Platform",
+  }));
+}
+
+/**
+ * Complete the required `name:platform` positional used by `project create`.
+ *
+ * Before the final colon, only organization prefixes are suggested because a
+ * create command targets a new project rather than an existing cached project.
+ * After the colon, the project-name portion is preserved and valid platform
+ * identifiers are completed.
+ *
+ * @param partial - The partial project specification being completed
+ * @returns Organization-prefix or complete name/platform suggestions
+ */
+export function completeProjectCreateSpec(partial: string): Completion[] {
+  if (WHITESPACE_RE.test(partial)) {
+    return [];
+  }
+
+  const colonIdx = partial.lastIndexOf(":");
+  if (colonIdx !== -1) {
+    const namePart = partial.slice(0, colonIdx);
+    const slashIdx = namePart.indexOf("/");
+    if (slashIdx === 0 || namePart.indexOf("/", slashIdx + 1) !== -1) {
+      return [];
+    }
+    const projectName =
+      slashIdx === -1 ? namePart : namePart.slice(slashIdx + 1);
+    if (projectName === "") {
+      return [];
+    }
+
+    const specPrefix = partial.slice(0, colonIdx + 1);
+    const platformPartial = partial.slice(colonIdx + 1);
+    const candidates =
+      platformPartial === "" ? COMMON_PLATFORMS : VALID_PLATFORMS;
+    return fuzzyMatch(platformPartial, candidates).map((platform) => ({
+      value: `${specPrefix}${platform}`,
+      description: "Platform",
+    }));
+  }
+
+  if (partial.includes("/")) {
+    return [];
+  }
+
+  return completeOrgSlugs(partial, "/");
 }
 
 /**

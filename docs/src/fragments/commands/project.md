@@ -38,14 +38,21 @@ sentry project view my-org/frontend -w
 ### Create a project
 
 ```bash
+# Multiple projects use name:platform pairs; project names cannot contain whitespace
 # Create a new project
+sentry project create my-new-app:javascript-nextjs
+
+# The historical single-project syntax remains supported
 sentry project create my-new-app javascript-nextjs
 
+# Create several projects with their own platforms
+sentry project create web:javascript api:python-django worker:node
+
 # Create under a specific org and team
-sentry project create my-org/my-new-app python --team backend-team
+sentry project create my-org/my-new-app:python --team backend-team
 
 # Preview without creating
-sentry project create my-new-app node --dry-run
+sentry project create my-new-app:node --dry-run
 ```
 
 ### Delete a project
