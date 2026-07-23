@@ -78,7 +78,7 @@ Run `sentry --help` to see all available commands, or browse the [command refere
 
 ## Configuration
 
-Credentials are stored in `~/.sentry/` with restricted permissions (mode 600).
+Credentials are stored in a SQLite database (`cli.db`) inside `~/.sentry/` with restricted permissions (mode 600). Override the directory with `SENTRY_CONFIG_DIR`.
 
 ## Library Usage
 
