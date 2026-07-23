@@ -58,6 +58,18 @@ describe("parseSentryUrl", () => {
       });
     });
 
+    test("self-hosted Feedback permalink supports legacy mixed-case project slugs", () => {
+      const result = parseSentryUrl(
+        "https://sentry.example.com/organizations/acme-corp/feedback/?feedbackSlug=Legacy_Project%3A5146636313"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.example.com",
+        org: "acme-corp",
+        project: "Legacy_Project",
+        issueId: "5146636313",
+      });
+    });
+
     test("strips trailing path segments after org", () => {
       // /organizations/{org}/ with no further recognized segments → org only
       const result = parseSentryUrl("https://sentry.io/organizations/my-org/");
@@ -414,6 +426,32 @@ describe("parseSentryUrl", () => {
 
     test("bare org subdomain returns org only", () => {
       const result = parseSentryUrl("https://my-org.sentry.io/");
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+      });
+    });
+
+    test("modern Feedback permalink returns its org", () => {
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/feedback/?feedbackSlug=my-project%3A5146636313"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+        project: "my-project",
+        issueId: "5146636313",
+      });
+    });
+
+    test.each([
+      "my-project%3Aa%3A5146636313",
+      "my-project%3Aabc%2Fdef",
+      "my-project%250A%3A5146636313",
+    ])("does not extract malformed Feedback slug %s", (feedbackSlug) => {
+      const result = parseSentryUrl(
+        `https://my-org.sentry.io/feedback/?feedbackSlug=${feedbackSlug}`
+      );
       expect(result).toEqual({
         baseUrl: "https://my-org.sentry.io",
         org: "my-org",

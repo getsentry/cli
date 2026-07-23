@@ -86,6 +86,12 @@ describe("buildCommandHint", () => {
       `sentry issue view ${issueUrl}`
     );
   });
+
+  test("supports a custom command domain", () => {
+    expect(buildCommandHint("view", "PROJECT-ABC", "sentry feedback")).toBe(
+      "sentry feedback view <org>/PROJECT-ABC"
+    );
+  });
 });
 
 const getConfigDir = useTestConfigDir("test-issue-utils-", {
@@ -115,6 +121,22 @@ afterEach(() => {
 });
 
 describe("resolveOrgAndIssueId", () => {
+  test("uses a custom command domain in deep resolution suggestions", async () => {
+    const error = await resolveIssue({
+      issueArg: "my-org/G",
+      cwd: getConfigDir(),
+      command: "view",
+      commandBase: "sentry feedback",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ResolutionError);
+    expect((error as ResolutionError).hint).toContain("sentry feedback view");
+    expect((error as ResolutionError).suggestions).toEqual([
+      "The format 'my-org/G' requires a project to build the full issue ID.",
+      "Use: sentry feedback view my-org/<project>-G",
+    ]);
+  });
+
   test("throws for numeric ID (org cannot be resolved)", async () => {
     // @ts-expect-error - partial mock
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1993,6 +2015,17 @@ describe("resolveOrgAndIssueId: magic @ selectors", () => {
     expect(String(err)).toContain("most recent");
     expect(String(err)).toContain("sentry issue list");
     expect(String(err)).toContain('-q "is:resolved"');
+
+    const eventError = await resolveIssue({
+      issueArg: "@latest",
+      cwd: getConfigDir(),
+      command: "list",
+      commandBase: "sentry event",
+    }).catch((error) => error);
+    expect(eventError).toBeInstanceOf(ResolutionError);
+    expect(eventError.hint).toBe(
+      'sentry issue list test-org/ -q "is:resolved"'
+    );
   });
 
   test("throws ContextError when org cannot be resolved for bare @selector", async () => {
