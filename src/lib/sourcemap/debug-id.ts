@@ -21,6 +21,7 @@
 
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import { ValidationError } from "../errors.js";
 import { logger } from "../logger.js";
 import {
   type DecodedInlineMap,
@@ -168,7 +169,16 @@ export async function injectDebugId(
   newJs += `\n${DEBUGID_COMMENT_PREFIX}${debugId}\n`;
 
   // --- Mutate sourcemap ---
-  const map = JSON.parse(mapContent) as SourcemapJson;
+  let map: SourcemapJson;
+  try {
+    map = JSON.parse(mapContent) as SourcemapJson;
+  } catch (error) {
+    log.debug("Failed to parse sourcemap JSON", error);
+    throw new ValidationError(
+      `Failed to parse sourcemap ${mapPath}: file is not valid JSON`,
+      "mapPath"
+    );
+  }
   mutateSourcemap(map, debugId, { offsetMappings: !skipSnippet });
 
   // Write both files concurrently
