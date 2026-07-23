@@ -40,7 +40,10 @@ const KNOWN_USER_FIELDS = new Set(["id", "email", "ip_address", "username"]);
  * Throws ValidationError if the format is wrong.
  */
 export function parseKeyValue(pair: string): [string, string] {
-  const idx = pair.indexOf(":");
+  const colonIdx = pair.indexOf(":");
+  const equalsIdx = pair.indexOf("=");
+  const candidates = [colonIdx, equalsIdx].filter((i) => i > 0);
+  const idx = candidates.length > 0 ? Math.min(...candidates) : -1;
   if (idx <= 0) {
     throw new ValidationError(
       `Expected KEY:VALUE format, got: ${JSON.stringify(pair)}`,
