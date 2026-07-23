@@ -46,6 +46,26 @@ The CLI has dedicated commands for most Sentry tasks, so agents should prefer `s
 
 The skill uses your existing CLI authentication, so you'll need to run `sentry auth login` first if you haven't already.
 
+## Supported Agents
+
+The CLI automatically detects the following AI coding agents (for telemetry attribution and behavior adaptation):
+
+| Agent | Detection Method |
+|-------|-----------------|
+| **Claude Code** | `CLAUDECODE` / `CLAUDE_CODE` env var, or process tree |
+| **Cursor** | `CURSOR_TRACE_ID` / `CURSOR_AGENT` env var, or process tree |
+| **Gemini CLI** | `GEMINI_CLI` env var, or process tree |
+| **OpenAI Codex** | `CODEX_SANDBOX` / `CODEX_CI` / `CODEX_THREAD_ID` env var |
+| **GitHub Copilot** | `COPILOT_MODEL` / `COPILOT_ALLOW_ALL` env var |
+| **Windsurf** | Process tree detection |
+| **Goose** | `GOOSE_TERMINAL` env var, or process tree |
+| **Amp** | `AMP_THREAD_ID` env var, or process tree |
+| **Augment** | `AUGMENT_AGENT` env var, or process tree |
+| **OpenCode** | `OPENCODE_CLIENT` env var, or process tree |
+| **Antigravity** | `ANTIGRAVITY_AGENT` env var |
+
+Any agent can also self-identify by setting `AI_AGENT=<name>` (highest priority) or `AGENT=<name>` (lowest priority fallback).
+
 ## Requirements
 
 - An authenticated Sentry CLI installation (`sentry auth login`)
