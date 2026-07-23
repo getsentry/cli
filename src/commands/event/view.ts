@@ -228,6 +228,17 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
         issueShortId: beforeSlash,
       };
     }
+
+    // "project/EVENT-ID" → project slug + hex event ID.
+    // e.g., "my-project/abc123def456abc123def456abc123de"
+    // Must be checked before parseSlashSeparatedArg, which throws ContextError
+    // for any single-slash arg, assuming it's "org/project" with a missing ID.
+    if (afterSlash && HEX_ID_RE.test(normalizeHexId(afterSlash))) {
+      return {
+        eventId: normalizeHexId(afterSlash),
+        targetArg: beforeSlash,
+      };
+    }
   }
 
   const { id: eventId, targetArg } = parseSlashSeparatedArg(
