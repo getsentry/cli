@@ -175,6 +175,11 @@ export {
   listTeams,
   listTeamsPaginated,
 } from "./api/teams.js";
+export {
+  createOrgAuthToken,
+  deleteOrgAuthToken,
+  listOrgAuthTokens,
+} from "./api/tokens.js";
 export type {
   FetchMultiSpanDetailsOptions,
   TraceItemAttribute,
