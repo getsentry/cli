@@ -139,10 +139,17 @@ sentry auth logout
 
 ## Self-Hosted Sentry
 
-Using a self-hosted Sentry instance? Set `SENTRY_URL` to point at it:
+Using a self-hosted Sentry instance? Use the `--url` flag on login to register your instance:
 
 ```bash
-SENTRY_URL=https://sentry.example.com sentry auth login
+sentry auth login --url https://sentry.example.com
+```
+
+You can also set `SENTRY_HOST` (or `SENTRY_URL`) as an environment variable:
+
+```bash
+export SENTRY_HOST=https://sentry.example.com
+sentry auth login
 ```
 
 See the [Self-Hosted](../self-hosted/) guide for full setup details.
