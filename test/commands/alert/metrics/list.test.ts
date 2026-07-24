@@ -13,6 +13,56 @@ const getConfigDir = useTestConfigDir("test-alert-metrics-list-", {
   isolateProjectRoot: true,
 });
 
+/**
+ * Fixed `dateCreated` for detector fixtures. Detectors always carry a creation
+ * timestamp, so the builder stamps this deterministic value; the exact instant
+ * is arbitrary and not asserted on — only its presence matters.
+ */
+const DETECTOR_DATE_CREATED = "2026-01-01T00:00:00Z";
+
+/**
+ * Build a metric-issue detector payload (the shape returned by the org-scoped
+ * `/detectors/` endpoint) from the flat metric-alert fields the assertions use.
+ * `status` 1 maps to a disabled detector (`enabled: false`); anything else is
+ * enabled.
+ */
+function detector(fields: {
+  id: string;
+  name: string;
+  status?: number;
+  query?: string;
+  aggregate?: string;
+  dataset?: string;
+  timeWindow?: number;
+  environment?: string | null;
+  projects?: string[];
+  dateCreated?: string;
+}) {
+  // Detectors are project-scoped (`projectSlug`) and expose the window in
+  // seconds, so mirror that here; the builder accepts minutes for readability.
+  const [projectSlug] = fields.projects ?? [];
+  return {
+    id: fields.id,
+    name: fields.name,
+    type: "metric_issue",
+    enabled: fields.status !== 1,
+    projectSlug: projectSlug ?? null,
+    owner: null,
+    dateCreated: fields.dateCreated ?? DETECTOR_DATE_CREATED,
+    dataSources: [
+      {
+        aggregate: fields.aggregate ?? "count()",
+        dataset: fields.dataset ?? "errors",
+        query: fields.query ?? "event.type:error",
+        timeWindow: (fields.timeWindow ?? 5) * 60,
+        environment: fields.environment ?? null,
+      },
+    ],
+    conditionGroup: null,
+    config: { detectionType: "static" },
+  };
+}
+
 type ListFlags = {
   readonly web: boolean;
   readonly fresh: boolean;
@@ -81,23 +131,9 @@ describe("alert metrics list pagination", () => {
   test("hasMore is false when limit is reached without next cursor", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
-      if (req.url.includes("/organizations/test-org/alert-rules/")) {
+      if (req.url.includes("/organizations/test-org/detectors/")) {
         return new Response(
-          JSON.stringify([
-            {
-              id: "1",
-              name: "Metric Rule Alpha",
-              status: 0,
-              query: "event.type:error",
-              aggregate: "count()",
-              dataset: "errors",
-              timeWindow: 5,
-              environment: null,
-              owner: null,
-              projects: [],
-              dateCreated: "2026-01-01T00:00:00Z",
-            },
-          ]),
+          JSON.stringify([detector({ id: "1", name: "Metric Rule Alpha" })]),
           {
             status: 200,
             headers: {
@@ -132,23 +168,9 @@ describe("alert metrics list pagination", () => {
   test("empty query page keeps hasMore when next cursor exists", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
-      if (req.url.includes("/organizations/test-org/alert-rules/")) {
+      if (req.url.includes("/organizations/test-org/detectors/")) {
         return new Response(
-          JSON.stringify([
-            {
-              id: "1",
-              name: "Metric Rule Alpha",
-              status: 0,
-              query: "event.type:error",
-              aggregate: "count()",
-              dataset: "errors",
-              timeWindow: 5,
-              environment: null,
-              owner: null,
-              projects: [],
-              dateCreated: "2026-01-01T00:00:00Z",
-            },
-          ]),
+          JSON.stringify([detector({ id: "1", name: "Metric Rule Alpha" })]),
           {
             status: 200,
             headers: {
@@ -220,7 +242,7 @@ describe("alert metrics list pagination", () => {
           name: "My Project",
         });
       }
-      if (url.pathname.includes("/alert-rules/")) {
+      if (url.pathname.includes("/detectors/")) {
         throw new Error("rule fetch should not be called for --web");
       }
       return new Response(JSON.stringify({ detail: "Not found" }), {
@@ -270,7 +292,7 @@ describe("alert metrics list pagination", () => {
           name: "My Project",
         });
       }
-      if (url.pathname.includes("/alert-rules/")) {
+      if (url.pathname.includes("/detectors/")) {
         throw new Error("rule fetch should not be called for --web");
       }
       return new Response(JSON.stringify({ detail: "Not found" }), {
@@ -311,21 +333,13 @@ describe("alert metrics list pagination", () => {
           name: "Metrics Project",
         });
       }
-      if (url.pathname === "/api/0/organizations/org-one/alert-rules/") {
+      if (url.pathname === "/api/0/organizations/org-one/detectors/") {
         return Response.json([
-          {
+          detector({
             id: "metrics-rule",
             name: "Metrics Rule",
-            status: 0,
-            query: "event.type:error",
-            aggregate: "count()",
-            dataset: "errors",
-            timeWindow: 5,
-            environment: null,
-            owner: null,
             projects: ["metrics"],
-            dateCreated: "2026-01-01T00:00:00Z",
-          },
+          }),
         ]);
       }
       return new Response(JSON.stringify({ detail: "Not found" }), {
@@ -354,25 +368,20 @@ describe("alert metrics list pagination", () => {
     setOrgRegion("org-one", DEFAULT_SENTRY_URL);
     setOrgRegion("org-two", DEFAULT_SENTRY_URL);
 
-    const rule = (org: string) => ({
-      id: `${org}-1`,
-      name: `${org} Metric Rule`,
-      status: org === "org-one" ? 0 : 1,
-      query: "event.type:error",
-      aggregate: "count()",
-      dataset: "errors",
-      timeWindow: 5,
-      environment: "prod",
-      owner: null,
-      projects: ["myproj"],
-      dateCreated: "2026-01-01T00:00:00Z",
-    });
+    const rule = (org: string) =>
+      detector({
+        id: `${org}-1`,
+        name: `${org} Metric Rule`,
+        status: org === "org-one" ? 0 : 1,
+        environment: "prod",
+        projects: ["myproj"],
+      });
 
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = new URL(req.url);
       const alertMatch = url.pathname.match(
-        /\/api\/0\/organizations\/([^/]+)\/alert-rules\//
+        /\/api\/0\/organizations\/([^/]+)\/detectors\//
       );
       if (alertMatch) {
         return Response.json([rule(alertMatch[1] as string)]);
@@ -429,7 +438,7 @@ describe("alert metrics list pagination", () => {
       const req = new Request(input, init);
       const url = new URL(req.url);
       const alertMatch = url.pathname.match(
-        /\/api\/0\/organizations\/([^/]+)\/alert-rules\//
+        /\/api\/0\/organizations\/([^/]+)\/detectors\//
       );
       if (alertMatch) {
         const org = alertMatch[1] as string;
@@ -439,19 +448,11 @@ describe("alert metrics list pagination", () => {
           });
         }
         return Response.json([
-          {
+          detector({
             id: "ok-1",
             name: "Surviving Metric Rule",
-            status: 0,
-            query: "event.type:error",
-            aggregate: "count()",
-            dataset: "errors",
-            timeWindow: 5,
-            environment: null,
-            owner: null,
             projects: ["myproj"],
-            dateCreated: "2026-01-01T00:00:00Z",
-          },
+          }),
         ]);
       }
       if (url.pathname === "/api/0/organizations/") {
@@ -495,7 +496,7 @@ describe("alert metrics list pagination", () => {
       expect.objectContaining({
         org: "org-two",
         status: 500,
-        message: expect.stringContaining("API request failed"),
+        message: expect.stringContaining("Failed to list metric alert rules"),
       }),
     ]);
     expect(warnSpy).toHaveBeenCalledWith(
@@ -503,11 +504,11 @@ describe("alert metrics list pagination", () => {
     );
   });
 
-  test("all org failures preserve ApiError status and endpoint", async () => {
+  test("all org failures preserve ApiError status", async () => {
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = new URL(req.url);
-      if (url.pathname === "/api/0/organizations/test-org/alert-rules/") {
+      if (url.pathname === "/api/0/organizations/test-org/detectors/") {
         return new Response(JSON.stringify({ detail: "scope denied" }), {
           status: 403,
         });
@@ -532,7 +533,6 @@ describe("alert metrics list pagination", () => {
     ).rejects.toMatchObject({
       name: "ApiError",
       status: 403,
-      endpoint: "/organizations/test-org/alert-rules/",
     } satisfies Partial<ApiError>);
   });
 
@@ -542,25 +542,14 @@ describe("alert metrics list pagination", () => {
     setOrgRegion("org-three", DEFAULT_SENTRY_URL);
     const perPageByOrg = new Map<string, number>();
 
-    const rule = (org: string, index: number) => ({
-      id: `${org}-${index}`,
-      name: `${org} Metric Rule ${index}`,
-      status: 0,
-      query: "event.type:error",
-      aggregate: "count()",
-      dataset: "errors",
-      timeWindow: 5,
-      environment: null,
-      owner: null,
-      projects: [],
-      dateCreated: "2026-01-01T00:00:00Z",
-    });
+    const rule = (org: string, index: number) =>
+      detector({ id: `${org}-${index}`, name: `${org} Metric Rule ${index}` });
 
     globalThis.fetch = mockFetch(async (input, init) => {
       const req = new Request(input, init);
       const url = new URL(req.url);
       const alertMatch = url.pathname.match(
-        /\/api\/0\/organizations\/([^/]+)\/alert-rules\//
+        /\/api\/0\/organizations\/([^/]+)\/detectors\//
       );
       if (alertMatch) {
         const org = alertMatch[1] as string;
