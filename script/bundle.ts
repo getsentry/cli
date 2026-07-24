@@ -167,6 +167,9 @@ const sentrySourcemapPlugin: Plugin = {
 const REQUIRE_ALIAS_FILTER =
   /(?:db[\\/](?:index|schema|sqlite)|list-command|telemetry)\.ts$/;
 const REQUIRE_ALIAS_RE = /\b_require\(/g;
+const IDENTIFIER_FILTER_RE = /^[A-Za-z_$][\w$]*$/;
+const NODE_ZLIB_RE = /^node:zlib$/;
+const ANY_RE = /^$/;
 
 /** Transform _require() → require() so esbuild resolves lazy relative requires. */
 const requireAliasPlugin: Plugin = {
@@ -206,7 +209,6 @@ const zlibNamespaceShimPlugin: Plugin = {
     // (createGzip, brotli*, zstd*, …); names absent at runtime read as undefined,
     // which the code feature-detects. `\bimport`/valid-identifier filtering keeps
     // the generated module syntactically valid.
-    // biome-ignore lint/style/useNodejsImportProtocol: dynamic require to enumerate exports at build time
     const zlibExportNames = Object.keys(require("node:zlib"));
     const names = new Set(
       [
@@ -217,23 +219,23 @@ const zlibNamespaceShimPlugin: Plugin = {
         "zstdDecompressSync",
         "createZstdCompress",
         "createZstdDecompress",
-      ].filter((n) => /^[A-Za-z_$][\w$]*$/.test(n) && n !== "default")
+      ].filter((n) => IDENTIFIER_FILTER_RE.test(n) && n !== "default")
     );
 
     // Redirect node:zlib to the shim — EXCEPT the shim's own re-export below,
     // which must reach the real builtin (otherwise it resolves to itself and
     // every member reads back as undefined). esbuild marks the real builtin
     // external so it stays a runtime lookup.
-    b.onResolve({ filter: /^node:zlib$/ }, (args) =>
+    b.onResolve({ filter: NODE_ZLIB_RE }, (args) =>
       args.namespace === NS
         ? { path: "node:zlib", external: true }
         : { path: NS, namespace: NS }
     );
 
-    b.onLoad({ filter: /.*/, namespace: NS }, () => ({
+    b.onLoad({ filter: ANY_RE, namespace: NS }, () => ({
       contents: [
         `import * as zlib from "node:zlib";`,
-        `export default zlib;`,
+        "export default zlib;",
         ...[...names].map(
           (n) => `export const ${n} = zlib[${JSON.stringify(n)}];`
         ),
