@@ -299,7 +299,11 @@ describe("classifySilenced", () => {
   });
 
   test("silences ResolutionError", () => {
-    const err = new ResolutionError("Project 'x'", "not found", "sentry issue list");
+    const err = new ResolutionError(
+      "Project 'x'",
+      "not found",
+      "sentry issue list"
+    );
     expect(classifySilenced(err)).toBe("resolution_error");
   });
 
