@@ -34,16 +34,17 @@ export type SendEventFlags = {
 const KNOWN_USER_FIELDS = new Set(["id", "email", "ip_address", "username"]);
 
 /**
- * Parse a single KEY:VALUE string, splitting on the first colon.
+ * Parse a single KEY:VALUE (or KEY=VALUE) string, splitting on the first
+ * `:` or `=`, whichever appears first.
  *
- * Values may contain colons (e.g. `url:https://example.com`).
+ * Values may contain further separators (e.g. `url:https://example.com`).
  * Throws ValidationError if the format is wrong.
  */
 export function parseKeyValue(pair: string): [string, string] {
   const colonIdx = pair.indexOf(":");
   const equalsIdx = pair.indexOf("=");
-  const candidates = [colonIdx, equalsIdx].filter((i) => i > 0);
-  const idx = candidates.length > 0 ? Math.min(...candidates) : -1;
+  const found = [colonIdx, equalsIdx].filter((i) => i >= 0);
+  const idx = found.length > 0 ? Math.min(...found) : -1;
   if (idx <= 0) {
     throw new ValidationError(
       `Expected KEY:VALUE format, got: ${JSON.stringify(pair)}`,

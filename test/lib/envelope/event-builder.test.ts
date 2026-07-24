@@ -35,6 +35,23 @@ describe("parseKeyValue", () => {
   test("empty key → throws ValidationError", async () => {
     expect(() => parseKeyValue(":value")).toThrow(ValidationError);
   });
+
+  test("splits on first equals sign", async () => {
+    expect(parseKeyValue("key=value")).toEqual(["key", "value"]);
+  });
+
+  test("splits on whichever separator comes first", async () => {
+    expect(parseKeyValue("key=a:b")).toEqual(["key", "a:b"]);
+    expect(parseKeyValue("key:a=b")).toEqual(["key", "a=b"]);
+  });
+
+  test("leading equals sign → throws ValidationError", async () => {
+    expect(() => parseKeyValue("=value")).toThrow(ValidationError);
+  });
+
+  test("leading colon before a later equals → throws ValidationError", async () => {
+    expect(() => parseKeyValue(":key=value")).toThrow(ValidationError);
+  });
 });
 
 // ── parseUserFields ───────────────────────────────────────────────
