@@ -632,7 +632,7 @@ export const exploreCommand = buildListCommand("explore", {
     flags: {
       field: {
         kind: "parsed",
-        parse: String,
+        parse: (v: string[]) => v,
         brief:
           'API field or aggregate (repeatable). E.g., title, "count()", "p50(transaction.duration)"',
         variadic: true,
@@ -671,7 +671,7 @@ export const exploreCommand = buildListCommand("explore", {
       },
       environment: {
         kind: "parsed",
-        parse: String,
+        parse: (v: string[]) => v,
         brief:
           "Replay environment filter for --dataset replays (repeatable, comma-separated)",
         variadic: true,
