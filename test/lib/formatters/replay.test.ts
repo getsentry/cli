@@ -10,15 +10,17 @@ describe("extractReplayActivityEvents", () => {
     const events = extractReplayActivityEvents(
       [
         [
-          { timestamp: 1, data: { href: "/checkout" } },
+          { type: 4, timestamp: 1, data: { href: "/checkout" } },
           {
+            type: 5,
             timestamp: 2,
             data: {
-              tag: "click",
-              payload: { selector: "#pay", label: "Pay now" },
+              tag: "breadcrumb",
+              payload: { category: "ui.click", message: "#pay" },
             },
           },
           {
+            type: 5,
             timestamp: 3,
             data: {
               tag: "performanceSpan",
@@ -30,10 +32,14 @@ describe("extractReplayActivityEvents", () => {
             },
           },
           {
+            type: 5,
             timestamp: 4,
             data: {
               tag: "breadcrumb",
-              payload: { category: "ui.click", message: "Submitted cart" },
+              payload: {
+                category: "navigation",
+                message: "Visited checkout",
+              },
             },
           },
         ],
@@ -49,8 +55,8 @@ describe("extractReplayActivityEvents", () => {
       },
       {
         timestampMs: 2,
-        label: "click",
-        details: ["selector=#pay", "label=Pay now"],
+        label: "ui.click",
+        details: ["message=#pay"],
       },
       {
         timestampMs: 3,
@@ -59,18 +65,16 @@ describe("extractReplayActivityEvents", () => {
       },
       {
         timestampMs: 4,
-        label: "ui.click",
-        details: ["message=Submitted cart"],
+        label: "navigation",
+        details: ["message=Visited checkout"],
       },
     ]);
   });
 
-  test("ignores malformed shapes and keeps empty click payload behavior", () => {
+  test("ignores unknown event fields and keeps empty click payload behavior", () => {
     const events = extractReplayActivityEvents(
       [
         [
-          null,
-          [],
           { timestamp: 1 },
           { timestamp: 2, data: null },
           { timestamp: 3, data: { href: "" } },

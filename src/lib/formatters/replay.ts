@@ -4,10 +4,11 @@
  * Human-readable formatting for Session Replay data in the CLI.
  */
 
+import type { ListProjectReplayRecordingSegmentsResponse } from "@sentry/api";
+
 import type {
   ReplayActivityEvent,
   ReplayDetails,
-  ReplayRecordingSegments,
   ReplayRelatedIssue,
   ReplayRelatedTrace,
 } from "../../types/index.js";
@@ -34,12 +35,8 @@ export type ReplayViewData = {
 };
 
 type MarkdownRow = [string, string];
-
-function hasReplayEventData(
-  value: unknown
-): value is { data: unknown; timestamp?: unknown } {
-  return typeof value === "object" && value !== null && "data" in value;
-}
+type ReplayRecordingSegments = ListProjectReplayRecordingSegmentsResponse;
+type ReplayRecordingEvent = ReplayRecordingSegments[number][number];
 
 function hasReplayTag(
   value: unknown
@@ -208,11 +205,9 @@ function summarizeTaggedReplayEvent(
   return summarize ? summarize(payload) : null;
 }
 
-function summarizeReplayEvent(event: unknown): ReplayActivityEvent | null {
-  if (!hasReplayEventData(event)) {
-    return null;
-  }
-
+function summarizeReplayEvent(
+  event: ReplayRecordingEvent
+): ReplayActivityEvent | null {
   const timestampMs = getEventTimestampMillis(event.timestamp);
   if (hasReplayTag(event.data)) {
     const replayEvent = summarizeTaggedReplayEvent(

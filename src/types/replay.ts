@@ -261,11 +261,6 @@ export const ReplayDetailsSchema = ReplayListItemSchema.extend({
   replay_type: z.string().nullable().optional().describe("Replay type"),
 }).describe("Replay details");
 
-/** Replay recording segments downloaded from the project replay endpoint. */
-export const ReplayRecordingSegmentsSchema = z
-  .array(z.array(z.unknown()))
-  .describe("Replay recording segments");
-
 /** Envelope returned by the replay index endpoint. */
 export const ReplayListResponseSchema = z
   .object({
@@ -380,9 +375,6 @@ export type ReplayDevice = z.infer<typeof ReplayDeviceSchema>;
 export type ReplayOtaUpdates = z.infer<typeof ReplayOtaUpdatesSchema>;
 export type ReplayListItem = z.infer<typeof ReplayListItemSchema>;
 export type ReplayDetails = z.infer<typeof ReplayDetailsSchema>;
-export type ReplayRecordingSegments = z.infer<
-  typeof ReplayRecordingSegmentsSchema
->;
 export type ReplayListResponse = z.infer<typeof ReplayListResponseSchema>;
 export type ReplayDetailsResponse = z.infer<typeof ReplayDetailsResponseSchema>;
 export type ReplayIdsByResource = z.infer<typeof ReplayIdsByResourceSchema>;
