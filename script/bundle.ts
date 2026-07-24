@@ -169,7 +169,7 @@ const REQUIRE_ALIAS_FILTER =
 const REQUIRE_ALIAS_RE = /\b_require\(/g;
 const IDENTIFIER_FILTER_RE = /^[A-Za-z_$][\w$]*$/;
 const NODE_ZLIB_RE = /^node:zlib$/;
-const ANY_RE = /^$/;
+const ANY_RE = /.*/;
 
 /** Transform _require() → require() so esbuild resolves lazy relative requires. */
 const requireAliasPlugin: Plugin = {
