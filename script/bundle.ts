@@ -224,8 +224,10 @@ const zlibNamespaceShimPlugin: Plugin = {
     // which must reach the real builtin (otherwise it resolves to itself and
     // every member reads back as undefined). esbuild marks the real builtin
     // external so it stays a runtime lookup.
-    b.onResolve({ filter: /^node:zlib$/ }, args =>
-      args.namespace === NS ? { path: "node:zlib", external: true } : { path: NS, namespace: NS }
+    b.onResolve({ filter: /^node:zlib$/ }, (args) =>
+      args.namespace === NS
+        ? { path: "node:zlib", external: true }
+        : { path: NS, namespace: NS }
     );
 
     b.onLoad({ filter: /.*/, namespace: NS }, () => ({
