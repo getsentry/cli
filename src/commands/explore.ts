@@ -385,6 +385,21 @@ function appendFlagHints(
 }
 
 /**
+ * Coerce the parser's `--field`/`-F` value into an array.
+ *
+ * Stricli's variadic parser yields a `string` for a single `-F` flag and a
+ * `string[]` for multiple, even though the flag is declared variadic. The
+ * declared type claims `string[] | undefined`, so callers must normalize the
+ * runtime value before using array methods on it (CLI-28C).
+ */
+function normalizeFields(field: string[] | undefined): string[] {
+  if (field === undefined) {
+    return [];
+  }
+  return Array.isArray(field) ? field : [field];
+}
+
+/**
  * Detect the first aggregate function in the field list.
  * Aggregates contain parentheses, e.g., `count()`, `p50(transaction.duration)`.
  */
@@ -710,11 +725,15 @@ export const exploreCommand = buildListCommand("explore", {
     );
 
     let dataset = flags.dataset;
-    const userSuppliedFields = flags.field && flags.field.length > 0;
-    let fieldList = [...defaultFieldsForDataset(dataset)];
-    if (userSuppliedFields) {
-      fieldList = Array.isArray(flags.field) ? flags.field : [flags.field];
-    }
+    // A single `-F` flag arrives from the parser as a bare string rather than a
+    // one-element array. Normalize once so every downstream consumer (fieldList,
+    // hintFlags, contextKey) sees an array — a leftover string makes the later
+    // `.filter`/`.join` calls throw a TypeError (CLI-28C).
+    const fields = normalizeFields(flags.field);
+    const userSuppliedFields = fields.length > 0;
+    let fieldList = userSuppliedFields
+      ? [...fields]
+      : [...defaultFieldsForDataset(dataset)];
     const timeRange = flags.period;
     const environment = parseReplayEnvironmentFilter(flags.environment);
 
@@ -806,7 +825,7 @@ export const exploreCommand = buildListCommand("explore", {
     const hasMore = !!nextCursor;
 
     const baseTarget = project ? `${org}/${project}` : `${org}/`;
-    const hintFlags = { ...flags, dataset };
+    const hintFlags = { ...flags, dataset, field: fields };
     const nav = paginationHint({
       hasPrev,
       hasMore,

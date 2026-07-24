@@ -321,6 +321,28 @@ describe("sentry explore", () => {
       );
     });
 
+    test("coerces a single -F flag (string) into an array without crashing", async () => {
+      // Stricli's variadic parser emits a bare string for a single `-F`, not a
+      // one-element array. The command must normalize it before the query and
+      // the pagination-hint path both use array methods on it (CLI-28C).
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        {
+          ...DEFAULT_FLAGS,
+          field: "transaction" as unknown as string[],
+        },
+        "test-org/"
+      );
+
+      expect(queryEventsSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({ fields: ["transaction"] })
+      );
+    });
+
     test("passes custom dataset", async () => {
       resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context } = createContext();
