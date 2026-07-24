@@ -710,13 +710,19 @@ export const exploreCommand = buildListCommand("explore", {
     );
 
     let dataset = flags.dataset;
-    const userSuppliedFields = flags.field && flags.field.length > 0;
+    const rawField = flags.field
+      ? ([] as string[]).concat(flags.field)
+      : undefined;
+    const userSuppliedFields = rawField && rawField.length > 0;
     let fieldList = [...defaultFieldsForDataset(dataset)];
     if (userSuppliedFields) {
-      fieldList = flags.field;
+      fieldList = rawField;
     }
     const timeRange = flags.period;
-    const environment = parseReplayEnvironmentFilter(flags.environment);
+    const rawEnvironment = flags.environment
+      ? ([] as string[]).concat(flags.environment)
+      : undefined;
+    const environment = parseReplayEnvironmentFilter(rawEnvironment);
 
     // --metric auto mode: resolve metric name → tracemetrics aggregate
     if (flags.metric) {
