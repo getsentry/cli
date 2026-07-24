@@ -54,7 +54,8 @@ type SilenceReason =
   | "output_error"
   | "auth_expected"
   | "api_user_error"
-  | "network_error";
+  | "network_error"
+  | "resolution_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -90,6 +91,9 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   // silence alongside the others (CLI-19).
   if (error instanceof AuthError) {
     return "auth_expected";
+  }
+  if (error instanceof ResolutionError) {
+    return "resolution_error";
   }
   if (error instanceof ApiError && error.status > 400 && error.status < 500) {
     return "api_user_error";
