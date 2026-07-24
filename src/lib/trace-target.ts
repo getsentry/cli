@@ -420,14 +420,14 @@ export function warnIfNormalized(parsed: ParsedTraceTarget, tag: string): void {
  *
  * @throws {ContextError} If auto-detection fails
  */
-export async function resolveTraceOrgOptionalProject(
+export function resolveTraceOrgOptionalProject(
   parsed: ParsedTraceTarget,
   cwd: string,
   usageHint: string
 ): Promise<ResolvedTraceOrgProject | ResolvedTraceOrg> {
   if (parsed.type === "org-scoped") {
     setOrgProjectContext([parsed.org], []);
-    return { traceId: parsed.traceId, org: parsed.org };
+    return Promise.resolve({ traceId: parsed.traceId, org: parsed.org });
   }
   return resolveTraceOrgProject(parsed, cwd, usageHint);
 }

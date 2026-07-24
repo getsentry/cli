@@ -529,10 +529,17 @@ export const viewCommand = buildCommand({
         USAGE_HINT
       );
       warnIfNormalized(parsed, "trace.view");
-      const target = await resolveTraceOrgOptionalProject(parsed, cwd, USAGE_HINT);
+      const target = await resolveTraceOrgOptionalProject(
+        parsed,
+        cwd,
+        USAGE_HINT
+      );
       resolved = {
         ...target,
-        projectFilter: parsed.type === "explicit" ? (target as { project?: string }).project : undefined,
+        projectFilter:
+          parsed.type === "explicit"
+            ? (target as { project?: string }).project
+            : undefined,
       };
     }
     const { traceId, org, project, projectFilter } = resolved;
