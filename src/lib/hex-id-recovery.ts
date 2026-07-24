@@ -325,6 +325,9 @@ export function extractHexCandidate(input: string): HexCandidate | null {
  */
 export function looksLikeSlug(input: string): boolean {
   const trimmed = input.trim();
+  if (trimmed.includes("/")) {
+    return false;
+  }
   if (trimmed.length < 3 || !trimmed.includes("-")) {
     return false;
   }
