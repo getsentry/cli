@@ -23,12 +23,7 @@ import {
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { computeSpanDurationMs } from "../../lib/formatters/time-utils.js";
-import {
-  HEX_ID_RE,
-  normalizeHexId,
-  SPAN_ID_RE,
-  validateSpanId,
-} from "../../lib/hex-id.js";
+import { HEX_ID_RE, SPAN_ID_RE, validateSpanId } from "../../lib/hex-id.js";
 import {
   handleRecoveryResult,
   recoverHexId,
@@ -40,7 +35,7 @@ import {
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import {
-  type parseSlashSeparatedTraceTarget,
+  parseSlashSeparatedTraceTarget,
   parseTraceTargetWithRecovery,
   resolveTraceOrgProject,
   warnIfNormalized,
@@ -89,6 +84,49 @@ type SpanViewArgs =
  *
  * @throws {ContextError} If insufficient arguments or a single bare span ID
  */
+
+/**
+ * Try to auto-split a single arg of the form `<trace-target>/<span-id>`.
+ *
+ * Handles one-slash (`<trace-id>/<span-id>`) and multi-slash
+ * (`org/project/<trace-id>/<span-id>`) forms. Returns null when the arg
+ * cannot be unambiguously split (e.g. left side is not a hex trace ID in
+ * the single-slash case).
+ */
+function tryAutoSplitSpanArg(arg: string): SpanViewArgs | null {
+  const lastSlashIdx = arg.lastIndexOf("/");
+  if (lastSlashIdx === -1) {
+    return null;
+  }
+
+  const tracePrefix = arg.slice(0, lastSlashIdx);
+  const possibleSpanId = arg
+    .slice(lastSlashIdx + 1)
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "");
+
+  if (!SPAN_ID_RE.test(possibleSpanId) || tracePrefix.length === 0) {
+    return null;
+  }
+
+  const hasMultipleSlashes = tracePrefix.includes("/");
+  const normalizedPrefix = tracePrefix.trim().toLowerCase().replace(/-/g, "");
+
+  // For single-slash form the prefix must be a hex trace ID.
+  // For multi-slash (org/project/trace-id) always attempt the split.
+  if (!(hasMultipleSlashes || HEX_ID_RE.test(normalizedPrefix))) {
+    return null;
+  }
+
+  const traceTarget = parseSlashSeparatedTraceTarget(tracePrefix, USAGE_HINT);
+  log.warn(
+    `Interpreting '${arg}' as <trace-target>/<span-id>. ` +
+      `Use separate arguments: sentry span view ${tracePrefix} ${possibleSpanId}`
+  );
+  return { kind: "resolved", traceTarget, rawSpanIds: [possibleSpanId] };
+}
+
 export function parsePositionalArgs(args: string[]): SpanViewArgs {
   if (args.length === 0) {
     throw new ContextError("Trace ID and span ID", USAGE_HINT, []);
@@ -99,31 +137,16 @@ export function parsePositionalArgs(args: string[]): SpanViewArgs {
     throw new ContextError("Trace ID and span ID", USAGE_HINT, []);
   }
 
-  // Auto-detect `<trace-id>/<span-id>` single-arg form. When a single
-  // arg contains exactly one slash separating a 32-char hex trace ID
-  // from a 16-char hex span ID, the user clearly intended to pass both.
+  // Auto-detect single-arg forms where the last slash-segment is a span ID.
+  // This handles:
+  //   <trace-id>/<span-id>                       (one slash)
+  //   [<org>/][<project>/]<trace-id>/<span-id>   (two+ slashes, e.g. copy-paste from `span list`)
   // Without this check, parseSlashSeparatedTraceTarget treats the span
-  // ID as a trace ID and fails validation (CLI-G6).
+  // ID as a trace ID and fails validation (CLI-G6 / CLI-1BD).
   if (args.length === 1) {
-    const slashIdx = first.indexOf("/");
-    if (slashIdx !== -1 && first.indexOf("/", slashIdx + 1) === -1) {
-      const left = normalizeHexId(first.slice(0, slashIdx));
-      const right = first
-        .slice(slashIdx + 1)
-        .trim()
-        .toLowerCase()
-        .replace(/-/g, "");
-      if (HEX_ID_RE.test(left) && SPAN_ID_RE.test(right)) {
-        log.warn(
-          `Interpreting '${first}' as <trace-id>/<span-id>. ` +
-            `Use separate arguments: sentry span view ${left} ${right}`
-        );
-        return {
-          kind: "resolved",
-          traceTarget: { type: "auto-detect" as const, traceId: left },
-          rawSpanIds: [right],
-        };
-      }
+    const resolved = tryAutoSplitSpanArg(first);
+    if (resolved) {
+      return resolved;
     }
   }
 
