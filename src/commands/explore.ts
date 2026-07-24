@@ -42,6 +42,7 @@ import {
   getReplayRequestFields,
   isSupportedReplayField,
   listSupportedReplayFields,
+  normalizeVariadicFlag,
   parseReplayEnvironmentFilter,
 } from "../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../lib/resolve-target.js";
@@ -375,28 +376,11 @@ function appendFlagHints(
   if (flags.limit !== DEFAULT_LIMIT) {
     parts.push(`--limit ${flags.limit}`);
   }
-  if (flags.environment && flags.environment.length > 0) {
-    for (const environment of flags.environment) {
-      parts.push(`-e "${environment}"`);
-    }
+  for (const environment of normalizeVariadicFlag(flags.environment)) {
+    parts.push(`-e "${environment}"`);
   }
   appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
-}
-
-/**
- * Coerce the parser's `--field`/`-F` value into an array.
- *
- * Stricli's variadic parser yields a `string` for a single `-F` flag and a
- * `string[]` for multiple, even though the flag is declared variadic. The
- * declared type claims `string[] | undefined`, so callers must normalize the
- * runtime value before using array methods on it (CLI-28C).
- */
-function normalizeFields(field: string[] | undefined): string[] {
-  if (field === undefined) {
-    return [];
-  }
-  return Array.isArray(field) ? field : [field];
 }
 
 /**
@@ -729,7 +713,7 @@ export const exploreCommand = buildListCommand("explore", {
     // one-element array. Normalize once so every downstream consumer (fieldList,
     // hintFlags, contextKey) sees an array — a leftover string makes the later
     // `.filter`/`.join` calls throw a TypeError (CLI-28C).
-    const fields = normalizeFields(flags.field);
+    const fields = normalizeVariadicFlag(flags.field);
     const userSuppliedFields = fields.length > 0;
     let fieldList = userSuppliedFields
       ? [...fields]

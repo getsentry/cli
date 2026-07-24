@@ -43,16 +43,31 @@ export const DEFAULT_REPLAY_EXPLORE_FIELDS = [
   "user.email",
 ] as const;
 
+/**
+ * Coerce a variadic CLI flag value into an array.
+ *
+ * Stricli's variadic parser yields a bare `string` for a single occurrence of
+ * a flag and a `string[]` for multiple, even though the flag is declared
+ * variadic. Callers must normalize before spreading or iterating, otherwise a
+ * single value is treated as an array of characters (CLI-28C).
+ */
+export function normalizeVariadicFlag(
+  value: readonly string[] | string | undefined
+): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  return Array.isArray(value) ? [...value] : [value as string];
+}
+
 /** Parse repeatable and comma-separated replay environment filters. */
 export function parseReplayEnvironmentFilter(
-  values: readonly string[] | undefined
+  values: readonly string[] | string | undefined
 ): string[] | undefined {
-  const parsed = values
-    ? [...values]
-        .flatMap((value) => value.split(","))
-        .map((value) => value.trim())
-        .filter(Boolean)
-    : [];
+  const parsed = normalizeVariadicFlag(values)
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
 
   return parsed.length > 0 ? parsed : undefined;
 }
