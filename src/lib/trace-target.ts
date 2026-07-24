@@ -412,9 +412,30 @@ export function warnIfNormalized(parsed: ParsedTraceTarget, tag: string): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * Resolve a parsed trace target to org + optional project.
+ *
+ * For commands like `trace view` where the underlying API works org-wide
+ * and a project slug is not required. Returns `project: undefined` when
+ * the target is org-scoped (i.e. `<org>/<trace-id>`).
+ *
+ * @throws {ContextError} If auto-detection fails
+ */
+export async function resolveTraceOrgOptionalProject(
+  parsed: ParsedTraceTarget,
+  cwd: string,
+  usageHint: string
+): Promise<ResolvedTraceOrgProject | ResolvedTraceOrg> {
+  if (parsed.type === "org-scoped") {
+    setOrgProjectContext([parsed.org], []);
+    return { traceId: parsed.traceId, org: parsed.org };
+  }
+  return resolveTraceOrgProject(parsed, cwd, usageHint);
+}
+
+/**
  * Resolve a parsed trace target to org + project.
  *
- * For commands like `span list` and `trace view` that require both
+ * For commands like `span list` and `span view` that require both
  * org and project for API calls.
  *
  * @throws {ContextError} If org-scoped without project
