@@ -151,3 +151,8 @@ Once authenticated, you can start using the CLI:
 - [Event commands](https://cli.sentry.dev/_preview/pr-1285/commands/event.md) - Inspect events
 - [API commands](https://cli.sentry.dev/_preview/pr-1285/commands/api.md) - Direct API access
 - [Agentic Usage](https://cli.sentry.dev/_preview/pr-1285/agentic-usage.md) - Enable AI coding agents to use the CLI
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/_preview/pr-1285/index.md)
+- [Next: Migrating from v3](https://cli.sentry.dev/_preview/pr-1285/migrating-from-v3.md)
