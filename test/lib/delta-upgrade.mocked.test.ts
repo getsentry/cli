@@ -17,6 +17,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { useTestConfigDir } from "../helpers.js";
+
+useTestConfigDir("delta-upgrade-mocked-");
+
 // ============================================================================
 // Mock Setup
 // ============================================================================
