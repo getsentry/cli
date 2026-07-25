@@ -93,8 +93,17 @@ export function buildCommandHint(
   if (issueId.startsWith("@")) {
     return `${base} ${command} <org>/${issueId}`;
   }
-  // Input already contains org/project context — show as-is to avoid double-prefixing
+  // Input already contains org/project context — show as-is to avoid double-prefixing,
+  // unless the part after the slash is a bare suffix (no dash, not all-digits),
+  // in which case suggest the correct org/<project>-suffix format.
   if (issueId.includes("/")) {
+    const slashIdx = issueId.lastIndexOf("/");
+    const prefix = issueId.slice(0, slashIdx);
+    const afterSlash = issueId.slice(slashIdx + 1);
+    if (afterSlash && !afterSlash.includes("-") && !isAllDigits(afterSlash)) {
+      // Bare suffix after org — guide user to supply a project
+      return `${base} ${command} ${prefix}/<project>-${afterSlash}`;
+    }
     return `${base} ${command} ${issueId}`;
   }
   // Numeric IDs always need org context - can't be combined with project
