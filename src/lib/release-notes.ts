@@ -571,7 +571,18 @@ async function fetchReleasesForChangelog(): Promise<GitHubRelease[]> {
   if (!response.ok) {
     return [];
   }
-  return (await response.json()) as GitHubRelease[];
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch (parseError) {
+    log.debug("Non-JSON response from GitHub releases", parseError);
+    return [];
+  }
+  if (!Array.isArray(data)) {
+    log.debug("GitHub releases response is not an array", typeof data);
+    return [];
+  }
+  return data as GitHubRelease[];
 }
 
 /**
@@ -663,13 +674,19 @@ async function fetchNightlyChangelog(
     return null;
   }
 
-  const commits = (await response.json()) as GitHubCommit[];
-  if (commits.length === 0) {
+  let commits: unknown;
+  try {
+    commits = await response.json();
+  } catch (parseError) {
+    log.debug("Non-JSON response from GitHub commits", parseError);
+    return null;
+  }
+  if (!Array.isArray(commits) || commits.length === 0) {
     return null;
   }
 
   return buildNightlyChangelogSummary(
-    commits,
+    commits as GitHubCommit[],
     fromVersion,
     toVersion,
     maxItems
