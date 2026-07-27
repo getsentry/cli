@@ -311,12 +311,20 @@ export async function resolveNightlyChain(opts: {
     if (!(manifest && tag)) {
       return null;
     }
-    const result = binpatchValidateChainStep(manifest, {
+    // Use the local validateChainStep (not binpatch's) so the rich 3-reason
+    // telemetry classification (version-mismatch | missing-layer |
+    // size-exceeded) survives the binpatch adoption. binpatch's returns a
+    // coarser {ok:false, reason: "malformed" | "over_budget"}.
+    const result = validateChainStep(manifest, {
       expectedFrom: previousVersion,
       patchLayerName,
       sizeLimit: opts.fullGzSize * SIZE_THRESHOLD_RATIO - totalSize,
     });
     if (!result.ok) {
+      Sentry.getActiveSpan()?.setAttribute(
+        "telemetry_reason",
+        result.failure.reason
+      );
       return null;
     }
     const toVersion = tag.slice(PATCH_TAG_PREFIX.length);
@@ -329,6 +337,10 @@ export async function resolveNightlyChain(opts: {
     }
   }
   if (previousVersion !== opts.targetVersion || !expectedSha256) {
+    Sentry.getActiveSpan()?.setAttribute(
+      "telemetry_reason",
+      "version-mismatch"
+    );
     return null;
   }
 
@@ -399,9 +411,16 @@ function makeProgressHandler(setMessage?: SetMessage): ProgressHandler {
   };
 }
 
-function telemetry(): DeltaTelemetry {
+function telemetry(): DeltaTelemetry & { _source: { current?: string } } {
+  // Expose `current` so attemptDeltaUpgrade's catch path can stamp
+  // `delta.source` on the active span even when apply fails AFTER a chain
+  // was successfully resolved (the catch previously left the span without
+  // this attribute, silently downgrading telemetry fidelity).
+  const captured: { current?: string } = {};
   return {
+    _source: captured,
     onResolved: ({ source, chain }) => {
+      captured.current = source;
       const span = Sentry.getActiveSpan();
       span?.setAttribute("delta.source", source);
       log.debug(
@@ -409,6 +428,7 @@ function telemetry(): DeltaTelemetry {
       );
     },
     onOfflineMiss: () => {
+      captured.current = "offline_miss";
       Sentry.getActiveSpan()?.setAttribute("delta.source", "offline_miss");
     },
     onUnavailable: (reason: DeltaUnavailableReason) => {
@@ -425,7 +445,8 @@ function resolveDelta(
   destPath: string,
   offline?: boolean,
   setMessage?: SetMessage
-): Promise<DeltaResult | null> {
+): Promise<{ result: DeltaResult | null; source: string | undefined }> {
+  const tel = telemetry();
   return resolveAndApply({
     source,
     currentVersion: CLI_VERSION,
@@ -435,8 +456,8 @@ function resolveDelta(
     cache: getPatchCache(),
     offline,
     onProgress: makeProgressHandler(setMessage),
-    telemetry: telemetry(),
-  });
+    telemetry: tel,
+  }).then((result) => ({ result, source: tel._source.current }));
 }
 
 // biome-ignore lint/nursery/useMaxParams: preserve the existing public API
@@ -454,7 +475,7 @@ export function resolveStableDelta(
     destPath,
     offline,
     setMessage
-  );
+  ).then(({ result }) => result);
 }
 
 // biome-ignore lint/nursery/useMaxParams: preserve the existing public API
@@ -472,7 +493,7 @@ export function resolveNightlyDelta(
     destPath,
     offline,
     setMessage
-  );
+  ).then(({ result }) => result);
 }
 
 // biome-ignore lint/nursery/useMaxParams: preserve the existing public API
@@ -493,8 +514,9 @@ export function attemptDeltaUpgrade(
     async (span) => {
       span.setAttribute("delta.from_version", CLI_VERSION);
       span.setAttribute("delta.to_version", targetVersion);
+      let chainSource: string | undefined;
       try {
-        const result = await resolveDelta(
+        const resolved = await resolveDelta(
           channel === "nightly" ? nightlySource() : stableSource(),
           targetVersion,
           oldBinaryPath,
@@ -502,6 +524,8 @@ export function attemptDeltaUpgrade(
           offline,
           setMessage
         );
+        chainSource = resolved.source;
+        const result = resolved.result;
         if (result) {
           span.setAttribute("delta.patch_bytes", result.patchBytes);
           span.setAttribute("delta.chain_length", result.chainLength);
@@ -529,6 +553,13 @@ export function attemptDeltaUpgrade(
             "delta.channel": channel,
           },
         });
+        // If the chain was resolved but apply threw, the source was captured
+        // by telemetry().onResolved — stamp it on the span so error spans
+        // don't silently lose the network/cache/offline_miss attribution.
+        const errorSpan = Sentry.getActiveSpan();
+        if (chainSource !== undefined && errorSpan) {
+          errorSpan.setAttribute("delta.source", chainSource);
+        }
         const message = error instanceof Error ? error.message : String(error);
         log.warn(
           `Delta upgrade failed (${message}), falling back to full download`

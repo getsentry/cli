@@ -16,7 +16,6 @@ import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zstdCompressSync } from "node:zlib";
-import { describe, expect, test } from "vitest";
 import {
   addDiffChunk,
   applyPatch,
@@ -24,7 +23,8 @@ import {
   applyPatchToMemory,
   MAX_OUTPUT_SIZE,
   parsePatchHeader,
-} from "../../src/lib/bspatch.js";
+} from "binpatch";
+import { describe, expect, test } from "vitest";
 
 const FIXTURES_DIR = join(import.meta.dirname, "../fixtures/patches");
 
