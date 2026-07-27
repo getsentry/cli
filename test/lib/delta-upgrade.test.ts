@@ -1719,12 +1719,11 @@ describe("resolveNightlyDelta", () => {
   }
 
   test("returns null when GHCR token fetch fails", async () => {
-    // Mock token endpoint to fail → resolveNightlyDelta throws → caught by caller
     mockFetch(async () => new Response("Unauthorized", { status: 401 }));
 
     await expect(
       resolveNightlyDelta("0.14.0-dev.123", "/tmp/fake-old", "/tmp/fake-out")
-    ).rejects.toThrow();
+    ).resolves.toBeNull();
   });
 
   test("returns null when no patch tags exist for the version range", async () => {

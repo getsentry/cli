@@ -5,9 +5,9 @@
  * functions across random inputs.
  */
 
+import { offtin, parsePatchHeader } from "binpatch";
 import { assert as fcAssert, integer, property, uint8Array } from "fast-check";
 import { describe, expect, test } from "vitest";
-import { offtin, parsePatchHeader } from "../../src/lib/bspatch.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
 describe("property: offtin", () => {

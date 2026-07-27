@@ -15,9 +15,9 @@ import { existsSync, mkdtempSync, unlinkSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { applyPatch, applyPatchChainInMemory } from "binpatch";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { getPlatformBinaryName } from "../../src/lib/binary.js";
-import { applyPatch, applyPatchChainInMemory } from "../../src/lib/bspatch.js";
 
 // Restore real fetch for E2E tests (preload.ts mocks it globally)
 const realFetch = (globalThis as { __originalFetch?: typeof fetch })
