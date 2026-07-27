@@ -64,6 +64,7 @@ export {
   apiRequestToRegionNoContent,
   autoPaginate,
   buildSearchParams,
+  isTextualContentType,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
   parseLinkHeader,

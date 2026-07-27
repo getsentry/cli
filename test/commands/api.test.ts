@@ -18,6 +18,7 @@ import {
   dataToQueryParams,
   extractJsonBody,
   formatApiResponse,
+  formatBinaryErrorBody,
   normalizeEndpoint,
   normalizeFields,
   parseDataBody,
@@ -955,6 +956,36 @@ describe("formatApiResponse", () => {
 
   test("returns empty string for undefined", () => {
     expect(formatApiResponse(undefined)).toBe("");
+  });
+
+  test("returns empty string for Uint8Array (binary guard)", () => {
+    // Binary must never go through JSON.stringify / String().
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    expect(formatApiResponse(png)).toBe("");
+  });
+});
+
+describe("formatBinaryErrorBody", () => {
+  test("summarizes status, content-type, and size without dumping bytes", () => {
+    const body = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const headers = new Headers({ "content-type": "image/png" });
+    const summary = formatBinaryErrorBody(403, headers, body);
+    expect(summary).toContain("HTTP 403");
+    expect(summary).toContain("image/png");
+    expect(summary).toContain("4 bytes");
+    // Must not contain raw binary / replacement-char artifacts
+    expect(summary).not.toContain("\uFFFD");
+    expect(summary).not.toMatch(/\x89/);
+  });
+
+  test("uses unknown when content-type is missing", () => {
+    const summary = formatBinaryErrorBody(
+      500,
+      new Headers(),
+      new Uint8Array(0)
+    );
+    expect(summary).toContain("unknown");
+    expect(summary).toContain("0 bytes");
   });
 });
 

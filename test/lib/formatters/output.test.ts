@@ -6,18 +6,29 @@ import {
   writeFooter,
 } from "../../../src/lib/formatters/output.js";
 
-/** Collect all writes to a string array for assertions. */
+/** Collect all writes for assertions (string or binary). */
 function createTestWriter() {
-  const chunks: string[] = [];
+  const chunks: Array<string | Uint8Array> = [];
   return {
-    write(data: string) {
+    write(data: string | Uint8Array) {
       chunks.push(data);
       return true;
     },
     chunks,
-    /** Full concatenated output */
+    /** Full concatenated string output (binary chunks decoded as latin1). */
     get output() {
-      return chunks.join("");
+      return chunks
+        .map((c) =>
+          typeof c === "string" ? c : Buffer.from(c).toString("latin1")
+        )
+        .join("");
+    },
+    /** Concatenated raw bytes from all writes. */
+    get bytes() {
+      const parts = chunks.map((c) =>
+        typeof c === "string" ? Buffer.from(c, "utf8") : Buffer.from(c)
+      );
+      return Buffer.concat(parts);
     },
   };
 }
@@ -100,6 +111,35 @@ describe("renderCommandOutput", () => {
     };
     render(w, { value: 42 }, config, { json: false });
     expect(w.output).toBe("Value: 42\n");
+  });
+
+  test("streams Uint8Array binary bodies raw with no trailing newline", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<unknown> = {
+      human: () => "SHOULD_NOT_RUN",
+    };
+    // Real PNG signature — proves no UTF-8 replacement and no formatter path.
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    render(w, png, config, { json: false });
+    expect(w.chunks).toHaveLength(1);
+    expect(w.chunks[0]).toBeInstanceOf(Uint8Array);
+    expect(Array.from(w.bytes)).toEqual([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    // No trailing newline added by the text formatter path
+    expect(w.bytes.length).toBe(8);
+  });
+
+  test("streams Uint8Array even when json=true (binary bypasses JSON)", () => {
+    const w = createTestWriter();
+    const config: OutputConfig<unknown> = {
+      human: () => "SHOULD_NOT_RUN",
+    };
+    const bytes = new Uint8Array([0xff, 0x00, 0x80]);
+    render(w, bytes, config, { json: true });
+    expect(Array.from(w.bytes)).toEqual([0xff, 0x00, 0x80]);
   });
 
   test("jsonExclude strips fields from JSON output", () => {

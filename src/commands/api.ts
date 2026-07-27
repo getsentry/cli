@@ -885,16 +885,41 @@ export function buildBodyFromFields(
 /**
  * Format a raw response body value for human-readable output.
  * Objects are pretty-printed as JSON, strings pass through, null/undefined → empty.
+ * Binary bodies (`Uint8Array`) return empty — `renderCommandOutput` streams
+ * them raw and never calls this formatter for that path.
  * @internal Exported for testing
  */
 export function formatApiResponse(data: unknown): string {
   if (data === null || data === undefined) {
     return "";
   }
+  // Guard: binary must never go through JSON.stringify / String().
+  // renderCommandOutput short-circuits Uint8Array before calling us, but keep
+  // this safe if a caller invokes the formatter directly.
+  if (data instanceof Uint8Array) {
+    return "";
+  }
   if (typeof data === "object") {
     return JSON.stringify(data, null, 2);
   }
   return String(data);
+}
+
+/**
+ * Summarize a binary error body for human output without dumping raw bytes.
+ * Used when `sentry api` gets a non-2xx response with a non-textual body.
+ * @internal Exported for testing
+ */
+export function formatBinaryErrorBody(
+  status: number,
+  headers: Headers,
+  body: Uint8Array
+): string {
+  const contentType = headers.get("content-type") ?? "unknown";
+  return (
+    `HTTP ${status} — binary error body ` +
+    `(${contentType}, ${body.byteLength} bytes)`
+  );
 }
 
 /**
@@ -1110,6 +1135,58 @@ function logResponse(response: { status: number; headers: Headers }): void {
   log.debug("<");
 }
 
+/**
+ * Decide what `sentry api` should emit for a completed response.
+ *
+ * - silent: no body (OutputError(null) on error for exit code only)
+ * - binary error: short status/content-type summary (never dump bytes)
+ * - binary success: raw Uint8Array (TTY warn only; no hard-refuse)
+ * - text/JSON: body as-is for the formatter path
+ *
+ * Extracted from the command func to keep cognitive complexity under the lint threshold.
+ *
+ * @returns data to yield via CommandOutput, or `undefined` when silent/no body
+ * @throws {OutputError} on HTTP error statuses
+ */
+function resolveApiResponseOutput(
+  response: { status: number; headers: Headers; body: unknown },
+  options: { silent: boolean; isTTY: boolean | undefined }
+): unknown {
+  const isError = response.status >= 400;
+  const isBinary = response.body instanceof Uint8Array;
+
+  if (options.silent) {
+    if (isError) {
+      throw new OutputError(null);
+    }
+    return;
+  }
+
+  if (isError) {
+    if (isBinary) {
+      throw new OutputError(
+        formatBinaryErrorBody(
+          response.status,
+          response.headers,
+          response.body as Uint8Array
+        )
+      );
+    }
+    throw new OutputError(response.body);
+  }
+
+  // Binary success: stream raw bytes. TTY warn only — hard-refuse belongs
+  // with a future --output flag.
+  if (isBinary && options.isTTY) {
+    log.warn(
+      "Binary response written to a TTY — redirect stdout to a file " +
+        "(e.g. `> file.bin`) to capture raw bytes cleanly."
+    );
+  }
+
+  return response.body;
+}
+
 export const apiCommand = buildCommand({
   output: { human: formatApiResponse },
   docs: {
@@ -1285,19 +1362,15 @@ export const apiCommand = buildCommand({
       );
     }
 
-    // Silent mode — no output, just exit code
-    if (flags.silent) {
-      if (isError) {
-        throw new OutputError(null);
-      }
+    const output = resolveApiResponseOutput(response, {
+      silent: flags.silent,
+      isTTY: this.stdout.isTTY,
+    });
+    if (output === undefined) {
       return;
     }
-
-    // Always return raw body — --fields filters it directly
-    if (isError) {
-      throw new OutputError(response.body);
-    }
-
-    return yield new CommandOutput(response.body);
+    // Binary Uint8Array bodies are written raw by renderCommandOutput (no
+    // formatter, no trailing newline). Text/JSON go through formatApiResponse.
+    return yield new CommandOutput(output);
   },
 });
