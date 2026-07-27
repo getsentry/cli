@@ -41,6 +41,7 @@ import { CLI_VERSION } from "./constants.js";
 import { customFetch } from "./custom-ca.js";
 import { getConfigDir } from "./db/index.js";
 import { formatBytes } from "./formatters/numbers.js";
+import { GHCR_REPO } from "./ghcr.js";
 import { logger } from "./logger.js";
 import { makeByteProgress, type SetMessage } from "./progress.js";
 import { withTracing, withTracingSpan } from "./telemetry.js";
@@ -67,7 +68,9 @@ export type DeltaResult = {
   chainLength: number;
 };
 
-const GITHUB_REPO_REPO_NAME = "getsentry/sentry-cli";
+// GHCR publishes nightlies to ghcr.io/getsentry/cli (see src/lib/ghcr.ts
+// GHCR_REPO). Importing as a named import keeps a single source of truth and
+// avoids the silent 404 introduced when this was a string literal.
 const log = logger.withTag("delta-upgrade");
 
 const instrument: InstrumentHook = (name, fn) =>
@@ -129,7 +132,7 @@ function stableSource(): SourceStrategy {
 function nightlySource(): SourceStrategy {
   return ghcrSource({
     registry: "https://ghcr.io",
-    repo: GITHUB_REPO_REPO_NAME,
+    repo: GHCR_REPO,
     binaryName: getPlatformBinaryName(),
     targetTag: (version) => `nightly-${version}`,
     compareVersions,
@@ -274,7 +277,7 @@ export async function resolveNightlyChain(opts: {
 }): Promise<PatchChain | null> {
   const client = new OciClient({
     registry: "https://ghcr.io",
-    repo: GITHUB_REPO_REPO_NAME,
+    repo: GHCR_REPO,
     userAgent: `sentry-cli/${CLI_VERSION}`,
     fetch: customFetch,
   });
