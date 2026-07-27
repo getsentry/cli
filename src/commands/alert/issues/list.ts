@@ -497,7 +497,7 @@ function formatIssueAlertListHuman(result: IssueAlertListResult): string {
   ];
 
   const parts: string[] = [];
-  const buffer: Writer = { write: (s) => parts.push(s) };
+  const buffer: Writer = { write: (s: string) => parts.push(s) };
 
   if (result.title) {
     parts.push(`${result.title}:\n\n`);
