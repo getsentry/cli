@@ -166,7 +166,7 @@ function formatDashboardListHuman(result: DashboardListResult): string {
   ];
 
   const parts: string[] = [];
-  const buffer: Writer = { write: (s) => parts.push(s) };
+  const buffer: Writer = { write: (s: string) => parts.push(s) };
   writeTable(buffer, rows, columns);
 
   return parts.join("").trimEnd();

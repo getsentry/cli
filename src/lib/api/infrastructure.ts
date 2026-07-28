@@ -662,9 +662,52 @@ export async function apiRequest<T>(
 }
 
 /**
+ * Whether a response Content-Type should be decoded as text.
+ *
+ * Allowlist of textual types — anything unknown defaults to binary-safe
+ * handling so downloads (PNG attachments, minidumps, etc.) are not
+ * corrupted by UTF-8 decoding. Empty/missing Content-Type stays textual
+ * because most Sentry JSON endpoints omit or under-specify it.
+ *
+ * @param contentType - Raw Content-Type header value (may include params)
+ * @returns true when the body should be read via `response.text()`
+ */
+export function isTextualContentType(contentType: string | null): boolean {
+  if (!contentType) {
+    return true;
+  }
+  const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (mediaType.length === 0) {
+    return true;
+  }
+  if (mediaType.startsWith("text/")) {
+    return true;
+  }
+  if (
+    mediaType === "application/json" ||
+    mediaType === "application/yaml" ||
+    mediaType === "application/x-yaml" ||
+    mediaType === "application/javascript" ||
+    mediaType === "application/xml" ||
+    mediaType === "application/xhtml+xml"
+  ) {
+    return true;
+  }
+  // Structured suffixes: application/problem+json, application/atom+xml, …
+  if (mediaType.endsWith("+json") || mediaType.endsWith("+xml")) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Make a raw API request that returns full response details.
  * Unlike apiRequest, this does not throw on non-2xx responses.
  * Used by the 'sentry api' command for direct API access.
+ *
+ * Response bodies are decoded as text only for textual Content-Types
+ * ({@link isTextualContentType}). Non-textual bodies are returned as
+ * `Uint8Array` so binary downloads stay byte-for-byte intact.
  *
  * @param endpoint - API endpoint path (e.g., "/organizations/")
  * @param options - Request options including method, body, params, and custom headers
@@ -712,12 +755,21 @@ export async function rawApiRequest(
     body: requestBody,
   });
 
-  const text = await response.text();
+  const contentType = response.headers.get("content-type");
   let responseBody: unknown;
-  try {
-    responseBody = JSON.parse(text);
-  } catch {
-    responseBody = text;
+  if (isTextualContentType(contentType)) {
+    // Textual path: UTF-8 decode, then try JSON.parse (unchanged behavior).
+    const text = await response.text();
+    try {
+      responseBody = JSON.parse(text);
+    } catch {
+      responseBody = text;
+    }
+  } else {
+    // Binary path: preserve raw bytes. Do not call response.text() — that
+    // UTF-8-decodes with replacement (U+FFFD → EF BF BD) and permanently
+    // corrupts non-UTF-8 payloads such as PNG attachments.
+    responseBody = new Uint8Array(await response.arrayBuffer());
   }
 
   return {

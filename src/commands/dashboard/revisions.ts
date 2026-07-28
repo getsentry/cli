@@ -86,7 +86,7 @@ function formatRevisionsHuman(result: RevisionsResult): string {
   ];
 
   const parts: string[] = [];
-  const buffer: Writer = { write: (s) => parts.push(s) };
+  const buffer: Writer = { write: (s: string) => parts.push(s) };
   writeTable(buffer, rows, columns);
 
   return parts.join("").trimEnd();

@@ -291,6 +291,15 @@ export function renderCommandOutput(
   renderer: HumanRenderer<any>,
   ctx: RenderContext
 ): void {
+  // Binary bodies (Uint8Array) must bypass text formatters entirely — no
+  // JSON pretty-print, no trailing newline, no string coercion. This is the
+  // path `sentry api` uses for attachment downloads and other non-textual
+  // Content-Types so redirected stdout stays byte-for-byte faithful.
+  if (data instanceof Uint8Array) {
+    stdout.write(data);
+    return;
+  }
+
   if (ctx.json) {
     if (config.jsonTransform) {
       const transformed = config.jsonTransform(data, ctx.fields);

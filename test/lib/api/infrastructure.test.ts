@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { throwApiError } from "../../../src/lib/api/infrastructure.js";
+import {
+  isTextualContentType,
+  rawApiRequest,
+  throwApiError,
+} from "../../../src/lib/api/infrastructure.js";
+import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { ApiError } from "../../../src/lib/errors.js";
+import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 describe("throwApiError", () => {
   test("network failure with Error produces readable message", () => {
@@ -524,5 +530,143 @@ describe("throwApiError", () => {
         }
       });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isTextualContentType + rawApiRequest binary handling (getsentry/cli#1303)
+// ---------------------------------------------------------------------------
+
+describe("isTextualContentType", () => {
+  test.each([
+    [null, true],
+    [undefined as unknown as null, true],
+    ["", true],
+    ["   ", true],
+    ["application/json", true],
+    ["application/json; charset=utf-8", true],
+    ["APPLICATION/JSON", true],
+    ["text/plain", true],
+    ["text/html; charset=utf-8", true],
+    ["application/problem+json", true],
+    ["application/vnd.api+json", true],
+    ["application/xml", true],
+    ["application/atom+xml", true],
+    ["application/yaml", true],
+    ["application/x-yaml", true],
+    ["application/javascript", true],
+    // Binary / unknown → false (allowlist default)
+    ["image/png", false],
+    ["application/png", false],
+    ["application/octet-stream", false],
+    ["application/zip", false],
+    ["application/pdf", false],
+    ["application/x-dmp", false],
+    ["image/jpeg", false],
+    ["audio/mpeg", false],
+    ["video/mp4", false],
+    ["multipart/form-data", false],
+  ] as const)("%s → %s", (input, expected) => {
+    // Treat undefined like missing header for the null case already covered.
+    expect(isTextualContentType(input ?? null)).toBe(expected);
+  });
+});
+
+describe("rawApiRequest binary handling", () => {
+  useTestConfigDir("raw-api-binary-");
+
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(async () => {
+    originalFetch = globalThis.fetch;
+    await setAuthToken("test-token");
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("returns Uint8Array for image/png without UTF-8 corruption", async () => {
+    // Real PNG signature: 89 50 4e 47 0d 0a 1a 0a — the leading 0x89 is not
+    // valid UTF-8 and would become EF BF BD if response.text() were used.
+    const pngBytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+      0x49, 0x48, 0x44, 0x52,
+    ]);
+
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(pngBytes, {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        })
+    );
+
+    const result = await rawApiRequest(
+      "projects/org/proj/events/abc/attachments/1/?download=1"
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.body).toBeInstanceOf(Uint8Array);
+    const body = result.body as Uint8Array;
+    expect(Array.from(body.slice(0, 8))).toEqual([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    // Must NOT contain the UTF-8 replacement sequence EF BF BD
+    expect(Array.from(body.slice(0, 3))).not.toEqual([0xef, 0xbf, 0xbd]);
+    expect(body).toEqual(pngBytes);
+  });
+
+  test("returns Uint8Array for application/octet-stream", async () => {
+    const bytes = new Uint8Array([0xff, 0xfe, 0x00, 0x01, 0x80]);
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(bytes, {
+          status: 200,
+          headers: { "content-type": "application/octet-stream" },
+        })
+    );
+
+    const result = await rawApiRequest("debug-files/1/download/");
+    expect(result.body).toBeInstanceOf(Uint8Array);
+    expect(result.body).toEqual(bytes);
+  });
+
+  test("still parses JSON for application/json", async () => {
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+
+    const result = await rawApiRequest("organizations/");
+    expect(result.body).toEqual({ ok: true });
+  });
+
+  test("still parses JSON when Content-Type is missing", async () => {
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ slug: "acme" }), {
+          status: 200,
+        })
+    );
+
+    const result = await rawApiRequest("organizations/acme/");
+    expect(result.body).toEqual({ slug: "acme" });
+  });
+
+  test("returns plain text string for text/plain non-JSON", async () => {
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response("not json", {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        })
+    );
+
+    const result = await rawApiRequest("some/text/");
+    expect(result.body).toBe("not json");
   });
 });

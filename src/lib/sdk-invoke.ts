@@ -228,10 +228,44 @@ function extractExitCode(thrown: unknown): number {
   return 0;
 }
 
-/** Parse captured output: prefer zero-copy object, then JSON, then raw string. */
-function parseOutput<T>(capturedResult: unknown, stdoutChunks: string[]): T {
+/**
+ * Concatenate captured stdout chunks into a single `Uint8Array`.
+ *
+ * String chunks are UTF-8 encoded; binary chunks are copied as-is. Used when
+ * any chunk is binary (e.g. a `sentry api` attachment download) so the bytes
+ * survive round-trip instead of being coerced to comma-separated decimals by
+ * `Array#join`.
+ */
+function concatChunksToBytes(chunks: Array<string | Uint8Array>): Uint8Array {
+  const parts = chunks.map((c) =>
+    typeof c === "string" ? new TextEncoder().encode(c) : c
+  );
+  const total = parts.reduce((sum, p) => sum + p.byteLength, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.byteLength;
+  }
+  return out;
+}
+
+/**
+ * Parse captured output: prefer zero-copy object, then JSON, then raw string.
+ * @internal Exported for testing
+ */
+export function parseOutput<T>(
+  capturedResult: unknown,
+  stdoutChunks: Array<string | Uint8Array>
+): T {
   if (capturedResult !== undefined) {
     return capturedResult as T;
+  }
+  // Binary output (e.g. `sentry api` attachment downloads) must be returned
+  // byte-faithfully. If any chunk is a Uint8Array, joining as strings would
+  // stringify it to comma-separated decimals — return raw bytes instead.
+  if (stdoutChunks.some((c) => c instanceof Uint8Array)) {
+    return concatChunksToBytes(stdoutChunks) as T;
   }
   const stdoutStr = stdoutChunks.join("");
   if (!stdoutStr.trim()) {
@@ -264,7 +298,7 @@ type CaptureContext = {
     homeDir: string;
     configDir: string;
   };
-  stdoutChunks: string[];
+  stdoutChunks: Array<string | Uint8Array>;
   stderrChunks: string[];
   getCapturedResult: () => unknown;
 };
@@ -283,7 +317,7 @@ async function buildCaptureContext(
   cwd: string,
   opts?: CaptureOptions
 ): Promise<CaptureContext> {
-  const stdoutChunks: string[] = [];
+  const stdoutChunks: Array<string | Uint8Array> = [];
   const stderrChunks: string[] = [];
   const capturedResults: unknown[] = [];
 
@@ -296,7 +330,7 @@ async function buildCaptureContext(
       };
 
   const stdout: Writer = {
-    write: (s: string) => {
+    write: (s: string | Uint8Array) => {
       stdoutChunks.push(s);
     },
     captureObject,
@@ -471,6 +505,16 @@ function executeWithStream<T>(
           )
         );
       } else {
+        // Drain any raw stdout the command wrote directly (via stdout.write)
+        // instead of yielding via captureObject — e.g. a binary Uint8Array
+        // body. Without this, those bytes accumulate in stdoutChunks and are
+        // dropped when the channel closes. No streaming-capable command emits
+        // binary today, but this keeps the streaming path faithful to the
+        // capture path (see parseOutput) if one ever does.
+        const trailing = parseOutput<T>(undefined, captureCtx.stdoutChunks);
+        if (trailing !== undefined) {
+          channel.push(trailing);
+        }
         channel.close();
       }
     } catch (thrown) {

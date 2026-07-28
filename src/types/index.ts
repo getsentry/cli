@@ -187,12 +187,18 @@ export {
  * Simple writer interface for output streams.
  * Compatible with process.stdout, process.stderr, and test mocks.
  * Avoids dependency on Node.js-specific types like NodeJS.WriteStream.
+ *
+ * `write` accepts `Uint8Array` so binary command output (e.g. `sentry api`
+ * attachment downloads) can stream raw bytes without a string round-trip.
+ * Optional `isTTY` mirrors Node write streams for TTY-aware warnings.
  */
 export type Writer = {
-  write(data: string): void;
+  write(data: string | Uint8Array): void;
   /**
    * Zero-copy object capture for library mode.
    * When set, JSON objects are passed directly instead of serialized.
    */
   captureObject?: (obj: unknown) => void;
+  /** True when the underlying stream is a TTY (optional; set on process streams). */
+  readonly isTTY?: boolean;
 };
