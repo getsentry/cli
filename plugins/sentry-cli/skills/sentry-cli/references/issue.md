@@ -312,7 +312,7 @@ sentry issue ignore CLI-G5 --until auto
 Merge 2+ issues into a single canonical group
 
 **Flags:**
-- `-i, --into <value> - Prefer this issue as the canonical parent (must match one of the provided IDs)`
+- `-i, --into <value> - Prefer this issue as the canonical parent (included in the merge if not already listed)`
 
 **Examples:**
 
