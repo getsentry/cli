@@ -390,12 +390,19 @@ function colorsInBand(plane: IndexedPlane, y0: number): number[] {
  *
  * @param img - Decoded RGBA image.
  * @param maxWidth - Cap on rendered pixel width; wider images are downscaled.
+ *   The effective cap is the smaller of this and {@link DEFAULT_MAX_WIDTH}, so
+ *   passing the terminal's pixel width keeps the image from overflowing while
+ *   still bounding the escape-sequence size. Omit to use the default ceiling.
  */
 export function encodeImageToSixel(
   img: DecodedImage,
-  maxWidth: number = DEFAULT_MAX_WIDTH
+  maxWidth?: number
 ): string | undefined {
-  const scaled = downscale(img, maxWidth);
+  const effectiveMaxWidth = Math.min(
+    maxWidth ?? DEFAULT_MAX_WIDTH,
+    DEFAULT_MAX_WIDTH
+  );
+  const scaled = downscale(img, effectiveMaxWidth);
   const palette = buildPalette(scaled, PALETTE_SIZE);
   if (palette.length === 0) {
     return;
@@ -443,12 +450,13 @@ export function encodeImageToSixel(
  *
  * @param body - Raw image bytes.
  * @param contentType - Optional HTTP Content-Type, used as a decode-format hint.
- * @param maxWidth - Cap on rendered pixel width.
+ * @param maxWidth - Cap on rendered pixel width (clamped to
+ *   {@link DEFAULT_MAX_WIDTH}). Omit to use the default ceiling.
  */
 export function imageBytesToSixel(
   body: Uint8Array,
   contentType?: string | null,
-  maxWidth: number = DEFAULT_MAX_WIDTH
+  maxWidth?: number
 ): string | undefined {
   const format = detectImageFormat(body, contentType);
   if (!format) {

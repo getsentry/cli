@@ -206,6 +206,26 @@ export function canRenderSixel(): boolean {
 }
 
 /**
+ * The usable image width in device pixels for the current terminal — the
+ * number of columns times the reported character-cell width. Returns
+ * `undefined` when the terminal didn't report a cell width (in which case a
+ * caller can't know the pixel budget and should fall back to a safe default).
+ *
+ * Callers rendering arbitrary images (e.g. `sentry api` attachments) use this
+ * to downscale so a wide image doesn't overflow the terminal and garble the
+ * session, mirroring the fit check {@link sixelFits} does for the banner.
+ */
+export function terminalPixelWidth(
+  columns: number = process.stdout.columns ?? 80
+): number | undefined {
+  const caps = detectSixelCaps();
+  if (!(caps.supported && caps.cellWidth && caps.cellWidth > 0)) {
+    return;
+  }
+  return columns * caps.cellWidth;
+}
+
+/**
  * The baked sixel banner escape string when the terminal supports sixel and the
  * image fits `columns`; otherwise `undefined` so the caller falls back to the
  * block-art banner.

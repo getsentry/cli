@@ -162,6 +162,20 @@ describe("encodeImageToSixel", () => {
     const img = solidImage(4, 4, [255, 255, 255, 0]);
     expect(encodeImageToSixel(img)).toBeUndefined();
   });
+
+  test("downscales to a caller-supplied maxWidth narrower than the image", () => {
+    // 200px-wide image, terminal budget of 40px → raster attributes report 40.
+    const img = solidImage(200, 20, [10, 20, 30, 255]);
+    const sixel = encodeImageToSixel(img, 40);
+    expect(sixel).toContain('"1;1;40;');
+  });
+
+  test("clamps maxWidth to the default ceiling for very wide budgets", () => {
+    // A 2000px image with a 5000px budget must still cap at DEFAULT_MAX_WIDTH (800).
+    const img = solidImage(2000, 10, [10, 20, 30, 255]);
+    const sixel = encodeImageToSixel(img, 5000);
+    expect(sixel).toContain('"1;1;800;');
+  });
 });
 
 describe("imageBytesToSixel", () => {

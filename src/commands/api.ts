@@ -16,7 +16,7 @@ import { CommandOutput } from "../lib/formatters/output.js";
 import { validateEndpoint } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";
 import { getDefaultSdkConfig } from "../lib/sentry-client.js";
-import { canRenderSixel } from "../lib/sixel.js";
+import { canRenderSixel, terminalPixelWidth } from "../lib/sixel.js";
 import { imageBytesToSixel } from "../lib/sixel-image.js";
 
 const log = logger.withTag("api");
@@ -1199,7 +1199,15 @@ export function resolveBinaryTtyOutput(
   headers: Headers
 ): string | undefined {
   if (canRenderSixel()) {
-    const sixel = imageBytesToSixel(body, headers.get("content-type"));
+    // Cap the rendered width to the terminal's pixel budget so a wide image
+    // doesn't overflow the columns and garble the session. Falls back to the
+    // encoder's default when the terminal didn't report a cell width.
+    const maxWidth = terminalPixelWidth();
+    const sixel = imageBytesToSixel(
+      body,
+      headers.get("content-type"),
+      maxWidth
+    );
     if (sixel) {
       return sixel;
     }
