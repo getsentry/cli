@@ -161,7 +161,7 @@ Merge 2+ issues into a single canonical group
 
 | Option | Description |
 | --- | --- |
-| `-i, --into <into>` | Prefer this issue as the canonical parent (must match one of the provided IDs) |
+| `-i, --into <into>` | Prefer this issue as the canonical parent (included in the merge if not already listed) |
 
 All commands support `--json` for machine-readable output and `--fields` to select specific JSON fields.
 
