@@ -92,6 +92,7 @@ url: "https://cli.sentry.dev/"
 ## Pages in this section
 
 - [Installation](https://cli.sentry.dev/getting-started.md)
+- [Migrating from v3](https://cli.sentry.dev/migrating-from-v3.md)
 - [Self-Hosted](https://cli.sentry.dev/self-hosted.md)
 - [Configuration](https://cli.sentry.dev/configuration.md)
 - [Library Usage](https://cli.sentry.dev/library-usage.md)

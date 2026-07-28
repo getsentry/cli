@@ -10,11 +10,7 @@ View distributed traces
 
 ## Commands
 
-[Section titled “Commands”](#commands)
-
 ### `sentry trace list <org/project>`
-
-[Section titled “sentry trace list <org/project>”](#sentry-trace-list-orgproject)
 
 List recent traces in a project
 
@@ -31,13 +27,11 @@ List recent traces in a project
 | `-n, --limit <limit>` | Number of traces (1-1000) (default: "25") |
 | `-q, --query <query>` | Search query (Sentry search syntax) |
 | `-s, --sort <sort>` | Sort by: date, duration (default: "date") |
-| `-t, --period <period>` | Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01" (default: "7d") |
+| `-t, --period <period>` | Time range: "7d", "2026-06-01..2026-07-01", ">=2026-06-01" (default: "7d") |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 | `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
 ### `sentry trace view <org/project/trace-id...>`
-
-[Section titled “sentry trace view <org/project/trace-id...>”](#sentry-trace-view-orgprojecttrace-id)
 
 View details of a specific trace
 
@@ -58,8 +52,6 @@ View details of a specific trace
 
 ### `sentry trace logs <org/project/trace-id...>`
 
-[Section titled “sentry trace logs <org/project/trace-id...>”](#sentry-trace-logs-orgprojecttrace-id)
-
 View logs associated with a trace
 
 **Arguments:**
@@ -73,7 +65,7 @@ View logs associated with a trace
 | Option | Description |
 | --- | --- |
 | `-w, --web` | Open trace in browser |
-| `-t, --period <period>` | Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01" (default: "14d") |
+| `-t, --period <period>` | Time range: "7d", "2026-06-01..2026-07-01", ">=2026-06-01" (default: "14d") |
 | `-n, --limit <limit>` | Number of log entries (<=1000) (default: "100") |
 | `-q, --query <query>` | Filter query (e.g., "level:error", "project:backend", "project:[a,b]") |
 | `-s, --sort <sort>` | Sort order: "newest" (default) or "oldest" (default: "newest") |
@@ -83,53 +75,80 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 
 ## Examples
 
-[Section titled “Examples”](#examples)
-
 ### List traces
 
-[Section titled “List traces”](#list-traces)
-Terminal window
+```bash
+# List last 20 traces (default)
+sentry trace list
 
-```
-# List last 20 traces (default)sentry trace list
-# Sort by slowest firstsentry trace list --sort duration
-# Filter by transaction name, last 24 hourssentry trace list -q "transaction:GET /api/users" --period 24h
-# Paginate through resultssentry trace list my-org/backend -c next
+
+# Sort by slowest first
+sentry trace list --sort duration
+
+
+# Filter by transaction name, last 24 hours
+sentry trace list -q "transaction:GET /api/users" --period 24h
+
+
+# Paginate through results
+sentry trace list my-org/backend -c next
 ```
 
 
 ### View a trace
 
-[Section titled “View a trace”](#view-a-trace)
-Terminal window
+```bash
+# View trace details with span tree
+sentry trace view abc123def456abc123def456abc12345
 
-```
-# View trace details with span treesentry trace view abc123def456abc123def456abc12345
-# Open trace in browsersentry trace view abc123def456abc123def456abc12345 -w
-# Auto-recover from an issue short IDsentry trace view PROJ-123
+
+# Open trace in browser
+sentry trace view abc123def456abc123def456abc12345 -w
+
+
+# Auto-recover from an issue short ID
+sentry trace view PROJ-123
 ```
 
 
 ### Cross-project traces
 
-[Section titled “Cross-project traces”](#cross-project-traces)
-Terminal window
+```bash
+# Filter trace view to one project's spans
+sentry trace view my-org/cli-server/abc123def456abc123def456abc12345
 
-```
-# Filter trace view to one project's spanssentry trace view my-org/cli-server/abc123def456abc123def456abc12345
-# Full trace across all projects (default)sentry trace view my-org/abc123def456abc123def456abc12345
-# Filter trace logs by projectsentry trace logs my-org/cli-server/abc123def456abc123def456abc12345
-# Multiple projects via --querysentry trace logs abc123def456abc123def456abc12345 -q "project:[cli-server,api]"
+
+# Full trace across all projects (default)
+sentry trace view my-org/abc123def456abc123def456abc12345
+
+
+# Filter trace logs by project
+sentry trace logs my-org/cli-server/abc123def456abc123def456abc12345
+
+
+# Multiple projects via --query
+sentry trace logs abc123def456abc123def456abc12345 -q "project:[cli-server,api]"
 ```
 
 
 ### View trace logs
 
-[Section titled “View trace logs”](#view-trace-logs)
-Terminal window
+```bash
+# View logs for a trace
+sentry trace logs abc123def456abc123def456abc12345
 
+
+# Search with a longer time window
+sentry trace logs --period 30d abc123def456abc123def456abc12345
+
+
+# Filter logs within a trace
+sentry trace logs -q 'level:error' abc123def456abc123def456abc12345
 ```
-# View logs for a tracesentry trace logs abc123def456abc123def456abc12345
-# Search with a longer time windowsentry trace logs --period 30d abc123def456abc123def456abc12345
-# Filter logs within a tracesentry trace logs -q 'level:error' abc123def456abc123def456abc12345
-```
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/index.md)
+- [Parent: Commands](https://cli.sentry.dev/commands.md)
+- [Previous: team](https://cli.sentry.dev/commands/team.md)
+- [Next: trial](https://cli.sentry.dev/commands/trial.md)

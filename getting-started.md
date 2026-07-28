@@ -6,9 +6,7 @@ url: "https://cli.sentry.dev/getting-started/"
 
 # Installation
 
-## Installation
-
-### Install Script
+## Install Script
 
 Install the latest stable release:
 
@@ -37,23 +35,34 @@ The `--version` flag takes precedence over `SENTRY_VERSION` if both are set.
 The chosen channel is persisted so that `sentry cli upgrade` automatically
 tracks the same channel on future updates.
 
-#### Supported Platforms
+### Supported Platforms
 
 {/* GENERATED:START platform-support */}
-| OS | Architectures | Notes |
-|----|---------------|-------|
-| **macOS** | x64, arm64 (Apple Silicon) |  |
-| **Linux** | x64, arm64 | glibc and musl (Alpine) |
-| **Windows** | x64 | Via Git Bash, MSYS2, or WSL |
+
+      OS
+      Architectures
+      Notes
+    
+      macOS
+      x64, arm64 (Apple Silicon)
+      
+      Linux
+      x64, arm64
+      glibc and musl (Alpine)
+    
+      Windows
+      x64
+      Via Git Bash, MSYS2, or WSL
+    
 {/* GENERATED:END platform-support */}
 
-### Homebrew
+## Homebrew
 
 ```bash
 brew install getsentry/tools/sentry
 ```
 
-### Package Managers
+## Package Managers
 
 Install globally with your preferred package manager (the npm/pnpm/yarn packages require **Node.js 22.15+**):
 
@@ -63,6 +72,12 @@ Install globally with your preferred package manager (the npm/pnpm/yarn packages
   yarn="yarn global add sentry"
   bun="bun add -g sentry"
 />
+
+Unlike the install script and Homebrew, package manager installs don't set up shell completions or agent skills. Run `sentry cli setup` once to enable them:
+
+```bash
+sentry cli setup
+```
 
 Or run directly without installing:
 
@@ -136,3 +151,8 @@ Once authenticated, you can start using the CLI:
 - [Event commands](https://cli.sentry.dev/commands/event.md) - Inspect events
 - [API commands](https://cli.sentry.dev/commands/api.md) - Direct API access
 - [Agentic Usage](https://cli.sentry.dev/agentic-usage.md) - Enable AI coding agents to use the CLI
+
+## Navigation
+
+- [Docs home](https://cli.sentry.dev/index.md)
+- [Next: Migrating from v3](https://cli.sentry.dev/migrating-from-v3.md)

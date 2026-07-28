@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-issue
-version: 0.38.0
+version: 0.39.0
 description: Manage Sentry issues
 requires:
   bins: ["sentry"]
@@ -19,7 +19,7 @@ List issues in a project
 - `-q, --query <value> - Search query (Sentry syntax, implicit AND, no OR operator)`
 - `-n, --limit <value> - Maximum number of issues to list - (default: "25")`
 - `-s, --sort <value> - Sort by: recommended, date, new, freq, user (default: recommended on sentry.io, else date)`
-- `-t, --period <value> - Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01" - (default: "90d")`
+- `-t, --period <value> - Time range: "7d", "2026-06-01..2026-07-01", ">=2026-06-01" - (default: "90d")`
 - `-c, --cursor <value> - Pagination cursor (use "next" for next page, "prev" for previous)`
 - `--compact - Single-line rows for compact output (auto-detects if omitted)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
@@ -92,7 +92,7 @@ List events for a specific issue
 - `-n, --limit <value> - Number of events (1-1000) - (default: "25")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `--full - Include full event body (stacktraces)`
-- `-t, --period <value> - Time range: "7d", "2026-05-01..2026-06-01", ">=2026-05-01" - (default: "7d")`
+- `-t, --period <value> - Time range: "7d", "2026-06-01..2026-07-01", ">=2026-06-01" - (default: "7d")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
@@ -312,7 +312,7 @@ sentry issue ignore CLI-G5 --until auto
 Merge 2+ issues into a single canonical group
 
 **Flags:**
-- `-i, --into <value> - Prefer this issue as the canonical parent (must match one of the provided IDs)`
+- `-i, --into <value> - Prefer this issue as the canonical parent (included in the merge if not already listed)`
 
 **Examples:**
 
