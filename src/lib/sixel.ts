@@ -191,6 +191,21 @@ export function detectSixelCaps(): SixelCaps {
 }
 
 /**
+ * True when the current terminal can display sixel graphics right now: it's an
+ * interactive TTY, not opted out (plain-output / SENTRY_NO_SIXEL / non-unix),
+ * and it advertised sixel support in the DA1 probe.
+ *
+ * Used by callers that render arbitrary images (not just the baked banner),
+ * e.g. `sentry api` displaying image attachments inline.
+ */
+export function canRenderSixel(): boolean {
+  if (optedOut()) {
+    return false;
+  }
+  return detectSixelCaps().supported;
+}
+
+/**
  * The baked sixel banner escape string when the terminal supports sixel and the
  * image fits `columns`; otherwise `undefined` so the caller falls back to the
  * block-art banner.

@@ -28,6 +28,7 @@ import {
   prepareRequestOptions,
   readStdin,
   resolveApiResponseOutput,
+  resolveBinaryTtyOutput,
   resolveBody,
   resolveEffectiveHeaders,
   resolveRequestUrl,
@@ -1070,6 +1071,18 @@ describe("resolveApiResponseOutput", () => {
       { silent: false, isTTY: true }
     );
     expect(out).toBe(png);
+  });
+});
+
+describe("resolveBinaryTtyOutput", () => {
+  test("falls through to raw bytes (undefined) when sixel is unavailable", () => {
+    // The test environment is non-interactive, so canRenderSixel() is false
+    // and no inline image is produced — the caller keeps the raw bytes.
+    const out = resolveBinaryTtyOutput(
+      new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+      new Headers({ "content-type": "image/png" })
+    );
+    expect(out).toBeUndefined();
   });
 });
 

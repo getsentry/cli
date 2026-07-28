@@ -16,6 +16,8 @@ import { CommandOutput } from "../lib/formatters/output.js";
 import { validateEndpoint } from "../lib/input-validation.js";
 import { logger } from "../lib/logger.js";
 import { getDefaultSdkConfig } from "../lib/sentry-client.js";
+import { canRenderSixel } from "../lib/sixel.js";
+import { imageBytesToSixel } from "../lib/sixel-image.js";
 
 const log = logger.withTag("api");
 
@@ -1140,7 +1142,7 @@ function logResponse(response: { status: number; headers: Headers }): void {
  *
  * - silent: no body (OutputError(null) on error for exit code only)
  * - binary error: short status/content-type summary (never dump bytes)
- * - binary success: raw Uint8Array (TTY warn only; no hard-refuse)
+ * - binary success: raw Uint8Array (the func decides TTY rendering/warning)
  * - text/JSON: body as-is for the formatter path
  *
  * Extracted from the command func to keep cognitive complexity under the lint threshold.
@@ -1176,16 +1178,38 @@ export function resolveApiResponseOutput(
     throw new OutputError(response.body);
   }
 
-  // Binary success: stream raw bytes. TTY warn only — hard-refuse belongs
-  // with a future --output flag.
-  if (isBinary && options.isTTY) {
-    log.warn(
-      "Binary response written to a TTY — redirect stdout to a file " +
-        "(e.g. `> file.bin`) to capture raw bytes cleanly."
-    );
+  // Binary success: return raw bytes. The command func decides whether to
+  // render images inline (sixel) or warn about the raw-byte dump for a TTY.
+  return response.body;
+}
+
+/**
+ * For a binary response headed to an interactive TTY, either render it inline
+ * as a sixel image (when it's a supported image format and the terminal
+ * advertises sixel support) or warn that raw bytes are being dumped.
+ *
+ * @param body - The raw response bytes.
+ * @param headers - Response headers (Content-Type is used as a decode hint).
+ * @returns A sixel escape string to write instead of the raw bytes, or
+ *   `undefined` to fall through to the raw-byte behavior.
+ * @internal Exported for testing
+ */
+export function resolveBinaryTtyOutput(
+  body: Uint8Array,
+  headers: Headers
+): string | undefined {
+  if (canRenderSixel()) {
+    const sixel = imageBytesToSixel(body, headers.get("content-type"));
+    if (sixel) {
+      return sixel;
+    }
   }
 
-  return response.body;
+  log.warn(
+    "Binary response written to a TTY — redirect stdout to a file " +
+      "(e.g. `> file.bin`) to capture raw bytes cleanly."
+  );
+  return;
 }
 
 export const apiCommand = buildCommand({
@@ -1370,6 +1394,18 @@ export const apiCommand = buildCommand({
     if (output === undefined) {
       return;
     }
+
+    // Binary body headed to an interactive TTY: render supported images inline
+    // as sixel when the terminal is capable, otherwise warn about the raw dump.
+    // Skipped in --json mode (the body must stay raw bytes) and whenever stdout
+    // is redirected/piped (then the raw bytes flow through untouched).
+    if (output instanceof Uint8Array && this.stdout.isTTY && !flags.json) {
+      const sixel = resolveBinaryTtyOutput(output, response.headers);
+      if (sixel !== undefined) {
+        return yield new CommandOutput(sixel);
+      }
+    }
+
     // Binary Uint8Array bodies are written raw by renderCommandOutput (no
     // formatter, no trailing newline). Text/JSON go through formatApiResponse.
     return yield new CommandOutput(output);
