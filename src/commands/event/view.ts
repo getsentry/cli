@@ -55,6 +55,7 @@ import {
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
+import { isAllDigits } from "../../lib/utils.js";
 import {
   applySentryUrlContext,
   parseSentryUrl,
@@ -185,6 +186,7 @@ export function expandNewlineArgs(args: string[]): string[] {
  */
 const LATEST_EVENT_SENTINEL = "@latest";
 
+
 /**
  * Parse a single positional arg for event view, handling issue short ID
  * detection both in bare form ("BRUNCHIE-APP-29") and org-prefixed form
@@ -254,6 +256,16 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
       targetArg: undefined,
       issueShortId: eventId,
     };
+  }
+
+  // Detect bare "latest" (without the "@" prefix sentinel).
+  if (eventId.toLowerCase() === "latest") {
+    return { eventId: LATEST_EVENT_SENTINEL, targetArg };
+  }
+
+  // Detect numeric issue ID (e.g., "17370") — treat as issueId and fetch latest event.
+  if (isAllDigits(eventId)) {
+    return { eventId: LATEST_EVENT_SENTINEL, targetArg, issueId: eventId };
   }
 
   return { eventId, targetArg };
@@ -373,6 +385,27 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
       targetArg: undefined,
       issueShortId: first,
       warning: `'${first}' is an issue short ID, not a project slug. Ignoring second argument '${second}'.`,
+    };
+  }
+
+  // Detect bare "latest" as second arg (e.g., "my-org/my-project latest").
+  if (second.toLowerCase() === "latest") {
+    const extraEventIds = args.length > 2 ? args.slice(2) : undefined;
+    return {
+      eventId: LATEST_EVENT_SENTINEL,
+      targetArg: first,
+      extraEventIds,
+    };
+  }
+
+  // Detect numeric issue ID as second arg (e.g., "my-org/my-project 17370").
+  if (isAllDigits(second)) {
+    const extraEventIds = args.length > 2 ? args.slice(2) : undefined;
+    return {
+      eventId: LATEST_EVENT_SENTINEL,
+      targetArg: first,
+      issueId: second,
+      extraEventIds,
     };
   }
 
