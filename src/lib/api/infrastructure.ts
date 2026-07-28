@@ -510,7 +510,18 @@ export async function apiRequestToRegion<T>(
     );
   }
 
-  const data = await response.json();
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch (parseError) {
+    logger.debug("Failed to parse JSON response body", parseError);
+    throw new ApiError(
+      `Invalid JSON in API response from ${endpoint}`,
+      response.status,
+      "The server returned a non-JSON response body (possible proxy or CDN issue).",
+      endpoint
+    );
+  }
 
   if (schema) {
     const result = schema.safeParse(data);

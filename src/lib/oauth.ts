@@ -29,6 +29,7 @@ import {
   HostScopeError,
   ValidationError,
 } from "./errors.js";
+import { logger } from "./logger.js";
 import { normalizeOrigin } from "./sentry-urls.js";
 import { withHttpSpan } from "./telemetry.js";
 import { getActiveTokenHost, isRequestOriginTrusted } from "./token-host.js";
@@ -284,7 +285,18 @@ function requestDeviceCode(scope: string = SCOPES) {
       );
     }
 
-    const data = await response.json();
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      logger.debug("Non-JSON response from device code endpoint", parseError);
+      throw new ApiError(
+        "Invalid response from device authorization endpoint",
+        response.status,
+        "The server returned a non-JSON response body.",
+        "/oauth/device/code/"
+      );
+    }
 
     const result = DeviceCodeResponseSchema.safeParse(data);
     if (!result.success) {
@@ -318,7 +330,18 @@ function pollForToken(deviceCode: string): Promise<TokenResponse> {
       }
     );
 
-    const data = await response.json();
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      logger.debug("Non-JSON response from token endpoint", parseError);
+      throw new ApiError(
+        "Unexpected response from token endpoint",
+        response.status,
+        "The server returned a non-JSON response body (possible proxy or CDN issue).",
+        "/oauth/token/"
+      );
+    }
 
     // Try to parse as success response first
     const tokenResult = TokenResponseSchema.safeParse(data);
@@ -522,7 +545,19 @@ export function refreshAccessToken(
       );
     }
 
-    const data = await response.json();
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      logger.debug("Non-JSON response from token refresh endpoint", parseError);
+      throw new ApiError(
+        "Unexpected response from token refresh endpoint",
+        response.status,
+        "The server returned a non-JSON response body (possible proxy or CDN issue).",
+        "/oauth/token/"
+      );
+    }
+
     const result = TokenResponseSchema.safeParse(data);
 
     if (!result.success) {

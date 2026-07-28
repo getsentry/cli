@@ -163,7 +163,15 @@ export async function fetchRecentReleases(
       },
       signal,
     });
-    return response.ok ? ((await response.json()) as GitHubRelease[]) : [];
+    if (!response.ok) {
+      return [];
+    }
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      log.debug("GitHub releases response is not an array", typeof data);
+      return [];
+    }
+    return data as GitHubRelease[];
   } catch (error) {
     log.debug("Failed to fetch recent releases from GitHub", error);
     return [];
