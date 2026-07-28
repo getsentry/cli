@@ -78,6 +78,25 @@ describe("resolveMetricField", () => {
     }
   });
 
+  test("deduplicates suggestions when metrics list has duplicate names", () => {
+    // The API can return the same metric name multiple times (e.g. one entry
+    // per tag combination). Suggestions must not repeat the same name.
+    const metricsWithDuplicates: MetricMeta[] = [
+      { name: "llm.token_usage", type: "distribution", unit: "none" },
+      { name: "llm.token_usage", type: "distribution", unit: "none" },
+      { name: "llm.token_usage", type: "distribution", unit: "none" },
+    ];
+    try {
+      resolveMetricField("llm.token", "sum", metricsWithDuplicates);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ResolutionError);
+      const suggestionLine = (err as ResolutionError).message;
+      const occurrences = suggestionLine.split("llm.token_usage").length - 1;
+      expect(occurrences).toBe(1);
+    }
+  });
+
   test("throws ResolutionError for invalid aggregation", () => {
     expect(() =>
       resolveMetricField("llm.token_usage", "invalid_agg", SAMPLE_METRICS)
