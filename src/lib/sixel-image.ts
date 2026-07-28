@@ -60,6 +60,70 @@ const DEFAULT_MAX_WIDTH = 800;
 const DEFAULT_MAX_HEIGHT = 2000;
 
 /**
+ * Hard ceiling on either declared image dimension, checked from the header
+ * before the pure-JS decoders allocate `width * height * 4` bytes. A crafted
+ * file can claim enormous dimensions in a tiny header (e.g. a 1 KB PNG
+ * declaring 100000×100000 would make the decoder request ~40 GB and OOM the
+ * process — an OOM that `try/catch` cannot recover from). 20000px comfortably
+ * exceeds any real screenshot while bounding a pre-decode allocation to ~1.6 GB
+ * worst case for a single dimension.
+ */
+const MAX_DECODE_DIMENSION = 20_000;
+
+/**
+ * Read the declared pixel dimensions from a PNG or JPEG header without decoding
+ * the pixel data, so callers can reject oversized images before the decoder
+ * allocates a full pixel buffer. Returns `undefined` when the header is too
+ * short or malformed to read dimensions from.
+ *
+ * - PNG: the IHDR chunk always follows the 8-byte signature; width and height
+ *   are big-endian uint32 at byte offsets 16 and 20.
+ * - JPEG: scan the marker segments for a Start-of-Frame (SOF0–SOFF, excluding
+ *   the non-frame markers) and read height/width from its payload.
+ */
+export function readImageDimensions(
+  body: Uint8Array,
+  format: SupportedImageFormat
+): { width: number; height: number } | undefined {
+  if (format === "png") {
+    if (body.length < 24) {
+      return;
+    }
+    const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+    return { width: view.getUint32(16), height: view.getUint32(20) };
+  }
+  // JPEG: walk marker segments looking for a Start-of-Frame marker.
+  let offset = 2; // skip the leading SOI (FF D8)
+  while (offset + 9 < body.length) {
+    if (body[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+    const marker = body[offset + 1] as number;
+    // SOF0–SOFF carry frame dimensions, except DHT (C4), DAC (CC), and the
+    // RSTn restart markers (D0–D7) which share the 0xCn/0xDn range.
+    const isSof =
+      marker >= 0xc0 &&
+      marker <= 0xcf &&
+      marker !== 0xc4 &&
+      marker !== 0xc8 &&
+      marker !== 0xcc;
+    if (isSof) {
+      const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+      // SOF payload: [2-byte length][1-byte precision][2-byte height][2-byte width]
+      const height = view.getUint16(offset + 5);
+      const width = view.getUint16(offset + 7);
+      return { width, height };
+    }
+    // Advance past this segment using its 2-byte length field.
+    const segLength =
+      (body[offset + 2] as number) * 256 + (body[offset + 3] as number);
+    offset += 2 + segLength;
+  }
+  return;
+}
+
+/**
  * Detect a supported image format from an HTTP Content-Type and/or the leading
  * magic bytes of the body. Returns `undefined` for formats we can't decode.
  *
@@ -108,6 +172,16 @@ export function decodeImage(
   body: Uint8Array,
   format: SupportedImageFormat
 ): DecodedImage | undefined {
+  const dims = readImageDimensions(body, format);
+  if (
+    dims &&
+    (dims.width > MAX_DECODE_DIMENSION || dims.height > MAX_DECODE_DIMENSION)
+  ) {
+    log.debug(
+      `Refusing to decode ${format} image: declared dimensions ${dims.width}×${dims.height} exceed ${MAX_DECODE_DIMENSION}px cap`
+    );
+    return;
+  }
   try {
     if (format === "png") {
       const png = PNG.sync.read(Buffer.from(body));

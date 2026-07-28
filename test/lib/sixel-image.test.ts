@@ -18,6 +18,7 @@ import {
   downscale,
   encodeImageToSixel,
   imageBytesToSixel,
+  readImageDimensions,
 } from "../../src/lib/sixel-image.js";
 
 const ESC = "\x1b";
@@ -98,6 +99,34 @@ describe("decodeImage", () => {
   test("returns undefined for corrupt bytes", () => {
     const garbage = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]);
     expect(decodeImage(garbage, "png")).toBeUndefined();
+  });
+
+  test("refuses to decode a PNG declaring huge dimensions (OOM guard)", () => {
+    // Real 1×1 PNG, then overwrite the IHDR width/height with 100000×100000
+    // so the pre-decode dimension guard fires before pngjs allocates.
+    const png = toPngBytes(solidImage(1, 1, [0, 0, 0, 255]));
+    const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+    view.setUint32(16, 100_000);
+    view.setUint32(20, 100_000);
+    expect(decodeImage(png, "png")).toBeUndefined();
+  });
+});
+
+describe("readImageDimensions", () => {
+  test("reads PNG dimensions from the IHDR header", () => {
+    const png = toPngBytes(solidImage(7, 3, [1, 2, 3, 255]));
+    expect(readImageDimensions(png, "png")).toEqual({ width: 7, height: 3 });
+  });
+
+  test("reads JPEG dimensions from the SOF marker", () => {
+    const jpeg = toJpegBytes(solidImage(12, 8, [4, 5, 6, 255]));
+    expect(readImageDimensions(jpeg, "jpeg")).toEqual({ width: 12, height: 8 });
+  });
+
+  test("returns undefined for a truncated header", () => {
+    expect(
+      readImageDimensions(new Uint8Array([0x89, 0x50]), "png")
+    ).toBeUndefined();
   });
 });
 
