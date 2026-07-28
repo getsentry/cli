@@ -1190,15 +1190,20 @@ export function resolveApiResponseOutput(
  *
  * @param body - The raw response bytes.
  * @param headers - Response headers (Content-Type is used as a decode hint).
+ * @param allowSixel - Whether inline sixel rendering is permitted. Pass `false`
+ *   in `--json` mode: the raw bytes still stream out unchanged, but injecting a
+ *   sixel escape sequence would corrupt machine-readable output. The raw-dump
+ *   warning still fires so the user knows their terminal is about to be flooded.
  * @returns A sixel escape string to write instead of the raw bytes, or
  *   `undefined` to fall through to the raw-byte behavior.
  * @internal Exported for testing
  */
 export function resolveBinaryTtyOutput(
   body: Uint8Array,
-  headers: Headers
+  headers: Headers,
+  allowSixel = true
 ): string | undefined {
-  if (canRenderSixel()) {
+  if (allowSixel && canRenderSixel()) {
     // Cap the rendered width to the terminal's pixel budget so a wide image
     // doesn't overflow the columns and garble the session. Falls back to the
     // encoder's default when the terminal didn't report a cell width.
@@ -1403,12 +1408,17 @@ export const apiCommand = buildCommand({
       return;
     }
 
-    // Binary body headed to an interactive TTY: render supported images inline
+    // Binary body headed to an interactive TTY. Render supported images inline
     // as sixel when the terminal is capable, otherwise warn about the raw dump.
-    // Skipped in --json mode (the body must stay raw bytes) and whenever stdout
-    // is redirected/piped (then the raw bytes flow through untouched).
-    if (output instanceof Uint8Array && this.stdout.isTTY && !flags.json) {
-      const sixel = resolveBinaryTtyOutput(output, response.headers);
+    // In --json mode we skip sixel (it would corrupt machine-readable output)
+    // but still warn — renderCommandOutput dumps the raw bytes either way.
+    // Redirected/piped stdout skips this entirely (raw bytes flow untouched).
+    if (output instanceof Uint8Array && this.stdout.isTTY) {
+      const sixel = resolveBinaryTtyOutput(
+        output,
+        response.headers,
+        !flags.json
+      );
       if (sixel !== undefined) {
         return yield new CommandOutput(sixel);
       }

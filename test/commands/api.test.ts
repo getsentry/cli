@@ -1075,6 +1075,23 @@ describe("resolveApiResponseOutput", () => {
 });
 
 describe("resolveBinaryTtyOutput", () => {
+  let stderrOutput: string;
+  let originalWrite: typeof process.stderr.write;
+
+  beforeEach(() => {
+    stderrOutput = "";
+    originalWrite = process.stderr.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderrOutput +=
+        typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+  });
+
+  afterEach(() => {
+    process.stderr.write = originalWrite;
+  });
+
   test("falls through to raw bytes (undefined) when sixel is unavailable", () => {
     // The test environment is non-interactive, so canRenderSixel() is false
     // and no inline image is produced — the caller keeps the raw bytes.
@@ -1083,6 +1100,18 @@ describe("resolveBinaryTtyOutput", () => {
       new Headers({ "content-type": "image/png" })
     );
     expect(out).toBeUndefined();
+  });
+
+  test("still warns about the raw dump when sixel is disallowed (--json)", () => {
+    // In --json mode inline sixel is skipped so it can't corrupt the output,
+    // but the raw bytes still stream out, so the TTY warning must still fire.
+    const out = resolveBinaryTtyOutput(
+      new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+      new Headers({ "content-type": "image/png" }),
+      false
+    );
+    expect(out).toBeUndefined();
+    expect(stderrOutput).toContain("Binary response written to a TTY");
   });
 });
 
