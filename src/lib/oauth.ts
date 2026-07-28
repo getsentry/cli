@@ -545,7 +545,19 @@ export function refreshAccessToken(
       );
     }
 
-    const data = await response.json();
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      logger.debug("Non-JSON response from token refresh endpoint", parseError);
+      throw new ApiError(
+        "Unexpected response from token refresh endpoint",
+        response.status,
+        "The server returned a non-JSON response body (possible proxy or CDN issue).",
+        "/oauth/token/"
+      );
+    }
+
     const result = TokenResponseSchema.safeParse(data);
 
     if (!result.success) {
