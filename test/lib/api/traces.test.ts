@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
+  fetchMultiSpanDetails,
   getSpanDetails,
   listSpans,
   listTransactions,
@@ -713,5 +714,87 @@ describe("getSpanDetails", () => {
       type: "str",
       value: "db.query",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchMultiSpanDetails
+// ---------------------------------------------------------------------------
+
+describe("fetchMultiSpanDetails", () => {
+  useTestConfigDir("traces-multi-span-details-test-");
+
+  let originalFetch: typeof globalThis.fetch;
+  let requestedUrls: string[] = [];
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    requestedUrls = [];
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function mockOk() {
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input!, init);
+      requestedUrls.push(req.url);
+      return new Response(
+        JSON.stringify({
+          itemId: "x",
+          timestamp: "2026-01-01T00:00:00Z",
+          attributes: [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+  }
+
+  test("skips spans with no project slug instead of issuing a malformed request", async () => {
+    mockOk();
+
+    // fallbackProject is empty (org-scoped target) and the span has no
+    // project_slug — a request here would produce /projects/my-org//trace-items/…
+    const details = await fetchMultiSpanDetails(
+      [{ span_id: "span-no-project" }],
+      { org: "my-org", fallbackProject: "", traceId: "trace-xyz" }
+    );
+
+    expect(details.size).toBe(0);
+    expect(requestedUrls).toHaveLength(0);
+  });
+
+  test("uses fallback project when a span has no project_slug", async () => {
+    mockOk();
+
+    await fetchMultiSpanDetails([{ span_id: "span-a" }], {
+      org: "my-org",
+      fallbackProject: "fallback-proj",
+      traceId: "trace-xyz",
+    });
+
+    expect(requestedUrls).toHaveLength(1);
+    expect(requestedUrls[0]).toContain(
+      "/projects/my-org/fallback-proj/trace-items/span-a/"
+    );
+  });
+
+  test("does not skip other spans when one lacks a project slug", async () => {
+    mockOk();
+
+    const details = await fetchMultiSpanDetails(
+      [
+        { span_id: "span-no-project" },
+        { span_id: "span-b", project_slug: "proj-b" },
+      ],
+      { org: "my-org", fallbackProject: "", traceId: "trace-xyz" }
+    );
+
+    expect(requestedUrls).toHaveLength(1);
+    expect(requestedUrls[0]).toContain(
+      "/projects/my-org/proj-b/trace-items/span-b/"
+    );
+    expect(details.has("span-b")).toBe(true);
   });
 });
