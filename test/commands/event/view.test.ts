@@ -245,6 +245,54 @@ describe("parsePositionalArgs", () => {
     });
   });
 
+  describe("numeric issue IDs and bare 'latest'", () => {
+    test("bare numeric ID maps to issueId + latest sentinel", () => {
+      const result = parsePositionalArgs(["17370"]);
+      expect(result.eventId).toBe("@latest");
+      expect(result.issueId).toBe("17370");
+      expect(result.targetArg).toBeUndefined();
+    });
+
+    test("org/numeric-ID maps to org-all target + issueId (CLI-1F5)", () => {
+      const result = parsePositionalArgs(["my-org/17370"]);
+      expect(result.eventId).toBe("@latest");
+      expect(result.issueId).toBe("17370");
+      // Trailing slash signals org-all so the org resolves downstream.
+      expect(result.targetArg).toBe("my-org/");
+    });
+
+    test("org/project + numeric second arg maps to issueId", () => {
+      const result = parsePositionalArgs(["my-org/frontend", "17370"]);
+      expect(result.eventId).toBe("@latest");
+      expect(result.issueId).toBe("17370");
+      expect(result.targetArg).toBe("my-org/frontend");
+    });
+
+    test("bare 'latest' (single arg) throws ContextError", () => {
+      expect(() => parsePositionalArgs(["latest"])).toThrow(ContextError);
+    });
+
+    test("'latest' as second arg throws ContextError", () => {
+      expect(() => parsePositionalArgs(["my-org/frontend", "latest"])).toThrow(
+        ContextError
+      );
+    });
+
+    test("bare 'latest' error mentions Issue ID", () => {
+      try {
+        parsePositionalArgs(["latest"]);
+        expect.unreachable("Should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ContextError);
+        expect((error as ContextError).message).toContain("Issue ID");
+      }
+    });
+
+    test("'LATEST' is case-insensitive", () => {
+      expect(() => parsePositionalArgs(["LATEST"])).toThrow(ContextError);
+    });
+  });
+
   describe("slash-separated org/project/eventId (single arg)", () => {
     test("parses org/project/eventId as target + event ID", () => {
       const result = parsePositionalArgs(["sentry/cli/abc123def"]);
@@ -1028,6 +1076,65 @@ describe("viewCommand.func", () => {
 
     resolveOrgSpy.mockRestore();
     getIssueByShortIdSpy.mockRestore();
+    getLatestEventSpy.mockRestore();
+  });
+
+  test("numeric issue ID resolves org via resolveOrg then fetches latest event", async () => {
+    // Regression: the numeric-issue-ID path must auto-detect the org via
+    // resolveOrg (env/config/DSN) rather than resolveEffectiveOrg(""), which
+    // skips auto-detection and fails when no org is on the command line.
+    const resolveOrgSpy = vi
+      .spyOn(resolveTarget, "resolveOrg")
+      .mockResolvedValue({ org: "auto-org" });
+    const getLatestEventSpy = vi
+      .spyOn(apiClient, "getLatestEvent")
+      .mockResolvedValue(sampleEvent);
+    getSpanTreeLinesSpy.mockResolvedValue({
+      lines: [],
+      spans: null,
+      traceId: null,
+      success: false,
+    });
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(context, { json: true, web: false, spans: 0 }, "17370");
+
+    expect(resolveOrgSpy).toHaveBeenCalled();
+    expect(getLatestEventSpy).toHaveBeenCalledWith("auto-org", "17370");
+
+    resolveOrgSpy.mockRestore();
+    getLatestEventSpy.mockRestore();
+  });
+
+  test("org/numeric-ID passes explicit org through to resolveOrg", async () => {
+    const resolveOrgSpy = vi
+      .spyOn(resolveTarget, "resolveOrg")
+      .mockResolvedValue({ org: "my-org" });
+    const getLatestEventSpy = vi
+      .spyOn(apiClient, "getLatestEvent")
+      .mockResolvedValue(sampleEvent);
+    getSpanTreeLinesSpy.mockResolvedValue({
+      lines: [],
+      spans: null,
+      traceId: null,
+      success: false,
+    });
+
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: true, web: false, spans: 0 },
+      "my-org/17370"
+    );
+
+    expect(resolveOrgSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ org: "my-org" })
+    );
+    expect(getLatestEventSpy).toHaveBeenCalledWith("my-org", "17370");
+
+    resolveOrgSpy.mockRestore();
     getLatestEventSpy.mockRestore();
   });
 
