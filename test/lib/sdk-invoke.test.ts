@@ -194,7 +194,9 @@ describe("parseOutput: binary output", () => {
   test("returns raw bytes when a chunk is a Uint8Array (no comma-decimal coercion)", () => {
     // PNG signature — a byte-for-byte round-trip is required so SDK/run()
     // callers downloading attachments get faithful data, not "137,80,78,71".
-    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
     const result = parseOutput<Uint8Array>(undefined, [png]);
     expect(result).toBeInstanceOf(Uint8Array);
     expect(Array.from(result)).toEqual([
