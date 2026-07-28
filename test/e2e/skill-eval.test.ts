@@ -5,12 +5,14 @@
  * Uses the real CLI binary (via SENTRY_CLI_BINARY or dev mode) to verify
  * that planned commands actually exist.
  *
- * Skips automatically when ANTHROPIC_API_KEY is not set.
- * In CI, the key is only passed when skill-related files change.
+ * Skips automatically when no eval provider credential is set (neither
+ * OPENROUTER_API_KEY nor ANTHROPIC_API_KEY). In CI, the key is only passed
+ * when skill-related files change.
  */
 
 import { readFile } from "node:fs/promises";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { resolveEvalProvider } from "../eval-common/anthropic-client.js";
 import cases from "../skill-eval/cases.json";
 import { judgePlan } from "../skill-eval/helpers/judge.js";
 import { createClient } from "../skill-eval/helpers/llm-client.js";
@@ -20,17 +22,22 @@ import type { CaseResult, TestCase } from "../skill-eval/helpers/types.js";
 const SKILL_PATH = "plugins/sentry-cli/skills/sentry-cli/SKILL.md";
 const DEFAULT_THRESHOLD = 0.75;
 
-const apiKey = process.env.ANTHROPIC_API_KEY;
+/** Models under test — env-overridable, defaults to sonnet + opus. */
+const AGENT_MODELS = process.env.EVAL_AGENT_MODELS
+  ? process.env.EVAL_AGENT_MODELS.split(",").map((m) => m.trim())
+  : ["claude-sonnet-4-6", "claude-opus-4-6"];
+
+const provider = resolveEvalProvider();
 
 /**
  * The test preload mocks globalThis.fetch to block external network calls.
- * This test needs real fetch for Anthropic API calls, so we restore it
+ * This test needs real fetch for the eval provider's API, so we restore it
  * during the describe block and put the mock back when done.
  */
 const originalFetch = (globalThis as { __originalFetch?: typeof fetch })
   .__originalFetch;
 
-describe.skipIf(!apiKey)("skill eval", () => {
+describe.skipIf(!provider)("skill eval", () => {
   const savedFetch = globalThis.fetch;
 
   beforeAll(() => {
@@ -52,14 +59,17 @@ describe.skipIf(!apiKey)("skill eval", () => {
    * Each model gets its own test so failures are attributed clearly.
    */
   async function runEvalForModel(model: string): Promise<void> {
-    const client = await createClient(apiKey as string);
+    if (!provider) {
+      throw new Error("eval provider unavailable");
+    }
+    const client = await createClient(provider);
     const skillContent = await readFile(SKILL_PATH, "utf-8");
 
     const results: CaseResult[] = [];
     for (const testCase of testCases) {
       const plan = await generatePlan(
         client,
-        model,
+        provider.qualifyModel(model),
         skillContent,
         testCase.prompt
       );
@@ -73,11 +83,9 @@ describe.skipIf(!apiKey)("skill eval", () => {
     expect(score).toBeGreaterThanOrEqual(threshold);
   }
 
-  test("claude-sonnet-4-6 meets threshold", { timeout: 120_000 }, () =>
-    runEvalForModel("claude-sonnet-4-6")
-  );
-
-  test("claude-opus-4-6 meets threshold", { timeout: 120_000 }, () =>
-    runEvalForModel("claude-opus-4-6")
-  );
+  for (const model of AGENT_MODELS) {
+    test(`${model} meets threshold`, { timeout: 120_000 }, () =>
+      runEvalForModel(model)
+    );
+  }
 });

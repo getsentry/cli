@@ -1,3 +1,4 @@
+import { resolveEvalProvider } from "../../eval-common/anthropic-client.js";
 import type { FeatureDoc, Platform } from "./platforms.js";
 import type { WizardResult } from "./run-wizard.js";
 
@@ -17,7 +18,8 @@ export type JudgeVerdict = {
 
 /**
  * Use an LLM judge to evaluate whether a **single feature** was correctly set
- * up by the wizard. Returns null if ANTHROPIC_API_KEY is not set.
+ * up by the wizard. Returns null when no eval provider credential is set
+ * (OPENROUTER_API_KEY or ANTHROPIC_API_KEY).
  *
  * `docsContent` is the pre-fetched plain-text documentation to include as
  * ground truth in the prompt.
@@ -28,16 +30,16 @@ export async function judgeFeature(
   feature: FeatureDoc,
   docsContent: string
 ): Promise<JudgeVerdict | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  const provider = resolveEvalProvider();
+  if (!provider) {
     console.log(
-      `  [judge:${feature.feature}] Skipping LLM judge (no ANTHROPIC_API_KEY set)`
+      `  [judge:${feature.feature}] Skipping LLM judge (no OPENROUTER_API_KEY or ANTHROPIC_API_KEY set)`
     );
     return null;
   }
 
   // Restore real fetch — test preload mocks it to catch accidental network
-  // calls, but we need real HTTP for the Anthropic API.
+  // calls, but we need real HTTP for the eval provider's API.
   const realFetch = (globalThis as { __originalFetch?: typeof fetch })
     .__originalFetch;
   if (realFetch) {
@@ -46,7 +48,10 @@ export async function judgeFeature(
 
   // Dynamic import so we don't fail when the package isn't installed
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  const client = new Anthropic({ apiKey });
+  const client = new Anthropic({
+    apiKey: provider.apiKey,
+    baseURL: provider.baseURL,
+  });
 
   const newFilesSection = Object.entries(result.newFiles)
     .map(([path, content]) => `### ${path}\n\`\`\`\n${content}\n\`\`\``)
@@ -87,7 +92,7 @@ Return ONLY valid JSON with this structure:
 }`;
 
   const response = await client.messages.create({
-    model: "claude-sonnet-4-6",
+    model: provider.qualifyModel("claude-sonnet-4-6"),
     max_tokens: 1024,
     messages: [{ role: "user", content: prompt }],
   });
