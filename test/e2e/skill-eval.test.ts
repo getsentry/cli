@@ -25,7 +25,7 @@ const DEFAULT_THRESHOLD = 0.75;
 /** Models under test — env-overridable, defaults to sonnet + opus. */
 const AGENT_MODELS = process.env.EVAL_AGENT_MODELS
   ? process.env.EVAL_AGENT_MODELS.split(",").map((m) => m.trim())
-  : ["claude-sonnet-4-6", "claude-opus-4-6"];
+  : ["anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.6"];
 
 const provider = resolveEvalProvider();
 
@@ -62,14 +62,14 @@ describe.skipIf(!provider)("skill eval", () => {
     if (!provider) {
       throw new Error("eval provider unavailable");
     }
-    const client = await createClient(provider);
+    const client = createClient(provider);
     const skillContent = await readFile(SKILL_PATH, "utf-8");
 
     const results: CaseResult[] = [];
     for (const testCase of testCases) {
       const plan = await generatePlan(
         client,
-        provider.qualifyModel(model),
+        model,
         skillContent,
         testCase.prompt
       );

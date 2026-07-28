@@ -13,13 +13,13 @@
  *
  * Usage:
  *   tsx script/eval-skill.ts
- *   EVAL_AGENT_MODELS=claude-sonnet-4-6-20250627 tsx script/eval-skill.ts
+ *   EVAL_AGENT_MODELS=anthropic/claude-sonnet-4.6 tsx script/eval-skill.ts
  *
  * Environment variables:
  *   OPENROUTER_API_KEY  - OpenRouter API key (preferred)
  *   ANTHROPIC_API_KEY   - Anthropic API key (fallback when no OpenRouter key)
- *   EVAL_AGENT_MODELS   - Comma-separated model IDs (default: sonnet-4-6, opus-4-6)
- *   EVAL_JUDGE_MODEL    - Judge model ID (default: haiku-4-5)
+ *   EVAL_AGENT_MODELS   - Comma-separated model IDs (default: sonnet-4.6, opus-4.6)
+ *   EVAL_JUDGE_MODEL    - Judge model ID (default: haiku-4.5)
  *   EVAL_THRESHOLD      - Minimum pass rate 0-1 (default: 0.75)
  *   SENTRY_CLI_BINARY   - Path to pre-built binary (falls back to tsx src/bin.ts)
  */
@@ -106,7 +106,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const client = await createClient(provider);
+  const client = createClient(provider);
   const skillContent = await readFile(SKILL_PATH, "utf-8");
   const testCases = cases as unknown as TestCase[];
   const threshold = process.env.EVAL_THRESHOLD

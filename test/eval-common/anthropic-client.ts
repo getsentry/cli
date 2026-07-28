@@ -1,89 +1,157 @@
 /**
- * Shared Anthropic/OpenRouter client resolution for the eval frameworks.
+ * Shared LLM provider resolution and chat for the eval frameworks.
  *
- * Both the skill-eval and init-eval suites talk to Claude models via the
- * `@anthropic-ai/sdk`. OpenRouter is Anthropic-Messages-API-compatible, so the
- * same SDK works against it by overriding the base URL and namespacing model
- * IDs (`anthropic/claude-...`).
- *
- * Provider selection is credential-driven:
- * - `OPENROUTER_API_KEY` set  → OpenRouter (base URL + `anthropic/` model prefix)
- * - else `ANTHROPIC_API_KEY`  → Anthropic direct (bare model IDs)
+ * Both the skill-eval and init-eval suites send single-shot chat completions to
+ * Claude models. Provider selection is credential-driven:
+ * - `OPENROUTER_API_KEY` set  → OpenRouter (OpenAI-shaped `/chat/completions`)
+ * - else `ANTHROPIC_API_KEY`  → Anthropic direct (`@anthropic-ai/sdk`)
  * - neither                   → `null` (callers skip the eval)
  *
- * The base URL and model prefix can be overridden explicitly for either
- * provider via `OPENROUTER_BASE_URL` / `ANTHROPIC_BASE_URL` and
- * `EVAL_MODEL_PREFIX`.
+ * OpenRouter is **not** Anthropic-Messages-API compatible — it only speaks the
+ * OpenAI `/api/v1/chat/completions` schema — so that path uses `fetch` directly
+ * rather than the Anthropic SDK, and its model IDs are OpenRouter slugs
+ * (`anthropic/claude-sonnet-4.6`). The Anthropic-direct fallback keeps using the
+ * SDK with bare model IDs.
  */
 
-/** Default OpenRouter base URL for the Anthropic-compatible SDK. */
+/** Default OpenRouter base URL (OpenAI-compatible API root). */
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
-/** Model-ID namespace OpenRouter requires for Anthropic models. */
-export const OPENROUTER_MODEL_PREFIX = "anthropic/";
+/** A single system/user turn to send to the model. */
+export type ChatMessage = {
+  role: "system" | "user";
+  content: string;
+};
 
 /**
- * Resolved provider configuration for an eval run.
+ * Resolved provider for an eval run.
  *
- * `qualifyModel` maps a bare Claude model ID (e.g. `claude-sonnet-4-6`) to the
- * form the active provider expects. It is idempotent — a model ID that already
- * carries the prefix is returned unchanged, so callers may pass fully-qualified
- * IDs through `EVAL_AGENT_MODELS` without double-prefixing.
+ * `chat` sends one completion and returns the assistant's text. Implementations
+ * differ by provider (OpenRouter fetch vs. Anthropic SDK) but the contract is
+ * identical, so callers are provider-agnostic.
  */
 export type EvalProvider = {
-  /** API key passed to the Anthropic SDK. */
-  apiKey: string;
-  /** Base URL override, or `undefined` for the SDK default (Anthropic direct). */
-  baseURL: string | undefined;
   /** Which provider was selected — for logging/diagnostics. */
   provider: "openrouter" | "anthropic";
-  /** Map a bare model ID to the provider-qualified form (idempotent). */
-  qualifyModel: (model: string) => string;
+  /** Send a single chat completion and return the assistant's text. */
+  chat: (
+    model: string,
+    messages: ChatMessage[],
+    maxTokens: number
+  ) => Promise<string>;
 };
 
 /**
  * Resolve the eval provider from the environment.
  *
- * @returns provider config, or `null` when no API key is available so the
- *   caller can skip (matching the historical `!apiKey` skip behavior).
+ * @returns provider, or `null` when no API key is available so the caller can
+ *   skip (matching the historical `!apiKey` skip behavior).
  */
 export function resolveEvalProvider(
   env: NodeJS.ProcessEnv = process.env
 ): EvalProvider | null {
   const openRouterKey = env.OPENROUTER_API_KEY?.trim();
   const anthropicKey = env.ANTHROPIC_API_KEY?.trim();
-  const prefixOverride = env.EVAL_MODEL_PREFIX;
 
   if (openRouterKey) {
-    const prefix = prefixOverride ?? OPENROUTER_MODEL_PREFIX;
+    const baseURL = env.OPENROUTER_BASE_URL?.trim() || OPENROUTER_BASE_URL;
     return {
-      apiKey: openRouterKey,
-      baseURL: env.OPENROUTER_BASE_URL?.trim() || OPENROUTER_BASE_URL,
       provider: "openrouter",
-      qualifyModel: (model) => qualifyModel(model, prefix),
+      chat: (model, messages, maxTokens) =>
+        openRouterChat({
+          baseURL,
+          apiKey: openRouterKey,
+          model,
+          messages,
+          maxTokens,
+        }),
     };
   }
 
   if (anthropicKey) {
-    const prefix = prefixOverride ?? "";
+    const baseURL = env.ANTHROPIC_BASE_URL?.trim() || undefined;
     return {
-      apiKey: anthropicKey,
-      baseURL: env.ANTHROPIC_BASE_URL?.trim() || undefined,
       provider: "anthropic",
-      qualifyModel: (model) => qualifyModel(model, prefix),
+      chat: (model, messages, maxTokens) =>
+        anthropicChat({
+          baseURL,
+          apiKey: anthropicKey,
+          model,
+          messages,
+          maxTokens,
+        }),
     };
   }
 
   return null;
 }
 
+/** Arguments for a single provider chat call. */
+type ChatArgs = {
+  baseURL: string | undefined;
+  apiKey: string;
+  model: string;
+  messages: ChatMessage[];
+  maxTokens: number;
+};
+
 /**
- * Prefix a model ID with the provider namespace, unless it already carries it
- * or the prefix is empty. Idempotent.
+ * Send a completion to OpenRouter's OpenAI-shaped `/chat/completions` endpoint.
+ * System and user turns map directly to OpenAI `messages`.
  */
-function qualifyModel(model: string, prefix: string): string {
-  if (prefix.length === 0 || model.startsWith(prefix)) {
-    return model;
+async function openRouterChat({
+  baseURL,
+  apiKey,
+  model,
+  messages,
+  maxTokens,
+}: ChatArgs): Promise<string> {
+  const response = await fetch(`${baseURL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
+  });
+
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 500);
+    throw new Error(`OpenRouter ${response.status}: ${detail}`);
   }
-  return `${prefix}${model}`;
+
+  const data = (await response.json()) as {
+    choices?: { message?: { content?: string } }[];
+  };
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
+/**
+ * Send a completion via the Anthropic SDK. The single system turn becomes the
+ * `system` parameter; user turns become `messages`.
+ */
+async function anthropicChat({
+  baseURL,
+  apiKey,
+  model,
+  messages,
+  maxTokens,
+}: ChatArgs): Promise<string> {
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  const client = new Anthropic({ apiKey, baseURL });
+
+  const system = messages.find((m) => m.role === "system")?.content;
+  const userMsgs = messages
+    .filter((m) => m.role === "user")
+    .map((m) => ({ role: "user" as const, content: m.content }));
+
+  const response = await client.messages.create({
+    model,
+    max_tokens: maxTokens,
+    system,
+    messages: userMsgs,
+  });
+
+  const textBlock = response.content.find((b) => b.type === "text");
+  return textBlock?.text ?? "";
 }

@@ -2,6 +2,9 @@ import { resolveEvalProvider } from "../../eval-common/anthropic-client.js";
 import type { FeatureDoc, Platform } from "./platforms.js";
 import type { WizardResult } from "./run-wizard.js";
 
+/** Default judge model for init-eval (OpenRouter slug); override via EVAL_JUDGE_MODEL. */
+const INIT_EVAL_JUDGE_MODEL = "anthropic/claude-sonnet-4.6";
+
 export type JudgeCriterion = {
   name: string;
   /** true = pass, false = fail, "unknown" = judge can't determine */
@@ -46,13 +49,6 @@ export async function judgeFeature(
     globalThis.fetch = realFetch;
   }
 
-  // Dynamic import so we don't fail when the package isn't installed
-  const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  const client = new Anthropic({
-    apiKey: provider.apiKey,
-    baseURL: provider.baseURL,
-  });
-
   const newFilesSection = Object.entries(result.newFiles)
     .map(([path, content]) => `### ${path}\n\`\`\`\n${content}\n\`\`\``)
     .join("\n\n");
@@ -91,14 +87,11 @@ Return ONLY valid JSON with this structure:
   "summary": "Brief overall assessment of ${feature.feature} setup"
 }`;
 
-  const response = await client.messages.create({
-    model: provider.qualifyModel("claude-sonnet-4-6"),
-    max_tokens: 1024,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  const textBlock = response.content.find((b) => b.type === "text");
-  const text = textBlock?.text ?? "";
+  const text = await provider.chat(
+    process.env.EVAL_JUDGE_MODEL ?? INIT_EVAL_JUDGE_MODEL,
+    [{ role: "user", content: prompt }],
+    1024
+  );
 
   // Extract JSON from response (handle markdown code blocks)
   const jsonMatch = text.match(/\{[\s\S]*\}/);

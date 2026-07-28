@@ -1,16 +1,17 @@
-import { describe, expect, test } from "vitest";
-import {
-  OPENROUTER_BASE_URL,
-  resolveEvalProvider,
-} from "../eval-common/anthropic-client.js";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { resolveEvalProvider } from "../eval-common/anthropic-client.js";
 
 /**
- * Provider resolution drives which credential/base URL/model namespace the
- * eval frameworks use. These tests lock in the precedence (OpenRouter over
- * Anthropic), the `anthropic/` model prefixing, its idempotency, and the
- * null-when-unset skip contract.
+ * Provider resolution drives which credential/endpoint the eval frameworks use.
+ * These tests lock in the precedence (OpenRouter over Anthropic), the
+ * null-when-unset skip contract, and that the OpenRouter path posts the
+ * OpenAI-shaped `/chat/completions` request with the bearer key.
  */
 describe("resolveEvalProvider", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   test("returns null when no credential is set", () => {
     expect(resolveEvalProvider({})).toBeNull();
   });
@@ -27,54 +28,68 @@ describe("resolveEvalProvider", () => {
       ANTHROPIC_API_KEY: "an-key",
     });
     expect(p?.provider).toBe("openrouter");
-    expect(p?.apiKey).toBe("or-key");
-    expect(p?.baseURL).toBe(OPENROUTER_BASE_URL);
   });
 
-  test("OpenRouter qualifies bare model IDs with anthropic/ prefix", () => {
-    const p = resolveEvalProvider({ OPENROUTER_API_KEY: "or-key" });
-    expect(p?.qualifyModel("claude-sonnet-4-6")).toBe(
-      "anthropic/claude-sonnet-4-6"
-    );
-  });
-
-  test("qualifyModel is idempotent (no double prefix)", () => {
-    const p = resolveEvalProvider({ OPENROUTER_API_KEY: "or-key" });
-    expect(p?.qualifyModel("anthropic/claude-opus-4-6")).toBe(
-      "anthropic/claude-opus-4-6"
-    );
-  });
-
-  test("falls back to Anthropic direct with bare model IDs", () => {
+  test("falls back to Anthropic direct when only its key is set", () => {
     const p = resolveEvalProvider({ ANTHROPIC_API_KEY: "an-key" });
     expect(p?.provider).toBe("anthropic");
-    expect(p?.apiKey).toBe("an-key");
-    expect(p?.baseURL).toBeUndefined();
-    expect(p?.qualifyModel("claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
   });
 
-  test("honors explicit base URL overrides", () => {
-    expect(
-      resolveEvalProvider({
-        OPENROUTER_API_KEY: "or-key",
-        OPENROUTER_BASE_URL: "https://proxy.example/v1",
-      })?.baseURL
-    ).toBe("https://proxy.example/v1");
-    expect(
-      resolveEvalProvider({
-        ANTHROPIC_API_KEY: "an-key",
-        ANTHROPIC_BASE_URL: "https://proxy.example/anthropic",
-      })?.baseURL
-    ).toBe("https://proxy.example/anthropic");
+  test("OpenRouter chat posts OpenAI-shaped /chat/completions with bearer key", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: "hi there" } }] }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const p = resolveEvalProvider({ OPENROUTER_API_KEY: "or-key" });
+    const text = await p?.chat(
+      "anthropic/claude-sonnet-4.6",
+      [
+        { role: "system", content: "sys" },
+        { role: "user", content: "hello" },
+      ],
+      128
+    );
+
+    expect(text).toBe("hi there");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect((init as RequestInit).method).toBe("POST");
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer or-key");
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.model).toBe("anthropic/claude-sonnet-4.6");
+    expect(body.max_tokens).toBe(128);
+    expect(body.messages).toHaveLength(2);
   });
 
-  test("EVAL_MODEL_PREFIX overrides the default prefix", () => {
+  test("OpenRouter chat throws with status detail on non-2xx", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("nope", { status: 404 }))
+    );
+    const p = resolveEvalProvider({ OPENROUTER_API_KEY: "or-key" });
+    await expect(
+      p?.chat("anthropic/claude-sonnet-4.6", [], 16)
+    ).rejects.toThrow(/OpenRouter 404/);
+  });
+
+  test("honors OPENROUTER_BASE_URL override", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ choices: [] }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
     const p = resolveEvalProvider({
       OPENROUTER_API_KEY: "or-key",
-      EVAL_MODEL_PREFIX: "custom/",
+      OPENROUTER_BASE_URL: "https://proxy.example/v1",
     });
-    expect(p?.qualifyModel("claude-sonnet-4-6")).toBe(
-      "custom/claude-sonnet-4-6"
+    await p?.chat("m", [], 16);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://proxy.example/v1/chat/completions"
     );
   });
 });
