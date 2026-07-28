@@ -229,8 +229,13 @@ export function decodeImage(
       const png = PNG.sync.read(Buffer.from(body));
       return { width: png.width, height: png.height, data: png.data };
     }
-    // jpeg-js: request RGBA output so the pixel layout matches PNG.
-    const jpeg = decodeJpeg(Buffer.from(body), { useTArray: true });
+    // jpeg-js: request RGBA output explicitly so the pixel layout matches PNG
+    // and pixelAt's 4-byte stride. formatAsRGBA already defaults to true, but
+    // pinning it guards against a default change and mirrors snapshots/diff.ts.
+    const jpeg = decodeJpeg(Buffer.from(body), {
+      useTArray: true,
+      formatAsRGBA: true,
+    });
     return { width: jpeg.width, height: jpeg.height, data: jpeg.data };
   } catch (error) {
     log.debug(`Failed to decode ${format} image for sixel rendering`, error);

@@ -101,6 +101,23 @@ describe("decodeImage", () => {
     expect(decodeImage(garbage, "png")).toBeUndefined();
   });
 
+  test("decodes a JPEG to a 4-byte RGBA layout", () => {
+    // JPEG is lossy, so assert the stride/alpha rather than exact colors.
+    // pixelAt assumes a 4-byte RGBA stride, so decodeImage must always hand
+    // back RGBA (we pass formatAsRGBA explicitly); a 3-byte RGB buffer would
+    // be misread. Guards against a jpeg-js default change under semver bumps.
+    const src = solidImage(8, 8, [200, 40, 60, 255]);
+    const decoded = decodeImage(toJpegBytes(src), "jpeg");
+    expect(decoded).toBeDefined();
+    expect(decoded?.width).toBe(8);
+    expect(decoded?.height).toBe(8);
+    expect(decoded?.data.length).toBe(8 * 8 * 4);
+    // Alpha channel is fully opaque for a JPEG (no transparency).
+    expect(decoded?.data[3]).toBe(255);
+    // First pixel's red should be close to the source (lossy but not shifted).
+    expect(Math.abs((decoded?.data[0] ?? 0) - 200)).toBeLessThan(40);
+  });
+
   test("refuses to decode a PNG declaring huge dimensions (OOM guard)", () => {
     // Real 1×1 PNG, then overwrite the IHDR width/height with 100000×100000
     // so the pre-decode dimension guard fires before pngjs allocates.
