@@ -27,12 +27,13 @@ import {
   parseHeaders,
   prepareRequestOptions,
   readStdin,
+  resolveApiResponseOutput,
   resolveBody,
   resolveEffectiveHeaders,
   resolveRequestUrl,
   setNestedValue,
 } from "../../src/commands/api.js";
-import { ValidationError } from "../../src/lib/errors.js";
+import { OutputError, ValidationError } from "../../src/lib/errors.js";
 
 /**
  * Create a mock stdin stream from a string
@@ -986,6 +987,89 @@ describe("formatBinaryErrorBody", () => {
     );
     expect(summary).toContain("unknown");
     expect(summary).toContain("0 bytes");
+  });
+});
+
+describe("resolveApiResponseOutput", () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+  test("silent + success returns undefined (no body)", () => {
+    const out = resolveApiResponseOutput(
+      { status: 200, headers: new Headers(), body: "ok" },
+      { silent: true, isTTY: false }
+    );
+    expect(out).toBeUndefined();
+  });
+
+  test("silent + error throws OutputError(null) for exit code only", () => {
+    try {
+      resolveApiResponseOutput(
+        { status: 500, headers: new Headers(), body: "boom" },
+        { silent: true, isTTY: false }
+      );
+      throw new Error("expected throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(OutputError);
+      expect((error as OutputError).data).toBeNull();
+    }
+  });
+
+  test("error + text body throws OutputError carrying the body", () => {
+    try {
+      resolveApiResponseOutput(
+        { status: 404, headers: new Headers(), body: { detail: "not found" } },
+        { silent: false, isTTY: false }
+      );
+      throw new Error("expected throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(OutputError);
+      expect((error as OutputError).data).toEqual({ detail: "not found" });
+    }
+  });
+
+  test("error + binary body throws OutputError with a byte summary, never raw bytes", () => {
+    try {
+      resolveApiResponseOutput(
+        {
+          status: 403,
+          headers: new Headers({ "content-type": "image/png" }),
+          body: png,
+        },
+        { silent: false, isTTY: false }
+      );
+      throw new Error("expected throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(OutputError);
+      const body = (error as OutputError).data as string;
+      expect(typeof body).toBe("string");
+      expect(body).toContain("HTTP 403");
+      expect(body).toContain("image/png");
+      expect(body).not.toContain("\uFFFD");
+    }
+  });
+
+  test("success + text body returns the body unchanged", () => {
+    const out = resolveApiResponseOutput(
+      { status: 200, headers: new Headers(), body: { ok: true } },
+      { silent: false, isTTY: false }
+    );
+    expect(out).toEqual({ ok: true });
+  });
+
+  test("success + binary body returns raw bytes (non-TTY, no warning)", () => {
+    const out = resolveApiResponseOutput(
+      { status: 200, headers: new Headers(), body: png },
+      { silent: false, isTTY: false }
+    );
+    expect(out).toBe(png);
+  });
+
+  test("success + binary body to a TTY still returns raw bytes (warn only, no hard-refuse)", () => {
+    const out = resolveApiResponseOutput(
+      { status: 200, headers: new Headers(), body: png },
+      { silent: false, isTTY: true }
+    );
+    expect(out).toBe(png);
   });
 });
 

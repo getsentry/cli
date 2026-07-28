@@ -1147,8 +1147,9 @@ function logResponse(response: { status: number; headers: Headers }): void {
  *
  * @returns data to yield via CommandOutput, or `undefined` when silent/no body
  * @throws {OutputError} on HTTP error statuses
+ * @internal Exported for testing
  */
-function resolveApiResponseOutput(
+export function resolveApiResponseOutput(
   response: { status: number; headers: Headers; body: unknown },
   options: { silent: boolean; isTTY: boolean | undefined }
 ): unknown {
