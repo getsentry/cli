@@ -72,6 +72,35 @@ describe("buildCommandHint", () => {
     );
   });
 
+  test("suggests org/<project>-suffix for bare org/suffix form", () => {
+    // org/SUFFIX with no project prefix — guide user to supply a project
+    expect(buildCommandHint("view", "sentry/SERVER")).toBe(
+      "sentry issue view sentry/<project>-SERVER"
+    );
+    expect(buildCommandHint("explain", "my-org/ABC")).toBe(
+      "sentry issue explain my-org/<project>-ABC"
+    );
+  });
+
+  test("shows as-is for slash forms that aren't a bare org/suffix", () => {
+    // org/@selector — a special selector, not a project suffix (CLI-RD review)
+    expect(buildCommandHint("view", "sentry/@latest")).toBe(
+      "sentry issue view sentry/@latest"
+    );
+    // org/project/suffix — multi-segment path is already fully specified
+    expect(buildCommandHint("view", "sentry/cli/A1")).toBe(
+      "sentry issue view sentry/cli/A1"
+    );
+    // org/project#suffix — GitHub-style separator, already has project context
+    expect(buildCommandHint("view", "sentry/cli#A1")).toBe(
+      "sentry issue view sentry/cli#A1"
+    );
+    // leading slash with no org — don't fabricate an org/<project> template
+    expect(buildCommandHint("view", "/SERVER")).toBe(
+      "sentry issue view /SERVER"
+    );
+  });
+
   test("returns URL as-is for share URLs", () => {
     const shareUrl =
       "https://gibush-kq.sentry.io/share/issue/f1abd515c51346778384ff25dfb341e5/";
