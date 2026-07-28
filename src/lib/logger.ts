@@ -5,7 +5,10 @@
  * with log levels, tag scoping, and fancy TTY output. Two reporters are wired up:
  *
  * 1. **FancyReporter** (built-in) — writes to stderr with colors/icons for TTY,
- *    falls back to BasicReporter in CI/non-TTY environments.
+ *    falls back to BasicReporter in CI/non-TTY environments. Its `formatDate` is
+ *    overridden (see {@link patchReporterDates}) so the `[tag HH:MM:SS]` prefix
+ *    renders in corrected local time — consola's default renders UTC in the SEA
+ *    binaries this CLI ships.
  * 2. **Sentry.createConsolaReporter()** — auto-forwards all log messages to Sentry
  *    structured logs via `_INTERNAL_captureLog`. Requires `enableLogs: true` in
  *    `Sentry.init()` (already enabled in telemetry.ts).
@@ -63,6 +66,7 @@ import { createConsola } from "consola";
 const _require = createRequire(import.meta.url);
 
 import { getEnv } from "./env.js";
+import { formatLogTime } from "./timezone.js";
 
 /**
  * Environment variable name for controlling CLI log verbosity.
@@ -186,6 +190,42 @@ function patchWithTag(instance: ConsolaInstance): void {
 // setLogLevel() calls. By registering them here, setLogLevel() can
 // propagate the new level to all descendants.
 patchWithTag(logger);
+
+/**
+ * A consola reporter exposes a `formatDate(date, opts)` method that produces
+ * the time shown in the `[tag HH:MM:SS]` log prefix. Consola does not export
+ * its `FancyReporter`/`BasicReporter` classes, so we type just the slice we
+ * override.
+ */
+type DateFormattingReporter = {
+  formatDate?: (date: Date, opts: unknown) => string;
+};
+
+/**
+ * Replace each default reporter's `formatDate` with {@link formatLogTime}.
+ *
+ * Consola's built-in reporters format the prefix time via
+ * `date.toLocaleTimeString()` with no arguments. That call renders in whatever
+ * timezone the runtime resolved — which silently falls back to **UTC** in the
+ * SEA binaries this CLI ships, so users saw log timestamps hours off from their
+ * local clock. Overriding `formatDate` guarantees the prefix uses the corrected
+ * local time (see {@link formatLogTime}) regardless of ICU state, and switches
+ * to an unambiguous 24-hour format.
+ *
+ * The instances are reused from `logger.options.reporters` so all of consola's
+ * other formatting (icons, colors, alignment, badges) is preserved untouched.
+ */
+function patchReporterDates(instance: ConsolaInstance): void {
+  const reporters = (instance.options?.reporters ??
+    []) as DateFormattingReporter[];
+  for (const reporter of reporters) {
+    if (typeof reporter.formatDate === "function") {
+      reporter.formatDate = (date: Date) => formatLogTime(date);
+    }
+  }
+}
+
+patchReporterDates(logger);
 
 /** Whether the Sentry reporter has already been attached */
 let sentryReporterAttached = false;
