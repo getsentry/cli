@@ -53,6 +53,13 @@ const ALPHA_THRESHOLD = 128;
 const DEFAULT_MAX_WIDTH = 800;
 
 /**
+ * Default cap on the rendered pixel height. Long screenshots (narrow but very
+ * tall) would otherwise skip width-based downscaling entirely and produce a
+ * huge escape sequence with heavy CPU/memory cost, so height is bounded too.
+ */
+const DEFAULT_MAX_HEIGHT = 2000;
+
+/**
  * Detect a supported image format from an HTTP Content-Type and/or the leading
  * magic bytes of the body. Returns `undefined` for formats we can't decode.
  *
@@ -131,16 +138,25 @@ function pixelAt(
 }
 
 /**
- * Downscale an image to at most `maxWidth` pixels wide using nearest-neighbor
- * sampling. Returns the source unchanged when it already fits. Cheap and
- * dependency-free — quality is fine for terminal-sized previews.
+ * Downscale an image so it fits within `maxWidth` × `maxHeight` pixels, using
+ * nearest-neighbor sampling and preserving aspect ratio (scaled by whichever
+ * dimension is over its cap). Returns the source unchanged when it already
+ * fits. Cheap and dependency-free — quality is fine for terminal previews.
+ *
+ * Bounding height as well as width matters for long screenshots: a narrow but
+ * very tall image would otherwise skip width-based scaling entirely and blow up
+ * the palette pass and escape-sequence size.
  */
-export function downscale(img: DecodedImage, maxWidth: number): DecodedImage {
-  if (img.width <= maxWidth) {
+export function downscale(
+  img: DecodedImage,
+  maxWidth: number,
+  maxHeight: number
+): DecodedImage {
+  if (img.width <= maxWidth && img.height <= maxHeight) {
     return img;
   }
-  const scale = maxWidth / img.width;
-  const width = maxWidth;
+  const scale = Math.min(maxWidth / img.width, maxHeight / img.height);
+  const width = Math.max(1, Math.round(img.width * scale));
   const height = Math.max(1, Math.round(img.height * scale));
   const data = new Uint8Array(width * height * 4);
   for (let y = 0; y < height; y++) {
@@ -402,7 +418,7 @@ export function encodeImageToSixel(
     maxWidth ?? DEFAULT_MAX_WIDTH,
     DEFAULT_MAX_WIDTH
   );
-  const scaled = downscale(img, effectiveMaxWidth);
+  const scaled = downscale(img, effectiveMaxWidth, DEFAULT_MAX_HEIGHT);
   const palette = buildPalette(scaled, PALETTE_SIZE);
   if (palette.length === 0) {
     return;

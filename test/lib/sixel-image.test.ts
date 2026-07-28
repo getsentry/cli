@@ -102,16 +102,24 @@ describe("decodeImage", () => {
 });
 
 describe("downscale", () => {
-  test("returns the source unchanged when already within maxWidth", () => {
+  test("returns the source unchanged when already within bounds", () => {
     const img = solidImage(10, 5, [1, 2, 3, 255]);
-    expect(downscale(img, 20)).toBe(img);
+    expect(downscale(img, 20, 20)).toBe(img);
   });
 
   test("scales width down and height proportionally", () => {
     const img = solidImage(100, 50, [1, 2, 3, 255]);
-    const out = downscale(img, 20);
+    const out = downscale(img, 20, 2000);
     expect(out.width).toBe(20);
     expect(out.height).toBe(10);
+  });
+
+  test("scales a tall image down by its height cap", () => {
+    // Narrow but very tall: width is within bounds, height is 10x over.
+    const img = solidImage(40, 4000, [1, 2, 3, 255]);
+    const out = downscale(img, 800, 400);
+    expect(out.height).toBe(400);
+    expect(out.width).toBe(4);
   });
 });
 
@@ -175,6 +183,15 @@ describe("encodeImageToSixel", () => {
     const img = solidImage(2000, 10, [10, 20, 30, 255]);
     const sixel = encodeImageToSixel(img, 5000);
     expect(sixel).toContain('"1;1;800;');
+  });
+
+  test("bounds the height of a narrow but very tall image", () => {
+    // 40px wide (within budget) but 5000px tall — scaled uniformly to the
+    // DEFAULT_MAX_HEIGHT (2000) so the escape sequence stays bounded. Width
+    // scales proportionally: 40 * (2000/5000) = 16.
+    const img = solidImage(40, 5000, [10, 20, 30, 255]);
+    const sixel = encodeImageToSixel(img);
+    expect(sixel).toContain('"1;1;16;2000');
   });
 });
 
