@@ -1,6 +1,192 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.39.0
+
+### New Features ✨
+
+#### Build
+
+- Support iOS XCArchive and IPA upload by @BYK in [#1185](https://github.com/getsentry/cli/pull/1185)
+- Collect git/VCS metadata for build upload by @BYK in [#1174](https://github.com/getsentry/cli/pull/1174)
+- Add `build upload` for Android APK/AAB by @BYK in [#1172](https://github.com/getsentry/cli/pull/1172)
+- Add `build download` command for preprod artifacts by @BYK in [#1170](https://github.com/getsentry/cli/pull/1170)
+
+#### Debug Files
+
+- Add find command by @BYK in [#1189](https://github.com/getsentry/cli/pull/1189)
+- Add --il2cpp-mapping for Unity IL2CPP line mappings by @BYK in [#1165](https://github.com/getsentry/cli/pull/1165)
+- Extract embedded Portable PDBs from managed PEs by @BYK in [#1163](https://github.com/getsentry/cli/pull/1163)
+- Scan inside .zip archives on upload by @BYK in [#1141](https://github.com/getsentry/cli/pull/1141)
+- Honor server upload limits and add --derived-data by @BYK in [#1140](https://github.com/getsentry/cli/pull/1140)
+- Add upload command (core) by @BYK in [#1139](https://github.com/getsentry/cli/pull/1139)
+- Add print-sources command by @BYK in [#1138](https://github.com/getsentry/cli/pull/1138)
+
+#### React Native
+
+- Close remaining legacy parity gaps by @BYK in [#1198](https://github.com/getsentry/cli/pull/1198)
+- Add xcode command by @BYK in [#1193](https://github.com/getsentry/cli/pull/1193)
+- Add gradle command by @BYK in [#1192](https://github.com/getsentry/cli/pull/1192)
+
+#### Release
+
+- Add --from to scope set-commits to a local range by @betegon in [#1197](https://github.com/getsentry/cli/pull/1197)
+- Filter set-commits by path for monorepos (CLI-339) by @betegon in [#1159](https://github.com/getsentry/cli/pull/1159)
+
+#### Snapshots
+
+- Add upload command by @BYK in [#1186](https://github.com/getsentry/cli/pull/1186)
+- Add `snapshots diff` by @BYK in [#1179](https://github.com/getsentry/cli/pull/1179)
+- Add `snapshots download` by @BYK in [#1176](https://github.com/getsentry/cli/pull/1176)
+
+#### Other
+
+- (banner) Sixel image banner on capable terminals by @BYK in [#1187](https://github.com/getsentry/cli/pull/1187)
+- (ci) Add PR risk experiment workflow by @betegon in [#1129](https://github.com/getsentry/cli/pull/1129)
+- (db) Support Node.js 18+ for the npm package via WASM SQLite fallback by @BYK in [#1260](https://github.com/getsentry/cli/pull/1260)
+- (info) Add info command by @BYK in [#1190](https://github.com/getsentry/cli/pull/1190)
+- (init) Measure interactive prompt wait time by @betegon in [#1257](https://github.com/getsentry/cli/pull/1257)
+- (local) Surface trace IDs, attribute table, and fix AI filter by @jared-outpost in [#1133](https://github.com/getsentry/cli/pull/1133)
+- (upgrade) Progress bars for delta-patch apply and full download by @BYK in [#1281](https://github.com/getsentry/cli/pull/1281)
+- Add ESM export by @JPeer264 in [#1288](https://github.com/getsentry/cli/pull/1288)
+- Replace CLI banner with block-art SENTRY wordmark by @BYK in [#1169](https://github.com/getsentry/cli/pull/1169)
+
+### Bug Fixes 🐛
+
+#### Alerts
+
+- Read metric alert rules from org-scoped /detectors/ by @jared-outpost in [#1275](https://github.com/getsentry/cli/pull/1275)
+- Delete issue alert rules via org-scoped /workflows/ by @betegon in [#1216](https://github.com/getsentry/cli/pull/1216)
+- Read issue alert rules from org-scoped /workflows/ by @betegon in [#1215](https://github.com/getsentry/cli/pull/1215)
+
+#### Auth
+
+- Only treat 401/403 as an invalid token on login (CLI-19) by @BYK in [#1153](https://github.com/getsentry/cli/pull/1153)
+- Add alerts:read and alerts:write to default OAuth scopes by @sergical in [#1137](https://github.com/getsentry/cli/pull/1137)
+
+#### Ci
+
+- Use temp config dir in npm smoke test to prevent WASM SQLite crash by @MathurAditya724 in [#1282](https://github.com/getsentry/cli/pull/1282)
+- Clear auth tokens in npm smoke test to prevent WASM SQLite crash by @MathurAditya724 in [#1278](https://github.com/getsentry/cli/pull/1278)
+- Grant PR risk write permission by @betegon in [#1136](https://github.com/getsentry/cli/pull/1136)
+- Allow PR risk labels by @betegon in [#1135](https://github.com/getsentry/cli/pull/1135)
+
+#### Debug Files
+
+- Accurate upload count and preserve --require-all hint by @BYK in [#1167](https://github.com/getsentry/cli/pull/1167)
+- Exit non-zero when files are dropped for size by @BYK in [#1146](https://github.com/getsentry/cli/pull/1146)
+- Map targeted object for --il2cpp-mapping + free WASM handles by @BYK in [#1166](https://github.com/getsentry/cli/pull/1166)
+
+#### Error Reporting
+
+- Stop reporting network fetch failures as crashes (CLI-16W) by @BYK in [#1152](https://github.com/getsentry/cli/pull/1152)
+- Silence search-query parse 400s (CLI-FA) by @BYK in [#1151](https://github.com/getsentry/cli/pull/1151)
+- Silence ContextError to stop crash reports (CLI-3B) by @BYK in [#1149](https://github.com/getsentry/cli/pull/1149)
+
+#### Event
+
+- Recognize numeric issue IDs and bare 'latest' in 'event view' by @sentry in [#1297](https://github.com/getsentry/cli/pull/1297)
+- Correctly parse project/event-id in view command by @sentry in [#1263](https://github.com/getsentry/cli/pull/1263)
+
+#### Init
+
+- Allow org admins to create projects when member creation is disabled by @MathurAditya724 in [#1284](https://github.com/getsentry/cli/pull/1284)
+- Retry transient auth validation once by @betegon in [#1271](https://github.com/getsentry/cli/pull/1271)
+- Keep Ink task progress in sync by @betegon in [#1259](https://github.com/getsentry/cli/pull/1259)
+- Terminate verification process trees by @betegon in [#1258](https://github.com/getsentry/cli/pull/1258)
+- Preserve welcome banner alignment by @betegon in [#1255](https://github.com/getsentry/cli/pull/1255)
+- Extend API timeout to 210 seconds by @betegon in [#1252](https://github.com/getsentry/cli/pull/1252)
+
+#### Issue
+
+- Ensure --into flag is resolved with multiple positional args by @sentry in [#1256](https://github.com/getsentry/cli/pull/1256)
+- Stop collapsing stats on piped output and JSON defaults by @betegon in [#1221](https://github.com/getsentry/cli/pull/1221)
+- Report issue not found instead of project not found by @betegon in [#1207](https://github.com/getsentry/cli/pull/1207)
+- Accept multi-line issue identifiers by keeping first line (CLI-1G1) by @BYK in [#1148](https://github.com/getsentry/cli/pull/1148)
+
+#### Release
+
+- Polish --from ref errors and dashed-value parsing by @betegon in [#1203](https://github.com/getsentry/cli/pull/1203)
+- Make set-commits --clear actually clear commits by @betegon in [#1196](https://github.com/getsentry/cli/pull/1196)
+
+#### Resolution
+
+- Correct hint for bare suffix in org/suffix issue ID by @sentry in [#1296](https://github.com/getsentry/cli/pull/1296)
+- Prevent duplicate org in trace ID resolution by @sentry in [#1289](https://github.com/getsentry/cli/pull/1289)
+
+#### Upgrade
+
+- Nightly discovery hits wrong GHCR package (silent 404 → full-download fallback) by @BYK in [#1304](https://github.com/getsentry/cli/pull/1304)
+- Bound untrusted patch newSize to prevent pre-verification OOM by @BYK in [#1279](https://github.com/getsentry/cli/pull/1279)
+
+#### Other
+
+- (agent-skills) Write skill files atomically to prevent partial reads by @BYK in [#1144](https://github.com/getsentry/cli/pull/1144)
+- (api) Stream binary responses without UTF-8 decoding by @sentry-junior in [#1305](https://github.com/getsentry/cli/pull/1305)
+- (arg-parsing) Allow project display names with spaces in org/project argument by @sentry in [#1116](https://github.com/getsentry/cli/pull/1116)
+- (cli) Allow '=' as key-value separator for tags and extra flags by @sentry in [#1285](https://github.com/getsentry/cli/pull/1285)
+- (db) Recover WASM SQLite locks via PID sentinel, not a 60s age window by @BYK in [#1261](https://github.com/getsentry/cli/pull/1261)
+- (dsn) Ignore EINVAL from readdirSync on special files by @sentry in [#1286](https://github.com/getsentry/cli/pull/1286)
+- (errors) Surface user search-query 400s as ValidationError, keep CLI-built 400s reported (CLI-FA) by @BYK in [#1154](https://github.com/getsentry/cli/pull/1154)
+- (local) Handle standalone span items, Cloudflare SDK source, and warn level by @MathurAditya724 in [#1276](https://github.com/getsentry/cli/pull/1276)
+- (metrics) Prevent duplicate metric suggestions in error by @sentry in [#1299](https://github.com/getsentry/cli/pull/1299)
+- (resolve) Guide users to org/project instead of silencing the auto-detect error (CLI-3B) by @BYK in [#1155](https://github.com/getsentry/cli/pull/1155)
+- (resolve-target) Hint numeric project IDs in 404 suggestions by @betegon in [#1208](https://github.com/getsentry/cli/pull/1208)
+- (seer) Read sentry_run_id instead of the deprecated run_id by @trevor-e in [#1224](https://github.com/getsentry/cli/pull/1224)
+- (sourcemap) Derive debug ID from JS + map so distinct chunks don't collide (#3350) by @BYK in [#1162](https://github.com/getsentry/cli/pull/1162)
+- (span) Correctly parse multi-segment trace targets in single-arg view by @sentry in [#1283](https://github.com/getsentry/cli/pull/1283)
+- (trace) Allow 'trace view' to work with org-scoped targets by @sentry in [#1291](https://github.com/getsentry/cli/pull/1291)
+- Guard response.json() and validate external API response shapes by @cursor in [#1301](https://github.com/getsentry/cli/pull/1301)
+
+### Documentation 📚
+
+#### Site
+
+- Update og images by @betegon in [#1188](https://github.com/getsentry/cli/pull/1188)
+- Use brand fonts (Dammit Sans headings, Rubik body) by @BYK in [#1183](https://github.com/getsentry/cli/pull/1183)
+- Adopt new Sentry CLI brand lockup + app-icon favicon by @BYK in [#1181](https://github.com/getsentry/cli/pull/1181)
+
+#### Other
+
+- (debug-files) Drop planned --symbol-maps (BCSymbolMap) support by @BYK in [#1168](https://github.com/getsentry/cli/pull/1168)
+- (getting-started) Remove redundant Installation heading, fix platform support table by @sergical in [#1195](https://github.com/getsentry/cli/pull/1195)
+- (lore) Mark multi-region fan-out entry as superseded by @betegon in [#1214](https://github.com/getsentry/cli/pull/1214)
+- Add v3→v4 migration guide (sentry-cli → sentry) by @BYK in [#1201](https://github.com/getsentry/cli/pull/1201)
+- Note `sentry cli setup` for package manager installs by @sergical in [#1204](https://github.com/getsentry/cli/pull/1204)
+- Refresh README banner with new brand art + gradient by @BYK in [#1178](https://github.com/getsentry/cli/pull/1178)
+- Note ambiguous-width limitation of block-art banner by @BYK in [#1177](https://github.com/getsentry/cli/pull/1177)
+
+### Internal Changes 🔧
+
+#### Deps
+
+- Bump js-yaml to 3.15.0 via pnpm override by @betegon in [#1206](https://github.com/getsentry/cli/pull/1206)
+- Bump @sentry/api to 0.253.0 and adopt token operationIds by @betegon in [#1194](https://github.com/getsentry/cli/pull/1194)
+- Add content assertions for Sentry tree-shaking patches by @BYK in [#1175](https://github.com/getsentry/cli/pull/1175)
+- Bump patched deps to latest and regenerate patches by @BYK in [#1173](https://github.com/getsentry/cli/pull/1173)
+- Pin patched dependency keys to exact versions by @BYK in [#1171](https://github.com/getsentry/cli/pull/1171)
+
+#### Docs
+
+- Bump starlight theme to 0.8.0 by @sentry-junior in [#1287](https://github.com/getsentry/cli/pull/1287)
+- Clean up PR previews on close + scheduled safety-net sweep by @BYK in [#1202](https://github.com/getsentry/cli/pull/1202)
+
+#### Upgrade
+
+- Adopt binpatch@0.3.0 for delta self-update by @BYK in [#1298](https://github.com/getsentry/cli/pull/1298)
+- Vectorize bspatch diff-add with SWAR (4x faster apply) by @BYK in [#1280](https://github.com/getsentry/cli/pull/1280)
+
+#### Other
+
+- (debug-files) Scan paths via shared walkFiles walker by @BYK in [#1150](https://github.com/getsentry/cli/pull/1150)
+- (eval) Support OpenRouter for skill-eval and init-eval judges by @MathurAditya724 in [#1306](https://github.com/getsentry/cli/pull/1306)
+- (organizations) List orgs from control silo in a single call by @betegon in [#1212](https://github.com/getsentry/cli/pull/1212)
+- (snapshots) Stream-extract downloaded archives by @BYK in [#1184](https://github.com/getsentry/cli/pull/1184)
+- Bump binpatch ^0.3.0 → ^0.3.1 by @BYK in [#1309](https://github.com/getsentry/cli/pull/1309)
+- Load .env.local in tsx and cli dev scripts by @MathurAditya724 in [#1227](https://github.com/getsentry/cli/pull/1227)
+- Pin Node to exact patched versions via central env vars by @BYK in [#1145](https://github.com/getsentry/cli/pull/1145)
+- Regenerate docs by @github-actions[bot] in [def1a782](https://github.com/getsentry/cli/commit/def1a782ffdb52a1e97fcf6571ca24a61e9c7a99)
+
 ## 0.38.0
 
 ### New Features ✨
