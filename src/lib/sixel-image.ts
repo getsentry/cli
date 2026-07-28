@@ -71,6 +71,77 @@ const DEFAULT_MAX_HEIGHT = 2000;
 const MAX_DECODE_DIMENSION = 20_000;
 
 /**
+ * True for JPEG marker ids that carry no length-prefixed payload: SOI/EOI
+ * (D8/D9), the RSTn restart markers (D0–D7), and TEM (01). These advance the
+ * walker by just the two marker bytes.
+ */
+function isStandaloneJpegMarker(marker: number): boolean {
+  return marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9);
+}
+
+/**
+ * True for JPEG Start-of-Frame markers (SOF0–SOF15, C0–CF) that carry the
+ * frame dimensions, excluding the non-frame markers DHT (C4), JPG (C8), and
+ * DAC (CC) that share the 0xCn range.
+ */
+function isSofJpegMarker(marker: number): boolean {
+  return (
+    marker >= 0xc0 &&
+    marker <= 0xcf &&
+    marker !== 0xc4 &&
+    marker !== 0xc8 &&
+    marker !== 0xcc
+  );
+}
+
+/**
+ * Walk JPEG marker segments looking for a Start-of-Frame and read its declared
+ * width/height without decoding pixel data. Returns `undefined` when no SOF is
+ * found within the buffer or the stream is malformed.
+ */
+function readJpegDimensions(
+  body: Uint8Array
+): { width: number; height: number } | undefined {
+  // Must read up to offset+8 (the 2-byte width) for a SOF, so require
+  // offset+8 to be in bounds (offset+9 <= body.length).
+  let offset = 2; // skip the leading SOI (FF D8)
+  while (offset + 9 <= body.length) {
+    // Markers begin with 0xFF; runs of 0xFF are legal fill bytes, so skip them
+    // one at a time rather than mis-reading them as a length-prefixed segment.
+    if (body[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+    const marker = body[offset + 1] as number;
+    if (marker === 0xff) {
+      offset += 1; // fill byte; re-examine from the next 0xFF
+      continue;
+    }
+    if (isStandaloneJpegMarker(marker)) {
+      offset += 2;
+      continue;
+    }
+    if (isSofJpegMarker(marker)) {
+      const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+      // SOF payload: [2-byte length][1-byte precision][2-byte height][2-byte width]
+      return {
+        height: view.getUint16(offset + 5),
+        width: view.getUint16(offset + 7),
+      };
+    }
+    // Length-prefixed segment: advance past the 2-byte length (which counts
+    // its own 2 bytes) plus the leading marker.
+    const segLength =
+      (body[offset + 2] as number) * 256 + (body[offset + 3] as number);
+    if (segLength < 2) {
+      return; // malformed length; bail rather than loop forever
+    }
+    offset += 2 + segLength;
+  }
+  return;
+}
+
+/**
  * Read the declared pixel dimensions from a PNG or JPEG header without decoding
  * the pixel data, so callers can reject oversized images before the decoder
  * allocates a full pixel buffer. Returns `undefined` when the header is too
@@ -78,8 +149,7 @@ const MAX_DECODE_DIMENSION = 20_000;
  *
  * - PNG: the IHDR chunk always follows the 8-byte signature; width and height
  *   are big-endian uint32 at byte offsets 16 and 20.
- * - JPEG: scan the marker segments for a Start-of-Frame (SOF0–SOFF, excluding
- *   the non-frame markers) and read height/width from its payload.
+ * - JPEG: scan the marker segments for a Start-of-Frame and read its payload.
  */
 export function readImageDimensions(
   body: Uint8Array,
@@ -92,35 +162,7 @@ export function readImageDimensions(
     const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
     return { width: view.getUint32(16), height: view.getUint32(20) };
   }
-  // JPEG: walk marker segments looking for a Start-of-Frame marker.
-  let offset = 2; // skip the leading SOI (FF D8)
-  while (offset + 9 < body.length) {
-    if (body[offset] !== 0xff) {
-      offset += 1;
-      continue;
-    }
-    const marker = body[offset + 1] as number;
-    // SOF0–SOFF carry frame dimensions, except DHT (C4), DAC (CC), and the
-    // RSTn restart markers (D0–D7) which share the 0xCn/0xDn range.
-    const isSof =
-      marker >= 0xc0 &&
-      marker <= 0xcf &&
-      marker !== 0xc4 &&
-      marker !== 0xc8 &&
-      marker !== 0xcc;
-    if (isSof) {
-      const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
-      // SOF payload: [2-byte length][1-byte precision][2-byte height][2-byte width]
-      const height = view.getUint16(offset + 5);
-      const width = view.getUint16(offset + 7);
-      return { width, height };
-    }
-    // Advance past this segment using its 2-byte length field.
-    const segLength =
-      (body[offset + 2] as number) * 256 + (body[offset + 3] as number);
-    offset += 2 + segLength;
-  }
-  return;
+  return readJpegDimensions(body);
 }
 
 /**

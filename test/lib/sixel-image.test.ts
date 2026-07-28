@@ -123,6 +123,33 @@ describe("readImageDimensions", () => {
     expect(readImageDimensions(jpeg, "jpeg")).toEqual({ width: 12, height: 8 });
   });
 
+  test("reads JPEG dimensions past fill bytes and standalone markers", () => {
+    // Minimal JPEG-ish stream: SOI, a 0xFF fill byte, an RSTn standalone
+    // marker, then a SOF0 declaring 3×5. Exercises the marker walker's
+    // fill-byte and standalone-marker handling so the SOF isn't skipped.
+    const jpeg = new Uint8Array([
+      0xff,
+      0xd8, // SOI
+      0xff, // stray fill byte
+      0xff,
+      0xd0, // RST0 (standalone, no length)
+      0xff,
+      0xc0, // SOF0
+      0x00,
+      0x11, // segment length (17)
+      0x08, // precision
+      0x00,
+      0x05, // height = 5
+      0x00,
+      0x03, // width = 3
+      0x03,
+      0x01,
+      0x22,
+      0x00, // (partial component data, unread)
+    ]);
+    expect(readImageDimensions(jpeg, "jpeg")).toEqual({ width: 3, height: 5 });
+  });
+
   test("returns undefined for a truncated header", () => {
     expect(
       readImageDimensions(new Uint8Array([0x89, 0x50]), "png")
