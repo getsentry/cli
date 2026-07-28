@@ -61,6 +61,7 @@ import {
 } from "../../lib/sentry-url-parser.js";
 import { buildEventSearchUrl } from "../../lib/sentry-urls.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
+import { isAllDigits } from "../../lib/utils.js";
 import type { SentryEvent } from "../../types/index.js";
 
 type ViewFlags = {
@@ -186,6 +187,13 @@ export function expandNewlineArgs(args: string[]): string[] {
 const LATEST_EVENT_SENTINEL = "@latest";
 
 /**
+ * Shared usage hint shown when a bare "latest" is passed without an issue.
+ * There is no "latest event of a project" API — the latest-event lookup is
+ * keyed by issue, so the user must supply an issue ID (or short ID).
+ */
+const BARE_LATEST_HINT = "sentry event view <issue-id>";
+
+/**
  * Parse a single positional arg for event view, handling issue short ID
  * detection both in bare form ("BRUNCHIE-APP-29") and org-prefixed form
  * ("figma/FULLSCREEN-2RN").
@@ -195,49 +203,17 @@ const LATEST_EVENT_SENTINEL = "@latest";
  * "org/project" with a missing event ID.
  */
 function parseSingleArg(arg: string): ParsedPositionalArgs {
-  // Detect "org/SHORT-ID" and "SHORT-ID/EVENT-ID" patterns before
-  // parseSlashSeparatedArg, which throws ContextError for single-slash args.
+  // Detect single-slash shortcuts ("org/SHORT-ID", "SHORT-ID/EVENT-ID",
+  // "project/EVENT-ID", "org/NUMERIC-ID") before parseSlashSeparatedArg,
+  // which throws ContextError for single-slash args.
   const slashIdx = arg.indexOf("/");
   if (slashIdx !== -1 && arg.indexOf("/", slashIdx + 1) === -1) {
-    const beforeSlash = arg.slice(0, slashIdx);
-    const afterSlash = arg.slice(slashIdx + 1);
-
-    // "org/SHORT-ID" → auto-redirect to that issue's latest event.
-    // e.g., "figma/FULLSCREEN-2RN"
-    if (afterSlash && looksLikeIssueShortId(afterSlash)) {
-      // Use "org/" (trailing slash) to signal OrgAll mode so downstream
-      // parseOrgProjectArg interprets this as an org, not a project search.
-      return {
-        eventId: LATEST_EVENT_SENTINEL,
-        targetArg: `${beforeSlash}/`,
-        issueShortId: afterSlash,
-      };
-    }
-
-    // "SHORT-ID/EVENT-ID" → view a specific event identified by issue short ID.
-    // e.g., "CLI-G5/abc123def456abc123def456abc123de"
-    if (
-      beforeSlash &&
-      looksLikeIssueShortId(beforeSlash) &&
-      afterSlash &&
-      HEX_ID_RE.test(normalizeHexId(afterSlash))
-    ) {
-      return {
-        eventId: normalizeHexId(afterSlash),
-        targetArg: undefined,
-        issueShortId: beforeSlash,
-      };
-    }
-
-    // "project/EVENT-ID" → project slug + hex event ID.
-    // e.g., "my-project/abc123def456abc123def456abc123de"
-    // Must be checked before parseSlashSeparatedArg, which throws ContextError
-    // for any single-slash arg, assuming it's "org/project" with a missing ID.
-    if (afterSlash && HEX_ID_RE.test(normalizeHexId(afterSlash))) {
-      return {
-        eventId: normalizeHexId(afterSlash),
-        targetArg: beforeSlash,
-      };
+    const singleSlash = parseSingleSlashArg(
+      arg.slice(0, slashIdx),
+      arg.slice(slashIdx + 1)
+    );
+    if (singleSlash) {
+      return singleSlash;
     }
   }
 
@@ -256,7 +232,88 @@ function parseSingleArg(arg: string): ParsedPositionalArgs {
     };
   }
 
+  // Reject bare "latest" (without the "@" prefix sentinel). There is no
+  // "latest event of a project" endpoint — the latest-event lookup is keyed
+  // by issue, so a bare "latest" has nothing to resolve against.
+  if (eventId.toLowerCase() === "latest") {
+    throw new ContextError("Issue ID", BARE_LATEST_HINT, [
+      "'latest' resolves the newest event of an issue — pass an issue ID, e.g. 'sentry event view 17370'",
+    ]);
+  }
+
+  // Detect numeric issue ID (e.g., "17370") — treat as issueId and fetch latest event.
+  if (isAllDigits(eventId)) {
+    return { eventId: LATEST_EVENT_SENTINEL, targetArg, issueId: eventId };
+  }
+
   return { eventId, targetArg };
+}
+
+/**
+ * Resolve a single-slash positional arg (`before/after`) to a parsed result,
+ * or `null` when it isn't one of the recognized shortcut shapes and should
+ * fall through to `parseSlashSeparatedArg`.
+ *
+ * Handled shapes:
+ * - `org/SHORT-ID` → org-all + issue short ID (latest event)
+ * - `SHORT-ID/EVENT-ID` → specific event via issue short ID
+ * - `org/NUMERIC-ID` → org-all + numeric issue ID (latest event)
+ * - `project/EVENT-ID` → project slug + hex event ID
+ *
+ * Extracted from `parseSingleArg` to keep it under the cognitive-complexity
+ * limit.
+ */
+function parseSingleSlashArg(
+  beforeSlash: string,
+  afterSlash: string
+): ParsedPositionalArgs | null {
+  // "org/SHORT-ID" → auto-redirect to that issue's latest event.
+  // e.g., "figma/FULLSCREEN-2RN". Use "org/" (trailing slash) to signal
+  // OrgAll mode so downstream parseOrgProjectArg treats it as an org.
+  if (afterSlash && looksLikeIssueShortId(afterSlash)) {
+    return {
+      eventId: LATEST_EVENT_SENTINEL,
+      targetArg: `${beforeSlash}/`,
+      issueShortId: afterSlash,
+    };
+  }
+
+  // "SHORT-ID/EVENT-ID" → view a specific event identified by issue short ID.
+  // e.g., "CLI-G5/abc123def456abc123def456abc123de"
+  if (
+    beforeSlash &&
+    looksLikeIssueShortId(beforeSlash) &&
+    afterSlash &&
+    HEX_ID_RE.test(normalizeHexId(afterSlash))
+  ) {
+    return {
+      eventId: normalizeHexId(afterSlash),
+      targetArg: undefined,
+      issueShortId: beforeSlash,
+    };
+  }
+
+  // "org/NUMERIC-ID" → org-all + numeric issue ID (latest event).
+  // e.g., "my-org/17370". Mirrors bare "17370" and "my-org/my-project 17370",
+  // and matches how `sentry issue view org/numericId` already behaves.
+  if (beforeSlash && afterSlash && isAllDigits(afterSlash)) {
+    return {
+      eventId: LATEST_EVENT_SENTINEL,
+      targetArg: `${beforeSlash}/`,
+      issueId: afterSlash,
+    };
+  }
+
+  // "project/EVENT-ID" → project slug + hex event ID.
+  // e.g., "my-project/abc123def456abc123def456abc123de"
+  if (afterSlash && HEX_ID_RE.test(normalizeHexId(afterSlash))) {
+    return {
+      eventId: normalizeHexId(afterSlash),
+      targetArg: beforeSlash,
+    };
+  }
+
+  return null;
 }
 
 /** Return type for parsePositionalArgs */
@@ -373,6 +430,26 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
       targetArg: undefined,
       issueShortId: first,
       warning: `'${first}' is an issue short ID, not a project slug. Ignoring second argument '${second}'.`,
+    };
+  }
+
+  // Reject bare "latest" as second arg (e.g., "my-org/my-project latest").
+  // Even with an explicit project there is no "latest event of a project"
+  // endpoint — latest is resolved per-issue, so this has nothing to key on.
+  if (second.toLowerCase() === "latest") {
+    throw new ContextError("Issue ID", BARE_LATEST_HINT, [
+      "'latest' resolves the newest event of an issue — pass an issue ID, e.g. 'sentry event view 17370'",
+    ]);
+  }
+
+  // Detect numeric issue ID as second arg (e.g., "my-org/my-project 17370").
+  if (isAllDigits(second)) {
+    const extraEventIds = args.length > 2 ? args.slice(2) : undefined;
+    return {
+      eventId: LATEST_EVENT_SENTINEL,
+      targetArg: first,
+      issueId: second,
+      extraEventIds,
     };
   }
 
@@ -757,6 +834,35 @@ type IssueShortcutOptions = {
 };
 
 /**
+ * Fetch the latest event for a numeric issue ID (or issue-URL issue ID).
+ *
+ * getLatestEvent only needs org + issue ID, so the org is taken from the
+ * explicit target when one was supplied (`org/` or `org/project`) and
+ * otherwise auto-detected via env/config/DSN. Using resolveEffectiveOrg("")
+ * here would skip auto-detection and fail when no org was on the command line.
+ */
+async function resolveIssueIdShortcut(
+  parsed: ReturnType<typeof parseOrgProjectArg>,
+  issueId: string,
+  cwd: string,
+  spans: number
+): Promise<IssueShortcutResult> {
+  const log = logger.withTag("event.view");
+  const explicitOrg =
+    parsed.type === "org-all" || parsed.type === "explicit"
+      ? parsed.org
+      : undefined;
+  const resolved = await resolveOrg({ org: explicitOrg, cwd });
+  if (!resolved) {
+    throw new ContextError("Organization", `sentry event view ${issueId}`);
+  }
+  const org = resolved.org;
+  log.info(`Fetching latest event for issue ${issueId}...`);
+  const data = await fetchLatestEventData(org, issueId, spans);
+  return { org, data, hint: `Showing latest event for issue ${issueId}` };
+}
+
+/**
  * Handle issue-based shortcuts: issue URLs and issue short IDs.
  *
  * Both paths resolve an issue and fetch its latest event. Extracted from
@@ -770,16 +876,11 @@ async function resolveIssueShortcut(
   const { parsed, eventId, issueId, issueShortId, cwd, spans } = options;
   const log = logger.withTag("event.view");
 
-  // Issue URL shortcut: fetch the latest event directly via the issue ID.
-  // This bypasses project resolution entirely since getLatestEvent only
-  // needs org + issue ID.
+  // Issue URL / numeric issue ID shortcut: fetch the latest event directly
+  // via the issue ID, bypassing project resolution (getLatestEvent only needs
+  // org + issue ID).
   if (issueId) {
-    const org = await resolveEffectiveOrg(
-      parsed.type === "org-all" ? parsed.org : ""
-    );
-    log.info(`Fetching latest event for issue ${issueId}...`);
-    const data = await fetchLatestEventData(org, issueId, spans);
-    return { org, data, hint: `Showing latest event for issue ${issueId}` };
+    return await resolveIssueIdShortcut(parsed, issueId, cwd, spans);
   }
 
   // Issue short ID auto-redirect: user passed an issue short ID
