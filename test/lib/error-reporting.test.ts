@@ -304,11 +304,16 @@ describe("classifySilenced", () => {
       new ResolutionError("Project 'x'", "not found", "sentry issue list"),
     ],
     ["ValidationError", new ValidationError("bad")],
-    ["SeerError", new SeerError("not_enabled")],
     ["ConfigError", new ConfigError("bad")],
     ["generic Error", new Error("boom")],
   ])("does NOT silence %s", (_label, err) => {
     expect(classifySilenced(err)).toBeNull();
+  });
+
+  test("silences SeerError with feature_disabled", () => {
+    expect(classifySilenced(new SeerError("not_enabled"))).toBe(
+      "feature_disabled"
+    );
   });
 });
 
@@ -518,10 +523,16 @@ describe("reportCliError integration", () => {
     expect(captureSpy).toHaveBeenCalledWith(err);
   });
 
-  test("captures SeerError (marketing dashboard)", () => {
+  test("silences SeerError and emits metric (not captured)", () => {
     reportCliError(new SeerError("not_enabled", "my-org"));
-    expect(captureSpy).toHaveBeenCalled();
-    expect(metricSpy).not.toHaveBeenCalled();
+    expect(captureSpy).not.toHaveBeenCalled();
+    expect(metricSpy).toHaveBeenCalledWith(
+      "cli.error.silenced",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({ reason: "feature_disabled" }),
+      })
+    );
   });
 
   test("silences AuthError(invalid) and emits metric", () => {
