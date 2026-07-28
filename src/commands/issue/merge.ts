@@ -135,9 +135,20 @@ async function resolveAllIssues(
   // would send `?id=100&id=100` to Sentry, which the API dedupes server
   // side — returning 204 ("no matching issues") — and then we re-throw
   // that as a confusing "no matching issues" error. Catch it here instead.
-  const issues = resolved.map((r) => r.issue);
-  const uniqueIds = new Set(issues.map((i) => i.id));
-  if (uniqueIds.size < 2) {
+  // Dedupe by numeric ID, keeping first occurrence. `--into` is always
+  // appended to the arg list, so a user who names the same issue both as
+  // a positional and via `--into` (in any form) collapses to one entry
+  // here rather than being sent to the API twice.
+  const seen = new Set<string>();
+  const issues: SentryIssue[] = [];
+  for (const { issue } of resolved) {
+    if (seen.has(issue.id)) {
+      continue;
+    }
+    seen.add(issue.id);
+    issues.push(issue);
+  }
+  if (issues.length < 2) {
     throw new ValidationError(
       `Merge needs at least 2 distinct issues (all inputs resolved to ${issues[0]?.shortId ?? "the same issue"}).\n\n` +
         "Check your argument list — you may have passed the same issue in\n" +
@@ -274,7 +285,7 @@ export const mergeCommand = buildCommand({
         kind: "parsed",
         parse: String,
         brief:
-          "Prefer this issue as the canonical parent (must match one of the provided IDs)",
+          "Prefer this issue as the canonical parent (included in the merge if not already listed)",
         optional: true,
       },
     },
@@ -285,14 +296,12 @@ export const mergeCommand = buildCommand({
   async *func(this: SentryContext, flags: MergeFlags, ...args: string[]) {
     const { cwd } = this;
 
-    // Accept "sentry issue merge A --into B" as a valid 2-issue merge.
-    // --into already designates which issue is the merge target, so passing
-    // it as a positional too would be redundant. Append it to args so the
-    // rest of the pipeline sees 2+ issues and orderForMerge puts it first.
-    // We append flags.into regardless of how many positional args were given,
-    // as long as it isn't already listed as a positional argument.
-    const effectiveArgs =
-      flags.into && !args.includes(flags.into) ? [...args, flags.into] : args;
+    // --into always designates an issue that participates in the merge (as
+    // the preferred parent). Append it to the positional list so the rest of
+    // the pipeline sees it as one of the issues to merge. Any duplicate form
+    // (same issue passed both as a positional and via --into) is collapsed
+    // later by numeric-ID dedupe in resolveAllIssues.
+    const effectiveArgs = flags.into ? [...args, flags.into] : args;
 
     if (effectiveArgs.length < 2) {
       const hint =
