@@ -6,7 +6,11 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { applyFlagDefaults, type FlagDef } from "../../src/lib/sdk-invoke.js";
+import {
+  applyFlagDefaults,
+  type FlagDef,
+  parseOutput,
+} from "../../src/lib/sdk-invoke.js";
 
 // ---------------------------------------------------------------------------
 // applyFlagDefaults — parsed flags with defaults
@@ -179,5 +183,40 @@ describe("applyFlagDefaults: combined scenario", () => {
     expect(result.fresh).toBe(false);
     // query: undefined stripped, no default → absent
     expect("query" in result).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseOutput — binary vs textual capture
+// ---------------------------------------------------------------------------
+
+describe("parseOutput: binary output", () => {
+  test("returns raw bytes when a chunk is a Uint8Array (no comma-decimal coercion)", () => {
+    // PNG signature — a byte-for-byte round-trip is required so SDK/run()
+    // callers downloading attachments get faithful data, not "137,80,78,71".
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const result = parseOutput<Uint8Array>(undefined, [png]);
+    expect(result).toBeInstanceOf(Uint8Array);
+    expect(Array.from(result)).toEqual([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+  });
+
+  test("concatenates mixed string and binary chunks as bytes", () => {
+    const result = parseOutput<Uint8Array>(undefined, [
+      "AB",
+      new Uint8Array([0x00, 0xff]),
+    ]);
+    expect(Array.from(result)).toEqual([0x41, 0x42, 0x00, 0xff]);
+  });
+
+  test("still JSON-parses textual chunks", () => {
+    const result = parseOutput<{ ok: boolean }>(undefined, ['{"ok":true}']);
+    expect(result).toEqual({ ok: true });
+  });
+
+  test("prefers captured object over stdout chunks", () => {
+    const obj = { id: 1 };
+    expect(parseOutput(obj, ["ignored"])).toBe(obj);
   });
 });
