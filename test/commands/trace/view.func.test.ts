@@ -312,18 +312,25 @@ describe("viewCommand.func", () => {
     expect(output).toContain("Filtered to project");
   });
 
-  test("throws ContextError for org-all target", async () => {
+  test("calls getDetailedTrace without project for org-scoped target", async () => {
+    getDetailedTraceSpy.mockResolvedValue(sampleSpans);
+
     const { context } = createMockContext();
     const func = await viewCommand.loader();
 
-    await expect(
-      func.call(
-        context,
-        { json: false, web: false, spans: 100 },
-        "my-org/",
-        "aaaa1111bbbb2222cccc3333dddd4444"
-      )
-    ).rejects.toThrow(ContextError);
+    await func.call(
+      context,
+      { json: false, web: false, spans: 100 },
+      "my-org/",
+      "aaaa1111bbbb2222cccc3333dddd4444"
+    );
+
+    expect(getDetailedTraceSpy).toHaveBeenCalledWith(
+      "my-org",
+      "aaaa1111bbbb2222cccc3333dddd4444",
+      expect.any(Number),
+      expect.objectContaining({ projectId: undefined })
+    );
   });
 
   test("throws ContextError when auto-detect cannot resolve a target", async () => {

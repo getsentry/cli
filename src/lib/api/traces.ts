@@ -270,10 +270,23 @@ export async function fetchMultiSpanDetails(
   const total = spans.length;
 
   await limit.map(spans, async (span) => {
+    const projectSlug = span.project_slug || fallbackProject;
+    // Without a project slug the detail URL would be malformed
+    // (/projects/{org}//trace-items/...). Skip rather than issue a
+    // request that is guaranteed to fail. Happens for org-scoped
+    // targets where neither the span nor the fallback has a project.
+    if (!projectSlug) {
+      log.debug(
+        `Skipping detail fetch for span ${span.span_id}: no project slug available`
+      );
+      completed += 1;
+      onProgress?.(completed, total);
+      return;
+    }
     try {
       const detail = await getSpanDetails(
         org,
-        span.project_slug || fallbackProject,
+        projectSlug,
         span.span_id,
         traceId
       );

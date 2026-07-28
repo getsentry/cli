@@ -44,7 +44,7 @@ import { buildTraceUrl } from "../../lib/sentry-urls.js";
 import { setOrgProjectContext } from "../../lib/telemetry.js";
 import {
   parseTraceTargetWithRecovery,
-  resolveTraceOrgProject,
+  resolveTraceOrgOptionalProject,
   warnIfNormalized,
 } from "../../lib/trace-target.js";
 import type { TraceSpan } from "../../types/index.js";
@@ -529,10 +529,17 @@ export const viewCommand = buildCommand({
         USAGE_HINT
       );
       warnIfNormalized(parsed, "trace.view");
-      const target = await resolveTraceOrgProject(parsed, cwd, USAGE_HINT);
+      const target = await resolveTraceOrgOptionalProject(
+        parsed,
+        cwd,
+        USAGE_HINT
+      );
       resolved = {
         ...target,
-        projectFilter: parsed.type === "explicit" ? target.project : undefined,
+        projectFilter:
+          parsed.type === "explicit"
+            ? (target as { project?: string }).project
+            : undefined,
       };
     }
     const { traceId, org, project, projectFilter } = resolved;
