@@ -8,8 +8,8 @@
  * the LLM judge with empirical results.
  *
  * Requires an eval provider credential: OPENROUTER_API_KEY (preferred) or
- * ANTHROPIC_API_KEY. OpenRouter is used when its key is set; model IDs are
- * namespaced (`anthropic/`) automatically.
+ * ANTHROPIC_API_KEY. OpenRouter is used when its key is set; default model IDs
+ * are OpenRouter slugs (e.g. `anthropic/claude-sonnet-4.6`).
  *
  * Usage:
  *   tsx script/eval-skill.ts
