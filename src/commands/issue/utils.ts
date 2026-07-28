@@ -93,8 +93,30 @@ export function buildCommandHint(
   if (issueId.startsWith("@")) {
     return `${base} ${command} <org>/${issueId}`;
   }
-  // Input already contains org/project context — show as-is to avoid double-prefixing
+  // Input already contains org/project context — show as-is to avoid double-prefixing,
+  // unless it's the bare `org/suffix` form (a single slash with a non-project
+  // suffix), in which case suggest the correct `org/<project>-suffix` format.
   if (issueId.includes("/")) {
+    const slashIdx = issueId.indexOf("/");
+    const org = issueId.slice(0, slashIdx);
+    const afterSlash = issueId.slice(slashIdx + 1);
+    // Only rewrite the genuine `org/suffix` case: a non-empty org, a single
+    // slash, and a bare suffix. Skip multi-segment paths (`org/project/id`),
+    // `#`-separated forms (`org/project#id`), `@` selectors (`org/@latest`),
+    // dashed short IDs (`org/cli-G`), and numeric IDs (`org/123`) — all of
+    // those are already fully specified or handled by other branches.
+    if (
+      org &&
+      afterSlash &&
+      !afterSlash.includes("/") &&
+      !afterSlash.includes("#") &&
+      !afterSlash.startsWith("@") &&
+      !afterSlash.includes("-") &&
+      !isAllDigits(afterSlash)
+    ) {
+      // Bare suffix after org — guide user to supply a project
+      return `${base} ${command} ${org}/<project>-${afterSlash}`;
+    }
     return `${base} ${command} ${issueId}`;
   }
   // Numeric IDs always need org context - can't be combined with project
