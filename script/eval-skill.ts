@@ -7,21 +7,25 @@
  * Commands are verified against the real CLI binary (via `-h`) to ground
  * the LLM judge with empirical results.
  *
- * Requires ANTHROPIC_API_KEY env var for Anthropic API access.
+ * Requires an eval provider credential: OPENROUTER_API_KEY (preferred) or
+ * ANTHROPIC_API_KEY. OpenRouter is used when its key is set; default model IDs
+ * are OpenRouter slugs (e.g. `anthropic/claude-sonnet-4.6`).
  *
  * Usage:
  *   tsx script/eval-skill.ts
- *   EVAL_AGENT_MODELS=claude-sonnet-4-6-20250627 tsx script/eval-skill.ts
+ *   EVAL_AGENT_MODELS=anthropic/claude-sonnet-4.6 tsx script/eval-skill.ts
  *
  * Environment variables:
- *   ANTHROPIC_API_KEY   - Anthropic API key (required)
- *   EVAL_AGENT_MODELS   - Comma-separated model IDs (default: sonnet-4-6, opus-4-6)
- *   EVAL_JUDGE_MODEL    - Judge model ID (default: haiku-4-5)
+ *   OPENROUTER_API_KEY  - OpenRouter API key (preferred)
+ *   ANTHROPIC_API_KEY   - Anthropic API key (fallback when no OpenRouter key)
+ *   EVAL_AGENT_MODELS   - Comma-separated model IDs (default: sonnet-4.6, opus-4.6)
+ *   EVAL_JUDGE_MODEL    - Judge model ID (default: haiku-4.5)
  *   EVAL_THRESHOLD      - Minimum pass rate 0-1 (default: 0.75)
  *   SENTRY_CLI_BINARY   - Path to pre-built binary (falls back to tsx src/bin.ts)
  */
 
 import { readFile } from "node:fs/promises";
+import { resolveEvalProvider } from "../test/eval-common/anthropic-client.js";
 import cases from "../test/skill-eval/cases.json";
 import { judgePlan } from "../test/skill-eval/helpers/judge.js";
 import { createClient } from "../test/skill-eval/helpers/llm-client.js";
@@ -90,14 +94,19 @@ async function evalModel(
 }
 
 async function main(): Promise<void> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.error("Error: ANTHROPIC_API_KEY is required for the skill eval.");
-    console.error("Set it via: export ANTHROPIC_API_KEY=<your-key>");
+  const provider = resolveEvalProvider();
+  if (!provider) {
+    console.error(
+      "Error: an eval provider credential is required for the skill eval."
+    );
+    console.error(
+      "Set OPENROUTER_API_KEY (preferred) or ANTHROPIC_API_KEY, e.g.:"
+    );
+    console.error("  export OPENROUTER_API_KEY=<your-key>");
     process.exit(1);
   }
 
-  const client = await createClient(apiKey);
+  const client = createClient(provider);
   const skillContent = await readFile(SKILL_PATH, "utf-8");
   const testCases = cases as unknown as TestCase[];
   const threshold = process.env.EVAL_THRESHOLD
@@ -107,6 +116,7 @@ async function main(): Promise<void> {
   console.log(
     `Skill eval: ${testCases.length} cases × ${client.agentModels.length} models`
   );
+  console.log(`Provider: ${provider.provider}`);
   console.log(`Agent models: ${client.agentModels.join(", ")}`);
   console.log(`Judge model: ${client.judgeModel}`);
   console.log(`Threshold: ${(threshold * 100).toFixed(0)}%`);

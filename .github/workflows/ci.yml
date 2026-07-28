@@ -770,8 +770,11 @@ jobs:
       - name: E2E Tests
         env:
           SENTRY_CLI_BINARY: ${{ github.workspace }}/dist-bin/sentry-linux-x64
-          # Pass API key only when skill files changed — the skill-eval e2e test
-          # auto-skips when the key is absent, so non-skill PRs aren't affected.
+          # Pass the eval provider key only when skill files changed — the
+          # skill-eval e2e test auto-skips when no key is present, so non-skill
+          # PRs aren't affected. OpenRouter is preferred; ANTHROPIC_API_KEY is
+          # kept as a fallback for direct-Anthropic runs.
+          OPENROUTER_API_KEY: ${{ needs.changes.outputs.skill == 'true' && secrets.OPENROUTER_API_KEY || '' }}
           ANTHROPIC_API_KEY: ${{ needs.changes.outputs.skill == 'true' && secrets.ANTHROPIC_API_KEY || '' }}
         run: pnpm run test:e2e
 

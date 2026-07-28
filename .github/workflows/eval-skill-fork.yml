@@ -66,6 +66,7 @@ jobs:
         id: eval
         run: pnpm run eval:skill
         env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         continue-on-error: true
 
