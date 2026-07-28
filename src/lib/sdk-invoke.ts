@@ -505,6 +505,16 @@ function executeWithStream<T>(
           )
         );
       } else {
+        // Drain any raw stdout the command wrote directly (via stdout.write)
+        // instead of yielding via captureObject — e.g. a binary Uint8Array
+        // body. Without this, those bytes accumulate in stdoutChunks and are
+        // dropped when the channel closes. No streaming-capable command emits
+        // binary today, but this keeps the streaming path faithful to the
+        // capture path (see parseOutput) if one ever does.
+        const trailing = parseOutput<T>(undefined, captureCtx.stdoutChunks);
+        if (trailing !== undefined) {
+          channel.push(trailing);
+        }
         channel.close();
       }
     } catch (thrown) {
