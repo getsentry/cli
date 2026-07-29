@@ -475,8 +475,8 @@ function formatIssueAlertListHuman(result: IssueAlertListResult): string {
     ...(isMultiProject && {
       project: `${target.org}/${target.project}`,
     }),
-    conditions: String(r.conditions.length),
-    actions: String(r.actions.length),
+    conditions: String(r.conditions?.length ?? 0),
+    actions: String(r.actions?.length ?? 0),
     environment: r.environment ?? "all",
     status:
       r.status === "active"
