@@ -64,4 +64,14 @@ sentry api organizations/ --dry-run
 
 When querying the Events API (`/events/` endpoint), valid dataset values are: `spans`, `transactions`, `logs`, `errors`, `discover`.
 
+### Binary responses
+
+Endpoints that return binary data — image attachments, minidumps, debug files — are streamed to stdout as raw bytes, so you can redirect them straight to a file:
+
+```bash
+sentry api "projects/my-org/my-project/events/EVENT_ID/attachments/ATTACHMENT_ID/?download=1" > screenshot.png
+```
+
+When the response is a PNG or JPEG image **and** you're on a sixel-capable terminal, the image is rendered inline instead of dumping raw bytes into your session. Redirecting or piping stdout always keeps the raw bytes. Set `SENTRY_NO_SIXEL=1` to disable inline rendering.
+
 For full API documentation, see the [Sentry API Reference](https://docs.sentry.io/api/).

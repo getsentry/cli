@@ -27,6 +27,7 @@ import {
   readReply,
   sixelBanner,
   sixelFits,
+  terminalPixelWidth,
 } from "../../src/lib/sixel.js";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
@@ -102,6 +103,19 @@ describe("sixelFits", () => {
     expect(sixelFits({ supported: false, cellWidth: 10 }, 200, 640)).toBe(
       false
     );
+  });
+});
+
+describe("terminalPixelWidth", () => {
+  afterEach(() => {
+    __resetSixelCache();
+  });
+
+  test("returns undefined when the terminal has no sixel caps (non-TTY test env)", () => {
+    // Under the test runner stdin/stdout are not TTYs, so the probe reports
+    // unsupported and there's no cell width to derive a pixel budget from.
+    __resetSixelCache();
+    expect(terminalPixelWidth(80)).toBeUndefined();
   });
 });
 
