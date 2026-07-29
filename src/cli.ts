@@ -12,6 +12,7 @@
 
 import { getEnv } from "./lib/env.js";
 import { CliError } from "./lib/errors.js";
+import { initTimezone } from "./lib/timezone.js";
 
 /**
  * Preload project context: walk up from `cwd` once, finding both the
@@ -686,6 +687,11 @@ export async function runCli(cliArgs: string[]): Promise<void> {
  */
 export async function startCli(): Promise<void> {
   const args = process.argv.slice(2);
+
+  // Repair the timezone before anything formats a Date. SEA binaries can fall
+  // back to UTC when they cannot resolve the OS zone, which made log
+  // timestamps (and all other Date output) appear in the wrong timezone.
+  initTimezone();
 
   // Completions are a fast-path (~1ms) — skip .sentryclirc I/O.
   if (args[0] === "__complete") {
