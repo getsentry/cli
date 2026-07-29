@@ -78,10 +78,28 @@ describe("fixedOffsetZone", () => {
 });
 
 describe("runtimeTimezone", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   test("returns a non-empty IANA-ish string", () => {
     const tz = runtimeTimezone();
     expect(typeof tz).toBe("string");
     expect(tz.length).toBeGreaterThan(0);
+  });
+
+  test("falls back to UTC when Intl resolves an empty zone", () => {
+    vi.spyOn(Intl, "DateTimeFormat").mockReturnValue({
+      resolvedOptions: () => ({ timeZone: "" }),
+    } as unknown as Intl.DateTimeFormat);
+    expect(runtimeTimezone()).toBe("UTC");
+  });
+
+  test("falls back to UTC when Intl throws", () => {
+    vi.spyOn(Intl, "DateTimeFormat").mockImplementation(() => {
+      throw new Error("ICU data missing");
+    });
+    expect(runtimeTimezone()).toBe("UTC");
   });
 });
 
