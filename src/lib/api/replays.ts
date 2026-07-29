@@ -4,6 +4,11 @@
  * Functions for listing and retrieving Session Replays.
  */
 
+import {
+  type ListProjectReplayRecordingSegmentsResponse,
+  listProjectReplayRecordingSegments,
+} from "@sentry/api";
+import { zListProjectReplayRecordingSegmentsResponse } from "@sentry/api/zod";
 import type { z } from "zod";
 import {
   REPLAY_LIST_FIELDS,
@@ -14,19 +19,20 @@ import {
   type ReplayListItem,
   type ReplayListResponse,
   ReplayListResponseSchema,
-  type ReplayRecordingSegments,
-  ReplayRecordingSegmentsSchema,
 } from "../../types/index.js";
 
+import { ApiError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 
 import {
   API_MAX_PER_PAGE,
   apiRequestToRegion,
   autoPaginate,
+  getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
   type PaginatedResponse,
   parseLinkHeader,
+  unwrapPaginatedResult,
 } from "./infrastructure.js";
 
 /** Replay sort field names supported by the backend replay index endpoint. */
@@ -106,12 +112,30 @@ type FetchReplayPageOptions = {
 };
 
 type FetchReplayRecordingSegmentsPageOptions = {
-  regionUrl: string;
   orgSlug: string;
   projectSlugOrId: string;
   replayId: string;
   cursor?: string;
 };
+
+/**
+ * Validate the generated replay recording response before formatter code trusts
+ * its object boundary. The SDK invokes response validators outside its normal
+ * error-result path, so convert Zod failures to the CLI's API error type here.
+ */
+async function validateReplayRecordingSegmentsResponse(
+  data: unknown
+): Promise<void> {
+  const result =
+    await zListProjectReplayRecordingSegmentsResponse.safeParseAsync(data);
+  if (!result.success) {
+    throw new ApiError(
+      "Unexpected replay recording segments response",
+      0,
+      result.error.message
+    );
+  }
+}
 
 /** Options for {@link getReplayRecordingSegments}. */
 export type GetReplayRecordingSegmentsOptions = {
@@ -236,8 +260,7 @@ export async function getReplay(
  * Fetch replay recording segments for a single replay.
  *
  * Uses the project-scoped replay endpoint because recording segments are
- * partitioned by project. `download=true` matches the frontend contract and
- * returns the parsed segment payload directly.
+ * partitioned by project.
  *
  * Uses a manual pagination loop rather than {@link autoPaginate} because
  * `autoPaginate` trims results to `limit`, but `expectedSegments` is a soft
@@ -248,15 +271,13 @@ export async function getReplayRecordingSegments(
   projectSlugOrId: string,
   replayId: string,
   options: GetReplayRecordingSegmentsOptions = {}
-): Promise<ReplayRecordingSegments> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
+): Promise<ListProjectReplayRecordingSegmentsResponse> {
   const expectedSegments = options.expectedSegments ?? Number.POSITIVE_INFINITY;
-  const segments: ReplayRecordingSegments = [];
+  const segments: ListProjectReplayRecordingSegmentsResponse = [];
   let cursor: string | undefined;
 
   for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
     const { data, nextCursor } = await fetchReplayRecordingSegmentsPage({
-      regionUrl,
       orgSlug,
       projectSlugOrId,
       replayId,
@@ -275,25 +296,32 @@ export async function getReplayRecordingSegments(
   return segments;
 }
 
+/**
+ * Fetch one SDK-backed recording page while preserving its cursor metadata.
+ */
 async function fetchReplayRecordingSegmentsPage(
   options: FetchReplayRecordingSegmentsPageOptions
-): Promise<PaginatedResponse<ReplayRecordingSegments>> {
-  const { cursor, orgSlug, projectSlugOrId, regionUrl, replayId } = options;
-  const { data, headers } = await apiRequestToRegion<ReplayRecordingSegments>(
-    regionUrl,
-    `/projects/${orgSlug}/${projectSlugOrId}/replays/${replayId}/recording-segments/`,
-    {
-      params: {
-        cursor,
-        download: true,
-        per_page: API_MAX_PER_PAGE,
-      },
-      schema: ReplayRecordingSegmentsSchema,
-    }
-  );
+): Promise<PaginatedResponse<ListProjectReplayRecordingSegmentsResponse>> {
+  const { cursor, orgSlug, projectSlugOrId, replayId } = options;
+  const config = await getOrgSdkConfig(orgSlug);
+  const result = await listProjectReplayRecordingSegments({
+    ...config,
+    path: {
+      organization_id_or_slug: orgSlug,
+      project_id_or_slug: projectSlugOrId,
+      replay_id: replayId,
+    },
+    query: {
+      cursor,
+      per_page: API_MAX_PER_PAGE,
+    },
+    responseValidator: validateReplayRecordingSegmentsResponse,
+  });
 
-  const { nextCursor } = parseLinkHeader(headers.get("link") ?? null);
-  return { data, nextCursor };
+  return unwrapPaginatedResult<ListProjectReplayRecordingSegmentsResponse>(
+    result,
+    "Failed to fetch replay recording segments"
+  );
 }
 
 /**

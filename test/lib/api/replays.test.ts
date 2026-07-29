@@ -13,6 +13,7 @@ import {
 import { DEFAULT_SENTRY_URL } from "../../../src/lib/constants.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
+import { ApiError } from "../../../src/lib/errors.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 useTestConfigDir("replays-api-test-");
@@ -275,9 +276,19 @@ describe("getReplayRecordingSegments", () => {
     expect(url.pathname).toContain(
       `/api/0/projects/test-org/42/replays/${REPLAY_ID}/recording-segments/`
     );
-    expect(url.searchParams.get("download")).toBe("true");
+    expect(url.searchParams.get("download")).toBeNull();
     expect(url.searchParams.get("per_page")).toBe("100");
     expect(segments).toEqual([[{ timestamp: 1 }]]);
+  });
+
+  test("rejects non-object recording events at the API boundary", async () => {
+    globalThis.fetch = mockFetch(async () =>
+      recordingSegmentsResponse([[null]])
+    );
+
+    await expect(
+      getReplayRecordingSegments("test-org", "42", REPLAY_ID)
+    ).rejects.toBeInstanceOf(ApiError);
   });
 
   test("auto-paginates recording segments using the link cursor", async () => {
