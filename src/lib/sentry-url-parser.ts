@@ -66,9 +66,9 @@ function matchOrganizationsPath(
     return { baseUrl, org, issueId: segments[3], eventId };
   }
 
-  // /organizations/{org}/traces/{traceId}/
-  if (segments[2] === "traces" && segments[3]) {
-    return { baseUrl, org, traceId: segments[3] };
+  const tracePath = matchTracePath(segments, 2);
+  if (tracePath.status === "detail") {
+    return { baseUrl, org, traceId: tracePath.traceId };
   }
 
   const replayPath = matchReplayPath(segments, 2);
@@ -125,9 +125,9 @@ function matchSubdomainPath(
       segments[2] === "events" && segments[3] ? segments[3] : undefined;
     return { issueId: segments[1], eventId };
   }
-  // /traces/{traceId}/
-  if (segments[0] === "traces" && segments[1]) {
-    return { traceId: segments[1] };
+  const tracePath = matchTracePath(segments, 0);
+  if (tracePath.status === "detail") {
+    return { traceId: tracePath.traceId };
   }
 
   const replayPath = matchReplayPath(segments, 0);
@@ -163,6 +163,38 @@ function matchSubdomainTailPath(
     return {};
   }
   return null;
+}
+
+/**
+ * Match a trace path, canonical or legacy.
+ *
+ * The trace detail view is mounted at `trace/:traceSlug/` under both `traces/`
+ * and `explore/traces/`, so the `trace/` segment is what distinguishes a detail
+ * URL from the traces list. Legacy `traces/{id}/` (no `trace/` segment) is still
+ * accepted so previously-copied links keep resolving.
+ */
+function matchTracePath(
+  segments: string[],
+  startIndex: number
+): { status: "absent" | "list" } | { status: "detail"; traceId: string } {
+  let index = startIndex;
+  if (segments[index] === "explore") {
+    index += 1;
+  }
+  if (segments[index] !== "traces") {
+    return { status: "absent" };
+  }
+  index += 1;
+  if (segments[index] === "trace") {
+    index += 1;
+  }
+
+  const traceId = segments[index];
+  if (!traceId) {
+    return { status: "list" };
+  }
+
+  return { status: "detail", traceId };
 }
 
 function matchReplayPath(

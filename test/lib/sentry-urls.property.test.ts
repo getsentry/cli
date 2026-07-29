@@ -428,11 +428,11 @@ describe("buildLogsUrl properties", () => {
 });
 
 describe("buildTraceUrl properties", () => {
-  test("output contains /traces/ path with trace ID", async () => {
+  test("output contains /explore/traces/trace/ path with trace ID", async () => {
     await fcAssert(
       property(tuple(slugArb, traceIdArb), ([orgSlug, traceId]) => {
         const result = buildTraceUrl(orgSlug, traceId);
-        expect(result).toContain(`/traces/${traceId}/`);
+        expect(result).toContain(`/explore/traces/trace/${traceId}/`);
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -462,7 +462,9 @@ describe("buildTraceUrl properties", () => {
     await fcAssert(
       property(tuple(slugArb, traceIdArb), ([orgSlug, traceId]) => {
         const result = buildTraceUrl(orgSlug, traceId);
-        expect(result).toBe(`${getOrgBaseUrl(orgSlug)}/traces/${traceId}/`);
+        expect(result).toBe(
+          `${getOrgBaseUrl(orgSlug)}/explore/traces/trace/${traceId}/`
+        );
       }),
       { numRuns: DEFAULT_NUM_RUNS }
     );
@@ -584,7 +586,7 @@ describe("self-hosted URLs", () => {
 
   test("buildTraceUrl uses path-based pattern", () => {
     expect(buildTraceUrl("my-org", "abc123def456abc123def456abc123de")).toBe(
-      `${SELF_HOSTED_URL}/organizations/my-org/traces/abc123def456abc123def456abc123de/`
+      `${SELF_HOSTED_URL}/organizations/my-org/explore/traces/trace/abc123def456abc123def456abc123de/`
     );
   });
 

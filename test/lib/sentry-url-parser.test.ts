@@ -162,6 +162,28 @@ describe("parseSentryUrl", () => {
   });
 
   describe("trace URLs", () => {
+    test("/organizations/{org}/explore/traces/trace/{traceId}/", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/explore/traces/trace/a4d1aae7216b47ff8117cf4e09ce9d0a/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+        traceId: "a4d1aae7216b47ff8117cf4e09ce9d0a",
+      });
+    });
+
+    test("org-domain /explore/traces/trace/{traceId}/", () => {
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/explore/traces/trace/a4d1aae7216b47ff8117cf4e09ce9d0a/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+        traceId: "a4d1aae7216b47ff8117cf4e09ce9d0a",
+      });
+    });
+
     test("/organizations/{org}/traces/{traceId}/", () => {
       const result = parseSentryUrl(
         "https://sentry.io/organizations/my-org/traces/a4d1aae7216b47ff8117cf4e09ce9d0a/"
