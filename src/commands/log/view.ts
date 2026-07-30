@@ -39,6 +39,7 @@ import {
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import {
+  resolveLogProjectId,
   resolveOrgAndProject,
   resolveProjectBySlug,
 } from "../../lib/resolve-target.js";
@@ -512,13 +513,16 @@ export const viewCommand = buildCommand({
       return;
     }
 
+    // Resolve the project slug to its numeric ID so the Events request scopes
+    // via the `project` param. The `project:<slug>` filter only matches
+    // actively-selected projects and can otherwise return no logs (#1317).
+    const projectId = await resolveLogProjectId(target.org, target.project);
+
     // Fetch all requested log entries
-    const logs = await getLogs(
-      target.org,
-      target.project,
-      logIds,
-      flags.fields
-    );
+    const logs = await getLogs(target.org, target.project, logIds, {
+      extraFields: flags.fields,
+      projectId,
+    });
 
     if (logs.length === 0) {
       throwNotFoundError(logIds, target.org, target.project);

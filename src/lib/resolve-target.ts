@@ -951,6 +951,44 @@ export async function fetchProjectId(
 }
 
 /**
+ * Resolve a project slug to its numeric ID for log queries, tolerating failures.
+ *
+ * Log listing and lookup scope by the `project` query param instead of the
+ * `project:<slug>` search filter, which only matches projects that are actively
+ * selected in the org (see #1317). This helper resolves the slug so callers can
+ * pass a numeric ID.
+ *
+ * Behaviour:
+ * - Numeric slug → returned as-is (already an ID).
+ * - Slug that resolves → its numeric ID.
+ * - Transient resolution failure → `undefined`, so the caller falls back to
+ *   slug-based query scoping rather than failing the command.
+ *
+ * A 404 (project genuinely not found) still throws from {@link fetchProjectId};
+ * that is a user-actionable error, not a transient failure to swallow.
+ */
+export async function resolveLogProjectId(
+  org: string,
+  project: string
+): Promise<number | undefined> {
+  if (isAllDigits(project)) {
+    return Number(project);
+  }
+  try {
+    return await fetchProjectId(org, project);
+  } catch (error) {
+    if (error instanceof ResolutionError) {
+      throw error;
+    }
+    log.debug(
+      `Failed to resolve project ID for '${org}/${project}'; falling back to slug scoping`,
+      error
+    );
+    return;
+  }
+}
+
+/**
  * Maximum concurrent DSN resolution API calls.
  * Prevents overwhelming the Sentry API with parallel requests when
  * many DSNs are detected (e.g., monorepos or repos with test fixtures).

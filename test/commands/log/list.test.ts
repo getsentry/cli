@@ -349,6 +349,7 @@ describe("listCommand.func — standard mode", () => {
   beforeEach(() => {
     listLogsSpy = vi.spyOn(apiClient, "listLogs");
     resolveOrgProjectSpy = vi.spyOn(resolveTarget, "resolveOrgProjectFromArg");
+    vi.spyOn(resolveTarget, "resolveLogProjectId").mockResolvedValue(undefined);
     withProgressSpy = vi
       .spyOn(polling, "withProgress")
       .mockImplementation(mockWithProgress);
@@ -1032,6 +1033,7 @@ describe("listCommand.func — follow mode (standard)", () => {
     sigint = interceptSigint();
     listLogsSpy = vi.spyOn(apiClient, "listLogs");
     resolveOrgProjectSpy = vi.spyOn(resolveTarget, "resolveOrgProjectFromArg");
+    vi.spyOn(resolveTarget, "resolveLogProjectId").mockResolvedValue(undefined);
     isPlainSpy = vi.spyOn(formatters, "isPlainOutput").mockReturnValue(true);
     updateNotifSpy = vi
       .spyOn(versionCheck, "getUpdateNotification")
