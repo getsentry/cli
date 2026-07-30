@@ -168,25 +168,38 @@ function matchSubdomainTailPath(
 /**
  * Match a trace path, canonical or legacy.
  *
- * The trace detail view is mounted at `trace/:traceSlug/` under both `traces/`
- * and `explore/traces/`, so the `trace/` segment is what distinguishes a detail
- * URL from the traces list. Legacy `traces/{id}/` (no `trace/` segment) is still
- * accepted so previously-copied links keep resolving.
+ * The trace detail view is mounted at `trace/:traceSlug/`. Canonical URLs are
+ * `explore/traces/trace/{id}/`; the `trace/` segment is what distinguishes a
+ * detail URL from the traces list. Legacy `traces/{id}/` (no `explore/` prefix,
+ * no `trace/` segment) is still accepted so previously-copied links keep
+ * resolving.
+ *
+ * The `trace/` segment is only optional in the legacy non-`explore/` form.
+ * Under the `explore/` prefix the `trace/` segment is required — otherwise a
+ * URL like `explore/traces/{something}/` (e.g. a future sub-route) would be
+ * misread as a trace detail with a bogus ID.
  */
 function matchTracePath(
   segments: string[],
   startIndex: number
 ): { status: "absent" | "list" } | { status: "detail"; traceId: string } {
   let index = startIndex;
-  if (segments[index] === "explore") {
+  const hasExplorePrefix = segments[index] === "explore";
+  if (hasExplorePrefix) {
     index += 1;
   }
   if (segments[index] !== "traces") {
     return { status: "absent" };
   }
   index += 1;
-  if (segments[index] === "trace") {
+
+  const hasTraceSegment = segments[index] === "trace";
+  if (hasTraceSegment) {
     index += 1;
+  } else if (hasExplorePrefix) {
+    // `explore/traces/` without the `trace/` segment is the list route (or an
+    // unrelated sub-route), never a detail — don't treat the next segment as an ID.
+    return { status: "list" };
   }
 
   const traceId = segments[index];

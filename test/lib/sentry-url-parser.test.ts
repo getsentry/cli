@@ -205,6 +205,26 @@ describe("parseSentryUrl", () => {
         traceId: "00112233445566778899aabbccddeeff",
       });
     });
+
+    test("explore/traces without the trace segment is not a detail", () => {
+      // `explore/traces/{slug}/` (no `trace/` segment) is the list route or an
+      // unrelated sub-route — the slug must not be captured as a trace ID. The
+      // subdomain matcher has no fallback for this shape, so it does not match.
+      const result = parseSentryUrl(
+        "https://my-org.sentry.io/explore/traces/some-subroute/"
+      );
+      expect(result).toBeNull();
+    });
+
+    test("organizations explore/traces without trace segment is org-only", () => {
+      const result = parseSentryUrl(
+        "https://sentry.io/organizations/my-org/explore/traces/some-subroute/"
+      );
+      expect(result).toEqual({
+        baseUrl: "https://sentry.io",
+        org: "my-org",
+      });
+    });
   });
 
   describe("replay URLs", () => {
