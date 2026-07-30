@@ -66,9 +66,9 @@ function matchOrganizationsPath(
     return { baseUrl, org, issueId: segments[3], eventId };
   }
 
-  // /organizations/{org}/traces/{traceId}/
-  if (segments[2] === "traces" && segments[3]) {
-    return { baseUrl, org, traceId: segments[3] };
+  const tracePath = matchTracePath(segments, 2);
+  if (tracePath.status === "detail") {
+    return { baseUrl, org, traceId: tracePath.traceId };
   }
 
   const replayPath = matchReplayPath(segments, 2);
@@ -125,9 +125,14 @@ function matchSubdomainPath(
       segments[2] === "events" && segments[3] ? segments[3] : undefined;
     return { issueId: segments[1], eventId };
   }
-  // /traces/{traceId}/
-  if (segments[0] === "traces" && segments[1]) {
-    return { traceId: segments[1] };
+  const tracePath = matchTracePath(segments, 0);
+  if (tracePath.status === "detail") {
+    return { traceId: tracePath.traceId };
+  }
+  if (tracePath.status === "list") {
+    // A bare trace list URL (e.g. `/explore/traces/`) resolves to the org,
+    // matching the replay-list behavior below.
+    return {};
   }
 
   const replayPath = matchReplayPath(segments, 0);
@@ -163,6 +168,51 @@ function matchSubdomainTailPath(
     return {};
   }
   return null;
+}
+
+/**
+ * Match a trace path, canonical or legacy.
+ *
+ * The trace detail view is mounted at `trace/:traceSlug/`. Canonical URLs are
+ * `explore/traces/trace/{id}/`; the `trace/` segment is what distinguishes a
+ * detail URL from the traces list. Legacy `traces/{id}/` (no `explore/` prefix,
+ * no `trace/` segment) is still accepted so previously-copied links keep
+ * resolving.
+ *
+ * The `trace/` segment is only optional in the legacy non-`explore/` form.
+ * Under the `explore/` prefix the `trace/` segment is required — otherwise a
+ * URL like `explore/traces/{something}/` (e.g. a future sub-route) would be
+ * misread as a trace detail with a bogus ID.
+ */
+function matchTracePath(
+  segments: string[],
+  startIndex: number
+): { status: "absent" | "list" } | { status: "detail"; traceId: string } {
+  let index = startIndex;
+  const hasExplorePrefix = segments[index] === "explore";
+  if (hasExplorePrefix) {
+    index += 1;
+  }
+  if (segments[index] !== "traces") {
+    return { status: "absent" };
+  }
+  index += 1;
+
+  const hasTraceSegment = segments[index] === "trace";
+  if (hasTraceSegment) {
+    index += 1;
+  } else if (hasExplorePrefix) {
+    // `explore/traces/` without the `trace/` segment is the list route (or an
+    // unrelated sub-route), never a detail — don't treat the next segment as an ID.
+    return { status: "list" };
+  }
+
+  const traceId = segments[index];
+  if (!traceId) {
+    return { status: "list" };
+  }
+
+  return { status: "detail", traceId };
 }
 
 function matchReplayPath(
@@ -256,7 +306,8 @@ function matchSharePath(
  * - `/organizations/{org}/issues/{id}/`
  * - `/organizations/{org}/issues/{id}/events/{eventId}/`
  * - `/settings/{org}/projects/{project}/`
- * - `/organizations/{org}/traces/{traceId}/`
+ * - `/organizations/{org}/explore/traces/trace/{traceId}/` (canonical)
+ * - `/organizations/{org}/traces/{traceId}/` (legacy)
  * - `/organizations/{org}/explore/replays/{replayId}/`
  * - `/organizations/{org}/replays/{replayId}/`
  * - `/organizations/{org}/dashboard/{id}/`
@@ -265,7 +316,8 @@ function matchSharePath(
  *
  * Also recognizes SaaS subdomain-style URLs:
  * - `https://{org}.sentry.io/issues/{id}/`
- * - `https://{org}.sentry.io/traces/{traceId}/`
+ * - `https://{org}.sentry.io/explore/traces/trace/{traceId}/` (canonical)
+ * - `https://{org}.sentry.io/traces/{traceId}/` (legacy)
  * - `https://{org}.sentry.io/explore/replays/{replayId}/`
  * - `https://{org}.sentry.io/replays/{replayId}/`
  * - `https://{org}.sentry.io/issues/{id}/events/{eventId}/`

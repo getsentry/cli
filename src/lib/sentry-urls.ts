@@ -321,9 +321,9 @@ export function buildDashboardUrl(
  */
 export function buildTraceUrl(orgSlug: string, traceId: string): string {
   if (isSaaS()) {
-    return `${getOrgBaseUrl(orgSlug)}/traces/${traceId}/`;
+    return `${getOrgBaseUrl(orgSlug)}/explore/traces/trace/${traceId}/`;
   }
-  return `${getSentryBaseUrl()}/organizations/${orgSlug}/traces/${traceId}/`;
+  return `${getSentryBaseUrl()}/organizations/${orgSlug}/explore/traces/trace/${traceId}/`;
 }
 
 // Alert URLs
