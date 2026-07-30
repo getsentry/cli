@@ -129,6 +129,11 @@ function matchSubdomainPath(
   if (tracePath.status === "detail") {
     return { traceId: tracePath.traceId };
   }
+  if (tracePath.status === "list") {
+    // A bare trace list URL (e.g. `/explore/traces/`) resolves to the org,
+    // matching the replay-list behavior below.
+    return {};
+  }
 
   const replayPath = matchReplayPath(segments, 0);
   if (replayPath.status === "detail") {

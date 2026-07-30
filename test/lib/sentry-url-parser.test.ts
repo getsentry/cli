@@ -208,12 +208,23 @@ describe("parseSentryUrl", () => {
 
     test("explore/traces without the trace segment is not a detail", () => {
       // `explore/traces/{slug}/` (no `trace/` segment) is the list route or an
-      // unrelated sub-route — the slug must not be captured as a trace ID. The
-      // subdomain matcher has no fallback for this shape, so it does not match.
+      // unrelated sub-route — the slug must not be captured as a trace ID. It
+      // resolves to the org (like the replay list), not a trace detail.
       const result = parseSentryUrl(
         "https://my-org.sentry.io/explore/traces/some-subroute/"
       );
-      expect(result).toBeNull();
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+      });
+    });
+
+    test("subdomain trace list resolves to the org", () => {
+      const result = parseSentryUrl("https://my-org.sentry.io/explore/traces/");
+      expect(result).toEqual({
+        baseUrl: "https://my-org.sentry.io",
+        org: "my-org",
+      });
     });
 
     test("organizations explore/traces without trace segment is org-only", () => {
