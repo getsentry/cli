@@ -31,13 +31,13 @@ Log out of Sentry
 
 ### `sentry auth refresh`
 
-Refresh your authentication token
+Refresh your OAuth access token
 
 **Options:**
 
 | Option | Description |
 | --- | --- |
-| `--force` | Force refresh even if token is still valid |
+| `--force` | Force refresh even if the access token is still valid |
 | `--read-only` | Re-authenticate with read-only OAuth scopes (project:read, org:read, event:read, member:read, team:read) |
 | `-s, --scope <scope>...` | Re-authenticate with specific OAuth scopes (repeatable, comma-separated). E.g. --scope project:read --scope org:read |
 
@@ -81,7 +81,8 @@ sentry auth login
 2. Open the URL in your browser
 3. Enter the code when prompted
 4. Authorize the application
-5. The CLI automatically receives your token
+5. The CLI stores the OAuth credentials and, when the server provides a refresh
+   token, automatically refreshes the access token
 
 ### Token login
 
@@ -113,7 +114,7 @@ sentry auth logout
 ```
 
 
-### Refresh token
+### Refresh the OAuth access token
 
 ```bash
 sentry auth refresh
@@ -135,9 +136,10 @@ sentry auth status
 
 
 ```plaintext
-Authenticated as: username
-Organization: my-org
-Token expires: 2024-12-31
+✓ Authenticated
+User: username
+Access token expires: in 4 weeks
+Automatic refresh: enabled
 ```
 
 
@@ -153,17 +155,19 @@ sentry auth whoami
 
 ## Credential Storage
 
-Auth tokens are stored in a SQLite database at `~/.sentry/cli.db` with restricted file permissions.
+Auth tokens are stored in the Sentry CLI configuration directory (`~/.sentry/` by default, overridable with `SENTRY_CONFIG_DIR`) with restricted file permissions.
+
+OAuth access tokens expire. When the server provides a refresh token, the CLI stores it and refreshes the access token automatically. Persist the configuration directory across runs to keep automatic refresh working. For ephemeral CI jobs or sandboxes that cannot persist stored credentials, provide an API token with `sentry auth login --token` or `SENTRY_AUTH_TOKEN`.
 
 ## Token Precedence
 
 By default, the CLI checks for auth tokens in the following order:
 
-1. The stored OAuth token in the SQLite database (from `sentry auth login`)
+1. The stored credential from `sentry auth login`
 2. `SENTRY_AUTH_TOKEN` environment variable
 3. `SENTRY_TOKEN` environment variable (legacy alias)
 
-The stored OAuth token takes priority because it supports automatic refresh. To override this and force environment tokens to win, set `SENTRY_FORCE_ENV_TOKEN=1`.
+The stored credential takes priority. Stored OAuth credentials support automatic refresh; manually provided API tokens do not use a refresh token. To override this precedence and force environment tokens to win, set `SENTRY_FORCE_ENV_TOKEN=1`.
 
 When a token comes from an environment variable, the CLI skips expiry checks and automatic refresh.
 

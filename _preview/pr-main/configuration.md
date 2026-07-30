@@ -182,7 +182,7 @@ export SENTRY_PLAIN_OUTPUT=1
 
 ### `SENTRY_NO_SIXEL`
 
-Disable the sixel image banner on terminals that support it; the block-art banner is shown instead.
+Disable sixel graphics on terminals that support it; the banner falls back to block art, and image attachments printed by `sentry api` are written as raw bytes instead of rendered inline.
 
 ```bash
 export SENTRY_NO_SIXEL=1

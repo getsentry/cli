@@ -98,7 +98,11 @@ The easiest way to authenticate is via OAuth device flow:
 sentry auth login
 ```
 
-You'll be given a URL and a code to enter. Once you authorize the application in your browser, the CLI will automatically receive your token.
+You'll be given a URL and a code to enter. Once you authorize the application
+in your browser, the CLI stores the OAuth credentials. When the server provides
+a refresh token, the CLI refreshes the access token automatically. Persist the
+Sentry CLI configuration directory (`~/.sentry/` by default, overridable with
+`SENTRY_CONFIG_DIR`) across runs to keep automatic refresh working.
 
 ### API Token
 
@@ -109,6 +113,9 @@ sentry auth login --token YOUR_SENTRY_API_TOKEN
 ```
 
 You can create API tokens in your [Sentry account settings](https://sentry.io/settings/account/api/auth-tokens/).
+
+API tokens are also useful for ephemeral CI jobs and sandboxes that cannot
+persist the CLI configuration directory.
 
 ### Check Auth Status
 
