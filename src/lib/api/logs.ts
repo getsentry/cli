@@ -39,6 +39,24 @@ function toApiSort(sort: LogSortDirection | undefined): string {
   return sort === "oldest" ? "timestamp" : "-timestamp";
 }
 
+/**
+ * Resolve the numeric project ID to send via the `project` query param.
+ *
+ * Prefers an explicit `projectId` from the caller; otherwise falls back to the
+ * slug when it is itself all-digits (a numeric project ID passed as the slug).
+ * Returns `undefined` when neither yields a numeric ID, signalling that the
+ * caller should scope via `project:<slug>` search syntax instead.
+ */
+function resolveNumericProjectId(
+  projectSlug: string,
+  projectId: number | undefined
+): number | undefined {
+  if (projectId !== undefined) {
+    return projectId;
+  }
+  return isAllDigits(projectSlug) ? Number(projectSlug) : undefined;
+}
+
 /** Fields to request from the logs API */
 const LOG_FIELDS = [
   "sentry.item_id",
@@ -116,6 +134,16 @@ type ListLogsOptions = {
    * Used by `--fields` to surface custom structured log attributes.
    */
   extraFields?: string[];
+  /**
+   * Numeric project ID. When provided, the request scopes to the project via
+   * the `project` query param instead of `project:<slug>` search syntax.
+   *
+   * The `project:<slug>` filter only matches when that project is actively
+   * selected in the org, so a plain slug can return empty `data: []` even when
+   * the project has logs. Passing the numeric ID selects the project directly
+   * and avoids that gap. Mirrors {@link listIssuesPaginated}.
+   */
+  projectId?: number;
 };
 
 /**
@@ -132,9 +160,16 @@ export async function listLogs(
   projectSlug: string,
   options: ListLogsOptions = {}
 ): Promise<SentryLog[]> {
-  const isNumericProject = isAllDigits(projectSlug);
+  const numericProjectId = resolveNumericProjectId(
+    projectSlug,
+    options.projectId
+  );
 
-  const projectFilter = isNumericProject ? "" : `project:${projectSlug}`;
+  // Only fall back to `project:<slug>` search scoping when we have no numeric
+  // ID — that filter requires the project to be actively selected, otherwise
+  // the API returns empty results even when the project has logs.
+  const projectFilter =
+    numericProjectId === undefined ? `project:${projectSlug}` : "";
   const timestampFilter = options.afterTimestamp
     ? `timestamp_precise:>${options.afterTimestamp}`
     : "";
@@ -159,7 +194,7 @@ export async function listLogs(
     query: {
       dataset: "logs",
       field: fields,
-      project: isNumericProject ? [Number(projectSlug)] : undefined,
+      project: numericProjectId === undefined ? undefined : [numericProjectId],
       query: fullQuery || undefined,
       per_page: options.limit || API_MAX_PER_PAGE,
       statsPeriod:
@@ -210,15 +245,23 @@ const DETAILED_LOG_FIELDS = [
 type GetLogsBatchOptions = {
   config: Awaited<ReturnType<typeof getOrgSdkConfig>>;
   extraFields?: string[];
+  /** Numeric project ID for direct project selection. @see {@link ListLogsOptions.projectId} */
+  projectId?: number;
 };
 
 async function getLogsBatch(
   orgSlug: string,
   projectSlug: string,
   batchIds: string[],
-  { config, extraFields }: GetLogsBatchOptions
+  { config, extraFields, projectId }: GetLogsBatchOptions
 ): Promise<DetailedSentryLog[]> {
-  const query = `project:${projectSlug} sentry.item_id:[${batchIds.join(",")}]`;
+  const numericProjectId = resolveNumericProjectId(projectSlug, projectId);
+
+  // Scope by numeric ID when available; otherwise fall back to the
+  // `project:<slug>` filter (which only matches actively-selected projects).
+  const projectFilter =
+    numericProjectId === undefined ? `project:${projectSlug} ` : "";
+  const query = `${projectFilter}sentry.item_id:[${batchIds.join(",")}]`;
 
   const fields = extraFields?.length
     ? [
@@ -233,6 +276,7 @@ async function getLogsBatch(
     query: {
       dataset: "logs",
       field: fields,
+      project: numericProjectId === undefined ? undefined : [numericProjectId],
       query,
       per_page: batchIds.length,
       statsPeriod: LOG_RETENTION_PERIOD,
@@ -248,6 +292,17 @@ async function getLogsBatch(
   return logsResponse.data;
 }
 
+/** Options for {@link getLogs}. */
+type GetLogsOptions = {
+  /** Additional fields to request beyond {@link DETAILED_LOG_FIELDS}. */
+  extraFields?: string[];
+  /**
+   * Numeric project ID for direct project selection via the `project` query
+   * param. @see {@link ListLogsOptions.projectId}
+   */
+  projectId?: number;
+};
+
 /**
  * Get one or more log entries by their item IDs.
  * Uses the Explore/Events API with dataset=logs and a filter query.
@@ -259,19 +314,22 @@ async function getLogsBatch(
  * @param orgSlug - Organization slug
  * @param projectSlug - Project slug for filtering
  * @param logIds - One or more sentry.item_id values to fetch
+ * @param options - Optional extra fields and numeric project ID
  * @returns Array of matching detailed log entries (may be shorter than logIds if some weren't found)
  */
 export async function getLogs(
   orgSlug: string,
   projectSlug: string,
   logIds: string[],
-  extraFields?: string[]
+  options: GetLogsOptions = {}
 ): Promise<DetailedSentryLog[]> {
+  const { extraFields, projectId } = options;
   const config = await getOrgSdkConfig(orgSlug);
+  const batchOptions: GetLogsBatchOptions = { config, extraFields, projectId };
 
   // Single batch — no splitting needed
   if (logIds.length <= API_MAX_PER_PAGE) {
-    return getLogsBatch(orgSlug, projectSlug, logIds, { config, extraFields });
+    return getLogsBatch(orgSlug, projectSlug, logIds, batchOptions);
   }
 
   // Split into batches of API_MAX_PER_PAGE and fetch in parallel
@@ -282,7 +340,7 @@ export async function getLogs(
 
   const results = await Promise.all(
     batches.map((batch) =>
-      getLogsBatch(orgSlug, projectSlug, batch, { config, extraFields })
+      getLogsBatch(orgSlug, projectSlug, batch, batchOptions)
     )
   );
 

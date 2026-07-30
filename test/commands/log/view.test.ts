@@ -115,6 +115,8 @@ import {
   ResolutionError,
   ValidationError,
 } from "../../../src/lib/errors.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as resolveTarget from "../../../src/lib/resolve-target.js";
 import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
 import type { DetailedSentryLog } from "../../../src/types/index.js";
 
@@ -511,6 +513,7 @@ describe("viewCommand.func", () => {
   beforeEach(async () => {
     getLogsSpy = vi.spyOn(apiClient, "getLogs");
     findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
+    vi.spyOn(resolveTarget, "resolveLogProjectId").mockResolvedValue(undefined);
     openInBrowserSpy = vi.spyOn(browser, "openInBrowser");
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });

@@ -109,6 +109,7 @@ describe("viewCommand.func", () => {
     });
     resolveOrgAndProjectSpy = vi.spyOn(resolveTarget, "resolveOrgAndProject");
     resolveProjectBySlugSpy = vi.spyOn(resolveTarget, "resolveProjectBySlug");
+    vi.spyOn(resolveTarget, "resolveLogProjectId").mockResolvedValue(1234);
     openInBrowserSpy = vi.spyOn(browser, "openInBrowser");
   });
 
@@ -229,12 +230,10 @@ describe("viewCommand.func", () => {
       );
 
       // getLogs should have been called with both IDs
-      expect(getLogsSpy).toHaveBeenCalledWith(
-        "my-org",
-        "proj",
-        [ID1, ID2],
-        undefined
-      );
+      expect(getLogsSpy).toHaveBeenCalledWith("my-org", "proj", [ID1, ID2], {
+        extraFields: undefined,
+        projectId: 1234,
+      });
 
       const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
       const parsed = JSON.parse(output);
@@ -340,7 +339,7 @@ describe("viewCommand.func", () => {
         "resolved-org",
         "resolved-proj",
         [ID1],
-        undefined
+        { extraFields: undefined, projectId: 1234 }
       );
     });
 
@@ -375,7 +374,7 @@ describe("viewCommand.func", () => {
         "detected-org",
         "detected-proj",
         [ID1],
-        undefined
+        { extraFields: undefined, projectId: 1234 }
       );
 
       // Human output should include the detected-from hint

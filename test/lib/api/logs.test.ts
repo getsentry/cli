@@ -41,6 +41,30 @@ function mockOk(body: unknown) {
   );
 }
 
+/**
+ * Mock fetch that captures the request URL of the last call and returns the
+ * given body. Lets tests assert how a project was scoped (query vs. param).
+ */
+function captureRequest(body: unknown): { url: () => string } {
+  let lastUrl = "";
+  globalThis.fetch = mockFetch(async (input: RequestInfo | URL) => {
+    if (typeof input === "string") {
+      lastUrl = input;
+    } else if (input instanceof URL) {
+      lastUrl = input.toString();
+    } else {
+      lastUrl = input.url;
+    }
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  return { url: () => lastUrl };
+}
+
+const EMPTY_LOGS = { data: [], meta: { fields: {} } };
+
 describe("listLogs", () => {
   test("returns logs when API returns a valid response", async () => {
     mockOk({
@@ -112,6 +136,38 @@ describe("listLogs", () => {
       );
     }
   });
+
+  test("scopes via the project param when projectId is provided (#1317)", async () => {
+    const captured = captureRequest(EMPTY_LOGS);
+
+    await listLogs("test-org", "my-project", { projectId: 4242 });
+
+    const url = captured.url();
+    // Numeric ID goes to the `project` query param, not the search query.
+    expect(url).toContain("project=4242");
+    expect(url).not.toContain("project%3Amy-project");
+  });
+
+  test("falls back to project:<slug> query when no projectId is available", async () => {
+    const captured = captureRequest(EMPTY_LOGS);
+
+    await listLogs("test-org", "my-project");
+
+    const url = captured.url();
+    // Without an ID, scope via search syntax (`project:my-project`).
+    expect(url).toContain("project%3Amy-project");
+    expect(url).not.toMatch(/[?&]project=/);
+  });
+
+  test("treats an all-digits slug as a numeric project ID", async () => {
+    const captured = captureRequest(EMPTY_LOGS);
+
+    await listLogs("test-org", "12345");
+
+    const url = captured.url();
+    expect(url).toContain("project=12345");
+    expect(url).not.toContain("project%3A12345");
+  });
 });
 
 describe("getLogs", () => {
@@ -163,5 +219,25 @@ describe("getLogs", () => {
       expect(apiError.detail).toContain("received string");
       expect(apiError.detail).toContain("self-hosted");
     }
+  });
+
+  test("scopes via the project param when projectId is provided (#1317)", async () => {
+    const captured = captureRequest(EMPTY_LOGS);
+
+    await getLogs("test-org", "my-project", ["log-001"], { projectId: 4242 });
+
+    const url = captured.url();
+    expect(url).toContain("project=4242");
+    expect(url).not.toContain("project%3Amy-project");
+  });
+
+  test("falls back to project:<slug> query when no projectId is available", async () => {
+    const captured = captureRequest(EMPTY_LOGS);
+
+    await getLogs("test-org", "my-project", ["log-001"]);
+
+    const url = captured.url();
+    expect(url).toContain("project%3Amy-project");
+    expect(url).not.toMatch(/[?&]project=/);
   });
 });

@@ -59,6 +59,7 @@ import {
 import { getEnv } from "./env.js";
 import {
   ApiError,
+  CliError,
   ContextError,
   ResolutionError,
   ValidationError,
@@ -948,6 +949,47 @@ export async function fetchProjectId(
   }
 
   return toNumericId(project_.id);
+}
+
+/**
+ * Resolve a project slug to its numeric ID for log queries, tolerating failures.
+ *
+ * Log listing and lookup scope by the `project` query param instead of the
+ * `project:<slug>` search filter, which only matches projects that are actively
+ * selected in the org (see #1317). This helper resolves the slug so callers can
+ * pass a numeric ID.
+ *
+ * Behaviour:
+ * - Numeric slug → returned as-is (already an ID).
+ * - Slug that resolves → its numeric ID.
+ * - Transient resolution failure → `undefined`, so the caller falls back to
+ *   slug-based query scoping rather than failing the command.
+ *
+ * User-actionable errors from {@link fetchProjectId} — {@link AuthError},
+ * {@link HostScopeError}, a 404 {@link ResolutionError}, and any other
+ * {@link CliError} — are re-thrown so the command fails with a clear message
+ * instead of silently degrading to slug scoping. Only genuinely unexpected
+ * (non-{@link CliError}) failures are swallowed as transient.
+ */
+export async function resolveLogProjectId(
+  org: string,
+  project: string
+): Promise<number | undefined> {
+  if (isAllDigits(project)) {
+    return Number(project);
+  }
+  try {
+    return await fetchProjectId(org, project);
+  } catch (error) {
+    if (error instanceof CliError) {
+      throw error;
+    }
+    log.debug(
+      `Failed to resolve project ID for '${org}/${project}'; falling back to slug scoping`,
+      error
+    );
+    return;
+  }
 }
 
 /**

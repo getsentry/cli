@@ -49,7 +49,10 @@ import {
 } from "../../lib/list-command.js";
 import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
-import { resolveOrgProjectFromArg } from "../../lib/resolve-target.js";
+import {
+  resolveLogProjectId,
+  resolveOrgProjectFromArg,
+} from "../../lib/resolve-target.js";
 import { sanitizeQuery } from "../../lib/search-query.js";
 import {
   PERIOD_BRIEF,
@@ -173,14 +176,16 @@ async function executeSingleFetch(
   org: string,
   project: string,
   flags: ListFlags,
-  timeRange: TimeRange
+  options: { timeRange: TimeRange; projectId?: number }
 ): Promise<FetchResult> {
+  const { timeRange, projectId } = options;
   const logs = await listLogs(org, project, {
     query: flags.query,
     limit: flags.limit,
     ...timeRangeToApiParams(timeRange),
     sort: flags.sort,
     extraFields: flags.fields,
+    projectId,
   }).catch((error: unknown): never => {
     // An unparseable user --query is a user input mistake, not a CLI bug.
     throw toSearchQueryError(error, flags.query);
@@ -895,6 +900,10 @@ export const listCommand = buildListCommand(
           cwd,
           COMMAND_NAME
         );
+        // Resolve the slug to a numeric project ID so the Events query scopes
+        // via the `project` param. The `project:<slug>` filter only matches
+        // actively-selected projects and can otherwise return no logs (#1317).
+        const projectId = await resolveLogProjectId(org, project);
         if (flags.follow) {
           writeFollowBanner(
             flags.follow ?? DEFAULT_POLL_INTERVAL,
@@ -914,6 +923,7 @@ export const listCommand = buildListCommand(
                 statsPeriod,
                 afterTimestamp,
                 extraFields: flags.fields,
+                projectId,
               }).catch((error: unknown): never => {
                 // An unparseable user --query is a user input mistake, not a
                 // CLI bug — surface it as an actionable ValidationError.
@@ -931,7 +941,8 @@ export const listCommand = buildListCommand(
             message: `Fetching logs (up to ${flags.limit})...`,
             json: flags.json,
           },
-          () => executeSingleFetch(org, project, flags, timeRange)
+          () =>
+            executeSingleFetch(org, project, flags, { timeRange, projectId })
         );
         yield new CommandOutput(result);
         return { hint };
