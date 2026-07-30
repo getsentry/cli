@@ -26,6 +26,7 @@ import {
   fetchProjectId,
   isValidDirNameForInference,
   resolveAllTargets,
+  resolveLogProjectId,
   resolveOrg,
   resolveOrgAndProject,
   resolveOrgOptionalProjectTarget,
@@ -594,6 +595,100 @@ describe("fetchProjectId", () => {
     const result = await fetchProjectId("test-org", "legacy-project");
     expect(result).toBe(777);
     expect(apiCalled).toBe(true);
+  });
+});
+
+// ============================================================================
+// resolveLogProjectId — slug→id resolution tolerant of transient failures,
+// used by log list/view to scope by the numeric `project` param (#1317).
+// ============================================================================
+
+describe("resolveLogProjectId", () => {
+  useTestConfigDir("test-resolveLogProjectId-");
+
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("returns an all-digit slug as a numeric ID without hitting the API", async () => {
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    let apiCalled = false;
+    globalThis.fetch = mockFetch(async () => {
+      apiCalled = true;
+      return new Response("should not be called", { status: 500 });
+    });
+
+    const result = await resolveLogProjectId("test-org", "6775615880");
+    expect(result).toBe(6_775_615_880);
+    expect(apiCalled).toBe(false);
+  });
+
+  test("resolves a slug to its numeric project ID", async () => {
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    clearProjectCache();
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/api/0/projects/test-org/my-project/")) {
+        return Response.json({ id: "456", slug: "my-project" });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+
+    const result = await resolveLogProjectId("test-org", "my-project");
+    expect(result).toBe(456);
+  });
+
+  test("returns undefined on a transient server error (falls back to slug scoping)", async () => {
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    clearProjectCache();
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Internal error" }), {
+          status: 500,
+        })
+    );
+
+    const result = await resolveLogProjectId("test-org", "my-project");
+    expect(result).toBeUndefined();
+  });
+
+  test("re-throws AuthError instead of swallowing it", async () => {
+    const saved = process.env.SENTRY_AUTH_TOKEN;
+    delete process.env.SENTRY_AUTH_TOKEN;
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+
+    try {
+      await expect(
+        resolveLogProjectId("test-org", "my-project")
+      ).rejects.toThrow(AuthError);
+    } finally {
+      if (saved !== undefined) {
+        process.env.SENTRY_AUTH_TOKEN = saved;
+      }
+    }
+  });
+
+  test("re-throws ResolutionError on a genuine 404", async () => {
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    clearProjectCache();
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(JSON.stringify({ detail: "Not found" }), { status: 404 })
+    );
+
+    await expect(
+      resolveLogProjectId("test-org", "missing-project")
+    ).rejects.toThrow(ResolutionError);
   });
 });
 

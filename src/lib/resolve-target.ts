@@ -59,6 +59,7 @@ import {
 import { getEnv } from "./env.js";
 import {
   ApiError,
+  CliError,
   ContextError,
   ResolutionError,
   ValidationError,
@@ -964,8 +965,11 @@ export async function fetchProjectId(
  * - Transient resolution failure → `undefined`, so the caller falls back to
  *   slug-based query scoping rather than failing the command.
  *
- * A 404 (project genuinely not found) still throws from {@link fetchProjectId};
- * that is a user-actionable error, not a transient failure to swallow.
+ * User-actionable errors from {@link fetchProjectId} — {@link AuthError},
+ * {@link HostScopeError}, a 404 {@link ResolutionError}, and any other
+ * {@link CliError} — are re-thrown so the command fails with a clear message
+ * instead of silently degrading to slug scoping. Only genuinely unexpected
+ * (non-{@link CliError}) failures are swallowed as transient.
  */
 export async function resolveLogProjectId(
   org: string,
@@ -977,7 +981,7 @@ export async function resolveLogProjectId(
   try {
     return await fetchProjectId(org, project);
   } catch (error) {
-    if (error instanceof ResolutionError) {
+    if (error instanceof CliError) {
       throw error;
     }
     log.debug(
