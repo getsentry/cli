@@ -208,7 +208,7 @@ describe("statusCommand.func", () => {
       expect(getOutput()).not.toContain("environment variable");
     });
 
-    test("shows expiration for OAuth token with expiresAt", async () => {
+    test("identifies access token expiration precisely", async () => {
       getAuthConfigSpy.mockReturnValue({
         token: "sntrys_abc123def456",
         source: "oauth",
@@ -219,10 +219,10 @@ describe("statusCommand.func", () => {
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
 
-      expect(getOutput()).toContain("Expires");
+      expect(getOutput()).toContain("Access token expires");
     });
 
-    test("shows auto-refresh enabled with refresh token", async () => {
+    test("shows automatic refresh enabled with refresh token", async () => {
       getAuthConfigSpy.mockReturnValue({
         token: "sntrys_abc123def456",
         source: "oauth",
@@ -233,11 +233,12 @@ describe("statusCommand.func", () => {
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
 
-      expect(getOutput()).toContain("Auto-refresh");
+      expect(getOutput()).toContain("Access token");
+      expect(getOutput()).toContain("Automatic refresh");
       expect(getOutput()).toContain("enabled");
     });
 
-    test("shows auto-refresh disabled without refresh token", async () => {
+    test("identifies a stored manual token without implying refresh is broken", async () => {
       getAuthConfigSpy.mockReturnValue({
         token: "sntrys_abc123def456",
         source: "oauth",
@@ -247,8 +248,9 @@ describe("statusCommand.func", () => {
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
 
-      expect(getOutput()).toContain("Auto-refresh");
-      expect(getOutput()).toContain("disabled");
+      expect(getOutput()).toContain("API token");
+      expect(getOutput()).not.toContain("Automatic refresh");
+      expect(getOutput()).not.toContain("disabled");
     });
   });
 
@@ -291,8 +293,8 @@ describe("statusCommand.func", () => {
       const { context, getOutput } = createContext();
       await func.call(context, humanFlags);
 
-      expect(getOutput()).not.toContain("Expires");
-      expect(getOutput()).not.toContain("Auto-refresh");
+      expect(getOutput()).not.toContain("expires");
+      expect(getOutput()).not.toContain("Automatic refresh");
     });
 
     test("masks token by default for env tokens", async () => {

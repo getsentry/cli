@@ -1776,6 +1776,17 @@ function formatAuthHeader(source: string): string {
   return `## ${colorTag("green", "✓")} Authenticated`;
 }
 
+/** Select a precise credential label for the auth status table. */
+function authTokenLabel(isEnv: boolean, isOAuthAccessToken: boolean): string {
+  if (isEnv) {
+    return "Token";
+  }
+  if (isOAuthAccessToken) {
+    return "Access token";
+  }
+  return "API token";
+}
+
 /**
  * Build the key-value rows for the main auth details section.
  */
@@ -1790,14 +1801,21 @@ function buildAuthDetailRows(data: AuthStatusData): [string, string][] {
     rows.push(["User", formatUserIdentity(data.user)]);
   }
   if (data.token) {
-    rows.push(["Token", safeCodeSpan(data.token.display)]);
+    // Stored credentials do not retain an explicit auth method, so managed
+    // expiry or refresh capability identifies OAuth access tokens.
+    const isOAuthAccessToken =
+      data.token.refreshEnabled || data.token.expiresAt !== undefined;
+    const tokenLabel = authTokenLabel(isEnv, isOAuthAccessToken);
+    rows.push([tokenLabel, safeCodeSpan(data.token.display)]);
     if (data.token.expiresAt) {
-      rows.push(["Expires", formatExpiration(data.token.expiresAt)]);
-    }
-    // Only show auto-refresh for non-env tokens
-    if (!isEnv) {
       rows.push([
-        "Auto-refresh",
+        "Access token expires",
+        formatExpiration(data.token.expiresAt),
+      ]);
+    }
+    if (isOAuthAccessToken) {
+      rows.push([
+        "Automatic refresh",
         data.token.refreshEnabled ? "enabled" : "disabled (no refresh token)",
       ]);
     }

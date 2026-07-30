@@ -1,7 +1,7 @@
 /**
  * sentry auth refresh
  *
- * Manually refresh the authentication token, or re-authenticate with
+ * Manually refresh the OAuth access token, or re-authenticate with
  * different scopes via the OAuth device flow (like `gh auth refresh -s`).
  *
  * When `--scope` or `--read-only` is passed, the command runs a new device
@@ -70,19 +70,28 @@ function resolveRefreshScope(flags: RefreshFlags): string {
 
 /** Format refresh result for terminal output */
 function formatRefreshResult(data: RefreshOutput): string {
-  return data.refreshed
-    ? `${success("✓")} ${data.message}. Expires in ${formatDuration(data.expiresIn ?? 0)}.`
-    : `Token still valid (expires in ${formatDuration(data.expiresIn ?? 0)}).\nUse --force to refresh anyway.`;
+  if (data.refreshed) {
+    const validity =
+      data.expiresIn === undefined
+        ? ""
+        : ` Access token valid for ${formatDuration(data.expiresIn)}.`;
+    return `${success("✓")} ${data.message}.${validity}`;
+  }
+  const validity =
+    data.expiresIn === undefined
+      ? ""
+      : ` for ${formatDuration(data.expiresIn)}`;
+  return `${data.message}${validity}.\nUse --force to refresh anyway.`;
 }
 
 export const refreshCommand = buildCommand({
   auth: false,
   docs: {
-    brief: "Refresh your authentication token",
+    brief: "Refresh your OAuth access token",
     fullDescription: `
-Manually refresh your authentication token using the stored refresh token.
+Manually refresh your OAuth access token using the stored refresh token.
 
-Token refresh normally happens automatically when making API requests.
+Access token refresh normally happens automatically when making API requests.
 Use this command to force an immediate refresh or to verify the refresh
 mechanism is working correctly.
 
@@ -93,10 +102,10 @@ session (similar to \`gh auth refresh -s <scope>\`).
 
 Examples:
   $ sentry auth refresh
-  Token refreshed successfully. Expires in 59 minutes.
+  ✓ Access token refreshed successfully. Access token valid for 59 minutes.
 
   $ sentry auth refresh --force
-  Token refreshed successfully. Expires in 60 minutes.
+  ✓ Access token refreshed successfully. Access token valid for 1 hour.
 
   $ sentry auth refresh --scope event:read --scope org:read
   Re-authenticating with scopes: event:read, org:read...
@@ -113,7 +122,7 @@ Examples:
     flags: {
       force: {
         kind: "boolean",
-        brief: "Force refresh even if token is still valid",
+        brief: "Force refresh even if the access token is still valid",
         default: false,
       },
       "read-only": {
@@ -185,8 +194,8 @@ Examples:
       success: true,
       refreshed: result.refreshed,
       message: result.refreshed
-        ? "Token refreshed successfully"
-        : "Token still valid",
+        ? "Access token refreshed successfully"
+        : "Access token is still valid",
       expiresIn: result.expiresIn,
       expiresAt: result.expiresAt
         ? new Date(result.expiresAt).toISOString()
