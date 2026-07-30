@@ -1291,3 +1291,33 @@ export const CustomerTrialInfoSchema = z.object({
 });
 
 export type CustomerTrialInfo = z.infer<typeof CustomerTrialInfoSchema>;
+
+// Org Auth Tokens
+
+/**
+ * Zod schema for an organization auth token as returned by the Sentry API.
+ *
+ * Matches the serializer in `sentry/api/serializers/models/orgauthtoken.py`.
+ * The `token` field is only present in the POST response (token creation) —
+ * it is the only time the full token value is available.
+ */
+export const OrgAuthTokenSchema = z.object({
+  /** Numeric token ID (string-encoded) */
+  id: z.string(),
+  /** Human-readable token name */
+  name: z.string(),
+  /** Permission scopes granted to this token (e.g., ["org:ci"]) */
+  scopes: z.array(z.string()),
+  /** Last 4 characters of the token (for identification) */
+  tokenLastCharacters: z.string().nullable().optional(),
+  /** ISO 8601 date when the token was created */
+  dateCreated: z.string(),
+  /** ISO 8601 date when the token was last used, null if never */
+  dateLastUsed: z.string().nullable().optional(),
+  /** ID of the project where the token was last used, null if never */
+  projectLastUsedId: z.string().nullable().optional(),
+  /** Full token value — only present in the creation response */
+  token: z.string().optional(),
+});
+
+export type OrgAuthToken = z.infer<typeof OrgAuthTokenSchema>;

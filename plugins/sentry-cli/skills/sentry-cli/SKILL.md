@@ -504,6 +504,16 @@ Work with Sentry teams
 
 → Full flags and examples: `references/team.md`
 
+### Token
+
+Manage org auth tokens
+
+- `sentry token create <org>` — Create an org auth token
+- `sentry token delete <org> <token-id>` — Delete an org auth token
+- `sentry token list <org>` — List org auth tokens
+
+→ Full flags and examples: `references/token.md`
+
 ### Explore
 
 Query aggregate event data (Explore)
