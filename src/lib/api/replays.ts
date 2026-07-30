@@ -338,7 +338,7 @@ export async function listReplayIdsForIssue(
     `/organizations/${orgSlug}/replay-count/`,
     {
       params: {
-        data_source: "discover",
+        data_source: "events",
         project: "-1",
         query: `issue.id:[${normalizedIssueId}]`,
         returnIds: true,
