@@ -29,6 +29,8 @@ export type LoginResult = {
   configPath: string;
   /** Token lifetime in seconds, if known. */
   expiresIn?: number;
+  /** Whether the OAuth access token can be refreshed automatically. */
+  refreshEnabled?: boolean;
 };
 
 /**
@@ -200,6 +202,7 @@ export async function runInteractiveLogin(
       method: "oauth",
       configPath: getDbPath(),
       expiresIn: tokenResponse.expires_in,
+      refreshEnabled: Boolean(tokenResponse.refresh_token),
     };
     if (user) {
       result.user = toLoginUser(user);

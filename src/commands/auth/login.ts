@@ -64,10 +64,19 @@ function formatLoginResult(result: LoginResult): string {
   if (result.user) {
     lines.push(`  Logged in as: ${formatUserIdentity(result.user)}`);
   }
-  lines.push(`  Config saved to: ${result.configPath}`);
-  if (result.expiresIn) {
-    lines.push(`  Token expires in: ${formatDuration(result.expiresIn)}`);
+  if (result.method === "oauth" && result.refreshEnabled !== undefined) {
+    if (result.refreshEnabled) {
+      lines.push("  Automatic refresh: enabled");
+    } else {
+      lines.push("  Automatic refresh: unavailable");
+      if (result.expiresIn !== undefined) {
+        lines.push(
+          `  Access token expires in: ${formatDuration(result.expiresIn)}`
+        );
+      }
+    }
   }
+  lines.push(`  Config saved to: ${result.configPath}`);
   lines.push(""); // trailing newline
   return lines.join("\n");
 }
@@ -322,7 +331,7 @@ async function handleExistingAuth(force: boolean): Promise<boolean> {
       `${envVar} is set in your environment (likely from build tooling).\n` +
         "  OAuth credentials will be stored separately and used for CLI commands."
     );
-    // If no stored OAuth token exists, proceed directly to login
+    // If no stored credential exists, proceed directly to login
     if (!hasStoredAuthCredentials()) {
       return true;
     }

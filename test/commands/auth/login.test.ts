@@ -444,13 +444,33 @@ describe("loginCommand.func --token path", () => {
     runInteractiveLoginSpy.mockResolvedValue({
       method: "oauth",
       configPath: "/tmp/db",
+      expiresIn: 3600,
+      refreshEnabled: true,
     });
 
-    const { context } = createContext();
+    const { context, getStdout } = createContext();
     await func.call(context, { force: false, timeout: 900 });
 
     expect(runInteractiveLoginSpy).toHaveBeenCalled();
     expect(setAuthTokenSpy).not.toHaveBeenCalled();
+    expect(getStdout()).toContain("Automatic refresh: enabled");
+    expect(getStdout()).not.toContain("expires");
+  });
+
+  test("OAuth login warns when automatic refresh is unavailable", async () => {
+    isAuthenticatedSpy.mockReturnValue(false);
+    runInteractiveLoginSpy.mockResolvedValue({
+      method: "oauth",
+      configPath: "/tmp/db",
+      expiresIn: 3600,
+      refreshEnabled: false,
+    });
+
+    const { context, getStdout } = createContext();
+    await func.call(context, { force: false, timeout: 900 });
+
+    expect(getStdout()).toContain("Automatic refresh: unavailable");
+    expect(getStdout()).toContain("Access token expires in: 1 hour");
   });
 
   test("--force when authenticated: clears auth and proceeds to interactive login", async () => {

@@ -144,7 +144,8 @@ describe("refreshCommand.func", () => {
     const { context, getStdout } = createContext();
     await func.call(context, { json: false, force: false });
 
-    expect(getStdout()).toContain("Token refreshed successfully");
+    expect(getStdout()).toContain("Access token refreshed successfully");
+    expect(getStdout()).toContain("Access token valid for");
     expect(getStdout()).toContain("1 hour");
   });
 
@@ -164,8 +165,29 @@ describe("refreshCommand.func", () => {
     const { context, getStdout } = createContext();
     await func.call(context, { json: false, force: false });
 
-    expect(getStdout()).toContain("Token still valid");
+    expect(getStdout()).toContain("Access token is still valid");
+    expect(getStdout()).toContain("30 minutes");
     expect(getStdout()).toContain("--force");
+  });
+
+  test("unknown lifetime does not render a zero-second validity", async () => {
+    isEnvTokenActiveSpy.mockReturnValue(false);
+    getAuthConfigSpy.mockReturnValue({
+      token: "old_token",
+      source: "oauth",
+      refreshToken: "refresh_abc",
+    });
+    refreshTokenSpy.mockResolvedValue({
+      token: "new_token",
+      refreshed: true,
+    });
+
+    const { context, getStdout } = createContext();
+    await func.call(context, { json: false, force: false });
+
+    expect(getStdout()).toContain("Access token refreshed successfully");
+    expect(getStdout()).not.toContain("0 seconds");
+    expect(getStdout()).not.toContain("valid for");
   });
 
   test("--json: outputs JSON for successful refresh", async () => {
