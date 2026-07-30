@@ -288,7 +288,8 @@ function matchSharePath(
  * - `/organizations/{org}/issues/{id}/`
  * - `/organizations/{org}/issues/{id}/events/{eventId}/`
  * - `/settings/{org}/projects/{project}/`
- * - `/organizations/{org}/traces/{traceId}/`
+ * - `/organizations/{org}/explore/traces/trace/{traceId}/` (canonical)
+ * - `/organizations/{org}/traces/{traceId}/` (legacy)
  * - `/organizations/{org}/explore/replays/{replayId}/`
  * - `/organizations/{org}/replays/{replayId}/`
  * - `/organizations/{org}/dashboard/{id}/`
@@ -297,7 +298,8 @@ function matchSharePath(
  *
  * Also recognizes SaaS subdomain-style URLs:
  * - `https://{org}.sentry.io/issues/{id}/`
- * - `https://{org}.sentry.io/traces/{traceId}/`
+ * - `https://{org}.sentry.io/explore/traces/trace/{traceId}/` (canonical)
+ * - `https://{org}.sentry.io/traces/{traceId}/` (legacy)
  * - `https://{org}.sentry.io/explore/replays/{replayId}/`
  * - `https://{org}.sentry.io/replays/{replayId}/`
  * - `https://{org}.sentry.io/issues/{id}/events/{eventId}/`
