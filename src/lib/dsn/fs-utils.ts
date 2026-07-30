@@ -18,6 +18,7 @@ import * as Sentry from "@sentry/node-core/light";
  * - EISDIR: Path is a directory, not a file (e.g., `.env/` directory instead of `.env` file)
  * - ENOTDIR: A path component is not a directory (e.g., `/file.txt/child`)
  * - EINVAL: Invalid argument (e.g., scandir on a special/virtual filesystem entry like /proc paths)
+ * - ELOOP: Too many symbolic links (e.g., cyclic symlink encountered during scan)
  *
  * All other errors are unexpected and should be reported to Sentry.
  *
@@ -33,7 +34,8 @@ function isIgnorableFileError(error: unknown): boolean {
       code === "EPERM" ||
       code === "EISDIR" ||
       code === "ENOTDIR" ||
-      code === "EINVAL"
+      code === "EINVAL" ||
+      code === "ELOOP"
     );
   }
   return false;
