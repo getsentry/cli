@@ -114,8 +114,8 @@ importers:
         specifier: ^4.1.9
         version: 4.1.10(vitest@4.1.10)
       binpatch:
-        specifier: ^0.3.1
-        version: 0.3.2
+        specifier: ^0.4.0
+        version: 0.4.0
       chalk:
         specifier: ^5.6.2
         version: 5.6.2
@@ -1907,9 +1907,9 @@ packages:
   bcp-47@2.1.1:
     resolution: {integrity: sha512-KLw+H/gd2p4zly1X7Yh/qziuyae5/w/QFnvTng9eZL5fvszL7Whl3MBoWF8yxL7ksUjBfOD+OxkytiqbBpG+Fw==}
 
-  binpatch@0.3.2:
-    resolution: {integrity: sha512-XJz74dJmzVgB9I5BEGAUiIWEy8LP3BF6W/hgqQ5Ka9mlzVnPqc+2Uj/aEWyPeRb3N0BH5E67915scdBv4ccPIA==}
-    engines: {node: '>=22.5'}
+  binpatch@0.4.0:
+    resolution: {integrity: sha512-6iMwo8i/iy3vGNalRCGZ5u2p/D9PKEcpQJNxU+NH4TikshbYeJMC7kCjxUPmTI6QHfgOtyjS7D6SUUelsz7M/A==}
+    engines: {node: '>=22.15.0'}
 
   binpunch@1.0.0:
     resolution: {integrity: sha512-ghxdoerLN3WN64kteDJuL4d9dy7gbvcqoADNRWBk6aQ5FrYH1EmPmREAdcdIdTNAA3uW3V38Env5OqH2lj+i+g==}
@@ -6232,7 +6232,7 @@ snapshots:
       is-alphanumerical: 2.0.1
       is-decimal: 2.0.1
 
-  binpatch@0.3.2: {}
+  binpatch@0.4.0: {}
 
   binpunch@1.0.0: {}
 
