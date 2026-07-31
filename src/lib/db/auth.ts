@@ -665,7 +665,9 @@ export async function refreshToken(
   }
 
   const issuedAt = row.issued_at ?? expiresAt - DEFAULT_TOKEN_LIFETIME_MS;
-  const totalLifetime = expiresAt - issuedAt;
+  // Clamp to >=1ms so a corrupt row (issued_at >= expires_at) doesn't
+  // cause division by zero, which would yield Infinity and skip refresh.
+  const totalLifetime = Math.max(1, expiresAt - issuedAt);
   const remainingLifetime = expiresAt - now;
   const remainingRatio = remainingLifetime / totalLifetime;
   const expiresIn = Math.max(0, Math.floor(remainingLifetime / 1000));

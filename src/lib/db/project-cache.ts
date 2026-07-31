@@ -7,6 +7,13 @@ import { recordCacheHit } from "../telemetry.js";
 import { getDatabase, maybeCleanupCaches } from "./index.js";
 import { runUpsert, touchCacheEntry } from "./utils.js";
 
+/**
+ * How long cached project entries are considered fresh on read.
+ * Stale entries are treated as cache misses and will be re-fetched.
+ * Matches the cleanup TTL in `db/index.ts` (7 days).
+ */
+export const PROJECT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 type ProjectCacheRow = {
   cache_key: string;
   org_slug: string;
@@ -45,6 +52,11 @@ function getByKey(key: string): CachedProject | undefined {
     .get(key) as ProjectCacheRow | undefined;
 
   if (!row) {
+    recordCacheHit("project", false);
+    return;
+  }
+
+  if (Date.now() - row.cached_at > PROJECT_CACHE_TTL_MS) {
     recordCacheHit("project", false);
     return;
   }
@@ -139,6 +151,11 @@ export function getCachedProjectBySlug(
   // When no rows match, SQLite still returns a single row with NULL columns
   // because of the MAX aggregate — guard on cache_key being populated.
   if (!row?.cache_key) {
+    recordCacheHit("project", false);
+    return;
+  }
+
+  if (Date.now() - row.cached_at > PROJECT_CACHE_TTL_MS) {
     recordCacheHit("project", false);
     return;
   }

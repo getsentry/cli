@@ -30,6 +30,9 @@ export function formatRelativeTime(dateString: string | undefined): string {
   }
 
   const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) {
+    return colorTag("muted", "—");
+  }
   const now = Date.now();
   // Clamp to >= 0 so clock skew, scheduled/future timestamps, or bad API data
   // render as "0m ago" instead of a negative duration like "-5m ago".
