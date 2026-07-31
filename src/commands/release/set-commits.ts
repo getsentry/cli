@@ -119,8 +119,8 @@ function hasNoRepoIntegration(orgSlug: string): boolean {
       const age = Date.now() - Number(checkedAt);
       return age < REPO_CACHE_TTL_MS;
     }
-  } catch {
-    // DB errors shouldn't block the command
+  } catch (error) {
+    log.debug("Failed to check repo integration cache", error);
   }
   return false;
 }
@@ -134,8 +134,8 @@ function cacheNoRepoIntegration(orgSlug: string): void {
       [key]: "false",
       [`${key}.checked_at`]: String(Date.now()),
     });
-  } catch {
-    // Non-fatal
+  } catch (error) {
+    log.debug("Failed to cache repo integration status", error);
   }
 }
 
@@ -145,8 +145,8 @@ function clearRepoIntegrationCache(orgSlug: string): void {
     const db = getDatabase();
     const key = `repos_configured.${orgSlug}`;
     clearMetadata(db, [key, `${key}.checked_at`]);
-  } catch {
-    // Non-fatal
+  } catch (error) {
+    log.debug("Failed to clear repo integration cache", error);
   }
 }
 
