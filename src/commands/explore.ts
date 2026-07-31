@@ -42,6 +42,7 @@ import {
   getReplayRequestFields,
   isSupportedReplayField,
   listSupportedReplayFields,
+  normalizeVariadicFlag,
   parseReplayEnvironmentFilter,
 } from "../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../lib/resolve-target.js";
@@ -375,10 +376,8 @@ function appendFlagHints(
   if (flags.limit !== DEFAULT_LIMIT) {
     parts.push(`--limit ${flags.limit}`);
   }
-  if (flags.environment && flags.environment.length > 0) {
-    for (const environment of flags.environment) {
-      parts.push(`-e "${environment}"`);
-    }
+  for (const environment of normalizeVariadicFlag(flags.environment)) {
+    parts.push(`-e "${environment}"`);
   }
   appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
@@ -710,11 +709,15 @@ export const exploreCommand = buildListCommand("explore", {
     );
 
     let dataset = flags.dataset;
-    const userSuppliedFields = flags.field && flags.field.length > 0;
-    let fieldList = [...defaultFieldsForDataset(dataset)];
-    if (userSuppliedFields) {
-      fieldList = flags.field;
-    }
+    // A single `-F` flag arrives from the parser as a bare string rather than a
+    // one-element array. Normalize once so every downstream consumer (fieldList,
+    // hintFlags, contextKey) sees an array — a leftover string makes the later
+    // `.filter`/`.join` calls throw a TypeError (CLI-28C).
+    const fields = normalizeVariadicFlag(flags.field);
+    const userSuppliedFields = fields.length > 0;
+    let fieldList = userSuppliedFields
+      ? [...fields]
+      : [...defaultFieldsForDataset(dataset)];
     const timeRange = flags.period;
     const environment = parseReplayEnvironmentFilter(flags.environment);
 
@@ -806,7 +809,7 @@ export const exploreCommand = buildListCommand("explore", {
     const hasMore = !!nextCursor;
 
     const baseTarget = project ? `${org}/${project}` : `${org}/`;
-    const hintFlags = { ...flags, dataset };
+    const hintFlags = { ...flags, dataset, field: fields };
     const nav = paginationHint({
       hasPrev,
       hasMore,

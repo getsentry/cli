@@ -42,6 +42,7 @@ import {
 import { withProgress } from "../../lib/polling.js";
 import {
   getReplayUserLabel,
+  normalizeVariadicFlag,
   parseReplayEnvironmentFilter,
 } from "../../lib/replay-search.js";
 import { resolveOrgOptionalProjectFromArg } from "../../lib/resolve-target.js";
@@ -182,10 +183,8 @@ function appendReplayFlags(
   const parts: string[] = [];
   appendQueryHint(parts, flags.query);
   appendSortHint(parts, flags.sort, DEFAULT_SORT);
-  if (flags.environment && flags.environment.length > 0) {
-    for (const environment of flags.environment) {
-      parts.push(`-e "${environment}"`);
-    }
+  for (const environment of normalizeVariadicFlag(flags.environment)) {
+    parts.push(`-e "${environment}"`);
   }
   appendPeriodHint(parts, flags.period, DEFAULT_PERIOD);
   return parts.length > 0 ? `${base} ${parts.join(" ")}` : base;
