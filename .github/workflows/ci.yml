@@ -434,6 +434,19 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     continue-on-error: true
+    # `prev-tag` (nightly main) and `prev-release-tag` (stable release branches):
+    # the tag the current build's patches were actually generated FROM. Carried
+    # through to publish-nightly so it can record the SAME value as the
+    # `from-version` annotation — see push-patches below. If we let
+    # publish-nightly re-derive this from `oras repo tags` (or `gh release
+    # list`) it can disagree with what generate-patches used (e.g. a
+    # concurrent push lands a new tag between the two jobs, or semver
+    # ordering shifts when a 0.41 nightly precedes a 0.40 nightly), and
+    # `binpatch` consumers would then receive a patch annotated with a
+    # `from-version` that doesn't match the actual source binary.
+    outputs:
+      prev-tag: ${{ steps.set-prev-tag.outputs.prev-tag }}
+      prev-release-tag: ${{ steps.set-prev-release-tag.outputs.prev-release-tag }}
     steps:
       - name: Install ORAS CLI
         # Only needed on main (to fetch previous nightly from GHCR)
@@ -467,6 +480,7 @@ jobs:
           merge-multiple: true
 
       - name: Download previous nightly binaries (main)
+        id: set-prev-tag
         if: github.ref == 'refs/heads/main'
         run: |
           VERSION="${{ needs.changes.outputs.nightly-version }}"
@@ -491,6 +505,9 @@ jobs:
             exit 0
           fi
           echo "HAS_PREV=true" >> "$GITHUB_ENV"
+          # Record the tag we actually used so publish-nightly can stamp the
+          # `from-version` annotation with the SAME value (see job output).
+          echo "prev-tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
           echo "Previous nightly: ${PREV_TAG}"
 
           # Download and decompress previous nightly binaries
@@ -504,6 +521,7 @@ jobs:
           done
 
       - name: Download previous release binaries (release/**)
+        id: set-prev-release-tag
         if: startsWith(github.ref, 'refs/heads/release/')
         env:
           GH_TOKEN: ${{ github.token }}
@@ -516,6 +534,9 @@ jobs:
             exit 0
           fi
           echo "HAS_PREV=true" >> "$GITHUB_ENV"
+          # Record the tag we actually used so publish-nightly can stamp the
+          # `from-version` annotation with the SAME value (see job output).
+          echo "prev-release-tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
           echo "Previous release: ${PREV_TAG}"
 
           shopt -s nullglob
@@ -727,19 +748,32 @@ jobs:
             exit 0
           fi
 
-          # Find from-version by listing GHCR nightly tags
-          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-[0-9]' | sort -V || echo "")
-          PREV_TAG=""
-          for tag in $TAGS; do
-            if [ "$tag" = "nightly-${VERSION}" ]; then break; fi
-            PREV_TAG="$tag"
-          done
+          # Use the from-version tag that generate-patches actually used to
+          # generate the patch bytes — NOT a re-derived tag listing here.
+          # Re-deriving (via `oras repo tags` or `gh release list`) can disagree
+          # with what generate-patches saw if the registry state changed
+          # between the two jobs (e.g. a concurrent push, semver re-ordering).
+          # binpatch verifies only the final output SHA, so a mismatched
+          # `from-version` annotation silently bypasses the user's expected
+          # upgrade path. See binpatch docs:
+          # https://github.com/BYK/binpatch/blob/main/website/src/content/docs/security.md
+          PREV_TAG_NIGHTLY="${{ needs.generate-patches.outputs.prev-tag }}"
+          PREV_TAG_RELEASE="${{ needs.generate-patches.outputs.prev-release-tag }}"
+
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            PREV_TAG="$PREV_TAG_NIGHTLY"
+          else
+            PREV_TAG="$PREV_TAG_RELEASE"
+          fi
 
           if [ -z "$PREV_TAG" ]; then
-            echo "No previous nightly tag found, skipping patch push"
+            echo "No previous tag recorded by generate-patches, skipping patch push"
             exit 0
           fi
           PREV_VERSION="${PREV_TAG#nightly-}"
+          # For release branches the tag is the GitHub release tag, not a
+          # `nightly-` prefix — strip a leading `v` if present.
+          PREV_VERSION="${PREV_VERSION#v}"
 
           cd patches
           eval oras push "${REPO}:patch-${VERSION}" \
