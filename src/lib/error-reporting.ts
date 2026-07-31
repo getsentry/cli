@@ -53,6 +53,7 @@ import {
 type SilenceReason =
   | "output_error"
   | "auth_expected"
+  | "validation_error"
   | "api_user_error"
   | "network_error";
 
@@ -90,6 +91,13 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   // silence alongside the others (CLI-19).
   if (error instanceof AuthError) {
     return "auth_expected";
+  }
+  // A ValidationError means the user supplied malformed input (e.g. a project
+  // slug where a 32-char hex trace ID was required). It is never a CLI bug —
+  // the CLI correctly rejects the input and displays an actionable message.
+  // Silence it so it does not pollute Sentry as an unhandled error (CLI-1GP).
+  if (error instanceof ValidationError) {
+    return "validation_error";
   }
   if (error instanceof ApiError && error.status > 400 && error.status < 500) {
     return "api_user_error";
