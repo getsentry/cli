@@ -1,28 +1,7 @@
 ---
-import Pagination from "virtual:starlight/components/Pagination";
+import StarlightThemeFooter from "@sentry/starlight-theme/components/Footer.astro";
+
+const isHomepage = Astro.locals.starlightRoute.id === "";
 ---
 
-{
-  /*
-   * Theme footer without social icons.
-   * The GitHub repo is already linked in the header; the landing-page
-   * install overscroll banner otherwise covers the footer icon (#1323).
-   */
-}
-<footer>
-  <table
-    role="presentation"
-    width="100%"
-    height="32"
-    cellspacing="0"
-    cellpadding="0"
-  >
-    <tbody>
-      <tr>
-        <td></td>
-      </tr>
-    </tbody>
-  </table>
-
-  <Pagination />
-</footer>
+{!isHomepage && <StarlightThemeFooter />}
