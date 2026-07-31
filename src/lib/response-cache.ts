@@ -717,16 +717,19 @@ export async function invalidateCachedResponsesMatching(
           entry.identity === currentIdentity &&
           entry.url?.startsWith(prefix)
         ) {
-          await unlink(filePath).catch(() => {
-            /* another process may have deleted it */
+          await unlink(filePath).catch((unlinkErr) => {
+            log.debug(
+              "Cache file already deleted by another process",
+              unlinkErr
+            );
           });
         }
-      } catch {
-        /* unparseable/missing — leave to cleanup */
+      } catch (error) {
+        log.debug("Unparseable/missing cache entry during invalidation", error);
       }
     });
-  } catch {
-    /* best-effort: mutation has already succeeded upstream */
+  } catch (error) {
+    log.debug("Best-effort cache invalidation failed", error);
   }
 }
 
