@@ -8,7 +8,7 @@
 import type { SentryContext } from "../../context.js";
 import { triggerSolutionPlanning } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
-import { ApiError } from "../../lib/errors.js";
+import { ApiError, CliError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   formatSolution,
@@ -217,6 +217,15 @@ export const planCommand = buildCommand({
         json: flags.json,
       });
 
+      // Root cause analysis requires user input in the Sentry UI before
+      // solution planning can proceed (e.g. selecting a root cause).
+      if (state.status === "WAITING_FOR_USER_RESPONSE") {
+        throw new CliError(
+          "Root cause analysis requires your input before a plan can be generated.\n" +
+            "Open the issue in Sentry to select a root cause, then re-run this command."
+        );
+      }
+
       // Check if solution already exists (skip if --force)
       if (!flags.force) {
         const existingSolution = extractSolution(state);
@@ -259,6 +268,13 @@ export const planCommand = buildCommand({
 
       if (finalState.status === "CANCELLED") {
         throw new Error("Plan creation was cancelled.");
+      }
+
+      if (finalState.status === "WAITING_FOR_USER_RESPONSE") {
+        throw new CliError(
+          "Plan creation requires your input in the Sentry UI.\n" +
+            "Open the issue in Sentry to provide the requested information, then re-run this command."
+        );
       }
 
       return yield new CommandOutput(buildPlanData(finalState));

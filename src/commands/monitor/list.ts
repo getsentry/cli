@@ -41,6 +41,9 @@ function formatSchedule(monitor: MonitorWithOrg): string {
     return "";
   }
   if (Array.isArray(config.schedule)) {
+    if (config.schedule.length < 2) {
+      return String(config.schedule[0] ?? "");
+    }
     return `every ${config.schedule[0]} ${config.schedule[1]}`;
   }
   return config.schedule;
