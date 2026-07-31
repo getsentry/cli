@@ -56,5 +56,5 @@ sentry info --config-status-json
 
 - [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
 - [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
-- [Previous: explore](https://cli.sentry.dev/_preview/pr-main/commands/explore.md)
+- [Previous: feedback](https://cli.sentry.dev/_preview/pr-main/commands/feedback.md)
 - [Next: init](https://cli.sentry.dev/_preview/pr-main/commands/init.md)
