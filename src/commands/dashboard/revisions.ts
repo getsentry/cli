@@ -199,8 +199,12 @@ export const revisionsCommand = buildCommand({
     );
 
     const trimmed = results.slice(0, flags.limit);
-    const hasMore = results.length > flags.limit || !!nextCursor;
-    const cursorToStore = hasMore ? nextCursor : undefined;
+    const overshot = results.length > flags.limit;
+    const hasMore = overshot || !!nextCursor;
+    // When multi-page fetch overshoots the limit, the API cursor points past
+    // trimmed items — storing it would skip them on '-c next'. Drop it to
+    // match autoPaginate() behavior (see infrastructure.ts lines 419-420).
+    const cursorToStore = !overshot && hasMore ? nextCursor : undefined;
 
     advancePaginationState(
       PAGINATION_KEY,
