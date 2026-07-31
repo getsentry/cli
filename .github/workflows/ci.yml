@@ -504,7 +504,11 @@ jobs:
           # of a new series (no prior tags in the same series) falls through
           # with PREV_TAG="" and the existing HAS_PREV skip handles it.
           MAJOR_MINOR=$(echo "${VERSION}" | cut -d. -f1,2)
-          SAME_SERIES_TAGS=$(printf '%s\n' "$TAGS" | grep "^nightly-${MAJOR_MINOR}\." || true)
+          # -F (fixed-string) avoids treating the dot in "0.40" as a regex
+          # metachar. In practice `oras repo tags` upstream is filtered to
+          # `^nightly-[0-9]` and MAJOR_MINOR is always digits.digits, so this
+          # can't actually mis-match — but be defensive.
+          SAME_SERIES_TAGS=$(printf '%s\n' "$TAGS" | grep -F "nightly-${MAJOR_MINOR}." || true)
           PREV_TAG=""
           for tag in $SAME_SERIES_TAGS; do
             # Current tag may not exist yet (publish-nightly hasn't run),
