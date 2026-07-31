@@ -4,7 +4,7 @@ Guidelines for AI agents working in this codebase.
 
 ## Project Overview
 
-**Sentry CLI** is a command-line interface for [Sentry](https://sentry.io), built with [Bun](https://bun.sh) and [Stricli](https://bloomberg.github.io/stricli/).
+**Sentry CLI** is a command-line interface for [Sentry](https://sentry.io), built with [esbuild](https://esbuild.github.io/) + [fossilize](https://github.com/nicolo-ribaudo/fossilize) (Node.js SEA binaries) and [Stricli](https://bloomberg.github.io/stricli/). Uses [pnpm](https://pnpm.io/) as package manager and [vitest](https://vitest.dev/) for testing.
 
 ### Goals
 
@@ -12,7 +12,7 @@ Guidelines for AI agents working in this codebase.
 - **AI-powered debugging** - Integrate Seer AI for root cause analysis and fix plans
 - **Developer-friendly** - Follow `gh` CLI conventions for intuitive UX
 - **Agent-friendly** - JSON output and predictable behavior for AI coding agents
-- **Fast** - Native binaries via Bun, SQLite caching for API responses
+- **Fast** - Native binaries via Node.js SEA (fossilize), SQLite caching for API responses
 
 ### Key Features
 
@@ -37,41 +37,40 @@ Before working on this codebase, read the Cursor rules:
 
 ```bash
 # Development
-bun install                              # Install dependencies
-bun run dev                              # Run CLI in dev mode
-bun run --env-file=.env.local src/bin.ts # Dev with env vars
+pnpm install                             # Install dependencies
+pnpm run cli -- --help                   # Run CLI in dev mode
+pnpm run cli -- auth login               # Dev with env vars (reads .env.local automatically)
 
 # Build
-bun run build                            # Build for current platform
-bun run build:all                        # Build for all platforms
+pnpm run build                           # Build for current platform
+pnpm run build:all                       # Build for all platforms
 
 # Type Checking
-bun run typecheck                        # Check types
+pnpm run typecheck                       # Check types
 
 # Linting & Formatting
-bun run lint                             # Check for issues
-bun run lint:fix                         # Auto-fix issues (run before committing)
+pnpm run lint                            # Check for issues
+pnpm run lint:fix                        # Auto-fix issues (run before committing)
 
 # Testing
-bun test                                 # Run all tests
-bun test path/to/file.test.ts            # Run single test file
-bun test --watch                         # Watch mode
-bun test --filter "test name"            # Run tests matching pattern
-bun run test:unit                        # Run unit tests only
-bun run test:e2e                         # Run e2e tests only
+pnpm run test:unit                       # Run unit tests
+pnpm run test:e2e                        # Run e2e tests
+vitest run path/to/file.test.ts          # Run single test file
+vitest --watch                           # Watch mode
+vitest run --filter "test name"          # Run tests matching pattern
 ```
 
 ## Rules: No Runtime Dependencies
 
-**CRITICAL**: All packages must be in `devDependencies`, never `dependencies`. Everything is bundled at build time via esbuild. CI enforces this with `bun run check:deps`.
+**CRITICAL**: All packages must be in `devDependencies`, never `dependencies`. Everything is bundled at build time via esbuild. CI enforces this with `pnpm run check:deps`.
 
-When adding a package, always use `bun add -d <package>` (the `-d` flag).
+When adding a package, always use `pnpm add -D <package>` (the `-D` flag).
 
 When the `@sentry/api` SDK provides types for an API response, import them directly from `@sentry/api` instead of creating redundant Zod schemas in `src/types/sentry.ts`.
 
 ## Rules: Use Bun APIs
 
-**CRITICAL**: This project uses Bun as runtime. Always prefer Bun-native APIs over Node.js equivalents.
+**CRITICAL**: Source code uses Bun-style APIs (e.g., `Bun.file()`, `Bun.Glob`, `Bun.which()`). These are shimmed by `script/node-polyfills.ts` for the npm/Node.js distribution. Always prefer these over raw Node.js equivalents.
 
 Read the full guidelines in `.cursor/rules/bun-cli.mdc`.
 
@@ -409,12 +408,12 @@ Use `"date"` for timestamp-based sort (not `"time"`). Export sort types from the
 
 ### Generated Docs & Skills
 
-All command docs and skill files are generated via `bun run generate:docs` (which runs `generate:command-docs` then `generate:skill`). This runs automatically as part of `dev`, `build`, `typecheck`, and `test` scripts.
+All command docs and skill files are generated via `pnpm run generate:docs` (which runs `generate:command-docs` then `generate:skill`). This runs automatically as part of `dev`, `build`, `typecheck`, and `test` scripts.
 
 - **Command docs** (`docs/src/content/docs/commands/*.md`) are **gitignored** and generated from CLI metadata + hand-written fragments in `docs/src/fragments/commands/`.
 - **Skill files** (`plugins/sentry-cli/skills/sentry-cli/`) are **committed** (consumed by external plugin systems) and auto-committed by CI when stale.
 - Edit fragments in `docs/src/fragments/commands/` for custom examples and guides.
-- `bun run check:fragments` validates fragment ↔ route consistency.
+- `pnpm run check:fragments` validates fragment ↔ route consistency.
 - Positional `placeholder` values must be descriptive: `"org/project/trace-id"` not `"args"`.
 
 ### Zod Schemas for Validation
@@ -510,7 +509,7 @@ CliError (base, exitCode=1)
 - Pass `alternatives: []` when defaults are irrelevant (e.g., for missing Trace ID, Event ID)
 - Use `" and "` in `resource` for plural grammar: `"Trace ID and span ID"` → "are required"
 
-**CI enforcement:** `bun run check:errors` scans for `ContextError` with multiline commands, `CliError` with ad-hoc "Try:" strings, and silent `catch` blocks (advisory).
+**CI enforcement:** `pnpm run check:errors` scans for `ContextError` with multiline commands, `CliError` with ad-hoc "Try:" strings, and silent `catch` blocks (advisory).
 
 ```typescript
 // Usage examples
@@ -554,7 +553,7 @@ catch (error) {
 
 Use `logger.withTag("command-name")` for tagged logging in command files.
 
-**CI enforcement:** `bun run check:errors` includes a silent-catch scan that flags
+**CI enforcement:** `pnpm run check:errors` includes a silent-catch scan that flags
 `catch` blocks which are empty, comment-only, or return-only without surfacing the
 error. It is currently **advisory** (warns, does not fail CI) because of a pre-existing
 backlog; run with `SENTRY_STRICT_SILENT_CATCH=1` to enforce. Do not add new silent
@@ -700,7 +699,7 @@ await deleteUserData(userId)
 ### Goal
 Minimal comments, maximum clarity. Comments explain **intent and reasoning**, not syntax.
 
-## Testing (bun:test + fast-check)
+## Testing (vitest + fast-check)
 
 **Prefer property-based and model-based testing** over traditional unit tests. These approaches find edge cases automatically and provide better coverage with less code.
 
@@ -734,7 +733,7 @@ Tests that need a database or config directory **must** use `useTestConfigDir()`
 - `const baseDir = process.env[CONFIG_DIR_ENV_VAR]!` at module scope — This captures a value that may be stale
 - Manual `beforeEach`/`afterEach` that sets/deletes `SENTRY_CONFIG_DIR`
 
-**Why**: Bun's test runner uses `--isolate --parallel` (see `test:unit` in `package.json`), so each test file runs in a fresh global environment within a worker process. That bounds most cross-file leaks to a single worker, but `process.env` is still shared within a file's lifecycle — if your `afterEach` deletes the env var, the next describe/test's module-level code (or a beforeEach that re-reads env) gets `undefined`, causing `TypeError: The "paths[0]" property must be of type string`. Also, `TEST_TMP_DIR` is namespaced by `BUN_TEST_WORKER_ID` in `test/constants.ts` so parallel workers don't wipe each other's temp state during preload.
+**Why**: Vitest runs test files in parallel worker pools, so each test file runs in a fresh global environment within a worker process. That bounds most cross-file leaks to a single worker, but `process.env` is still shared within a file's lifecycle — if your `afterEach` deletes the env var, the next describe/test's module-level code (or a beforeEach that re-reads env) gets `undefined`, causing `TypeError: The "paths[0]" property must be of type string`. Also, `TEST_TMP_DIR` is namespaced by `VITEST_POOL_ID` in `test/constants.ts` so parallel workers don't wipe each other's temp state during preload.
 
 ```typescript
 // CORRECT: Use the helper
@@ -757,7 +756,7 @@ afterEach(() => { delete process.env.SENTRY_CONFIG_DIR; }); // BUG!
 Use property-based tests when verifying invariants that should hold for **any valid input**.
 
 ```typescript
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { constantFrom, assert as fcAssert, property, tuple } from "fast-check";
 import { DEFAULT_NUM_RUNS } from "../model-based/helpers.js";
 
@@ -805,7 +804,7 @@ describe("property: myFunction", () => {
 Use model-based tests for **stateful systems** where sequences of operations should maintain invariants.
 
 ```typescript
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   type AsyncCommand,
   asyncModelRun,
@@ -933,7 +932,7 @@ When adding property tests for a function that already has unit tests, **remove 
 ```
 
 ```typescript
-import { describe, expect, test, mock } from "bun:test";
+import { describe, expect, test, vi } from "vitest";
 
 describe("feature", () => {
   test("should return specific value", async () => {
@@ -942,7 +941,7 @@ describe("feature", () => {
 });
 
 // Mock modules when needed
-mock.module("./some-module", () => ({
+vi.mock("./some-module", () => ({
   default: () => "mocked",
 }));
 ```
