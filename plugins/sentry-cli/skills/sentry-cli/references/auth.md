@@ -30,9 +30,18 @@ sentry auth login
 
 sentry auth login --token YOUR_SENTRY_API_TOKEN
 
-SENTRY_URL=https://sentry.example.com sentry auth login
+# Request only read scopes (project:read, org:read, event:read, etc.)
+sentry auth login --read-only
 
-SENTRY_URL=https://sentry.example.com sentry auth login --token YOUR_TOKEN
+# Request specific OAuth scopes (comma-separated or repeated)
+sentry auth login --scope project:read --scope org:read
+sentry auth login --scope project:read,org:read,event:read
+
+sentry auth login --url https://sentry.example.com
+
+SENTRY_HOST=https://sentry.example.com sentry auth login
+
+sentry auth login --url https://sentry.example.com --token YOUR_TOKEN
 ```
 
 ### `sentry auth logout`
