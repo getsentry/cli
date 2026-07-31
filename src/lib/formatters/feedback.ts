@@ -233,7 +233,7 @@ export function formatFeedbackList(result: FeedbackListResult): string {
   return `Feedback in ${scope}:\n\n${formatTable(result.feedback, FEEDBACK_COLUMNS, { truncate: true })}`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isFeedbackContext(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -241,7 +241,7 @@ function feedbackContext(
   event: SentryEvent | null
 ): Record<string, unknown> | undefined {
   const context = event?.contexts?.feedback;
-  return isRecord(context) ? context : undefined;
+  return isFeedbackContext(context) ? context : undefined;
 }
 
 function feedbackUrl(event: SentryEvent | null): string | undefined {
