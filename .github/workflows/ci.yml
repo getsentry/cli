@@ -828,7 +828,6 @@ jobs:
           # Environment-scoped (production) — see note in build-binary.
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: pnpm run bundle
-      - run: npm pack
       # Switch to the matrix Node to run the produced artifact. This is the
       # consumer's perspective: Node 20 exercises the WASM SQLite fallback
       # (no node:sqlite before 22.15); 22/24 use the native driver.
