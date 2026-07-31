@@ -512,6 +512,15 @@ Query aggregate event data (Explore)
 
 → Full flags and examples: `references/explore.md`
 
+### Feedback
+
+Search and inspect User Feedback
+
+- `sentry feedback list <org/project>` — List and search User Feedback
+- `sentry feedback view <feedback>` — View a User Feedback item
+
+→ Full flags and examples: `references/feedback.md`
+
 ### Log
 
 View Sentry logs

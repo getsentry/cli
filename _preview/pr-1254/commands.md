@@ -31,6 +31,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`issue`](https://cli.sentry.dev/_preview/pr-1254/commands/issue.md) | Manage Sentry issues |
 | [`event`](https://cli.sentry.dev/_preview/pr-1254/commands/event.md) | View, list, and send Sentry events |
 | [`explore`](https://cli.sentry.dev/_preview/pr-1254/commands/explore.md) | Query aggregate event data (Explore) |
+| [`feedback`](https://cli.sentry.dev/_preview/pr-1254/commands/feedback.md) | Search and inspect User Feedback |
 | [`log`](https://cli.sentry.dev/_preview/pr-1254/commands/log.md) | View Sentry logs |
 | [`monitor`](https://cli.sentry.dev/_preview/pr-1254/commands/monitor.md) | Work with Sentry cron monitors |
 | [`snapshots`](https://cli.sentry.dev/_preview/pr-1254/commands/snapshots.md) | Manage and compare snapshots |
@@ -89,6 +90,7 @@ sentry issue view PROJ-123 -w
 - [debug-files](https://cli.sentry.dev/_preview/pr-1254/commands/debug-files.md)
 - [event](https://cli.sentry.dev/_preview/pr-1254/commands/event.md)
 - [explore](https://cli.sentry.dev/_preview/pr-1254/commands/explore.md)
+- [feedback](https://cli.sentry.dev/_preview/pr-1254/commands/feedback.md)
 - [info](https://cli.sentry.dev/_preview/pr-1254/commands/info.md)
 - [init](https://cli.sentry.dev/_preview/pr-1254/commands/init.md)
 - [issue](https://cli.sentry.dev/_preview/pr-1254/commands/issue.md)
