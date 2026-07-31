@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-build
-version: 0.39.0
+version: 0.40.0
 description: Manage mobile build artifacts
 requires:
   bins: ["sentry"]

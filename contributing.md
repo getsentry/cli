@@ -67,6 +67,7 @@ cli/
 │   │   ├── dashboard/   # add, create, delete, edit, list, restore, revisions, view
 │   │   ├── debug-files/ # bundle-jvm, bundle-sources, check, find, print-sources, upload
 │   │   ├── event/       # list, send, view
+│   │   ├── feedback/    # list, view
 │   │   ├── issue/       # archive, events, explain, list, merge, plan, resolve, unresolve, view
 │   │   ├── local/       # run, serve
 │   │   ├── log/         # list, view

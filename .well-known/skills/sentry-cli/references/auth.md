@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-auth
-version: 0.39.0
+version: 0.40.0
 description: Authenticate with Sentry
 requires:
   bins: ["sentry"]
@@ -47,10 +47,10 @@ sentry auth logout
 
 ### `sentry auth refresh`
 
-Refresh your authentication token
+Refresh your OAuth access token
 
 **Flags:**
-- `--force - Force refresh even if token is still valid`
+- `--force - Force refresh even if the access token is still valid`
 - `--read-only - Re-authenticate with read-only OAuth scopes (project:read, org:read, event:read, member:read, team:read)`
 - `-s, --scope <value>... - Re-authenticate with specific OAuth scopes (repeatable, comma-separated). E.g. --scope project:read --scope org:read`
 

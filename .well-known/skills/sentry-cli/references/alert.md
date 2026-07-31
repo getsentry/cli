@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-alert
-version: 0.39.0
+version: 0.40.0
 description: Manage Sentry alert rules
 requires:
   bins: ["sentry"]

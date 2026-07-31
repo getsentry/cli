@@ -31,6 +31,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`issue`](https://cli.sentry.dev/commands/issue.md) | Manage Sentry issues |
 | [`event`](https://cli.sentry.dev/commands/event.md) | View, list, and send Sentry events |
 | [`explore`](https://cli.sentry.dev/commands/explore.md) | Query aggregate event data (Explore) |
+| [`feedback`](https://cli.sentry.dev/commands/feedback.md) | Search and inspect User Feedback |
 | [`log`](https://cli.sentry.dev/commands/log.md) | View Sentry logs |
 | [`monitor`](https://cli.sentry.dev/commands/monitor.md) | Work with Sentry cron monitors |
 | [`snapshots`](https://cli.sentry.dev/commands/snapshots.md) | Manage and compare snapshots |
@@ -89,6 +90,7 @@ sentry issue view PROJ-123 -w
 - [debug-files](https://cli.sentry.dev/commands/debug-files.md)
 - [event](https://cli.sentry.dev/commands/event.md)
 - [explore](https://cli.sentry.dev/commands/explore.md)
+- [feedback](https://cli.sentry.dev/commands/feedback.md)
 - [info](https://cli.sentry.dev/commands/info.md)
 - [init](https://cli.sentry.dev/commands/init.md)
 - [issue](https://cli.sentry.dev/commands/issue.md)

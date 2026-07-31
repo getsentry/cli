@@ -152,4 +152,4 @@ sentry explore my-org/cli -F title -F "count()" -F "count_unique(user)" \
 - [Docs home](https://cli.sentry.dev/index.md)
 - [Parent: Commands](https://cli.sentry.dev/commands.md)
 - [Previous: event](https://cli.sentry.dev/commands/event.md)
-- [Next: info](https://cli.sentry.dev/commands/info.md)
+- [Next: feedback](https://cli.sentry.dev/commands/feedback.md)
