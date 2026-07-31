@@ -65,6 +65,9 @@ export default defineConfig({
       plugins: [sentryStarlightTheme(), sentryAgentMarkdown()],
       components: {
         Header: "./src/components/Header.astro",
+        // Drop footer social icons — header already links the repo, and the
+        // landing-page install banner covers the footer GitHub icon (#1323).
+        Footer: "./src/components/Footer.astro",
         PageTitle: "./src/components/PageTitle.astro",
       },
       head: [
