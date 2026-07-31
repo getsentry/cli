@@ -1,6 +1,28 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.40.0
+
+### New Features ✨
+
+- (api) Render image attachments inline via sixel on capable terminals by @jared-outpost in [#1310](https://github.com/getsentry/cli/pull/1310)
+- (feedback) Add list and view commands by @betegon in [#1266](https://github.com/getsentry/cli/pull/1266)
+
+### Bug Fixes 🐛
+
+- (alert) Guard against undefined conditions/actions in list command by @sentry in [#1313](https://github.com/getsentry/cli/pull/1313)
+- (auth) Clarify access token expiry wording by @betegon in [#1315](https://github.com/getsentry/cli/pull/1315)
+- (fs) Ignore ELOOP errors during file scanning by @sentry in [#1320](https://github.com/getsentry/cli/pull/1320)
+- (local) Point `trace view --web` at the trace detail route by @sergical in [#1314](https://github.com/getsentry/cli/pull/1314)
+- (log) Scope log queries by numeric project ID by @jared-outpost in [#1318](https://github.com/getsentry/cli/pull/1318)
+- (logger) Render log timestamps in local time instead of UTC by @MathurAditya724 in [#1311](https://github.com/getsentry/cli/pull/1311)
+- (replays) Use `events` data source for issue replay count by @mjq in [#1316](https://github.com/getsentry/cli/pull/1316)
+
+### Internal Changes 🔧
+
+- (lint) Prevent generic isRecord guards by @betegon in [#1272](https://github.com/getsentry/cli/pull/1272)
+- Regenerate docs by @github-actions[bot] in [3e292ee4](https://github.com/getsentry/cli/commit/3e292ee4beb5c8254e0f020d2bfaf64fa16a7132)
+
 ## 0.39.0
 
 ### New Features ✨
