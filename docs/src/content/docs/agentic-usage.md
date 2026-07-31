@@ -46,6 +46,26 @@ The CLI has dedicated commands for most Sentry tasks, so agents should prefer `s
 
 The skill uses your existing CLI authentication, so you'll need to run `sentry auth login` first if you haven't already.
 
+## Supported Agents
+
+The CLI detects and integrates with these AI coding agents:
+
+| Agent | Skill auto-install | Telemetry detection |
+|-------|--------------------|---------------------|
+| **Claude Code** | `~/.claude/skills/` | env + process |
+| **Cursor** | `~/.agents/skills/` | env + process |
+| **GitHub Copilot** | — | env |
+| **Windsurf** | — | process |
+| **Gemini CLI** | — | env + process |
+| **OpenAI Codex** | — | env |
+| **Augment** | — | env + process |
+| **OpenCode** | — | env + process |
+| **Goose** | — | env + process |
+| **Amp** | — | env + process |
+| **Antigravity** | — | env |
+
+Agents without auto-install can use skills by creating a `~/.agents` directory (the CLI installs skills there on the next `sentry cli setup`), or via `npx skills add https://cli.sentry.dev`.
+
 ## Requirements
 
 - An authenticated Sentry CLI installation (`sentry auth login`)
