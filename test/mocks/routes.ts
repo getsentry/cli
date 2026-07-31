@@ -8,6 +8,9 @@
 import methodNotAllowedFixture from "../fixtures/errors/method-not-allowed.json";
 import notFoundFixture from "../fixtures/errors/not-found.json";
 import eventFixture from "../fixtures/event.json";
+import feedbackFixture from "../fixtures/feedback.json";
+import feedbackEventFixture from "../fixtures/feedback-event.json";
+import feedbacksFixture from "../fixtures/feedbacks.json";
 import issueFixture from "../fixtures/issue.json";
 import issuesFixture from "../fixtures/issues.json";
 import logDetailFixture from "../fixtures/log-detail.json";
@@ -19,7 +22,7 @@ import projectsFixture from "../fixtures/projects.json";
 import traceSpansFixture from "../fixtures/trace-spans.json";
 import transactionsFixture from "../fixtures/transactions.json";
 import userFixture from "../fixtures/user.json";
-import type { MockRoute, MockServer } from "./server.js";
+import type { MockResponse, MockRoute, MockServer } from "./server.js";
 import { createMockServer } from "./server.js";
 
 export const TEST_ORG = "test-org";
@@ -28,6 +31,10 @@ export const TEST_TOKEN = "test-auth-token-12345";
 export const TEST_ISSUE_ID = "400001";
 export const TEST_ISSUE_SHORT_ID = "TEST-PROJECT-1A";
 export const TEST_EVENT_ID = "abc123def456abc123def456abc12345";
+export const TEST_FEEDBACK_ID = "5146636313";
+export const TEST_FEEDBACK_SHORT_ID = "TEST-PROJECT-2SDJ";
+export const TEST_FEEDBACK_EVENT_ID = "feed123def456abc123def456abc1234";
+export const TEST_FEEDBACK_LATEST_ORG = "test-feedback-latest-org";
 export const TEST_DSN = "https://abc123@o123.ingest.sentry.io/456789";
 export const TEST_LOG_ID = "a0a1a2a3a4a5a6a7a8a9b0b1b2b3b4b5";
 export const TEST_TRACE_ID = "aaaa1111bbbb2222cccc3333dddd4444";
@@ -44,6 +51,103 @@ const projectKeysFixture = [
     dateCreated: "2024-01-01T00:00:00.000Z",
   },
 ];
+
+function feedbackLimitContextResponse(
+  url: URL,
+  serverUrl: string
+): MockResponse | undefined {
+  const query = url.searchParams.get("query") ?? "";
+  if (!query.includes("e2e-limit-context")) {
+    return;
+  }
+
+  const limit = url.searchParams.get("limit") ?? "unknown";
+  const expectedCursor = `feedback-limit-${limit}-next`;
+  const cursor = url.searchParams.get("cursor");
+  if (cursor && cursor !== expectedCursor) {
+    return {
+      status: 400,
+      body: { detail: `Unexpected cursor ${cursor}` },
+    };
+  }
+  return {
+    body: Array.from(
+      { length: Number.parseInt(limit, 10) },
+      () => feedbacksFixture[0]
+    ),
+    headers: {
+      Link: `<${serverUrl}/next>; rel="next"; results="true"; cursor="${expectedCursor}"`,
+    },
+  };
+}
+
+/** Validate the org-wide issue-index request made by `feedback view @latest`. */
+function feedbackLatestValidationResponse(url: URL): MockResponse | undefined {
+  const query = url.searchParams.get("query") ?? "";
+  if (
+    url.searchParams.get("limit") === "1" &&
+    query.includes("status:unresolved") &&
+    url.searchParams.get("sort") === "date"
+  ) {
+    return;
+  }
+
+  return {
+    status: 400,
+    body: { detail: "Invalid @latest Feedback query" },
+  };
+}
+
+/** Build the Feedback-specific response for the shared issue-index route. */
+function feedbackIssueIndexResponse(
+  url: URL,
+  orgSlug: string,
+  serverUrl: string
+): MockResponse {
+  if (orgSlug === TEST_FEEDBACK_LATEST_ORG) {
+    const latestValidationResponse = feedbackLatestValidationResponse(url);
+    if (latestValidationResponse) {
+      return latestValidationResponse;
+    }
+  }
+
+  const paginationResponse = feedbackLimitContextResponse(url, serverUrl);
+  if (paginationResponse) {
+    return paginationResponse;
+  }
+
+  const query = url.searchParams.get("query") ?? "";
+  if (
+    query.includes("e2e-status-check") &&
+    !query.includes("status:unresolved")
+  ) {
+    return {
+      status: 400,
+      body: { detail: "Missing default Feedback status filter" },
+    };
+  }
+
+  return { body: feedbacksFixture };
+}
+
+/** Build the org issue-index response for issue and Feedback E2E tests. */
+function issueIndexResponse(
+  req: Request,
+  params: Record<string, string>,
+  serverUrl: string
+): MockResponse {
+  const supportedOrgs = [TEST_ORG, TEST_FEEDBACK_LATEST_ORG];
+  if (!supportedOrgs.includes(params.orgSlug)) {
+    return { status: 404, body: notFoundFixture };
+  }
+
+  const url = new URL(req.url);
+  const query = url.searchParams.get("query") ?? "";
+  if (query.includes("issue.category:feedback")) {
+    return feedbackIssueIndexResponse(url, params.orgSlug, serverUrl);
+  }
+  return { body: issuesFixture };
+}
 
 export const apiRoutes: MockRoute[] = [
   // User Regions (multi-region support)
@@ -142,12 +246,7 @@ export const apiRoutes: MockRoute[] = [
   {
     method: "GET",
     path: "/api/0/organizations/:orgSlug/issues/",
-    response: (_req, params) => {
-      if (params.orgSlug === TEST_ORG) {
-        return { body: issuesFixture };
-      }
-      return { status: 404, body: notFoundFixture };
-    },
+    response: issueIndexResponse,
   },
   // Issues (legacy project-scoped endpoint)
   {
@@ -164,6 +263,9 @@ export const apiRoutes: MockRoute[] = [
     method: "GET",
     path: "/api/0/issues/:issueId/",
     response: (_req, params) => {
+      if (params.issueId === TEST_FEEDBACK_ID) {
+        return { body: feedbackFixture };
+      }
       if (params.issueId === TEST_ISSUE_ID) {
         return { body: issueFixture };
       }
@@ -174,6 +276,15 @@ export const apiRoutes: MockRoute[] = [
     method: "GET",
     path: "/api/0/organizations/:orgSlug/issues/:shortId/",
     response: (_req, params) => {
+      if (params.orgSlug === TEST_ORG && params.shortId === TEST_FEEDBACK_ID) {
+        return { body: feedbackFixture };
+      }
+      if (
+        params.orgSlug === TEST_ORG &&
+        params.shortId.toUpperCase() === TEST_FEEDBACK_SHORT_ID
+      ) {
+        return { body: feedbackFixture };
+      }
       if (
         params.orgSlug === TEST_ORG &&
         params.shortId.toUpperCase() === TEST_ISSUE_SHORT_ID
@@ -185,8 +296,30 @@ export const apiRoutes: MockRoute[] = [
   },
   {
     method: "GET",
+    path: "/api/0/organizations/:orgSlug/shortids/:shortId/",
+    response: (_req, params) => {
+      if (
+        params.orgSlug === TEST_ORG &&
+        params.shortId.toUpperCase() === TEST_FEEDBACK_SHORT_ID
+      ) {
+        return { body: { group: feedbackFixture } };
+      }
+      if (
+        params.orgSlug === TEST_ORG &&
+        params.shortId.toUpperCase() === TEST_ISSUE_SHORT_ID
+      ) {
+        return { body: { group: issueFixture } };
+      }
+      return { status: 404, body: notFoundFixture };
+    },
+  },
+  {
+    method: "GET",
     path: "/api/0/organizations/:orgSlug/issues/:issueId/events/latest/",
     response: (_req, params) => {
+      if (params.orgSlug === TEST_ORG && params.issueId === TEST_FEEDBACK_ID) {
+        return { body: feedbackEventFixture };
+      }
       if (params.orgSlug === TEST_ORG && params.issueId === TEST_ISSUE_ID) {
         return { body: eventFixture };
       }
@@ -205,6 +338,51 @@ export const apiRoutes: MockRoute[] = [
         params.eventId === TEST_EVENT_ID
       ) {
         return { body: eventFixture };
+      }
+      return { status: 404, body: notFoundFixture };
+    },
+  },
+  {
+    method: "GET",
+    path: "/api/0/projects/:orgSlug/:projectSlug/events/:eventId/attachments/",
+    response: (_req, params) => {
+      if (
+        params.orgSlug === TEST_ORG &&
+        params.projectSlug === TEST_PROJECT &&
+        params.eventId === TEST_FEEDBACK_EVENT_ID
+      ) {
+        return {
+          body: [
+            {
+              id: "attachment-1",
+              event_id: TEST_FEEDBACK_EVENT_ID,
+              type: "event.attachment",
+              name: "screenshot.png",
+              mimetype: "image/png",
+              dateCreated: "2026-07-16T12:00:00Z",
+              size: 2048,
+              headers: {},
+              sha1: null,
+            },
+          ],
+        };
+      }
+      return { status: 404, body: notFoundFixture };
+    },
+  },
+  {
+    method: "GET",
+    path: "/api/0/organizations/:orgSlug/replay-count/",
+    response: (_req, params) => {
+      if (params.orgSlug === TEST_ORG) {
+        return {
+          body: {
+            [TEST_FEEDBACK_ID]: [
+              "346789a703f6454384f1de473b8b9fcc",
+              "aaaaaaaa03f6454384f1de473b8b9fcc",
+            ],
+          },
+        };
       }
       return { status: 404, body: notFoundFixture };
     },

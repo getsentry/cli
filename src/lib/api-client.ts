@@ -52,10 +52,18 @@ export {
   findEventAcrossOrgs,
   getEvent,
   getLatestEvent,
+  listEventAttachments,
   listIssueEvents,
   type ResolvedEvent,
   resolveEventInOrg,
 } from "./api/events.js";
+export {
+  buildFeedbackQuery,
+  type FeedbackPage,
+  type FeedbackStatus,
+  type ListFeedbackOptions,
+  listFeedback,
+} from "./api/feedback.js";
 export {
   API_MAX_PER_PAGE,
   type ApiRequestOptions,

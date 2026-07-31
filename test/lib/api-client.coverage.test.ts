@@ -25,6 +25,7 @@ import {
   getLatestEvent,
   getLogs,
   getProjectKeys,
+  listEventAttachments,
   listIssuesAllPages,
   listLogs,
   listProjects,
@@ -429,6 +430,37 @@ describe("issues.ts", () => {
       expect(result.issues).toHaveLength(2);
       // Exactly at limit with more pages → keep nextCursor
       expect(result.nextCursor).toBe("has-more");
+    });
+
+    test("uses the remaining limit on the final page and preserves its cursor", async () => {
+      const requestedLimits: string[] = [];
+      let callCount = 0;
+
+      globalThis.fetch = mockFetch(async (input, init) => {
+        callCount += 1;
+        const req = new Request(input!, init);
+        const url = new URL(req.url);
+        requestedLimits.push(url.searchParams.get("limit") ?? "");
+        const count = callCount === 3 ? 50 : 100;
+        const issues = Array.from({ length: count }, (_, index) =>
+          mockIssue({ id: `${callCount}-${index}` })
+        );
+        return new Response(JSON.stringify(issues), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            Link: linkHeader(`cursor-${callCount + 1}`, true),
+          },
+        });
+      });
+
+      const result = await listIssuesAllPages("test-org", "test-project", {
+        limit: 250,
+      });
+
+      expect(result.issues).toHaveLength(250);
+      expect(requestedLimits).toEqual(["100", "100", "50"]);
+      expect(result.nextCursor).toBe("cursor-4");
     });
 
     test("accepts startCursor option", async () => {
@@ -950,6 +982,56 @@ describe("events.ts", () => {
 
       const result = await getEvent("test-org", "test-project", "evt-abc");
       expect(result.eventID).toBe("evt-abc");
+    });
+  });
+
+  describe("listEventAttachments", () => {
+    test("returns attachment metadata from every API page", async () => {
+      let requestCount = 0;
+      globalThis.fetch = mockFetch(async (input, init) => {
+        const req = new Request(input!, init);
+        const url = new URL(req.url);
+        expect(url.pathname).toContain(
+          "/projects/test-org/test-project/events/evt-abc/attachments/"
+        );
+        expect(url.searchParams.get("per_page")).toBe("100");
+
+        requestCount += 1;
+        const firstPage = url.searchParams.get("cursor") === null;
+        if (firstPage) {
+          return new Response(
+            JSON.stringify([{ id: "attachment-1", name: "first.png" }]),
+            {
+              status: 200,
+              headers: {
+                "Content-Type": "application/json",
+                Link: linkHeader("attachments-next", true),
+              },
+            }
+          );
+        }
+
+        expect(url.searchParams.get("cursor")).toBe("attachments-next");
+        return new Response(
+          JSON.stringify([{ id: "attachment-2", name: "second.png" }]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      });
+
+      const result = await listEventAttachments(
+        "test-org",
+        "test-project",
+        "evt-abc"
+      );
+
+      expect(result.map((attachment) => attachment.id)).toEqual([
+        "attachment-1",
+        "attachment-2",
+      ]);
+      expect(requestCount).toBe(2);
     });
   });
 
