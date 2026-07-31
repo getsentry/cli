@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
-import { copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { build, type Plugin } from "esbuild";
 import pkg from "../package.json";
