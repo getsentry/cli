@@ -1,5 +1,6 @@
 #!/usr/bin/env tsx
 import { copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { build, type Plugin } from "esbuild";
 import pkg from "../package.json";
@@ -433,10 +434,22 @@ console.log("  -> dist/vendor/symbolic_bg.wasm (DIF parser)");
 // Once bundled, `__dirname` is `dist/`, so the file must sit at
 // dist/node-sqlite3-wasm.wasm. Only loaded on Node.js < 22.15 (see
 // src/lib/db/sqlite.ts resolveDriver()); harmless dead weight on newer Node.
-await copyFile(
-  "./node_modules/node-sqlite3-wasm/dist/node-sqlite3-wasm.wasm",
-  "./dist/node-sqlite3-wasm.wasm"
-);
+let sqliteWasmSrc: string;
+try {
+  sqliteWasmSrc = createRequire(import.meta.url).resolve(
+    "node-sqlite3-wasm/dist/node-sqlite3-wasm.wasm"
+  );
+} catch {
+  throw new Error(
+    "Missing node-sqlite3-wasm WASM (node-sqlite3-wasm/dist/node-sqlite3-wasm.wasm). Run: pnpm install"
+  );
+}
+if (!existsSync(sqliteWasmSrc)) {
+  throw new Error(
+    `Missing node-sqlite3-wasm WASM at ${sqliteWasmSrc}. Run: pnpm install`
+  );
+}
+await copyFile(sqliteWasmSrc, "./dist/node-sqlite3-wasm.wasm");
 console.log("  -> dist/node-sqlite3-wasm.wasm (WASM SQLite fallback)");
 
 // Calculate bundle size (only the main bundle, not source maps)
