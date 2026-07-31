@@ -3,8 +3,8 @@ changelog:
   policy: auto
 versioning:
   policy: auto
-preReleaseCommand: node --experimental-strip-types script/bump-version.ts --pre
-postReleaseCommand: node --experimental-strip-types script/bump-version.ts --post
+preReleaseCommand: bash -c 'cd packages/cli && node --experimental-strip-types script/bump-version.ts --pre'
+postReleaseCommand: bash -c 'cd packages/cli && node --experimental-strip-types script/bump-version.ts --post'
 artifactProvider:
   name: github
   config:
