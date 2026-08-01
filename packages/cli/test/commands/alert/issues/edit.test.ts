@@ -136,4 +136,30 @@ describe("alert issues edit", () => {
       ],
     });
   });
+
+  test("maps the workflow enabled field to a status label in output", async () => {
+    const context = createContext();
+    resolveSpy.mockResolvedValue({ targets: [sampleTarget] });
+    getRuleSpy.mockResolvedValue(sampleRule);
+    getDocSpy.mockResolvedValue({
+      id: "42",
+      name: "Rule Alpha",
+      enabled: true,
+    });
+    putSpy.mockResolvedValue({ id: "42", name: "Rule Alpha", enabled: false });
+    const func = (await editCommand.loader()) as unknown as (
+      this: unknown,
+      flags: EditFlags,
+      arg: string
+    ) => Promise<void>;
+
+    await func.call(
+      context,
+      { status: "disabled", json: true },
+      "test-org/test-project/42"
+    );
+
+    const output = context.stdout.write.mock.calls.map((c) => c[0]).join("");
+    expect(JSON.parse(output)).toMatchObject({ id: "42", status: "disabled" });
+  });
 });

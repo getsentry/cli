@@ -283,6 +283,11 @@ export const editCommand = buildCommand({
       org: target.org,
       project: target.project,
       id: String(updated.id ?? rule.id),
+      // The workflows endpoint returns `enabled` rather than `status`; map it
+      // back to a status label so human/JSON output matches the create path.
+      status: String(
+        updated.status ?? (updated.enabled === false ? "disabled" : "active")
+      ),
     } satisfies EditResult);
   },
 });
