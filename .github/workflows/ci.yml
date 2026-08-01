@@ -488,12 +488,32 @@ jobs:
 
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
 
-          # Find previous nightly tag
+          # Find previous nightly tag, restricted to the same major.minor series
+          # as the current build. Without this filter, `sort -V` places every
+          # 0.41 nightly after every 0.40 nightly (0.41 > 0.40), and the loop
+          # below walks past all 0.40 tags and onto the 0.41 tag — even though
+          # the current build hasn't pushed its own tag yet, so the
+          # `if [ "$tag" = "nightly-${VERSION}" ]` break never triggers.
+          # Result: PREV_TAG ends up being the 0.41 nightly, and the resulting
+          # patch is generated FROM the 0.41 binary and stamped with
+          # `from-version: 0.41.x-dev.Y` — useless to any user on the 0.40
+          # series. See commit message for the exact scenario.
           TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-[0-9]' | sort -V || echo "")
+          # MAJOR_MINOR is e.g. "0.40" — restricts the loop to tags that
+          # belong to the same series as the current build. The first build
+          # of a new series (no prior tags in the same series) falls through
+          # with PREV_TAG="" and the existing HAS_PREV skip handles it.
+          MAJOR_MINOR=$(echo "${VERSION}" | cut -d. -f1,2)
+          # -F (fixed-string) avoids treating the dot in "0.40" as a regex
+          # metachar. In practice `oras repo tags` upstream is filtered to
+          # `^nightly-[0-9]` and MAJOR_MINOR is always digits.digits, so this
+          # can't actually mis-match — but be defensive.
+          SAME_SERIES_TAGS=$(printf '%s\n' "$TAGS" | grep -F "nightly-${MAJOR_MINOR}." || true)
           PREV_TAG=""
-          for tag in $TAGS; do
+          for tag in $SAME_SERIES_TAGS; do
             # Current tag may not exist yet (publish-nightly hasn't run),
-            # but that's fine — we want the latest existing nightly tag
+            # but that's fine — we want the latest existing nightly tag in
+            # the same series as the current build.
             if [ "$tag" = "nightly-${VERSION}" ]; then
               break
             fi
@@ -501,7 +521,7 @@ jobs:
           done
 
           if [ -z "$PREV_TAG" ]; then
-            echo "No previous versioned nightly found, skipping patches"
+            echo "No previous nightly tag in ${MAJOR_MINOR}.x series, skipping patches"
             exit 0
           fi
           echo "HAS_PREV=true" >> "$GITHUB_ENV"
