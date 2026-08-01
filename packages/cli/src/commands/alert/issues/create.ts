@@ -19,6 +19,7 @@ import {
   matchToLogicType,
   parseJsonObjectList,
   parseMatchMode,
+  triggerLogicType,
   validateIssueRuleArrays,
 } from "../mutation-utils.js";
 
@@ -73,6 +74,10 @@ export const createCommand = buildCommand({
       "  --condition  a trigger data-condition: {type, comparison, conditionResult}\n" +
       "  --action     an action: {type, data, config}\n" +
       "  --filter     an action-filter condition (same shape as --condition)\n\n" +
+      "Match modes: --filter-match all|any controls the action-filter group.\n" +
+      "--action-match is accepted for parity but the trigger group is always\n" +
+      "evaluated as 'any-short' — issue alerts fire on a single error detector,\n" +
+      "and the workflows endpoint requires that logic type for issue triggers.\n\n" +
       "Examples:\n" +
       "  sentry alert issues create my-org/my-app --name 'New Issues' \\\n" +
       '    --condition \'{"type":"first_seen_event","comparison":true,"conditionResult":true}\' \\\n' +
@@ -221,7 +226,7 @@ export const createCommand = buildCommand({
       detectorIds: [detectorId],
       config: { frequency: flags.frequency },
       triggers: {
-        logicType: matchToLogicType(flags["action-match"]),
+        logicType: triggerLogicType(),
         conditions,
       },
       actionFilters: [

@@ -130,7 +130,10 @@ describe("alert issues edit", () => {
       name: "Rule Beta",
       enabled: false,
       config: { frequency: 30 },
-      triggers: { logicType: "all", conditions: [{ id: "new-condition" }] },
+      triggers: {
+        logicType: "any-short",
+        conditions: [{ id: "new-condition" }],
+      },
       actionFilters: [
         { logicType: "all", conditions: [], actions: [{ id: "new-action" }] },
       ],

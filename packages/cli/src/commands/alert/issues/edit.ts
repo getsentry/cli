@@ -20,6 +20,7 @@ import {
   parseJsonObjectList,
   parseMatchMode,
   parseStatusFlag,
+  triggerLogicType,
   validateIssueRuleArrays,
 } from "../mutation-utils.js";
 import { parseIssueRuleArg, resolveIssueAlertRule } from "./rule-resolve.js";
@@ -112,7 +113,7 @@ function applyIssueEdits(
       triggers.conditions = conditions;
     }
     if (flags["action-match"] !== undefined) {
-      triggers.logicType = matchToLogicType(flags["action-match"]);
+      triggers.logicType = triggerLogicType();
     }
     body.triggers = triggers;
   }

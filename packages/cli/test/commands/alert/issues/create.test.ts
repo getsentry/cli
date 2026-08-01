@@ -199,7 +199,10 @@ describe("alert issues create", () => {
         name: "Rule A",
         detectorIds: [100],
         config: { frequency: 30 },
-        triggers: { logicType: "all", conditions: [{ id: "condition-a" }] },
+        triggers: {
+          logicType: "any-short",
+          conditions: [{ id: "condition-a" }],
+        },
         actionFilters: [
           {
             logicType: "all",
