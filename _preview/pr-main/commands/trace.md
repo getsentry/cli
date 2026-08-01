@@ -27,7 +27,7 @@ List recent traces in a project
 | `-n, --limit <limit>` | Number of traces (1-1000) (default: "25") |
 | `-q, --query <query>` | Search query (Sentry search syntax) |
 | `-s, --sort <sort>` | Sort by: date, duration (default: "date") |
-| `-t, --period <period>` | Time range: "7d", "2026-06-01..2026-07-01", ">=2026-06-01" (default: "7d") |
+| `-t, --period <period>` | Time range: "7d", "2026-07-01..2026-08-01", ">=2026-07-01" (default: "7d") |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 | `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
@@ -65,9 +65,9 @@ View logs associated with a trace
 | Option | Description |
 | --- | --- |
 | `-w, --web` | Open trace in browser |
-| `-t, --period <period>` | Time range: "7d", "2026-06-01..2026-07-01", ">=2026-06-01" (default: "14d") |
+| `-t, --period <period>` | Time range: "7d", "2026-07-01..2026-08-01", ">=2026-07-01" (default: "14d") |
 | `-n, --limit <limit>` | Number of log entries (<=1000) (default: "100") |
-| `-q, --query <query>` | Filter query (e.g., "level:error", "project:backend", "project:[a,b]") |
+| `-q, --query <query>` | Filter query (e.g., "severity:error", "project:backend", "project:[a,b]") |
 | `-s, --sort <sort>` | Sort order: "newest" (default) or "oldest" (default: "newest") |
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 
@@ -143,7 +143,7 @@ sentry trace logs --period 30d abc123def456abc123def456abc12345
 
 
 # Filter logs within a trace
-sentry trace logs -q 'level:error' abc123def456abc123def456abc12345
+sentry trace logs -q 'severity:error' abc123def456abc123def456abc12345
 ```
 
 ## Navigation

@@ -25,9 +25,9 @@ List logs from a project
 | Option | Description |
 | --- | --- |
 | `-n, --limit <limit>` | Number of log entries (1-1000) (default: "100") |
-| `-q, --query <query>` | Filter query (e.g., "level:error", "project:backend", "project:[a,b]") |
+| `-q, --query <query>` | Filter query (e.g., "severity:error", "project:backend", "project:[a,b]") |
 | `-f, --follow <follow>` | Stream logs (optionally specify poll interval in seconds) |
-| `-t, --period <period>` | Time range: "7d", "2026-06-01..2026-07-01", ">=2026-06-01" |
+| `-t, --period <period>` | Time range: "7d", "2026-07-01..2026-08-01", ">=2026-07-01" |
 | `-s, --sort <sort>` | Sort order: "newest" (default) or "oldest" (default: "newest") |
 | `--fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 
@@ -76,7 +76,7 @@ Showing 4 logs.
 
 ```bash
 # Show only error logs
-sentry log list -q 'level:error'
+sentry log list -q 'severity:error'
 
 
 # Filter by message content
@@ -100,7 +100,7 @@ sentry log list -f 5
 
 
 # Stream error logs from a specific project
-sentry log list my-org/backend -f -q 'level:error'
+sentry log list my-org/backend -f -q 'severity:error'
 ```
 
 
