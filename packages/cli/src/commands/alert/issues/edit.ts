@@ -33,7 +33,6 @@ type EditFlags = {
   readonly status?: "active" | "disabled" | undefined;
   readonly condition?: string[];
   readonly action?: string[];
-  readonly "action-match"?: "all" | "any";
   readonly frequency?: number;
   readonly environment?: string;
   readonly filter?: string[];
@@ -55,7 +54,6 @@ function hasIssueMutations(flags: EditFlags): boolean {
     flags.status !== undefined ||
     flags.condition !== undefined ||
     flags.action !== undefined ||
-    flags["action-match"] !== undefined ||
     flags.frequency !== undefined ||
     flags.environment !== undefined ||
     flags.filter !== undefined ||
@@ -105,16 +103,14 @@ function applyIssueEdits(
     body.owner = flags.owner.trim() === "" ? null : flags.owner;
   }
 
-  // Triggers: the "when" data-condition group.
-  if (conditions !== undefined || flags["action-match"] !== undefined) {
+  // Triggers: the "when" data-condition group. Issue-alert triggers always use
+  // the 'any-short' logic type (see triggerLogicType), so we pin it whenever the
+  // conditions change rather than exposing a trigger match flag.
+  if (conditions !== undefined) {
     const triggers =
       (body.triggers as Record<string, unknown> | undefined) ?? {};
-    if (conditions !== undefined) {
-      triggers.conditions = conditions;
-    }
-    if (flags["action-match"] !== undefined) {
-      triggers.logicType = triggerLogicType();
-    }
+    triggers.conditions = conditions;
+    triggers.logicType = triggerLogicType();
     body.triggers = triggers;
   }
 
@@ -209,12 +205,6 @@ export const editCommand = buildCommand({
         optional: true,
         brief: "Action object JSON (repeatable, or pass one JSON array)",
       },
-      "action-match": {
-        kind: "parsed",
-        parse: (value: string) => parseMatchMode(value, "action-match"),
-        optional: true,
-        brief: "Condition/action match mode: all or any",
-      },
       frequency: {
         kind: "parsed",
         parse: numberParser,
@@ -250,7 +240,6 @@ export const editCommand = buildCommand({
     aliases: {
       c: "condition",
       a: "action",
-      m: "action-match",
     },
   },
   async *func(this: SentryContext, flags: EditFlags, arg: string) {

@@ -24,13 +24,12 @@ import {
 } from "../mutation-utils.js";
 
 const USAGE_HINT =
-  "sentry alert issues create <target> --name <name> --condition <json> --action <json> --action-match all|any";
+  "sentry alert issues create <target> --name <name> --condition <json> --action <json>";
 
 type CreateFlags = {
   readonly name: string;
   readonly condition?: string[];
   readonly action?: string[];
-  readonly "action-match"?: "all" | "any";
   readonly frequency: number;
   readonly environment?: string;
   readonly filter?: string[];
@@ -66,7 +65,7 @@ export const createCommand = buildCommand({
       "<org>/<project>, an auto-detected project, or a bare project search when " +
       "it resolves to exactly one project.\n\n" +
       "Required fields:\n" +
-      "  --name, --condition (>=1), --action (>=1), --action-match all|any\n\n" +
+      "  --name, --condition (>=1), --action (>=1)\n\n" +
       "Optional fields:\n" +
       "  --frequency, --environment, --filter, --filter-match, --owner\n\n" +
       "Conditions and actions are workflow-native JSON (this targets the\n" +
@@ -74,15 +73,13 @@ export const createCommand = buildCommand({
       "  --condition  a trigger data-condition: {type, comparison, conditionResult}\n" +
       "  --action     an action: {type, data, config}\n" +
       "  --filter     an action-filter condition (same shape as --condition)\n\n" +
-      "Match modes: --filter-match all|any controls the action-filter group.\n" +
-      "--action-match is accepted for parity but the trigger group is always\n" +
-      "evaluated as 'any-short' — issue alerts fire on a single error detector,\n" +
-      "and the workflows endpoint requires that logic type for issue triggers.\n\n" +
+      "Match mode: --filter-match all|any controls how the action-filter\n" +
+      "conditions combine. Issue-alert triggers always evaluate as 'any-short'\n" +
+      "(they fire on a single error detector), so there is no trigger match flag.\n\n" +
       "Examples:\n" +
       "  sentry alert issues create my-org/my-app --name 'New Issues' \\\n" +
       '    --condition \'{"type":"first_seen_event","comparison":true,"conditionResult":true}\' \\\n' +
-      '    --action \'{"type":"email","data":{},"config":{"targetType":"team","targetIdentifier":"1"}}\' \\\n' +
-      "    --action-match any\n\n" +
+      '    --action \'{"type":"email","data":{},"config":{"targetType":"team","targetIdentifier":"1"}}\'\n\n' +
       "  sentry alert issues create my-org/my-app --name 'High Priority' \\\n" +
       '    --condition \'{"type":"new_high_priority_issue","comparison":true,"conditionResult":true}\' \\\n' +
       '    --action \'{"type":"email","data":{},"config":{"targetType":"user","targetIdentifier":"56789"}}\' \\\n' +
@@ -125,12 +122,6 @@ export const createCommand = buildCommand({
         optional: true,
         brief: "Action object JSON (repeatable, or pass one JSON array)",
       },
-      "action-match": {
-        kind: "parsed",
-        parse: (value: string) => parseMatchMode(value, "action-match"),
-        optional: true,
-        brief: "Condition/action match mode: all or any",
-      },
       frequency: {
         kind: "parsed",
         parse: numberParser,
@@ -168,7 +159,6 @@ export const createCommand = buildCommand({
       ...DRY_RUN_ALIASES,
       c: "condition",
       a: "action",
-      m: "action-match",
     },
   },
   async *func(
@@ -184,12 +174,6 @@ export const createCommand = buildCommand({
       throw new ValidationError(
         "frequency must be greater than 0.",
         "frequency"
-      );
-    }
-    if (!flags["action-match"]) {
-      throw new ValidationError(
-        "Pass --action-match with one of: all, any.",
-        "action-match"
       );
     }
 

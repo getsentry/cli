@@ -23,7 +23,6 @@ type CreateFlags = {
   readonly name: string;
   readonly condition?: string[];
   readonly action?: string[];
-  readonly "action-match"?: "all" | "any";
   readonly frequency: number;
   readonly environment?: string;
   readonly filter?: string[];
@@ -61,30 +60,6 @@ describe("alert issues create", () => {
     detectorSpy.mockRestore();
   });
 
-  test("requires --action-match", async () => {
-    const context = createContext();
-    const func = (await createCommand.loader()) as unknown as (
-      this: unknown,
-      flags: CreateFlags,
-      arg: string
-    ) => Promise<void>;
-
-    await expect(
-      func.call(
-        context,
-        {
-          name: "Rule A",
-          condition: ['{"id":"condition-a"}'],
-          action: ['{"id":"action-a"}'],
-          frequency: 30,
-          "dry-run": true,
-          json: true,
-        },
-        "test-org/test-project"
-      )
-    ).rejects.toBeInstanceOf(ValidationError);
-  });
-
   test("rejects blank rule name", async () => {
     const context = createContext();
     const func = (await createCommand.loader()) as unknown as (
@@ -100,7 +75,6 @@ describe("alert issues create", () => {
           name: "   ",
           condition: ['{"id":"condition-a"}'],
           action: ['{"id":"action-a"}'],
-          "action-match": "any",
           frequency: 30,
           "dry-run": true,
           json: true,
@@ -125,7 +99,6 @@ describe("alert issues create", () => {
           name: "Rule A",
           condition: ['{"id":"condition-a"}'],
           action: ['{"id":"action-a"}'],
-          "action-match": "any",
           frequency: 0,
           "dry-run": true,
           json: true,
@@ -150,7 +123,6 @@ describe("alert issues create", () => {
         name: "Rule A",
         condition: ['{"id":"condition-a"}'],
         action: ['{"id":"action-a"}'],
-        "action-match": "all",
         frequency: 30,
         "dry-run": true,
         json: true,
@@ -176,7 +148,6 @@ describe("alert issues create", () => {
         name: "Rule A",
         condition: ['{"id":"condition-a"}'],
         action: ['{"id":"action-a"}'],
-        "action-match": "all",
         frequency: 30,
         environment: "prod",
         filter: ['{"id":"filter-a"}'],
@@ -242,7 +213,6 @@ describe("alert issues create", () => {
           name: "Rule A",
           condition: ['{"id":"condition-a"}'],
           action: ['{"id":"action-a"}'],
-          "action-match": "any",
           frequency: 30,
           "dry-run": true,
           json: true,
@@ -273,7 +243,6 @@ describe("alert issues create", () => {
         name: "Rule A",
         condition: ['{"id":"condition-a"}'],
         action: ['{"id":"action-a"}'],
-        "action-match": "any",
         frequency: 15,
         "dry-run": false,
         json: true,

@@ -39,7 +39,6 @@ type EditFlags = {
   readonly status?: "active" | "disabled";
   readonly condition?: string[];
   readonly action?: string[];
-  readonly "action-match"?: "all" | "any";
   readonly json: boolean;
 };
 
@@ -119,7 +118,6 @@ describe("alert issues edit", () => {
         status: "disabled",
         condition: ['{"id":"new-condition"}'],
         action: ['{"id":"new-action"}'],
-        "action-match": "all",
         json: true,
       },
       "test-org/test-project/42"
