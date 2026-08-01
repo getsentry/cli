@@ -66,7 +66,7 @@ Create an issue alert rule
 | `--frequency <frequency>` | Frequency in minutes (default: 30) |
 | `--environment <environment>` | Environment filter |
 | `--filter <filter>...` | Filter object JSON (repeatable, or pass one JSON array) |
-| `--filter-match <filter-match>` | Filter match mode: all or any |
+| `-m, --filter-match <filter-match>` | Filter match mode: all or any |
 | `--owner <owner>` | Owner (team:user style value accepted by Sentry API) |
 | `-n, --dry-run` | Show what would happen without making changes |
 
@@ -109,7 +109,7 @@ Edit an issue alert rule
 | `--frequency <frequency>` | Frequency in minutes |
 | `--environment <environment>` | Environment value (pass empty string to clear) |
 | `--filter <filter>...` | Filter object JSON (repeatable, or pass one JSON array) |
-| `--filter-match <filter-match>` | Filter match mode: all or any |
+| `-m, --filter-match <filter-match>` | Filter match mode: all or any |
 | `--owner <owner>` | Owner value (pass empty string to clear) |
 
 ### `sentry alert metrics list <target>`
