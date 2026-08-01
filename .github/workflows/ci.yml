@@ -434,16 +434,18 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     continue-on-error: true
-    # `from-version` (nightly main) and `from-version-release` (stable release
-    # branches): the previous version the patches were actually generated
+    # `from-version`: the previous version the patches were actually generated
     # FROM, as computed by the binpatch action. Carried through to
     # publish-nightly so it stamps the `from-version` annotation on the
     # pushed patch manifest with the SAME value. See
     # https://github.com/BYK/binpatch/blob/main/website/src/content/docs/security.md#from-version-annotation-trust
+    #
+    # Note: the `release/**` path uses `generate-release` (different mode) and
+    # its `from-version` is captured only for the `Upload patch artifacts` step
+    # gate below. `publish-nightly` only runs on `main`, so the release-branch
+    # from-version is intentionally not exposed as a job output.
     outputs:
       from-version: ${{ steps.gen-ghcr.outputs.from-version }}
-      from-version-release: ${{ steps.gen-release.outputs.from-version }}
-      has-patches: ${{ steps.gen-ghcr.outputs.has-patches }}
     steps:
       - name: Download current binaries
         uses: actions/download-artifact@v8
@@ -457,7 +459,7 @@ jobs:
       - name: Generate delta patches (nightly)
         id: gen-ghcr
         if: github.ref == 'refs/heads/main'
-        uses: BYK/binpatch/action@v0.4.1
+        uses: BYK/binpatch/action@0.4.2
         with:
           mode: generate-ghcr
           version: ${{ needs.changes.outputs.nightly-version }}
@@ -471,7 +473,7 @@ jobs:
       - name: Generate delta patches (stable)
         id: gen-release
         if: startsWith(github.ref, 'refs/heads/release/')
-        uses: BYK/binpatch/action@v0.4.1
+        uses: BYK/binpatch/action@0.4.2
         with:
           mode: generate-release
           repo: ${{ github.repository }}
@@ -540,7 +542,7 @@ jobs:
           path: patches
 
       - name: Push to GHCR (binpatch action)
-        uses: BYK/binpatch/action@v0.4.1
+        uses: BYK/binpatch/action@0.4.2
         with:
           mode: publish-ghcr
           version: ${{ needs.changes.outputs.nightly-version }}
