@@ -63,7 +63,6 @@ Create an issue alert rule
 | `--name <name>` | Rule name |
 | `-c, --condition <condition>...` | Condition object JSON (repeatable, or pass one JSON array) |
 | `-a, --action <action>...` | Action object JSON (repeatable, or pass one JSON array) |
-| `-m, --action-match <action-match>` | Condition/action match mode: all or any |
 | `--frequency <frequency>` | Frequency in minutes (default: 30) |
 | `--environment <environment>` | Environment filter |
 | `--filter <filter>...` | Filter object JSON (repeatable, or pass one JSON array) |
@@ -107,7 +106,6 @@ Edit an issue alert rule
 | `--status <status>` | Rule status: active or disabled |
 | `-c, --condition <condition>...` | Condition object JSON (repeatable, or pass one JSON array) |
 | `-a, --action <action>...` | Action object JSON (repeatable, or pass one JSON array) |
-| `-m, --action-match <action-match>` | Condition/action match mode: all or any |
 | `--frequency <frequency>` | Frequency in minutes |
 | `--environment <environment>` | Environment value (pass empty string to clear) |
 | `--filter <filter>...` | Filter object JSON (repeatable, or pass one JSON array) |
@@ -228,9 +226,8 @@ All commands support `--json` for machine-readable output and `--fields` to sele
 # Create an issue alert rule with inline JSON condition/action
 sentry alert issues create my-org/my-project \
   --name "Error Spike" \
-  --condition '{"id":"sentry.rules.conditions.first_seen_event.FirstSeenEventCondition"}' \
-  --action '{"id":"sentry.mail.actions.NotifyEmailAction","targetType":"Team","targetIdentifier":1}' \
-  --action-match any
+  --condition '{"type":"first_seen_event","comparison":true,"conditionResult":true}' \
+  --action '{"type":"email","data":{},"config":{"targetType":"team","targetIdentifier":"1"}}'
 ```
 
 
