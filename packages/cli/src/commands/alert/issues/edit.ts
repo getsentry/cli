@@ -240,6 +240,7 @@ export const editCommand = buildCommand({
     aliases: {
       c: "condition",
       a: "action",
+      m: "filter-match",
     },
   },
   async *func(this: SentryContext, flags: EditFlags, arg: string) {

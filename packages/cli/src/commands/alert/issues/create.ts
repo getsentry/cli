@@ -159,6 +159,7 @@ export const createCommand = buildCommand({
       ...DRY_RUN_ALIASES,
       c: "condition",
       a: "action",
+      m: "filter-match",
     },
   },
   async *func(

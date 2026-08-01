@@ -60,7 +60,7 @@ Create an issue alert rule
 - `--frequency <value> - Frequency in minutes (default: 30) - (default: 30)`
 - `--environment <value> - Environment filter`
 - `--filter <value>... - Filter object JSON (repeatable, or pass one JSON array)`
-- `--filter-match <value> - Filter match mode: all or any`
+- `-m, --filter-match <value> - Filter match mode: all or any`
 - `--owner <value> - Owner (team:user style value accepted by Sentry API)`
 - `-n, --dry-run - Show what would happen without making changes`
 
@@ -102,7 +102,7 @@ Edit an issue alert rule
 - `--frequency <value> - Frequency in minutes`
 - `--environment <value> - Environment value (pass empty string to clear)`
 - `--filter <value>... - Filter object JSON (repeatable, or pass one JSON array)`
-- `--filter-match <value> - Filter match mode: all or any`
+- `-m, --filter-match <value> - Filter match mode: all or any`
 - `--owner <value> - Owner value (pass empty string to clear)`
 
 **Examples:**
