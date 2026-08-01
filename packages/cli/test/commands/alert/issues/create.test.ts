@@ -46,15 +46,19 @@ function createContext() {
 describe("alert issues create", () => {
   let resolveSpy: ReturnType<typeof vi.spyOn>;
   let createSpy: ReturnType<typeof vi.spyOn>;
+  let detectorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     resolveSpy = vi.spyOn(resolveTarget, "resolveTargetsFromParsedArg");
     createSpy = vi.spyOn(apiClient, "createIssueAlertRule");
+    detectorSpy = vi.spyOn(apiClient, "resolveErrorDetectorId");
+    detectorSpy.mockResolvedValue(100);
   });
 
   afterEach(() => {
     resolveSpy.mockRestore();
     createSpy.mockRestore();
+    detectorSpy.mockRestore();
   });
 
   test("requires --action-match", async () => {
@@ -193,13 +197,17 @@ describe("alert issues create", () => {
       dryRun: true,
       body: {
         name: "Rule A",
-        conditions: [{ id: "condition-a" }],
-        actions: [{ id: "action-a" }],
-        actionMatch: "all",
-        frequency: 30,
+        detectorIds: [100],
+        config: { frequency: 30 },
+        triggers: { logicType: "all", conditions: [{ id: "condition-a" }] },
+        actionFilters: [
+          {
+            logicType: "all",
+            conditions: [{ id: "filter-a" }],
+            actions: [{ id: "action-a" }],
+          },
+        ],
         environment: "prod",
-        filters: [{ id: "filter-a" }],
-        filterMatch: "all",
         owner: "team:ops",
       },
     });
@@ -270,12 +278,14 @@ describe("alert issues create", () => {
       "test-org/test-project"
     );
 
-    expect(createSpy).toHaveBeenCalledWith("test-org", "test-project", {
+    expect(createSpy).toHaveBeenCalledWith("test-org", {
       name: "Rule A",
-      conditions: [{ id: "condition-a" }],
-      actions: [{ id: "action-a" }],
-      actionMatch: "any",
-      frequency: 15,
+      detectorIds: [100],
+      config: { frequency: 15 },
+      triggers: { logicType: "any-short", conditions: [{ id: "condition-a" }] },
+      actionFilters: [
+        { logicType: "all", conditions: [], actions: [{ id: "action-a" }] },
+      ],
     });
   });
 });

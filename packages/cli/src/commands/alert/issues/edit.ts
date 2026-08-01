@@ -7,8 +7,8 @@
 
 import type { SentryContext } from "../../../context.js";
 import {
-  getIssueAlertRuleDocument,
-  putIssueAlertRule,
+  getIssueAlertWorkflowDocument,
+  updateIssueAlertRule,
 } from "../../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../../lib/command.js";
@@ -16,6 +16,7 @@ import { ContextError, ValidationError } from "../../../lib/errors.js";
 import { CommandOutput } from "../../../lib/formatters/output.js";
 import { resolveTargetsFromParsedArg } from "../../../lib/resolve-target.js";
 import {
+  matchToLogicType,
   parseJsonObjectList,
   parseMatchMode,
   parseStatusFlag,
@@ -87,32 +88,56 @@ function applyIssueEdits(
     body.name = flags.name;
   }
   if (flags.status !== undefined) {
-    body.status = flags.status;
-  }
-  if (conditions !== undefined) {
-    body.conditions = conditions;
-  }
-  if (actions !== undefined) {
-    body.actions = actions;
-  }
-  if (flags["action-match"] !== undefined) {
-    body.actionMatch = flags["action-match"];
+    // Workflows use an `enabled` boolean rather than a status string.
+    body.enabled = flags.status === "active";
   }
   if (flags.frequency !== undefined) {
-    body.frequency = flags.frequency;
+    const config = (body.config as Record<string, unknown> | undefined) ?? {};
+    config.frequency = flags.frequency;
+    body.config = config;
   }
   if (flags.environment !== undefined) {
     body.environment =
       flags.environment.trim() === "" ? null : flags.environment;
   }
-  if (filters !== undefined) {
-    body.filters = filters;
-  }
-  if (flags["filter-match"] !== undefined) {
-    body.filterMatch = flags["filter-match"];
-  }
   if (flags.owner !== undefined) {
     body.owner = flags.owner.trim() === "" ? null : flags.owner;
+  }
+
+  // Triggers: the "when" data-condition group.
+  if (conditions !== undefined || flags["action-match"] !== undefined) {
+    const triggers =
+      (body.triggers as Record<string, unknown> | undefined) ?? {};
+    if (conditions !== undefined) {
+      triggers.conditions = conditions;
+    }
+    if (flags["action-match"] !== undefined) {
+      triggers.logicType = matchToLogicType(flags["action-match"]);
+    }
+    body.triggers = triggers;
+  }
+
+  // Action filter: the "if" group plus its actions. Issue alerts use one filter.
+  if (
+    actions !== undefined ||
+    filters !== undefined ||
+    flags["filter-match"] !== undefined
+  ) {
+    const actionFilters = Array.isArray(body.actionFilters)
+      ? (body.actionFilters as Record<string, unknown>[])
+      : [];
+    const filter = (actionFilters[0] as Record<string, unknown>) ?? {};
+    if (actions !== undefined) {
+      filter.actions = actions;
+    }
+    if (filters !== undefined) {
+      filter.conditions = filters;
+    }
+    if (flags["filter-match"] !== undefined) {
+      filter.logicType = matchToLogicType(flags["filter-match"]);
+    }
+    actionFilters[0] = filter;
+    body.actionFilters = actionFilters;
   }
 
   if (conditions !== undefined) {
@@ -248,16 +273,11 @@ export const editCommand = buildCommand({
     );
 
     const body = {
-      ...(await getIssueAlertRuleDocument(target.org, target.project, rule.id)),
+      ...(await getIssueAlertWorkflowDocument(target.org, rule.id)),
     } as Record<string, unknown>;
     applyIssueEdits(body, flags);
 
-    const updated = await putIssueAlertRule(
-      target.org,
-      target.project,
-      rule.id,
-      body
-    );
+    const updated = await updateIssueAlertRule(target.org, rule.id, body);
     yield new CommandOutput({
       ...updated,
       org: target.org,

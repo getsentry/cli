@@ -59,8 +59,8 @@ describe("alert issues edit", () => {
 
   beforeEach(() => {
     getRuleSpy = vi.spyOn(apiClient, "getIssueAlertRule");
-    getDocSpy = vi.spyOn(apiClient, "getIssueAlertRuleDocument");
-    putSpy = vi.spyOn(apiClient, "putIssueAlertRule");
+    getDocSpy = vi.spyOn(apiClient, "getIssueAlertWorkflowDocument");
+    putSpy = vi.spyOn(apiClient, "updateIssueAlertRule");
     resolveSpy = vi.spyOn(resolveTarget, "resolveTargetsFromParsedArg");
   });
 
@@ -84,27 +84,27 @@ describe("alert issues edit", () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
-  test("merges additional fields into full PUT body", async () => {
+  test("merges additional fields into full workflow update body", async () => {
     const context = createContext();
     resolveSpy.mockResolvedValue({ targets: [sampleTarget] });
     getRuleSpy.mockResolvedValue(sampleRule);
     getDocSpy.mockResolvedValue({
       id: "42",
       name: "Rule Alpha",
-      status: "active",
-      actionMatch: "any",
-      conditions: [{ id: "old-condition" }],
-      actions: [{ id: "old-action" }],
-      frequency: 30,
+      enabled: true,
+      config: { frequency: 30 },
+      triggers: {
+        logicType: "any-short",
+        conditions: [{ id: "old-condition" }],
+      },
+      actionFilters: [
+        { logicType: "all", conditions: [], actions: [{ id: "old-action" }] },
+      ],
     });
     putSpy.mockResolvedValue({
       id: "42",
       name: "Rule Beta",
-      status: "disabled",
-      actionMatch: "all",
-      conditions: [{ id: "new-condition" }],
-      actions: [{ id: "new-action" }],
-      frequency: 30,
+      enabled: false,
     });
     const func = (await editCommand.loader()) as unknown as (
       this: unknown,
@@ -125,14 +125,15 @@ describe("alert issues edit", () => {
       "test-org/test-project/42"
     );
 
-    expect(putSpy).toHaveBeenCalledWith("test-org", "test-project", "42", {
+    expect(putSpy).toHaveBeenCalledWith("test-org", "42", {
       id: "42",
       name: "Rule Beta",
-      status: "disabled",
-      actionMatch: "all",
-      conditions: [{ id: "new-condition" }],
-      actions: [{ id: "new-action" }],
-      frequency: 30,
+      enabled: false,
+      config: { frequency: 30 },
+      triggers: { logicType: "all", conditions: [{ id: "new-condition" }] },
+      actionFilters: [
+        { logicType: "all", conditions: [], actions: [{ id: "new-action" }] },
+      ],
     });
   });
 });
