@@ -1098,11 +1098,11 @@ export function parseIssueArg(arg: string): ParsedIssueArg {
   // lines would produce garbage, so we keep only the first line.
   // Splitting on `\n` (a control char) never breaks project display names with
   // spaces (#1116), since those are rejected as control chars anyway.
-  const input =
-    arg
-      .split(LINE_SPLIT_PATTERN)
-      .map((line) => line.trim())
-      .find((line) => line.length > 0) ?? "";
+  // Issue identifiers are single whitespace-free tokens. Splitting on /\s+/
+  // handles both newline-separated inputs (shell command substitution capturing
+  // extra output) and space-separated inputs (AI agents passing multiple IDs
+  // like "CLI-1G1 CLI-1G2"), fixing CLI-1G1 (217+ affected users).
+  const input = arg.trim().split(/\s+/).find((token) => token.length > 0) ?? "";
 
   if (!input) {
     throw new ValidationError(
