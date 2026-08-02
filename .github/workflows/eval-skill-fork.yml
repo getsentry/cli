@@ -74,7 +74,7 @@ jobs:
           tar -xzf fork.tar.gz --wildcards \
             "*/packages/cli/plugins/sentry-cli/skills/*" \
             "*/apps/cli-docs/*" \
-            --strip-components=1 || true
+            --strip-components=1
           rm fork.tar.gz
 
       - name: Eval SKILL.md
