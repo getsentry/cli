@@ -232,12 +232,42 @@ type HelpJsonScan = {
 };
 
 /**
+ * True when `token` is a boolean-style flag that does NOT consume a following
+ * value token — a known boolean global flag (`--verbose`, `--json`, its `-v`
+ * alias, or a `--no-<flag>` negation). Everything else that starts with `-` is
+ * assumed to be value-taking, so its next token is a flag value rather than a
+ * command-path segment.
+ *
+ * Used by {@link scanHelpJsonToken} to avoid swallowing a real path segment
+ * after a boolean flag (`issue --verbose list`) while still discarding the
+ * values of value flags (`--org acme`, `--limit 5`).
+ */
+function isBooleanFlagToken(token: string): boolean {
+  if (token.length === 2 && token[0] === "-" && token[1] !== "-") {
+    const flag = FLAG_BY_SHORT.get(token[1] ?? "");
+    return flag ? !flag.takesValue : false;
+  }
+  if (!token.startsWith("--")) {
+    return false;
+  }
+  const name = token.slice(2);
+  if (name.startsWith("no-") && NEGATABLE_NAMES.has(name.slice(3))) {
+    return true;
+  }
+  const flag = FLAG_BY_NAME.get(name);
+  return flag ? !flag.takesValue : false;
+}
+
+/**
  * Fold a single argv token into the {@link HelpJsonScan} accumulator.
  *
  * Recognizes `--help`, `--json`, and `--fields` (both spaced and `=` forms),
- * collects non-flag tokens as the command path, and drops all other flags.
+ * collects non-flag tokens as the command path, and drops all other flags —
+ * including the spaced value of any value-taking flag (`--org acme`,
+ * `--limit 5`) so those values never leak into the resolved command path.
  *
- * @returns The number of tokens consumed (1, or 2 for spaced `--fields value`).
+ * @returns The number of tokens consumed (1, or 2 when a value flag's spaced
+ *   value is dropped alongside it).
  */
 function scanHelpJsonToken(
   argv: readonly string[],
@@ -253,18 +283,31 @@ function scanHelpJsonToken(
     scan.hasJson = true;
     return 1;
   }
-  if (token === "--fields") {
-    scan.fields = argv[index + 1];
-    return 2;
-  }
   if (token.startsWith("--fields=")) {
     scan.fields = token.slice("--fields=".length);
     return 1;
   }
-  // Other flags (e.g. --verbose, --log-level) are irrelevant to the help
-  // command's structured output and are dropped from the rewritten path.
+  const next = argv[index + 1];
+  // A spaced value is only present when the next token isn't itself a flag —
+  // `--fields --json` leaves --fields valueless rather than eating --json.
+  const hasSpacedValue = next !== undefined && !next.startsWith("-");
+  if (token === "--fields") {
+    if (hasSpacedValue) {
+      scan.fields = next;
+      return 2;
+    }
+    return 1;
+  }
   if (!token.startsWith("-")) {
     scan.commandPath.push(token);
+    return 1;
+  }
+  // Any other flag is irrelevant to the help command's structured output and
+  // is dropped. A value flag (`--org acme`, `--limit 5`) also drops its spaced
+  // value so it isn't mistaken for a command-path segment; a boolean flag
+  // (`--verbose`) leaves the following token for the path.
+  if (hasSpacedValue && !isBooleanFlagToken(token)) {
+    return 2;
   }
   return 1;
 }

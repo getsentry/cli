@@ -580,6 +580,47 @@ describe("rewriteHelpJsonRequest", () => {
     ).toEqual(["help", "--json", "issue"]);
   });
 
+  test("drops a value flag's spaced value so it never becomes a path segment", () => {
+    // `--org acme` / `--limit 5` must not leak `acme` / `5` into the command
+    // path, which would resolve the wrong command or a not-found error.
+    expect(
+      rewriteHelpJsonRequest([
+        "issue",
+        "list",
+        "--org",
+        "acme",
+        "--help",
+        "--json",
+      ])
+    ).toEqual(["help", "--json", "issue", "list"]);
+    expect(
+      rewriteHelpJsonRequest([
+        "issue",
+        "list",
+        "--limit",
+        "5",
+        "--help",
+        "--json",
+      ])
+    ).toEqual(["help", "--json", "issue", "list"]);
+  });
+
+  test("keeps a path segment following a boolean flag", () => {
+    // `--verbose` is a known boolean flag, so the token after it (`list`) is a
+    // real command-path segment, not a flag value.
+    expect(
+      rewriteHelpJsonRequest(["issue", "--verbose", "list", "--help", "--json"])
+    ).toEqual(["help", "--json", "issue", "list"]);
+  });
+
+  test("does not let --fields swallow a following flag", () => {
+    // `--fields --json`: --fields has no value, and --json must still register
+    // so the rewrite fires.
+    expect(
+      rewriteHelpJsonRequest(["issue", "list", "--help", "--fields", "--json"])
+    ).toEqual(["help", "--json", "issue", "list"]);
+  });
+
   test("returns null for bare --help without --json", () => {
     expect(rewriteHelpJsonRequest(["issue", "--help"])).toBeNull();
   });
