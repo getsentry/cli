@@ -222,6 +222,106 @@ export function isVersionRequest(argv: readonly string[]): boolean {
 }
 
 /**
+ * Accumulator for {@link rewriteHelpJsonRequest} while scanning argv.
+ */
+type HelpJsonScan = {
+  hasHelp: boolean;
+  hasJson: boolean;
+  commandPath: string[];
+  fields: string | undefined;
+};
+
+/**
+ * Fold a single argv token into the {@link HelpJsonScan} accumulator.
+ *
+ * Recognizes `--help`, `--json`, and `--fields` (both spaced and `=` forms),
+ * collects non-flag tokens as the command path, and drops all other flags.
+ *
+ * @returns The number of tokens consumed (1, or 2 for spaced `--fields value`).
+ */
+function scanHelpJsonToken(
+  argv: readonly string[],
+  index: number,
+  scan: HelpJsonScan
+): number {
+  const token = argv[index] ?? "";
+  if (token === "--help") {
+    scan.hasHelp = true;
+    return 1;
+  }
+  if (token === "--json") {
+    scan.hasJson = true;
+    return 1;
+  }
+  if (token === "--fields") {
+    scan.fields = argv[index + 1];
+    return 2;
+  }
+  if (token.startsWith("--fields=")) {
+    scan.fields = token.slice("--fields=".length);
+    return 1;
+  }
+  // Other flags (e.g. --verbose, --log-level) are irrelevant to the help
+  // command's structured output and are dropped from the rewritten path.
+  if (!token.startsWith("-")) {
+    scan.commandPath.push(token);
+  }
+  return 1;
+}
+
+/**
+ * Rewrite a flag-based `--help --json` request into a `help` command invocation.
+ *
+ * Stricli handles `--help` internally by printing its own text usage and
+ * ignores `--json` entirely, so `sentry --help --json` and
+ * `sentry <command> --help --json` never produce structured output. Agents and
+ * tooling reach for `--help` first, so we rewrite these forms to the dedicated
+ * `help` command — which already emits JSON via {@link introspectAllCommands}
+ * and {@link introspectCommand} — giving both help UX paths identical JSON.
+ *
+ * The rewrite only fires when **both** `--help` and `--json` appear before any
+ * `--` escape separator. A bare `--help` (no `--json`) is left untouched so
+ * Stricli's existing human usage output is preserved unchanged.
+ *
+ * The command path is the sequence of non-flag tokens (e.g. `issue list`), and
+ * a `--fields <value>` (or `--fields=<value>`) flag is carried through so field
+ * selection keeps working. The result is `["help", "--json", ...path]` with
+ * `--fields` appended when present.
+ *
+ * @param argv - Raw CLI arguments (e.g., `process.argv.slice(2)`)
+ * @returns The rewritten `help`-command argv, or `null` if the request is not a
+ *   `--help --json` combination and should be processed normally.
+ */
+export function rewriteHelpJsonRequest(
+  argv: readonly string[]
+): string[] | null {
+  const scan: HelpJsonScan = {
+    hasHelp: false,
+    hasJson: false,
+    commandPath: [],
+    fields: undefined,
+  };
+
+  for (let i = 0; i < argv.length; ) {
+    // Tokens after -- are positional/pass-through — a --help there is not ours.
+    if (argv[i] === "--") {
+      return null;
+    }
+    i += scanHelpJsonToken(argv, i, scan);
+  }
+
+  if (!(scan.hasHelp && scan.hasJson)) {
+    return null;
+  }
+
+  const rewritten = ["help", "--json", ...scan.commandPath];
+  if (scan.fields !== undefined) {
+    rewritten.push("--fields", scan.fields);
+  }
+  return rewritten;
+}
+
+/**
  * Move global flags from any position in argv to the end.
  *
  * Tokens after `--` are never touched. The relative order of both
@@ -309,10 +409,14 @@ export function rewriteDashedFlagValues(argv: readonly string[]): string[] {
  * Preprocess raw CLI argv before Stricli dispatch.
  *
  * Composes the argv transforms applied on every invocation:
- * 1. A top-level `--version` (see {@link isVersionRequest}) is normalized to a
+ * 1. A flag-based `--help --json` request (see {@link rewriteHelpJsonRequest})
+ *    is rewritten to the dedicated `help` command so JSON help works for the
+ *    `--help` forms agents reach for (`sentry --help --json`,
+ *    `sentry issue --help --json`), matching `sentry help --json`.
+ * 2. A top-level `--version` (see {@link isVersionRequest}) is normalized to a
  *    plain `["--version"]` so the application-level version handler prints it
  *    regardless of how deep in the route tree it appeared.
- * 2. Otherwise, dashed flag values are rewritten (see
+ * 3. Otherwise, dashed flag values are rewritten (see
  *    {@link rewriteDashedFlagValues}), then global flags are hoisted to the
  *    tail (see {@link hoistGlobalFlags}).
  *
@@ -323,6 +427,10 @@ export function rewriteDashedFlagValues(argv: readonly string[]): string[] {
  * @returns The argv to hand to Stricli's `run`
  */
 export function preprocessArgv(argv: readonly string[]): string[] {
+  const helpJson = rewriteHelpJsonRequest(argv);
+  if (helpJson) {
+    return helpJson;
+  }
   if (isVersionRequest(argv)) {
     return ["--version"];
   }
