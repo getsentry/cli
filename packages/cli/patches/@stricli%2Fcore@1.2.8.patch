@@ -1,5 +1,5 @@
 diff --git a/dist/index.cjs b/dist/index.cjs
-index a9afbc1ab78cad7ba97d53882a80236af62854df..7622c3b1e512fd9a180fce9cca7955001e22e5a9 100644
+index a9afbc1ab78cad7ba97d53882a80236af62854df..d5aa6e2d46b08fcd20f1bf06fdb427e45e2ae620 100644
 --- a/dist/index.cjs
 +++ b/dist/index.cjs
 @@ -1277,6 +1277,29 @@ var RouteMapSymbol = Symbol("RouteMap");
@@ -44,7 +44,7 @@ index a9afbc1ab78cad7ba97d53882a80236af62854df..7622c3b1e512fd9a180fce9cca795500
          unprocessedInputs.push(input);
          return;
        }
-+      if (!treatInputsAsArguments && !target && expectTopLevelFlagValue) {
++      if (!treatInputsAsArguments && !target && expectTopLevelFlagValue && input !== "--help" && input !== "-h" && input !== "--helpAll" && input !== "--help-all") {
 +        expectTopLevelFlagValue = false;
 +        unprocessedInputs.push(input);
 +        return;
@@ -119,7 +119,7 @@ index a9afbc1ab78cad7ba97d53882a80236af62854df..7622c3b1e512fd9a180fce9cca795500
    checkForInvalidVariadicSeparators(flags);
    let loader;
 diff --git a/dist/index.js b/dist/index.js
-index f76639637e812453d107bda3e3ec165fc195f4d8..13f059ca7f56375fe3fbdc160f0f3f9cb0d7f008 100644
+index f76639637e812453d107bda3e3ec165fc195f4d8..4a55791b41d95baf324c687553694616ac82c67e 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -1229,6 +1229,29 @@ var RouteMapSymbol = Symbol("RouteMap");
@@ -164,7 +164,7 @@ index f76639637e812453d107bda3e3ec165fc195f4d8..13f059ca7f56375fe3fbdc160f0f3f9c
          unprocessedInputs.push(input);
          return;
        }
-+      if (!treatInputsAsArguments && !target && expectTopLevelFlagValue) {
++      if (!treatInputsAsArguments && !target && expectTopLevelFlagValue && input !== "--help" && input !== "-h" && input !== "--helpAll" && input !== "--help-all") {
 +        expectTopLevelFlagValue = false;
 +        unprocessedInputs.push(input);
 +        return;

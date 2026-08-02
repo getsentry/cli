@@ -163,6 +163,23 @@ describe("top-level flags on a nested group command", () => {
   });
 });
 
+describe("a value flag does not swallow --help", () => {
+  // A value-taking global flag given without its value (`--org --help`) must not
+  // consume the following `--help` as its value — help should still fire, matching
+  // Stricli's leaf-level behavior where a following flag isn't taken as a value.
+  test("--org --help renders help instead of eating --help", async () => {
+    const { stdout, stderr } = await runApp(["--org", "--help"]);
+    expect(stderr).not.toContain(NO_COMMAND_REGISTERED);
+    expect(stdout).toContain("USAGE");
+  });
+
+  test("--org --help at a group renders help", async () => {
+    const { stdout, stderr } = await runApp(["cli", "--org", "--help"]);
+    expect(stderr).not.toContain(NO_COMMAND_REGISTERED);
+    expect(stdout).toContain("USAGE");
+  });
+});
+
 describe("escape sequence is still respected", () => {
   test("a global flag after -- is not treated as a top-level flag", async () => {
     // After `--`, tokens are positional/pass-through. `bash-hook` takes no
