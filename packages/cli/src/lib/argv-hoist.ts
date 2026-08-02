@@ -305,8 +305,10 @@ function scanHelpJsonToken(
   // Any other flag is irrelevant to the help command's structured output and
   // is dropped. A value flag (`--org acme`, `--limit 5`) also drops its spaced
   // value so it isn't mistaken for a command-path segment; a boolean flag
-  // (`--verbose`) leaves the following token for the path.
-  if (hasSpacedValue && !isBooleanFlagToken(token)) {
+  // (`--verbose`) leaves the following token for the path. An `=`-form flag
+  // (`--org=acme`) already carries its value inline, so it never consumes the
+  // following token — dropping it would swallow a real command-path segment.
+  if (hasSpacedValue && !token.includes("=") && !isBooleanFlagToken(token)) {
     return 2;
   }
   return 1;

@@ -613,6 +613,24 @@ describe("rewriteHelpJsonRequest", () => {
     ).toEqual(["help", "--json", "issue", "list"]);
   });
 
+  test("keeps a path segment following an =-form value flag", () => {
+    // `--org=acme` carries its value inline, so the next token (`issue`/`list`)
+    // is a real command-path segment. A naive length check would treat the
+    // whole `org=acme` string as an unknown value flag and swallow `issue`.
+    expect(
+      rewriteHelpJsonRequest([
+        "--org=acme",
+        "issue",
+        "list",
+        "--help",
+        "--json",
+      ])
+    ).toEqual(["help", "--json", "issue", "list"]);
+    expect(
+      rewriteHelpJsonRequest(["issue", "--limit=5", "list", "--help", "--json"])
+    ).toEqual(["help", "--json", "issue", "list"]);
+  });
+
   test("does not let --fields swallow a following flag", () => {
     // `--fields --json`: --fields has no value, and --json must still register
     // so the rewrite fires.
