@@ -24,6 +24,7 @@ import {
 import { getEnv } from "./env.js";
 import { isUserError } from "./errors.js";
 import { cyan, muted } from "./formatters/colors.js";
+import { GLOBAL_FLAGS } from "./global-flags.js";
 import { cleanupPatchCache } from "./patch-cache.js";
 import { fetchLatestFromGitHub, fetchLatestNightlyVersion } from "./upgrade.js";
 
@@ -63,6 +64,50 @@ const SUPPRESSED_ARGS = new Set([
  */
 const SUPPRESSED_CLI_SUBCOMMANDS = new Set(["setup", "fix"]);
 
+/** Global value-flag names that consume the following token as their value. */
+const GLOBAL_VALUE_FLAG_NAMES = new Set(
+  GLOBAL_FLAGS.filter((f) => f.kind === "value").map((f) => f.name)
+);
+
+/**
+ * Find the first positional (non-global-flag) token after the leading `cli`
+ * group, or `undefined` if there is none.
+ *
+ * Global flags may sit anywhere in argv (they're recognized by the route
+ * scanner at any depth, not hoisted), so `sentry cli --verbose setup` keeps
+ * `--verbose` between `cli` and `setup`. This skips global flags and the value
+ * consumed by a value-taking global flag (`--org acme`) so the real subcommand
+ * is found regardless of interleaved flags. Tokens after a `--` escape are not
+ * command-path segments and stop the scan.
+ *
+ * @param args - CLI arguments (`process.argv.slice(2)`-style, post-normalize)
+ * @returns The `cli` subcommand token, or `undefined` when absent
+ */
+function cliSubcommandAfterGroup(args: readonly string[]): string | undefined {
+  for (let i = 1; i < args.length; i += 1) {
+    const token = args[i] ?? "";
+    if (token === "--") {
+      return;
+    }
+    if (!token.startsWith("-")) {
+      return token;
+    }
+    // Skip a value-taking global flag's spaced value so it isn't mistaken for
+    // the subcommand (`cli --org acme setup` → subcommand is `setup`).
+    const name = token.startsWith("--") ? token.slice(2) : "";
+    const next = args[i + 1];
+    if (
+      GLOBAL_VALUE_FLAG_NAMES.has(name) &&
+      !token.includes("=") &&
+      next !== undefined &&
+      !next.startsWith("-")
+    ) {
+      i += 1;
+    }
+  }
+  return;
+}
+
 /** AbortController for pending version check fetch */
 let pendingAbortController: AbortController | null = null;
 
@@ -99,9 +144,17 @@ export function shouldSuppressNotification(args: string[]): boolean {
   if (args.some((arg) => SUPPRESSED_ARGS.has(arg))) {
     return true;
   }
-  // Suppress for "cli <subcommand>" management commands (setup, fix)
-  if (args[0] === "cli" && SUPPRESSED_CLI_SUBCOMMANDS.has(args[1] ?? "")) {
-    return true;
+  // Suppress for "cli <subcommand>" management commands (setup, fix). Global
+  // flags may sit between `cli` and the subcommand (they're no longer hoisted),
+  // so resolve the subcommand past any interleaved global flags.
+  if (args[0] === "cli") {
+    const subcommand = cliSubcommandAfterGroup(args);
+    if (
+      subcommand !== undefined &&
+      SUPPRESSED_CLI_SUBCOMMANDS.has(subcommand)
+    ) {
+      return true;
+    }
   }
   return false;
 }
