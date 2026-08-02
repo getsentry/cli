@@ -541,6 +541,20 @@ describe("rewriteHelpJsonRequest", () => {
     ]);
   });
 
+  test("recognizes the -h short alias for --help", () => {
+    // Stricli treats `-h` as an alias of `--help`, so the JSON rewrite must
+    // fire for it too — otherwise `sentry -h --json` falls through to text usage.
+    expect(rewriteHelpJsonRequest(["-h", "--json"])).toEqual([
+      "help",
+      "--json",
+    ]);
+    expect(rewriteHelpJsonRequest(["issue", "-h", "--json"])).toEqual([
+      "help",
+      "--json",
+      "issue",
+    ]);
+  });
+
   test("rewrites a nested command --help --json to help <group> <command>", () => {
     expect(
       rewriteHelpJsonRequest(["issue", "list", "--help", "--json"])

@@ -261,10 +261,11 @@ function isBooleanFlagToken(token: string): boolean {
 /**
  * Fold a single argv token into the {@link HelpJsonScan} accumulator.
  *
- * Recognizes `--help`, `--json`, and `--fields` (both spaced and `=` forms),
- * collects non-flag tokens as the command path, and drops all other flags —
- * including the spaced value of any value-taking flag (`--org acme`,
- * `--limit 5`) so those values never leak into the resolved command path.
+ * Recognizes `--help` (and its `-h` alias), `--json`, and `--fields` (both
+ * spaced and `=` forms), collects non-flag tokens as the command path, and
+ * drops all other flags — including the spaced value of any value-taking flag
+ * (`--org acme`, `--limit 5`) so those values never leak into the resolved
+ * command path.
  *
  * @returns The number of tokens consumed (1, or 2 when a value flag's spaced
  *   value is dropped alongside it).
@@ -275,7 +276,9 @@ function scanHelpJsonToken(
   scan: HelpJsonScan
 ): number {
   const token = argv[index] ?? "";
-  if (token === "--help") {
+  // `-h` is Stricli's built-in short alias for `--help`, so it must trigger the
+  // JSON rewrite too — otherwise `sentry -h --json` falls through to text usage.
+  if (token === "--help" || token === "-h") {
     scan.hasHelp = true;
     return 1;
   }
