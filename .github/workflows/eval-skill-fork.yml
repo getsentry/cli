@@ -77,6 +77,12 @@ jobs:
             --strip-components=1
           rm fork.tar.gz
 
+          # Security: prevent symlink arbitrary file read attacks (e.g. symlinking to /proc/self/environ)
+          if find packages/cli/plugins/sentry-cli/skills apps/cli-docs -type l | grep -q .; then
+            echo "Error: Symlinks are not allowed in fork docs for security reasons."
+            exit 1
+          fi
+
       - name: Eval SKILL.md
         id: eval
         run: pnpm run eval:skill
