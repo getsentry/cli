@@ -67,18 +67,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "Downloading fork source from ${{ github.event.pull_request.head.repo.full_name }}@${{ github.event.pull_request.head.sha }}"
-          gh api "repos/${{ github.event.pull_request.head.repo.full_name }}/tarball/${{ github.event.pull_request.head.sha }}" > fork.tar.gz
+          echo "Fetching fork source from ${{ github.event.pull_request.head.repo.full_name }}@${{ github.event.pull_request.head.sha }}"
+          git remote add fork https://github.com/${{ github.event.pull_request.head.repo.full_name }}.git
+          git fetch fork ${{ github.event.pull_request.head.sha }}
           
-          # Extract only docs and skill-related files safely over the base checkout
-          tar -xzf fork.tar.gz --wildcards \
-            "*/packages/cli/plugins/sentry-cli/skills/*" \
-            "*/apps/cli-docs/*" \
-            --strip-components=1
-          rm fork.tar.gz
-
+          # Checkout only docs and skill-related files safely
+          git checkout FETCH_HEAD -- packages/cli/plugins/sentry-cli/skills/ apps/cli-docs/ || true
+          
           # Security: prevent symlink arbitrary file read attacks (e.g. symlinking to /proc/self/environ)
-          if find packages/cli/plugins/sentry-cli/skills apps/cli-docs -type l | grep -q .; then
+          if find packages/cli/plugins/sentry-cli/skills apps/cli-docs -type l 2>/dev/null | grep -q .; then
             echo "Error: Symlinks are not allowed in fork docs for security reasons."
             exit 1
           fi
