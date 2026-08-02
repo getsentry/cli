@@ -2,8 +2,9 @@
  * Single source of truth for global CLI flags.
  *
  * Global flags are injected into every leaf command by {@link buildCommand}
- * and hoisted from any argv position by {@link hoistGlobalFlags}. This
- * module defines the metadata once so both systems stay in sync
+ * and recognized at any argv position by Stricli's patched route scanner (a
+ * top-level-flags allow-list) plus the app-boundary glue in `argv-glue.ts`.
+ * This module defines the metadata once so those systems stay in sync
  * automatically — adding a flag here is all that's needed.
  *
  * The Stricli flag *shapes* (kind, brief, default, etc.) remain in
@@ -32,8 +33,15 @@ type GlobalFlagDef = {
 /**
  * All global flags that are injected into every leaf command.
  *
- * Order doesn't matter — both the hoisting preprocessor and the
- * `buildCommand` wrapper build lookup structures from this list.
+ * Order doesn't matter — both the `buildCommand` wrapper and the app-boundary
+ * glue build lookup structures from this list.
+ *
+ * IMPORTANT: the set of flag tokens recognized *before the subcommand* also
+ * lives, hardcoded, in the `@stricli/core` route-scanner patch
+ * (`packages/cli/patches/@stricli%2Fcore@1.2.8.patch`,
+ * `SENTRY_TOP_LEVEL_*_FLAGS`). Patching minified `dist` code can't import this
+ * list, so adding/removing a global flag here means updating that patch too, or
+ * the flag won't be accepted when placed before the subcommand.
  */
 export const GLOBAL_FLAGS: readonly GlobalFlagDef[] = [
   { name: "verbose", short: "v", kind: "boolean" },
