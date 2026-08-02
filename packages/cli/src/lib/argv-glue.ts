@@ -213,9 +213,13 @@ export function rewriteHelpJsonRequest(
   };
 
   for (let i = 0; i < argv.length; ) {
-    // Tokens after -- are positional/pass-through — a --help there is not ours.
+    // Stop at the escape separator: tokens after `--` are positional/pass-through
+    // and must not be interpreted (a `--help`/`--json` there belongs to the
+    // wrapped command). Flags seen *before* `--` still count, so
+    // `sentry <cmd> --help --json -- passthru` rewrites while
+    // `sentry <cmd> -- tool --help --json` does not.
     if (argv[i] === "--") {
-      return null;
+      break;
     }
     i += scanHelpJsonToken(argv, i, scan);
   }

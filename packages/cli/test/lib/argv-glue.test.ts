@@ -260,4 +260,12 @@ describe("rewriteHelpJsonRequest", () => {
       ])
     ).toBeNull();
   });
+
+  test("rewrites --help --json seen before a -- escape separator", () => {
+    // Flags before `--` still count: the scan stops at `--` but keeps what it
+    // already found, so `--help --json -- passthru` yields JSON help.
+    expect(
+      rewriteHelpJsonRequest(["issue", "list", "--help", "--json", "--", "x"])
+    ).toEqual(["help", "--json", "issue", "list"]);
+  });
 });
