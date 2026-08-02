@@ -42,8 +42,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: pnpm/action-setup@v4
 
@@ -64,6 +62,20 @@ jobs:
 
       - name: Generate docs and skill files
         run: pnpm run generate:schema && pnpm run generate:docs
+
+      - name: Apply fork docs and skill files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Downloading fork source from ${{ github.event.pull_request.head.repo.full_name }}@${{ github.event.pull_request.head.sha }}"
+          gh api "repos/${{ github.event.pull_request.head.repo.full_name }}/tarball/${{ github.event.pull_request.head.sha }}" > fork.tar.gz
+          
+          # Extract only docs and skill-related files safely over the base checkout
+          tar -xzf fork.tar.gz --wildcards \
+            "*/packages/cli/plugins/sentry-cli/skills/*" \
+            "*/apps/cli-docs/*" \
+            --strip-components=1 || true
+          rm fork.tar.gz
 
       - name: Eval SKILL.md
         id: eval
