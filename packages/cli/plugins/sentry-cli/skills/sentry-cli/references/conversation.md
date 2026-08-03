@@ -62,7 +62,7 @@ sentry conversation list -q "has:errors"
 sentry conversation list my-org -c next
 ```
 
-### `sentry conversation view <org> <conversation-id>`
+### `sentry conversation view <org/conversation-id>`
 
 View an AI conversation transcript
 
