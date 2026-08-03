@@ -12,9 +12,13 @@ artifactProvider:
       Build:
         - '/^sentry-.*$/'
         - 'npm-package'
+        - 'cloudflare'
 targets:
   - name: npm
   - name: github
+  - name: cloudflare
+    deployType: worker
+    workingDir: apps/cli-docs
   - name: registry
     apps:
       'app:sentry':
