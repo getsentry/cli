@@ -17,6 +17,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`build`](https://cli.sentry.dev/_preview/pr-1351/commands/build.md) | Manage mobile build artifacts |
 | [`cli`](https://cli.sentry.dev/_preview/pr-1351/commands/cli.md) | CLI-related commands |
 | [`code-mappings`](https://cli.sentry.dev/_preview/pr-1351/commands/code-mappings.md) | Manage code mappings for stack trace linking |
+| [`conversation`](https://cli.sentry.dev/_preview/pr-1351/commands/conversation.md) | List and view AI conversations |
 | [`dart-symbol-map`](https://cli.sentry.dev/_preview/pr-1351/commands/dart-symbol-map.md) | Work with Dart/Flutter symbol maps |
 | [`debug-files`](https://cli.sentry.dev/_preview/pr-1351/commands/debug-files.md) | Work with debug information files |
 | [`dashboard`](https://cli.sentry.dev/_preview/pr-1351/commands/dashboard.md) | Manage Sentry dashboards |
@@ -85,6 +86,7 @@ sentry issue view PROJ-123 -w
 - [build](https://cli.sentry.dev/_preview/pr-1351/commands/build.md)
 - [cli](https://cli.sentry.dev/_preview/pr-1351/commands/cli.md)
 - [code-mappings](https://cli.sentry.dev/_preview/pr-1351/commands/code-mappings.md)
+- [conversation](https://cli.sentry.dev/_preview/pr-1351/commands/conversation.md)
 - [dart-symbol-map](https://cli.sentry.dev/_preview/pr-1351/commands/dart-symbol-map.md)
 - [dashboard](https://cli.sentry.dev/_preview/pr-1351/commands/dashboard.md)
 - [debug-files](https://cli.sentry.dev/_preview/pr-1351/commands/debug-files.md)
