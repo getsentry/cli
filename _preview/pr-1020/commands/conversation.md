@@ -30,7 +30,7 @@ List recent AI conversations
 | `-f, --fresh` | Bypass cache, re-detect projects, and fetch fresh data |
 | `-c, --cursor <cursor>` | Navigate pages: "next", "prev", "first" (or raw cursor string) |
 
-### `sentry conversation view <org> <conversation-id>`
+### `sentry conversation view <org/conversation-id>`
 
 View an AI conversation transcript
 
@@ -38,8 +38,7 @@ View an AI conversation transcript
 
 | Argument | Description |
 | --- | --- |
-| `<org>` | Organization slug (optional if auto-detected) |
-| `<conversation-id>` | AI conversation ID |
+| `<org/conversation-id>` | [<org>/]<conversation-id> - Org (optional) and conversation ID |
 
 **Options:**
 
@@ -91,4 +90,4 @@ sentry conversation view my-org conv-123 --json
 - [Docs home](https://cli.sentry.dev/_preview/pr-1020/index.md)
 - [Parent: Commands](https://cli.sentry.dev/_preview/pr-1020/commands.md)
 - [Previous: code-mappings](https://cli.sentry.dev/_preview/pr-1020/commands/code-mappings.md)
-- [Next: dart-symbol-map](https://cli.sentry.dev/_preview/pr-1020/commands/dart-symbol-map.md)
+- [Next: conversations](https://cli.sentry.dev/_preview/pr-1020/commands/conversations.md)

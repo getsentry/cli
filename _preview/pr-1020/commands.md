@@ -45,6 +45,7 @@ The Sentry CLI provides commands for interacting with various Sentry resources.
 | [`local`](https://cli.sentry.dev/_preview/pr-1020/commands/local.md) | Sentry for local development |
 | [`api`](https://cli.sentry.dev/_preview/pr-1020/commands/api.md) | Make an authenticated API request |
 | [`schema`](https://cli.sentry.dev/_preview/pr-1020/commands/schema.md) | Browse the Sentry API schema |
+| [`conversations`](https://cli.sentry.dev/_preview/pr-1020/commands/conversations.md) | List recent AI conversations |
 
 ## Global Options
 
@@ -87,6 +88,7 @@ sentry issue view PROJ-123 -w
 - [cli](https://cli.sentry.dev/_preview/pr-1020/commands/cli.md)
 - [code-mappings](https://cli.sentry.dev/_preview/pr-1020/commands/code-mappings.md)
 - [conversation](https://cli.sentry.dev/_preview/pr-1020/commands/conversation.md)
+- [conversations](https://cli.sentry.dev/_preview/pr-1020/commands/conversations.md)
 - [dart-symbol-map](https://cli.sentry.dev/_preview/pr-1020/commands/dart-symbol-map.md)
 - [dashboard](https://cli.sentry.dev/_preview/pr-1020/commands/dashboard.md)
 - [debug-files](https://cli.sentry.dev/_preview/pr-1020/commands/debug-files.md)

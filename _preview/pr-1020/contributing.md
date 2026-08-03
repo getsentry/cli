@@ -87,6 +87,7 @@ cli/
 │   │   ├── trace/       # list, logs, view
 │   │   ├── trial/       # list, start
 │   │   ├── api.ts       # Make an authenticated API request
+│   │   ├── conversations.ts# List recent AI conversations
 │   │   ├── explore.ts   # Query aggregate event data (Explore)
 │   │   ├── help.ts      # Help command
 │   │   ├── info.ts      # Print configuration and verify authentication
