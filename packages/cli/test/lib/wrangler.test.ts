@@ -151,6 +151,75 @@ describe("injectWranglerSpotlightBinding", () => {
     ]);
   });
 
+  test("injects before a chained command instead of into the last command", async () => {
+    await addWranglerConfig();
+
+    const result = await injectWranglerSpotlightBinding(
+      ["sh", "-c", "wrangler dev --port 8787 && echo done"],
+      SPOTLIGHT_URL,
+      tmpDir
+    );
+
+    expect(result.args).toEqual([
+      "sh",
+      "-c",
+      `wrangler dev --port 8787 --var ${BINDING} && echo done`,
+    ]);
+  });
+
+  test("ignores shell operators inside quotes and substitutions", async () => {
+    await addWranglerConfig();
+
+    const result = await injectWranglerSpotlightBinding(
+      [
+        "sh",
+        "-c",
+        'wrangler dev --define MESSAGE:"a && b" --name "$(echo x && echo y)" | tee output.log',
+      ],
+      SPOTLIGHT_URL,
+      tmpDir
+    );
+
+    expect(result.args).toEqual([
+      "sh",
+      "-c",
+      `wrangler dev --define MESSAGE:"a && b" --name "$(echo x && echo y)" --var ${BINDING} | tee output.log`,
+    ]);
+  });
+
+  test("injects before a shell redirection", async () => {
+    await addWranglerConfig();
+
+    const result = await injectWranglerSpotlightBinding(
+      ["sh", "-c", "wrangler dev > wrangler.log 2>&1"],
+      SPOTLIGHT_URL,
+      tmpDir
+    );
+
+    expect(result.args).toEqual([
+      "sh",
+      "-c",
+      `wrangler dev --var ${BINDING} > wrangler.log 2>&1`,
+    ]);
+  });
+
+  test("preserves an explicit Spotlight binding inside a shell script", async () => {
+    await addWranglerConfig();
+    const script =
+      "wrangler dev --var SENTRY_SPOTLIGHT:http://localhost:9999/stream && echo done";
+
+    const result = await injectWranglerSpotlightBinding(
+      ["sh", "-c", script],
+      SPOTLIGHT_URL,
+      tmpDir
+    );
+
+    expect(result).toEqual({
+      args: ["sh", "-c", script],
+      injected: false,
+    });
+  });
+
   test("respects an explicit config path when no default config exists", async () => {
     const result = await injectWranglerSpotlightBinding(
       ["wrangler", "dev", "--config", "config/worker.jsonc"],

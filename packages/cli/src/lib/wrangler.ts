@@ -30,6 +30,9 @@ const WRANGLER_DEV_SHELL_RE = /\bwrangler(?:\.cmd)?\s+(?:pages\s+)?dev\b/;
 /** Match an existing SENTRY_SPOTLIGHT Wrangler binding. */
 const SPOTLIGHT_VAR_RE = /^SENTRY_SPOTLIGHT(?::|=)/;
 
+/** Match an existing SENTRY_SPOTLIGHT binding inside a shell command. */
+const SHELL_SPOTLIGHT_VAR_RE = /--var(?:=|\s+)["']?SENTRY_SPOTLIGHT(?::|=)/;
+
 /** Strip Windows' executable suffix before command comparisons. */
 const CMD_SUFFIX_RE = /\.cmd$/i;
 
@@ -49,11 +52,88 @@ function executableName(value: string): string {
 /** Whether args already provide an explicit SENTRY_SPOTLIGHT Wrangler var. */
 function hasSpotlightVar(args: readonly string[]): boolean {
   return args.some((arg, index) => {
+    if (SHELL_SPOTLIGHT_VAR_RE.test(arg)) {
+      return true;
+    }
     if (arg.startsWith("--var=")) {
       return SPOTLIGHT_VAR_RE.test(arg.slice("--var=".length));
     }
     return args[index - 1] === "--var" && SPOTLIGHT_VAR_RE.test(arg);
   });
+}
+
+/**
+ * Find where the Wrangler command ends inside a shell script.
+ *
+ * Shell control operators and redirections delimit the command, but operators
+ * inside quotes or command substitutions do not. The returned offset is where
+ * Wrangler's `--var` must be inserted.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this is a single-pass shell lexer; splitting its quote/escape/substitution state would obscure the transitions
+function findShellCommandEnd(script: string, start: number): number {
+  let quote: "'" | '"' | "`" | undefined;
+  let escaped = false;
+  let substitutionDepth = 0;
+
+  for (let index = start; index < script.length; index += 1) {
+    const char = script[index];
+    const next = script[index + 1];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+      continue;
+    }
+    if (char === "$" && next === "(") {
+      substitutionDepth += 1;
+      index += 1;
+      continue;
+    }
+    if (char === ")" && substitutionDepth > 0) {
+      substitutionDepth -= 1;
+      continue;
+    }
+    if (substitutionDepth > 0) {
+      continue;
+    }
+    if (
+      char === "\n" ||
+      char === ";" ||
+      char === "&" ||
+      char === "|" ||
+      char === "<" ||
+      char === ">" ||
+      char === "#"
+    ) {
+      return index;
+    }
+  }
+  return script.length;
+}
+
+/** Add the binding before the next shell operator after `wrangler dev`. */
+function injectIntoShellCommand(script: string, binding: string): string {
+  const match = WRANGLER_DEV_SHELL_RE.exec(script);
+  if (!match) {
+    return script;
+  }
+  const commandEnd = findShellCommandEnd(script, match.index + match[0].length);
+  const before = script.slice(0, commandEnd).trimEnd();
+  const spacing = script.slice(before.length, commandEnd);
+  return `${before} --var ${binding}${spacing}${script.slice(commandEnd)}`;
 }
 
 /** Whether a direct/wrapped command invokes `wrangler dev`. */
@@ -156,7 +236,10 @@ export async function injectWranglerSpotlightBinding(
   );
   if (shellIndex !== -1) {
     const augmented = [...args];
-    augmented[shellIndex] = `${augmented[shellIndex]} --var ${binding}`;
+    augmented[shellIndex] = injectIntoShellCommand(
+      augmented[shellIndex] ?? "",
+      binding
+    );
     return { args: augmented, injected: true };
   }
 
