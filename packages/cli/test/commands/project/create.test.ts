@@ -1216,4 +1216,29 @@ describe("project create", () => {
     expect(output).toContain("my-app");
     expect(output).toContain("Would create team");
   });
+
+  test("falls back to a later project's slug when the first name slugifies to empty", async () => {
+    listTeamsSpy.mockResolvedValue([]);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await createCommand.loader();
+    // "!!!" has no characters slugify() keeps, so it alone can't name the
+    // auto-created team — the batch should still share "my-app" instead of
+    // rejecting every project with "No teams found".
+    await func.call(
+      context,
+      { json: false, "dry-run": true },
+      "!!!:node",
+      "my-app:python"
+    );
+
+    expect(createTeamSpy).not.toHaveBeenCalled();
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+
+    const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
+    expect(output).not.toContain("No teams found");
+    expect(output).toContain("Would create team");
+    // Both projects share the same auto-create slug, derived from "my-app".
+    expect(output.match(/Would create team 'my-app'/g)).toHaveLength(2);
+  });
 });

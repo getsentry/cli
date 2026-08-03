@@ -698,8 +698,14 @@ export const createCommand = buildCommand({
 
     // If the org has no teams, the first project auto-creates one and the rest
     // reuse it. Pin that team slug up front so a real run and a --dry-run
-    // preview agree (dry-run never actually creates the team).
-    const teamAutoCreateSlug = slugify(parsed[0]?.name ?? "");
+    // preview agree (dry-run never actually creates the team). Search the
+    // whole batch, not just parsed[0]: a name that slugifies to "" (e.g.
+    // punctuation-only or non-ASCII) must not disable auto-create for every
+    // other project in the batch — createOneProject's `??` fallback treats
+    // "" as a set value, not a missing one.
+    const teamAutoCreateSlug = parsed
+      .map((p) => slugify(p.name))
+      .find((slug) => slug !== "");
 
     // Create sequentially to respect rate limits. Results are emitted as one
     // value so --json stays parseable, including partial success before an error.
