@@ -181,11 +181,12 @@ for (const [key, patchPath] of Object.entries(patches)) {
  * patch did NOT apply (in either the ESM or CJS bundle).
  *
  * @stricli/core (top-level flags): the patch teaches `buildRouteScanner` to
- * recognize a fixed allow-list of Sentry global flags (`--verbose`, `--json`,
- * `--org`, …) at any route depth, so `sentry --verbose issue list` no longer
- * fails route resolution. This is a pure insertion, so it's guarded by a
- * `requiredMarker` (`matchSentryTopLevelFlag`) that must be present once
- * patched. Its absence means global flags before a subcommand will crash.
+ * recognize a host-supplied allow-list of global flags (`scanner.topLevelFlags`)
+ * at any route depth, so `sentry --verbose issue list` no longer fails route
+ * resolution. The allow-list itself is passed in from the app (derived from
+ * GLOBAL_FLAGS) rather than hardcoded in the patch. This is a pure insertion, so
+ * it's guarded by a `requiredMarker` (`matchTopLevelFlag`) that must be present
+ * once patched. Its absence means global flags before a subcommand will crash.
  *
  * @stricli/core (`-v` version alias): the patch also drops Stricli's built-in
  * `-v`=version alias in `runApplication` so `-v` stays the Sentry CLI's
@@ -228,13 +229,13 @@ const CONTENT_ASSERTIONS: ReadonlyArray<{
   },
   {
     file: "@stricli/core/dist/index.js",
-    requiredMarker: "matchSentryTopLevelFlag",
+    requiredMarker: "matchTopLevelFlag",
     description:
       "@stricli/core ESM: top-level-flags scanner allow-list missing (global flags before a subcommand, e.g. `sentry --verbose issue list`, will fail route resolution)",
   },
   {
     file: "@stricli/core/dist/index.cjs",
-    requiredMarker: "matchSentryTopLevelFlag",
+    requiredMarker: "matchTopLevelFlag",
     description:
       "@stricli/core CJS: top-level-flags scanner allow-list missing (global flags before a subcommand, e.g. `sentry --verbose issue list`, will fail route resolution)",
   },

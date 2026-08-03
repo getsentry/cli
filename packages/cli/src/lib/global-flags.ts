@@ -36,12 +36,11 @@ type GlobalFlagDef = {
  * Order doesn't matter — both the `buildCommand` wrapper and the app-boundary
  * glue build lookup structures from this list.
  *
- * IMPORTANT: the set of flag tokens recognized *before the subcommand* also
- * lives, hardcoded, in the `@stricli/core` route-scanner patch
- * (`packages/cli/patches/@stricli%2Fcore@1.2.8.patch`,
- * `SENTRY_TOP_LEVEL_*_FLAGS`). Patching minified `dist` code can't import this
- * list, so adding/removing a global flag here means updating that patch too, or
- * the flag won't be accepted when placed before the subcommand.
+ * The set of flag tokens recognized *before the subcommand* is derived from
+ * this list by {@link buildTopLevelFlags} and handed to Stricli's patched route
+ * scanner via the `scanner.topLevelFlags` option (see `app.ts`). Adding or
+ * removing a global flag here is all that's needed — the allow-list is no
+ * longer hardcoded in the `@stricli/core` patch.
  */
 export const GLOBAL_FLAGS: readonly GlobalFlagDef[] = [
   { name: "verbose", short: "v", kind: "boolean" },
@@ -55,3 +54,45 @@ export const GLOBAL_FLAGS: readonly GlobalFlagDef[] = [
   { name: "org", short: null, kind: "value" },
   { name: "project", short: null, kind: "value" },
 ];
+
+/**
+ * Allow-list of global flag tokens recognized before the subcommand, in the
+ * shape consumed by Stricli's patched route scanner (`scanner.topLevelFlags`).
+ *
+ * - `booleanFlags` — tokens that stand alone (no value): each boolean flag's
+ *   `--<name>`, its `-<short>` alias, and its `--no-<name>` negation.
+ * - `valueFlags` — tokens that consume the following argv token (or an
+ *   `=`-joined value) as their value: each value flag's `--<name>` and
+ *   `-<short>` alias.
+ *
+ * The scanner uses these sets to forward a global flag placed before the
+ * subcommand (`sentry --verbose issue list`) to the leaf command instead of
+ * failing route resolution. Derived from {@link GLOBAL_FLAGS} so the two stay
+ * in sync automatically.
+ */
+export type TopLevelFlags = {
+  readonly booleanFlags: ReadonlySet<string>;
+  readonly valueFlags: ReadonlySet<string>;
+};
+
+/**
+ * Build the {@link TopLevelFlags} allow-list from {@link GLOBAL_FLAGS}.
+ *
+ * Passed to `buildApplication`'s `scanner.topLevelFlags` so the patched route
+ * scanner recognizes these flags at any route depth.
+ */
+export function buildTopLevelFlags(): TopLevelFlags {
+  const booleanFlags = new Set<string>();
+  const valueFlags = new Set<string>();
+  for (const flag of GLOBAL_FLAGS) {
+    const target = flag.kind === "boolean" ? booleanFlags : valueFlags;
+    target.add(`--${flag.name}`);
+    if (flag.short !== null) {
+      target.add(`-${flag.short}`);
+    }
+    if (flag.kind === "boolean") {
+      booleanFlags.add(`--no-${flag.name}`);
+    }
+  }
+  return { booleanFlags, valueFlags };
+}
