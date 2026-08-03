@@ -324,24 +324,19 @@ export function loadSentryCliRc(cwd: string): Promise<SentryCliRcConfig> {
 }
 
 /**
- * Path of the `.sentryclirc` file whose `token` the shim injected into
- * `SENTRY_AUTH_TOKEN`, or `undefined` when the active env token did not
- * come from the shim.
+ * Path of the `.sentryclirc` file whose `token` the shim copied into
+ * `SENTRY_AUTH_TOKEN`, pinned by {@link applySentryCliRcEnvShim} at the
+ * one point it knows the provenance. `undefined` when the active env
+ * token was set by the user rather than injected from rc.
  *
- * Lets downstream diagnostics (e.g. the env-token-ignored hint) name the
- * real source instead of claiming the user set an env var they never did.
+ * Mirrors the boot-time snapshot pattern in `env-token-host.ts`
+ * (`pinnedHost` + getter): lets the synchronous env-token-ignored hint
+ * name the real source instead of claiming the user set an env var they
+ * never did, without re-awaiting the async rc loader.
  */
 let rcInjectedTokenSource: string | undefined;
 
-/**
- * The `.sentryclirc` file that supplied the token now living in
- * `SENTRY_AUTH_TOKEN`, or `undefined` when the token came from a real
- * env var (or no token is set).
- *
- * Populated by {@link applySentryCliRcEnvShim}. Returns `undefined` if a
- * genuine `SENTRY_AUTH_TOKEN`/`SENTRY_TOKEN` was already set, since the
- * shim only injects when both are unset.
- */
+/** Read the pinned rc-injected token source. See {@link rcInjectedTokenSource}. */
 export function getRcInjectedTokenSource(): string | undefined {
   return rcInjectedTokenSource;
 }
