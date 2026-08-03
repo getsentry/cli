@@ -12,11 +12,9 @@ artifactProvider:
       Build:
         - '/^sentry-.*$/'
         - 'npm-package'
-        - 'gh-pages'
 targets:
   - name: npm
   - name: github
-  - name: gh-pages
   - name: registry
     apps:
       'app:sentry':
