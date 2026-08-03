@@ -57,5 +57,5 @@ sentry dart-symbol-map upload --debug-id 12345678-1234-1234-1234-123456789abc ma
 
 - [Docs home](https://cli.sentry.dev/_preview/pr-1354/index.md)
 - [Parent: Commands](https://cli.sentry.dev/_preview/pr-1354/commands.md)
-- [Previous: code-mappings](https://cli.sentry.dev/_preview/pr-1354/commands/code-mappings.md)
+- [Previous: conversation](https://cli.sentry.dev/_preview/pr-1354/commands/conversation.md)
 - [Next: dashboard](https://cli.sentry.dev/_preview/pr-1354/commands/dashboard.md)
