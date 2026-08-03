@@ -73,4 +73,4 @@ The JSON file must contain an array of objects with `stackRoot` and `sourceRoot`
 - [Docs home](https://cli.sentry.dev/_preview/pr-main/index.md)
 - [Parent: Commands](https://cli.sentry.dev/_preview/pr-main/commands.md)
 - [Previous: cli](https://cli.sentry.dev/_preview/pr-main/commands/cli.md)
-- [Next: dart-symbol-map](https://cli.sentry.dev/_preview/pr-main/commands/dart-symbol-map.md)
+- [Next: conversation](https://cli.sentry.dev/_preview/pr-main/commands/conversation.md)

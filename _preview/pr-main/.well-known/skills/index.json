@@ -11,6 +11,7 @@
         "references/build.md",
         "references/cli.md",
         "references/code-mappings.md",
+        "references/conversation.md",
         "references/dart-symbol-map.md",
         "references/dashboard.md",
         "references/debug-files.md",
