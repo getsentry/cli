@@ -52,8 +52,6 @@ sentry local -f error -f log
 # Run quietly (suppress per-envelope tail output)
 sentry local --quiet
 
---var SENTRY_SPOTLIGHT:http://localhost:<port>/stream
-
 sentry local -f error -f log    # only errors and logs
 
 sentry local -f ai          # only AI/agent spans

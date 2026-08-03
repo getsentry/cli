@@ -44,11 +44,7 @@ The `<PREFIX>` variants cover every common framework client prefix so the spotli
 
 **Server vs. client.** Server-side SDKs (`@sentry/node`, Python, and friends) read `SENTRY_SPOTLIGHT` automatically — no code changes needed.
 
-**Cloudflare Workers.** Wrangler does not expose inherited process environment variables to Worker code. When `local run` detects `wrangler dev` together with a `wrangler.json`, `wrangler.jsonc`, or `wrangler.toml`, it automatically adds:
-
-```bash
---var SENTRY_SPOTLIGHT:http://localhost:<port>/stream
-```
+**Cloudflare Workers.** Wrangler does not expose inherited process environment variables to Worker code. When `local run` detects `wrangler dev` together with a `wrangler.json`, `wrangler.jsonc`, or `wrangler.toml`, it automatically adds `--var SENTRY_SPOTLIGHT:http://localhost:<port>/stream`.
 
 This creates an ephemeral Worker binding that `@sentry/cloudflare` reads from its `env` object, so you do not need `spotlight: true` in `withSentry()` and no project file is modified. An explicit `--var SENTRY_SPOTLIGHT:...` is preserved.
 
