@@ -99,6 +99,19 @@ describe("renderJsonHelp", () => {
     const parsed = JSON.parse(out as string);
     expect(parsed).toHaveProperty("error");
   });
+
+  test("a value-taking global flag's spaced value is not treated as a path segment", () => {
+    // `sentry --org acme issue list --help --json`: `--org acme` is forwarded
+    // in unprocessedInputs. `acme` must be consumed as --org's value, leaving
+    // the resolved `issue list` command rather than an `acme`-prefixed path.
+    const out = renderJsonHelp(
+      [APP, "issue", "list"],
+      ["--org", "acme", "--json"]
+    );
+    const parsed = JSON.parse(out as string);
+    expect(parsed).toHaveProperty("path");
+    expect(parsed.path).toContain("issue list");
+  });
 });
 
 describe("rewriteHelpJsonToHelpCommand", () => {
@@ -137,6 +150,36 @@ describe("rewriteHelpJsonToHelpCommand", () => {
         "path",
       ])
     ).toEqual(["help", "--json", "issue", "list", "--fields", "path"]);
+  });
+
+  test("drops spaced values of value-taking global flags from the path", () => {
+    // `sentry --org acme --log-level debug cli nope --help --json`: the values
+    // `acme` and `debug` must not leak into the command path, which should be
+    // just `cli nope`.
+    expect(
+      rewriteHelpJsonToHelpCommand([
+        "--org",
+        "acme",
+        "--log-level",
+        "debug",
+        "cli",
+        "nope",
+        "--help",
+        "--json",
+      ])
+    ).toEqual(["help", "--json", "cli", "nope"]);
+  });
+
+  test("drops inline value-flag forms without consuming the next token", () => {
+    expect(
+      rewriteHelpJsonToHelpCommand([
+        "--org=acme",
+        "cli",
+        "nope",
+        "--help",
+        "--json",
+      ])
+    ).toEqual(["help", "--json", "cli", "nope"]);
   });
 
   test("ignores --help/--json after a -- escape", () => {

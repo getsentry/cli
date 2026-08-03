@@ -16,6 +16,7 @@ import {
   formatJson,
   parseFieldsList,
 } from "./formatters/json.js";
+import { GLOBAL_FLAGS } from "./global-flags.js";
 import {
   type CommandInfo,
   extractAllRoutes,
@@ -481,8 +482,11 @@ export function rewriteHelpJsonToHelpCommand(
  *
  * `extraPath` collects non-flag tokens that were not part of the resolved route
  * (e.g. an unknown subcommand the scanner forwarded to a group's default
- * command). The spaced value of a `--fields` flag is consumed so it is not
- * mistaken for a path segment; other flags are ignored.
+ * command). Spaced values of value-taking global flags (`--fields`, `--org`,
+ * `--project`, `--log-level`) are consumed so they are not mistaken for path
+ * segments — e.g. `--org acme cli nope` must yield `["cli", "nope"]`, not
+ * `["acme", "cli", "nope"]`. Boolean flags and other `--`-prefixed tokens are
+ * ignored.
  */
 function parseHelpJsonFlags(inputs: readonly string[]): {
   hasJson: boolean;
@@ -503,11 +507,55 @@ function parseHelpJsonFlags(inputs: readonly string[]): {
       i = consumeFieldsFlag(inputs, i, (parsed) => {
         fields = parsed;
       });
+    } else if (isValueFlagToken(token)) {
+      i = consumeValueFlag(inputs, i);
     } else if (!token.startsWith("-")) {
       extraPath.push(token);
     }
   }
   return { hasJson, fields, extraPath };
+}
+
+/**
+ * Skip the spaced value of a value-taking global flag at `index` so it is not
+ * collected as a command-path segment, returning the index of the last token
+ * consumed. Inline `--org=acme` carries its value in the same token, and a
+ * following `-`-prefixed token is another flag, not a value — both leave the
+ * index unchanged.
+ */
+function consumeValueFlag(inputs: readonly string[], index: number): number {
+  const token = inputs[index] ?? "";
+  if (token.includes("=") || inputs[index + 1]?.startsWith("-")) {
+    return index;
+  }
+  return inputs[index + 1] === undefined ? index : index + 1;
+}
+
+/**
+ * Tokens for value-taking global flags whose spaced value must be skipped when
+ * scanning for the help command path, excluding `--fields` (extracted
+ * separately) and `--json` (a boolean). Derived from {@link GLOBAL_FLAGS} so it
+ * stays in sync as global flags change: includes each value flag's `--<name>`
+ * and any `-<short>` alias. The inline `--<name>=<value>` form is matched by
+ * {@link isValueFlagToken}, which strips the `=<value>` suffix before lookup.
+ */
+const VALUE_FLAG_TOKENS: ReadonlySet<string> = new Set(
+  GLOBAL_FLAGS.filter(
+    (flag) => flag.kind === "value" && flag.name !== "fields"
+  ).flatMap((flag) =>
+    flag.short === null
+      ? [`--${flag.name}`]
+      : [`--${flag.name}`, `-${flag.short}`]
+  )
+);
+
+/**
+ * Whether `token` is a value-taking global flag (spaced `--org` or inline
+ * `--org=acme`) whose following value should not be treated as a path segment.
+ */
+function isValueFlagToken(token: string): boolean {
+  const name = token.startsWith("--") ? token.split("=", 1)[0] : token;
+  return VALUE_FLAG_TOKENS.has(name ?? token);
 }
 
 /**
