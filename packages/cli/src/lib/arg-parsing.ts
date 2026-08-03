@@ -92,9 +92,6 @@ const TWO_SEGMENT_PARTS = 2;
  */
 const ISSUE_SHORT_ID_MULTI_SEGMENT_PARTS = 3;
 
-/** Max segment length for compact version-slug prefix words (`my`, `app` in `my-app-2b`). */
-const COMPACT_VERSION_SLUG_SEGMENT_MAX_LEN = 3;
-
 /** Splits a string into lines on LF or CRLF boundaries. */
 const LINE_SPLIT_PATTERN = /\r?\n/;
 
@@ -213,24 +210,30 @@ export function rejectIssueCommandTokenListTarget(target: string): void {
 /**
  * Case-insensitive short ID match with guardrails against project-slug false positives.
  *
+ * A fully-lowercase input is only recovered when it can't be told apart from a
+ * project slug by anything but its final segment, so the rule keys off that
+ * segment. This keeps the classification consistent for the whole class rather
+ * than carving out length-based special cases (which flipped `my-app-2b` vs
+ * `my-apps-2b` on a one-character difference).
+ *
  * Guard tiers:
  * 1. Two-part all-lowercase slugs (e.g. `my-project`) — rejected as project names
  * 2. Multi-segment all-lowercase with a letter-only or digit-only final
- *    (e.g. `my-frontend-app`, `my-app-2`) — rejected
+ *    (e.g. `my-frontend-app`, `my-app-2`) — rejected. A short-ID suffix mixes a
+ *    letter and a digit (`1b`, `4y`), so a pure-word or pure-number final marks
+ *    a project slug.
  * 3. Title-case first segment (e.g. `My` in `My-Project`, `My-2b`, `My-App-2`) —
  *    rejected. Real short-ID prefixes are fully uppercase or fully lowercase,
  *    not "someone capitalized a project name" title case.
- * 4. Compact three-part version slugs (e.g. `my-app-2b`) — rejected when the
- *    first two segments are short lowercase words and the final is alphanumeric.
  *
  * All-uppercase multi-segment short IDs (e.g. `SPOTLIGHT-ELECTRON-5`) pass tier 2
  * because Sentry project slugs are always lowercase. Mixed-case short IDs
  * (e.g. `CaM-82x`) and lowercase multi-segment with alphanumeric finals
- * (e.g. `javascript-react-mr-1b`) may match when uppercased.
+ * (e.g. `javascript-react-mr-1b`, `my-app-2b`) match when uppercased.
  *
  * @example
  * matchesIssueShortIdIgnoreCase("my-app-2")               // false
- * matchesIssueShortIdIgnoreCase("my-app-2b")              // false
+ * matchesIssueShortIdIgnoreCase("my-app-2b")              // true
  * matchesIssueShortIdIgnoreCase("My-Project")             // false
  * matchesIssueShortIdIgnoreCase("My-2b")                  // false
  * matchesIssueShortIdIgnoreCase("CLI-5")                  // true
@@ -246,15 +249,6 @@ function matchesIssueShortIdIgnoreCase(str: string): boolean {
   }
   const lastPartLower = (parts.at(-1) ?? "").toLowerCase();
   if (multiSegment && !hasUppercase && !isAlphanumericSegment(lastPartLower)) {
-    return false;
-  }
-  if (
-    parts.length === ISSUE_SHORT_ID_MULTI_SEGMENT_PARTS &&
-    !hasUppercase &&
-    isAlphanumericSegment(lastPartLower) &&
-    (parts[0]?.length ?? 0) <= COMPACT_VERSION_SLUG_SEGMENT_MAX_LEN &&
-    (parts[1]?.length ?? 0) <= COMPACT_VERSION_SLUG_SEGMENT_MAX_LEN
-  ) {
     return false;
   }
   if (

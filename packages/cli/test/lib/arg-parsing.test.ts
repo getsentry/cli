@@ -1124,9 +1124,15 @@ describe("looksLikeIssueShortId", () => {
       );
     });
 
-    test("my-app-2b with ignoreCase is false (compact versioned project slug)", () => {
+    test("my-app-2b with ignoreCase is true (lowercase multi-segment, alphanumeric final)", () => {
       expect(looksLikeIssueShortId("my-app-2b", { ignoreCase: true })).toBe(
-        false
+        true
+      );
+    });
+
+    test("my-apps-2b with ignoreCase is true (alphanumeric final, no length special-casing)", () => {
+      expect(looksLikeIssueShortId("my-apps-2b", { ignoreCase: true })).toBe(
+        true
       );
     });
 
