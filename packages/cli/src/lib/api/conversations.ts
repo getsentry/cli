@@ -1,8 +1,17 @@
 /**
  * AI Conversations API functions
  *
- * Functions for listing and retrieving AI conversation data
- * from the Sentry Explore conversations endpoints.
+ * Functions for listing and retrieving AI conversation data from the Sentry
+ * Explore AI-conversations endpoints.
+ *
+ * The `/organizations/{org}/ai-conversations/` endpoints are not yet in
+ * `@sentry/api` (getsentry/sentry-api-schema): they are a new AI-monitoring
+ * feature that has not been published to the API schema, so no generated SDK
+ * function or response type exists for them. Following the same pattern as the
+ * experimental endpoints in `logs.ts`/`traces.ts`, they are called directly via
+ * `apiRequestToRegion` with local Zod schemas. Pagination still goes through the
+ * shared `parseLinkHeader` helper, which wraps `@sentry/api`'s
+ * `parseSentryLinkHeader`. Revisit once these endpoints land in `@sentry/api`.
  */
 
 import { z } from "zod";
