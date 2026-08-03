@@ -13,6 +13,7 @@ import { bashHookCommand } from "./commands/bash-hook.js";
 import { buildRoute } from "./commands/build/index.js";
 import { cliRoute } from "./commands/cli/index.js";
 import { codeMappingsRoute } from "./commands/code-mappings/index.js";
+import { conversationRoute } from "./commands/conversation/index.js";
 import { dartSymbolMapRoute } from "./commands/dart-symbol-map/index.js";
 import { dashboardRoute } from "./commands/dashboard/index.js";
 import { listCommand as dashboardListCommand } from "./commands/dashboard/list.js";
@@ -107,6 +108,7 @@ export const routes = buildRouteMap({
     build: buildRoute,
     cli: cliRoute,
     "code-mappings": codeMappingsRoute,
+    conversation: conversationRoute,
     "dart-symbol-map": dartSymbolMapRoute,
     "debug-files": debugFilesRoute,
     dashboard: dashboardRoute,
