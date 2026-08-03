@@ -12,6 +12,11 @@ import { isAuthenticated } from "./db/auth.js";
 import { TOP_LEVEL_ENV_VARS } from "./env-registry.js";
 import { cyan, magenta, muted } from "./formatters/colors.js";
 import {
+  filterFields,
+  formatJson,
+  parseFieldsList,
+} from "./formatters/json.js";
+import {
   type CommandInfo,
   extractAllRoutes,
   getPositionalString,
@@ -372,6 +377,85 @@ export function introspectCommand(
     };
   }
   return resolved.info;
+}
+
+/**
+ * Render structured JSON help for `--help --json` requests, or `undefined` when
+ * the request is a plain text help request.
+ *
+ * Wired into Stricli's `documentation.renderHelp` hook (see `app.ts`). Stricli
+ * calls this whenever it is about to print help — for `--help`/`--helpAll` or a
+ * bare route group — passing the resolved route `prefix` (leading with the app
+ * name) and the `unprocessedInputs` that survived route resolution (which
+ * include forwarded top-level flags such as `--json`/`--fields`).
+ *
+ * When `--json` is present, this reproduces exactly what `sentry help --json
+ * [command]` writes to stdout: `introspectAllCommands()` for the full tree, or
+ * `introspectCommand(path)` for a specific command/group, serialized with
+ * {@link formatJson} and optionally narrowed by `--fields`. When `--json` is
+ * absent, it returns `undefined` so Stricli falls back to the built-in text
+ * help — leaving `sentry --help` and `sentry <cmd> --help` unchanged.
+ *
+ * @param prefix - Resolved route path including the app name (`["sentry", ...]`)
+ * @param unprocessedInputs - Inputs left after route resolution, including any
+ *   forwarded top-level flags
+ * @returns The JSON help string (with trailing newline), or `undefined` to fall
+ *   back to text help
+ */
+export function renderJsonHelp(
+  prefix: readonly string[],
+  unprocessedInputs: readonly string[]
+): string | undefined {
+  const { hasJson, fields } = parseHelpJsonFlags(unprocessedInputs);
+  if (!hasJson) {
+    return;
+  }
+
+  // Drop the leading app name so the path matches introspectCommand's routes.
+  const commandPath = prefix.slice(1);
+  const data =
+    commandPath.length === 0
+      ? introspectAllCommands()
+      : introspectCommand([...commandPath]);
+
+  const final = fields && fields.length > 0 ? filterFields(data, fields) : data;
+  return `${formatJson(final)}\n`;
+}
+
+/**
+ * Scan the top-level flags forwarded past route resolution for `--json` and
+ * `--fields`, mirroring the flag forms the `buildCommand` wrapper accepts.
+ *
+ * Only tokens before a `--` escape separator are considered so a wrapped
+ * command's own `--json` (`sentry monitor run <slug> -- tool --json`) is not
+ * treated as a help request. `--fields` supports both the spaced
+ * (`--fields a,b`) and inline (`--fields=a,b`) forms; its value is parsed with
+ * {@link parseFieldsList} for parity with the wrapper's `--fields` handling.
+ */
+function parseHelpJsonFlags(inputs: readonly string[]): {
+  hasJson: boolean;
+  fields: string[] | undefined;
+} {
+  let hasJson = false;
+  let fields: string[] | undefined;
+  for (let i = 0; i < inputs.length; i += 1) {
+    const token = inputs[i] ?? "";
+    if (token === "--") {
+      break;
+    }
+    if (token === "--json") {
+      hasJson = true;
+    } else if (token.startsWith("--fields=")) {
+      fields = parseFieldsList(token.slice("--fields=".length));
+    } else if (token === "--fields") {
+      const next = inputs[i + 1];
+      if (next !== undefined && !next.startsWith("-")) {
+        fields = parseFieldsList(next);
+        i += 1;
+      }
+    }
+  }
+  return { hasJson, fields };
 }
 
 // ---------------------------------------------------------------------------

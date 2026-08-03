@@ -161,7 +161,6 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const { isatty } = await import("node:tty");
   const { ExitCode, run } = await import("@stricli/core");
   const { app } = await import("./app.js");
-  const { preprocessArgv } = await import("./lib/argv-glue.js");
   const { buildContext } = await import("./context.js");
   const { AuthError, OutputError, formatError, getExitCode } = await import(
     "./lib/errors.js"
@@ -185,17 +184,11 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     shouldSuppressNotification,
   } = await import("./lib/version-check.js");
 
-  // Normalize argv before dispatch (see preprocessArgv). Global-flag hoisting is
-  // now handled by Stricli's patched route scanner (top-level-flags allow-list),
-  // so only two application-boundary transforms remain:
-  //  - `--version` after a route group/subcommand (e.g. `sentry cli --version`)
-  //    is normalized to a top-level `--version`; Stricli only handles it at the
-  //    application proxy. `-v` is left alone — it's the --verbose alias.
-  //  - a flag-based `--help --json` request is rewritten to the `help` command
-  //    so JSON help works for the `--help` forms agents reach for.
-  // The original cliArgs are kept for post-run checks (e.g., help recovery)
-  // that rely on the original token positions.
-  const normalizedArgs = preprocessArgv(cliArgs);
+  // Global-flag hoisting, `--version` at any route depth, and `--help --json`
+  // structured output are all handled inside Stricli now (the patched route
+  // scanner's top-level-flags allow-list + `versionRequested` state, and the
+  // `documentation.renderHelp` hook in app.ts), so no argv preprocessing is
+  // needed before dispatch — the raw args go straight to `run()`.
 
   // ---------------------------------------------------------------------------
   // Error-recovery middleware
@@ -616,9 +609,11 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     setLogLevel(envLogLevel);
   }
 
-  // Use hoisted args so positional checks (e.g., args[0] === "cli") work
-  // even when global flags precede the subcommand in the original argv.
-  const suppressNotification = shouldSuppressNotification(normalizedArgs);
+  // `shouldSuppressNotification` scans for `--version`/`--json` and the
+  // `cli setup`/`cli fix` subcommands at any position, skipping interleaved
+  // global flags — so it works on the raw args even though global flags may
+  // precede the subcommand.
+  const suppressNotification = shouldSuppressNotification(cliArgs);
 
   // Start background update check (non-blocking)
   if (!suppressNotification) {
@@ -626,7 +621,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   }
 
   try {
-    await executor(normalizedArgs);
+    await executor(cliArgs);
 
     // When Stricli can't match a subcommand in a route group (e.g.,
     // `sentry dashboard help`), it writes "No command registered for `help`"
@@ -635,8 +630,6 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     // the custom help command with proper introspection output.
     // Check both raw (-5) and unsigned (251) forms because Node.js keeps
     // the raw value while Bun converts to unsigned byte.
-    // Uses original cliArgs (not hoisted) so the `at(-1) === "help"` check
-    // works when global flags were placed before "help".
     if (
       (process.exitCode === ExitCode.UnknownCommand ||
         process.exitCode === (ExitCode.UnknownCommand + 256) % 256) &&
@@ -662,7 +655,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
     }
     process.stderr.write(`${error("Error:")} ${formatError(err)}\n`);
     process.exitCode = getExitCode(err);
-    const notification = getErrorUpdateNotification(err, normalizedArgs);
+    const notification = getErrorUpdateNotification(err, cliArgs);
     if (notification) {
       process.stderr.write(notification);
     }
