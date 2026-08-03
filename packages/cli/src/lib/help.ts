@@ -428,6 +428,56 @@ export function renderJsonHelp(
 }
 
 /**
+ * Whether a raw argv is a `--version` request that should print the version.
+ *
+ * The patched scanner only trips `versionRequested` when it actually consumes
+ * the `--version` token, so a `--version` sitting after an unknown route token
+ * in a group without a default command (e.g. `sentry cli nope --version`) never
+ * reaches that state — the run aborts as `UnknownCommand` first. `cli.ts` uses
+ * this as a post-run recovery to restore the old `isVersionRequest` behavior:
+ * any bare `--version` before a `--` escape prints the version.
+ *
+ * `-v` is intentionally excluded — the Sentry CLI remaps it to `--verbose` via
+ * `GLOBAL_FLAGS`, matching the scanner patch that drops Stricli's `-v`=version
+ * alias. Tokens after a `--` escape belong to a wrapped command and are ignored.
+ *
+ * @param argv - Raw CLI arguments (e.g. `process.argv.slice(2)`)
+ * @returns `true` when the version should be printed
+ */
+export function isVersionRequest(argv: readonly string[]): boolean {
+  for (const token of argv) {
+    if (token === "--") {
+      return false;
+    }
+    if (token === "--version") {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether an `UnknownCommand` exit for `argv` is recoverable by `cli.ts` into
+ * successful output rather than a real unknown-command error.
+ *
+ * Mirrors the three shapes `recoverUnknownCommandHelp` retries — a `--version`
+ * request, a `--help --json` request, or a trailing `help` token. The unknown
+ * `unknown_command` telemetry event is suppressed for these so recoverable help
+ * and version invocations (e.g. `sentry cli nope --help --json`, whose last
+ * token is `--json`, not `help`) don't produce spurious noise.
+ *
+ * @param argv - Raw CLI arguments that were dispatched
+ * @returns `true` when the unknown-command exit will be recovered
+ */
+export function isRecoverableUnknownCommand(argv: readonly string[]): boolean {
+  return (
+    isVersionRequest(argv) ||
+    rewriteHelpJsonToHelpCommand(argv) !== undefined ||
+    (argv.length >= 2 && argv.at(-1) === "help")
+  );
+}
+
+/**
  * Rewrite a raw `--help --json` argv into an equivalent `help` command
  * invocation, or `undefined` when the argv is not a `--help --json` request.
  *

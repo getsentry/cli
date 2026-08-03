@@ -10,6 +10,8 @@
 
 import { describe, expect, test } from "vitest";
 import {
+  isRecoverableUnknownCommand,
+  isVersionRequest,
   renderJsonHelp,
   rewriteHelpJsonToHelpCommand,
 } from "../../src/lib/help.js";
@@ -193,5 +195,55 @@ describe("rewriteHelpJsonToHelpCommand", () => {
         "--json",
       ])
     ).toBeUndefined();
+  });
+});
+
+describe("isVersionRequest", () => {
+  test("true for a bare --version at any depth", () => {
+    expect(isVersionRequest(["--version"])).toBe(true);
+    expect(isVersionRequest(["cli", "--version"])).toBe(true);
+    // Unknown route token before --version: the scanner aborts before
+    // consuming it, so this is the case cli.ts must recover.
+    expect(isVersionRequest(["cli", "nope", "--version"])).toBe(true);
+  });
+
+  test("false without --version", () => {
+    expect(isVersionRequest(["cli", "nope"])).toBe(false);
+    expect(isVersionRequest([])).toBe(false);
+  });
+
+  test("does not treat -v as a version request", () => {
+    // -v is remapped to --verbose by the Sentry CLI (and the scanner patch
+    // drops Stricli's -v=version alias).
+    expect(isVersionRequest(["-v"])).toBe(false);
+  });
+
+  test("ignores --version after a -- escape", () => {
+    expect(isVersionRequest(["bash-hook", "--", "--version"])).toBe(false);
+  });
+});
+
+describe("isRecoverableUnknownCommand", () => {
+  test("true for a --version request", () => {
+    expect(isRecoverableUnknownCommand(["cli", "nope", "--version"])).toBe(
+      true
+    );
+  });
+
+  test("true for a --help --json request whose last token is --json", () => {
+    // Regression: the old guard only checked `argv.at(-1) === "help"`, so this
+    // shape leaked a spurious unknown_command telemetry event.
+    expect(
+      isRecoverableUnknownCommand(["cli", "nope", "--help", "--json"])
+    ).toBe(true);
+  });
+
+  test("true for a trailing help token", () => {
+    expect(isRecoverableUnknownCommand(["dashboard", "help"])).toBe(true);
+  });
+
+  test("false for a genuine unknown command", () => {
+    expect(isRecoverableUnknownCommand(["cli", "nope"])).toBe(false);
+    expect(isRecoverableUnknownCommand(["issue", "listt"])).toBe(false);
   });
 });

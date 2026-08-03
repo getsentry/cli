@@ -148,14 +148,19 @@ function isUnknownCommandExit(unknownCode: number): boolean {
  * Recover help requests that Stricli's route scanner rejected as unknown
  * commands, re-dispatching them so the user still gets help output.
  *
- * Two shapes are recovered when the run exited with UnknownCommand:
+ * Three shapes are recovered when the run exited with UnknownCommand:
  *
- * 1. **`--help --json` on an unknown command** (e.g.
+ * 1. **`--version` on an unknown command** (e.g. `sentry cli nope --version`) —
+ *    in a group without a default command, the scanner aborts on the unknown
+ *    token before consuming `--version`, so `versionRequested` never trips.
+ *    Printed here so `--version` still wins at any depth, matching the old
+ *    pre-scanner `isVersionRequest` behavior.
+ * 2. **`--help --json` on an unknown command** (e.g.
  *    `sentry cli nope --help --json`) — in a group without a default command,
  *    route resolution fails before the `renderHelp` hook runs, so no JSON is
  *    produced. Retried as the `help` command so agents get a structured
  *    `{ error }` object instead of Stricli's text `UnknownCommand`.
- * 2. **A trailing `help` token** (e.g. `sentry dashboard help`) — retried as
+ * 3. **A trailing `help` token** (e.g. `sentry dashboard help`) — retried as
  *    `sentry help <group...>`, which routes to the custom help command.
  *
  * @param cliArgs - The raw CLI arguments that were dispatched
@@ -171,7 +176,17 @@ async function recoverUnknownCommandHelp(
     return;
   }
 
-  const { rewriteHelpJsonToHelpCommand } = await import("./lib/help.js");
+  const { isVersionRequest, rewriteHelpJsonToHelpCommand } = await import(
+    "./lib/help.js"
+  );
+
+  if (isVersionRequest(cliArgs)) {
+    process.exitCode = 0;
+    const { CLI_VERSION } = await import("./lib/constants.js");
+    process.stdout.write(`${CLI_VERSION}\n`);
+    return;
+  }
+
   const helpJsonArgs = rewriteHelpJsonToHelpCommand(cliArgs);
   if (helpJsonArgs) {
     process.exitCode = 0;
@@ -557,12 +572,15 @@ export async function runCli(cliArgs: string[]): Promise<void> {
       // stderr and sets exitCode without throwing. Report to Sentry so
       // we can track typo/confusion patterns and improve suggestions.
       if (
-        (process.exitCode === ExitCode.UnknownCommand ||
-          process.exitCode === (ExitCode.UnknownCommand + 256) % 256) &&
-        // Skip when the unknown token is "help" — the outer code in
-        // runCli recovers this by retrying as `sentry help <group...>`
-        argv.at(-1) !== "help"
+        process.exitCode === ExitCode.UnknownCommand ||
+        process.exitCode === (ExitCode.UnknownCommand + 256) % 256
       ) {
+        // Skip help/`--version` requests that `recoverUnknownCommandHelp`
+        // turns into successful output — they aren't real unknown commands.
+        const { isRecoverableUnknownCommand } = await import("./lib/help.js");
+        if (isRecoverableUnknownCommand(argv)) {
+          return;
+        }
         // Best-effort: telemetry must never crash the CLI
         try {
           await reportUnknownCommand(argv);
