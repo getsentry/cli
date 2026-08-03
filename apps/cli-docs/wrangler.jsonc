@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "sentry-cli-docs",
+  "name": "cli",
   // Static-assets-only Worker: no `main` entrypoint, Cloudflare serves the
   // built Astro output directly from the edge. `compatibility_date` is still
   // required by wrangler even for assets-only Workers.
