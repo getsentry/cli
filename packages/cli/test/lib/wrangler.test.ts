@@ -14,6 +14,7 @@ import { TEST_TMP_DIR } from "../constants.js";
 
 const SPOTLIGHT_URL = "http://localhost:8969/stream";
 const BINDING = `SENTRY_SPOTLIGHT:${SPOTLIGHT_URL}`;
+const QUOTED_BINDING = `'${BINDING}'`;
 
 let tmpDir: string;
 
@@ -75,6 +76,19 @@ describe("injectWranglerSpotlightBinding", () => {
     expect(result.injected).toBe(true);
   });
 
+  test("does not treat an argument containing wrangler dev as the executable", async () => {
+    await addWranglerConfig();
+    const args = ["echo", "wrangler", "dev"];
+
+    const result = await injectWranglerSpotlightBinding(
+      args,
+      SPOTLIGHT_URL,
+      tmpDir
+    );
+
+    expect(result).toEqual({ args, injected: false });
+  });
+
   test("supports wrangler pages dev", async () => {
     await addWranglerConfig();
 
@@ -110,7 +124,28 @@ describe("injectWranglerSpotlightBinding", () => {
     expect(result.args).toEqual(["npm", "run", "dev", "--", "--var", BINDING]);
   });
 
-  test("appends to an existing package-script argument separator", async () => {
+  test("preserves a Spotlight binding declared inside a package script", async () => {
+    await addWranglerConfig();
+    await writeFile(
+      join(tmpDir, "package.json"),
+      JSON.stringify({
+        scripts: {
+          dev: "wrangler dev --var SENTRY_SPOTLIGHT:http://localhost:9999/stream",
+        },
+      })
+    );
+    const args = ["npm", "run", "dev"];
+
+    const result = await injectWranglerSpotlightBinding(
+      args,
+      SPOTLIGHT_URL,
+      tmpDir
+    );
+
+    expect(result).toEqual({ args, injected: false });
+  });
+
+  test("injects before pnpm's literal package-script separator", async () => {
     await addWranglerConfig();
     await writeFile(
       join(tmpDir, "package.json"),
@@ -127,11 +162,11 @@ describe("injectWranglerSpotlightBinding", () => {
       "pnpm",
       "run",
       "dev",
+      "--var",
+      BINDING,
       "--",
       "--port",
       "8787",
-      "--var",
-      BINDING,
     ]);
   });
 
@@ -147,7 +182,7 @@ describe("injectWranglerSpotlightBinding", () => {
     expect(result.args).toEqual([
       "sh",
       "-c",
-      `NODE_ENV=development wrangler dev --var ${BINDING}`,
+      `NODE_ENV=development wrangler dev --var ${QUOTED_BINDING}`,
     ]);
   });
 
@@ -163,7 +198,37 @@ describe("injectWranglerSpotlightBinding", () => {
     expect(result.args).toEqual([
       "sh",
       "-c",
-      `wrangler dev --port 8787 --var ${BINDING} && echo done`,
+      `wrangler dev --port 8787 --var ${QUOTED_BINDING} && echo done`,
+    ]);
+  });
+
+  test("does not inject into quoted text in a shell command", async () => {
+    await addWranglerConfig();
+    const args = ["sh", "-c", 'echo "run wrangler dev"'];
+
+    const result = await injectWranglerSpotlightBinding(
+      args,
+      SPOTLIGHT_URL,
+      tmpDir
+    );
+
+    expect(result).toEqual({ args, injected: false });
+  });
+
+  test("quotes the binding before adding it to a shell command", async () => {
+    await addWranglerConfig();
+    const unsafeUrl = "http://localhost:8969/stream'; echo injected";
+
+    const result = await injectWranglerSpotlightBinding(
+      ["sh", "-c", "wrangler dev"],
+      unsafeUrl,
+      tmpDir
+    );
+
+    expect(result.args).toEqual([
+      "sh",
+      "-c",
+      "wrangler dev --var 'SENTRY_SPOTLIGHT:http://localhost:8969/stream'\\''; echo injected'",
     ]);
   });
 
@@ -183,7 +248,7 @@ describe("injectWranglerSpotlightBinding", () => {
     expect(result.args).toEqual([
       "sh",
       "-c",
-      `wrangler dev --define MESSAGE:"a && b" --name "$(echo x && echo y)" --var ${BINDING} | tee output.log`,
+      `wrangler dev --define MESSAGE:"a && b" --name "$(echo x && echo y)" --var ${QUOTED_BINDING} | tee output.log`,
     ]);
   });
 
@@ -199,7 +264,7 @@ describe("injectWranglerSpotlightBinding", () => {
     expect(result.args).toEqual([
       "sh",
       "-c",
-      `wrangler dev --var ${BINDING} > wrangler.log 2>&1`,
+      `wrangler dev --var ${QUOTED_BINDING} > wrangler.log 2>&1`,
     ]);
   });
 
@@ -220,6 +285,22 @@ describe("injectWranglerSpotlightBinding", () => {
     });
   });
 
+  test("supports Windows cmd and wrangler.cmd paths case-insensitively", async () => {
+    await addWranglerConfig();
+
+    const result = await injectWranglerSpotlightBinding(
+      ["cmd.exe", "/C", String.raw`C:\repo\node_modules\.bin\WRANGLER.CMD dev`],
+      SPOTLIGHT_URL,
+      tmpDir
+    );
+
+    expect(result.args).toEqual([
+      "cmd.exe",
+      "/C",
+      String.raw`C:\repo\node_modules\.bin\WRANGLER.CMD dev --var "SENTRY_SPOTLIGHT:http://localhost:8969/stream"`,
+    ]);
+  });
+
   test("respects an explicit config path when no default config exists", async () => {
     const result = await injectWranglerSpotlightBinding(
       ["wrangler", "dev", "--config", "config/worker.jsonc"],
@@ -236,6 +317,60 @@ describe("injectWranglerSpotlightBinding", () => {
       "--var",
       BINDING,
     ]);
+  });
+
+  test("detects a custom config path inside a package script", async () => {
+    await writeFile(
+      join(tmpDir, "package.json"),
+      JSON.stringify({
+        scripts: { dev: "wrangler dev --config config/worker.jsonc" },
+      })
+    );
+
+    const result = await injectWranglerSpotlightBinding(
+      ["npm", "run", "dev"],
+      SPOTLIGHT_URL,
+      tmpDir
+    );
+
+    expect(result.args).toEqual(["npm", "run", "dev", "--", "--var", BINDING]);
+  });
+
+  test("does not claim injection into a compound package script", async () => {
+    await addWranglerConfig();
+    await writeFile(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ scripts: { dev: "wrangler dev && node after.js" } })
+    );
+    const args = ["npm", "run", "dev"];
+
+    const result = await injectWranglerSpotlightBinding(
+      args,
+      SPOTLIGHT_URL,
+      tmpDir
+    );
+
+    expect(result).toEqual({ args, injected: false });
+  });
+
+  test.each([
+    "pnpm",
+    "yarn",
+    "bun",
+  ])("supports %s shorthand scripts without an npm-style separator", async (manager) => {
+    await addWranglerConfig();
+    await writeFile(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ scripts: { dev: "wrangler dev" } })
+    );
+
+    const result = await injectWranglerSpotlightBinding(
+      [manager, "dev"],
+      SPOTLIGHT_URL,
+      tmpDir
+    );
+
+    expect(result.args).toEqual([manager, "dev", "--var", BINDING]);
   });
 
   test("does not override a user-supplied Spotlight binding", async () => {
