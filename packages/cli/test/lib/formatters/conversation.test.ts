@@ -52,9 +52,11 @@ describe("formatConversationTable", () => {
   test("renders a table with conversation data", () => {
     const items = [makeListItem()];
     const result = formatConversationTable(items);
-    expect(result).toContain("conv-abc-123");
-    expect(result).toContain("test@example.com");
-    expect(result).toContain("Hello world");
+    // The table shrinks columns to terminal width, so long values may be
+    // truncated with "…"; assert on surviving prefixes and the token count.
+    expect(result).toContain("conv-");
+    expect(result).toContain("test@");
+    expect(result).toContain("Hello");
     expect(result).toContain("500");
   });
 
@@ -211,8 +213,8 @@ describe("formatTranscriptResult", () => {
     expect(output).toContain("AI Conversation: conv-123");
     expect(output).toContain("my-org");
     expect(output).toContain("my-project");
-    expect(output).toContain("[user]");
-    expect(output).toContain("[assistant]");
+    expect(output).toContain("user");
+    expect(output).toContain("assistant");
     expect(output).toContain("Turn 1");
   });
 
@@ -266,7 +268,7 @@ describe("formatTranscriptResult", () => {
       toolSpan,
     ]);
     const output = formatTranscriptResult(transcript);
-    expect(output).toContain("[tools]");
+    expect(output).toContain("tools");
     expect(output).toContain("web_search");
   });
 

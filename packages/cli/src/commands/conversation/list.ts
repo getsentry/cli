@@ -13,9 +13,9 @@ import {
   hasPreviousPage,
   resolveCursor,
 } from "../../lib/db/pagination.js";
+import { ContextError } from "../../lib/errors.js";
 import { formatConversationTable } from "../../lib/formatters/conversation.js";
 import { filterFields } from "../../lib/formatters/json.js";
-import { sanitize } from "../../lib/formatters/local.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   buildListCommand,
@@ -72,7 +72,7 @@ function formatListHuman(result: ConversationListResult): string {
       ? "No conversations on this page."
       : "No AI conversations found.";
   }
-  return `AI conversations in ${sanitize(org)}:\n\n${formatConversationTable(conversations)}`;
+  return `AI conversations in ${org}:\n\n${formatConversationTable(conversations)}`;
 }
 
 function jsonTransform(
@@ -150,9 +150,7 @@ export const listCommand = buildListCommand("conversation", {
 
     const resolved = await resolveOrg({ org: target, cwd });
     if (!resolved) {
-      throw new Error(
-        `Could not determine organization. Pass it explicitly: sentry ${COMMAND_NAME} <org>`
-      );
+      throw new ContextError("Organization", `sentry ${COMMAND_NAME} <org>`);
     }
     const org = resolved.org;
 

@@ -88,8 +88,10 @@ export const viewCommand = buildCommand({
       org = resolved.org;
       conversationId = orgOrConversationId;
     } else {
-      throw new Error(
-        "Missing conversation ID. Usage: sentry conversation view [org] <conversation-id>"
+      throw new ContextError(
+        "Conversation ID",
+        "sentry conversation view [<org>] <conversation-id>",
+        []
       );
     }
 

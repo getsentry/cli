@@ -9,7 +9,15 @@ import type {
   AIConversationSpan,
   ConversationListItem,
 } from "../../types/conversation.js";
-import { sanitize } from "./local.js";
+import {
+  colorTag,
+  escapeMarkdownCell,
+  escapeMarkdownInline,
+  mdKvTable,
+  renderMarkdown,
+  safeCodeSpan,
+} from "./markdown.js";
+import { type Column, formatTable } from "./table.js";
 
 // ---------------------------------------------------------------------------
 // List formatter
@@ -29,17 +37,34 @@ function formatTimestamp(epochSeconds: number): string {
   return new Date(epochSeconds * 1000).toLocaleString();
 }
 
-export function formatConversationTable(items: ConversationListItem[]): string {
-  const rows = items.map((c) => {
-    const input = c.firstInput ? sanitize(truncate(c.firstInput)) : "—";
-    const user = sanitize(c.user?.email ?? c.user?.username ?? "—");
-    const time = formatTimestamp(c.startTimestamp);
-    return `  ${sanitize(truncate(c.conversationId, 40))}  ${time}  ${String(c.totalTokens).padStart(8)}  ${String(c.toolCalls).padStart(5)}  ${String(c.errors).padStart(4)}  ${user}  ${input}`;
-  });
+const CONVERSATION_COLUMNS: Column<ConversationListItem>[] = [
+  {
+    header: "ID",
+    value: (c) => escapeMarkdownCell(truncate(c.conversationId, 40)),
+    truncate: true,
+  },
+  { header: "Started", value: (c) => formatTimestamp(c.startTimestamp) },
+  {
+    header: "Tokens",
+    value: (c) => String(c.totalTokens),
+    align: "right",
+  },
+  { header: "Tools", value: (c) => String(c.toolCalls), align: "right" },
+  { header: "Errs", value: (c) => String(c.errors), align: "right" },
+  {
+    header: "User",
+    value: (c) => escapeMarkdownCell(c.user?.email ?? c.user?.username ?? "—"),
+  },
+  {
+    header: "First Input",
+    value: (c) =>
+      c.firstInput ? escapeMarkdownCell(truncate(c.firstInput)) : "—",
+    truncate: true,
+  },
+];
 
-  const header =
-    "  ID                                        Started                    Tokens  Tools  Errs  User          First Input";
-  return [header, ...rows].join("\n");
+export function formatConversationTable(items: ConversationListItem[]): string {
+  return formatTable(items, CONVERSATION_COLUMNS, { truncate: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -294,17 +319,18 @@ function appendContentBlock(
   label: string,
   content: string
 ): void {
-  lines.push(`   [${label}]`);
+  lines.push(`**${label}**`);
+  lines.push("");
   for (const line of truncate(content, 600).split("\n")) {
-    lines.push(`   ${sanitize(line)}`);
+    lines.push(escapeMarkdownInline(line));
   }
   lines.push("");
 }
 
 function formatTurnHuman(turn: ConversationTurn): string {
   const meta = [
-    turn.model ? sanitize(turn.model) : null,
-    turn.agentName ? sanitize(turn.agentName) : null,
+    turn.model ? escapeMarkdownInline(turn.model) : null,
+    turn.agentName ? escapeMarkdownInline(turn.agentName) : null,
     turn.totalTokens > 0 ? `${turn.totalTokens} tokens` : null,
     formatDuration(turn.durationMs),
   ]
@@ -312,11 +338,12 @@ function formatTurnHuman(turn: ConversationTurn): string {
     .join(" | ");
 
   const lines: string[] = [];
-  lines.push(`── Turn ${turn.turn} — ${formatEpoch(turn.started)}`);
-  if (meta) {
-    lines.push(`   ${meta}`);
-  }
+  lines.push(`### Turn ${turn.turn} — ${formatEpoch(turn.started)}`);
   lines.push("");
+  if (meta) {
+    lines.push(colorTag("muted", meta));
+    lines.push("");
+  }
 
   if (turn.userContent) {
     appendContentBlock(lines, "user", turn.userContent);
@@ -326,12 +353,15 @@ function formatTurnHuman(turn: ConversationTurn): string {
   }
 
   if (turn.toolCalls.length > 0) {
-    lines.push("   [tools]");
+    lines.push("**tools**");
+    lines.push("");
     for (const tc of turn.toolCalls) {
       const status =
-        tc.status && tc.status !== "ok" ? ` (${sanitize(tc.status)})` : "";
+        tc.status && tc.status !== "ok"
+          ? ` (${escapeMarkdownInline(tc.status)})`
+          : "";
       lines.push(
-        `   • ${sanitize(tc.name)} — ${formatDuration(tc.durationMs)}${status}`
+        `- ${safeCodeSpan(tc.name)} — ${formatDuration(tc.durationMs)}${status}`
       );
     }
     lines.push("");
@@ -354,29 +384,35 @@ export type TranscriptResult = {
 
 export function formatTranscriptResult(result: TranscriptResult): string {
   if (result.spanCount === 0) {
-    return `No spans found for conversation ${sanitize(result.conversationId)} in the last 30 days.`;
+    return `No spans found for conversation ${escapeMarkdownInline(result.conversationId)} in the last 30 days.`;
   }
 
-  const header = [
-    `AI Conversation: ${sanitize(result.conversationId)}`,
-    "",
-    `  Org:      ${sanitize(result.org)}`,
-    `  Projects: ${result.projects.map(sanitize).join(", ") || "—"}`,
-    `  Started:  ${formatEpoch(result.startTimestamp)}`,
-    `  Ended:    ${formatEpoch(result.endTimestamp)}`,
-    `  Turns:    ${result.turns.length}`,
-    `  Spans:    ${result.spanCount}`,
-    `  Tokens:   ${result.totalTokens}`,
-    "",
+  const rows: [string, string][] = [
+    ["Org", escapeMarkdownCell(result.org)],
+    ["Projects", result.projects.map(escapeMarkdownCell).join(", ") || "—"],
+    ["Started", formatEpoch(result.startTimestamp)],
+    ["Ended", formatEpoch(result.endTimestamp)],
+    ["Turns", String(result.turns.length)],
+    ["Spans", String(result.spanCount)],
+    ["Tokens", String(result.totalTokens)],
   ];
 
-  const sections = [...header, ...result.turns.map(formatTurnHuman)];
+  const lines: string[] = [
+    `# AI Conversation: ${escapeMarkdownInline(result.conversationId)}`,
+    "",
+    mdKvTable(rows),
+    "",
+    ...result.turns.map(formatTurnHuman),
+  ];
   if (result.truncated) {
-    sections.push(
-      "⚠ Transcript truncated — the conversation exceeds the pagination limit."
+    lines.push(
+      colorTag(
+        "yellow",
+        "⚠ Transcript truncated — the conversation exceeds the pagination limit."
+      )
     );
   }
-  return sections.join("\n");
+  return renderMarkdown(lines.join("\n"));
 }
 
 export function buildTranscriptResult(
@@ -389,10 +425,9 @@ export function buildTranscriptResult(
     conversationId,
     org,
     turns,
-    totalTokens: spans.reduce(
-      (sum, s) => sum + numeric(s["gen_ai.usage.total_tokens"]),
-      0
-    ),
+    // Sum tokens per turn (ai_client spans only). Summing every span would
+    // double-count parent invoke_agent spans that aggregate child usage.
+    totalTokens: turns.reduce((sum, t) => sum + t.totalTokens, 0),
     spanCount: spans.length,
     projects: [...new Set(spans.map((s) => s.project))].sort(),
     startTimestamp:

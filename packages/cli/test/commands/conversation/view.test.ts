@@ -232,7 +232,20 @@ describe("viewCommand.func", () => {
 
     await expect(
       func.call(context, HUMAN_FLAGS, undefined as unknown as string)
-    ).rejects.toThrow("Missing conversation ID");
+    ).rejects.toThrow(ContextError);
+  });
+
+  test("no-args error mentions Conversation ID", async () => {
+    const { context } = createMockContext();
+    const func = await viewCommand.loader();
+
+    try {
+      await func.call(context, HUMAN_FLAGS, undefined as unknown as string);
+      expect.unreachable("Should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextError);
+      expect((error as ContextError).message).toContain("Conversation ID");
+    }
   });
 
   test("throws ContextError when org cannot be resolved", async () => {

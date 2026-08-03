@@ -44,6 +44,7 @@ vi.mock("../../../src/lib/db/auth.js", async (importOriginal) => {
 
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as dbAuth from "../../../src/lib/db/auth.js";
+import { ContextError } from "../../../src/lib/errors.js";
 
 vi.mock("../../../src/lib/polling.js", async (importOriginal) => {
   const actual =
@@ -275,7 +276,7 @@ describe("listCommand.func", () => {
     const func = await listCommand.loader();
 
     await expect(func.call(context, HUMAN_FLAGS, undefined)).rejects.toThrow(
-      "Could not determine organization"
+      ContextError
     );
   });
 
@@ -309,7 +310,8 @@ describe("listCommand.func", () => {
     await func.call(context, HUMAN_FLAGS, ORG);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
-    expect(output).toContain("conv-abc-123");
+    // ID column truncates to terminal width; assert on the surviving prefix.
+    expect(output).toContain("conv-");
     expect(output).toContain(ORG);
   });
 
