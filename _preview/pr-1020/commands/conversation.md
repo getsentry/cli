@@ -90,4 +90,4 @@ sentry conversation view my-org conv-123 --json
 - [Docs home](https://cli.sentry.dev/_preview/pr-1020/index.md)
 - [Parent: Commands](https://cli.sentry.dev/_preview/pr-1020/commands.md)
 - [Previous: code-mappings](https://cli.sentry.dev/_preview/pr-1020/commands/code-mappings.md)
-- [Next: conversations](https://cli.sentry.dev/_preview/pr-1020/commands/conversations.md)
+- [Next: dart-symbol-map](https://cli.sentry.dev/_preview/pr-1020/commands/dart-symbol-map.md)

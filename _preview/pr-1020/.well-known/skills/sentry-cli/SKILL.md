@@ -629,14 +629,6 @@ Browse the Sentry API schema
 
 → Full flags and examples: `references/schema.md`
 
-### Conversations
-
-List recent AI conversations
-
-- `sentry conversations <org>` — List recent AI conversations
-
-→ Full flags and examples: `references/conversations.md`
-
 ## Global Options
 
 All commands support the following global options:
