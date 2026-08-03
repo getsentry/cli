@@ -406,38 +406,92 @@ export function renderJsonHelp(
   prefix: readonly string[],
   unprocessedInputs: readonly string[]
 ): string | undefined {
-  const { hasJson, fields } = parseHelpJsonFlags(unprocessedInputs);
+  const { hasJson, fields, extraPath } = parseHelpJsonFlags(unprocessedInputs);
   if (!hasJson) {
     return;
   }
 
-  // Drop the leading app name so the path matches introspectCommand's routes.
-  const commandPath = prefix.slice(1);
+  // The route path is `prefix` (minus the app name), plus any non-flag tokens
+  // the scanner couldn't route — e.g. `sentry issue nope --help --json` leaves
+  // `nope` in unprocessedInputs. Folding those in lets `introspectCommand`
+  // return a `{ error }` object for an unknown command instead of silently
+  // rendering the parent group, matching the old `--help --json` behavior.
+  const commandPath = [...prefix.slice(1), ...extraPath];
   const data =
     commandPath.length === 0
       ? introspectAllCommands()
-      : introspectCommand([...commandPath]);
+      : introspectCommand(commandPath);
 
   const final = fields && fields.length > 0 ? filterFields(data, fields) : data;
   return `${formatJson(final)}\n`;
 }
 
 /**
- * Scan the top-level flags forwarded past route resolution for `--json` and
- * `--fields`, mirroring the flag forms the `buildCommand` wrapper accepts.
+ * Rewrite a raw `--help --json` argv into an equivalent `help` command
+ * invocation, or `undefined` when the argv is not a `--help --json` request.
+ *
+ * Used by `cli.ts` as a post-run recovery: when the route scanner rejects an
+ * unknown token in a group that has no default command (e.g.
+ * `sentry cli nope --help --json`), it fails before the `renderHelp` hook runs,
+ * so no JSON is produced. Re-dispatching the returned args (`["help", "--json",
+ * ...path]`, with `--fields` appended when present) routes through the `help`
+ * command, which emits the structured `{ error }` JSON for the unknown command
+ * — matching the pre-scanner `--help --json` behavior.
+ *
+ * Both `--help` (or its `-h` alias) and `--json` must appear before a `--`
+ * escape separator; otherwise `undefined` is returned and normal handling
+ * applies.
+ *
+ * @param argv - Raw CLI arguments (e.g. `process.argv.slice(2)`)
+ * @returns The `help`-command argv, or `undefined` when not a `--help --json`
+ *   request
+ */
+export function rewriteHelpJsonToHelpCommand(
+  argv: readonly string[]
+): string[] | undefined {
+  let hasHelp = false;
+  const { hasJson, fields, extraPath } = parseHelpJsonFlags(argv);
+  for (const token of argv) {
+    if (token === "--") {
+      break;
+    }
+    if (token === "--help" || token === "-h") {
+      hasHelp = true;
+    }
+  }
+  if (!(hasHelp && hasJson)) {
+    return;
+  }
+  const rewritten = ["help", "--json", ...extraPath];
+  if (fields && fields.length > 0) {
+    rewritten.push("--fields", fields.join(","));
+  }
+  return rewritten;
+}
+
+/**
+ * Scan the top-level flags forwarded past route resolution for `--json`,
+ * `--fields`, and any leftover non-flag command-path tokens.
  *
  * Only tokens before a `--` escape separator are considered so a wrapped
  * command's own `--json` (`sentry monitor run <slug> -- tool --json`) is not
  * treated as a help request. `--fields` supports both the spaced
  * (`--fields a,b`) and inline (`--fields=a,b`) forms; its value is parsed with
  * {@link parseFieldsList} for parity with the wrapper's `--fields` handling.
+ *
+ * `extraPath` collects non-flag tokens that were not part of the resolved route
+ * (e.g. an unknown subcommand the scanner forwarded to a group's default
+ * command). The spaced value of a `--fields` flag is consumed so it is not
+ * mistaken for a path segment; other flags are ignored.
  */
 function parseHelpJsonFlags(inputs: readonly string[]): {
   hasJson: boolean;
   fields: string[] | undefined;
+  extraPath: string[];
 } {
   let hasJson = false;
   let fields: string[] | undefined;
+  const extraPath: string[] = [];
   for (let i = 0; i < inputs.length; i += 1) {
     const token = inputs[i] ?? "";
     if (token === "--") {
@@ -445,17 +499,38 @@ function parseHelpJsonFlags(inputs: readonly string[]): {
     }
     if (token === "--json") {
       hasJson = true;
-    } else if (token.startsWith("--fields=")) {
-      fields = parseFieldsList(token.slice("--fields=".length));
-    } else if (token === "--fields") {
-      const next = inputs[i + 1];
-      if (next !== undefined && !next.startsWith("-")) {
-        fields = parseFieldsList(next);
-        i += 1;
-      }
+    } else if (token.startsWith("--fields")) {
+      i = consumeFieldsFlag(inputs, i, (parsed) => {
+        fields = parsed;
+      });
+    } else if (!token.startsWith("-")) {
+      extraPath.push(token);
     }
   }
-  return { hasJson, fields };
+  return { hasJson, fields, extraPath };
+}
+
+/**
+ * Parse a `--fields` flag at `index` (inline `--fields=a,b` or spaced
+ * `--fields a,b`), passing the parsed list to `assign`, and return the index of
+ * the last token consumed so the caller's loop advances past a spaced value.
+ */
+function consumeFieldsFlag(
+  inputs: readonly string[],
+  index: number,
+  assign: (fields: string[]) => void
+): number {
+  const token = inputs[index] ?? "";
+  if (token.startsWith("--fields=")) {
+    assign(parseFieldsList(token.slice("--fields=".length)));
+    return index;
+  }
+  const next = inputs[index + 1];
+  if (next !== undefined && !next.startsWith("-")) {
+    assign(parseFieldsList(next));
+    return index + 1;
+  }
+  return index;
 }
 
 // ---------------------------------------------------------------------------

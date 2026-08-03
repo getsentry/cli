@@ -9,7 +9,10 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { renderJsonHelp } from "../../src/lib/help.js";
+import {
+  renderJsonHelp,
+  rewriteHelpJsonToHelpCommand,
+} from "../../src/lib/help.js";
 
 const APP = "sentry";
 
@@ -79,5 +82,73 @@ describe("renderJsonHelp", () => {
     const out = renderJsonHelp([APP, "nope"], ["--json"]);
     const parsed = JSON.parse(out as string);
     expect(parsed).toHaveProperty("error");
+  });
+
+  test("an unknown token forwarded in unprocessedInputs yields a JSON error", () => {
+    // `sentry issue nope --help --json`: the scanner forwards `nope` to the
+    // `issue` group's default command, so it arrives in unprocessedInputs
+    // rather than the prefix. It must still produce an error, not the group.
+    const out = renderJsonHelp([APP, "issue"], ["nope", "--json"]);
+    const parsed = JSON.parse(out as string);
+    expect(parsed).toHaveProperty("error");
+    expect(parsed.error).toContain("nope");
+  });
+
+  test("a top-level unknown token yields a JSON error", () => {
+    const out = renderJsonHelp([APP], ["nope", "--json"]);
+    const parsed = JSON.parse(out as string);
+    expect(parsed).toHaveProperty("error");
+  });
+});
+
+describe("rewriteHelpJsonToHelpCommand", () => {
+  test("returns undefined when not a --help --json request", () => {
+    expect(rewriteHelpJsonToHelpCommand(["cli", "nope"])).toBeUndefined();
+    expect(
+      rewriteHelpJsonToHelpCommand(["cli", "nope", "--help"])
+    ).toBeUndefined();
+    expect(
+      rewriteHelpJsonToHelpCommand(["cli", "nope", "--json"])
+    ).toBeUndefined();
+  });
+
+  test("rewrites an unknown-command --help --json to the help command", () => {
+    expect(
+      rewriteHelpJsonToHelpCommand(["cli", "nope", "--help", "--json"])
+    ).toEqual(["help", "--json", "cli", "nope"]);
+  });
+
+  test("recognizes the -h alias and is order-insensitive", () => {
+    expect(rewriteHelpJsonToHelpCommand(["--json", "cli", "-h"])).toEqual([
+      "help",
+      "--json",
+      "cli",
+    ]);
+  });
+
+  test("carries --fields through", () => {
+    expect(
+      rewriteHelpJsonToHelpCommand([
+        "issue",
+        "list",
+        "--help",
+        "--json",
+        "--fields",
+        "path",
+      ])
+    ).toEqual(["help", "--json", "issue", "list", "--fields", "path"]);
+  });
+
+  test("ignores --help/--json after a -- escape", () => {
+    expect(
+      rewriteHelpJsonToHelpCommand([
+        "monitor",
+        "run",
+        "--",
+        "tool",
+        "--help",
+        "--json",
+      ])
+    ).toBeUndefined();
   });
 });

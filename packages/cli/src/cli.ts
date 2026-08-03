@@ -132,6 +132,67 @@ function redactArgv(argv: string[]): string[] {
 }
 
 /**
+ * Whether `process.exitCode` is Stricli's UnknownCommand code.
+ *
+ * Checks both the raw (negative) and unsigned-byte forms because Node.js keeps
+ * the raw value while Bun converts to an unsigned byte.
+ */
+function isUnknownCommandExit(unknownCode: number): boolean {
+  return (
+    process.exitCode === unknownCode ||
+    process.exitCode === (unknownCode + 256) % 256
+  );
+}
+
+/**
+ * Recover help requests that Stricli's route scanner rejected as unknown
+ * commands, re-dispatching them so the user still gets help output.
+ *
+ * Two shapes are recovered when the run exited with UnknownCommand:
+ *
+ * 1. **`--help --json` on an unknown command** (e.g.
+ *    `sentry cli nope --help --json`) — in a group without a default command,
+ *    route resolution fails before the `renderHelp` hook runs, so no JSON is
+ *    produced. Retried as the `help` command so agents get a structured
+ *    `{ error }` object instead of Stricli's text `UnknownCommand`.
+ * 2. **A trailing `help` token** (e.g. `sentry dashboard help`) — retried as
+ *    `sentry help <group...>`, which routes to the custom help command.
+ *
+ * @param cliArgs - The raw CLI arguments that were dispatched
+ * @param executor - The command executor (middleware chain) to retry with
+ * @param unknownCode - Stricli's `ExitCode.UnknownCommand`
+ */
+async function recoverUnknownCommandHelp(
+  cliArgs: string[],
+  executor: (argv: string[]) => Promise<void>,
+  unknownCode: number
+): Promise<void> {
+  if (!isUnknownCommandExit(unknownCode) || cliArgs[0] === "help") {
+    return;
+  }
+
+  const { rewriteHelpJsonToHelpCommand } = await import("./lib/help.js");
+  const helpJsonArgs = rewriteHelpJsonToHelpCommand(cliArgs);
+  if (helpJsonArgs) {
+    process.exitCode = 0;
+    await executor(helpJsonArgs);
+    return;
+  }
+
+  if (cliArgs.length >= 2 && cliArgs.at(-1) === "help") {
+    process.exitCode = 0;
+    const groupArgs = cliArgs.slice(0, -1);
+    const { warning } = await import("./lib/formatters/colors.js");
+    process.stderr.write(
+      warning(
+        `Tip: use --help for help (e.g., sentry ${groupArgs.join(" ")} --help)\n`
+      )
+    );
+    await executor(["help", ...groupArgs]);
+  }
+}
+
+/**
  * Error-recovery middleware for the CLI.
  *
  * Each middleware wraps command execution and may intercept specific errors
@@ -165,7 +226,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const { AuthError, OutputError, formatError, getExitCode } = await import(
     "./lib/errors.js"
   );
-  const { error, warning } = await import("./lib/formatters/colors.js");
+  const { error } = await import("./lib/formatters/colors.js");
   const { runInteractiveLogin } = await import("./lib/interactive-login.js");
   const { assertAutoLoginHostTrusted, recoverWithAutoLogin } = await import(
     "./lib/auto-auth.js"
@@ -623,29 +684,9 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   try {
     await executor(cliArgs);
 
-    // When Stricli can't match a subcommand in a route group (e.g.,
-    // `sentry dashboard help`), it writes "No command registered for `help`"
-    // to stderr and sets exitCode to UnknownCommand. If the unrecognized
-    // token was "help", retry as `sentry help <group...>` which routes to
-    // the custom help command with proper introspection output.
-    // Check both raw (-5) and unsigned (251) forms because Node.js keeps
-    // the raw value while Bun converts to unsigned byte.
-    if (
-      (process.exitCode === ExitCode.UnknownCommand ||
-        process.exitCode === (ExitCode.UnknownCommand + 256) % 256) &&
-      cliArgs.length >= 2 &&
-      cliArgs.at(-1) === "help" &&
-      cliArgs[0] !== "help"
-    ) {
-      process.exitCode = 0;
-      const helpArgs = ["help", ...cliArgs.slice(0, -1)];
-      process.stderr.write(
-        warning(
-          `Tip: use --help for help (e.g., sentry ${cliArgs.slice(0, -1).join(" ")} --help)\n`
-        )
-      );
-      await executor(helpArgs);
-    }
+    // Recover help/`--help --json` requests that Stricli's route scanner
+    // rejected as unknown commands (see the helpers below).
+    await recoverUnknownCommandHelp(cliArgs, executor, ExitCode.UnknownCommand);
   } catch (err) {
     // OutputError: data was already rendered to stdout by the command wrapper.
     // Just set exitCode silently — no stderr message needed.

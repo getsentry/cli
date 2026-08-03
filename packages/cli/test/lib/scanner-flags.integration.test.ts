@@ -281,4 +281,21 @@ describe("--help --json renders structured help via renderHelp hook", () => {
     expect(stdout).toContain("USAGE");
     expect(() => JSON.parse(stdout)).toThrow();
   });
+
+  test("an unknown subcommand under a group emits a JSON error, not the group", async () => {
+    // `issue` has a default command, so the scanner forwards `nope` to it and
+    // reaches renderHelp. The unknown token must surface as a JSON `error`
+    // rather than silently rendering the `issue` group.
+    const { stdout } = await runApp(["issue", "nope", "--help", "--json"]);
+    const parsed = JSON.parse(stdout);
+    expect(parsed).toHaveProperty("error");
+    expect(parsed.error).toContain("nope");
+  });
+
+  test("a top-level unknown command emits a JSON error", async () => {
+    const { stdout } = await runApp(["nope", "--help", "--json"]);
+    const parsed = JSON.parse(stdout);
+    expect(parsed).toHaveProperty("error");
+    expect(parsed.error).toContain("nope");
+  });
 });
