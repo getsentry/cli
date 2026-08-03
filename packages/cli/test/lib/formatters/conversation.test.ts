@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   buildTranscriptResult,
   extractTurns,
@@ -49,7 +49,24 @@ function makeSpan(
 }
 
 describe("formatConversationTable", () => {
-  test("renders a table with conversation data", () => {
+  const originalColumns = process.stdout.columns;
+
+  afterEach(() => {
+    Object.defineProperty(process.stdout, "columns", {
+      value: originalColumns,
+      configurable: true,
+    });
+  });
+
+  function setTerminalWidth(width: number | undefined): void {
+    Object.defineProperty(process.stdout, "columns", {
+      value: width,
+      configurable: true,
+    });
+  }
+
+  test("renders the full column set on wide terminals", () => {
+    setTerminalWidth(200);
     const items = [makeListItem()];
     const result = formatConversationTable(items);
     // The table shrinks columns to terminal width, so long values may be
@@ -58,6 +75,22 @@ describe("formatConversationTable", () => {
     expect(result).toContain("test@");
     expect(result).toContain("Hello");
     expect(result).toContain("500");
+    // Wide mode keeps the Tools/Errs/User columns.
+    expect(result).toContain("Tools");
+    expect(result).toContain("User");
+  });
+
+  test("drops Tools/Errs/User columns on narrow terminals", () => {
+    setTerminalWidth(80);
+    const items = [makeListItem()];
+    const result = formatConversationTable(items);
+    // Core columns survive.
+    expect(result).toContain("conv-");
+    expect(result).toContain("Hello");
+    expect(result).toContain("500");
+    // Lower-value columns are dropped to avoid aggressive truncation.
+    expect(result).not.toContain("Tools");
+    expect(result).not.toContain("test@");
   });
 
   test("handles missing user and input", () => {

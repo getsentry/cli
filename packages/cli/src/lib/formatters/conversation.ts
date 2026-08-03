@@ -37,34 +37,77 @@ function formatTimestamp(epochSeconds: number): string {
   return new Date(epochSeconds * 1000).toLocaleString();
 }
 
-const CONVERSATION_COLUMNS: Column<ConversationListItem>[] = [
-  {
-    header: "ID",
-    value: (c) => escapeMarkdownCell(truncate(c.conversationId, 40)),
-    truncate: true,
-  },
-  { header: "Started", value: (c) => formatTimestamp(c.startTimestamp) },
-  {
-    header: "Tokens",
-    value: (c) => String(c.totalTokens),
-    align: "right",
-  },
-  { header: "Tools", value: (c) => String(c.toolCalls), align: "right" },
-  { header: "Errs", value: (c) => String(c.errors), align: "right" },
-  {
-    header: "User",
-    value: (c) => escapeMarkdownCell(c.user?.email ?? c.user?.username ?? "—"),
-  },
-  {
-    header: "First Input",
-    value: (c) =>
-      c.firstInput ? escapeMarkdownCell(truncate(c.firstInput)) : "—",
-    truncate: true,
-  },
-];
+/**
+ * Minimum terminal width (columns) to show the full 7-column conversation
+ * table. Below this, the lower-value Tools/Errs/User columns are dropped so
+ * the core ID/Started/Tokens/First Input columns don't truncate aggressively.
+ */
+const WIDE_TABLE_MIN_TERM_WIDTH = 100;
+
+const ID_COLUMN: Column<ConversationListItem> = {
+  header: "ID",
+  value: (c) => escapeMarkdownCell(truncate(c.conversationId, 40)),
+  truncate: true,
+};
+
+const STARTED_COLUMN: Column<ConversationListItem> = {
+  header: "Started",
+  value: (c) => formatTimestamp(c.startTimestamp),
+};
+
+const TOKENS_COLUMN: Column<ConversationListItem> = {
+  header: "Tokens",
+  value: (c) => String(c.totalTokens),
+  align: "right",
+};
+
+const TOOLS_COLUMN: Column<ConversationListItem> = {
+  header: "Tools",
+  value: (c) => String(c.toolCalls),
+  align: "right",
+};
+
+const ERRS_COLUMN: Column<ConversationListItem> = {
+  header: "Errs",
+  value: (c) => String(c.errors),
+  align: "right",
+};
+
+const USER_COLUMN: Column<ConversationListItem> = {
+  header: "User",
+  value: (c) => escapeMarkdownCell(c.user?.email ?? c.user?.username ?? "—"),
+};
+
+const FIRST_INPUT_COLUMN: Column<ConversationListItem> = {
+  header: "First Input",
+  value: (c) =>
+    c.firstInput ? escapeMarkdownCell(truncate(c.firstInput)) : "—",
+  truncate: true,
+};
+
+/**
+ * Select conversation table columns for the current terminal width. Wide
+ * terminals get the full set; narrow ones (piped output defaults to 80) drop
+ * Tools/Errs/User to keep the remaining columns readable.
+ */
+function selectConversationColumns(): Column<ConversationListItem>[] {
+  const termWidth = process.stdout.columns || 80;
+  if (termWidth >= WIDE_TABLE_MIN_TERM_WIDTH) {
+    return [
+      ID_COLUMN,
+      STARTED_COLUMN,
+      TOKENS_COLUMN,
+      TOOLS_COLUMN,
+      ERRS_COLUMN,
+      USER_COLUMN,
+      FIRST_INPUT_COLUMN,
+    ];
+  }
+  return [ID_COLUMN, STARTED_COLUMN, TOKENS_COLUMN, FIRST_INPUT_COLUMN];
+}
 
 export function formatConversationTable(items: ConversationListItem[]): string {
-  return formatTable(items, CONVERSATION_COLUMNS, { truncate: true });
+  return formatTable(items, selectConversationColumns(), { truncate: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +244,7 @@ function collectMessages(value: unknown): { role?: string; content: string }[] {
         return null;
       }
       const r = msg as Record<string, unknown>;
-      const raw = r.content ?? r.text;
+      const raw = r.content ?? r.text ?? r.parts;
       if (raw === null || raw === undefined) {
         return null;
       }

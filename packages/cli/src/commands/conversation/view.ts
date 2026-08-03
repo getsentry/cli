@@ -27,14 +27,46 @@ type ViewFlags = {
   readonly fresh: boolean;
 };
 
+const USAGE_HINT = "sentry conversation view [<org>/]<conversation-id>";
+
+/**
+ * Split a `[<org>/]<conversation-id>` positional into its parts.
+ *
+ * Conversation IDs are org-scoped (not org/project-scoped like trace/replay
+ * IDs) and never contain `/`, so the arg has at most one slash: everything
+ * before the first `/` is the org, the remainder is the conversation ID. With
+ * no slash the whole value is the conversation ID and the org is auto-detected.
+ *
+ * @throws {ContextError} When the conversation ID segment is empty.
+ */
+function parseConversationTarget(target: string): {
+  org?: string;
+  conversationId: string;
+} {
+  const trimmed = target.trim();
+  const slashIdx = trimmed.indexOf("/");
+  if (slashIdx === -1) {
+    return { conversationId: trimmed };
+  }
+  const org = trimmed.slice(0, slashIdx);
+  const conversationId = trimmed.slice(slashIdx + 1);
+  if (!(org && conversationId)) {
+    throw new ContextError("Conversation ID", USAGE_HINT, []);
+  }
+  return { org, conversationId };
+}
+
 export const viewCommand = buildCommand({
   docs: {
     brief: "View an AI conversation transcript",
     fullDescription:
       "View the full transcript of an AI conversation.\n\n" +
+      "The org is optional and auto-detected from your project context when\n" +
+      "omitted. Prefix the ID with an org slug to target a specific org.\n\n" +
       "Examples:\n" +
-      "  sentry conversation view my-org conv-123\n" +
-      "  sentry conversation view my-org conv-123 --json\n",
+      "  sentry conversation view conv-123\n" +
+      "  sentry conversation view my-org/conv-123\n" +
+      "  sentry conversation view my-org/conv-123 --json\n",
   },
   output: {
     human: formatTranscriptResult,
@@ -44,16 +76,10 @@ export const viewCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          placeholder: "org",
-          brief: "Organization slug (optional if auto-detected)",
+          placeholder: "org/conversation-id",
+          brief:
+            "[<org>/]<conversation-id> - Org (optional) and conversation ID",
           parse: String,
-          optional: true,
-        },
-        {
-          placeholder: "conversation-id",
-          brief: "AI conversation ID",
-          parse: String,
-          optional: true,
         },
       ],
     },
@@ -62,38 +88,20 @@ export const viewCommand = buildCommand({
     },
     aliases: FRESH_ALIASES,
   },
-  async *func(
-    this: SentryContext,
-    flags: ViewFlags,
-    orgOrConversationId: string,
-    maybeConversationId?: string
-  ) {
+  async *func(this: SentryContext, flags: ViewFlags, target: string) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
-    let org: string;
-    let conversationId: string;
-
-    if (maybeConversationId) {
-      org = orgOrConversationId;
-      conversationId = maybeConversationId;
-    } else if (orgOrConversationId) {
-      const resolved = await resolveOrg({ cwd });
-      if (!resolved) {
-        throw new ContextError(
-          "Organization",
-          "sentry conversation view <org> <conversation-id>"
-        );
-      }
-      org = resolved.org;
-      conversationId = orgOrConversationId;
-    } else {
-      throw new ContextError(
-        "Conversation ID",
-        "sentry conversation view [<org>] <conversation-id>",
-        []
-      );
+    if (!target?.trim()) {
+      throw new ContextError("Conversation ID", USAGE_HINT, []);
     }
+    const { org: orgArg, conversationId } = parseConversationTarget(target);
+
+    const resolved = await resolveOrg({ org: orgArg, cwd });
+    if (!resolved) {
+      throw new ContextError("Organization", USAGE_HINT);
+    }
+    const org = resolved.org;
 
     const { spans, truncated } = await withProgress(
       {

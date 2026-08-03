@@ -2,8 +2,8 @@
  * Conversation View Command Tests
  *
  * Tests for the `sentry conversation view` command func() body, covering:
- * - Resolving org + conversationId from two positionals
- * - Resolving org via resolveOrg with single positional (conversation-id only)
+ * - Resolving org + conversationId from a single `<org>/<conversation-id>` arg
+ * - Resolving org via resolveOrg when only the conversation-id is given
  * - Throwing error when no args provided
  * - Throwing ContextError when org cannot be resolved
  * - Yielding CommandOutput with transcript result
@@ -176,6 +176,9 @@ describe("viewCommand.func", () => {
   beforeEach(() => {
     getConversationSpansSpy = vi.spyOn(apiClient, "getConversationSpans");
     resolveOrgSpy = vi.spyOn(resolveTarget, "resolveOrg");
+    // Default: org resolves to ORG. Individual tests override for auto-detect
+    // or resolution-failure scenarios.
+    resolveOrgSpy.mockResolvedValue({ org: ORG });
     withProgressSpy = vi
       .spyOn(polling, "withProgress")
       .mockImplementation(mockWithProgress);
@@ -187,7 +190,8 @@ describe("viewCommand.func", () => {
     withProgressSpy.mockRestore();
   });
 
-  test("resolves org + conversationId from two positionals", async () => {
+  test("resolves org + conversationId from a slash-separated arg", async () => {
+    resolveOrgSpy.mockResolvedValue({ org: ORG });
     getConversationSpansSpy.mockResolvedValue({
       spans: sampleSpans,
       truncated: false,
@@ -195,11 +199,13 @@ describe("viewCommand.func", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
-    await func.call(context, JSON_FLAGS, ORG, CONVERSATION_ID);
+    await func.call(context, JSON_FLAGS, `${ORG}/${CONVERSATION_ID}`);
 
-    // Should NOT call resolveOrg when org is given explicitly
-    expect(resolveOrgSpy).not.toHaveBeenCalled();
-    // Should call getConversationSpans with the explicit org and conversation ID
+    // resolveOrg is called with the explicit org from the arg
+    expect(resolveOrgSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ org: ORG })
+    );
+    // Should call getConversationSpans with the resolved org and conversation ID
     expect(getConversationSpansSpy).toHaveBeenCalledWith(ORG, CONVERSATION_ID);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
@@ -207,7 +213,7 @@ describe("viewCommand.func", () => {
     expect(parsed.conversationId).toBe(CONVERSATION_ID);
   });
 
-  test("resolves org via resolveOrg with single positional (conversation-id only)", async () => {
+  test("resolves org via resolveOrg when only conversation-id is given", async () => {
     resolveOrgSpy.mockResolvedValue({ org: "auto-org" });
     getConversationSpansSpy.mockResolvedValue({
       spans: sampleSpans,
@@ -219,7 +225,9 @@ describe("viewCommand.func", () => {
     // Only conversation ID provided — org should be auto-resolved
     await func.call(context, JSON_FLAGS, CONVERSATION_ID);
 
-    expect(resolveOrgSpy).toHaveBeenCalled();
+    expect(resolveOrgSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ org: undefined })
+    );
     expect(getConversationSpansSpy).toHaveBeenCalledWith(
       "auto-org",
       CONVERSATION_ID
@@ -282,7 +290,7 @@ describe("viewCommand.func", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
-    await func.call(context, JSON_FLAGS, ORG, CONVERSATION_ID);
+    await func.call(context, JSON_FLAGS, `${ORG}/${CONVERSATION_ID}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
@@ -301,7 +309,7 @@ describe("viewCommand.func", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
-    await func.call(context, HUMAN_FLAGS, ORG, CONVERSATION_ID);
+    await func.call(context, HUMAN_FLAGS, `${ORG}/${CONVERSATION_ID}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain(CONVERSATION_ID);
@@ -316,7 +324,7 @@ describe("viewCommand.func", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
-    await func.call(context, JSON_FLAGS, ORG, CONVERSATION_ID);
+    await func.call(context, JSON_FLAGS, `${ORG}/${CONVERSATION_ID}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
@@ -331,7 +339,7 @@ describe("viewCommand.func", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
-    await func.call(context, JSON_FLAGS, ORG, CONVERSATION_ID);
+    await func.call(context, JSON_FLAGS, `${ORG}/${CONVERSATION_ID}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     const parsed = JSON.parse(output);
@@ -348,7 +356,7 @@ describe("viewCommand.func", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
-    await func.call(context, HUMAN_FLAGS, ORG, CONVERSATION_ID);
+    await func.call(context, HUMAN_FLAGS, `${ORG}/${CONVERSATION_ID}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("truncated");
@@ -362,7 +370,7 @@ describe("viewCommand.func", () => {
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
-    await func.call(context, HUMAN_FLAGS, ORG, CONVERSATION_ID);
+    await func.call(context, HUMAN_FLAGS, `${ORG}/${CONVERSATION_ID}`);
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
     expect(output).toContain("No spans found");
