@@ -491,8 +491,7 @@ export class ResolutionError extends CliError {
     resource: string,
     headline: string,
     hint: string,
-    suggestions: string[] = [],
-    expected = false
+    suggestions: string[] = []
   ) {
     super(
       buildResolutionMessage(resource, headline, hint, suggestions),
@@ -503,7 +502,17 @@ export class ResolutionError extends CliError {
     this.headline = headline;
     this.hint = hint;
     this.suggestions = suggestions;
-    this.expected = expected;
+    this.expected = false;
+  }
+
+  /**
+   * Return a copy of this error marked as an expected user-input outcome.
+   * Use this instead of a constructor parameter to stay within the 4-param
+   * lint limit (`useMaxParams`).
+   */
+  asExpected(): this {
+    (this as { expected: boolean }).expected = true;
+    return this;
   }
 
   override format(): string {
