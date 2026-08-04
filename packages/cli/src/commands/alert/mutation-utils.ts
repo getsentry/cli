@@ -13,6 +13,31 @@ const METRIC_DATASET_VALUES = new Set([
   "spans",
   "metrics",
 ]);
+
+/**
+ * Maps user-provided dataset aliases to canonical metric alert dataset values.
+ *
+ * The Sentry API and dashboard docs surface names like `error-events` or
+ * `transaction-like` (dashboard canonical forms) and shorthand like `eap` or
+ * `events_analytics_platform`. This map normalises them to the values the
+ * metric alert API actually accepts so users copying from docs or using
+ * dashboard terminology don't hit a validation error.
+ */
+const METRIC_DATASET_ALIASES: Record<string, string> = {
+  // Singular forms
+  error: "errors",
+  transaction: "transactions",
+  session: "sessions",
+  metric: "metrics",
+  // Dashboard canonical forms
+  "error-events": "errors",
+  "transaction-like": "transactions",
+  tracemetrics: "metrics",
+  metricsenhanced: "metrics",
+  // EAP / explore dataset
+  eap: "spans",
+  events_analytics_platform: "spans",
+};
 const METRIC_TIME_WINDOWS = new Set([
   1, 5, 10, 15, 30, 60, 120, 240, 360, 720, 1440,
 ]);
@@ -172,9 +197,22 @@ export function normalizeProjectList(
   return values.length > 0 ? values : undefined;
 }
 
+/**
+ * Normalise a user-provided `--dataset` value to the canonical metric alert
+ * dataset name accepted by the Sentry API.
+ *
+ * Resolves known aliases (e.g. `error-events` → `errors`, `tracemetrics` →
+ * `metrics`) so that values copied from dashboard docs or from the explore
+ * dataset terminology work without manual translation.
+ */
+export function normalizeMetricDataset(dataset: string): string {
+  const lower = dataset.trim().toLowerCase();
+  return METRIC_DATASET_ALIASES[lower] ?? lower;
+}
+
 /** Validate that `dataset` is one of the allowed Sentry metric alert dataset values. */
 export function validateMetricDataset(dataset: string): void {
-  const normalized = dataset.trim().toLowerCase();
+  const normalized = normalizeMetricDataset(dataset);
   if (METRIC_DATASET_VALUES.has(normalized)) {
     return;
   }
