@@ -213,7 +213,7 @@ export const editCommand = buildCommand({
         parse: String,
         optional: true,
         brief:
-          "Dataset (errors, transactions, sessions, events, spans, metrics)",
+          "Dataset: errors (error-events), transactions (transaction-like), sessions, events, spans, metrics",
       },
       "time-window": {
         kind: "parsed",

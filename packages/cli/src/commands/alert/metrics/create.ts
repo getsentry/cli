@@ -129,7 +129,7 @@ export const createCommand = buildCommand({
         kind: "parsed",
         parse: String,
         brief:
-          "Dataset (errors, transactions, sessions, events, spans, metrics)",
+          "Dataset: errors (error-events), transactions (transaction-like), sessions, events, spans, metrics",
       },
       "time-window": {
         kind: "parsed",
