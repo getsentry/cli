@@ -54,7 +54,8 @@ type SilenceReason =
   | "output_error"
   | "auth_expected"
   | "api_user_error"
-  | "network_error";
+  | "network_error"
+  | "user_input_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -99,6 +100,14 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   // 400 here: it is converted to a ValidationError at the command boundary
   // (toSearchQueryError) so the user gets an actionable message and the bug
   // signal for CLI-authored bad queries is preserved (CLI-FA).
+  //
+  // A ValidationError means the user supplied malformed input (a non-existent
+  // directory, an invalid ID format, etc.). It is not a CLI bug — the user
+  // needs to correct their invocation — so silence it the same way we silence
+  // other expected user-error classes (CLI-1FN).
+  if (error instanceof ValidationError) {
+    return "user_input_error";
+  }
   return null;
 }
 
