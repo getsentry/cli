@@ -480,12 +480,19 @@ export class ResolutionError extends CliError {
   readonly headline: string;
   readonly hint: string;
   readonly suggestions: string[];
+  /**
+   * When true, this error is an expected outcome of user-supplied input
+   * (e.g. a short ID that doesn't match any entity) rather than a CLI bug.
+   * `classifySilenced` uses this to suppress noise in Sentry issue reports.
+   */
+  readonly expected: boolean;
 
   constructor(
     resource: string,
     headline: string,
     hint: string,
-    suggestions: string[] = []
+    suggestions: string[] = [],
+    expected = false
   ) {
     super(
       buildResolutionMessage(resource, headline, hint, suggestions),
@@ -496,6 +503,7 @@ export class ResolutionError extends CliError {
     this.headline = headline;
     this.hint = hint;
     this.suggestions = suggestions;
+    this.expected = expected;
   }
 
   override format(): string {

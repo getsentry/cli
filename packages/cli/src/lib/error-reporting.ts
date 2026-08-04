@@ -54,7 +54,8 @@ type SilenceReason =
   | "output_error"
   | "auth_expected"
   | "api_user_error"
-  | "network_error";
+  | "network_error"
+  | "user_input_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -93,6 +94,11 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   }
   if (error instanceof ApiError && error.status > 400 && error.status < 500) {
     return "api_user_error";
+  }
+  // A ResolutionError marked `expected` means the user supplied a bad/short ID
+  // that couldn't be resolved — a normal user-input outcome, not a CLI bug.
+  if (error instanceof ResolutionError && error.expected) {
+    return "user_input_error";
   }
   // A 400 (Bad Request) signals a malformed request the CLI built — a code
   // defect — so it is always captured. A user's unparseable `--query` is NOT a

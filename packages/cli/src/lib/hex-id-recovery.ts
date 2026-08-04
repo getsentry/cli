@@ -616,11 +616,15 @@ function buildRecoveryError(
     case "no-matches":
     case "past-retention":
     case "looks-like-slug":
+      // Pass expected=true: these are normal outcomes of user-supplied IDs that
+      // couldn't be resolved, not CLI bugs. classifySilenced uses this to avoid
+      // reporting them as Sentry issues.
       return new ResolutionError(
         `${entityCap} '${result.original}'`,
         failedReasonHeadline(result.reason),
         options.canonicalCommand,
-        result.hint ? [result.hint] : []
+        result.hint ? [result.hint] : [],
+        true
       );
     case "api-error":
       return fallbackError;
