@@ -1,6 +1,80 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.41.0
+
+### New Features ✨
+
+- (docs) Deploy CLI docs to Cloudflare with Craft by @jared-outpost in [#1354](https://github.com/getsentry/cli/pull/1354)
+- (help) Support JSON output for --help flags by @jared-outpost in [#1337](https://github.com/getsentry/cli/pull/1337)
+- (local) Inject Spotlight as a Wrangler Worker binding by @MathurAditya724 in [#1351](https://github.com/getsentry/cli/pull/1351)
+- (project) Create multiple projects in one command by @betegon in [#1191](https://github.com/getsentry/cli/pull/1191)
+- Add `sentry conversation` command group for inspecting AI agent transcripts by @sergical in [#1020](https://github.com/getsentry/cli/pull/1020)
+
+### Bug Fixes 🐛
+
+#### Alert
+
+- Normalize dataset aliases in metric alert commands by @sentry in [#1356](https://github.com/getsentry/cli/pull/1356)
+- Handle missing conditions/actions in issue alert view by @sentry in [#1331](https://github.com/getsentry/cli/pull/1331)
+
+#### Alerts
+
+- Seed logicType/conditions when issue alert edit adds first action filter by @jared-outpost in [#1336](https://github.com/getsentry/cli/pull/1336)
+- Migrate metric alert mutations to detectors API by @jared-outpost in [#1338](https://github.com/getsentry/cli/pull/1338)
+- Create and edit issue alert rules via org-scoped /workflows/ by @betegon in [#1223](https://github.com/getsentry/cli/pull/1223)
+
+#### Issue
+
+- Case-insensitive short-ID detection for issue list recovery by @betegon in [#1210](https://github.com/getsentry/cli/pull/1210)
+- Reject issue-1-style command-token args by @betegon in [#1209](https://github.com/getsentry/cli/pull/1209)
+
+#### Local
+
+- Don't abort when the port is held by an unhealthy sidecar by @MathurAditya724 in [#1344](https://github.com/getsentry/cli/pull/1344)
+- Warn when the event stream cannot be attached by @MathurAditya724 in [#1343](https://github.com/getsentry/cli/pull/1343)
+- Tail events in `run` when a server already owns the port by @MathurAditya724 in [#1342](https://github.com/getsentry/cli/pull/1342)
+- Print one timestamp per event line and identify as a Spot… by @MathurAditya724 in [#1341](https://github.com/getsentry/cli/pull/1341)
+
+#### Upgrade
+
+- Delta apply progress bar shows percentage only (no GB scare) by @BYK in [#1355](https://github.com/getsentry/cli/pull/1355)
+- Restrict delta patch from-version to same major.minor series by @BYK in [#1329](https://github.com/getsentry/cli/pull/1329)
+- Use generated-patch from-version + close output fd synchronously by @BYK in [#1327](https://github.com/getsentry/cli/pull/1327)
+
+#### Other
+
+- (auth) Name .sentryclirc as token source in ignored-token hint by @jared-outpost in [#1346](https://github.com/getsentry/cli/pull/1346)
+- (dashboard) Correctly validate span and tracemetrics aggregates by @sentry in [#1295](https://github.com/getsentry/cli/pull/1295)
+- (docs) Remove footer GitHub icon covered by install banner by @sentry-junior in [#1324](https://github.com/getsentry/cli/pull/1324)
+- (fs) Ignore ETIMEDOUT in scandir on network mounts by @sentry in [#1217](https://github.com/getsentry/cli/pull/1217)
+- (logs) Correct severity query examples by @jamieQ in [#1328](https://github.com/getsentry/cli/pull/1328)
+- (npm) Route bare "zlib" imports through the ESM namespace shim by @JPeer264 in [#1357](https://github.com/getsentry/cli/pull/1357)
+
+### Documentation 📚
+
+- (lore) Persist the project-create colon-syntax decision by @betegon in [#1352](https://github.com/getsentry/cli/pull/1352)
+
+### Internal Changes 🔧
+
+#### Cli
+
+- Move --version/--help into the Stricli scanner, delete argv-glue by @jared-outpost in [#1348](https://github.com/getsentry/cli/pull/1348)
+- Replace argv-hoist preprocessor with a Stricli top-level-flags patch by @jared-outpost in [#1340](https://github.com/getsentry/cli/pull/1340)
+
+#### Deps
+
+- Bump binpatch ^0.3.1 → ^0.4.0 by @BYK in [#1326](https://github.com/getsentry/cli/pull/1326)
+- Bump the npm_and_yarn group across 2 directories with 3 updates by @dependabot in [#1322](https://github.com/getsentry/cli/pull/1322)
+
+#### Other
+
+- (api) Adopt SDK types for the projects domain by @betegon in [#1213](https://github.com/getsentry/cli/pull/1213)
+- (upgrade) Adopt BYK/binpatch action for delta patch generation/publish by @BYK in [#1330](https://github.com/getsentry/cli/pull/1330)
+- Fix 13 dependabot alerts via pnpm overrides + remove stale docs lockfile by @BYK in [#1332](https://github.com/getsentry/cli/pull/1332)
+- Pre-shape repo into pnpm-workspace monorepo layout by @BYK in [#1254](https://github.com/getsentry/cli/pull/1254)
+- Regenerate docs by @github-actions[bot] in [0b43edad](https://github.com/getsentry/cli/commit/0b43edad47386844ece1f9f288310e2683afce49)
+
 ## 0.40.0
 
 ### New Features ✨
