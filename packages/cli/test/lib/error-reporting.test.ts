@@ -303,12 +303,21 @@ describe("classifySilenced", () => {
       "ResolutionError",
       new ResolutionError("Project 'x'", "not found", "sentry issue list"),
     ],
-    ["ValidationError", new ValidationError("bad")],
     ["SeerError", new SeerError("not_enabled")],
     ["ConfigError", new ConfigError("bad")],
     ["generic Error", new Error("boom")],
   ])("does NOT silence %s", (_label, err) => {
     expect(classifySilenced(err)).toBeNull();
+  });
+
+  test("silences ValidationError as user_input_error (CLI-1FN)", () => {
+    // ValidationError means the user supplied malformed input (wrong directory,
+    // invalid ID format, etc.) — not a CLI bug. Silence it so it does not
+    // appear as a crash in Sentry, while still recording volume via the metric.
+    expect(classifySilenced(new ValidationError("bad"))).toBe("user_input_error");
+    expect(classifySilenced(new ValidationError("bad", "field"))).toBe(
+      "user_input_error"
+    );
   });
 });
 
@@ -471,41 +480,22 @@ describe("reportCliError integration", () => {
     );
   });
 
-  test("ValidationError with field uses field as kind", () => {
-    const { tags } = capturedScopeTags(new ValidationError("Bad", "trace_id"));
-    expect(tags["cli_error.class"]).toBe("ValidationError");
-    expect(tags["cli_error.kind"]).toBe("trace_id");
-  });
-
-  test("ValidationError without field falls back to message prefix", () => {
-    // Without a stable fallback, every unfielded ValidationError would get
-    // kind="" and collapse into one huge mixed group.
-    const err = new ValidationError(
-      'Invalid trace ID "d2ad4a2d947b5983". Expected 32-char hex.'
+  test("silences ValidationError and emits metric (CLI-1FN)", () => {
+    // ValidationError is user-input noise (wrong directory, invalid ID, etc.),
+    // not a CLI bug. It should be dropped from Sentry and recorded only as a
+    // silenced-error metric so volume stays visible without polluting issues.
+    reportCliError(new ValidationError("Directory 'foo' does not exist.", "directory"));
+    expect(captureSpy).not.toHaveBeenCalled();
+    expect(metricSpy).toHaveBeenCalledWith(
+      "cli.error.silenced",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          error_class: "ValidationError",
+          reason: "user_input_error",
+        }),
+      })
     );
-    const { tags } = capturedScopeTags(err);
-    expect(tags["cli_error.class"]).toBe("ValidationError");
-    expect(tags["cli_error.kind"]).toBe("Invalid trace ID");
-  });
-
-  test("ValidationError kind is stable across different user inputs", () => {
-    const a = capturedScopeTags(
-      new ValidationError('Invalid trace ID "abc"')
-    ).tags;
-    const b = capturedScopeTags(
-      new ValidationError('Invalid trace ID "xyz-different"')
-    ).tags;
-    expect(a["cli_error.kind"]).toBe(b["cli_error.kind"]);
-  });
-
-  test("ValidationError kind differentiates by validator", () => {
-    const traceErr = capturedScopeTags(
-      new ValidationError('Invalid trace ID "abc"')
-    ).tags;
-    const eventErr = capturedScopeTags(
-      new ValidationError('Invalid event ID "abc"')
-    ).tags;
-    expect(traceErr["cli_error.kind"]).not.toBe(eventErr["cli_error.kind"]);
   });
 
   test("captures ResolutionError", () => {
