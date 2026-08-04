@@ -165,7 +165,7 @@ Create a metric alert rule
 | `--name <name>` | Rule name |
 | `--query <query>` | Metric query filter string |
 | `--aggregate <aggregate>` | Aggregate expression (for example count(), p95(transaction.duration)) |
-| `--dataset <dataset>` | Dataset (errors, transactions, sessions, events, spans, metrics) |
+| `--dataset <dataset>` | Dataset: errors (error-events), transactions (transaction-like), sessions, events, spans, metrics |
 | `--time-window <time-window>` | Evaluation window in minutes |
 | `-t, --trigger <trigger>...` | Trigger object JSON (repeatable, or pass one JSON array) |
 | `-p, --project <project>...` | Project slug filter (repeatable or comma-separated) |
@@ -209,7 +209,7 @@ Edit a metric alert rule
 | `--status <status>` | active or disabled |
 | `--query <query>` | Metric query filter |
 | `--aggregate <aggregate>` | Aggregate expression |
-| `--dataset <dataset>` | Dataset (errors, transactions, sessions, events, spans, metrics) |
+| `--dataset <dataset>` | Dataset: errors (error-events), transactions (transaction-like), sessions, events, spans, metrics |
 | `--time-window <time-window>` | Evaluation window in minutes |
 | `-t, --trigger <trigger>...` | Trigger object JSON (repeatable, or pass one JSON array) |
 | `-p, --project <project>...` | Project slug filter (repeatable or comma-separated) |
