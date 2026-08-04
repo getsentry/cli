@@ -314,7 +314,9 @@ describe("classifySilenced", () => {
     // ValidationError means the user supplied malformed input (wrong directory,
     // invalid ID format, etc.) — not a CLI bug. Silence it so it does not
     // appear as a crash in Sentry, while still recording volume via the metric.
-    expect(classifySilenced(new ValidationError("bad"))).toBe("user_input_error");
+    expect(classifySilenced(new ValidationError("bad"))).toBe(
+      "user_input_error"
+    );
     expect(classifySilenced(new ValidationError("bad", "field"))).toBe(
       "user_input_error"
     );
@@ -484,7 +486,9 @@ describe("reportCliError integration", () => {
     // ValidationError is user-input noise (wrong directory, invalid ID, etc.),
     // not a CLI bug. It should be dropped from Sentry and recorded only as a
     // silenced-error metric so volume stays visible without polluting issues.
-    reportCliError(new ValidationError("Directory 'foo' does not exist.", "directory"));
+    reportCliError(
+      new ValidationError("Directory 'foo' does not exist.", "directory")
+    );
     expect(captureSpy).not.toHaveBeenCalled();
     expect(metricSpy).toHaveBeenCalledWith(
       "cli.error.silenced",
