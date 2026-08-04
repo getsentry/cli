@@ -758,15 +758,15 @@ jobs:
       # be deployed to production.
       - name: Remove sourcemaps from output
         run: find apps/cli-docs/dist -name '*.map' -delete
+      # Package the built site plus its Wrangler config as cloudflare.zip so
+      # Craft's cloudflare target can deploy the extracted Worker artifact.
       - name: Package Docs
-        run: |
-          cp .nojekyll apps/cli-docs/dist/
-          cd apps/cli-docs/dist && zip -r "$GITHUB_WORKSPACE/gh-pages.zip" .
+        run: cd apps/cli-docs && zip -r "$GITHUB_WORKSPACE/cloudflare.zip" wrangler.jsonc dist
       - name: Upload docs artifact
         uses: actions/upload-artifact@v7
         with:
-          name: gh-pages
-          path: gh-pages.zip
+          name: cloudflare
+          path: cloudflare.zip
 
   ci-status:
     name: CI Status
