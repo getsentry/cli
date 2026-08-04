@@ -12,11 +12,12 @@ artifactProvider:
       Build:
         - '/^sentry-.*$/'
         - 'npm-package'
-        - 'gh-pages'
+        - 'cloudflare'
 targets:
   - name: npm
   - name: github
-  - name: gh-pages
+  - name: cloudflare
+    deployType: worker
   - name: registry
     apps:
       'app:sentry':
