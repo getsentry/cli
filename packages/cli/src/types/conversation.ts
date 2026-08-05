@@ -92,10 +92,12 @@ export type AIConversationSpan = z.infer<typeof AIConversationSpanSchema>;
  * array. Pagination still uses the `Link` header; each page is an envelope
  * whose `spans` field holds that page's rows.
  */
-export const AIConversationDetailsSchema = z.object({
-  conversationId: z.string(),
-  title: z.string().nullable(),
-  spans: z.array(AIConversationSpanSchema),
-});
+export const AIConversationDetailsSchema = z
+  .object({
+    conversationId: z.string(),
+    title: z.string().nullable(),
+    spans: z.array(AIConversationSpanSchema),
+  })
+  .passthrough();
 
 export type AIConversationDetails = z.infer<typeof AIConversationDetailsSchema>;
