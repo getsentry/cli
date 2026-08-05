@@ -52,8 +52,7 @@ const ID_COLUMN: Column<ConversationListItem> = {
 
 const TITLE_COLUMN: Column<ConversationListItem> = {
   header: "Title",
-  value: (c) =>
-    c.title ? escapeMarkdownCell(truncate(c.title, 40)) : "—",
+  value: (c) => (c.title ? escapeMarkdownCell(truncate(c.title, 40)) : "—"),
   truncate: true,
 };
 
