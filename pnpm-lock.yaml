@@ -57,6 +57,10 @@ importers:
         version: 4.118.0
 
   packages/cli:
+    dependencies:
+      valibot:
+        specifier: ^1.4.2
+        version: 1.4.2(typescript@5.9.3)
     devDependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.39.0
@@ -216,7 +220,7 @@ importers:
         version: 5.9.3
       ultracite:
         specifier: 6.3.10
-        version: 6.3.10(typescript@5.9.3)
+        version: 6.3.10(typescript@5.9.3)(valibot@1.4.2(typescript@5.9.3))
       uuidv7:
         specifier: ^1.2.1
         version: 1.2.1
@@ -4374,6 +4378,14 @@ packages:
   uuidv7@1.2.1:
     resolution: {integrity: sha512-4kPkK3/XTQW9Hbm4CaqfICn+kY9LJtDVEOfgsRRra/+n2Ofg4NqzRFceAkxvQ/Ud/6BpHOPzj8cirqM7TzTN5Q==}
     hasBin: true
+
+  valibot@1.4.2:
+    resolution: {integrity: sha512-gjdCvJ6d3RyHAneqxMYMW9QMCwYMb3jpOO0IyHZV1bnRHFBHrX3VkIILt5XYR0WhwHiH7Mty8ovuPZ/O3gamrg==}
+    peerDependencies:
+      typescript: '>=5'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   vary@1.1.2:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
@@ -9231,11 +9243,12 @@ snapshots:
 
   trough@2.2.0: {}
 
-  trpc-cli@0.12.4(@trpc/server@11.18.0(typescript@5.9.3))(zod@4.4.3):
+  trpc-cli@0.12.4(@trpc/server@11.18.0(typescript@5.9.3))(valibot@1.4.2(typescript@5.9.3))(zod@4.4.3):
     dependencies:
       commander: 14.0.3
     optionalDependencies:
       '@trpc/server': 11.18.0(typescript@5.9.3)
+      valibot: 1.4.2(typescript@5.9.3)
       zod: 4.4.3
 
   tslib@2.8.1:
@@ -9261,7 +9274,7 @@ snapshots:
 
   ufo@1.6.4: {}
 
-  ultracite@6.3.10(typescript@5.9.3):
+  ultracite@6.3.10(typescript@5.9.3)(valibot@1.4.2(typescript@5.9.3)):
     dependencies:
       '@clack/prompts': 0.11.0
       '@trpc/server': 11.18.0(typescript@5.9.3)
@@ -9269,7 +9282,7 @@ snapshots:
       glob: 13.0.6
       jsonc-parser: 3.3.1
       nypm: 0.6.8
-      trpc-cli: 0.12.4(@trpc/server@11.18.0(typescript@5.9.3))(zod@4.4.3)
+      trpc-cli: 0.12.4(@trpc/server@11.18.0(typescript@5.9.3))(valibot@1.4.2(typescript@5.9.3))(zod@4.4.3)
       zod: 4.4.3
     transitivePeerDependencies:
       - '@orpc/server'
@@ -9389,6 +9402,10 @@ snapshots:
   uuid@11.1.1: {}
 
   uuidv7@1.2.1: {}
+
+  valibot@1.4.2(typescript@5.9.3):
+    optionalDependencies:
+      typescript: 5.9.3
 
   vary@1.1.2: {}
 
