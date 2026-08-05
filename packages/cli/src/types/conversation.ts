@@ -1,8 +1,8 @@
 /**
  * AI Conversation types and Zod schemas.
  *
- * Schemas for the conversation list items and the raw conversation spans
- * returned by the Sentry Explore AI-conversations endpoints.
+ * Schemas for conversation list items, the details envelope, and raw
+ * conversation spans returned by the Sentry Explore AI-conversations endpoints.
  */
 
 import { z } from "zod";

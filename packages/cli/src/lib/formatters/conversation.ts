@@ -38,15 +38,22 @@ function formatTimestamp(epochSeconds: number): string {
 }
 
 /**
- * Minimum terminal width (columns) to show the full 7-column conversation
- * table. Below this, the lower-value Tools/Errs/User columns are dropped so
- * the core ID/Started/Tokens/First Input columns don't truncate aggressively.
+ * Minimum terminal width (columns) to show the full conversation table.
+ * Below this, Tools/Errs/User are dropped so the core ID/Title/Started/
+ * Tokens/First Input columns don't truncate aggressively.
  */
 const WIDE_TABLE_MIN_TERM_WIDTH = 100;
 
 const ID_COLUMN: Column<ConversationListItem> = {
   header: "ID",
   value: (c) => escapeMarkdownCell(truncate(c.conversationId, 40)),
+  truncate: true,
+};
+
+const TITLE_COLUMN: Column<ConversationListItem> = {
+  header: "Title",
+  value: (c) =>
+    c.title ? escapeMarkdownCell(truncate(c.title, 40)) : "—",
   truncate: true,
 };
 
@@ -88,13 +95,15 @@ const FIRST_INPUT_COLUMN: Column<ConversationListItem> = {
 /**
  * Select conversation table columns for the current terminal width. Wide
  * terminals get the full set; narrow ones (piped output defaults to 80) drop
- * Tools/Errs/User to keep the remaining columns readable.
+ * Tools/Errs/User to keep the remaining columns readable. Title stays on
+ * both widths so stored conversation names remain visible.
  */
 function selectConversationColumns(): Column<ConversationListItem>[] {
   const termWidth = process.stdout.columns || 80;
   if (termWidth >= WIDE_TABLE_MIN_TERM_WIDTH) {
     return [
       ID_COLUMN,
+      TITLE_COLUMN,
       STARTED_COLUMN,
       TOKENS_COLUMN,
       TOOLS_COLUMN,
@@ -103,7 +112,13 @@ function selectConversationColumns(): Column<ConversationListItem>[] {
       FIRST_INPUT_COLUMN,
     ];
   }
-  return [ID_COLUMN, STARTED_COLUMN, TOKENS_COLUMN, FIRST_INPUT_COLUMN];
+  return [
+    ID_COLUMN,
+    TITLE_COLUMN,
+    STARTED_COLUMN,
+    TOKENS_COLUMN,
+    FIRST_INPUT_COLUMN,
+  ];
 }
 
 export function formatConversationTable(items: ConversationListItem[]): string {
@@ -416,7 +431,8 @@ function formatTurnHuman(turn: ConversationTurn): string {
 export type TranscriptResult = {
   conversationId: string;
   org: string;
-  title?: string | null;
+  /** Stored conversation title, or null when none has been titled yet. */
+  title: string | null;
   turns: ConversationTurn[];
   totalTokens: number;
   spanCount: number;
@@ -428,9 +444,15 @@ export type TranscriptResult = {
 
 export function formatTranscriptResult(result: TranscriptResult): string {
   if (result.spanCount === 0) {
-    return `No spans found for conversation ${escapeMarkdownInline(result.conversationId)} in the last 30 days.`;
+    const id = escapeMarkdownInline(result.conversationId);
+    const titled = result.title
+      ? `${id} (${escapeMarkdownInline(result.title)})`
+      : id;
+    return `No spans found for conversation ${titled} in the last 30 days.`;
   }
 
+  // Keep the conversation ID in the heading (needed to re-run `conversation
+  // view`). Surface title as a table row so it is not duplicated in the heading.
   const rows: [string, string][] = [
     ["Org", escapeMarkdownCell(result.org)],
     ["Projects", result.projects.map(escapeMarkdownCell).join(", ") || "—"],
@@ -444,12 +466,8 @@ export function formatTranscriptResult(result: TranscriptResult): string {
     rows.unshift(["Title", escapeMarkdownCell(result.title)]);
   }
 
-  const heading = result.title
-    ? `# ${escapeMarkdownInline(result.title)}`
-    : `# AI Conversation: ${escapeMarkdownInline(result.conversationId)}`;
-
   const lines: string[] = [
-    heading,
+    `# AI Conversation: ${escapeMarkdownInline(result.conversationId)}`,
     "",
     mdKvTable(rows),
     "",
@@ -470,13 +488,13 @@ export function buildTranscriptResult(
   conversationId: string,
   org: string,
   spans: AIConversationSpan[],
-  title?: string | null
+  title: string | null = null
 ): TranscriptResult {
   const turns = extractTurns(spans);
   return {
     conversationId,
     org,
-    title: title ?? null,
+    title,
     turns,
     // Sum tokens per turn (ai_client spans only). Summing every span would
     // double-count parent invoke_agent spans that aggregate child usage.

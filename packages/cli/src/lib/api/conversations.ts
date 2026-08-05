@@ -4,17 +4,12 @@
  * Functions for listing and retrieving AI conversation data from the Sentry
  * Explore AI-conversations endpoints.
  *
- * The `/organizations/{org}/ai-conversations/` endpoints are not yet in
- * `@sentry/api` (getsentry/sentry-api-schema): they are PRIVATE AI-monitoring
- * endpoints that have not been published to the OpenAPI schema, so no generated
- * SDK function or response type exists for them. Following the same pattern as
- * the experimental endpoints in `logs.ts`/`traces.ts`, they are called directly
- * via `apiRequestToRegion` with local Zod schemas.
- *
- * Details responses are an envelope `{ conversationId, title, spans }`
- * (getsentry/sentry#121143), not a bare span array. Pagination still uses the
- * `Link` header via `parseLinkHeader` (wrapping `@sentry/api`'s
- * `parseSentryLinkHeader`). Revisit once these endpoints land in `@sentry/api`.
+ * The `/organizations/{org}/ai-conversations/` endpoints are PRIVATE and not
+ * yet in `@sentry/api` (getsentry/sentry-api-schema). Call them via
+ * `apiRequestToRegion` with local Zod schemas (same pattern as `logs.ts` /
+ * `traces.ts`). Details response shape is documented on
+ * `AIConversationDetailsSchema`. Pagination uses `parseLinkHeader`. Revisit
+ * once these endpoints land in `@sentry/api`.
  */
 
 import { z } from "zod";
@@ -118,8 +113,6 @@ export async function getConversationSpans(
       params.cursor = cursor;
     }
 
-    // Each page is an envelope `{ conversationId, title, spans }` (sentry#121143).
-    // Pagination cursors still live in the Link header.
     const { data, headers } = await apiRequestToRegion<AIConversationDetails>(
       regionUrl,
       `/organizations/${orgSlug}/ai-conversations/${encodeURIComponent(conversationId)}/`,
