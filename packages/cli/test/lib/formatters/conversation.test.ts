@@ -204,6 +204,16 @@ describe("buildTranscriptResult", () => {
     expect(result.endTimestamp).toBe(1_716_500_010);
   });
 
+  test("includes title when provided", () => {
+    const result = buildTranscriptResult(
+      "conv-123",
+      "my-org",
+      [makeSpan()],
+      "Refund a duplicate charge"
+    );
+    expect(result.title).toBe("Refund a duplicate charge");
+  });
+
   test("returns zero timestamps for empty spans", () => {
     const result = buildTranscriptResult("conv-123", "my-org", []);
     expect(result.startTimestamp).toBe(0);
@@ -249,6 +259,18 @@ describe("formatTranscriptResult", () => {
     expect(output).toContain("user");
     expect(output).toContain("assistant");
     expect(output).toContain("Turn 1");
+  });
+
+  test("uses title as heading when present", () => {
+    const transcript = buildTranscriptResult(
+      "conv-123",
+      "my-org",
+      [makeSpan()],
+      "Refund a duplicate charge"
+    );
+    const output = formatTranscriptResult(transcript);
+    expect(output).toContain("Refund a duplicate charge");
+    expect(output).not.toContain("AI Conversation: conv-123");
   });
 
   test("shows truncation warning", () => {

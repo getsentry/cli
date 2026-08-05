@@ -416,6 +416,7 @@ function formatTurnHuman(turn: ConversationTurn): string {
 export type TranscriptResult = {
   conversationId: string;
   org: string;
+  title?: string | null;
   turns: ConversationTurn[];
   totalTokens: number;
   spanCount: number;
@@ -439,9 +440,16 @@ export function formatTranscriptResult(result: TranscriptResult): string {
     ["Spans", String(result.spanCount)],
     ["Tokens", String(result.totalTokens)],
   ];
+  if (result.title) {
+    rows.unshift(["Title", escapeMarkdownCell(result.title)]);
+  }
+
+  const heading = result.title
+    ? `# ${escapeMarkdownInline(result.title)}`
+    : `# AI Conversation: ${escapeMarkdownInline(result.conversationId)}`;
 
   const lines: string[] = [
-    `# AI Conversation: ${escapeMarkdownInline(result.conversationId)}`,
+    heading,
     "",
     mdKvTable(rows),
     "",
@@ -461,12 +469,14 @@ export function formatTranscriptResult(result: TranscriptResult): string {
 export function buildTranscriptResult(
   conversationId: string,
   org: string,
-  spans: AIConversationSpan[]
+  spans: AIConversationSpan[],
+  title?: string | null
 ): TranscriptResult {
   const turns = extractTurns(spans);
   return {
     conversationId,
     org,
+    title: title ?? null,
     turns,
     // Sum tokens per turn (ai_client spans only). Summing every span would
     // double-count parent invoke_agent spans that aggregate child usage.

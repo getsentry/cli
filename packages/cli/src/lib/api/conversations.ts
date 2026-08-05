@@ -5,20 +5,24 @@
  * Explore AI-conversations endpoints.
  *
  * The `/organizations/{org}/ai-conversations/` endpoints are not yet in
- * `@sentry/api` (getsentry/sentry-api-schema): they are a new AI-monitoring
- * feature that has not been published to the API schema, so no generated SDK
- * function or response type exists for them. Following the same pattern as the
- * experimental endpoints in `logs.ts`/`traces.ts`, they are called directly via
- * `apiRequestToRegion` with local Zod schemas. Pagination still goes through the
- * shared `parseLinkHeader` helper, which wraps `@sentry/api`'s
- * `parseSentryLinkHeader`. Revisit once these endpoints land in `@sentry/api`.
+ * `@sentry/api` (getsentry/sentry-api-schema): they are PRIVATE AI-monitoring
+ * endpoints that have not been published to the OpenAPI schema, so no generated
+ * SDK function or response type exists for them. Following the same pattern as
+ * the experimental endpoints in `logs.ts`/`traces.ts`, they are called directly
+ * via `apiRequestToRegion` with local Zod schemas.
+ *
+ * Details responses are an envelope `{ conversationId, title, spans }`
+ * (getsentry/sentry#121143), not a bare span array. Pagination still uses the
+ * `Link` header via `parseLinkHeader` (wrapping `@sentry/api`'s
+ * `parseSentryLinkHeader`). Revisit once these endpoints land in `@sentry/api`.
  */
 
 import { z } from "zod";
 
 import {
+  type AIConversationDetails,
+  AIConversationDetailsSchema,
   type AIConversationSpan,
-  AIConversationSpanSchema,
   type ConversationListItem,
   ConversationListItemSchema,
 } from "../../types/conversation.js";
@@ -90,9 +94,12 @@ export async function getConversationSpans(
     project?: string;
     perPage?: number;
   } = {}
-): Promise<{ spans: AIConversationSpan[]; truncated: boolean }> {
+): Promise<{
+  spans: AIConversationSpan[];
+  truncated: boolean;
+  title: string | null;
+}> {
   const regionUrl = await resolveOrgRegion(orgSlug);
-  const pageSchema = z.array(AIConversationSpanSchema);
 
   const params: Record<string, string> = {
     per_page: String(options.perPage ?? 1000),
@@ -103,6 +110,7 @@ export async function getConversationSpans(
   }
 
   const spans: AIConversationSpan[] = [];
+  let title: string | null = null;
   let cursor: string | undefined;
 
   for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
@@ -110,13 +118,18 @@ export async function getConversationSpans(
       params.cursor = cursor;
     }
 
-    const { data, headers } = await apiRequestToRegion<AIConversationSpan[]>(
+    // Each page is an envelope `{ conversationId, title, spans }` (sentry#121143).
+    // Pagination cursors still live in the Link header.
+    const { data, headers } = await apiRequestToRegion<AIConversationDetails>(
       regionUrl,
       `/organizations/${orgSlug}/ai-conversations/${encodeURIComponent(conversationId)}/`,
-      { params, schema: pageSchema }
+      { params, schema: AIConversationDetailsSchema }
     );
 
-    spans.push(...data);
+    if (page === 0) {
+      title = data.title;
+    }
+    spans.push(...data.spans);
     const parsed = parseLinkHeader(headers.get("link") ?? null);
     cursor = parsed.nextCursor;
     if (!cursor) {
@@ -131,5 +144,5 @@ export async function getConversationSpans(
     );
   }
 
-  return { spans, truncated };
+  return { spans, truncated, title };
 }
