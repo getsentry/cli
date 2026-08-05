@@ -321,6 +321,7 @@ Work with Sentry projects
 - `sentry project create [<org>/]<name>:<platform>...` — Create one or more projects
 - `sentry project delete <org/project>` — Delete a project
 - `sentry project list <org/project>` — List projects
+- `sentry project platforms` — List all valid Sentry platform identifiers
 - `sentry project view <org/project>` — View details of a project
 
 → Full flags and examples: `references/project.md`

@@ -41,15 +41,13 @@ import {
   type ProjectCreatedResult,
   type ProjectCreateOutput,
 } from "../../lib/formatters/human.js";
-import { isPlainOutput } from "../../lib/formatters/markdown.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
-import { buildMarkdownTable, type Column } from "../../lib/formatters/table.js";
-import { renderTextTable } from "../../lib/formatters/text-table.js";
 import { logger } from "../../lib/logger.js";
 import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../lib/mutate-command.js";
 import {
   COMMON_PLATFORMS,
   isValidPlatform,
+  renderPlatformGrid,
   suggestPlatform,
 } from "../../lib/platforms.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
@@ -72,35 +70,6 @@ type CreateFlags = {
   readonly json: boolean;
   readonly fields?: string[];
 };
-
-/** Build a 3-column grid string from a flat list of platforms. */
-function platformGrid(items: readonly string[]): string {
-  const COLS = 3;
-  const rows: string[][] = [];
-  for (let i = 0; i < items.length; i += COLS) {
-    const row = items.slice(i, i + COLS);
-    while (row.length < COLS) {
-      row.push("");
-    }
-    rows.push(row);
-  }
-
-  if (isPlainOutput()) {
-    const columns: Column<string[]>[] = Array.from(
-      { length: COLS },
-      (_, ci) => ({
-        header: " ",
-        value: (row: string[]) => row[ci] ?? "",
-      })
-    );
-    return buildMarkdownTable(rows, columns);
-  }
-
-  const [first, ...rest] = rows;
-  return renderTextTable(first ?? [], rest, {
-    headerSeparator: false,
-  });
-}
 
 /**
  * Normalize common platform format mistakes.
@@ -148,11 +117,11 @@ function buildPlatformError(nameArg: string, platform?: string): string {
   if (platform) {
     const suggestions = suggestPlatform(platform);
     if (suggestions.length > 0) {
-      didYouMean = `\nDid you mean?\n${platformGrid(suggestions)}`;
+      didYouMean = `\nDid you mean?\n${renderPlatformGrid(suggestions)}`;
     }
   }
 
-  const platformTable = platformGrid([...COMMON_PLATFORMS]);
+  const platformTable = renderPlatformGrid([...COMMON_PLATFORMS]);
 
   return (
     `${heading}\n` +
@@ -160,6 +129,7 @@ function buildPlatformError(nameArg: string, platform?: string): string {
     "\nUsage:\n" +
     `  sentry project create ${nameArg}:<platform>\n\n` +
     `Common platforms:\n\n${platformTable}\n` +
+    "Run 'sentry project platforms' to see all valid platform identifiers.\n" +
     "Run 'sentry project create <name>:<platform>' with any valid Sentry platform identifier."
   );
 }

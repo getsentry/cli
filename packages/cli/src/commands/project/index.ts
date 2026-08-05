@@ -2,6 +2,7 @@ import { buildRouteMap } from "../../lib/route-map.js";
 import { createCommand } from "./create.js";
 import { deleteCommand } from "./delete.js";
 import { listCommand } from "./list.js";
+import { platformsCommand } from "./platforms.js";
 import { viewCommand } from "./view.js";
 
 export const projectRoute = buildRouteMap({
@@ -9,6 +10,7 @@ export const projectRoute = buildRouteMap({
     create: createCommand,
     delete: deleteCommand,
     list: listCommand,
+    platforms: platformsCommand,
     view: viewCommand,
   },
   defaultCommand: "view",
