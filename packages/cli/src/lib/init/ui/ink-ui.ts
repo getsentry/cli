@@ -360,6 +360,7 @@ type InkInstance = {
  * re-renders.
  */
 export class InkUI implements WizardUI {
+  readonly supportsInteractivePrompts = true;
   private readonly instance: InkInstance;
   private readonly store: WizardStore;
   /**

@@ -155,6 +155,9 @@ export type WizardSummary = {
  * the main screen buffer, and release any held TTY resources.
  */
 export type WizardUI = AsyncDisposable & {
+  /** Whether this implementation can render and resolve interactive prompts. */
+  readonly supportsInteractivePrompts?: boolean;
+
   // ── Lifecycle messages ────────────────────────────────────────────
 
   /**

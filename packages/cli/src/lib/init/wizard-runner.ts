@@ -21,6 +21,7 @@ import {
   getTraceData,
   setTag,
 } from "@sentry/node-core/light";
+import { extractRequiredScopes } from "../api-scope.js";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { customFetch } from "../custom-ca.js";
@@ -31,6 +32,7 @@ import {
   stripColorTags,
 } from "../formatters/markdown.js";
 import { logger } from "../logger.js";
+import { chooseProjectTeam } from "../team-choice.js";
 import {
   abortIfCancelled,
   PROGRESS_ROTATE_INTERVAL_MS,
@@ -83,6 +85,7 @@ import {
 type SpinState = { running: boolean };
 
 const INIT_SERVICE_AUTH_FAILED_LABEL = "Authentication failed";
+const INIT_SCOPE_UPDATE_REQUIRED_LABEL = "Authorization update required";
 
 const APPLY_CODEMODS_STEP = "apply-codemods";
 
@@ -102,6 +105,10 @@ type StepContext = {
   context: ResolvedInitContext;
   ui: WizardUI;
 };
+
+function supportsInteractiveTeamChoice(ui: WizardUI): boolean {
+  return ui.supportsInteractivePrompts === true;
+}
 
 function nextPhase(
   stepPhases: Map<string, number>,
@@ -358,7 +365,26 @@ async function handleSuspendedStep(
       ui.recordFilesReading?.(payload.params.paths);
     }
 
-    const toolResult = await executeTool(payload, context);
+    const canChooseTeam =
+      (payload.operation === "create-sentry-project" ||
+        payload.operation === "ensure-sentry-project") &&
+      !context.yes &&
+      !context.dryRun &&
+      supportsInteractiveTeamChoice(ui);
+    const toolResult = canChooseTeam
+      ? await executeTool(payload, context, {
+          chooseTeam: async (teams) => {
+            spin.stop("Found available teams");
+            spinState.running = false;
+            const choice = await chooseProjectTeam(teams, async (options) =>
+              abortIfCancelled(await ui.select(options))
+            );
+            spin.start("Creating Sentry project...");
+            spinState.running = true;
+            return choice;
+          },
+        })
+      : await executeTool(payload, context);
 
     if (toolResult.message) {
       spin.stop(renderInlineMarkdown(toolResult.message));
@@ -1094,7 +1120,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   } catch (err) {
     const isAuthFailure = err instanceof ApiError && err.status === 401;
     const isPermissionFailure =
-      err instanceof ApiError && (err.status === 401 || err.status === 403);
+      err instanceof ApiError && err.status === 403;
+    const isScopeFailure =
+      isPermissionFailure &&
+      extractRequiredScopes(err.detail).length > 0;
     // A running spinner owns a live interval, so stop it before any early
     // return or rethrow to avoid leaving the event loop artificially busy.
     if (spinState.running) {
@@ -1105,6 +1134,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         code = 0;
       } else if (isAuthFailure) {
         label = INIT_SERVICE_AUTH_FAILED_LABEL;
+      } else if (isScopeFailure) {
+        label = INIT_SCOPE_UPDATE_REQUIRED_LABEL;
       } else if (isPermissionFailure) {
         label = "Sentry API request denied";
       }
@@ -1124,8 +1155,13 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     if (activeStepId) {
       ui.setStep?.(activeStepId, "failed");
     }
-    if (isAuthFailure) {
-      showFailedFeedback(ui, INIT_SERVICE_AUTH_FAILED_LABEL);
+    if (isAuthFailure || isScopeFailure) {
+      showFailedFeedback(
+        ui,
+        isAuthFailure
+          ? INIT_SERVICE_AUTH_FAILED_LABEL
+          : INIT_SCOPE_UPDATE_REQUIRED_LABEL
+      );
       setTag("wizard.outcome", "errored");
       throw err;
     }

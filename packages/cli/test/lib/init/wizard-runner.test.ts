@@ -616,6 +616,58 @@ describe("runWizard", () => {
     expect(spinnerMock.message).toHaveBeenCalledWith("Running tool...");
   });
 
+  test("gives interactive project creation a narrow team-choice capability", async () => {
+    const { ui, calls, respond } = createMockUI();
+    respond.select("continue");
+    respond.select("existing");
+    useMockUI(ui, calls);
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "create-sentry-project",
+      cwd: "/tmp/test",
+      params: { name: "my-app", platform: "javascript-react" },
+    };
+    const context = makeContext({ yes: false, team: undefined });
+    resolveInitContextSpy.mockResolvedValue(context);
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["ensure-sentry-project"]],
+      steps: {
+        "ensure-sentry-project": { suspendPayload: payload },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+    executeToolSpy.mockImplementation(
+      async (_payload, _context, capabilities) => {
+        const choice = await capabilities?.chooseTeam?.([
+          {
+            id: "1",
+            slug: "platform",
+            name: "Platform",
+            access: ["team:admin"],
+          },
+        ]);
+        expect(choice).toEqual({ kind: "existing", slug: "platform" });
+        return { ok: true, data: { results: [] } };
+      }
+    );
+
+    await forceStdinTty(() => runWizard(makeOptions({ yes: false })));
+
+    expect(executeToolSpy).toHaveBeenCalledWith(payload, context, {
+      chooseTeam: expect.any(Function),
+    });
+    expect(calls).toContainEqual({
+      kind: "select",
+      message: "Choose a team for the new project",
+      options: ["create", "existing"],
+    });
+    expect(spinnerMock.stop).toHaveBeenCalledWith("Found available teams");
+    expect(spinnerMock.start).toHaveBeenCalledWith(
+      "Creating Sentry project..."
+    );
+  });
+
   test("dispatches interactive payloads to the prompt handler", async () => {
     mockStartResult = {
       status: "suspended",
@@ -721,7 +773,7 @@ describe("runWizard", () => {
     expect(lastFeedbackOutcome()).toBe("failed");
   });
 
-  test("preserves 403 errors thrown for command-level scope inspection", async () => {
+  test("preserves a missing-scope 403 for global OAuth recovery", async () => {
     const payload: ToolPayload = {
       type: "tool",
       operation: "create-sentry-project",
@@ -735,16 +787,22 @@ describe("runWizard", () => {
         "ensure-sentry-project": { suspendPayload: payload },
       },
     };
-    const scopeError = new ApiError("Forbidden", 403);
+    const scopeError = new ApiError(
+      "Cannot create project",
+      403,
+      "This operation requires the 'team:admin' authorization scope."
+    );
     executeToolSpy.mockRejectedValue(scopeError);
 
-    await expect(runWizard(makeOptions())).rejects.toBe(scopeError);
+    const error = await runWizard(makeOptions()).catch((cause) => cause);
 
+    expect(error).toBe(scopeError);
+    expect(error).not.toBeInstanceOf(WizardError);
     expect(spinnerMock.stop).toHaveBeenCalledWith(
-      "Sentry API request denied",
+      "Authorization update required",
       1
     );
-    expect(lastCancelMessage()).toBe("Sentry API request denied");
+    expect(lastCancelMessage()).toBe("Authorization update required");
   });
 
   test("tears down forwarding and stops the spinner on cancellation", async () => {
@@ -1962,3 +2020,4 @@ describe("runWizard — progress rotation for long-running steps", () => {
     await runPromise;
   });
 });
+
