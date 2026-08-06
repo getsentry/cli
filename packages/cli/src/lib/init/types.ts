@@ -1,3 +1,5 @@
+import type { ResolvedConcreteTeam } from "../resolve-team.js";
+
 export type DirEntry = {
   name: string;
   path: string;
@@ -43,17 +45,11 @@ export type ResolvedInitContext = {
   features?: string[];
   org: string;
   /**
-   * Resolved team slug for init operations.
-   * Omitted when init defers empty-org auto-creation until project creation.
+   * Explicit team requested with `--team`.
+   * Implicit team resolution is deferred until project creation so existing
+   * projects never require a team choice.
    */
-  team?: string;
-  /**
-   * True only when `team` was supplied via the `--team` CLI flag.
-   * False/absent when the team was auto-selected by preflight.
-   * Used by project creation tools to decide whether to suppress the
-   * org-scoped fallback on 403 (only suppress for explicitly named teams).
-   */
-  isExplicitTeam?: boolean;
+  team?: ResolvedConcreteTeam;
   project?: string;
   /** Pre-selected app name for monorepo runs. Passed through from `--app`. */
   app?: string;

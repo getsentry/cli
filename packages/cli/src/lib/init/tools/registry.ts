@@ -1,4 +1,12 @@
-import type { ToolOperation, ToolPayload, ToolResult } from "../types.js";
+import { extractRequiredScopes } from "../../api-scope.js";
+import { ApiError } from "../../errors.js";
+import { WizardCancelledError } from "../clack-utils.js";
+import type {
+  ResolvedInitContext,
+  ToolOperation,
+  ToolPayload,
+  ToolResult,
+} from "../types.js";
 import { applyPatchsetTool } from "./apply-patchset.js";
 import {
   createSentryProjectTool,
@@ -12,7 +20,12 @@ import { listDirTool } from "./list-dir.js";
 import { readFilesTool } from "./read-files.js";
 import { runCommandsTool } from "./run-commands.js";
 import { formatToolError, validateToolSandbox } from "./shared.js";
-import type { AnyInitToolDefinition, ToolContext } from "./types.js";
+import type { AnyInitToolDefinition, ToolCapabilities } from "./types.js";
+
+const PROJECT_CREATION_OPERATIONS = new Set<ToolOperation>([
+  "create-sentry-project",
+  "ensure-sentry-project",
+]);
 
 const toolDefinitions = [
   listDirTool,
@@ -44,7 +57,8 @@ export function describeTool(payload: ToolPayload): string {
  */
 export async function executeTool(
   payload: ToolPayload,
-  context: ToolContext
+  context: ResolvedInitContext,
+  capabilities: ToolCapabilities = {}
 ): Promise<ToolResult> {
   const sandboxError = validateToolSandbox(payload, context.directory);
   if (sandboxError) {
@@ -60,8 +74,23 @@ export async function executeTool(
   }
 
   try {
-    return await tool.execute(payload as never, context);
+    const executionContext = PROJECT_CREATION_OPERATIONS.has(payload.operation)
+      ? { ...context, chooseTeam: capabilities.chooseTeam }
+      : context;
+    return await tool.execute(payload as never, executionContext);
   } catch (error) {
+    if (error instanceof WizardCancelledError) {
+      throw error;
+    }
+    // Scope-bearing 403s must reach the top-level CLI middleware so existing
+    // OAuth grants can be refreshed and the full init command retried.
+    if (
+      error instanceof ApiError &&
+      error.status === 403 &&
+      extractRequiredScopes(error.detail).length > 0
+    ) {
+      throw error;
+    }
     return { ok: false, error: formatToolError(error) };
   }
 }
