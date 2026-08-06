@@ -4,9 +4,6 @@
  * Source of truth: sentry/src/sentry/models/project.py GETTING_STARTED_DOCS_PLATFORMS
  */
 
-import { isPlainOutput } from "./formatters/markdown.js";
-import { buildMarkdownTable, type Column } from "./formatters/table.js";
-import { renderTextTable } from "./formatters/text-table.js";
 import { levenshtein } from "./fuzzy.js";
 
 /** Full list of valid Sentry platform identifiers (112 from backend + "other"). */
@@ -159,35 +156,6 @@ export const COMMON_PLATFORMS = [
 /** Check if a platform string is valid. */
 export function isValidPlatform(platform: string): boolean {
   return VALID_PLATFORM_SET.has(platform);
-}
-
-/** Build a 3-column grid string from a flat list of platforms. */
-export function renderPlatformGrid(items: readonly string[]): string {
-  const COLS = 3;
-  const rows: string[][] = [];
-  for (let i = 0; i < items.length; i += COLS) {
-    const row = items.slice(i, i + COLS);
-    while (row.length < COLS) {
-      row.push("");
-    }
-    rows.push(row);
-  }
-
-  if (isPlainOutput()) {
-    const columns: Column<string[]>[] = Array.from(
-      { length: COLS },
-      (_, ci) => ({
-        header: " ",
-        value: (row: string[]) => row[ci] ?? "",
-      })
-    );
-    return buildMarkdownTable(rows, columns);
-  }
-
-  const [first, ...rest] = rows;
-  return renderTextTable(first ?? [], rest, {
-    headerSeparator: false,
-  });
 }
 
 function addUnique(arr: string[], value: string): void {

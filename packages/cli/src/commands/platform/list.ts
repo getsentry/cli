@@ -17,7 +17,8 @@ import { buildCommand } from "../../lib/command.js";
 import { OutputError } from "../../lib/errors.js";
 import { muted } from "../../lib/formatters/colors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
-import { renderPlatformGrid, VALID_PLATFORMS } from "../../lib/platforms.js";
+import { renderPlatformGrid } from "../../lib/platform-grid.js";
+import { VALID_PLATFORMS } from "../../lib/platforms.js";
 
 type PlatformsFlags = {
   readonly search?: string;

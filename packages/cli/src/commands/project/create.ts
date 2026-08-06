@@ -44,10 +44,10 @@ import {
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../lib/mutate-command.js";
+import { renderPlatformGrid } from "../../lib/platform-grid.js";
 import {
   COMMON_PLATFORMS,
   isValidPlatform,
-  renderPlatformGrid,
   suggestPlatform,
 } from "../../lib/platforms.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
