@@ -60,7 +60,12 @@ import {
   isRouteMap,
 } from "../src/lib/introspect.js";
 
-/** Resolve the default subcommand name for a route map, if configured. */
+/**
+ * Resolve the default subcommand name for a route map, if configured.
+ *
+ * Hidden dispatcher routes (e.g. auth's `default`) map bare group examples
+ * onto the user-facing command they primarily document (login).
+ */
 function findDefaultCommandName(routeMap: RouteMap): string | undefined {
   if (!routeMap.getDefaultCommand) {
     return;
@@ -71,7 +76,13 @@ function findDefaultCommandName(routeMap: RouteMap): string | undefined {
   }
   for (const sub of routeMap.getAllEntries()) {
     if (sub.target === defaultCmd) {
-      return sub.name.original;
+      const name = sub.name.original;
+      // Auth uses a hidden "default" dispatcher; bare `sentry auth` examples
+      // document the login path.
+      if (name === "default") {
+        return "login";
+      }
+      return name;
     }
   }
   return;

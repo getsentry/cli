@@ -8,7 +8,8 @@
 sentry auth
 ```
 
-`sentry auth login` is equivalent.
+Bare `sentry auth` logs in when you're logged out and shows status when you're
+already authenticated. `sentry auth login` always starts the login flow.
 
 1. A URL and device code will be displayed
 2. Open the URL in your browser
