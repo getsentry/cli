@@ -1,13 +1,13 @@
 /**
- * Project Platforms Command Tests
+ * Platform List Command Tests
  *
- * Tests for the `sentry project platforms` command in
- * src/commands/project/platforms.ts. Purely local/static data — no API
+ * Tests for the `sentry platform list` command in
+ * src/commands/platform/list.ts. Purely local/static data — no API
  * mocking needed (auth: false).
  */
 
 import { describe, expect, test, vi } from "vitest";
-import { platformsCommand } from "../../../src/commands/project/platforms.js";
+import { listCommand } from "../../../src/commands/platform/list.js";
 import type { SentryContext } from "../../../src/context.js";
 import { EXIT, OutputError } from "../../../src/lib/errors.js";
 import { VALID_PLATFORMS } from "../../../src/lib/platforms.js";
@@ -32,10 +32,10 @@ function createMockContext(): {
   };
 }
 
-describe("project platforms", () => {
+describe("platform list", () => {
   test("lists all valid platforms by default", async () => {
     const { context, stdoutWrite } = createMockContext();
-    const func = await platformsCommand.loader();
+    const func = await listCommand.loader();
     await func.call(context, { json: false });
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
@@ -47,7 +47,7 @@ describe("project platforms", () => {
 
   test("--json outputs the full platform list as a JSON array", async () => {
     const { context, stdoutWrite } = createMockContext();
-    const func = await platformsCommand.loader();
+    const func = await listCommand.loader();
     await func.call(context, { json: true });
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
@@ -58,7 +58,7 @@ describe("project platforms", () => {
 
   test("--search filters to matching platforms only", async () => {
     const { context, stdoutWrite } = createMockContext();
-    const func = await platformsCommand.loader();
+    const func = await listCommand.loader();
     await func.call(context, { json: false, search: "node" });
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
@@ -69,7 +69,7 @@ describe("project platforms", () => {
 
   test("--search --json filters the JSON array too", async () => {
     const { context, stdoutWrite } = createMockContext();
-    const func = await platformsCommand.loader();
+    const func = await listCommand.loader();
     await func.call(context, { json: true, search: "go-" });
 
     const output = stdoutWrite.mock.calls.map((c) => c[0]).join("");
@@ -80,7 +80,7 @@ describe("project platforms", () => {
 
   test("--search with no matches exits non-zero with empty results, not a broken table", async () => {
     const { context } = createMockContext();
-    const func = await platformsCommand.loader();
+    const func = await listCommand.loader();
 
     const err = await func
       .call(context, { json: false, search: "nonexistent-xyz-platform" })

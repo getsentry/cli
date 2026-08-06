@@ -68,8 +68,9 @@ cli/
 │   │   ├── log/         # list, view
 │   │   ├── monitor/     # list, run
 │   │   ├── org/         # list, view
+│   │   ├── platform/    # list
 │   │   ├── proguard/    # upload, uuid
-│   │   ├── project/     # create, delete, list, platforms, view
+│   │   ├── project/     # create, delete, list, view
 │   │   ├── react-native/# gradle, xcode
 │   │   ├── release/     # archive, create, delete, deploy, deploys, finalize, list, propose-version, restore, set-commits, view
 │   │   ├── replay/      # list, view

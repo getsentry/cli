@@ -1,5 +1,5 @@
 /**
- * sentry project platforms
+ * sentry platform list
  *
  * List all valid Sentry platform identifiers. Purely local/static data —
  * no API access required. Exists so `sentry project create`'s missing/invalid
@@ -7,8 +7,9 @@
  * just the curated "Common platforms" subset shown inline in that error.
  *
  * Usage:
- *   sentry project platforms                 → list all valid platforms
- *   sentry project platforms --search python  → filter by substring
+ *   sentry platform list                 → list all valid platforms
+ *   sentry platforms                     → shortcut for the above
+ *   sentry platform list --search python → filter by substring
  */
 
 import type { SentryContext } from "../../context.js";
@@ -30,7 +31,7 @@ function formatPlatformsHuman(list: readonly string[]): string {
   return `${renderPlatformGrid(list)}\n${list.length} platform${list.length === 1 ? "" : "s"}`;
 }
 
-export const platformsCommand = buildCommand({
+export const listCommand = buildCommand({
   auth: false,
   docs: {
     brief: "List all valid Sentry platform identifiers",
@@ -38,9 +39,9 @@ export const platformsCommand = buildCommand({
       "List every valid Sentry platform identifier — the full set behind " +
       "`sentry project create <name>:<platform>`. Use --search to filter.\n\n" +
       "Examples:\n" +
-      "  sentry project platforms                 List all valid platforms\n" +
-      "  sentry project platforms --search python  Filter by substring\n" +
-      "  sentry project platforms --json           Machine-readable output",
+      "  sentry platform list                 List all valid platforms\n" +
+      "  sentry platform list --search python  Filter by substring\n" +
+      "  sentry platform list --json           Machine-readable output",
   },
   output: {
     human: formatPlatformsHuman,

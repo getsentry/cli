@@ -129,7 +129,7 @@ function buildPlatformError(nameArg: string, platform?: string): string {
     "\nUsage:\n" +
     `  sentry project create ${nameArg}:<platform>\n\n` +
     `Common platforms:\n\n${platformTable}\n` +
-    "Run 'sentry project platforms' to see all valid platform identifiers.\n" +
+    "Run 'sentry platform list' to see all valid platform identifiers.\n" +
     "Run 'sentry project create <name>:<platform>' with any valid Sentry platform identifier."
   );
 }
