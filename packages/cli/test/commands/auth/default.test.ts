@@ -7,6 +7,9 @@ import {
   authDefaultCommand,
   resolveAuthDefaultTarget,
 } from "../../../src/commands/auth/default.js";
+import { loginCommand } from "../../../src/commands/auth/login.js";
+import { statusCommand } from "../../../src/commands/auth/status.js";
+import { CommandOutput } from "../../../src/lib/formatters/output.js";
 
 describe("resolveAuthDefaultTarget", () => {
   test("logged out → login", () => {
@@ -41,36 +44,29 @@ describe("resolveAuthDefaultTarget", () => {
 });
 
 describe("authDefaultCommand", () => {
-  test("dispatches to login when logged out", async () => {
+  test("dispatches to login raw func when logged out", async () => {
     const isAuthenticated = vi.spyOn(
       await import("../../../src/lib/db/auth.js"),
       "isAuthenticated"
     );
     isAuthenticated.mockReturnValue(false);
 
-    const loginLoader = vi.fn(async () =>
-      vi.fn(async () => {
-        // login path
-      })
-    );
-    const statusLoader = vi.fn(async () =>
-      vi.fn(async () => {
-        // status path
-      })
-    );
+    const loginRaw = vi.fn(async function* () {
+      yield new CommandOutput({
+        method: "token",
+        configPath: "/tmp/sentry.db",
+      });
+    });
+    const statusRaw = vi.fn(async function* () {
+      yield new CommandOutput({ authenticated: true, source: "oauth" });
+    });
 
-    const { loginCommand } = await import(
-      "../../../src/commands/auth/login.js"
-    );
-    const { statusCommand } = await import(
-      "../../../src/commands/auth/status.js"
-    );
-    const loginSpy = vi
-      .spyOn(loginCommand, "loader")
-      .mockImplementation(loginLoader);
-    const statusSpy = vi
-      .spyOn(statusCommand, "loader")
-      .mockImplementation(statusLoader);
+    const loginCmd = loginCommand as unknown as { __rawFunc: unknown };
+    const statusCmd = statusCommand as unknown as { __rawFunc: unknown };
+    const prevLogin = loginCmd.__rawFunc;
+    const prevStatus = statusCmd.__rawFunc;
+    loginCmd.__rawFunc = loginRaw;
+    statusCmd.__rawFunc = statusRaw;
 
     const context = {
       stdout: { write: vi.fn() },
@@ -79,54 +75,49 @@ describe("authDefaultCommand", () => {
       env: process.env,
     };
 
-    const func = await authDefaultCommand.loader();
-    await func.call(context as never, {
-      timeout: 900,
-      force: false,
-      "read-only": false,
-      "show-token": false,
-      fresh: false,
-      json: false,
-    });
+    try {
+      const func = await authDefaultCommand.loader();
+      await func.call(context as never, {
+        timeout: 900,
+        force: false,
+        "read-only": false,
+        "show-token": false,
+        fresh: false,
+        json: false,
+      });
 
-    expect(loginSpy).toHaveBeenCalledOnce();
-    expect(statusSpy).not.toHaveBeenCalled();
-
-    loginSpy.mockRestore();
-    statusSpy.mockRestore();
-    isAuthenticated.mockRestore();
+      expect(loginRaw).toHaveBeenCalledOnce();
+      expect(statusRaw).not.toHaveBeenCalled();
+    } finally {
+      loginCmd.__rawFunc = prevLogin;
+      statusCmd.__rawFunc = prevStatus;
+      isAuthenticated.mockRestore();
+    }
   });
 
-  test("dispatches to status when logged in", async () => {
+  test("dispatches to status raw func when logged in", async () => {
     const isAuthenticated = vi.spyOn(
       await import("../../../src/lib/db/auth.js"),
       "isAuthenticated"
     );
     isAuthenticated.mockReturnValue(true);
 
-    const loginLoader = vi.fn(async () =>
-      vi.fn(async () => {
-        // login path
-      })
-    );
-    const statusLoader = vi.fn(async () =>
-      vi.fn(async () => {
-        // status path
-      })
-    );
+    const loginRaw = vi.fn(async function* () {
+      yield new CommandOutput({
+        method: "token",
+        configPath: "/tmp/sentry.db",
+      });
+    });
+    const statusRaw = vi.fn(async function* () {
+      yield new CommandOutput({ authenticated: true, source: "oauth" });
+    });
 
-    const { loginCommand } = await import(
-      "../../../src/commands/auth/login.js"
-    );
-    const { statusCommand } = await import(
-      "../../../src/commands/auth/status.js"
-    );
-    const loginSpy = vi
-      .spyOn(loginCommand, "loader")
-      .mockImplementation(loginLoader);
-    const statusSpy = vi
-      .spyOn(statusCommand, "loader")
-      .mockImplementation(statusLoader);
+    const loginCmd = loginCommand as unknown as { __rawFunc: unknown };
+    const statusCmd = statusCommand as unknown as { __rawFunc: unknown };
+    const prevLogin = loginCmd.__rawFunc;
+    const prevStatus = statusCmd.__rawFunc;
+    loginCmd.__rawFunc = loginRaw;
+    statusCmd.__rawFunc = statusRaw;
 
     const context = {
       stdout: { write: vi.fn() },
@@ -135,21 +126,23 @@ describe("authDefaultCommand", () => {
       env: process.env,
     };
 
-    const func = await authDefaultCommand.loader();
-    await func.call(context as never, {
-      timeout: 900,
-      force: false,
-      "read-only": false,
-      "show-token": false,
-      fresh: false,
-      json: false,
-    });
+    try {
+      const func = await authDefaultCommand.loader();
+      await func.call(context as never, {
+        timeout: 900,
+        force: false,
+        "read-only": false,
+        "show-token": false,
+        fresh: false,
+        json: false,
+      });
 
-    expect(statusSpy).toHaveBeenCalledOnce();
-    expect(loginSpy).not.toHaveBeenCalled();
-
-    loginSpy.mockRestore();
-    statusSpy.mockRestore();
-    isAuthenticated.mockRestore();
+      expect(statusRaw).toHaveBeenCalledOnce();
+      expect(loginRaw).not.toHaveBeenCalled();
+    } finally {
+      loginCmd.__rawFunc = prevLogin;
+      statusCmd.__rawFunc = prevStatus;
+      isAuthenticated.mockRestore();
+    }
   });
 });

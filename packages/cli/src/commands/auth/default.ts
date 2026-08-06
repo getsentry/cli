@@ -3,19 +3,22 @@
  *
  * Routes to login when logged out (or when login-only flags are present),
  * and to status when already authenticated.
+ *
+ * Dispatches into the *unwrapped* login/status generators so the command
+ * pipeline (auth guard, rc-URL trust check, telemetry, output rendering)
+ * runs exactly once under this command's settings.
  */
 
+import type { Command } from "@stricli/core";
 import type { SentryContext } from "../../context.js";
-import {
-  buildCommand,
-  FIELDS_FLAG,
-  JSON_FLAG,
-  numberParser,
-} from "../../lib/command.js";
+import { buildCommand, numberParser } from "../../lib/command.js";
 import { isAuthenticated } from "../../lib/db/auth.js";
+import { formatAuthStatus } from "../../lib/formatters/human.js";
+import { CommandOutput } from "../../lib/formatters/output.js";
+import type { LoginResult } from "../../lib/interactive-login.js";
 import { FRESH_ALIASES, FRESH_FLAG } from "../../lib/list-command.js";
-import { loginCommand, parseLoginUrl } from "./login.js";
-import { statusCommand } from "./status.js";
+import { formatLoginResult, loginCommand, parseLoginUrl } from "./login.js";
+import { type AuthStatusData, statusCommand } from "./status.js";
 
 type AuthDefaultFlags = {
   readonly token?: string;
@@ -26,8 +29,6 @@ type AuthDefaultFlags = {
   readonly scope?: readonly string[];
   readonly "show-token": boolean;
   readonly fresh: boolean;
-  readonly json?: boolean;
-  readonly fields?: string[];
 };
 
 /** Login-only flags that force the bare command into the login path. */
@@ -62,24 +63,51 @@ export function resolveAuthDefaultTarget(
   return authenticated ? "status" : "login";
 }
 
-async function invokeCommand(
-  command: typeof loginCommand | typeof statusCommand,
-  context: SentryContext,
-  flags: Record<string, unknown>
-): Promise<void> {
-  const loaded = await command.loader();
-  const func = typeof loaded === "function" ? loaded : loaded.default;
-  await func.call(context, flags);
+type RawCommandFunc = (
+  this: SentryContext,
+  flags: Record<string, unknown>,
+  ...args: unknown[]
+) => AsyncGenerator<unknown, unknown, undefined>;
+
+/** Read the unwrapped generator attached by {@link buildCommand}. */
+function getRawFunc(command: Command<SentryContext>): RawCommandFunc {
+  const raw = (command as unknown as { __rawFunc?: RawCommandFunc }).__rawFunc;
+  if (!raw) {
+    throw new Error(
+      "Command is missing __rawFunc; expected buildCommand output"
+    );
+  }
+  return raw;
+}
+
+function isLoginResult(data: unknown): data is LoginResult {
+  return (
+    !!data &&
+    typeof data === "object" &&
+    "method" in data &&
+    "configPath" in data
+  );
+}
+
+function formatAuthDefaultOutput(data: LoginResult | AuthStatusData): string {
+  if (isLoginResult(data)) {
+    return formatLoginResult(data);
+  }
+  return formatAuthStatus(data);
 }
 
 /**
  * Hidden default for bare `sentry auth`.
  *
  * Accepts the union of login and status flags so either path works without
- * an explicit subcommand. Rendering is delegated to the selected command.
+ * an explicit subcommand. Renders through this command's single pipeline.
  */
 export const authDefaultCommand = buildCommand({
   auth: false,
+  // Login must run even with a poisoned .sentryclirc URL. Status is also
+  // reached through this path when already authenticated — matching the
+  // onboarding intent of bare `sentry auth` rather than re-applying the
+  // stricter explicit-status rc gate via a nested wrapper.
   skipRcUrlCheck: true,
   docs: {
     brief: "Authenticate with Sentry or show auth status",
@@ -137,23 +165,27 @@ export const authDefaultCommand = buildCommand({
         default: false,
       },
       fresh: FRESH_FLAG,
-      // Declared explicitly because this dispatcher has no output config of
-      // its own — login/status own rendering, but bare `sentry auth --json`
-      // still needs to parse these flags.
-      json: JSON_FLAG,
-      fields: FIELDS_FLAG,
     },
     aliases: { s: "scope", ...FRESH_ALIASES },
   },
-  // No output config: the selected login/status command owns rendering.
-  // biome-ignore lint/correctness/useYield: dispatcher awaits nested command handlers
+  output: { human: formatAuthDefaultOutput },
   async *func(this: SentryContext, flags: AuthDefaultFlags) {
     const target = resolveAuthDefaultTarget(flags);
     const command = target === "login" ? loginCommand : statusCommand;
-    await invokeCommand(
-      command,
+    const raw = getRawFunc(command as Command<SentryContext>);
+    const generator = raw.call(
       this,
       flags as unknown as Record<string, unknown>
     );
+
+    // Re-yield CommandOutput values so this command's wrapper renders once.
+    let step = await generator.next();
+    while (!step.done) {
+      if (step.value instanceof CommandOutput) {
+        yield step.value;
+      }
+      step = await generator.next();
+    }
+    return step.value as { hint?: string } | undefined;
   },
 });
