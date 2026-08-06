@@ -1,8 +1,8 @@
 /**
  * Team Resolution
  *
- * Resolves which team to use for operations that require one (e.g., project creation).
- * Shared across create commands that need a team in the API path.
+ * Resolves which team to use for project creation.
+ * Shared by `sentry project create` and `sentry init`.
  *
  * ## Resolution flow
  *
@@ -10,28 +10,30 @@
  * 2. Fetch org teams via `listTeams`
  *    - On 404: org doesn't exist → resolve effective org via cache, show org list
  *    - On other errors: surface status + generic hint
- * 3. If zero teams → auto-create a team named after the project (slug-based),
- *    or defer init-specific creation until the final slug is known
- * 4. If exactly one team → auto-select it
- * 5. Filter to teams the user belongs to (`isMember === true`)
- *    - If exactly one member team → auto-select it
- * 6. Multiple candidate teams → error with team list and `--team` hint
+ * 3. Use the first team on which the caller has effective `team:admin`
+ *    access. The API orders teams by slug, so this is deterministic and
+ *    matches the web UI's default-team policy.
+ * 4. If organization policy allows member project creation, or the caller has
+ *    `org:write`, return no team so the org-scoped onboarding endpoint can
+ *    atomically create the project and its personal Team Admin team.
+ * 5. For a restricted organization, create a new project-owning team only when
+ *    the caller has both `project:admin` and `team:admin`. The latter is needed
+ *    to administer the team after creating it and create its project.
  *
- * The auto-created team (step 3) mirrors the Sentry UI behavior where new
- * organizations always have at least one team.
+ * Team selection is deliberately not interactive. Choosing a project and
+ * choosing its owning team are separate concerns; callers should maximize the
+ * chance of creation without presenting a potentially unbounded team list.
  */
 
 import type { SentryTeam } from "../types/index.js";
-import { createTeam, listOrganizations, listTeams } from "./api-client.js";
 import {
-  ApiError,
-  AuthError,
-  CliError,
-  ContextError,
-  ResolutionError,
-} from "./errors.js";
+  createTeam,
+  getOrganization,
+  listOrganizations,
+  listTeams,
+} from "./api-client.js";
+import { ApiError, AuthError, CliError, ResolutionError } from "./errors.js";
 import { resolveEffectiveOrg } from "./region.js";
-import { getSentryBaseUrl } from "./sentry-urls.js";
 
 /**
  * Best-effort fetch the user's organizations and format as a hint string.
@@ -61,11 +63,7 @@ export type ResolveTeamOptions = {
   detectedFrom?: string;
   /** Usage hint shown in errors (e.g., "sentry project create <org>/<name>:<platform>") */
   usageHint: string;
-  /**
-   * Slug to use when auto-creating a team in an empty org.
-   * If not provided and the org has zero teams, an error is thrown instead
-   * unless empty-org auto-creation is being deferred.
-   */
+  /** Slug to use when auto-creating a team for a project admin. */
   autoCreateSlug?: string;
   /**
    * When true, skip the actual team creation API call and return what
@@ -73,16 +71,6 @@ export type ResolveTeamOptions = {
    * with the autoCreateSlug value.
    */
   dryRun?: boolean;
-  /**
-   * When true, an empty org returns a deferred result instead of auto-creating
-   * a team immediately. This lets callers wait until they know the final slug.
-   */
-  deferAutoCreateOnEmptyOrg?: boolean;
-  /**
-   * Called when multiple candidate teams remain after membership filtering.
-   * Return the selected team slug. If not provided, a ContextError is thrown.
-   */
-  onAmbiguous?: (candidates: SentryTeam[]) => Promise<string>;
 };
 
 /** Result of team resolution that produced a concrete team slug. */
@@ -93,22 +81,36 @@ export type ResolvedConcreteTeam = {
   source: "explicit" | "auto-selected" | "auto-created";
 };
 
-/** Result of init-specific deferred team resolution for empty organizations. */
-export type DeferredResolvedTeam = {
-  /** Indicates that team creation should happen later once the final slug is known. */
-  source: "deferred";
-};
-
-/** Result of team resolution, including deferred empty-org handling for init. */
-export type ResolvedTeam = ResolvedConcreteTeam | DeferredResolvedTeam;
+/**
+ * Build the actionable authorization error used when account permissions and
+ * token scopes disagree. This commonly happens to OAuth sessions issued before
+ * `team:admin` became part of the CLI's standard scope set. Keeping the scope
+ * name in an `ApiError` detail lets the global scope-recovery middleware offer
+ * a one-time OAuth refresh and retry the command for those existing grants.
+ */
+export function buildTeamAdminAuthorizationError(
+  orgSlug: string,
+  teamSlug?: string
+): ApiError {
+  const target = teamSlug ? `team '${teamSlug}'` : "a new project-owning team";
+  return new ApiError(
+    `Cannot create the project through ${target} in '${orgSlug}' without the 'team:admin' authorization scope.`,
+    403,
+    [
+      "This operation requires the 'team:admin' authorization scope.",
+      "Your Sentry role may already grant Team Admin access, but the current CLI authorization may predate that standard scope.",
+      "Re-authorize the CLI, or use an auth token with team:admin.",
+    ].join("\n")
+  );
+}
 
 /**
- * Resolve which team to use for an operation.
+ * Resolve which team to use for project creation.
  *
  * @param orgSlug - Organization to list teams from
  * @param options - Resolution options (team flag, usage hint, detection source)
- * @returns Resolved team slug with source info
- * @throws {ContextError} When team cannot be resolved
+ * @returns Resolved team slug with source info, or undefined for the
+ *   org-scoped onboarding route
  * @throws {ResolutionError} When org slug returns 404
  */
 
@@ -116,9 +118,7 @@ export type ResolvedTeam = ResolvedConcreteTeam | DeferredResolvedTeam;
  * Handle errors from `listTeams` during team resolution.
  *
  * - 404 → org not found (builds a rich error with org list)
- * - 403 → member lacks team:read; re-thrown as `ApiError` so callers that
- *   implement a member-accessible fallback can detect it and use
- *   POST /organizations/{org}/projects/ instead.
+ * - 403 is handled by the caller as an org-scoped creation fallback.
  * - 401 → re-thrown as `ApiError` so the enriched detail (expired session,
  *   member-disabled-over-limit, etc.) survives instead of being flattened.
  * - other → generic ResolutionError (5xx, network, etc.)
@@ -154,18 +154,8 @@ async function handleListTeamsError(
 
 export async function resolveOrCreateTeam(
   orgSlug: string,
-  options: ResolveTeamOptions & {
-    deferAutoCreateOnEmptyOrg?: false | undefined;
-  }
-): Promise<ResolvedConcreteTeam>;
-export async function resolveOrCreateTeam(
-  orgSlug: string,
-  options: ResolveTeamOptions & { deferAutoCreateOnEmptyOrg: true }
-): Promise<ResolvedTeam>;
-export async function resolveOrCreateTeam(
-  orgSlug: string,
   options: ResolveTeamOptions
-): Promise<ResolvedTeam> {
+): Promise<ResolvedConcreteTeam | undefined> {
   if (options.team) {
     return { slug: options.team, source: "explicit" };
   }
@@ -174,101 +164,112 @@ export async function resolveOrCreateTeam(
   try {
     teams = await listTeams(orgSlug);
   } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      return;
+    }
     return await handleListTeamsError(error, orgSlug, options);
   }
 
-  // No teams — auto-create one if a slug was provided
-  if (teams.length === 0) {
-    return resolveEmptyTeams(orgSlug, options);
-  }
-
-  // Single team — auto-select
-  if (teams.length === 1) {
-    return { slug: (teams[0] as SentryTeam).slug, source: "auto-selected" };
-  }
-
-  // Multiple teams — prefer teams the user belongs to
-  const memberTeams = teams.filter((t) => t.isMember === true);
-  const candidates = memberTeams.length > 0 ? memberTeams : teams;
-
-  if (candidates.length === 1) {
+  const eligibleTeam = teams.find(
+    (team) => Array.isArray(team.access) && team.access.includes("team:admin")
+  );
+  if (eligibleTeam) {
     return {
-      slug: (candidates[0] as SentryTeam).slug,
+      slug: eligibleTeam.slug,
       source: "auto-selected",
     };
   }
 
-  // Multiple candidates — let caller choose or throw
-  if (options.onAmbiguous) {
-    const slug = await options.onAmbiguous(candidates);
-    return { slug, source: "auto-selected" };
-  }
-
-  const label =
-    memberTeams.length > 0
-      ? `You belong to ${candidates.length} teams in ${orgSlug}`
-      : `Multiple teams found in ${orgSlug}`;
-  throw new ContextError(
-    "Team",
-    `${options.usageHint} --team ${(candidates[0] as SentryTeam).slug}`,
-    [
-      `${label}. Specify one with --team`,
-      ...candidates.map((t) => `Available: ${t.slug}`),
-    ]
-  );
-}
-
-/**
- * Handle the case when an org has zero teams.
- * Either defers init-specific creation, auto-creates a team, returns a dry-run
- * preview, or throws.
- */
-function resolveEmptyTeams(
-  orgSlug: string,
-  options: ResolveTeamOptions
-): Promise<ResolvedTeam> | ResolvedTeam {
-  if (options.deferAutoCreateOnEmptyOrg) {
-    return { source: "deferred" };
-  }
   if (!options.autoCreateSlug) {
-    const teamsUrl = `${getSentryBaseUrl()}/settings/${orgSlug}/teams/`;
-    throw new ContextError("Team", `${options.usageHint} --team <team-slug>`, [
-      `No teams found in org '${orgSlug}'`,
-      `Create a team at ${teamsUrl}`,
-    ]);
+    return;
   }
+
+  let organization: Awaited<ReturnType<typeof getOrganization>>;
+  try {
+    organization = await getOrganization(orgSlug);
+  } catch {
+    // Team listing already proved the org exists. If its detail endpoint is
+    // unavailable, let the org-scoped project endpoint produce the precise
+    // creation error instead of turning a best-effort capability check into a
+    // blocker.
+    return;
+  }
+
+  const access = Array.isArray(organization.access) ? organization.access : [];
+  if (
+    organization.allowMemberProjectCreation !== false ||
+    access.includes("org:write")
+  ) {
+    return;
+  }
+
+  if (!access.includes("project:admin")) {
+    return;
+  }
+
+  if (!access.includes("team:admin")) {
+    throw buildTeamAdminAuthorizationError(orgSlug);
+  }
+
   if (options.dryRun) {
     return { slug: options.autoCreateSlug, source: "auto-created" };
   }
-  return autoCreateTeam(orgSlug, options.autoCreateSlug);
+
+  return await autoCreateTeam(orgSlug, options.autoCreateSlug);
 }
 
 /**
- * Auto-create a team in an org that has no teams.
- * Uses the provided slug as the team name.
+ * Auto-create a project-owning team, retrying deterministic suffixes when a
+ * non-admin team already owns the preferred slug.
  */
 async function autoCreateTeam(
   orgSlug: string,
   slug: string
-): Promise<ResolvedTeam> {
+): Promise<ResolvedConcreteTeam> {
+  const candidates = [
+    slug,
+    `${slug}-team`,
+    ...[2, 3, 4].map((n) => `${slug}-team-${n}`),
+  ];
+
+  for (const candidate of candidates) {
+    const result = await tryCreateTeamCandidate(orgSlug, candidate, slug);
+    if (result === "conflict") {
+      continue;
+    }
+    return result;
+  }
+
+  throw new CliError(
+    `Could not create a unique team for project '${slug}' in '${orgSlug}'.`
+  );
+}
+
+/**
+ * Attempt one candidate slug. A conflict asks the outer bounded retry loop for
+ * another slug; a permission failure reports the stale authorization without
+ * mutating further.
+ */
+async function tryCreateTeamCandidate(
+  orgSlug: string,
+  candidate: string,
+  projectSlug: string
+): Promise<ResolvedConcreteTeam | "conflict"> {
   try {
-    const team = await createTeam(orgSlug, slug);
+    const team = await createTeam(orgSlug, candidate);
     return { slug: team.slug, source: "auto-created" };
   } catch (error) {
-    // Let auth errors propagate so the central handler can trigger auto-login
     if (error instanceof AuthError) {
       throw error;
     }
-    // 403 means the user lacks permission to create teams (e.g., org member role).
-    // Re-throw as ApiError so callers can fall back to the org-scoped endpoint
-    // (POST /organizations/{org}/projects/) instead of showing a dead-end error.
     if (error instanceof ApiError && error.status === 403) {
-      throw error;
+      throw buildTeamAdminAuthorizationError(orgSlug, candidate);
     }
-    // Other failures (permissions, network, etc.) — surface with manual fallback
+    if (error instanceof ApiError && error.status === 409) {
+      return "conflict";
+    }
     throw new CliError(
-      `No teams found in org '${orgSlug}' and automatic team creation failed.\n\n` +
-        `Create a team manually at ${getSentryBaseUrl()}/settings/${orgSlug}/teams/` +
+      `Could not create a team for project '${projectSlug}' in '${orgSlug}'.` +
         (error instanceof ApiError
           ? `\n\nAPI error (${error.status}): ${error.detail ?? error.message}`
           : "")

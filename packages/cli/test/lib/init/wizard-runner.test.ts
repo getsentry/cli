@@ -721,6 +721,38 @@ describe("runWizard", () => {
     expect(lastFeedbackOutcome()).toBe("failed");
   });
 
+  test("preserves a missing-scope 403 for global OAuth recovery", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "create-sentry-project",
+      cwd: "/tmp/test",
+      params: { name: "my-app", platform: "javascript-react" },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["ensure-sentry-project"]],
+      steps: {
+        "ensure-sentry-project": { suspendPayload: payload },
+      },
+    };
+    const scopeError = new ApiError(
+      "Cannot create project",
+      403,
+      "This operation requires the 'team:admin' authorization scope."
+    );
+    executeToolSpy.mockRejectedValue(scopeError);
+
+    const error = await runWizard(makeOptions()).catch((cause) => cause);
+
+    expect(error).toBe(scopeError);
+    expect(error).not.toBeInstanceOf(WizardError);
+    expect(spinnerMock.stop).toHaveBeenCalledWith(
+      "Authorization update required",
+      1
+    );
+    expect(lastCancelMessage()).toBe("Authorization update required");
+  });
+
   test("tears down forwarding and stops the spinner on cancellation", async () => {
     const captureSpy = vi.spyOn(Sentry, "captureException");
     const payload: ToolPayload = {

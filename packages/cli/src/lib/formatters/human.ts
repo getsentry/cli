@@ -1996,8 +1996,8 @@ export function formatProjectCreated(result: ProjectCreatedResult): string {
   if (result.teamSource === "auto-created") {
     lines.push(
       dry
-        ? `> **Note:** Would create team '${escapeMarkdownInline(result.teamSlug)}' (org has no teams).`
-        : `> **Note:** Created team '${escapeMarkdownInline(result.teamSlug)}' (org had no teams).`
+        ? `> **Note:** Would create team '${escapeMarkdownInline(result.teamSlug)}' for this project.`
+        : `> **Note:** Created team '${escapeMarkdownInline(result.teamSlug)}' for this project.`
     );
     lines.push("");
   } else if (result.teamSource === "auto-selected") {
