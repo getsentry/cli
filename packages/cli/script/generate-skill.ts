@@ -369,11 +369,14 @@ function collectCommandPaths(
  */
 function associateCodeBlocks(
   tokens: Token[],
-  commandPaths: string[],
-  commandGroup: string,
-  examples: Map<string, string[]>,
-  defaultCommandPath?: string
+  context: {
+    commandPaths: string[];
+    commandGroup: string;
+    examples: Map<string, string[]>;
+    defaultCommandPath?: string;
+  }
 ): void {
+  const { commandPaths, commandGroup, examples, defaultCommandPath } = context;
   const groupFallback = `sentry ${commandGroup}`;
   let currentCmd: string | null = null;
 
@@ -425,13 +428,12 @@ async function loadCommandExamples(
   const defaultCommandPath = defaultCommandName
     ? `sentry ${commandGroup} ${defaultCommandName}`
     : undefined;
-  associateCodeBlocks(
-    tokens,
+  associateCodeBlocks(tokens, {
     commandPaths,
     commandGroup,
     examples,
-    defaultCommandPath
-  );
+    defaultCommandPath,
+  });
   return examples;
 }
 

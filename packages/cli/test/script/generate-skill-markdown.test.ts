@@ -44,11 +44,7 @@ describe("matchExampleToCommand", () => {
     expect(
       matchExampleToCommand(
         "sentry auth\nsentry auth --token YOUR_SENTRY_API_TOKEN",
-        [
-          "sentry auth login",
-          "sentry auth logout",
-          "sentry auth status",
-        ],
+        ["sentry auth login", "sentry auth logout", "sentry auth status"],
         "sentry auth",
         "sentry auth login"
       )
