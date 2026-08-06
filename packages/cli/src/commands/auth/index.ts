@@ -15,11 +15,11 @@ export const authRoute = buildRouteMap({
     token: tokenCommand,
     whoami: whoamiCommand,
   },
-  defaultCommand: "status",
+  defaultCommand: "login",
   docs: {
     brief: "Authenticate with Sentry",
     fullDescription:
-      "Manage authentication with Sentry. Use 'sentry auth login' to authenticate, " +
+      "Manage authentication with Sentry. Use 'sentry auth' (or 'sentry auth login') to authenticate, " +
       "'sentry auth logout' to remove credentials, 'sentry auth refresh' to manually refresh your OAuth access token, " +
       "'sentry auth status' to check your authentication status, " +
       "'sentry auth whoami' to show your current user identity, " +
