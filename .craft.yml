@@ -17,6 +17,7 @@ targets:
   - name: npm
   - name: github
   - name: vercel
+    projectId: prj_wVkOnIwI3eIQbGD1Gw7qS1MqFFIK
   - name: registry
     apps:
       'app:sentry':
