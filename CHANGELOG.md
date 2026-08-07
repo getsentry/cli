@@ -1,6 +1,14 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.42.1
+
+### Internal Changes 🔧
+
+- (cli) Remove remaining zod usage, migrate to valibot by @jared-outpost in [#1389](https://github.com/getsentry/cli/pull/1389)
+- Deploy docs through Vercel by @BYK in [#1391](https://github.com/getsentry/cli/pull/1391)
+- Regenerate docs by @github-actions[bot] in [f805991b](https://github.com/getsentry/cli/commit/f805991b68b95800fb1a53da4ab838f12aba3e78)
+
 ## 0.42.0
 
 ### New Features ✨
