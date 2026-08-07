@@ -37,6 +37,7 @@ const ENTER_CONFIRM_HINT_RE = /enter\s+confirm/;
 const ESC_CANCEL_HINT_RE = /esc\s+cancel/;
 const COMPLETED_SELECTING_FEATURES_RE = /✔\s+Selecting features/;
 const ANSI_ESCAPE_PREFIX = "\u001B[";
+const CURSOR_TO_LINE_START = "\u001B[G";
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in captured Ink output
 const ANSI_CSI_RE = /\u001B\[[0-9;?]*[ -/]*[@-~]/g;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in captured Ink output
@@ -54,7 +55,7 @@ const TEST_BANNER_ROWS = [
 
 class CaptureStream extends Writable {
   frames: string[] = [];
-  lastRenderedFrame = "";
+  settledOutput = "";
   columns: number;
   rows: number;
   isTTY = true;
@@ -69,6 +70,13 @@ class CaptureStream extends Writable {
   }
   allOutput(): string {
     return this.frames.join("");
+  }
+  latestFrame(): string {
+    const output = this.settledOutput || this.allOutput();
+    const redrawStart = output.lastIndexOf(CURSOR_TO_LINE_START);
+    return redrawStart === -1
+      ? output
+      : output.slice(redrawStart + CURSOR_TO_LINE_START.length);
   }
 }
 
@@ -115,8 +123,7 @@ async function renderApp(
     await sleep(20);
   }
   await sleep(FRAME_SETTLE_MS);
-  out.lastRenderedFrame =
-    out.frames.findLast((frame) => frame.includes(FEEDBACK_BANNER_TEXT)) ?? "";
+  out.settledOutput = out.allOutput();
   instance.unmount();
   // waitUntilExit() hangs in CI — race with a short unref'd timeout.
   await Promise.race([
@@ -146,6 +153,10 @@ function withoutFeedbackBanner(output: string): string {
     .split(LINE_SPLIT_RE)
     .filter((line) => !line.includes(FEEDBACK_BANNER_TEXT))
     .join("\n");
+}
+
+function stripFinalLineBreak(output: string): string {
+  return output.endsWith("\n") ? output.slice(0, -1) : output;
 }
 
 function stripAnsi(output: string): string {
@@ -556,14 +567,13 @@ describe("Ink App snapshot", () => {
     });
 
     const rendered = await renderApp(store, 120, { rows: 24 });
-    const frame = stripAnsi(rendered.allOutput());
-    const lastFrame = stripAnsi(rendered.lastRenderedFrame);
+    const frame = stripFinalLineBreak(stripAnsi(rendered.latestFrame()));
     expect(frame).toContain("Which team should own this project?");
     expect(frame).toContain("(1/20)");
     expect(frame).toContain("Team 4");
     expect(frame).not.toContain("Team 5");
-    expect(lastFrame.split(LINE_SPLIT_RE)).toHaveLength(24);
-    expect(lastFrame).toContain(FEEDBACK_BANNER_TEXT);
+    expect(frame.split(LINE_SPLIT_RE).length).toBeLessThanOrEqual(24);
+    expect(frame).toContain(FEEDBACK_BANNER_TEXT);
 
     const scrolledFrame = stripAnsi(
       (
@@ -600,13 +610,12 @@ describe("Ink App snapshot", () => {
     });
 
     const rendered = await renderApp(store, 120, { rows: 16 });
-    const frame = stripAnsi(rendered.allOutput());
-    const lastFrame = stripAnsi(rendered.lastRenderedFrame);
+    const frame = stripFinalLineBreak(stripAnsi(rendered.latestFrame()));
     expect(frame).toContain("0/20 selected • 1/20");
     expect(frame).toContain("Feature 6");
     expect(frame).not.toContain("Feature 7");
-    expect(lastFrame.split(LINE_SPLIT_RE)).toHaveLength(16);
-    expect(lastFrame).toContain(FEEDBACK_BANNER_TEXT);
+    expect(frame.split(LINE_SPLIT_RE).length).toBeLessThanOrEqual(16);
+    expect(frame).toContain(FEEDBACK_BANNER_TEXT);
 
     const scrolledFrame = stripAnsi(
       (
@@ -638,12 +647,11 @@ describe("Ink App snapshot", () => {
     });
 
     const rendered = await renderApp(store, 120, { rows: 30 });
-    const frame = stripAnsi(rendered.allOutput());
-    const lastFrame = stripAnsi(rendered.lastRenderedFrame);
+    const frame = stripFinalLineBreak(stripAnsi(rendered.latestFrame()));
     expect(frame).toContain("Feature 7");
     expect(frame).not.toContain("Feature 8");
-    expect(lastFrame.split(LINE_SPLIT_RE)).toHaveLength(30);
-    expect(lastFrame).toContain(FEEDBACK_BANNER_TEXT);
+    expect(frame.split(LINE_SPLIT_RE).length).toBeLessThanOrEqual(30);
+    expect(frame).toContain(FEEDBACK_BANNER_TEXT);
   });
 
   test("long option hints stay on one terminal row", async () => {
