@@ -18,10 +18,12 @@
  */
 
 import path from "node:path";
+import { isatty } from "node:tty";
 import { setTag } from "@sentry/node-core/light";
 import type { SentryContext } from "../context.js";
 import { findProjectsBySlug } from "../lib/api/projects.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
+import { shouldAutoAuth } from "../lib/auto-auth.js";
 import { buildCommand } from "../lib/command.js";
 import { refreshToken } from "../lib/db/auth.js";
 import { ContextError, ValidationError } from "../lib/errors.js";
@@ -416,11 +418,10 @@ export const initCommand = buildCommand<
 
     // 6. Run the wizard.
     //
-    // Wrapped in try/finally so the macOS force-exit safety net (step 7)
-    // is scheduled on every exit path: success, WizardError, user cancel,
-    // and any other thrown error. Without finally, a thrown WizardError
-    // would skip the timer and the process would hang on the error
-    // display — exactly what Cursor Bugbot flagged on an earlier revision.
+    // Wrapped in try/catch/finally so the macOS force-exit safety net (step 7)
+    // is scheduled on terminal exit paths without interrupting the global
+    // auto-auth middleware when it owns login and command retry.
+    let deferForceExitToAutoAuth = false;
     try {
       await runWizard({
         directory: targetDir,
@@ -436,6 +437,9 @@ export const initCommand = buildCommand<
         // signal we forward to the factory as `forceLegacyUi`.
         forceLegacyUi: flags.tui === false,
       });
+    } catch (error) {
+      deferForceExitToAutoAuth = shouldAutoAuth(error, () => isatty(0));
+      throw error;
     } finally {
       // 7. macOS-only force-exit safety net.
       //
@@ -458,7 +462,11 @@ export const initCommand = buildCommand<
       // Skipped under `bun test` (which sets NODE_ENV=test automatically)
       // because the test runner calls `initCommand.func` directly; an
       // unref'd timer would still fire and terminate the runner mid-suite.
-      if (process.platform === "darwin" && process.env.NODE_ENV !== "test") {
+      if (
+        !deferForceExitToAutoAuth &&
+        process.platform === "darwin" &&
+        process.env.NODE_ENV !== "test"
+      ) {
         setTimeout(() => {
           process.exit(process.exitCode ?? 0);
         }, 100).unref();

@@ -12,6 +12,8 @@ import { initCommand } from "../../src/commands/init.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as projectsApi from "../../src/lib/api/projects.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as autoAuthModule from "../../src/lib/auto-auth.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as authModule from "../../src/lib/db/auth.js";
 import {
   AuthError,
@@ -301,6 +303,51 @@ describe("init command func", () => {
 
       expect(warmSpy).not.toHaveBeenCalled();
       expect(runWizardSpy).not.toHaveBeenCalled();
+    });
+
+    test("does not schedule the macOS force-exit timer during auto-auth", async () => {
+      const authError = new AuthError("expired");
+      runWizardSpy.mockRejectedValueOnce(authError);
+      const shouldAutoAuthSpy = vi
+        .spyOn(autoAuthModule, "shouldAutoAuth")
+        .mockReturnValue(true);
+      const timeout = { unref: vi.fn() } as unknown as ReturnType<
+        typeof setTimeout
+      >;
+      const setTimeoutSpy = vi
+        .spyOn(globalThis, "setTimeout")
+        .mockReturnValue(timeout);
+      const originalPlatform = process.platform;
+      const originalNodeEnv = process.env.NODE_ENV;
+      Object.defineProperty(process, "platform", {
+        value: "darwin",
+        configurable: true,
+      });
+      process.env.NODE_ENV = "production";
+
+      try {
+        await expect(func.call(makeContext(), DEFAULT_FLAGS)).rejects.toBe(
+          authError
+        );
+
+        expect(shouldAutoAuthSpy).toHaveBeenCalledWith(
+          authError,
+          expect.any(Function)
+        );
+        expect(setTimeoutSpy).not.toHaveBeenCalled();
+      } finally {
+        shouldAutoAuthSpy.mockRestore();
+        setTimeoutSpy.mockRestore();
+        Object.defineProperty(process, "platform", {
+          value: originalPlatform,
+          configurable: true,
+        });
+        if (originalNodeEnv === undefined) {
+          delete process.env.NODE_ENV;
+        } else {
+          process.env.NODE_ENV = originalNodeEnv;
+        }
+      }
     });
   });
 
