@@ -1,6 +1,47 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.42.0
+
+### New Features ✨
+
+- (auth) Make bare sentry auth run login by @sentry-junior in [#1380](https://github.com/getsentry/cli/pull/1380)
+- (platform) Add `sentry platform list` command by @betegon in [#1366](https://github.com/getsentry/cli/pull/1366)
+
+### Bug Fixes 🐛
+
+#### Init
+
+- Sort and align selector options by @betegon in [#1387](https://github.com/getsentry/cli/pull/1387)
+- Improve task panel readability by @betegon in [#1386](https://github.com/getsentry/cli/pull/1386)
+- Keep select prompts within terminal by @betegon in [#1385](https://github.com/getsentry/cli/pull/1385)
+- Refresh auth before wizard startup by @betegon in [#1384](https://github.com/getsentry/cli/pull/1384)
+
+#### Other
+
+- (conversation) Parse details envelope instead of bare span array by @MathurAditya724 in [#1365](https://github.com/getsentry/cli/pull/1365)
+- (explore) Remove deprecated `discover` and `transactions` datasets by @mjq in [#1368](https://github.com/getsentry/cli/pull/1368)
+- (skill) Update Explore (`/events/`) datasets by @mjq in [#1369](https://github.com/getsentry/cli/pull/1369)
+- Cap API per_page, guard null alert names, fix log hasMore logic by @cursor in [#1158](https://github.com/getsentry/cli/pull/1158)
+
+### Documentation 📚
+
+- Documentation audit — fix version claims, license, agent coverage, and auth examples by @cursor in [#1350](https://github.com/getsentry/cli/pull/1350)
+
+### Internal Changes 🔧
+
+#### Cli
+
+- Migrate replay SDK validator from zod to valibot by @jared-outpost in [#1388](https://github.com/getsentry/cli/pull/1388)
+- Migrate self-contained runtime validation from zod to valibot by @jared-outpost in [#1370](https://github.com/getsentry/cli/pull/1370)
+
+#### Other
+
+- (deps-dev) Bump hono from 4.12.33 to 4.12.34 in the npm_and_yarn group across 1 directory by @dependabot in [#1358](https://github.com/getsentry/cli/pull/1358)
+- Remove disabled changelog-preview workflow by @oioki in [#1360](https://github.com/getsentry/cli/pull/1360)
+- Remove accidental command-metadata.json by @jared-outpost in [#1359](https://github.com/getsentry/cli/pull/1359)
+- Regenerate docs by @github-actions[bot] in [aa7f660d](https://github.com/getsentry/cli/commit/aa7f660d8e3d0b2236f067976447cbc683112121)
+
 ## 0.41.0
 
 ### New Features ✨
