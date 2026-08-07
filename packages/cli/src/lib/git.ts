@@ -413,6 +413,17 @@ export function inferRepositoryName(
 }
 
 /**
+ * Return the absolute root of the current git worktree.
+ */
+export function inferRepositoryRoot(cwd?: string): string | undefined {
+  try {
+    return git(["rev-parse", "--show-toplevel"], cwd) || undefined;
+  } catch {
+    return;
+  }
+}
+
+/**
  * Infer the default branch from a git remote's HEAD ref.
  *
  * @param remote - The remote name (e.g., "origin", "upstream")

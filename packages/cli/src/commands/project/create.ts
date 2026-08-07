@@ -20,9 +20,6 @@
 
 import type { SentryContext } from "../../context.js";
 import {
-  type CreatedProjectDetails,
-  createProjectWithAutoTeam,
-  createProjectWithDsn,
   listTeams,
   MEMBER_PROJECT_CREATION_DISABLED_DETAIL,
 } from "../../lib/api-client.js";
@@ -50,6 +47,10 @@ import {
   isValidPlatform,
   suggestPlatform,
 } from "../../lib/platforms.js";
+import {
+  createProjectWithTeamFallback,
+  ProjectCreationApiError,
+} from "../../lib/project-creation.js";
 import { resolveOrg } from "../../lib/resolve-target.js";
 import {
   buildOrgNotFoundError,
@@ -204,9 +205,8 @@ async function handleCreateProject404(opts: {
 /**
  * Resolve the team to show in a --dry-run preview.
  *
- * Mirrors the non-dry-run fallback: if resolveOrCreateTeam 403s (member lacks
- * team:read), the real run would use POST /organizations/{org}/projects/ which
- * auto-creates a personal team. Show a placeholder instead of failing.
+ * Mirrors the real resolver without mutating. When the real run would use the
+ * org-scoped endpoint, show a personal-team placeholder.
  */
 async function resolveDryRunTeam(
   orgSlug: string,
@@ -216,25 +216,14 @@ async function resolveDryRunTeam(
     autoCreateSlug: string;
   }
 ): Promise<ResolvedConcreteTeam> {
-  try {
-    return await resolveOrCreateTeam(orgSlug, {
-      team: opts.team,
-      detectedFrom: opts.detectedFrom,
-      usageHint: USAGE_HINT,
-      autoCreateSlug: opts.autoCreateSlug,
-      dryRun: true,
-    });
-  } catch (error) {
-    // 403 from listTeams: member lacks team:read. The real run falls back to the
-    // org-scoped endpoint which auto-creates a personal team. Preview that outcome.
-    if (!(error instanceof ApiError && error.status === 403) || opts.team) {
-      throw error;
-    }
-    log.debug(
-      "403 on listTeams in dry-run — previewing org-scoped fallback outcome"
-    );
-    return { slug: "team-<username>", source: "auto-created" };
-  }
+  const team = await resolveOrCreateTeam(orgSlug, {
+    team: opts.team,
+    detectedFrom: opts.detectedFrom,
+    usageHint: USAGE_HINT,
+    autoCreateSlug: opts.autoCreateSlug,
+    dryRun: true,
+  });
+  return team ?? { slug: "team-<username>", source: "auto-created" };
 }
 
 /** Inputs shared by both project-creation endpoints. */
@@ -246,63 +235,6 @@ type CreateProjectBaseOpts = {
   /** Validated Sentry platform identifier. */
   platform: string;
 };
-
-/** Inputs required by the team-scoped project-creation endpoint. */
-type CreateProjectOpts = CreateProjectBaseOpts & {
-  /** Team slug that will own the project. */
-  teamSlug: string;
-  /** Source used to resolve the organization, when auto-detected. */
-  detectedFrom?: string;
-};
-
-/**
- * Fallback project creation via POST /organizations/{org}/projects/.
- *
- * Used when the team-scoped flow 403s (member lacks project:write or can't
- * create teams). Returns the created project details plus the team slug the
- * server auto-created. Surfaces a clear policy error if the org has disabled
- * member project creation entirely.
- */
-async function createProjectWithAutoTeamFallback(
-  opts: CreateProjectBaseOpts
-): Promise<
-  CreatedProjectDetails & {
-    teamSlug: string;
-    teamSource: ResolvedConcreteTeam["source"];
-  }
-> {
-  const { orgSlug, name, platform } = opts;
-  let result: Awaited<ReturnType<typeof createProjectWithAutoTeam>>;
-  try {
-    result = await createProjectWithAutoTeam(orgSlug, { name, platform });
-  } catch (error) {
-    if (!(error instanceof ApiError)) {
-      throw error;
-    }
-    if (
-      error.status === 403 &&
-      error.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)
-    ) {
-      throw new ApiError(
-        `Failed to create project '${name}' in ${orgSlug} (HTTP 403).\n\n` +
-          "Your organization has disabled project creation for members.\n" +
-          "Ask an org owner or manager to enable it in Organization Settings → Member Roles,\n" +
-          "or ask them to create the project and add you to it.",
-        403,
-        error.detail,
-        error.endpoint
-      );
-    }
-    return handleCreateApiError(error, opts);
-  }
-  return {
-    project: result.project,
-    dsn: result.dsn,
-    url: result.url,
-    teamSlug: result.team_slug,
-    teamSource: "auto-created",
-  };
-}
 
 /**
  * A project with this name already exists in the org (HTTP 409). Shared by the
@@ -326,6 +258,20 @@ function handleCreateApiError(
   opts: CreateProjectBaseOpts
 ): never {
   const { orgSlug, name, platform } = opts;
+  if (
+    error.status === 403 &&
+    error.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)
+  ) {
+    throw new ApiError(
+      `Failed to create project '${name}' in ${orgSlug} (HTTP 403).\n\n` +
+        "Your organization has disabled project creation for members.\n" +
+        "Ask an org owner or manager to enable it in Organization Settings → Member Roles,\n" +
+        "or ask them to create the project and add you to it.",
+      403,
+      error.detail,
+      error.endpoint
+    );
+  }
   if (error.status === 409) {
     throw projectExistsError(orgSlug, name);
   }
@@ -342,27 +288,6 @@ function handleCreateApiError(
     error.detail,
     error.endpoint
   );
-}
-
-/**
- * Create a project (with DSN + URL) with user-friendly error handling.
- * Wraps API errors with actionable messages instead of raw HTTP status codes.
- */
-async function createProjectWithErrors(
-  opts: CreateProjectOpts
-): Promise<CreatedProjectDetails> {
-  const { orgSlug, teamSlug, name, platform } = opts;
-  try {
-    return await createProjectWithDsn(orgSlug, teamSlug, { name, platform });
-  } catch (error) {
-    if (!(error instanceof ApiError)) {
-      throw error;
-    }
-    if (error.status === 404) {
-      return await handleCreateProject404(opts);
-    }
-    return handleCreateApiError(error, opts);
-  }
 }
 
 /** A validated project specification parsed from the command positionals. */
@@ -545,51 +470,43 @@ async function createOneProject(opts: {
     };
   }
 
-  let teamSlug: string;
-  let teamSource: ResolvedConcreteTeam["source"];
-  let projectDetails: CreatedProjectDetails;
+  const team = await resolveOrCreateTeam(orgSlug, {
+    team: flags.team,
+    detectedFrom,
+    usageHint: USAGE_HINT,
+    autoCreateSlug,
+  });
 
+  let projectDetails: Awaited<ReturnType<typeof createProjectWithTeamFallback>>;
   try {
-    const team: ResolvedConcreteTeam = await resolveOrCreateTeam(orgSlug, {
-      team: flags.team,
-      detectedFrom,
-      usageHint: USAGE_HINT,
-      autoCreateSlug,
-    });
-    teamSlug = team.slug;
-    teamSource = team.source;
-    projectDetails = await createProjectWithErrors({
+    projectDetails = await createProjectWithTeamFallback({
       orgSlug,
-      teamSlug,
       name,
       platform,
-      detectedFrom,
+      team,
     });
   } catch (error) {
-    // 403 means the user lacks permission to create or access teams, or to
-    // create projects on the resolved team. Fall back to the org-scoped endpoint
-    // which requires only project:read and auto-creates a personal team.
-    // Skip the fallback when --team was explicit: the 403 is meaningful there.
-    if (!(error instanceof ApiError && error.status === 403) || flags.team) {
+    if (!(error instanceof ApiError)) {
       throw error;
     }
-    // Policy 403: org has disabled member project creation. The org-scoped
-    // endpoint enforces the same flag — re-throw to avoid a wasted round-trip.
-    if (error.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)) {
-      throw error;
+    if (
+      error instanceof ProjectCreationApiError &&
+      error.status === 404 &&
+      error.route === "team" &&
+      team
+    ) {
+      return await handleCreateProject404({
+        orgSlug,
+        teamSlug: team.slug,
+        name,
+        platform,
+        detectedFrom,
+      });
     }
-    log.debug("403 on team-based flow — falling back to org-scoped endpoint");
-    const fallback = await createProjectWithAutoTeamFallback({
-      orgSlug,
-      name,
-      platform,
-    });
-    teamSlug = fallback.teamSlug;
-    teamSource = fallback.teamSource;
-    projectDetails = fallback;
+    return handleCreateApiError(error, { orgSlug, name, platform });
   }
 
-  const { project, dsn, url } = projectDetails;
+  const { project, dsn, url, teamSlug, teamSource } = projectDetails;
   return {
     project,
     orgSlug,
@@ -614,8 +531,9 @@ export const createCommand = buildCommand({
       "cannot contain whitespace.\n\n" +
       "Every project is a name:platform pair. Create several projects at once\n" +
       "by passing multiple pairs as separate arguments. All projects share one org.\n\n" +
-      "Projects are created under a team. If the org has one team, it is used\n" +
-      "automatically. If no teams exist, one is created. Otherwise, specify --team.\n\n" +
+      "Projects are created under a team. An eligible Team Admin team is used\n" +
+      "automatically. If needed and permitted, a new team is created. Use --team\n" +
+      "to choose a specific team explicitly.\n\n" +
       "Examples:\n" +
       "  sentry project create my-app:node\n" +
       "  sentry project create acme-corp/my-app:javascript-nextjs\n" +

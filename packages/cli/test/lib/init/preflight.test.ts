@@ -1,6 +1,5 @@
 /**
- * Tests for `resolveInitContext`. Stubs API and DSN-detection layers
- * with `spyOn` and uses `MockUI` to drive prompts deterministically.
+ * Tests for init preflight project intent and organization resolution.
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -9,44 +8,23 @@ vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../../src/lib/api-client.js")>();
   return Object.fromEntries(
-    Object.entries(actual).map(([k, v]) => [
-      k,
-      typeof v === "function" ? vi.fn(v) : v,
+    Object.entries(actual).map(([key, value]) => [
+      key,
+      typeof value === "function" ? vi.fn(value) : value,
     ])
   );
 });
-
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as apiClient from "../../../src/lib/api-client.js";
 
 vi.mock("../../../src/lib/db/auth.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../../src/lib/db/auth.js")>();
   return Object.fromEntries(
-    Object.entries(actual).map(([k, v]) => [
-      k,
-      typeof v === "function" ? vi.fn(v) : v,
+    Object.entries(actual).map(([key, value]) => [
+      key,
+      typeof value === "function" ? vi.fn(value) : value,
     ])
   );
 });
-
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as auth from "../../../src/lib/db/auth.js";
-
-vi.mock("../../../src/lib/dsn/index.js", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../../src/lib/dsn/index.js")>();
-  return Object.fromEntries(
-    Object.entries(actual).map(([k, v]) => [
-      k,
-      typeof v === "function" ? vi.fn(v) : v,
-    ])
-  );
-});
-
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as dsnIndex from "../../../src/lib/dsn/index.js";
-import { ApiError, WizardError } from "../../../src/lib/errors.js";
 
 vi.mock("../../../src/lib/init/org-prefetch.js", async (importOriginal) => {
   const actual =
@@ -54,75 +32,73 @@ vi.mock("../../../src/lib/init/org-prefetch.js", async (importOriginal) => {
       typeof import("../../../src/lib/init/org-prefetch.js")
     >();
   return Object.fromEntries(
-    Object.entries(actual).map(([k, v]) => [
-      k,
-      typeof v === "function" ? vi.fn(v) : v,
+    Object.entries(actual).map(([key, value]) => [
+      key,
+      typeof value === "function" ? vi.fn(value) : value,
     ])
   );
 });
-
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as prefetch from "../../../src/lib/init/org-prefetch.js";
-import { resolveInitContext } from "../../../src/lib/init/preflight.js";
-import type { WizardOptions } from "../../../src/lib/init/types.js";
-import { CANCELLED } from "../../../src/lib/init/ui/types.js";
 
 vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../../src/lib/resolve-target.js")>();
   return Object.fromEntries(
-    Object.entries(actual).map(([k, v]) => [
-      k,
-      typeof v === "function" ? vi.fn(v) : v,
+    Object.entries(actual).map(([key, value]) => [
+      key,
+      typeof value === "function" ? vi.fn(value) : value,
     ])
   );
 });
 
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as apiClient from "../../../src/lib/api-client.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as auth from "../../../src/lib/db/auth.js";
+import { ApiError } from "../../../src/lib/errors.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as prefetch from "../../../src/lib/init/org-prefetch.js";
+import { resolveInitContext } from "../../../src/lib/init/preflight.js";
+import type { WizardOptions } from "../../../src/lib/init/types.js";
+import { CANCELLED } from "../../../src/lib/init/ui/types.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
-
-vi.mock("../../../src/lib/resolve-team.js", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../../src/lib/resolve-team.js")>();
-  return Object.fromEntries(
-    Object.entries(actual).map(([k, v]) => [
-      k,
-      typeof v === "function" ? vi.fn(v) : v,
-    ])
-  );
-});
-
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as resolveTeam from "../../../src/lib/resolve-team.js";
 import { createMockUI, type MockCall } from "./ui/mock-ui.js";
 
 function makeOptions(overrides?: Partial<WizardOptions>): WizardOptions {
   return {
-    directory: "/tmp/test",
+    directory: "/work/checkout",
     yes: true,
     dryRun: false,
     ...overrides,
   };
 }
 
+function makeProject(slug: string, name = slug) {
+  return {
+    id: `id-${slug}`,
+    slug,
+    name,
+    platform: "javascript-react",
+    dateCreated: "2026-04-16T00:00:00Z",
+  } as any;
+}
+
 function feedbackOutcomes(calls: MockCall[]): string[] {
   return calls
     .filter(
-      (c): c is Extract<MockCall, { kind: "feedback" }> => c.kind === "feedback"
+      (call): call is Extract<MockCall, { kind: "feedback" }> =>
+        call.kind === "feedback"
     )
-    .map((c) => c.outcome);
+    .map((call) => call.outcome);
 }
 
 let resolveOrgPrefetchedSpy: ReturnType<typeof spyOn>;
 let listOrganizationsSpy: ReturnType<typeof spyOn>;
-let listTeamsSpy: ReturnType<typeof spyOn>;
-let getOrganizationSpy: ReturnType<typeof spyOn>;
+let listProjectsSpy: ReturnType<typeof spyOn>;
 let getProjectSpy: ReturnType<typeof spyOn>;
 let tryGetPrimaryDsnSpy: ReturnType<typeof spyOn>;
 let getAuthTokenSpy: ReturnType<typeof spyOn>;
-let resolveOrCreateTeamSpy: ReturnType<typeof spyOn>;
-let detectDsnSpy: ReturnType<typeof spyOn>;
-let resolveDsnByPublicKeySpy: ReturnType<typeof spyOn>;
+let resolveAllTargetsSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
   resolveOrgPrefetchedSpy = vi
@@ -131,224 +107,332 @@ beforeEach(() => {
   listOrganizationsSpy = vi
     .spyOn(apiClient, "listOrganizations")
     .mockResolvedValue([{ id: "1", slug: "acme", name: "Acme" }]);
-  listTeamsSpy = vi.spyOn(apiClient, "listTeams").mockResolvedValue([
-    {
-      id: "1",
-      slug: "platform",
-      name: "Platform",
-      access: ["team:admin"],
-      isMember: true,
-    } as any,
-  ]);
-  getOrganizationSpy = vi
-    .spyOn(apiClient, "getOrganization")
-    .mockResolvedValue({
-      id: "1",
-      slug: "acme",
-      name: "Acme",
-      access: ["project:read"],
-      allowMemberProjectCreation: true,
-    } as any);
-  getProjectSpy = vi.spyOn(apiClient, "getProject").mockResolvedValue({
-    id: "42",
-    slug: "my-app",
-    name: "my-app",
-    platform: "javascript-react",
-    dateCreated: "2026-04-16T00:00:00Z",
-  } as any);
+  listProjectsSpy = vi.spyOn(apiClient, "listProjects").mockResolvedValue([]);
+  getProjectSpy = vi
+    .spyOn(apiClient, "getProject")
+    .mockImplementation(async (_org, slug) => {
+      if (slug === "junior") {
+        return makeProject("junior");
+      }
+      throw new ApiError("not found", 404);
+    });
   tryGetPrimaryDsnSpy = vi
     .spyOn(apiClient, "tryGetPrimaryDsn")
     .mockResolvedValue("https://abc@o1.ingest.sentry.io/42");
   getAuthTokenSpy = vi
     .spyOn(auth, "getAuthToken")
     .mockReturnValue("sntrys_test");
-  resolveOrCreateTeamSpy = vi
-    .spyOn(resolveTeam, "resolveOrCreateTeam")
-    .mockResolvedValue({
-      slug: "platform",
-      source: "auto-selected",
-    });
-  detectDsnSpy = vi.spyOn(dsnIndex, "detectDsn").mockResolvedValue(null);
-  resolveDsnByPublicKeySpy = vi
-    .spyOn(resolveTarget, "resolveDsnByPublicKey")
-    .mockResolvedValue(null);
+  resolveAllTargetsSpy = vi
+    .spyOn(resolveTarget, "resolveAllTargets")
+    .mockResolvedValue({ targets: [] });
 });
 
 afterEach(() => {
   resolveOrgPrefetchedSpy.mockRestore();
   listOrganizationsSpy.mockRestore();
-  listTeamsSpy.mockRestore();
-  getOrganizationSpy.mockRestore();
+  listProjectsSpy.mockRestore();
   getProjectSpy.mockRestore();
   tryGetPrimaryDsnSpy.mockRestore();
   getAuthTokenSpy.mockRestore();
-  resolveOrCreateTeamSpy.mockRestore();
-  detectDsnSpy.mockRestore();
-  resolveDsnByPublicKeySpy.mockRestore();
+  resolveAllTargetsSpy.mockRestore();
   process.exitCode = 0;
 });
 
 describe("resolveInitContext", () => {
-  test("uses an existing detected project in --yes mode", async () => {
-    detectDsnSpy.mockResolvedValue({
-      publicKey: "abc",
-      protocol: "https",
-      host: "o1.ingest.sentry.io",
-      projectId: "42",
-      raw: "https://abc@o1.ingest.sentry.io/42",
-      source: "env_file" as const,
-    });
-    resolveDsnByPublicKeySpy.mockResolvedValue({
-      org: "acme",
-      project: "my-app",
+  test("automatically uses the shared resolver's concrete project", async () => {
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "acme",
+          project: "junior",
+          projectId: 42,
+          orgDisplay: "Acme",
+          projectDisplay: "Junior",
+          detectedFrom: 'git origin remote "getsentry/junior"',
+        },
+      ],
     });
 
-    const { ui } = createMockUI();
-    const context = await resolveInitContext(makeOptions(), ui);
+    const { ui, calls } = createMockUI();
+    const context = await resolveInitContext(makeOptions({ yes: false }), ui);
 
     expect(context).toEqual(
       expect.objectContaining({
         org: "acme",
-        project: "my-app",
-        team: "platform",
-        authToken: "sntrys_test",
-        existingProject: expect.objectContaining({
-          orgSlug: "acme",
-          projectSlug: "my-app",
-        }),
+        project: "junior",
+        team: undefined,
+        existingProject: expect.objectContaining({ projectSlug: "junior" }),
       })
     );
-    expect(getProjectSpy).toHaveBeenCalledTimes(1);
-    expect(tryGetPrimaryDsnSpy).toHaveBeenCalledTimes(1);
+    expect(calls.filter((call) => call.kind === "select")).toHaveLength(0);
+    expect(listProjectsSpy).not.toHaveBeenCalled();
+    expect(resolveAllTargetsSpy).toHaveBeenCalledWith({
+      cwd: "/work/checkout",
+      resolutionMode: "codebase",
+      organizationFilter: "acme",
+    });
   });
 
-  test("keeps a detected DSN project even when project enrichment fails", async () => {
-    detectDsnSpy.mockResolvedValue({
-      publicKey: "abc",
-      protocol: "https",
-      host: "o1.ingest.sentry.io",
-      projectId: "42",
-      raw: "https://abc@o1.ingest.sentry.io/42",
-      source: "env_file" as const,
-    });
-    resolveDsnByPublicKeySpy.mockResolvedValue({
-      org: "acme",
-      project: "my-app",
+  test("keeps a canonical DSN when metadata enrichment is unavailable", async () => {
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "acme",
+          project: "junior",
+          projectId: 42,
+          orgDisplay: "Acme",
+          projectDisplay: "Junior",
+          detectedDsn: {
+            publicKey: "abc",
+            protocol: "https",
+            host: "o1.ingest.sentry.io",
+            projectId: "42",
+            raw: "https://abc@o1.ingest.sentry.io/42",
+            source: "env_file" as const,
+          },
+        },
+      ],
     });
     getProjectSpy.mockRejectedValue(new ApiError("temporary failure", 503));
-
-    const { ui } = createMockUI();
-    const context = await resolveInitContext(makeOptions(), ui);
-
-    expect(context).toEqual(
-      expect.objectContaining({
-        org: "acme",
-        project: "my-app",
-        team: "platform",
-      })
-    );
-    expect(context?.existingProject).toBeUndefined();
-  });
-
-  test("retries detected project enrichment during project selection when the first lookup yields no metadata", async () => {
-    detectDsnSpy.mockResolvedValue({
-      publicKey: "abc",
-      protocol: "https",
-      host: "o1.ingest.sentry.io",
-      projectId: "42",
-      raw: "https://abc@o1.ingest.sentry.io/42",
-      source: "env_file" as const,
-    });
-    resolveDsnByPublicKeySpy.mockResolvedValue({
-      org: "acme",
-      project: "my-app",
-    });
-    getProjectSpy
-      .mockRejectedValueOnce(new ApiError("not found", 404))
-      .mockResolvedValue({
-        id: "42",
-        slug: "my-app",
-        name: "my-app",
-        platform: "javascript-react",
-        dateCreated: "2026-04-16T00:00:00Z",
-      } as any);
 
     const { ui } = createMockUI();
     const context = await resolveInitContext(makeOptions(), ui);
 
     expect(context?.existingProject).toEqual(
       expect.objectContaining({
-        orgSlug: "acme",
-        projectSlug: "my-app",
+        projectSlug: "junior",
+        projectId: "42",
+        dsn: "https://abc@o1.ingest.sentry.io/42",
       })
     );
-    expect(getProjectSpy).toHaveBeenCalledTimes(2);
-    expect(tryGetPrimaryDsnSpy).toHaveBeenCalledTimes(1);
+    expect(getProjectSpy).not.toHaveBeenCalled();
   });
 
-  test("falls back to listing organizations when prefetch misses", async () => {
+  test("keeps target DSN provenance instead of correlating by array position", async () => {
+    const correctDsn = {
+      publicKey: "correct",
+      protocol: "https",
+      host: "o1.ingest.sentry.io",
+      projectId: "42",
+      raw: "https://correct@o1.ingest.sentry.io/42",
+      source: "code" as const,
+    };
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "acme",
+          project: "junior",
+          orgDisplay: "Acme",
+          projectDisplay: "Junior",
+          detectedDsn: correctDsn,
+        },
+      ],
+      detectedDsns: [
+        {
+          publicKey: "unresolved",
+          protocol: "https",
+          host: "self-hosted.example.com",
+          projectId: "42",
+          raw: "https://unresolved@self-hosted.example.com/42",
+          source: "code" as const,
+        },
+        correctDsn,
+      ],
+    });
+
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions(), ui);
+
+    expect(context?.existingProject?.dsn).toBe(correctDsn.raw);
+    expect(context?.existingProject?.projectId).toBe("42");
+  });
+
+  test("does not auto-select a partial multi-DSN resolution", async () => {
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "acme",
+          project: "junior",
+          orgDisplay: "Acme",
+          projectDisplay: "Junior",
+        },
+      ],
+      skippedSelfHosted: 1,
+    });
+    const { ui, respond } = createMockUI();
+    respond.select("create");
+
+    const context = await resolveInitContext(makeOptions({ yes: false }), ui);
+
+    expect(context?.org).toBe("acme");
+    expect(context?.project).toBeUndefined();
+    expect(context?.existingProject).toBeUndefined();
+  });
+
+  test("resolves organization before filtering project candidates", async () => {
+    resolveOrgPrefetchedSpy.mockResolvedValue({
+      org: "acme",
+      detectedFrom: "SENTRY_ORG env var",
+    });
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "other",
+          project: "junior",
+          orgDisplay: "Other",
+          projectDisplay: "Junior",
+        },
+      ],
+    });
+    const { ui, respond } = createMockUI();
+    respond.select("create");
+
+    const context = await resolveInitContext(makeOptions({ yes: false }), ui);
+
+    expect(resolveAllTargetsSpy).toHaveBeenCalledWith({
+      cwd: "/work/checkout",
+      resolutionMode: "codebase",
+      organizationFilter: "acme",
+    });
+    expect(context?.org).toBe("acme");
+    expect(context?.project).toBeUndefined();
+  });
+
+  test("filters shared resolver matches by an explicit organization", async () => {
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "other",
+          project: "junior",
+          orgDisplay: "Other",
+          projectDisplay: "Junior",
+        },
+        {
+          org: "acme",
+          project: "junior",
+          orgDisplay: "Acme",
+          projectDisplay: "Junior",
+        },
+      ],
+    });
+
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions({ org: "acme" }), ui);
+
+    expect(context?.existingProject?.projectSlug).toBe("junior");
+  });
+
+  test("filters ambiguous cross-org matches after organization resolution", async () => {
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "other",
+          project: "junior",
+          orgDisplay: "Other",
+          projectDisplay: "Junior",
+        },
+        {
+          org: "acme",
+          project: "junior",
+          orgDisplay: "Acme",
+          projectDisplay: "Junior",
+        },
+      ],
+    });
+
+    const { ui, calls } = createMockUI();
+    const context = await resolveInitContext(makeOptions({ yes: false }), ui);
+
+    expect(context?.org).toBe("acme");
+    expect(context?.existingProject?.projectSlug).toBe("junior");
+    expect(calls.filter((call) => call.kind === "select")).toHaveLength(0);
+  });
+
+  test("falls back to the only listed organization when detection misses", async () => {
     resolveOrgPrefetchedSpy.mockResolvedValue(null);
     listOrganizationsSpy.mockResolvedValue([
       { id: "1", slug: "solo-org", name: "Solo Org" },
     ]);
 
-    const { ui } = createMockUI();
-    const context = await resolveInitContext(makeOptions({ yes: false }), ui);
+    const { ui, respond } = createMockUI();
+    respond.select("create");
+    const context = await resolveInitContext(
+      makeOptions({ yes: false, directory: "/work/no-match" }),
+      ui
+    );
 
     expect(context?.org).toBe("solo-org");
   });
 
-  test("lets the user choose an existing bare-slug project", async () => {
-    const { ui, respond } = createMockUI();
-    respond.select("existing");
-
+  test("uses an explicitly named existing project without prompting", async () => {
+    const { ui, calls } = createMockUI();
     const context = await resolveInitContext(
-      makeOptions({ yes: false, project: "my-app" }),
+      makeOptions({ yes: false, project: "junior" }),
       ui
     );
 
-    expect(context?.project).toBe("my-app");
-    expect(context?.existingProject?.projectSlug).toBe("my-app");
+    expect(context?.existingProject?.projectSlug).toBe("junior");
+    expect(calls.filter((call) => call.kind === "select")).toHaveLength(0);
   });
 
-  test("keeps the bare slug when the existence lookup fails", async () => {
-    getProjectSpy.mockRejectedValue(new ApiError("temporary failure", 503));
+  test("keeps an explicitly named new project when no exact project exists", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("not found", 404));
 
     const { ui } = createMockUI();
     const context = await resolveInitContext(
-      makeOptions({ yes: false, project: "my-app" }),
+      makeOptions({ project: "brand-new" }),
       ui
     );
 
-    expect(context?.project).toBe("my-app");
+    expect(context?.project).toBe("brand-new");
     expect(context?.existingProject).toBeUndefined();
   });
 
-  test("uses org-scoped creation when no Team Admin team is available", async () => {
-    listTeamsSpy.mockResolvedValueOnce([
-      {
-        id: "1",
-        slug: "frontend",
-        name: "Frontend",
-        access: ["team:read"],
-        isMember: true,
-      } as any,
-    ]);
-
+  test("surfaces transient failures while checking an explicitly named project", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("unavailable", 503));
     const { ui } = createMockUI();
-    const context = await resolveInitContext(makeOptions(), ui);
 
-    expect(context?.team).toBeUndefined();
-    expect(getOrganizationSpy).toHaveBeenCalledWith("acme");
-    expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
+    await expect(
+      resolveInitContext(makeOptions({ project: "junior" }), ui)
+    ).rejects.toThrow("unavailable");
   });
 
-  test("clears the project when the user chooses to create new", async () => {
+  test("continues create-first flow when shared resolution fails", async () => {
+    resolveAllTargetsSpy.mockRejectedValue(new ApiError("unavailable", 503));
+    const { ui, respond, calls } = createMockUI();
+    respond.select("create");
+
+    const context = await resolveInitContext(
+      makeOptions({ yes: false, directory: "/work/local-checkout" }),
+      ui
+    );
+
+    expect(context?.project).toBeUndefined();
+    expect(calls.filter((call) => call.kind === "select")).toHaveLength(1);
+  });
+
+  test("does not auto-select an ambiguous shared resolution", async () => {
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "acme",
+          project: "junior",
+          orgDisplay: "Acme",
+          projectDisplay: "Junior",
+        },
+        {
+          org: "acme",
+          project: "backend",
+          orgDisplay: "Acme",
+          projectDisplay: "Backend",
+        },
+      ],
+    });
     const { ui, respond } = createMockUI();
     respond.select("create");
 
     const context = await resolveInitContext(
-      makeOptions({ yes: false, project: "my-app" }),
+      makeOptions({ yes: false, directory: "/work/local-checkout" }),
       ui
     );
 
@@ -356,162 +440,146 @@ describe("resolveInitContext", () => {
     expect(context?.existingProject).toBeUndefined();
   });
 
-  test("resolves an explicit team during preflight", async () => {
-    resolveOrCreateTeamSpy.mockImplementation(async (_org, options) => ({
-      slug: options.team ?? "platform",
-      source: options.team ? "explicit" : "auto-selected",
-    }));
-
-    const { ui } = createMockUI();
-    const context = await resolveInitContext(
-      makeOptions({ team: "backend", yes: false }),
-      ui
-    );
-
-    expect(context?.team).toBe("backend");
-    expect(resolveOrCreateTeamSpy).toHaveBeenCalledWith(
-      "acme",
-      expect.objectContaining({
-        team: "backend",
-        deferAutoCreateOnEmptyOrg: true,
-      })
-    );
-  });
-
-  test("selects a Team Admin team over non-admin member teams", async () => {
-    listTeamsSpy.mockResolvedValueOnce([
-      {
-        id: "1",
-        slug: "frontend",
-        name: "Frontend",
-        access: ["team:read"],
-        isMember: true,
-      } as any,
-      {
-        id: "2",
-        slug: "platform",
-        name: "Platform",
-        access: ["team:admin"],
-        isMember: true,
-      } as any,
-    ]);
-
-    const { ui } = createMockUI();
-    const context = await resolveInitContext(makeOptions(), ui);
-
-    expect(context?.team).toBe("platform");
-    expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
-  });
-
-  test("prompts when multiple Team Admin teams are available", async () => {
+  test("does not reuse a fuzzy-only project-root match", async () => {
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "acme",
+          project: "checkout-service",
+          orgDisplay: "Acme",
+          projectDisplay: "Checkout Service",
+          matchStrength: "fuzzy",
+        },
+      ],
+    });
     const { ui, respond } = createMockUI();
-    respond.select("mobile");
-    listTeamsSpy.mockResolvedValueOnce([
-      {
-        id: "1",
-        slug: "mobile",
-        name: "Mobile",
-        access: ["team:admin"],
-        isMember: true,
-      } as any,
-      {
-        id: "2",
-        slug: "platform",
-        name: "Platform",
-        access: ["team:admin"],
-        isMember: true,
-      } as any,
-    ]);
+    respond.select("create");
 
     const context = await resolveInitContext(makeOptions({ yes: false }), ui);
 
-    expect(context?.team).toBe("mobile");
+    expect(context?.project).toBeUndefined();
+    expect(context?.existingProject).toBeUndefined();
   });
 
-  test("selects the first Team Admin team in --yes mode", async () => {
-    listTeamsSpy.mockResolvedValueOnce([
-      {
-        id: "1",
-        slug: "mobile",
-        name: "Mobile",
-        access: ["team:admin"],
-        isMember: true,
-      } as any,
-      {
-        id: "2",
-        slug: "platform",
-        name: "Platform",
-        access: ["team:admin"],
-        isMember: true,
-      } as any,
+  test("offers create first when no likely project matches", async () => {
+    listProjectsSpy.mockResolvedValue([
+      makeProject("backend"),
+      makeProject("frontend"),
     ]);
+    const { ui, calls, respond } = createMockUI();
+    respond.select("create");
 
+    const context = await resolveInitContext(makeOptions({ yes: false }), ui);
+
+    expect(context?.project).toBeUndefined();
+    expect(calls).toContainEqual({
+      kind: "select",
+      message: "How should Sentry be configured for this codebase?",
+      options: ["create", "existing"],
+    });
+    expect(listProjectsSpy).not.toHaveBeenCalled();
+  });
+
+  test("opens the project list only after choosing the existing-project path", async () => {
+    listProjectsSpy.mockResolvedValue([
+      makeProject("backend", "Backend"),
+      makeProject("frontend", "Frontend"),
+    ]);
+    getProjectSpy.mockImplementation(async (_org, slug) => {
+      if (slug === "frontend") {
+        return makeProject("frontend", "Frontend");
+      }
+      throw new ApiError("not found", 404);
+    });
+    const { ui, calls, respond } = createMockUI();
+    respond.select("existing");
+    respond.select("frontend");
+
+    const context = await resolveInitContext(makeOptions({ yes: false }), ui);
+
+    expect(context?.existingProject?.projectSlug).toBe("frontend");
+    expect(calls.filter((call) => call.kind === "select")).toEqual([
+      {
+        kind: "select",
+        message: "How should Sentry be configured for this codebase?",
+        options: ["create", "existing"],
+      },
+      {
+        kind: "select",
+        message: "Which existing Sentry project should be used?",
+        options: ["backend", "frontend"],
+      },
+    ]);
+  });
+
+  test("does not ask for a team and preserves an explicit --team", async () => {
+    const { ui, calls } = createMockUI();
+    const context = await resolveInitContext(
+      makeOptions({ team: "backend" }),
+      ui
+    );
+
+    expect(context?.team).toEqual({ slug: "backend", source: "explicit" });
+    expect(calls.filter((call) => call.kind === "select")).toHaveLength(0);
+  });
+
+  test("does not list every project in non-interactive create mode", async () => {
+    listProjectsSpy.mockRejectedValueOnce(new ApiError("unavailable", 503));
     const { ui } = createMockUI();
-    const context = await resolveInitContext(makeOptions({ yes: true }), ui);
 
-    expect(context?.team).toBe("mobile");
+    const context = await resolveInitContext(makeOptions(), ui);
+
+    expect(context?.project).toBeUndefined();
+    expect(listProjectsSpy).not.toHaveBeenCalled();
   });
 
-  test("returns null when the user cancels an org selection", async () => {
-    resolveOrgPrefetchedSpy.mockResolvedValue(null);
-    listOrganizationsSpy.mockResolvedValue([
-      { id: "1", slug: "acme", name: "Acme" },
-      { id: "2", slug: "beta", name: "Beta" },
-    ]);
+  test("surfaces project-list failures after the user chooses existing", async () => {
+    listProjectsSpy.mockRejectedValueOnce(new ApiError("unavailable", 503));
+    const { ui, respond } = createMockUI();
+    respond.select("existing");
 
+    await expect(
+      resolveInitContext(makeOptions({ yes: false }), ui)
+    ).rejects.toThrow("Could not list existing projects");
+  });
+
+  test("does not turn a stale existing-project selection into creation", async () => {
+    listProjectsSpy.mockResolvedValue([makeProject("backend")]);
+    const { ui, respond } = createMockUI();
+    respond.select("existing");
+    respond.select("backend");
+
+    await expect(
+      resolveInitContext(makeOptions({ yes: false }), ui)
+    ).rejects.toThrow("Project 'acme/backend' is no longer available");
+  });
+
+  test("returns null when the user cancels project intent selection", async () => {
+    listProjectsSpy.mockResolvedValue([makeProject("backend")]);
     const { ui, calls, respond } = createMockUI();
     respond.select(CANCELLED);
 
     const context = await resolveInitContext(makeOptions({ yes: false }), ui);
 
     expect(context).toBeNull();
-    const cancelCall = calls.find((c) => c.kind === "cancel");
-    expect(cancelCall?.kind === "cancel" && cancelCall.message).toBe(
-      "Setup cancelled."
-    );
     expect(feedbackOutcomes(calls)).toEqual(["cancelled"]);
   });
 
-  test("surfaces 403 guidance when listOrganizations is forbidden", async () => {
+  test("surfaces 403 guidance when organizations cannot be listed", async () => {
     resolveOrgPrefetchedSpy.mockResolvedValue(null);
     listOrganizationsSpy.mockRejectedValueOnce(
-      new ApiError(
-        "Failed to list organizations",
-        403,
-        "You do not have permission."
-      )
+      new ApiError("Failed to list organizations", 403, "Missing org:read")
     );
-
     const { ui, calls } = createMockUI();
-    await expect(
-      resolveInitContext(makeOptions({ yes: true }), ui)
-    ).rejects.toThrow("403 Forbidden");
 
-    const errorCall = calls.find(
-      (c): c is Extract<MockCall, { kind: "log.error" }> =>
-        c.kind === "log.error"
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
+      "403 Forbidden"
     );
-    expect(errorCall?.message).toContain("403 Forbidden");
-    expect(errorCall?.message).toContain("sentry init <org-slug>/");
-  });
-
-  test("surfaces 401 guidance when listOrganizations is unauthorized", async () => {
-    resolveOrgPrefetchedSpy.mockResolvedValue(null);
-    listOrganizationsSpy.mockRejectedValueOnce(
-      new ApiError("Failed to list organizations", 401, "Token expired")
+    expect(calls.find((call) => call.kind === "log.error")).toEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("sentry init <org-slug>/"),
+      })
     );
-
-    const { ui, calls } = createMockUI();
-    await expect(
-      resolveInitContext(makeOptions({ yes: true }), ui)
-    ).rejects.toThrow("401 Unauthorized");
-
-    const errorCall = calls.find(
-      (c): c is Extract<MockCall, { kind: "log.error" }> =>
-        c.kind === "log.error"
-    );
-    expect(errorCall?.message).toContain("401 Unauthorized");
-    expect(errorCall?.message).toContain("Token expired");
   });
 
   test("includes the auth token in the resolved context", async () => {
@@ -519,247 +587,5 @@ describe("resolveInitContext", () => {
     const context = await resolveInitContext(makeOptions(), ui);
 
     expect(context?.authToken).toBe("sntrys_test");
-  });
-
-  test("sets isExplicitTeam:true when --team flag is provided", async () => {
-    resolveOrCreateTeamSpy.mockResolvedValue({
-      slug: "backend",
-      source: "explicit",
-    } as any);
-
-    const { ui } = createMockUI();
-    const context = await resolveInitContext(
-      makeOptions({ team: "backend" }),
-      ui
-    );
-
-    expect(context?.isExplicitTeam).toBe(true);
-    expect(context?.team).toBe("backend");
-  });
-
-  test("sets isExplicitTeam:false when no --team flag is provided", async () => {
-    const { ui } = createMockUI();
-    const context = await resolveInitContext(makeOptions(), ui);
-
-    expect(context?.isExplicitTeam).toBe(false);
-  });
-
-  test("swallows 403 from listTeams and resolves context with team:undefined", async () => {
-    listTeamsSpy.mockRejectedValueOnce(
-      new ApiError("Forbidden", 403, "No team:read access")
-    );
-
-    const { ui } = createMockUI();
-    const context = await resolveInitContext(makeOptions(), ui);
-
-    // 403 is swallowed so the wizard can proceed to the org-scoped fallback
-    expect(context).not.toBeNull();
-    expect(context?.team).toBeUndefined();
-    expect(getOrganizationSpy).toHaveBeenCalledWith("acme");
-    expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
-  });
-
-  test("preserves rich org-not-found guidance when implicit team lookup returns 404", async () => {
-    resolveOrgPrefetchedSpy.mockResolvedValueOnce({ org: "missing-org" });
-    listOrganizationsSpy.mockResolvedValueOnce([
-      { id: "1", slug: "acme", name: "Acme" },
-      { id: "2", slug: "beta", name: "Beta" },
-    ]);
-    listTeamsSpy.mockRejectedValueOnce(
-      new ApiError("Not found", 404, "Organization not found")
-    );
-
-    const { ui, calls } = createMockUI();
-    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
-      "Organization 'missing-org'"
-    );
-
-    const errorCall = calls.find(
-      (c): c is Extract<MockCall, { kind: "log.error" }> =>
-        c.kind === "log.error"
-    );
-    expect(errorCall?.message).toContain("Your organizations:");
-    expect(errorCall?.message).toContain("acme");
-    expect(errorCall?.message).toContain("beta");
-  });
-
-  test("surfaces the enriched detail when implicit listTeams returns 401", async () => {
-    // member-disabled-over-limit: a 401 from listTeams must reach the user with
-    // its actionable detail, not a bare "Failed to list teams" + status line.
-    listTeamsSpy.mockRejectedValueOnce(
-      new ApiError(
-        "Failed to list teams",
-        401,
-        "Your account is disabled in this organization because it is over its member limit."
-      )
-    );
-
-    const { ui, calls } = createMockUI();
-    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow();
-
-    const errorCall = calls.find(
-      (c): c is Extract<MockCall, { kind: "log.error" }> =>
-        c.kind === "log.error"
-    );
-    expect(errorCall?.message).toContain("over its member limit");
-  });
-
-  test("surfaces the enriched detail when explicit --team listTeams returns 401", async () => {
-    resolveOrCreateTeamSpy.mockRejectedValueOnce(
-      new ApiError(
-        "Failed to list teams",
-        401,
-        "Your account is disabled in this organization because it is over its member limit."
-      )
-    );
-
-    const { ui, calls } = createMockUI();
-    await expect(
-      resolveInitContext(makeOptions({ team: "backend" }), ui)
-    ).rejects.toThrow();
-
-    const errorCall = calls.find(
-      (c): c is Extract<MockCall, { kind: "log.error" }> =>
-        c.kind === "log.error"
-    );
-    expect(errorCall?.message).toContain("over its member limit");
-  });
-
-  test("passes a pre-rendered WizardError through team resolution unchanged", async () => {
-    listTeamsSpy.mockRejectedValueOnce(
-      new WizardError("custom preflight failure")
-    );
-
-    const { ui, calls } = createMockUI();
-    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
-      "custom preflight failure"
-    );
-
-    const errorCall = calls.find(
-      (c): c is Extract<MockCall, { kind: "log.error" }> =>
-        c.kind === "log.error"
-    );
-    expect(errorCall?.message).toBe("custom preflight failure");
-  });
-
-  test("surfaces a non-API error message from implicit team resolution", async () => {
-    listTeamsSpy.mockRejectedValueOnce(new Error("network down"));
-
-    const { ui, calls } = createMockUI();
-    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
-      "network down"
-    );
-
-    const errorCall = calls.find(
-      (c): c is Extract<MockCall, { kind: "log.error" }> =>
-        c.kind === "log.error"
-    );
-    expect(errorCall?.message).toContain("network down");
-  });
-
-  test("fails early when listTeams is forbidden and member project creation is disabled", async () => {
-    listTeamsSpy.mockRejectedValueOnce(
-      new ApiError("Forbidden", 403, "No team:read access")
-    );
-    getOrganizationSpy.mockResolvedValueOnce({
-      id: "1",
-      slug: "acme",
-      name: "Acme",
-      access: ["project:read"],
-      allowMemberProjectCreation: false,
-    } as any);
-
-    const { ui } = createMockUI();
-    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
-      "Project creation is disabled for members"
-    );
-  });
-
-  test("fails early when member project creation is disabled and no Team Admin team exists", async () => {
-    listTeamsSpy.mockResolvedValueOnce([]);
-    getOrganizationSpy.mockResolvedValueOnce({
-      id: "1",
-      slug: "acme",
-      name: "Acme",
-      access: ["project:read"],
-      allowMemberProjectCreation: false,
-    } as any);
-
-    const { ui, calls } = createMockUI();
-    await expect(resolveInitContext(makeOptions(), ui)).rejects.toThrow(
-      "Project creation is disabled for members"
-    );
-
-    const errorCall = calls.find(
-      (c): c is Extract<MockCall, { kind: "log.error" }> =>
-        c.kind === "log.error"
-    );
-    expect(errorCall?.message).toContain("sentry init acme/<project-slug>");
-  });
-
-  test("allows org-scoped creation when member creation is disabled but token has org:write", async () => {
-    listTeamsSpy.mockResolvedValueOnce([]);
-    getOrganizationSpy.mockResolvedValueOnce({
-      id: "1",
-      slug: "acme",
-      name: "Acme",
-      access: ["org:write"],
-      allowMemberProjectCreation: false,
-    } as any);
-
-    const { ui } = createMockUI();
-    const context = await resolveInitContext(makeOptions(), ui);
-
-    expect(context?.team).toBeUndefined();
-  });
-
-  test("allows org-scoped creation when member creation is disabled but user is an admin (project:admin scope)", async () => {
-    listTeamsSpy.mockResolvedValueOnce([]);
-    getOrganizationSpy.mockResolvedValueOnce({
-      id: "1",
-      slug: "acme",
-      name: "Acme",
-      access: ["project:read", "project:write", "project:admin", "team:admin"],
-      allowMemberProjectCreation: false,
-    } as any);
-
-    const { ui } = createMockUI();
-    const context = await resolveInitContext(makeOptions(), ui);
-
-    expect(context?.team).toBeUndefined();
-  });
-
-  test("allows org-scoped creation when member creation is disabled but user has project:write scope", async () => {
-    listTeamsSpy.mockResolvedValueOnce([]);
-    getOrganizationSpy.mockResolvedValueOnce({
-      id: "1",
-      slug: "acme",
-      name: "Acme",
-      access: ["project:read", "project:write"],
-      allowMemberProjectCreation: false,
-    } as any);
-
-    const { ui } = createMockUI();
-    const context = await resolveInitContext(makeOptions(), ui);
-
-    expect(context?.team).toBeUndefined();
-  });
-
-  test("allows org-scoped creation when listTeams returns 403 and user has project:admin scope", async () => {
-    listTeamsSpy.mockRejectedValueOnce(
-      new ApiError("Forbidden", 403, "No team:read access")
-    );
-    getOrganizationSpy.mockResolvedValueOnce({
-      id: "1",
-      slug: "acme",
-      name: "Acme",
-      access: ["project:read", "project:write", "project:admin"],
-      allowMemberProjectCreation: false,
-    } as any);
-
-    const { ui } = createMockUI();
-    const context = await resolveInitContext(makeOptions(), ui);
-
-    expect(context?.team).toBeUndefined();
   });
 });

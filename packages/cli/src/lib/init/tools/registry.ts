@@ -1,3 +1,5 @@
+import { extractRequiredScopes } from "../../api-scope.js";
+import { ApiError } from "../../errors.js";
 import type { ToolOperation, ToolPayload, ToolResult } from "../types.js";
 import { applyPatchsetTool } from "./apply-patchset.js";
 import {
@@ -62,6 +64,15 @@ export async function executeTool(
   try {
     return await tool.execute(payload as never, context);
   } catch (error) {
+    // Scope-bearing 403s must reach the top-level CLI middleware so existing
+    // OAuth grants can be refreshed and the full init command retried.
+    if (
+      error instanceof ApiError &&
+      error.status === 403 &&
+      extractRequiredScopes(error.detail).length > 0
+    ) {
+      throw error;
+    }
     return { ok: false, error: formatToolError(error) };
   }
 }

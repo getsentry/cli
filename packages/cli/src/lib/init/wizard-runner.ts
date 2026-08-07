@@ -21,6 +21,7 @@ import {
   getTraceData,
   setTag,
 } from "@sentry/node-core/light";
+import { extractRequiredScopes } from "../api-scope.js";
 import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { customFetch } from "../custom-ca.js";
@@ -83,6 +84,7 @@ import {
 type SpinState = { running: boolean };
 
 const INIT_SERVICE_AUTH_FAILED_LABEL = "Authentication failed";
+const INIT_SCOPE_UPDATE_REQUIRED_LABEL = "Authorization update required";
 
 const APPLY_CODEMODS_STEP = "apply-codemods";
 
@@ -1093,6 +1095,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     }
   } catch (err) {
     const isAuthFailure = err instanceof ApiError && err.status === 401;
+    const isScopeFailure =
+      err instanceof ApiError &&
+      err.status === 403 &&
+      extractRequiredScopes(err.detail).length > 0;
     // A running spinner owns a live interval, so stop it before any early
     // return or rethrow to avoid leaving the event loop artificially busy.
     if (spinState.running) {
@@ -1103,6 +1109,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         code = 0;
       } else if (isAuthFailure) {
         label = INIT_SERVICE_AUTH_FAILED_LABEL;
+      } else if (isScopeFailure) {
+        label = INIT_SCOPE_UPDATE_REQUIRED_LABEL;
       }
       spin.stop(label, code);
       spinState.running = false;
@@ -1120,8 +1128,13 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     if (activeStepId) {
       ui.setStep?.(activeStepId, "failed");
     }
-    if (isAuthFailure) {
-      showFailedFeedback(ui, INIT_SERVICE_AUTH_FAILED_LABEL);
+    if (isAuthFailure || isScopeFailure) {
+      showFailedFeedback(
+        ui,
+        isAuthFailure
+          ? INIT_SERVICE_AUTH_FAILED_LABEL
+          : INIT_SCOPE_UPDATE_REQUIRED_LABEL
+      );
       setTag("wizard.outcome", "errored");
       throw err;
     }
