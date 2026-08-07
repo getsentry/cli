@@ -35,6 +35,8 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import stringWidth from "string-width";
+import wrapAnsi from "wrap-ansi";
 import {
   type BannerLine,
   bannerLinesForWidth,
@@ -393,7 +395,7 @@ function ActivityPane({
         </Box>
       )}
       {visibleLogs.length > 0 ? (
-        <Box flexDirection="column">
+        <Box flexDirection="column" flexShrink={1} overflow="hidden">
           {visibleLogs.map((log) => (
             <LogLine entry={log} key={log.id} />
           ))}
@@ -401,7 +403,12 @@ function ActivityPane({
       ) : null}
       {spinner.active ? <SpinnerRow state={spinner} /> : null}
       {summary ? <SummaryPanel summary={summary} /> : null}
-      {prompt ? <PromptArea prompt={prompt} /> : null}
+      {prompt ? (
+        <PromptArea
+          occupiedRows={visibleLogs.length + (spinner.active ? 2 : 0)}
+          prompt={prompt}
+        />
+      ) : null}
     </Box>
   );
 }
@@ -719,7 +726,11 @@ function IntroPreflightContent({
 
   const promptContent = prompt ? (
     <Box alignItems="center" width="100%">
-      <PromptArea alignment="center" prompt={prompt} />
+      <PromptArea
+        alignment="center"
+        occupiedRows={spinner.active ? 2 : 0}
+        prompt={prompt}
+      />
     </Box>
   ) : null;
 
@@ -1316,11 +1327,19 @@ export function getOptionWindow(
   return [start, start + viewportSize];
 }
 
-function getPromptOptionLimit(
-  terminalRows: number,
-  alignment: PromptAlignment,
-  kind: "select" | "multiselect"
-): number {
+function getPromptOptionLimit({
+  terminalRows,
+  alignment,
+  kind,
+  occupiedRows,
+  messageRows,
+}: {
+  terminalRows: number;
+  alignment: PromptAlignment;
+  kind: "select" | "multiselect";
+  occupiedRows: number;
+  messageRows: number;
+}): number {
   let reservedRows = WORKFLOW_PROMPT_RESERVED_ROWS;
   if (alignment === "center") {
     reservedRows =
@@ -1328,22 +1347,86 @@ function getPromptOptionLimit(
         ? CENTERED_MULTISELECT_RESERVED_ROWS
         : CENTERED_SELECT_RESERVED_ROWS;
   }
-  return Math.max(1, terminalRows - reservedRows);
+  const extraMessageRows = Math.max(0, messageRows - 1);
+  return Math.max(
+    1,
+    terminalRows - reservedRows - occupiedRows - extraMessageRows
+  );
+}
+
+function getPromptContentWidth(
+  terminalColumns: number,
+  alignment: PromptAlignment
+): number {
+  const frameWidth = getInkFrameWidth(terminalColumns);
+  if (alignment === "center") {
+    return Math.min(frameWidth, 84);
+  }
+  return frameWidth >= 80 ? Math.floor((frameWidth - 1) * 0.6) : frameWidth;
+}
+
+function getPromptMessageRows({
+  message,
+  terminalColumns,
+  alignment,
+  kind,
+  totalCount,
+}: {
+  message: string;
+  terminalColumns: number;
+  alignment: PromptAlignment;
+  kind: "select" | "multiselect";
+  totalCount: number;
+}): number {
+  let availableWidth = getPromptContentWidth(terminalColumns, alignment);
+  const countDigits = String(Math.max(1, totalCount)).length;
+
+  if (kind === "select") {
+    const positionWidth = stringWidth(
+      `(${"9".repeat(countDigits)}/${"9".repeat(countDigits)})`
+    );
+    availableWidth -= positionWidth + (alignment === "center" ? 1 : 3);
+  } else if (alignment === "start") {
+    const count = "9".repeat(countDigits);
+    availableWidth -=
+      stringWidth(`${count}/${count} selected • ${count}/${count}`) + 4;
+  }
+
+  return wrapAnsi(message, Math.max(1, availableWidth), {
+    hard: true,
+    trim: false,
+    wordWrap: true,
+  }).split("\n").length;
 }
 
 function PromptArea({
   alignment = "start",
+  occupiedRows = 0,
   prompt,
 }: {
   alignment?: PromptAlignment;
+  occupiedRows?: number;
   prompt: ActivePrompt;
 }): React.ReactNode {
-  const { rows } = useInkFrameSize();
+  const { columns, rows } = useInkFrameSize();
   if (prompt.kind === "select") {
+    const messageRows = getPromptMessageRows({
+      message: prompt.message,
+      terminalColumns: columns,
+      alignment,
+      kind: prompt.kind,
+      totalCount: prompt.options.length,
+    });
     return (
       <SelectPrompt
         alignment={alignment}
-        maxVisibleOptions={getPromptOptionLimit(rows, alignment, prompt.kind)}
+        maxVisibleOptions={getPromptOptionLimit({
+          terminalRows: rows,
+          alignment,
+          kind: prompt.kind,
+          occupiedRows,
+          messageRows,
+        })}
         prompt={prompt}
       />
     );
@@ -1352,10 +1435,23 @@ function PromptArea({
     return <ConfirmPrompt alignment={alignment} prompt={prompt} />;
   }
   if (prompt.kind === "multiselect") {
+    const messageRows = getPromptMessageRows({
+      message: prompt.message,
+      terminalColumns: columns,
+      alignment,
+      kind: prompt.kind,
+      totalCount: prompt.options.length,
+    });
     return (
       <MultiSelectPrompt
         alignment={alignment}
-        maxVisibleOptions={getPromptOptionLimit(rows, alignment, prompt.kind)}
+        maxVisibleOptions={getPromptOptionLimit({
+          terminalRows: rows,
+          alignment,
+          kind: prompt.kind,
+          occupiedRows,
+          messageRows,
+        })}
         prompt={prompt}
       />
     );

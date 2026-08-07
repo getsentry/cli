@@ -597,9 +597,10 @@ describe("Ink App snapshot", () => {
       "error",
       "An error remains visible while choosing features"
     );
+    store.appendLog("warn", "A second warning also remains visible");
     store.setPrompt({
       kind: "multiselect",
-      message: "Select features",
+      message: "Select features\nReview the monitoring choices",
       options: Array.from({ length: 20 }, (_value, index) => ({
         value: `feature-${index + 1}`,
         label: `Feature ${index + 1}`,
@@ -612,21 +613,27 @@ describe("Ink App snapshot", () => {
     const rendered = await renderApp(store, 120, { rows: 16 });
     const frame = stripFinalLineBreak(stripAnsi(rendered.latestFrame()));
     expect(frame).toContain("0/20 selected • 1/20");
-    expect(frame).toContain("Feature 6");
-    expect(frame).not.toContain("Feature 7");
+    expect(frame).toContain("Review the monitoring choices");
+    expect(frame).toContain("A second warning also remains visible");
+    expect(frame).toContain("Feature 2");
+    expect(frame).not.toContain("Feature 3");
     expect(frame.split(LINE_SPLIT_RE).length).toBeLessThanOrEqual(16);
     expect(frame).toContain(FEEDBACK_BANNER_TEXT);
 
-    const scrolledFrame = stripAnsi(
-      (
-        await renderApp(store, 120, {
-          input: Array.from({ length: 19 }, () => DOWN_ARROW),
-          rows: 16,
-        })
-      ).allOutput()
+    const scrolledFrame = stripFinalLineBreak(
+      stripAnsi(
+        (
+          await renderApp(store, 120, {
+            input: Array.from({ length: 19 }, () => DOWN_ARROW),
+            rows: 16,
+          })
+        ).latestFrame()
+      )
     );
     expect(scrolledFrame).toContain("0/20 selected • 20/20");
     expect(scrolledFrame).toContain("Feature 20");
+    expect(scrolledFrame.split(LINE_SPLIT_RE).length).toBeLessThanOrEqual(16);
+    expect(scrolledFrame).toContain(FEEDBACK_BANNER_TEXT);
   });
 
   test("centered multiselect prompts fit with the full banner", async () => {
@@ -636,7 +643,7 @@ describe("Ink App snapshot", () => {
     });
     store.setPrompt({
       kind: "multiselect",
-      message: "Select features",
+      message: "Select features\nReview the monitoring choices",
       options: Array.from({ length: 20 }, (_value, index) => ({
         value: `feature-${index + 1}`,
         label: `Feature ${index + 1}`,
@@ -648,8 +655,9 @@ describe("Ink App snapshot", () => {
 
     const rendered = await renderApp(store, 120, { rows: 30 });
     const frame = stripFinalLineBreak(stripAnsi(rendered.latestFrame()));
-    expect(frame).toContain("Feature 7");
-    expect(frame).not.toContain("Feature 8");
+    expect(frame).toContain("Review the monitoring choices");
+    expect(frame).toContain("Feature 6");
+    expect(frame).not.toContain("Feature 7");
     expect(frame.split(LINE_SPLIT_RE).length).toBeLessThanOrEqual(30);
     expect(frame).toContain(FEEDBACK_BANNER_TEXT);
   });
