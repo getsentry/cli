@@ -23,6 +23,7 @@ import type { SentryContext } from "../context.js";
 import { findProjectsBySlug } from "../lib/api/projects.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
+import { refreshToken } from "../lib/db/auth.js";
 import { ContextError, ValidationError } from "../lib/errors.js";
 import { warmOrgDetection } from "../lib/init/org-prefetch.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
@@ -399,6 +400,11 @@ export const initCommand = buildCommand<
     //    the name for a new project (org resolved later by the wizard).
     const { org: explicitOrg, project: explicitProject } =
       await resolveTarget(targetArg);
+
+    // Mastra requires an explicit bearer, unlike regular Sentry API requests
+    // that refresh OAuth lazily. Resolve it before opening the wizard so an
+    // AuthError can trigger auto-login without leaving a stale screen behind.
+    await refreshToken();
 
     // 5. Start background org detection when org is not yet known.
     //    The prefetch runs concurrently with the preamble, the wizard startup,
