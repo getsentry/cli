@@ -390,7 +390,15 @@ export async function fetchLatestFromGitHub(
     );
   }
 
-  const data = (await response.json()) as { tag_name?: string };
+  let data: { tag_name?: string };
+  try {
+    data = (await response.json()) as { tag_name?: string };
+  } catch {
+    throw new UpgradeError(
+      "network_error",
+      "GitHub returned non-JSON response"
+    );
+  }
 
   if (!data.tag_name) {
     throw new UpgradeError(
@@ -422,7 +430,15 @@ export async function fetchLatestFromNpm(): Promise<string> {
     );
   }
 
-  const data = (await response.json()) as { version?: string };
+  let data: { version?: string };
+  try {
+    data = (await response.json()) as { version?: string };
+  } catch {
+    throw new UpgradeError(
+      "network_error",
+      "npm registry returned non-JSON response"
+    );
+  }
 
   if (!data.version) {
     throw new UpgradeError("network_error", "No version found in npm registry");
