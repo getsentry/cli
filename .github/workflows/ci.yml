@@ -758,15 +758,21 @@ jobs:
       # be deployed to production.
       - name: Remove sourcemaps from output
         run: find apps/cli-docs/dist -name '*.map' -delete
-      # Package the built site plus its Wrangler config as cloudflare.zip so
-      # Craft's cloudflare target can deploy the extracted Worker artifact.
+      # Package the built site using Vercel's Build Output API so Craft's
+      # release-gated Vercel target can deploy it without rebuilding.
       - name: Package Docs
-        run: cd apps/cli-docs && zip -r "$GITHUB_WORKSPACE/cloudflare.zip" wrangler.jsonc dist
+        run: |
+          OUTPUT_DIR="$RUNNER_TEMP/vercel-output"
+          rm -rf "$OUTPUT_DIR"
+          mkdir -p "$OUTPUT_DIR/.vercel/output/static"
+          cp -R apps/cli-docs/dist/. "$OUTPUT_DIR/.vercel/output/static/"
+          printf '%s\n' '{"version":3}' > "$OUTPUT_DIR/.vercel/output/config.json"
+          (cd "$OUTPUT_DIR" && zip -qr "$GITHUB_WORKSPACE/vercel.zip" .vercel)
       - name: Upload docs artifact
         uses: actions/upload-artifact@v7
         with:
-          name: cloudflare
-          path: cloudflare.zip
+          name: vercel
+          path: vercel.zip
 
   ci-status:
     name: CI Status
