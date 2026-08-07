@@ -45,6 +45,8 @@ jobs:
       uses: getsentry/craft@v2
       env:
         GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+        VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        VERCEL_PROJECT_ID: prj_wVkOnIwI3eIQbGD1Gw7qS1MqFFIK
       with:
         version: ${{ inputs.version }}
         force: ${{ inputs.force }}
