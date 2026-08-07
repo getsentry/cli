@@ -98,9 +98,15 @@ function safeParseResponse<T>(
   assertObjectResponse(data, context);
   const result = safeParse(schema, data);
   if (!result.success) {
+    // Strip valibot issues to metadata only (path/type/message) before
+    // attaching to Sentry — full issues embed the raw failing `input` value.
     Sentry.setContext("schema_validation", {
       context,
-      issues: result.issues.slice(0, 10),
+      issues: result.issues.slice(0, 10).map((i) => ({
+        path: i.path,
+        type: i.type,
+        message: i.message,
+      })),
     });
     throw new ApiError(
       `${context}: unexpected response format`,

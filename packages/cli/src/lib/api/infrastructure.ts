@@ -529,10 +529,16 @@ export async function apiRequestToRegion<T>(
       // Attach structured validation issues to the Sentry event so we can
       // diagnose exactly which field(s) failed validation — the ApiError.detail
       // string alone may not be visible in the Sentry issue overview.
+      // Strip valibot issues to metadata only (path/type/message) before
+      // attaching — full issues embed the raw failing `input` value.
       Sentry.setContext("schema_validation", {
         endpoint,
         status: response.status,
-        issues: result.issues.slice(0, 10),
+        issues: result.issues.slice(0, 10).map((i) => ({
+          path: i.path,
+          type: i.type,
+          message: i.message,
+        })),
       });
       throw new ApiError(
         `Unexpected response format from ${endpoint}`,
