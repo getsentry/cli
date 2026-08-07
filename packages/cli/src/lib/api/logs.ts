@@ -103,7 +103,8 @@ function safeParseResponse<T>(
     Sentry.setContext("schema_validation", {
       context,
       issues: result.issues.slice(0, 10).map((i) => ({
-        path: i.path,
+        // Strip raw input from path items — only keep structural path keys.
+        path: i.path?.map((p) => ({ key: p.key, type: p.type })),
         type: i.type,
         message: i.message,
       })),
