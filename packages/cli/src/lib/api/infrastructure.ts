@@ -11,7 +11,7 @@ import { zstdCompress as zstdCompressCb } from "node:zlib";
 import { parseSentryLinkHeader } from "@sentry/api";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
-import type { z } from "zod";
+import { type GenericSchema, safeParse } from "valibot";
 
 import { extractRequiredScopes } from "../api-scope.js";
 import { getActiveEnvVarName, isEnvTokenActive } from "../db/auth.js";
@@ -189,8 +189,8 @@ export type ApiRequestOptions<T = unknown> = {
   bodyEncoding?: "zstd";
   /** Query parameters. String arrays create repeated keys (e.g., tags=1&tags=2) */
   params?: Record<string, string | number | boolean | string[] | undefined>;
-  /** Optional Zod schema for runtime validation of response data */
-  schema?: z.ZodType<T>;
+  /** Optional valibot schema for runtime validation of response data */
+  schema?: GenericSchema<unknown, T>;
 };
 
 /**
@@ -524,23 +524,23 @@ export async function apiRequestToRegion<T>(
   }
 
   if (schema) {
-    const result = schema.safeParse(data);
+    const result = safeParse(schema, data);
     if (!result.success) {
-      // Attach structured Zod issues to the Sentry event so we can diagnose
-      // exactly which field(s) failed validation — the ApiError.detail string
-      // alone may not be visible in the Sentry issue overview.
-      Sentry.setContext("zod_validation", {
+      // Attach structured validation issues to the Sentry event so we can
+      // diagnose exactly which field(s) failed validation — the ApiError.detail
+      // string alone may not be visible in the Sentry issue overview.
+      Sentry.setContext("schema_validation", {
         endpoint,
         status: response.status,
-        issues: result.error.issues.slice(0, 10),
+        issues: result.issues.slice(0, 10),
       });
       throw new ApiError(
         `Unexpected response format from ${endpoint}`,
         response.status,
-        result.error.message
+        result.issues.map((issue) => issue.message).join(", ")
       );
     }
-    return { data: result.data, headers: response.headers };
+    return { data: result.output, headers: response.headers };
   }
 
   return { data: data as T, headers: response.headers };
