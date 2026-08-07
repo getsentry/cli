@@ -42,6 +42,7 @@ const ANSI_CSI_RE = /\u001B\[[0-9;?]*[ -/]*[@-~]/g;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in captured Ink output
 const ANSI_OSC_RE = /\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g;
 const LINE_SPLIT_RE = /\r?\n/;
+const DOWN_ARROW = "\u001B[B";
 const RIGHT_ARROW = "\u001B[C";
 const FEEDBACK_BANNER_TEXT = '$ sentry cli feedback "what worked or broke"';
 
@@ -53,6 +54,7 @@ const TEST_BANNER_ROWS = [
 
 class CaptureStream extends Writable {
   frames: string[] = [];
+  lastRenderedFrame = "";
   columns: number;
   rows: number;
   isTTY = true;
@@ -113,6 +115,8 @@ async function renderApp(
     await sleep(20);
   }
   await sleep(FRAME_SETTLE_MS);
+  out.lastRenderedFrame =
+    out.frames.findLast((frame) => frame.includes(FEEDBACK_BANNER_TEXT)) ?? "";
   instance.unmount();
   // waitUntilExit() hangs in CI — race with a short unref'd timeout.
   await Promise.race([
@@ -533,6 +537,137 @@ describe("Ink App snapshot", () => {
     expect(frame).toContain("confirm");
     expect(frame).toContain("cancel");
     expect(frame).not.toContain("switch tab");
+  });
+
+  test("long select prompts only render options that fit the terminal", async () => {
+    const store = new WizardStore({
+      bannerRows: FULL_BANNER_LINES,
+      layout: "intro",
+    });
+    store.setPrompt({
+      kind: "select",
+      message: "Which team should own this project?",
+      options: Array.from({ length: 20 }, (_value, index) => ({
+        value: `team-${index + 1}`,
+        label: `Team ${index + 1}`,
+      })),
+      initialIndex: 0,
+      resolve: ignorePromptResolution,
+    });
+
+    const rendered = await renderApp(store, 120, { rows: 24 });
+    const frame = stripAnsi(rendered.allOutput());
+    const lastFrame = stripAnsi(rendered.lastRenderedFrame);
+    expect(frame).toContain("Which team should own this project?");
+    expect(frame).toContain("(1/20)");
+    expect(frame).toContain("Team 4");
+    expect(frame).not.toContain("Team 5");
+    expect(lastFrame.split(LINE_SPLIT_RE)).toHaveLength(24);
+    expect(lastFrame).toContain(FEEDBACK_BANNER_TEXT);
+
+    const scrolledFrame = stripAnsi(
+      (
+        await renderApp(store, 120, {
+          input: Array.from({ length: 7 }, () => DOWN_ARROW),
+          rows: 24,
+        })
+      ).allOutput()
+    );
+    expect(scrolledFrame).toContain("(8/20)");
+    expect(scrolledFrame).toContain("Team 8");
+  });
+
+  test("long multiselect prompts only render options that fit the terminal", async () => {
+    const store = new WizardStore({ bannerRows: [] });
+    store.appendLog(
+      "warn",
+      "A warning remains visible while choosing features"
+    );
+    store.appendLog(
+      "error",
+      "An error remains visible while choosing features"
+    );
+    store.setPrompt({
+      kind: "multiselect",
+      message: "Select features",
+      options: Array.from({ length: 20 }, (_value, index) => ({
+        value: `feature-${index + 1}`,
+        label: `Feature ${index + 1}`,
+      })),
+      initialSelected: [],
+      required: false,
+      resolve: ignorePromptResolution,
+    });
+
+    const rendered = await renderApp(store, 120, { rows: 16 });
+    const frame = stripAnsi(rendered.allOutput());
+    const lastFrame = stripAnsi(rendered.lastRenderedFrame);
+    expect(frame).toContain("0/20 selected • 1/20");
+    expect(frame).toContain("Feature 6");
+    expect(frame).not.toContain("Feature 7");
+    expect(lastFrame.split(LINE_SPLIT_RE)).toHaveLength(16);
+    expect(lastFrame).toContain(FEEDBACK_BANNER_TEXT);
+
+    const scrolledFrame = stripAnsi(
+      (
+        await renderApp(store, 120, {
+          input: Array.from({ length: 19 }, () => DOWN_ARROW),
+          rows: 16,
+        })
+      ).allOutput()
+    );
+    expect(scrolledFrame).toContain("0/20 selected • 20/20");
+    expect(scrolledFrame).toContain("Feature 20");
+  });
+
+  test("centered multiselect prompts fit with the full banner", async () => {
+    const store = new WizardStore({
+      bannerRows: FULL_BANNER_LINES,
+      layout: "intro",
+    });
+    store.setPrompt({
+      kind: "multiselect",
+      message: "Select features",
+      options: Array.from({ length: 20 }, (_value, index) => ({
+        value: `feature-${index + 1}`,
+        label: `Feature ${index + 1}`,
+      })),
+      initialSelected: [],
+      required: false,
+      resolve: ignorePromptResolution,
+    });
+
+    const rendered = await renderApp(store, 120, { rows: 30 });
+    const frame = stripAnsi(rendered.allOutput());
+    const lastFrame = stripAnsi(rendered.lastRenderedFrame);
+    expect(frame).toContain("Feature 7");
+    expect(frame).not.toContain("Feature 8");
+    expect(lastFrame.split(LINE_SPLIT_RE)).toHaveLength(30);
+    expect(lastFrame).toContain(FEEDBACK_BANNER_TEXT);
+  });
+
+  test("long option hints stay on one terminal row", async () => {
+    const store = new WizardStore({ bannerRows: [], layout: "intro" });
+    store.setPrompt({
+      kind: "select",
+      message: "Choose a team",
+      options: [
+        {
+          value: "team-1",
+          label: "A",
+          hint: "This deliberately long team name would wrap onto another row UNIQUE_TAIL",
+        },
+        { value: "team-2", label: "Team 2" },
+      ],
+      initialIndex: 0,
+      resolve: ignorePromptResolution,
+    });
+
+    const frame = stripAnsi(
+      (await renderApp(store, 40, { rows: 24 })).allOutput()
+    );
+    expect(frame).toContain("A");
+    expect(frame).not.toContain("UNIQUE_TAIL");
   });
 
   test("file scroll shortcut appears only when the file tree overflows", async () => {
