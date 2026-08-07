@@ -74,8 +74,8 @@ importers:
         specifier: ^1.26.0
         version: 1.36.0(express@5.2.1)(zod@3.25.76)
       '@sentry/api':
-        specifier: ^0.253.0
-        version: 0.253.0(zod@3.25.76)
+        specifier: ^0.256.0
+        version: 0.256.0(valibot@1.4.2(typescript@5.9.3))(zod@3.25.76)
       '@sentry/core':
         specifier: 10.63.0
         version: 10.63.0(patch_hash=e663994979ff877a26ab6d4dea5968fbaee4ccdfdeb85623983535a572678940)
@@ -1478,12 +1478,15 @@ packages:
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
 
-  '@sentry/api@0.253.0':
-    resolution: {integrity: sha512-g6zU6Qa7HaqEAhcPkrAF2yIF9Th3UBxNIM2HjFt9eTLWT+cHqO1zvgPe8yl5IXVpn4xwZmytbdome43ba+FgSQ==}
+  '@sentry/api@0.256.0':
+    resolution: {integrity: sha512-6SL/EpZW569eAEAOHossu2bWHXl1ODJsvs1xWro0hbmLieDD2G4FjBIyNj+zPwbHcCpXNfPhpCTLmkLVih9khA==}
     engines: {node: '>=22'}
     peerDependencies:
+      valibot: '*'
       zod: ^3.24.0
     peerDependenciesMeta:
+      valibot:
+        optional: true
       zod:
         optional: true
 
@@ -5920,8 +5923,9 @@ snapshots:
 
   '@sec-ant/readable-stream@0.4.1': {}
 
-  '@sentry/api@0.253.0(zod@3.25.76)':
+  '@sentry/api@0.256.0(valibot@1.4.2(typescript@5.9.3))(zod@3.25.76)':
     optionalDependencies:
+      valibot: 1.4.2(typescript@5.9.3)
       zod: 3.25.76
 
   '@sentry/astro@10.69.0(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(astro@7.1.6(@astrojs/markdown-remark@7.2.2)(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0))':
