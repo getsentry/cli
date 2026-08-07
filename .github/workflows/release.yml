@@ -46,6 +46,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
         VERCEL_PROJECT_ID: prj_wVkOnIwI3eIQbGD1Gw7qS1MqFFIK
       with:
         version: ${{ inputs.version }}
