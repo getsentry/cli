@@ -18,15 +18,14 @@
  */
 
 import path from "node:path";
-import { isatty } from "node:tty";
 import { setTag } from "@sentry/node-core/light";
 import type { SentryContext } from "../context.js";
 import { findProjectsBySlug } from "../lib/api/projects.js";
 import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
-import { shouldAutoAuth } from "../lib/auto-auth.js";
 import { buildCommand } from "../lib/command.js";
 import { refreshToken } from "../lib/db/auth.js";
 import { ContextError, ValidationError } from "../lib/errors.js";
+import { requestInitForceExit } from "../lib/init/force-exit.js";
 import { warmOrgDetection } from "../lib/init/org-prefetch.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
 import { validateResourceId } from "../lib/input-validation.js";
@@ -368,6 +367,7 @@ export const initCommand = buildCommand<
       t: "team",
     },
   },
+  // biome-ignore lint/correctness/useYield: init renders through WizardUI instead of command output
   async *func(
     this: SentryContext,
     flags: InitFlags,
@@ -416,61 +416,23 @@ export const initCommand = buildCommand<
       warmOrgDetection(targetDir);
     }
 
-    // 6. Run the wizard.
-    //
-    // Wrapped in try/catch/finally so the macOS force-exit safety net (step 7)
-    // is scheduled on terminal exit paths without interrupting the global
-    // auto-auth middleware when it owns login and command retry.
-    let deferForceExitToAutoAuth = false;
-    try {
-      await runWizard({
-        directory: targetDir,
-        yes: flags.yes,
-        dryRun: flags["dry-run"],
-        features: featuresList,
-        team: flags.team,
-        app: flags.app,
-        org: explicitOrg,
-        project: explicitProject,
-        // `flags.tui` defaults to `true`. `--no-tui` (auto-generated
-        // by stricli's flag negation) flips it to `false` — that's the
-        // signal we forward to the factory as `forceLegacyUi`.
-        forceLegacyUi: flags.tui === false,
-      });
-    } catch (error) {
-      deferForceExitToAutoAuth = shouldAutoAuth(error, () => isatty(0));
-      throw error;
-    } finally {
-      // 7. macOS-only force-exit safety net.
-      //
-      // On Darwin, `InkUI` opens a fresh `/dev/tty` `tty.ReadStream`
-      // (so Ink's `useInput` actually receives keystrokes — Bun's
-      // `process.stdin` doesn't deliver `readable` events properly,
-      // see oven-sh/bun#6862 / vadimdemedes/ink#636). The fresh
-      // stream is destroyed in the InkUI dispose path, but Bun's
-      // libuv handle for it can linger past `destroy()` on Darwin
-      // (oven-sh/bun#29126), keeping the event loop ref'd so the
-      // process hangs until the user presses a key.
-      //
-      // The .unref() timer doesn't hold the loop itself, so it's a no-op
-      // in the happy path (Linux: handle drains naturally; `--yes`
-      // on Darwin: LoggingUI doesn't open /dev/tty, may still drain
-      // naturally). On the Darwin hang path, it force-exits after a
-      // 100ms grace window — imperceptible to the user and enough
-      // for Sentry telemetry + stdio flushes to complete first.
-      //
-      // Skipped under `bun test` (which sets NODE_ENV=test automatically)
-      // because the test runner calls `initCommand.func` directly; an
-      // unref'd timer would still fire and terminate the runner mid-suite.
-      if (
-        !deferForceExitToAutoAuth &&
-        process.platform === "darwin" &&
-        process.env.NODE_ENV !== "test"
-      ) {
-        setTimeout(() => {
-          process.exit(process.exitCode ?? 0);
-        }, 100).unref();
-      }
-    }
+    // 6. Run the wizard. The outer CLI pipeline schedules the macOS/Bun
+    // force-exit safety net after recovery middleware (including auto-auth)
+    // has finished, so it cannot interrupt login or command retry.
+    requestInitForceExit();
+    await runWizard({
+      directory: targetDir,
+      yes: flags.yes,
+      dryRun: flags["dry-run"],
+      features: featuresList,
+      team: flags.team,
+      app: flags.app,
+      org: explicitOrg,
+      project: explicitProject,
+      // `flags.tui` defaults to `true`. `--no-tui` (auto-generated
+      // by stricli's flag negation) flips it to `false` — that's the
+      // signal we forward to the factory as `forceLegacyUi`.
+      forceLegacyUi: flags.tui === false,
+    });
   },
 });

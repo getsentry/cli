@@ -12,14 +12,14 @@ import { initCommand } from "../../src/commands/init.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as projectsApi from "../../src/lib/api/projects.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
-import * as autoAuthModule from "../../src/lib/auto-auth.js";
-// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as authModule from "../../src/lib/db/auth.js";
 import {
   AuthError,
   ContextError,
   ValidationError,
 } from "../../src/lib/errors.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as forceExitModule from "../../src/lib/init/force-exit.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as prefetchNs from "../../src/lib/init/org-prefetch.js";
 import { resetPrefetch } from "../../src/lib/init/org-prefetch.js";
@@ -39,6 +39,7 @@ let runWizardSpy: ReturnType<typeof spyOn>;
 let findProjectsSpy: ReturnType<typeof spyOn>;
 let warmSpy: ReturnType<typeof spyOn>;
 let refreshTokenSpy: ReturnType<typeof spyOn>;
+let requestForceExitSpy: ReturnType<typeof spyOn>;
 
 const func = (await initCommand.loader()) as unknown as (
   this: {
@@ -91,6 +92,7 @@ beforeEach(() => {
   refreshTokenSpy = vi
     .spyOn(authModule, "refreshToken")
     .mockResolvedValue({ token: "oauth-token", refreshed: false });
+  requestForceExitSpy = vi.spyOn(forceExitModule, "requestInitForceExit");
 });
 
 afterEach(() => {
@@ -98,6 +100,8 @@ afterEach(() => {
   findProjectsSpy.mockRestore();
   warmSpy.mockRestore();
   refreshTokenSpy.mockRestore();
+  requestForceExitSpy.mockRestore();
+  forceExitModule.scheduleInitForceExitIfRequested();
   resetPrefetch();
 });
 
@@ -289,9 +293,11 @@ describe("init command func", () => {
       expect(refreshTokenSpy).toHaveBeenCalledTimes(1);
       const refreshOrder = refreshTokenSpy.mock.invocationCallOrder[0];
       const warmOrder = warmSpy.mock.invocationCallOrder[0];
+      const forceExitOrder = requestForceExitSpy.mock.invocationCallOrder[0];
       const wizardOrder = runWizardSpy.mock.invocationCallOrder[0];
       expect(refreshOrder).toBeLessThan(warmOrder ?? 0);
-      expect(refreshOrder).toBeLessThan(wizardOrder ?? 0);
+      expect(refreshOrder).toBeLessThan(forceExitOrder ?? 0);
+      expect(forceExitOrder).toBeLessThan(wizardOrder ?? 0);
     });
 
     test("propagates AuthError before background work or wizard startup", async () => {
@@ -302,52 +308,8 @@ describe("init command func", () => {
       await expect(func.call(ctx, DEFAULT_FLAGS)).rejects.toBe(authError);
 
       expect(warmSpy).not.toHaveBeenCalled();
+      expect(requestForceExitSpy).not.toHaveBeenCalled();
       expect(runWizardSpy).not.toHaveBeenCalled();
-    });
-
-    test("does not schedule the macOS force-exit timer during auto-auth", async () => {
-      const authError = new AuthError("expired");
-      runWizardSpy.mockRejectedValueOnce(authError);
-      const shouldAutoAuthSpy = vi
-        .spyOn(autoAuthModule, "shouldAutoAuth")
-        .mockReturnValue(true);
-      const timeout = { unref: vi.fn() } as unknown as ReturnType<
-        typeof setTimeout
-      >;
-      const setTimeoutSpy = vi
-        .spyOn(globalThis, "setTimeout")
-        .mockReturnValue(timeout);
-      const originalPlatform = process.platform;
-      const originalNodeEnv = process.env.NODE_ENV;
-      Object.defineProperty(process, "platform", {
-        value: "darwin",
-        configurable: true,
-      });
-      process.env.NODE_ENV = "production";
-
-      try {
-        await expect(func.call(makeContext(), DEFAULT_FLAGS)).rejects.toBe(
-          authError
-        );
-
-        expect(shouldAutoAuthSpy).toHaveBeenCalledWith(
-          authError,
-          expect.any(Function)
-        );
-        expect(setTimeoutSpy).not.toHaveBeenCalled();
-      } finally {
-        shouldAutoAuthSpy.mockRestore();
-        setTimeoutSpy.mockRestore();
-        Object.defineProperty(process, "platform", {
-          value: originalPlatform,
-          configurable: true,
-        });
-        if (originalNodeEnv === undefined) {
-          delete process.env.NODE_ENV;
-        } else {
-          process.env.NODE_ENV = originalNodeEnv;
-        }
-      }
     });
   });
 
