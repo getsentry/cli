@@ -1,6 +1,12 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.42.2
+
+### Internal Changes 🔧
+
+- Regenerate docs by @github-actions[bot] in [0f9320ae](https://github.com/getsentry/cli/commit/0f9320ae2dda2eea0c60543438de886f38188c81)
+
 ## 0.42.1
 
 ### Internal Changes 🔧
