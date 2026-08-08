@@ -1600,14 +1600,18 @@ function renderHeatmapContent(
   const gutterW = maxLabelLen + 1; // label + space
   const chartWidth = Math.max(1, innerWidth - gutterW);
 
-  // Downsample each series to the chart width; pad shorter rows so every row
-  // has exactly `chartWidth` cells (downsample returns early for short input).
-  const rows = series.map((s) => {
-    const ds = downsample(s.values.map((v) => v.value), chartWidth);
-    return ds.length < chartWidth
-      ? [...ds, ...Array(chartWidth - ds.length).fill(0)]
-      : ds;
-  });
+  // Determine the actual number of time buckets from the first series
+  // (downsample returns the original length when shorter than target).
+  const firstValues = series[0]?.values.map((v) => v.value) ?? [];
+  const bucketCount = Math.min(
+    chartWidth,
+    firstValues.length || chartWidth
+  );
+
+  // Downsample every series to that bucket count; no padding.
+  const rows = series.map((s) =>
+    downsample(s.values.map((v) => v.value), bucketCount)
+  );
   const globalMax = Math.max(1, ...rows.flat());
 
   const lines: string[] = [];
@@ -1629,15 +1633,11 @@ function renderHeatmapContent(
   // Bottom time axis, aligned to the chart area.
   const firstTs = data.series[0]?.values.map((v) => v.timestamp) ?? [];
   if (firstTs.length > 0) {
-    const dsTs = downsampleTimestamps(firstTs, chartWidth);
-    const paddedTs =
-      dsTs.length < chartWidth
-        ? [...dsTs, ...Array(chartWidth - dsTs.length).fill(dsTs.at(-1) ?? 0)]
-        : dsTs;
+    const dsTs = downsampleTimestamps(firstTs, bucketCount);
     lines.push(
       ...buildTimeAxis({
-        timestamps: paddedTs,
-        chartWidth,
+        timestamps: dsTs,
+        chartWidth: bucketCount,
         gutterWidth: gutterW,
       })
     );
