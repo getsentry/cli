@@ -1634,9 +1634,13 @@ function renderHeatmapContent(
   }
 
   // Bottom time axis, aligned to the chart area.
-  const firstTs = data.series[0]?.values.map((v) => v.timestamp) ?? [];
-  if (firstTs.length > 0) {
-    const dsTs = downsampleTimestamps(firstTs, bucketCount);
+  // Find the longest series so its timestamps match the bucketCount.
+  const longest = series.reduce((a, b) =>
+    (b.values.length > a.values.length ? b : a), series[0] ?? { values: [] }
+  );
+  const axisTs = longest.values.map((v) => v.timestamp);
+  if (axisTs.length > 0) {
+    const dsTs = downsampleTimestamps(axisTs, bucketCount);
     lines.push(
       ...buildTimeAxis({
         timestamps: dsTs,
