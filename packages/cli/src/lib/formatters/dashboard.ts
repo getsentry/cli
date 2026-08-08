@@ -1600,18 +1600,21 @@ function renderHeatmapContent(
   const gutterW = maxLabelLen + 1; // label + space
   const chartWidth = Math.max(1, innerWidth - gutterW);
 
-  // Determine the actual number of time buckets from the first series
-  // (downsample returns the original length when shorter than target).
-  const firstValues = series[0]?.values.map((v) => v.value) ?? [];
-  const bucketCount = Math.min(
-    chartWidth,
-    firstValues.length || chartWidth
+  // Determine the actual number of time buckets from the longest series.
+  const maxLen = Math.max(
+    0,
+    ...series.map((s) => s.values.length)
   );
+  const bucketCount = Math.min(chartWidth, maxLen || chartWidth);
 
-  // Downsample every series to that bucket count; no padding.
-  const rows = series.map((s) =>
-    downsample(s.values.map((v) => v.value), bucketCount)
-  );
+  // Downsample every series to that bucket count; pad shorter series so every
+  // row has exactly `bucketCount` cells (downsample returns early for short input).
+  const rows = series.map((s) => {
+    const ds = downsample(s.values.map((v) => v.value), bucketCount);
+    return ds.length < bucketCount
+      ? [...ds, ...Array(bucketCount - ds.length).fill(0)]
+      : ds;
+  });
   const globalMax = Math.max(1, ...rows.flat());
 
   const lines: string[] = [];
