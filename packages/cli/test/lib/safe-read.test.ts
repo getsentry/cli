@@ -272,4 +272,18 @@ describe("workflow-inputs preReadCommonFiles FIFO safety", () => {
     expect(cache["package.json"]).toBe('{"name":"x"}');
     expect(cache["tsconfig.json"]).toBeNull();
   });
+
+  test("does not pre-read binary content disguised as a common config", async () => {
+    writeFileSync(
+      join(dir, "package.json"),
+      Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x00, 0xff])
+    );
+
+    const listing: DirEntry[] = [
+      { name: "package.json", path: "package.json", type: "file" },
+    ];
+    const cache = await preReadCommonFiles(dir, listing);
+
+    expect(cache["package.json"]).toBeNull();
+  });
 });
