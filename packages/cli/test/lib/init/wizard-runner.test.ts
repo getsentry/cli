@@ -721,6 +721,39 @@ describe("runWizard", () => {
     expect(lastFeedbackOutcome()).toBe("failed");
   });
 
+  test("preserves recoverable scope errors thrown by a tool", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "create-sentry-project",
+      cwd: "/tmp/test",
+      params: { name: "my-app", platform: "javascript-react" },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["ensure-sentry-project"]],
+      steps: {
+        "ensure-sentry-project": { suspendPayload: payload },
+      },
+    };
+    const scopeError = new ApiError(
+      "Forbidden",
+      403,
+      "Insufficient scope",
+      undefined,
+      true,
+      ["team:admin"]
+    );
+    executeToolSpy.mockRejectedValue(scopeError);
+
+    await expect(runWizard(makeOptions())).rejects.toBe(scopeError);
+
+    expect(spinnerMock.stop).toHaveBeenCalledWith(
+      "Authorization update required",
+      1
+    );
+    expect(lastCancelMessage()).toBe("Authorization update required");
+  });
+
   test("tears down forwarding and stops the spinner on cancellation", async () => {
     const captureSpy = vi.spyOn(Sentry, "captureException");
     const payload: ToolPayload = {

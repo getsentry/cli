@@ -23,6 +23,7 @@
  * @see https://cli.sentry.dev/exit-codes/ for full reference
  */
 
+import { extractRequiredScopes } from "./api-scope.js";
 import {
   buildBillingUrl,
   buildOrgSettingsUrl,
@@ -171,6 +172,8 @@ export class HostScopeError extends CliError {
  * @param status - HTTP status code
  * @param detail - Detailed error message from API response
  * @param endpoint - API endpoint that failed
+ * @param enriched403 - Whether centralized API handling enriched this 403
+ * @param requiredScopes - OAuth scopes reported by an insufficient-scope challenge
  */
 export class ApiError extends CliError {
   readonly status: number;
@@ -184,13 +187,17 @@ export class ApiError extends CliError {
    */
   readonly enriched403: boolean;
 
-  // biome-ignore lint/nursery/useMaxParams: established 4-param shape; enriched403 is a defaulted extension
+  /** Trusted scope-recovery metadata from a server challenge or endpoint context. */
+  readonly requiredScopes: readonly string[];
+
+  // biome-ignore lint/nursery/useMaxParams: established positional shape; new metadata is defaulted for compatibility
   constructor(
     message: string,
     status: number,
     detail?: string,
     endpoint?: string,
-    enriched403 = false
+    enriched403 = false,
+    requiredScopes: readonly string[] = []
   ) {
     super(message, EXIT.API);
     this.name = "ApiError";
@@ -198,6 +205,7 @@ export class ApiError extends CliError {
     this.detail = detail;
     this.endpoint = endpoint;
     this.enriched403 = enriched403;
+    this.requiredScopes = [...requiredScopes];
   }
 
   override format(): string {
@@ -210,6 +218,65 @@ export class ApiError extends CliError {
     }
     return msg;
   }
+}
+
+/** Metadata overrides accepted when cloning an API error. */
+export type ApiErrorOverrides = {
+  message?: string;
+  detail?: string;
+  enriched403?: boolean;
+  requiredScopes?: readonly string[];
+};
+
+/** Clone an API error while preserving all recovery metadata by default. */
+export function cloneApiError(
+  error: ApiError,
+  overrides: ApiErrorOverrides = {}
+): ApiError {
+  return new ApiError(
+    overrides.message ?? error.message,
+    error.status,
+    overrides.detail ?? error.detail,
+    error.endpoint,
+    overrides.enriched403 ?? error.enriched403,
+    overrides.requiredScopes ?? error.requiredScopes
+  );
+}
+
+/**
+ * Return an API error carrying additional authoritative OAuth scope metadata.
+ *
+ * Some endpoint-specific permission checks cannot emit an RFC 6750 challenge,
+ * but their caller may have enough role context to identify the missing token
+ * scope. Cloning keeps that contextual hint structured for the central
+ * recovery layer without rewriting response text.
+ *
+ * @param error - Original API error
+ * @param scopes - Required OAuth scopes established by the caller
+ * @returns An equivalent API error with merged scope metadata
+ */
+export function withRequiredScopes(
+  error: ApiError,
+  scopes: readonly string[]
+): ApiError {
+  return cloneApiError(error, {
+    requiredScopes: [...new Set([...error.requiredScopes, ...scopes])],
+  });
+}
+
+/** Resolve authoritative or legacy required-scope metadata from an API error. */
+export function getRequiredOAuthScopes(error: unknown): string[] {
+  if (!(error instanceof ApiError && error.status === 403)) {
+    return [];
+  }
+  return error.requiredScopes.length > 0
+    ? [...error.requiredScopes]
+    : extractRequiredScopes(error.detail);
+}
+
+/** Whether an API error can be retried after expanding an OAuth grant. */
+export function isRecoverableOAuthScopeError(error: unknown): boolean {
+  return getRequiredOAuthScopes(error).length > 0;
 }
 
 export type AuthErrorReason = "not_authenticated" | "expired" | "invalid";

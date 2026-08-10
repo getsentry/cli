@@ -1,6 +1,6 @@
 /** Shared helpers for alert list commands. */
 
-import { ApiError, ValidationError } from "../../lib/errors.js";
+import { ApiError, cloneApiError, ValidationError } from "../../lib/errors.js";
 import { LIST_MAX_LIMIT } from "../../lib/list-command.js";
 import { distributeFetchBudget, type FetchResult } from "../../lib/org-list.js";
 
@@ -42,13 +42,7 @@ export function throwAlertListFetchFailure(
   if (!(error instanceof ApiError)) {
     throw new Error(`${prefix}: ${error.message}`);
   }
-  throw new ApiError(
-    `${prefix}: ${error.message}`,
-    error.status,
-    error.detail,
-    error.endpoint,
-    error.enriched403
-  );
+  throw cloneApiError(error, { message: `${prefix}: ${error.message}` });
 }
 
 export function buildAlertListFailureErrors<TKey extends string, TFailure>(

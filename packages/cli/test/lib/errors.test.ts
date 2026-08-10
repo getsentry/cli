@@ -7,6 +7,7 @@ import {
   CliError,
   ConfigError,
   ContextError,
+  cloneApiError,
   DeviceFlowError,
   EXIT,
   formatError,
@@ -96,6 +97,25 @@ describe("ApiError", () => {
   test("format() works without detail", () => {
     const err = new ApiError("Request failed", 503);
     expect(err.format()).toBe("Request failed");
+  });
+
+  test("cloneApiError preserves structured scope metadata", () => {
+    const original = new ApiError(
+      "Forbidden",
+      403,
+      "Insufficient scope",
+      "/api/0/projects/",
+      true,
+      ["project:new-capability"]
+    );
+
+    const cloned = cloneApiError(original, { message: "Project list failed" });
+
+    expect(cloned.message).toBe("Project list failed");
+    expect(cloned.requiredScopes).toEqual(["project:new-capability"]);
+    expect(cloned.detail).toBe(original.detail);
+    expect(cloned.endpoint).toBe(original.endpoint);
+    expect(cloned.enriched403).toBe(true);
   });
 });
 

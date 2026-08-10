@@ -32,9 +32,11 @@ import {
   ApiError,
   CliError,
   ContextError,
+  cloneApiError,
   ResolutionError,
   ValidationError,
   withAuthGuard,
+  withRequiredScopes,
 } from "../../lib/errors.js";
 import {
   formatProjectCreateOutput,
@@ -283,6 +285,8 @@ type CreateProjectOpts = CreateProjectBaseOpts & {
   teamSlug: string;
   /** Source used to resolve the organization, when auto-detected. */
   detectedFrom?: string;
+  /** Scopes granted by the user's effective role on the resolved team. */
+  teamRoleScopes?: readonly string[];
 };
 
 /**
@@ -366,12 +370,9 @@ function handleCreateApiError(
   // error-reporting.ts applies — e.g. a 403 "feature disabled for members" is a
   // permission issue, not a CLI bug. 5xx and network errors still get captured.
   // The message is kept short — ApiError.format() appends detail/endpoint.
-  throw new ApiError(
-    `Failed to create project '${name}' in ${orgSlug} (HTTP ${error.status}).`,
-    error.status,
-    error.detail,
-    error.endpoint
-  );
+  throw cloneApiError(error, {
+    message: `Failed to create project '${name}' in ${orgSlug} (HTTP ${error.status}).`,
+  });
 }
 
 /**
@@ -391,7 +392,14 @@ async function createProjectWithErrors(
     if (error.status === 404) {
       return await handleCreateProject404(opts);
     }
-    return handleCreateApiError(error, opts);
+    const scopedError =
+      error.status === 403 &&
+      error.requiredScopes.length === 0 &&
+      opts.teamRoleScopes?.includes("team:admin") &&
+      error.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)
+        ? withRequiredScopes(error, ["team:admin"])
+        : error;
+    return handleCreateApiError(scopedError, opts);
   }
 }
 
@@ -594,6 +602,7 @@ async function createOneProject(opts: {
       name,
       platform,
       detectedFrom,
+      teamRoleScopes: team.roleScopes,
     });
   } catch (error) {
     // 403 means the user lacks permission to create or access teams, or to

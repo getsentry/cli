@@ -18,6 +18,7 @@ import {
   createSentryProject,
   createSentryProjectTool,
 } from "../../../../src/lib/init/tools/create-sentry-project.js";
+import { executeTool } from "../../../../src/lib/init/tools/registry.js";
 import type {
   CreateSentryProjectPayload,
   EnsureSentryProjectPayload,
@@ -344,7 +345,76 @@ describe("createSentryProject", () => {
     expect(createProjectWithAutoTeamSpy).not.toHaveBeenCalled();
   });
 
-  test("does not fall back on team-scoped policy 403", async () => {
+  test("surfaces an implicit Team Admin policy 403 for OAuth recovery", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Forbidden",
+        403,
+        "Your organization has disabled this feature for members."
+      )
+    );
+
+    const error = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: "platform",
+      teamRoleScopes: ["team:read", "team:admin"],
+      project: undefined,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).requiredScopes).toEqual(["team:admin"]);
+    expect(createProjectWithAutoTeamSpy).not.toHaveBeenCalled();
+  });
+
+  test("lets a recoverable scope error escape the real tool registry", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Forbidden",
+        403,
+        "Your organization has disabled this feature for members."
+      )
+    );
+
+    const error = await executeTool(makePayload(), {
+      directory: "/tmp/test",
+      yes: false,
+      dryRun: false,
+      org: "acme",
+      team: "platform",
+      teamRoleScopes: ["team:read", "team:admin"],
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).requiredScopes).toEqual(["team:admin"]);
+  });
+
+  test("lets a legacy detail-only scope error escape the real tool registry", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Forbidden",
+        403,
+        "You do not have the required scope: project:admin"
+      )
+    );
+
+    const error = await executeTool(makePayload(), {
+      directory: "/tmp/test",
+      yes: false,
+      dryRun: false,
+      org: "acme",
+      team: "platform",
+      isExplicitTeam: true,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).detail).toContain("project:admin");
+  });
+
+  test("keeps an explicit-team policy 403 as a role error", async () => {
     getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
     createProjectWithDsnSpy.mockRejectedValueOnce(
       new ApiError(
@@ -358,12 +428,35 @@ describe("createSentryProject", () => {
       dryRun: false,
       org: "acme",
       team: "platform",
+      isExplicitTeam: true,
       project: undefined,
     });
 
     expect(result.ok).toBe(false);
-    expect(createProjectWithAutoTeamSpy).not.toHaveBeenCalled();
     expect(result.error).toContain("disabled for members");
+  });
+
+  test("recovers an explicit team when its known role grants Team Admin", async () => {
+    getProjectSpy.mockRejectedValueOnce(new ApiError("Not found", 404));
+    createProjectWithDsnSpy.mockRejectedValueOnce(
+      new ApiError(
+        "Forbidden",
+        403,
+        "Your organization has disabled this feature for members."
+      )
+    );
+
+    const error = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: "platform",
+      teamRoleScopes: ["team:read", "team:admin"],
+      isExplicitTeam: true,
+      project: undefined,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).requiredScopes).toEqual(["team:admin"]);
   });
 
   test("surfaces friendly 409 error when fallback project already exists", async () => {

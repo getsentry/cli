@@ -25,7 +25,12 @@ import { formatBanner } from "../banner.js";
 import { CLI_VERSION } from "../constants.js";
 import { customFetch } from "../custom-ca.js";
 import { detectAgent } from "../detect-agent.js";
-import { ApiError, EXIT, WizardError } from "../errors.js";
+import {
+  ApiError,
+  EXIT,
+  isRecoverableOAuthScopeError,
+  WizardError,
+} from "../errors.js";
 import {
   renderInlineMarkdown,
   stripColorTags,
@@ -1093,6 +1098,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     }
   } catch (err) {
     const isAuthFailure = err instanceof ApiError && err.status === 401;
+    const isScopeFailure = isRecoverableOAuthScopeError(err);
     // A running spinner owns a live interval, so stop it before any early
     // return or rethrow to avoid leaving the event loop artificially busy.
     if (spinState.running) {
@@ -1103,6 +1109,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         code = 0;
       } else if (isAuthFailure) {
         label = INIT_SERVICE_AUTH_FAILED_LABEL;
+      } else if (isScopeFailure) {
+        label = "Authorization update required";
       }
       spin.stop(label, code);
       spinState.running = false;
@@ -1122,6 +1130,11 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     }
     if (isAuthFailure) {
       showFailedFeedback(ui, INIT_SERVICE_AUTH_FAILED_LABEL);
+      setTag("wizard.outcome", "errored");
+      throw err;
+    }
+    if (isScopeFailure) {
+      showFailedFeedback(ui, "Authorization update required");
       setTag("wizard.outcome", "errored");
       throw err;
     }

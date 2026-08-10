@@ -5,7 +5,11 @@ import {
   listTeams,
 } from "../api-client.js";
 import { getAuthToken } from "../db/auth.js";
-import { ApiError, WizardError } from "../errors.js";
+import {
+  ApiError,
+  isRecoverableOAuthScopeError,
+  WizardError,
+} from "../errors.js";
 import { buildOrgNotFoundError, resolveOrCreateTeam } from "../resolve-team.js";
 import { slugify } from "../utils.js";
 import { WizardCancelledError } from "./clack-utils.js";
@@ -38,6 +42,8 @@ type ProjectSelection = Pick<
   "project" | "existingProject"
 >;
 
+type TeamSelection = Pick<ResolvedInitContext, "team" | "teamRoleScopes">;
+
 /**
  * Resolve org, project, team, and auth state before the init workflow starts.
  */
@@ -62,9 +68,14 @@ export async function resolveInitContext(
       return null;
     }
 
-    const team = await resolveTeam(org, initial, ui);
+    const teamSelection = await resolveTeam(org, initial, ui);
 
-    return buildResolvedInitContext(initial, org, team, projectSelection);
+    return buildResolvedInitContext(
+      initial,
+      org,
+      teamSelection,
+      projectSelection
+    );
   });
 }
 
@@ -86,6 +97,9 @@ async function withPreflightHandling(
     ui.log.error(message);
     ui.cancel("Setup failed.");
     ui.feedback("failed");
+    if (isRecoverableOAuthScopeError(error)) {
+      throw error;
+    }
     throw error instanceof WizardError ? error : new WizardError(message);
   }
 }
@@ -93,7 +107,7 @@ async function withPreflightHandling(
 function buildResolvedInitContext(
   initial: WizardOptions,
   org: string,
-  team: string | undefined,
+  teamSelection: TeamSelection,
   selection: ProjectSelection
 ): ResolvedInitContext {
   return {
@@ -102,7 +116,7 @@ function buildResolvedInitContext(
     dryRun: initial.dryRun,
     features: initial.features,
     org,
-    team,
+    ...teamSelection,
     isExplicitTeam: Boolean(initial.team),
     project: selection.project,
     app: initial.app,
@@ -331,7 +345,7 @@ async function resolveTeam(
   org: string,
   initial: WizardOptions,
   ui: WizardUI
-): Promise<string | undefined> {
+): Promise<TeamSelection> {
   if (!initial.team) {
     return await resolveImplicitTeam(org, initial, ui);
   }
@@ -343,13 +357,18 @@ async function resolveTeam(
       dryRun: initial.dryRun,
       deferAutoCreateOnEmptyOrg: true,
     });
-    return result.source === "deferred" ? undefined : result.slug;
+    return result.source === "deferred"
+      ? {}
+      : { team: result.slug, teamRoleScopes: result.roleScopes };
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       throw error;
     }
     if (error instanceof ApiError && error.status === 403) {
-      return;
+      if (isRecoverableOAuthScopeError(error)) {
+        throw error;
+      }
+      return {};
     }
     throw toPreflightWizardError(error);
   }
@@ -410,6 +429,9 @@ async function listTeamsForImplicitInit(
     // 403 from listTeams means the user cannot inspect team access. Continue
     // without a team so init mirrors onboarding's org-scoped auto-team path.
     if (error instanceof ApiError && error.status === 403) {
+      if (isRecoverableOAuthScopeError(error)) {
+        throw error;
+      }
       await assertOrgScopedCreationCanProceed(org);
       return;
     }
@@ -424,19 +446,23 @@ async function resolveImplicitTeam(
   org: string,
   initial: WizardOptions,
   ui: WizardUI
-): Promise<string | undefined> {
+): Promise<TeamSelection> {
   const teams = await listTeamsForImplicitInit(org);
   if (!teams) {
-    return;
+    return {};
   }
 
   const candidateTeams = teams.filter(canCreateProjectInTeam);
   if (candidateTeams.length === 0) {
     await assertOrgScopedCreationCanProceed(org);
-    return;
+    return {};
   }
   if (candidateTeams.length === 1 || initial.yes) {
-    return (candidateTeams[0] as SentryTeam).slug;
+    const team = candidateTeams[0] as SentryTeam;
+    return {
+      team: team.slug,
+      teamRoleScopes: Array.isArray(team.access) ? [...team.access] : undefined,
+    };
   }
 
   const selected = await ui.select<string>({
@@ -450,7 +476,16 @@ async function resolveImplicitTeam(
   if (isCancelled(selected)) {
     throw new WizardCancelledError();
   }
-  return selected;
+  const selectedTeam = candidateTeams.find(
+    (candidate) => candidate.slug === selected
+  );
+  return {
+    team: selected,
+    teamRoleScopes:
+      selectedTeam && Array.isArray(selectedTeam.access)
+        ? [...selectedTeam.access]
+        : undefined,
+  };
 }
 
 /**
@@ -462,6 +497,9 @@ async function resolveImplicitTeam(
  * re-authenticating will.
  */
 function handleOrgListError(error: unknown): { ok: false; error: string } {
+  if (isRecoverableOAuthScopeError(error)) {
+    throw error;
+  }
   if (error instanceof ApiError && error.status === 403) {
     const lines: string[] = ["Could not list organizations (403 Forbidden)."];
     if (error.detail) {

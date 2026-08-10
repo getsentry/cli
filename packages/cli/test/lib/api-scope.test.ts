@@ -5,7 +5,83 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { extractRequiredScopes } from "../../src/lib/api-scope.js";
+import {
+  extractRequiredScopes,
+  extractRequiredScopesFromWwwAuthenticate,
+} from "../../src/lib/api-scope.js";
+
+describe("extractRequiredScopesFromWwwAuthenticate", () => {
+  test("extracts scopes from an RFC 6750 insufficient-scope challenge", () => {
+    expect(
+      extractRequiredScopesFromWwwAuthenticate(
+        'Bearer error="insufficient_scope", scope="team:admin project:write"'
+      )
+    ).toEqual(["team:admin", "project:write"]);
+  });
+
+  test("accepts a future scope because the server challenge is authoritative", () => {
+    expect(
+      extractRequiredScopesFromWwwAuthenticate(
+        'Bearer error="insufficient_scope", scope="project:new-capability"'
+      )
+    ).toEqual(["project:new-capability"]);
+  });
+
+  test("ignores unrelated or incomplete authentication challenges", () => {
+    expect(
+      extractRequiredScopesFromWwwAuthenticate(
+        'Bearer error="invalid_token", scope="team:admin"'
+      )
+    ).toEqual([]);
+    expect(
+      extractRequiredScopesFromWwwAuthenticate(
+        'Basic realm="sentry", error="insufficient_scope", scope="team:admin"'
+      )
+    ).toEqual([]);
+    expect(
+      extractRequiredScopesFromWwwAuthenticate(
+        'Bearer error="insufficient_scope"'
+      )
+    ).toEqual([]);
+  });
+
+  test("deduplicates scopes while preserving server order", () => {
+    expect(
+      extractRequiredScopesFromWwwAuthenticate(
+        'Bearer scope="team:admin team:admin org:read", error=insufficient_scope'
+      )
+    ).toEqual(["team:admin", "org:read"]);
+  });
+
+  test.each([
+    [
+      'Basic realm="legacy", Bearer error="insufficient_scope", scope="team:admin"',
+    ],
+    [
+      'Bearer error="insufficient_scope", scope="team:admin", Basic realm="legacy"',
+    ],
+  ])("isolates Bearer parameters in combined challenges", (header) => {
+    expect(extractRequiredScopesFromWwwAuthenticate(header)).toEqual([
+      "team:admin",
+    ]);
+  });
+
+  test("does not borrow a scope from a later authentication challenge", () => {
+    expect(
+      extractRequiredScopesFromWwwAuthenticate(
+        'Bearer error="insufficient_scope", Custom scope="team:admin"'
+      )
+    ).toEqual([]);
+  });
+
+  test("ignores challenge-like text inside a quoted parameter", () => {
+    expect(
+      extractRequiredScopesFromWwwAuthenticate(
+        'Basic realm="legacy, Bearer bogus", Bearer error="insufficient_scope", scope="project:new-capability"'
+      )
+    ).toEqual(["project:new-capability"]);
+  });
+});
 
 describe("extractRequiredScopes", () => {
   test("returns [] for undefined or null detail", () => {
@@ -28,6 +104,12 @@ describe("extractRequiredScopes", () => {
           "This is an org-level policy setting, not an auth issue. " +
           "You need org:admin/manager/owner role, or team:admin role on the team."
       )
+    ).toEqual([]);
+  });
+
+  test("ignores a role requirement that merely names a scope", () => {
+    expect(
+      extractRequiredScopes("This action requires the team:admin role.")
     ).toEqual([]);
   });
 

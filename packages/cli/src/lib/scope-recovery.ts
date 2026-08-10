@@ -4,17 +4,16 @@
  */
 
 import { isatty } from "node:tty";
-import { extractRequiredScopes } from "./api-scope.js";
 import { assertAutoLoginHostTrusted } from "./auto-auth.js";
 import { type AuthSource, getAuthConfig } from "./db/auth.js";
-import { ApiError } from "./errors.js";
+import { ApiError, getRequiredOAuthScopes } from "./errors.js";
 import type {
   InteractiveLoginOptions,
   LoginResult,
 } from "./interactive-login.js";
 import { interactivePromptsAllowed } from "./interactive-prompts.js";
 import { logger } from "./logger.js";
-import { OAUTH_SCOPES, resolveOAuthScopeString } from "./oauth.js";
+import { OAUTH_SCOPES } from "./oauth.js";
 
 type InteractiveLogin = (
   options?: InteractiveLoginOptions
@@ -79,7 +78,7 @@ function recoverableScopes(
     return null;
   }
 
-  const scopes = extractRequiredScopes(error.detail);
+  const scopes = getRequiredOAuthScopes(error);
   return scopes.length > 0 ? scopes : null;
 }
 
@@ -112,7 +111,11 @@ export async function runWithScopeRecovery(
 
     runtime.write("\n");
     const merged = [...new Set([...OAUTH_SCOPES, ...scopes])];
-    const requestedScope = resolveOAuthScopeString({ scopes: merged });
+    // Structured scopes come from either the configured host's RFC 6750
+    // challenge or trusted endpoint-specific context. Do not validate them
+    // against this CLI's baked-in list: a newer server may introduce a scope
+    // before the CLI is released again, and recovery should still work.
+    const requestedScope = merged.join(" ");
     const loginResult = await runInteractiveLogin({ scope: requestedScope });
     if (!loginResult) {
       throw error;

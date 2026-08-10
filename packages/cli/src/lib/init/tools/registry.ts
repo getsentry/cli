@@ -1,3 +1,4 @@
+import { isRecoverableOAuthScopeError } from "../../errors.js";
 import type { ToolOperation, ToolPayload, ToolResult } from "../types.js";
 import { applyPatchsetTool } from "./apply-patchset.js";
 import {
@@ -62,6 +63,9 @@ export async function executeTool(
   try {
     return await tool.execute(payload as never, context);
   } catch (error) {
+    if (isRecoverableOAuthScopeError(error)) {
+      throw error;
+    }
     return { ok: false, error: formatToolError(error) };
   }
 }

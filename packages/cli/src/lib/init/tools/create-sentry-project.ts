@@ -13,7 +13,11 @@ import {
   createProjectWithDsn,
   MEMBER_PROJECT_CREATION_DISABLED_DETAIL,
 } from "../../api-client.js";
-import { ApiError } from "../../errors.js";
+import {
+  ApiError,
+  isRecoverableOAuthScopeError,
+  withRequiredScopes,
+} from "../../errors.js";
 import { resolveOrCreateTeam } from "../../resolve-team.js";
 import { slugify } from "../../utils.js";
 import { tryGetExistingProjectData } from "../existing-project.js";
@@ -184,6 +188,26 @@ async function validateTeamForDryRun(
   }
 }
 
+function getProjectScopeRecoveryError(
+  error: unknown,
+  context: Pick<ToolContext, "team" | "teamRoleScopes">
+): ApiError | undefined {
+  if (!(error instanceof ApiError && error.status === 403)) {
+    return;
+  }
+  if (isRecoverableOAuthScopeError(error)) {
+    return error;
+  }
+  if (
+    context.team &&
+    context.teamRoleScopes?.includes("team:admin") &&
+    error.detail?.includes(MEMBER_PROJECT_CREATION_DISABLED_DETAIL)
+  ) {
+    return withRequiredScopes(error, ["team:admin"]);
+  }
+  return;
+}
+
 /**
  * Create a new Sentry project using the org that preflight already resolved.
  * When preflight does not resolve a Team Admin team, creation uses the same
@@ -200,7 +224,13 @@ export async function createSentryProject(
   payload: CreateSentryProjectPayload | EnsureSentryProjectPayload,
   context: Pick<
     ToolContext,
-    "dryRun" | "existingProject" | "isExplicitTeam" | "org" | "team" | "project"
+    | "dryRun"
+    | "existingProject"
+    | "isExplicitTeam"
+    | "org"
+    | "team"
+    | "teamRoleScopes"
+    | "project"
   >
 ): Promise<ToolResult> {
   const name = context.project ?? payload.params.name;
@@ -268,6 +298,17 @@ export async function createSentryProject(
       },
     };
   } catch (error) {
+    // Let the command-level OAuth recovery restart the wizard after a fresh
+    // authorization. Standard insufficient-scope responses already carry
+    // structured metadata from WWW-Authenticate. For an implicitly selected
+    // team, preflight only supplies `context.team` when the user's effective
+    // role grants team:admin, so the otherwise ambiguous policy 403 identifies
+    // an older OAuth grant that is missing that scope.
+    const recoveryError = getProjectScopeRecoveryError(error, context);
+    if (recoveryError) {
+      throw recoveryError;
+    }
+
     // Org-level policy: member project creation is disabled on this org.
     // Surface a clear message with the escape hatch.
     if (

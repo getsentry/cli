@@ -525,6 +525,7 @@ describe("resolveInitContext", () => {
     resolveOrCreateTeamSpy.mockResolvedValue({
       slug: "backend",
       source: "explicit",
+      roleScopes: ["team:read", "team:admin"],
     } as any);
 
     const { ui } = createMockUI();
@@ -535,6 +536,7 @@ describe("resolveInitContext", () => {
 
     expect(context?.isExplicitTeam).toBe(true);
     expect(context?.team).toBe("backend");
+    expect(context?.teamRoleScopes).toEqual(["team:read", "team:admin"]);
   });
 
   test("sets isExplicitTeam:false when no --team flag is provided", async () => {
@@ -557,6 +559,24 @@ describe("resolveInitContext", () => {
     expect(context?.team).toBeUndefined();
     expect(getOrganizationSpy).toHaveBeenCalledWith("acme");
     expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
+  });
+
+  test("preserves a structured insufficient-scope error from preflight", async () => {
+    const scopeError = new ApiError(
+      "Forbidden",
+      403,
+      "Insufficient scope",
+      undefined,
+      true,
+      ["team:read"]
+    );
+    listTeamsSpy.mockRejectedValueOnce(scopeError);
+
+    const { ui } = createMockUI();
+
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toBe(
+      scopeError
+    );
   });
 
   test("preserves rich org-not-found guidance when implicit team lookup returns 404", async () => {

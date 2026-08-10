@@ -41,6 +41,7 @@ import { createDsnFingerprint } from "../../lib/dsn/index.js";
 import {
   ApiError,
   ContextError,
+  cloneApiError,
   toSearchQueryError,
   ValidationError,
   withAuthGuard,
@@ -917,12 +918,9 @@ function enrichIssueListError(
   }
   if (error instanceof ApiError) {
     if (error.status === 400) {
-      throw new ApiError(
-        error.message,
-        error.status,
-        build400Detail(error.detail, flags),
-        error.endpoint
-      );
+      throw cloneApiError(error, {
+        detail: build400Detail(error.detail, flags),
+      });
     }
     if (error.status === 403) {
       // Centralized 403 enrichment (infrastructure.ts) already added
@@ -930,13 +928,7 @@ function enrichIssueListError(
       const detail = error.enriched403
         ? appendProjectMembershipHint(error.detail)
         : build403Detail(error.detail);
-      throw new ApiError(
-        error.message,
-        error.status,
-        detail,
-        error.endpoint,
-        true
-      );
+      throw cloneApiError(error, { detail, enriched403: true });
     }
   }
   throw error;
@@ -1154,13 +1146,11 @@ async function handleResolvedTargets(
           ? appendProjectMembershipHint(first.detail)
           : build403Detail(first.detail);
       }
-      throw new ApiError(
-        `${prefix}: ${first.message}`,
-        first.status,
+      throw cloneApiError(first, {
+        message: `${prefix}: ${first.message}`,
         detail,
-        first.endpoint,
-        first.enriched403 || first.status === 403
-      );
+        enriched403: first.enriched403 || first.status === 403,
+      });
     }
 
     throw new Error(`${prefix}: ${first.message}`);

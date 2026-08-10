@@ -9,7 +9,10 @@ function missingScopeError(): ApiError {
   return new ApiError(
     "Forbidden",
     403,
-    "You do not have the required scope: team:admin"
+    "You do not have permission to perform this action.",
+    undefined,
+    true,
+    ["team:admin"]
   );
 }
 
@@ -54,6 +57,53 @@ describe("runWithScopeRecovery", () => {
     const scope = login.mock.calls[0]?.[0]?.scope;
     expect(scope?.split(" ")).toEqual(
       expect.arrayContaining(["org:read", "project:write", "team:admin"])
+    );
+  });
+
+  test("keeps response-detail parsing as a legacy server fallback", async () => {
+    const originalError = new ApiError(
+      "Forbidden",
+      403,
+      "You do not have the required scope: project:admin"
+    );
+    const proceed = vi
+      .fn<(argv: string[]) => Promise<void>>()
+      .mockRejectedValueOnce(originalError)
+      .mockResolvedValueOnce();
+    const login = vi.fn().mockResolvedValue({
+      method: "oauth",
+      configPath: "/tmp/config",
+    });
+
+    await runWithScopeRecovery(proceed, [], login, runtime());
+
+    expect(login.mock.calls[0]?.[0]?.scope?.split(" ")).toContain(
+      "project:admin"
+    );
+  });
+
+  test("can recover a scope introduced by a newer Sentry server", async () => {
+    const originalError = new ApiError(
+      "Forbidden",
+      403,
+      "Insufficient scope",
+      undefined,
+      true,
+      ["project:new-capability"]
+    );
+    const proceed = vi
+      .fn<(argv: string[]) => Promise<void>>()
+      .mockRejectedValueOnce(originalError)
+      .mockResolvedValueOnce();
+    const login = vi.fn().mockResolvedValue({
+      method: "oauth",
+      configPath: "/tmp/config",
+    });
+
+    await runWithScopeRecovery(proceed, [], login, runtime());
+
+    expect(login.mock.calls[0]?.[0]?.scope?.split(" ")).toContain(
+      "project:new-capability"
     );
   });
 
