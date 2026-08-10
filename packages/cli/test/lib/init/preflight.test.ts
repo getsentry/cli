@@ -16,6 +16,10 @@ vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
   );
 });
 
+vi.mock("../../../src/lib/scope-recovery.js", () => ({
+  currentOAuthGrantNeedsRefresh: vi.fn(),
+}));
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as apiClient from "../../../src/lib/api-client.js";
 
@@ -66,6 +70,8 @@ import * as prefetch from "../../../src/lib/init/org-prefetch.js";
 import { resolveInitContext } from "../../../src/lib/init/preflight.js";
 import type { WizardOptions } from "../../../src/lib/init/types.js";
 import { CANCELLED } from "../../../src/lib/init/ui/types.js";
+// biome-ignore lint/performance/noNamespaceImport: scope decision is mocked at the module boundary
+import * as scopeRecovery from "../../../src/lib/scope-recovery.js";
 
 vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
   const actual =
@@ -125,6 +131,9 @@ let detectDsnSpy: ReturnType<typeof spyOn>;
 let resolveDsnByPublicKeySpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
+  vi.mocked(scopeRecovery.currentOAuthGrantNeedsRefresh).mockResolvedValue(
+    false
+  );
   resolveOrgPrefetchedSpy = vi
     .spyOn(prefetch, "resolveOrgPrefetched")
     .mockResolvedValue({ org: "acme" });
@@ -185,6 +194,7 @@ afterEach(() => {
   resolveOrCreateTeamSpy.mockRestore();
   detectDsnSpy.mockRestore();
   resolveDsnByPublicKeySpy.mockRestore();
+  vi.mocked(scopeRecovery.currentOAuthGrantNeedsRefresh).mockReset();
   process.exitCode = 0;
 });
 
@@ -525,7 +535,6 @@ describe("resolveInitContext", () => {
     resolveOrCreateTeamSpy.mockResolvedValue({
       slug: "backend",
       source: "explicit",
-      roleScopes: ["team:read", "team:admin"],
     } as any);
 
     const { ui } = createMockUI();
@@ -536,7 +545,6 @@ describe("resolveInitContext", () => {
 
     expect(context?.isExplicitTeam).toBe(true);
     expect(context?.team).toBe("backend");
-    expect(context?.teamRoleScopes).toEqual(["team:read", "team:admin"]);
   });
 
   test("sets isExplicitTeam:false when no --team flag is provided", async () => {
@@ -561,22 +569,16 @@ describe("resolveInitContext", () => {
     expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
   });
 
-  test("preserves a structured insufficient-scope error from preflight", async () => {
-    const scopeError = new ApiError(
-      "Forbidden",
-      403,
-      "Insufficient scope",
-      undefined,
-      true,
-      ["team:read"]
-    );
-    listTeamsSpy.mockRejectedValueOnce(scopeError);
+  test("preserves a 403 when the stored OAuth grant is stale", async () => {
+    const error = new ApiError("Forbidden", 403, "No team:read access");
+    listTeamsSpy.mockRejectedValueOnce(error);
+    vi.mocked(
+      scopeRecovery.currentOAuthGrantNeedsRefresh
+    ).mockResolvedValueOnce(true);
 
     const { ui } = createMockUI();
 
-    await expect(resolveInitContext(makeOptions(), ui)).rejects.toBe(
-      scopeError
-    );
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toBe(error);
   });
 
   test("preserves rich org-not-found guidance when implicit team lookup returns 404", async () => {

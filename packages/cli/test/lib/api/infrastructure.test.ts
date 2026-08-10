@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
-  apiRequestToRegion,
   isTextualContentType,
   rawApiRequest,
   throwApiError,
@@ -71,31 +70,6 @@ describe("throwApiError", () => {
       expect(apiError.message).toBe("Failed to list issues: 400 Bad Request");
       expect(apiError.status).toBe(400);
       expect(apiError.detail).toBe("Invalid query syntax");
-    }
-  });
-
-  test("preserves required scopes from WWW-Authenticate as structured metadata", () => {
-    const mockResponse = new Response("", {
-      status: 403,
-      statusText: "Forbidden",
-      headers: {
-        "www-authenticate":
-          'Bearer error="insufficient_scope", scope="team:admin"',
-      },
-    });
-
-    try {
-      throwApiError(
-        { detail: "You do not have permission to perform this action." },
-        mockResponse,
-        "Failed to create project"
-      );
-    } catch (error) {
-      const apiError = error as ApiError;
-      expect(apiError.requiredScopes).toEqual(["team:admin"]);
-      expect(apiError.detail).toContain(
-        "missing the required scope(s) 'team:admin'"
-      );
     }
   });
 
@@ -694,48 +668,5 @@ describe("rawApiRequest binary handling", () => {
 
     const result = await rawApiRequest("some/text/");
     expect(result.body).toBe("not json");
-  });
-});
-
-describe("apiRequestToRegion error metadata", () => {
-  useTestConfigDir("regional-api-scope-");
-
-  let originalFetch: typeof globalThis.fetch;
-
-  beforeEach(async () => {
-    originalFetch = globalThis.fetch;
-    await setAuthToken("test-token");
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  test("preserves an insufficient-scope challenge from a raw API response", async () => {
-    globalThis.fetch = mockFetch(
-      async () =>
-        new Response(
-          JSON.stringify({
-            detail: "You do not have permission to perform this action.",
-          }),
-          {
-            status: 403,
-            statusText: "Forbidden",
-            headers: {
-              "content-type": "application/json",
-              "www-authenticate":
-                'Bearer error="insufficient_scope", scope="team:admin"',
-            },
-          }
-        )
-    );
-
-    const error = await apiRequestToRegion(
-      "https://sentry.io",
-      "organizations/acme/projects/"
-    ).catch((caught: unknown) => caught);
-
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).requiredScopes).toEqual(["team:admin"]);
   });
 });

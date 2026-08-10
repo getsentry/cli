@@ -40,47 +40,4 @@ describe("resolveOrCreateTeam", () => {
     expect(error.status).toBe(401);
     expect(error.detail).toContain("over its member limit");
   });
-
-  test("preserves effective team role scopes for permission recovery", async () => {
-    listTeamsSpy.mockResolvedValueOnce([
-      {
-        id: "1",
-        slug: "platform",
-        name: "Platform",
-        access: ["team:read", "team:admin"],
-      },
-    ]);
-
-    const result = await resolveOrCreateTeam("acme", {
-      usageHint: "sentry project create",
-    });
-
-    expect(result).toEqual({
-      slug: "platform",
-      source: "auto-selected",
-      roleScopes: ["team:read", "team:admin"],
-    });
-  });
-
-  test("best-effort resolves role scopes for an explicit team", async () => {
-    listTeamsSpy.mockResolvedValueOnce([
-      {
-        id: "1",
-        slug: "platform",
-        name: "Platform",
-        access: ["team:read", "team:admin"],
-      },
-    ]);
-
-    const result = await resolveOrCreateTeam("acme", {
-      team: "platform",
-      usageHint: "sentry project create",
-    });
-
-    expect(result).toEqual({
-      slug: "platform",
-      source: "explicit",
-      roleScopes: ["team:read", "team:admin"],
-    });
-  });
 });

@@ -44,19 +44,6 @@ export const SENTRY_SCOPES = [
   "alerts:write",
 ] as const;
 
-const OAUTH_SCOPE_TOKEN_RE = /^[\x21\x23-\x5b\x5d-\x7e]+$/;
-const BEARER_CHALLENGE_RE = /^Bearer\s+(.+)$/i;
-const AUTH_SCHEME_TOKEN_CHAR_RE = /^[A-Za-z0-9!#$%&'*+.^_`|~-]$/;
-const SCOPE_SEPARATOR_RE = /\s+/;
-const MISSING_BEFORE_SCOPE_RE =
-  /(?:missing|lacks?|without|insufficient|required)[^.\n]{0,80}scopes?/;
-const SCOPE_BEFORE_MISSING_RE =
-  /scopes?[^.\n]{0,80}(?:missing|required|insufficient)/;
-const TOKEN_MISSING_RE =
-  /(?:token|authorization|oauth)[^.\n]{0,120}(?:missing|lacks?|without|insufficient)/;
-const EXPLICIT_SCOPE_REQUIREMENT_RE =
-  /(?:required\s*:|obtaining[^.\n]{0,80}scope)/;
-
 // Explicit alternation (not `<ns>:<action>` product) rejects nonexistent
 // combinations like `release:write` or `alerts:admin`. `:` is not a
 // regex metachar so no escaping needed.
@@ -91,117 +78,6 @@ export function extractRequiredScopes(detail: unknown): string[] {
     return extractFromText(detail);
   }
   return [];
-}
-
-/**
- * Extract required scopes from an RFC 6750 Bearer challenge.
- *
- * Unlike the legacy response-body parser above, this accepts valid scopes
- * that a newer Sentry server may introduce after this CLI was released. The
- * challenge is authoritative, so recovery can remain generic when the CLI's
- * standard OAuth scope set grows in the future.
- *
- * @param header - The `WWW-Authenticate` response header
- * @returns Deduplicated, source-ordered scopes for `insufficient_scope`
- */
-export function extractRequiredScopesFromWwwAuthenticate(
-  header: string | null | undefined
-): string[] {
-  if (!header) {
-    return [];
-  }
-  for (const challenge of splitAuthenticateChallenges(header)) {
-    const bearer = BEARER_CHALLENGE_RE.exec(challenge);
-    if (!bearer?.[1]) {
-      continue;
-    }
-    const params = bearer[1];
-    const error = extractAuthParam(params, "error");
-    if (error?.toLowerCase() !== "insufficient_scope") {
-      continue;
-    }
-    const scope = extractAuthParam(params, "scope");
-    if (!scope) {
-      continue;
-    }
-    return [
-      ...new Set(
-        scope
-          .split(SCOPE_SEPARATOR_RE)
-          .filter((candidate) => OAUTH_SCOPE_TOKEN_RE.test(candidate))
-      ),
-    ];
-  }
-  return [];
-}
-
-function splitAuthenticateChallenges(header: string): string[] {
-  const challenges: string[] = [];
-  let challengeStart = 0;
-  let inQuotes = false;
-  let escaped = false;
-
-  for (let index = 0; index < header.length; index += 1) {
-    const char = header[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char === "\\" && inQuotes) {
-      escaped = true;
-      continue;
-    }
-    if (char === '"') {
-      inQuotes = !inQuotes;
-      continue;
-    }
-    if (char !== "," || inQuotes) {
-      continue;
-    }
-
-    const nextSchemeStart = findNextAuthSchemeStart(header, index + 1);
-    if (nextSchemeStart === undefined) {
-      continue;
-    }
-    challenges.push(header.slice(challengeStart, index).trim());
-    challengeStart = nextSchemeStart;
-  }
-
-  challenges.push(header.slice(challengeStart).trim());
-  return challenges.filter(Boolean);
-}
-
-function findNextAuthSchemeStart(
-  header: string,
-  offset: number
-): number | undefined {
-  let cursor = offset;
-  while (header[cursor] === " " || header[cursor] === "\t") {
-    cursor += 1;
-  }
-  const tokenStart = cursor;
-  while (
-    cursor < header.length &&
-    AUTH_SCHEME_TOKEN_CHAR_RE.test(header[cursor] as string)
-  ) {
-    cursor += 1;
-  }
-  if (
-    cursor > tokenStart &&
-    (header[cursor] === " " || header[cursor] === "\t")
-  ) {
-    return tokenStart;
-  }
-  return;
-}
-
-function extractAuthParam(header: string, name: string): string | undefined {
-  const pattern = new RegExp(
-    `(?:^|[,\\s])${name}\\s*=\\s*(?:"([^"]*)"|([^,\\s]+))`,
-    "i"
-  );
-  const match = pattern.exec(header);
-  return match?.[1] ?? match?.[2];
 }
 
 /** A role/policy denial can mention scope names without a token lacking them. */
@@ -262,22 +138,9 @@ function matchesKnownScope(scope: string): boolean {
 }
 
 function extractFromText(text: string): string[] {
-  if (!describesMissingTokenScope(text)) {
-    return [];
-  }
   const matches = text.match(KNOWN_SCOPE_RE);
   if (!matches) {
     return [];
   }
   return [...new Set(matches.map((m) => m.toLowerCase()))];
-}
-
-function describesMissingTokenScope(text: string): boolean {
-  const normalized = text.toLowerCase();
-  return (
-    MISSING_BEFORE_SCOPE_RE.test(normalized) ||
-    SCOPE_BEFORE_MISSING_RE.test(normalized) ||
-    TOKEN_MISSING_RE.test(normalized) ||
-    EXPLICIT_SCOPE_REQUIREMENT_RE.test(normalized)
-  );
 }

@@ -721,7 +721,7 @@ describe("runWizard", () => {
     expect(lastFeedbackOutcome()).toBe("failed");
   });
 
-  test("preserves recoverable scope errors thrown by a tool", async () => {
+  test("preserves 403 errors thrown for command-level scope inspection", async () => {
     const payload: ToolPayload = {
       type: "tool",
       operation: "create-sentry-project",
@@ -735,23 +735,16 @@ describe("runWizard", () => {
         "ensure-sentry-project": { suspendPayload: payload },
       },
     };
-    const scopeError = new ApiError(
-      "Forbidden",
-      403,
-      "Insufficient scope",
-      undefined,
-      true,
-      ["team:admin"]
-    );
+    const scopeError = new ApiError("Forbidden", 403);
     executeToolSpy.mockRejectedValue(scopeError);
 
     await expect(runWizard(makeOptions())).rejects.toBe(scopeError);
 
     expect(spinnerMock.stop).toHaveBeenCalledWith(
-      "Authorization update required",
+      "Sentry API request denied",
       1
     );
-    expect(lastCancelMessage()).toBe("Authorization update required");
+    expect(lastCancelMessage()).toBe("Sentry API request denied");
   });
 
   test("tears down forwarding and stops the spinner on cancellation", async () => {

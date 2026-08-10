@@ -6,7 +6,7 @@
  *
  * ## Resolution flow
  *
- * 1. Explicit `--team` flag → use as-is, with best-effort role lookup
+ * 1. Explicit `--team` flag → use as-is, no validation
  * 2. Fetch org teams via `listTeams`
  *    - On 404: org doesn't exist → resolve effective org via cache, show org list
  *    - On other errors: surface status + generic hint
@@ -28,7 +28,6 @@ import {
   AuthError,
   CliError,
   ContextError,
-  isRecoverableOAuthScopeError,
   ResolutionError,
 } from "./errors.js";
 import { resolveEffectiveOrg } from "./region.js";
@@ -92,8 +91,6 @@ export type ResolvedConcreteTeam = {
   slug: string;
   /** How the team was determined */
   source: "explicit" | "auto-selected" | "auto-created";
-  /** Scopes granted by the user's effective role on this team, when known. */
-  roleScopes?: readonly string[];
 };
 
 /** Result of init-specific deferred team resolution for empty organizations. */
@@ -170,7 +167,7 @@ export async function resolveOrCreateTeam(
   options: ResolveTeamOptions
 ): Promise<ResolvedTeam> {
   if (options.team) {
-    return await resolveExplicitTeam(orgSlug, options.team);
+    return { slug: options.team, source: "explicit" };
   }
 
   let teams: SentryTeam[];
@@ -187,7 +184,7 @@ export async function resolveOrCreateTeam(
 
   // Single team — auto-select
   if (teams.length === 1) {
-    return resolvedListedTeam(teams[0] as SentryTeam);
+    return { slug: (teams[0] as SentryTeam).slug, source: "auto-selected" };
   }
 
   // Multiple teams — prefer teams the user belongs to
@@ -195,16 +192,16 @@ export async function resolveOrCreateTeam(
   const candidates = memberTeams.length > 0 ? memberTeams : teams;
 
   if (candidates.length === 1) {
-    return resolvedListedTeam(candidates[0] as SentryTeam);
+    return {
+      slug: (candidates[0] as SentryTeam).slug,
+      source: "auto-selected",
+    };
   }
 
   // Multiple candidates — let caller choose or throw
   if (options.onAmbiguous) {
     const slug = await options.onAmbiguous(candidates);
-    const selected = candidates.find((team) => team.slug === slug);
-    return selected
-      ? resolvedListedTeam(selected)
-      : { slug, source: "auto-selected" };
+    return { slug, source: "auto-selected" };
   }
 
   const label =
@@ -219,40 +216,6 @@ export async function resolveOrCreateTeam(
       ...candidates.map((t) => `Available: ${t.slug}`),
     ]
   );
-}
-
-function resolvedListedTeam(
-  team: SentryTeam,
-  source: ResolvedConcreteTeam["source"] = "auto-selected"
-): ResolvedConcreteTeam {
-  return {
-    slug: team.slug,
-    source,
-    ...(Array.isArray(team.access) ? { roleScopes: [...team.access] } : {}),
-  };
-}
-
-async function resolveExplicitTeam(
-  orgSlug: string,
-  teamSlug: string
-): Promise<ResolvedConcreteTeam> {
-  const fallback: ResolvedConcreteTeam = {
-    slug: teamSlug,
-    source: "explicit",
-  };
-  try {
-    const teams = await listTeams(orgSlug);
-    const team = teams.find((candidate) => candidate.slug === teamSlug);
-    return team ? resolvedListedTeam(team, "explicit") : fallback;
-  } catch (error) {
-    if (isRecoverableOAuthScopeError(error)) {
-      throw error;
-    }
-    // Explicit team resolution historically made no list request. Capability
-    // lookup is best-effort so missing team:read or a transient list failure
-    // cannot prevent the create endpoint from returning its precise result.
-    return fallback;
-  }
 }
 
 /**
@@ -290,11 +253,7 @@ async function autoCreateTeam(
 ): Promise<ResolvedTeam> {
   try {
     const team = await createTeam(orgSlug, slug);
-    return {
-      slug: team.slug,
-      source: "auto-created",
-      ...(Array.isArray(team.access) ? { roleScopes: [...team.access] } : {}),
-    };
+    return { slug: team.slug, source: "auto-created" };
   } catch (error) {
     // Let auth errors propagate so the central handler can trigger auto-login
     if (error instanceof AuthError) {

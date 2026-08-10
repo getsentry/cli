@@ -436,10 +436,9 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   /**
    * Scope recovery middleware.
    *
-   * Existing stored OAuth grants may predate the current standard scope set.
-   * On a scope-specific 403, offer one refresh with today's defaults and retry
-   * exactly once. Non-interactive and explicitly unattended commands never
-   * enter a device flow.
+   * After a 401/403, compare a stored OAuth grant with the CLI's current scope
+   * set. Re-authorize stale grants and retry exactly once. Non-interactive and
+   * explicitly unattended commands never enter a device flow.
    */
   const scopeRecoveryMiddleware: ErrorMiddleware = async (next, argv) => {
     const { runWithScopeRecovery } = await import("./lib/scope-recovery.js");

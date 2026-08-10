@@ -13,10 +13,7 @@ import { parseSentryLinkHeader } from "@sentry/api";
 import * as Sentry from "@sentry/node-core/light";
 import type { z } from "zod";
 
-import {
-  extractRequiredScopes,
-  extractRequiredScopesFromWwwAuthenticate,
-} from "../api-scope.js";
+import { extractRequiredScopes } from "../api-scope.js";
 import { getActiveEnvVarName, isEnvTokenActive } from "../db/auth.js";
 import { getEnv } from "../env.js";
 import { ApiError, AuthError, stringifyUnknown } from "../errors.js";
@@ -41,15 +38,9 @@ import {
  * - env-var tokens → suggest checking token scopes
  * - OAuth tokens → suggest re-authentication
  */
-function enrich403Detail(
-  rawDetail: string | undefined,
-  requiredScopes: readonly string[] = []
-): string {
+function enrich403Detail(rawDetail: string | undefined): string {
   // Org-level policy — re-auth and token scope advice do not apply here.
-  if (
-    requiredScopes.length === 0 &&
-    rawDetail?.includes("disabled this feature")
-  ) {
+  if (rawDetail?.includes("disabled this feature")) {
     return [
       rawDetail,
       "",
@@ -63,10 +54,7 @@ function enrich403Detail(
     lines.push(rawDetail, "");
   }
 
-  const scopes =
-    requiredScopes.length > 0
-      ? [...requiredScopes]
-      : extractRequiredScopes(rawDetail);
+  const scopes = extractRequiredScopes(rawDetail);
 
   if (isEnvTokenActive()) {
     if (scopes.length > 0) {
@@ -161,14 +149,10 @@ export function enrich401Detail(rawDetail: string | undefined): string {
 function enrichDetail(
   status: number,
   detail: string | undefined,
-  hasUsableDetail: boolean,
-  requiredScopes: readonly string[] = []
+  hasUsableDetail: boolean
 ): string | undefined {
   if (status === 403) {
-    return enrich403Detail(
-      hasUsableDetail ? detail : undefined,
-      requiredScopes
-    );
+    return enrich403Detail(hasUsableDetail ? detail : undefined);
   }
   if (status === 401) {
     return enrich401Detail(hasUsableDetail ? detail : undefined);
@@ -246,16 +230,12 @@ export function throwApiError(
     : stringifyUnknown(error);
 
   const is403 = status === 403;
-  const requiredScopes = extractRequiredScopesFromWwwAuthenticate(
-    response.headers.get("www-authenticate")
-  );
   throw new ApiError(
     `${context}: ${status} ${response.statusText ?? "Unknown"}`,
     status,
-    enrichDetail(status, detail, hasUsableDetail, requiredScopes),
+    enrichDetail(status, detail, hasUsableDetail),
     undefined,
-    is403,
-    requiredScopes
+    is403
   );
 }
 
@@ -612,16 +592,12 @@ async function throwRawApiError(
     "www-authenticate": response.headers.get("www-authenticate"),
   });
   const is403 = response.status === 403;
-  const requiredScopes = extractRequiredScopesFromWwwAuthenticate(
-    response.headers.get("www-authenticate")
-  );
   throw new ApiError(
     `API request failed: ${response.status} ${response.statusText}`,
     response.status,
-    enrichDetail(response.status, detail, detail !== undefined, requiredScopes),
+    enrichDetail(response.status, detail, detail !== undefined),
     endpoint,
-    is403,
-    requiredScopes
+    is403
   );
 }
 

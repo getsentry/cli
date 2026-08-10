@@ -273,14 +273,15 @@ describe("project create", () => {
     );
   });
 
-  test("passes --team after a best-effort role capability lookup", async () => {
+  test("passes --team to skip team auto-detection", async () => {
     listTeamsSpy.mockResolvedValue([sampleTeam, sampleTeam2]);
 
     const { context } = createMockContext();
     const func = await createCommand.loader();
     await func.call(context, { team: "mobile", json: false }, "my-app:go");
 
-    expect(listTeamsSpy).toHaveBeenCalledOnce();
+    // listTeams should NOT be called when --team is explicit
+    expect(listTeamsSpy).not.toHaveBeenCalled();
     expect(createProjectWithDsnSpy).toHaveBeenCalledWith(
       "acme-corp",
       "mobile",
@@ -673,55 +674,6 @@ describe("project create", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(403);
     expect(err.message).toContain("disabled project creation for members");
-  });
-
-  test("marks a Team Admin policy 403 as a recoverable OAuth scope error", async () => {
-    listTeamsSpy.mockResolvedValueOnce([
-      { ...sampleTeam, access: ["team:admin"] },
-    ]);
-    createProjectWithDsnSpy.mockRejectedValueOnce(
-      new ApiError(
-        "Forbidden",
-        403,
-        "Your organization has disabled this feature for members."
-      )
-    );
-
-    const { context } = createMockContext();
-    const func = await createCommand.loader();
-    const error = (await func
-      .call(context, { json: false }, "my-app:node")
-      .catch((caught: unknown) => caught)) as ApiError;
-
-    expect(error).toBeInstanceOf(ApiError);
-    expect(error.requiredScopes).toEqual(["team:admin"]);
-    expect(createProjectWithAutoTeamSpy).not.toHaveBeenCalled();
-  });
-
-  test("recovers a known Team Admin selected with --team", async () => {
-    listTeamsSpy.mockResolvedValueOnce([
-      {
-        ...sampleTeam,
-        slug: "platform",
-        access: ["team:read", "team:admin"],
-      },
-    ]);
-    createProjectWithDsnSpy.mockRejectedValueOnce(
-      new ApiError(
-        "Forbidden",
-        403,
-        "Your organization has disabled this feature for members."
-      )
-    );
-
-    const { context } = createMockContext();
-    const func = await createCommand.loader();
-    const error = (await func
-      .call(context, { json: false, team: "platform" }, "my-app:node")
-      .catch((caught: unknown) => caught)) as ApiError;
-
-    expect(error).toBeInstanceOf(ApiError);
-    expect(error.requiredScopes).toEqual(["team:admin"]);
   });
 
   test("outputs JSON when --json flag is set", async () => {

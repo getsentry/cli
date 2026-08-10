@@ -14,7 +14,6 @@ import type { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import {
   ApiError,
   ContextError,
-  cloneApiError,
   ResolutionError,
   ValidationError,
 } from "../../lib/errors.js";
@@ -793,12 +792,13 @@ export async function enrichDashboardError(
     error.status === 400 &&
     (ctx.operation === "create" || ctx.operation === "update")
   ) {
-    throw cloneApiError(error, {
-      message: `Dashboard ${ctx.operation} failed in ${org}`,
-      detail:
-        error.detail ??
+    throw new ApiError(
+      `Dashboard ${ctx.operation} failed in ${org}`,
+      error.status,
+      error.detail ??
         "The API rejected the request. Check widget configuration.",
-    });
+      error.endpoint
+    );
   }
 
   throw error;

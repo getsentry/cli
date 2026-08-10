@@ -47,8 +47,6 @@ export type ResolvedInitContext = {
    * Omitted when init defers empty-org auto-creation until project creation.
    */
   team?: string;
-  /** Scopes granted by the user's effective role on the resolved team. */
-  teamRoleScopes?: readonly string[];
   /**
    * True only when `team` was supplied via the `--team` CLI flag.
    * False/absent when the team was auto-selected by preflight.
