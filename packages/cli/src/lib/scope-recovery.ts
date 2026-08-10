@@ -32,17 +32,6 @@ const defaultRuntime: ScopeRecoveryRuntime = {
   write: (message) => process.stderr.write(message),
 };
 
-function disablesInteractiveRecovery(argv: string[]): boolean {
-  return argv.some(
-    (arg) =>
-      arg === "--yes" ||
-      arg === "-y" ||
-      arg.startsWith("--yes=") ||
-      arg === "--dry-run" ||
-      arg.startsWith("--dry-run=")
-  );
-}
-
 async function inspectOAuthScopes(
   runtime: ScopeRecoveryRuntime,
   startedWithOAuth = false
@@ -77,11 +66,50 @@ async function inspectOAuthScopes(
 }
 
 /** Whether the active stored OAuth token is invalid or lacks a current CLI scope. */
-export async function currentOAuthGrantNeedsRefresh(
-  runtime: ScopeRecoveryRuntime = defaultRuntime
+async function currentOAuthGrantNeedsRefresh(
+  runtime: ScopeRecoveryRuntime,
+  startedWithOAuth: boolean
 ): Promise<boolean> {
-  const state = await inspectOAuthScopes(runtime);
+  const state = await inspectOAuthScopes(runtime, startedWithOAuth);
   return Boolean(state && state.kind !== "current");
+}
+
+function hasActiveOAuthGrant(
+  runtime: ScopeRecoveryRuntime = defaultRuntime
+): boolean {
+  try {
+    return runtime.getAuthSource() === "oauth";
+  } catch {
+    return false;
+  }
+}
+
+export type OAuthScopeRecoveryGate = {
+  readonly shouldDelegate: (
+    error: unknown,
+    options: { unattended: boolean }
+  ) => Promise<boolean>;
+};
+
+/** Preserve command-specific fallbacks unless central OAuth recovery can own the error. */
+export function captureOAuthScopeRecoveryGate(
+  runtime: ScopeRecoveryRuntime = defaultRuntime
+): OAuthScopeRecoveryGate {
+  const startedWithOAuth = hasActiveOAuthGrant(runtime);
+  return {
+    shouldDelegate: async (error, options) => {
+      if (
+        !(error instanceof ApiError) ||
+        (error.status !== 401 && error.status !== 403) ||
+        options.unattended ||
+        !runtime.inputIsTty() ||
+        !runtime.promptsAllowed()
+      ) {
+        return false;
+      }
+      return await currentOAuthGrantNeedsRefresh(runtime, startedWithOAuth);
+    },
+  };
 }
 
 async function refreshOAuthScopes(
@@ -125,12 +153,7 @@ export async function runWithScopeRecovery(
   runInteractiveLogin: InteractiveLogin,
   runtime: ScopeRecoveryRuntime = defaultRuntime
 ): Promise<void> {
-  let startedWithOAuth = false;
-  try {
-    startedWithOAuth = runtime.getAuthSource() === "oauth";
-  } catch {
-    // The original command remains authoritative if the credential store fails.
-  }
+  const startedWithOAuth = hasActiveOAuthGrant(runtime);
   try {
     await proceed(argv);
   } catch (error) {
@@ -145,7 +168,6 @@ export async function runWithScopeRecovery(
     if (
       !state ||
       state.kind === "current" ||
-      disablesInteractiveRecovery(argv) ||
       !(await refreshOAuthScopes(state, runInteractiveLogin, runtime))
     ) {
       throw error;

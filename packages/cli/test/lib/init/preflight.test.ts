@@ -17,7 +17,7 @@ vi.mock("../../../src/lib/api-client.js", async (importOriginal) => {
 });
 
 vi.mock("../../../src/lib/scope-recovery.js", () => ({
-  currentOAuthGrantNeedsRefresh: vi.fn(),
+  captureOAuthScopeRecoveryGate: vi.fn(),
 }));
 
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
@@ -134,11 +134,13 @@ let getAuthTokenSpy: ReturnType<typeof spyOn>;
 let resolveOrCreateTeamSpy: ReturnType<typeof spyOn>;
 let detectDsnSpy: ReturnType<typeof spyOn>;
 let resolveDsnByPublicKeySpy: ReturnType<typeof spyOn>;
+let shouldDelegateScopeRecovery: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
-  vi.mocked(scopeRecovery.currentOAuthGrantNeedsRefresh).mockResolvedValue(
-    false
-  );
+  shouldDelegateScopeRecovery = vi.fn().mockResolvedValue(false);
+  vi.mocked(scopeRecovery.captureOAuthScopeRecoveryGate).mockReturnValue({
+    shouldDelegate: shouldDelegateScopeRecovery,
+  });
   resolveOrgPrefetchedSpy = vi
     .spyOn(prefetch, "resolveOrgPrefetched")
     .mockResolvedValue({ org: "acme" });
@@ -199,7 +201,7 @@ afterEach(() => {
   resolveOrCreateTeamSpy.mockRestore();
   detectDsnSpy.mockRestore();
   resolveDsnByPublicKeySpy.mockRestore();
-  vi.mocked(scopeRecovery.currentOAuthGrantNeedsRefresh).mockReset();
+  vi.mocked(scopeRecovery.captureOAuthScopeRecoveryGate).mockReset();
   process.exitCode = 0;
 });
 
@@ -544,6 +546,23 @@ describe("resolveInitContext", () => {
     expect(errorCall?.message).toContain("sentry init <org-slug>/");
   });
 
+  test("preserves an organization-list 403 when OAuth recovery can run", async () => {
+    const error = new ApiError(
+      "Failed to list organizations",
+      403,
+      "Missing org:read"
+    );
+    resolveOrgPrefetchedSpy.mockResolvedValue(null);
+    listOrganizationsSpy.mockRejectedValueOnce(error);
+    shouldDelegateScopeRecovery.mockResolvedValueOnce(true);
+
+    const { ui } = createMockUI();
+
+    await expect(
+      resolveInitContext(makeOptions({ yes: false }), ui)
+    ).rejects.toBe(error);
+  });
+
   test("surfaces 401 guidance when listOrganizations is unauthorized", async () => {
     resolveOrgPrefetchedSpy.mockResolvedValue(null);
     listOrganizationsSpy.mockRejectedValueOnce(
@@ -593,6 +612,32 @@ describe("resolveInitContext", () => {
     expect(context?.isExplicitTeam).toBe(false);
   });
 
+  test("keeps the org-scoped fallback for an unattended explicit-team 403", async () => {
+    resolveOrCreateTeamSpy.mockRejectedValueOnce(
+      new ApiError("Forbidden", 403, "No team:admin access")
+    );
+
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(
+      makeOptions({ team: "backend", yes: true }),
+      ui
+    );
+
+    expect(context?.team).toBeUndefined();
+  });
+
+  test("preserves an explicit-team 403 when OAuth recovery can run", async () => {
+    const error = new ApiError("Forbidden", 403, "No team:admin access");
+    resolveOrCreateTeamSpy.mockRejectedValueOnce(error);
+    shouldDelegateScopeRecovery.mockResolvedValueOnce(true);
+
+    const { ui } = createMockUI();
+
+    await expect(
+      resolveInitContext(makeOptions({ team: "backend", yes: false }), ui)
+    ).rejects.toBe(error);
+  });
+
   test("swallows 403 from listTeams and resolves context with team:undefined", async () => {
     listTeamsSpy.mockRejectedValueOnce(
       new ApiError("Forbidden", 403, "No team:read access")
@@ -608,16 +653,48 @@ describe("resolveInitContext", () => {
     expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
   });
 
-  test("preserves a 403 when the stored OAuth grant is stale", async () => {
+  test("preserves a 403 when OAuth scope recovery can run", async () => {
     const error = new ApiError("Forbidden", 403, "No team:read access");
     listTeamsSpy.mockRejectedValueOnce(error);
-    vi.mocked(
-      scopeRecovery.currentOAuthGrantNeedsRefresh
-    ).mockResolvedValueOnce(true);
+    shouldDelegateScopeRecovery.mockResolvedValueOnce(true);
 
     const { ui } = createMockUI();
 
-    await expect(resolveInitContext(makeOptions(), ui)).rejects.toBe(error);
+    await expect(
+      resolveInitContext(makeOptions({ yes: false }), ui)
+    ).rejects.toBe(error);
+    expect(shouldDelegateScopeRecovery).toHaveBeenCalledWith(error, {
+      unattended: false,
+    });
+  });
+
+  test("preserves a recoverable 401 from team lookup", async () => {
+    const error = new ApiError("Unauthorized", 401, "Invalid token");
+    listTeamsSpy.mockRejectedValueOnce(error);
+    shouldDelegateScopeRecovery.mockResolvedValueOnce(true);
+
+    const { ui } = createMockUI();
+
+    await expect(
+      resolveInitContext(makeOptions({ yes: false }), ui)
+    ).rejects.toBe(error);
+  });
+
+  test("keeps the org-scoped fallback when OAuth recovery is unattended", async () => {
+    listTeamsSpy.mockRejectedValueOnce(
+      new ApiError("Forbidden", 403, "No team:read access")
+    );
+
+    const { ui } = createMockUI();
+    const context = await resolveInitContext(makeOptions({ yes: true }), ui);
+
+    expect(context?.team).toBeUndefined();
+    expect(shouldDelegateScopeRecovery).toHaveBeenCalledWith(
+      expect.any(ApiError),
+      {
+        unattended: true,
+      }
+    );
   });
 
   test("preserves rich org-not-found guidance when implicit team lookup returns 404", async () => {

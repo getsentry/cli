@@ -15,7 +15,7 @@ import {
 } from "../../api-client.js";
 import { ApiError } from "../../errors.js";
 import { resolveOrCreateTeam } from "../../resolve-team.js";
-import { currentOAuthGrantNeedsRefresh } from "../../scope-recovery.js";
+import { captureOAuthScopeRecoveryGate } from "../../scope-recovery.js";
 import { slugify } from "../../utils.js";
 import { tryGetExistingProjectData } from "../existing-project.js";
 import { formatMemberProjectCreationDisabledError } from "../project-creation-errors.js";
@@ -185,14 +185,6 @@ async function validateTeamForDryRun(
   }
 }
 
-async function shouldRefreshOAuth(error: unknown): Promise<boolean> {
-  return (
-    error instanceof ApiError &&
-    (error.status === 401 || error.status === 403) &&
-    (await currentOAuthGrantNeedsRefresh())
-  );
-}
-
 /**
  * Create a new Sentry project using the org that preflight already resolved.
  * When preflight does not resolve a Team Admin team, creation uses the same
@@ -209,7 +201,13 @@ export async function createSentryProject(
   payload: CreateSentryProjectPayload | EnsureSentryProjectPayload,
   context: Pick<
     ToolContext,
-    "dryRun" | "existingProject" | "isExplicitTeam" | "org" | "team" | "project"
+    | "dryRun"
+    | "existingProject"
+    | "isExplicitTeam"
+    | "org"
+    | "team"
+    | "project"
+    | "yes"
   >
 ): Promise<ToolResult> {
   const name = context.project ?? payload.params.name;
@@ -229,6 +227,7 @@ export async function createSentryProject(
     };
   }
 
+  const scopeRecovery = captureOAuthScopeRecoveryGate();
   try {
     const existingProject = await tryGetExistingProjectData(context.org, slug);
     if (existingProject) {
@@ -277,10 +276,6 @@ export async function createSentryProject(
       },
     };
   } catch (error) {
-    if (await shouldRefreshOAuth(error)) {
-      throw error;
-    }
-
     // Org-level policy: member project creation is disabled on this org.
     // Surface a clear message with the escape hatch.
     if (
@@ -292,6 +287,13 @@ export async function createSentryProject(
         ok: false,
         error: formatMemberProjectCreationDisabledError(context.org),
       };
+    }
+    if (
+      await scopeRecovery.shouldDelegate(error, {
+        unattended: context.yes || context.dryRun,
+      })
+    ) {
+      throw error;
     }
     // 409: project already exists (from either the team-scoped or org-scoped
     // endpoint — both propagate here). Surface a friendly message with a view

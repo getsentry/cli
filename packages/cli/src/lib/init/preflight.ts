@@ -7,7 +7,7 @@ import {
 import { getAuthToken } from "../db/auth.js";
 import { ApiError, AuthError, HostScopeError, WizardError } from "../errors.js";
 import { buildOrgNotFoundError, resolveOrCreateTeam } from "../resolve-team.js";
-import { currentOAuthGrantNeedsRefresh } from "../scope-recovery.js";
+import { captureOAuthScopeRecoveryGate } from "../scope-recovery.js";
 import { slugify } from "../utils.js";
 import { WizardCancelledError } from "./clack-utils.js";
 import { tryGetExistingProjectData } from "./existing-project.js";
@@ -349,6 +349,7 @@ async function resolveTeam(
     return await resolveImplicitTeam(org, initial, ui);
   }
 
+  const scopeRecovery = captureOAuthScopeRecoveryGate();
   try {
     const result = await resolveOrCreateTeam(org, {
       team: initial.team,
@@ -361,10 +362,16 @@ async function resolveTeam(
     if (error instanceof WizardCancelledError) {
       throw error;
     }
+    if (
+      error instanceof ApiError &&
+      (error.status === 401 || error.status === 403) &&
+      (await scopeRecovery.shouldDelegate(error, {
+        unattended: initial.yes || initial.dryRun,
+      }))
+    ) {
+      throw error;
+    }
     if (error instanceof ApiError && error.status === 403) {
-      if (await currentOAuthGrantNeedsRefresh()) {
-        throw error;
-      }
       return;
     }
     throw toPreflightWizardError(error);
@@ -418,17 +425,23 @@ async function assertOrgScopedCreationCanProceed(org: string): Promise<void> {
 }
 
 async function listTeamsForImplicitInit(
-  org: string
+  org: string,
+  unattended: boolean
 ): Promise<SentryTeam[] | undefined> {
+  const scopeRecovery = captureOAuthScopeRecoveryGate();
   try {
     return await listTeams(org);
   } catch (error) {
     // 403 from listTeams means the user cannot inspect team access. Continue
     // without a team so init mirrors onboarding's org-scoped auto-team path.
+    if (
+      error instanceof ApiError &&
+      (error.status === 401 || error.status === 403) &&
+      (await scopeRecovery.shouldDelegate(error, { unattended }))
+    ) {
+      throw error;
+    }
     if (error instanceof ApiError && error.status === 403) {
-      if (await currentOAuthGrantNeedsRefresh()) {
-        throw error;
-      }
       await assertOrgScopedCreationCanProceed(org);
       return;
     }
@@ -444,7 +457,10 @@ async function resolveImplicitTeam(
   initial: WizardOptions,
   ui: WizardUI
 ): Promise<string | undefined> {
-  const teams = await listTeamsForImplicitInit(org);
+  const teams = await listTeamsForImplicitInit(
+    org,
+    initial.yes || initial.dryRun
+  );
   if (!teams) {
     return;
   }
@@ -482,16 +498,7 @@ async function resolveImplicitTeam(
  * directly. 401: token is invalid/expired — supplying an org won't help, only
  * re-authenticating will.
  */
-async function handleOrgListError(
-  error: unknown
-): Promise<{ ok: false; error: string }> {
-  if (
-    error instanceof ApiError &&
-    (error.status === 401 || error.status === 403) &&
-    (await currentOAuthGrantNeedsRefresh())
-  ) {
-    throw error;
-  }
+function handleOrgListError(error: unknown): { ok: false; error: string } {
   if (error instanceof ApiError && error.status === 403) {
     const lines: string[] = ["Could not list organizations (403 Forbidden)."];
     if (error.detail) {
@@ -526,10 +533,14 @@ async function resolveOrgSlug(
   }
 
   let orgs: Awaited<ReturnType<typeof listOrganizations>>;
+  const scopeRecovery = captureOAuthScopeRecoveryGate();
   try {
     orgs = await listOrganizations();
   } catch (error) {
-    return await handleOrgListError(error);
+    if (await scopeRecovery.shouldDelegate(error, { unattended: yes })) {
+      throw error;
+    }
+    return handleOrgListError(error);
   }
   orgs.sort(
     (left, right) =>
