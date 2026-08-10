@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.42.0-dev.0
+version: 0.43.0-dev.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -284,8 +284,8 @@ npm install -g sentry
 ### Authentication
 
 ```bash
-sentry auth login
-sentry auth login --token YOUR_SENTRY_API_TOKEN
+sentry auth
+sentry auth --token YOUR_SENTRY_API_TOKEN
 sentry auth status
 sentry auth logout
 ```
@@ -451,6 +451,14 @@ Manage Sentry dashboards
 - `sentry dashboard restore <org/dashboard...>` — Restore a dashboard revision
 
 → Full flags and examples: `references/dashboard.md`
+
+### Platform
+
+List valid Sentry platform identifiers
+
+- `sentry platform list` — List all valid Sentry platform identifiers
+
+→ Full flags and examples: `references/platform.md`
 
 ### Proguard
 

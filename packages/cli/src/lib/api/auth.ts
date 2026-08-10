@@ -1,14 +1,14 @@
-import { z } from "zod";
+import { array, nullable, object, string } from "valibot";
 
 import { getControlSiloUrl } from "../sentry-client.js";
 import { apiRequestToRegion } from "./infrastructure.js";
 
-const AuthStatusSchema = z.object({
-  auth: z
-    .object({
-      scopes: z.array(z.string()),
+const AuthStatusSchema = object({
+  auth: nullable(
+    object({
+      scopes: array(string()),
     })
-    .nullable(),
+  ),
 });
 
 export async function getCurrentAuthScopes(): Promise<

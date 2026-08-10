@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-issue
-version: 0.42.0-dev.0
+version: 0.43.0-dev.0
 description: Manage Sentry issues
 requires:
   bins: ["sentry"]
@@ -114,7 +114,7 @@ List events for a specific issue
 | `platform` | string \| null | Platform (python, javascript, etc.) |
 | `dateCreated` | string | ISO 8601 creation timestamp |
 | `crashFile` | string \| null | Crash file URL |
-| `metadata` | object \| null | Event metadata |
+| `metadata` | object | Event metadata |
 
 **Examples:**
 
@@ -236,6 +236,10 @@ Mark an issue as resolved
 **Flags:**
 - `-i, --in <value> - Resolve in a release, next release, or commit ('<version>' | '@next' | '@commit' | '@commit:<repo>@<sha>')`
 
+### `sentry issue unresolve <issue>`
+
+Reopen a resolved issue
+
 **Examples:**
 
 ```bash
@@ -264,10 +268,6 @@ sentry issue resolve CLI-G5 --in @commit:getsentry/cli@abc123def
 sentry issue unresolve CLI-G5
 sentry issue reopen CLI-G5   # alias
 ```
-
-### `sentry issue unresolve <issue>`
-
-Reopen a resolved issue
 
 ### `sentry issue archive <issue>`
 

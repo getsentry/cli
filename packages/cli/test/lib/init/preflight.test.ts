@@ -50,7 +50,12 @@ vi.mock("../../../src/lib/dsn/index.js", async (importOriginal) => {
 
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as dsnIndex from "../../../src/lib/dsn/index.js";
-import { ApiError, WizardError } from "../../../src/lib/errors.js";
+import {
+  ApiError,
+  AuthError,
+  HostScopeError,
+  WizardError,
+} from "../../../src/lib/errors.js";
 
 vi.mock("../../../src/lib/init/org-prefetch.js", async (importOriginal) => {
   const actual =
@@ -414,20 +419,20 @@ describe("resolveInitContext", () => {
   });
 
   test("prompts when multiple Team Admin teams are available", async () => {
-    const { ui, respond } = createMockUI();
+    const { ui, calls, respond } = createMockUI();
     respond.select("mobile");
     listTeamsSpy.mockResolvedValueOnce([
       {
         id: "1",
-        slug: "mobile",
-        name: "Mobile",
+        slug: "platform",
+        name: "Platform",
         access: ["team:admin"],
         isMember: true,
       } as any,
       {
         id: "2",
-        slug: "platform",
-        name: "Platform",
+        slug: "mobile",
+        name: "Mobile",
         access: ["team:admin"],
         isMember: true,
       } as any,
@@ -436,21 +441,23 @@ describe("resolveInitContext", () => {
     const context = await resolveInitContext(makeOptions({ yes: false }), ui);
 
     expect(context?.team).toBe("mobile");
+    const selectCall = calls.find((call) => call.kind === "select");
+    expect(selectCall?.options).toEqual(["mobile", "platform"]);
   });
 
-  test("selects the first Team Admin team in --yes mode", async () => {
+  test("selects the first alphabetical Team Admin team in --yes mode", async () => {
     listTeamsSpy.mockResolvedValueOnce([
       {
         id: "1",
-        slug: "mobile",
-        name: "Mobile",
+        slug: "platform",
+        name: "Platform",
         access: ["team:admin"],
         isMember: true,
       } as any,
       {
         id: "2",
-        slug: "platform",
-        name: "Platform",
+        slug: "mobile",
+        name: "Mobile",
         access: ["team:admin"],
         isMember: true,
       } as any,
@@ -460,6 +467,38 @@ describe("resolveInitContext", () => {
     const context = await resolveInitContext(makeOptions({ yes: true }), ui);
 
     expect(context?.team).toBe("mobile");
+  });
+
+  test("sorts organization options alphabetically by name", async () => {
+    resolveOrgPrefetchedSpy.mockResolvedValue(null);
+    listOrganizationsSpy.mockResolvedValue([
+      { id: "1", slug: "z-org", name: "Alpha" },
+      { id: "2", slug: "beta", name: "Beta" },
+      { id: "3", slug: "a-org", name: "Alpha" },
+    ]);
+
+    const { ui, calls, respond } = createMockUI();
+    respond.select("a-org");
+
+    const context = await resolveInitContext(makeOptions({ yes: false }), ui);
+
+    expect(context?.org).toBe("a-org");
+    const selectCall = calls.find((call) => call.kind === "select");
+    expect(selectCall?.options).toEqual(["a-org", "z-org", "beta"]);
+  });
+
+  test("sorts organizations in the --yes error", async () => {
+    resolveOrgPrefetchedSpy.mockResolvedValue(null);
+    listOrganizationsSpy.mockResolvedValue([
+      { id: "1", slug: "z-org", name: "Zulu" },
+      { id: "2", slug: "a-org", name: "Alpha" },
+    ]);
+
+    const { ui } = createMockUI();
+
+    await expect(
+      resolveInitContext(makeOptions({ yes: true }), ui)
+    ).rejects.toThrow("Multiple organizations found (a-org, z-org).");
   });
 
   test("returns null when the user cancels an org selection", async () => {
@@ -662,6 +701,20 @@ describe("resolveInitContext", () => {
         c.kind === "log.error"
     );
     expect(errorCall?.message).toBe("custom preflight failure");
+  });
+
+  test.each([
+    ["AuthError", new AuthError("expired")],
+    ["HostScopeError", new HostScopeError("host mismatch")],
+  ])("propagates %s without turning it into a wizard failure", async (_, error) => {
+    listTeamsSpy.mockRejectedValueOnce(error);
+
+    const { ui, calls } = createMockUI();
+    await expect(resolveInitContext(makeOptions(), ui)).rejects.toBe(error);
+
+    expect(calls.some((call) => call.kind === "log.error")).toBe(false);
+    expect(calls.some((call) => call.kind === "cancel")).toBe(false);
+    expect(calls.some((call) => call.kind === "feedback")).toBe(false);
   });
 
   test("surfaces a non-API error message from implicit team resolution", async () => {

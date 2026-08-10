@@ -35,6 +35,8 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import stringWidth from "string-width";
+import wrapAnsi from "wrap-ansi";
 import {
   type BannerLine,
   bannerLinesForWidth,
@@ -78,8 +80,10 @@ import type {
 
 /** Sentry blurple — primary brand accent. */
 const ACCENT = "#7553FF";
-const MUTED = "gray";
-const MUTED_DIM = "#555555";
+/** De-emphasized text that still clears dark terminal backgrounds. */
+const MUTED = "#898294";
+/** Lowest-contrast treatment for borders, counters, and supporting details. */
+const MUTED_DIM = "#68616F";
 /** Sentry purple — spinners, in-progress states. */
 const PRIMARY = "#8B6AC8";
 
@@ -87,6 +91,7 @@ const COLOR_INFO = "#9C84D4";
 const COLOR_WARN = "#FDB81B";
 const COLOR_ERROR = "#fe4144";
 const COLOR_SUCCESS = "#83da90";
+const ACTIVE_TASK_PULSE_INTERVAL_MS = 600;
 
 const ICON_BY_SEVERITY: Record<LogSeverity, { glyph: string; color?: string }> =
   {
@@ -105,6 +110,7 @@ const ICONS = {
   squareFilled: "\u25FC",
   squareOpen: "\u25FB",
   triangleRight: "\u25B6",
+  triangleRightOutline: "\u25B7",
   triangleSmallRight: "\u25B8",
   bullet: "\u2022",
 } as const;
@@ -393,7 +399,7 @@ function ActivityPane({
         </Box>
       )}
       {visibleLogs.length > 0 ? (
-        <Box flexDirection="column">
+        <Box flexDirection="column" flexShrink={1} overflow="hidden">
           {visibleLogs.map((log) => (
             <LogLine entry={log} key={log.id} />
           ))}
@@ -401,7 +407,12 @@ function ActivityPane({
       ) : null}
       {spinner.active ? <SpinnerRow state={spinner} /> : null}
       {summary ? <SummaryPanel summary={summary} /> : null}
-      {prompt ? <PromptArea prompt={prompt} /> : null}
+      {prompt ? (
+        <PromptArea
+          occupiedRows={visibleLogs.length + (spinner.active ? 2 : 0)}
+          prompt={prompt}
+        />
+      ) : null}
     </Box>
   );
 }
@@ -544,8 +555,6 @@ function ActionList<T extends string>({
     <Box flexDirection="column" width={listWidth}>
       {choices.map((choice, index) => {
         const isCursor = index === highlighted;
-        // biome-ignore lint/nursery/noLeakedRender: variable assignment, not JSX expression
-        const labelColor = isCursor ? undefined : MUTED;
         if (centered) {
           return (
             <Box
@@ -557,12 +566,8 @@ function ActionList<T extends string>({
               <Text color={ACCENT}>
                 {isCursor ? `${ICONS.triangleSmallRight} ` : "  "}
               </Text>
-              <Text bold={isCursor} color={labelColor}>
-                {choice.label}
-              </Text>
-              {choice.hint ? (
-                <Text color={MUTED_DIM}> {choice.hint}</Text>
-              ) : null}
+              <Text bold={isCursor}>{choice.label}</Text>
+              {choice.hint ? <Text color={MUTED}> {choice.hint}</Text> : null}
             </Box>
           );
         }
@@ -573,10 +578,8 @@ function ActionList<T extends string>({
                 {isCursor ? ICONS.triangleSmallRight : " "}
               </Text>
             </Box>
-            <Text bold={isCursor} color={labelColor}>
-              {choice.label}
-            </Text>
-            {choice.hint ? <Text color={MUTED_DIM}> {choice.hint}</Text> : null}
+            <Text bold={isCursor}>{choice.label}</Text>
+            {choice.hint ? <Text color={MUTED}> {choice.hint}</Text> : null}
           </Box>
         );
       })}
@@ -719,7 +722,11 @@ function IntroPreflightContent({
 
   const promptContent = prompt ? (
     <Box alignItems="center" width="100%">
-      <PromptArea alignment="center" prompt={prompt} />
+      <PromptArea
+        alignment="center"
+        occupiedRows={spinner.active ? 2 : 0}
+        prompt={prompt}
+      />
     </Box>
   ) : null;
 
@@ -851,7 +858,7 @@ function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
   const totalCount = steps.length;
 
   const headerRight = totalCount > 0 ? `${completedCount}/${totalCount}` : "";
-  const badgeColor = completedCount === totalCount ? COLOR_SUCCESS : MUTED_DIM;
+  const badgeColor = completedCount === totalCount ? COLOR_SUCCESS : MUTED;
 
   return (
     <Box
@@ -862,7 +869,7 @@ function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
       paddingX={1}
     >
       <Box justifyContent="space-between">
-        <Text bold color={MUTED}>
+        <Text bold color={ACCENT}>
           {ICONS.diamondOpen} Tasks
         </Text>
         {headerRight ? <Text color={badgeColor}>{headerRight}</Text> : null}
@@ -873,7 +880,7 @@ function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
           <Text color={PRIMARY}>
             <Spinner type="dots" />
           </Text>
-          <Text dimColor>Analyzing project...</Text>
+          <Text>Analyzing project...</Text>
         </Box>
       ) : null}
       {steps.map((entry) => (
@@ -884,61 +891,81 @@ function ProgressPanel({ steps }: { steps: StepEntry[] }): React.ReactNode {
 }
 
 function ProgressRow({ entry }: { entry: StepEntry }): React.ReactNode {
-  const { glyph, glyphColor, labelColor, dimLabel } = progressStyle(entry);
+  const { boldLabel, glyph, glyphColor, labelColor } = progressStyle(entry);
   return (
     <Box flexDirection="row" flexShrink={0}>
       <Box flexShrink={0} width={3}>
-        <Text color={glyphColor}>{glyph}</Text>
+        {entry.status === "in_progress" ? (
+          <ActiveTaskGlyph />
+        ) : (
+          <Text color={glyphColor}>{glyph}</Text>
+        )}
       </Box>
-      <Text color={labelColor} dimColor={dimLabel}>
+      <Text bold={boldLabel} color={labelColor}>
         {entry.label}
       </Text>
     </Box>
   );
 }
 
+function ActiveTaskGlyph(): React.ReactNode {
+  const [isFilled, setIsFilled] = useState(true);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setIsFilled((current) => !current);
+    }, ACTIVE_TASK_PULSE_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  return isFilled ? (
+    <Text color={PRIMARY}>{ICONS.triangleRight}</Text>
+  ) : (
+    <Text color={PRIMARY}>{ICONS.triangleRightOutline}</Text>
+  );
+}
+
 function progressStyle(entry: StepEntry): {
+  boldLabel: boolean;
   glyph: string;
   glyphColor: string;
   labelColor?: string;
-  dimLabel: boolean;
 } {
   if (entry.status === "in_progress") {
     return {
+      boldLabel: true,
       glyph: ICONS.triangleRight,
       glyphColor: PRIMARY,
-      dimLabel: false,
     };
   }
   if (entry.status === "completed") {
     return {
+      boldLabel: false,
       glyph: ICONS.squareFilled,
       glyphColor: COLOR_SUCCESS,
       labelColor: MUTED,
-      dimLabel: false,
     };
   }
   if (entry.status === "failed") {
     return {
+      boldLabel: true,
       glyph: "\u2716",
       glyphColor: COLOR_ERROR,
       labelColor: COLOR_ERROR,
-      dimLabel: false,
     };
   }
   if (entry.status === "skipped") {
     return {
+      boldLabel: false,
       glyph: "\u25CC",
       glyphColor: MUTED_DIM,
-      labelColor: MUTED_DIM,
-      dimLabel: true,
+      labelColor: MUTED,
     };
   }
   return {
+    boldLabel: false,
     glyph: ICONS.squareOpen,
-    glyphColor: MUTED_DIM,
-    labelColor: MUTED,
-    dimLabel: true,
+    glyphColor: MUTED,
   };
 }
 
@@ -1276,39 +1303,228 @@ type MultiSelectPromptOptionData = Extract<
   ActivePrompt,
   { kind: "multiselect" }
 >["options"][number];
+type CenteredSelectLayout = {
+  labelWidth: number;
+  width: number;
+};
+
+function getCenteredSelectLayout(
+  options: SelectPromptOptionData[]
+): CenteredSelectLayout {
+  const labelWidth = Math.max(
+    0,
+    ...options.map((option) => stringWidth(option.label))
+  );
+  const hintWidth = Math.max(
+    0,
+    ...options.map((option) => stringWidth(option.hint ?? ""))
+  );
+  return {
+    labelWidth,
+    width: 2 + labelWidth + (hintWidth > 0 ? hintWidth + 1 : 0),
+  };
+}
+
+/**
+ * Rows unavailable to option lists: workflow chrome reserves the tab/shortcut
+ * footers, while centered prompts also reserve intro padding, the full banner,
+ * and the extra controls shown by multiselect prompts.
+ */
+const WORKFLOW_PROMPT_RESERVED_ROWS = 10;
+const CENTERED_SELECT_RESERVED_ROWS = 20;
+const CENTERED_MULTISELECT_RESERVED_ROWS = 23;
+
+/**
+ * Returns the half-open option range that keeps the highlighted item visible.
+ * The range never exceeds the requested viewport size or the option count.
+ */
+export function getOptionWindow(
+  totalCount: number,
+  highlighted: number,
+  maxVisible: number
+): readonly [number, number] {
+  const normalizedTotal = Math.max(0, Math.floor(totalCount));
+  if (normalizedTotal === 0) {
+    return [0, 0];
+  }
+
+  const viewportSize = Math.min(
+    normalizedTotal,
+    Math.max(1, Math.floor(maxVisible))
+  );
+  const normalizedHighlight = Math.min(
+    normalizedTotal - 1,
+    Math.max(0, Math.floor(highlighted))
+  );
+  const centeredStart = normalizedHighlight - Math.floor(viewportSize / 2);
+  const start = Math.min(
+    normalizedTotal - viewportSize,
+    Math.max(0, centeredStart)
+  );
+  return [start, start + viewportSize];
+}
+
+function getPromptOptionLimit({
+  terminalRows,
+  alignment,
+  kind,
+  occupiedRows,
+  messageRows,
+}: {
+  terminalRows: number;
+  alignment: PromptAlignment;
+  kind: "select" | "multiselect";
+  occupiedRows: number;
+  messageRows: number;
+}): number {
+  let reservedRows = WORKFLOW_PROMPT_RESERVED_ROWS;
+  if (alignment === "center") {
+    reservedRows =
+      kind === "multiselect"
+        ? CENTERED_MULTISELECT_RESERVED_ROWS
+        : CENTERED_SELECT_RESERVED_ROWS;
+  }
+  const extraMessageRows = Math.max(0, messageRows - 1);
+  return Math.max(
+    1,
+    terminalRows - reservedRows - occupiedRows - extraMessageRows
+  );
+}
+
+function getPromptContentWidth(
+  terminalColumns: number,
+  alignment: PromptAlignment
+): number {
+  const frameWidth = getInkFrameWidth(terminalColumns);
+  if (alignment === "center") {
+    return Math.min(frameWidth, 84);
+  }
+  return frameWidth >= 80 ? Math.floor((frameWidth - 1) * 0.6) : frameWidth;
+}
+
+function getPromptMessageRows({
+  message,
+  terminalColumns,
+  alignment,
+  kind,
+  totalCount,
+}: {
+  message: string;
+  terminalColumns: number;
+  alignment: PromptAlignment;
+  kind: "select" | "multiselect";
+  totalCount: number;
+}): number {
+  let availableWidth = getPromptContentWidth(terminalColumns, alignment);
+  const countDigits = String(Math.max(1, totalCount)).length;
+
+  if (kind === "select") {
+    const positionWidth = stringWidth(
+      `(${"9".repeat(countDigits)}/${"9".repeat(countDigits)})`
+    );
+    availableWidth -= positionWidth + (alignment === "center" ? 1 : 3);
+  } else if (alignment === "start") {
+    const count = "9".repeat(countDigits);
+    availableWidth -=
+      stringWidth(`${count}/${count} selected • ${count}/${count}`) + 4;
+  }
+
+  return wrapAnsi(message, Math.max(1, availableWidth), {
+    hard: true,
+    trim: false,
+    wordWrap: true,
+  }).split("\n").length;
+}
 
 function PromptArea({
   alignment = "start",
+  occupiedRows = 0,
   prompt,
 }: {
   alignment?: PromptAlignment;
+  occupiedRows?: number;
   prompt: ActivePrompt;
 }): React.ReactNode {
+  const { columns, rows } = useInkFrameSize();
   if (prompt.kind === "select") {
-    return <SelectPrompt alignment={alignment} prompt={prompt} />;
+    const messageRows = getPromptMessageRows({
+      message: prompt.message,
+      terminalColumns: columns,
+      alignment,
+      kind: prompt.kind,
+      totalCount: prompt.options.length,
+    });
+    return (
+      <SelectPrompt
+        alignment={alignment}
+        maxVisibleOptions={getPromptOptionLimit({
+          terminalRows: rows,
+          alignment,
+          kind: prompt.kind,
+          occupiedRows,
+          messageRows,
+        })}
+        prompt={prompt}
+      />
+    );
   }
   if (prompt.kind === "confirm") {
     return <ConfirmPrompt alignment={alignment} prompt={prompt} />;
   }
   if (prompt.kind === "multiselect") {
-    return <MultiSelectPrompt alignment={alignment} prompt={prompt} />;
+    const messageRows = getPromptMessageRows({
+      message: prompt.message,
+      terminalColumns: columns,
+      alignment,
+      kind: prompt.kind,
+      totalCount: prompt.options.length,
+    });
+    return (
+      <MultiSelectPrompt
+        alignment={alignment}
+        maxVisibleOptions={getPromptOptionLimit({
+          terminalRows: rows,
+          alignment,
+          kind: prompt.kind,
+          occupiedRows,
+          messageRows,
+        })}
+        prompt={prompt}
+      />
+    );
   }
   return null;
 }
 
 function SelectPrompt({
   alignment,
+  maxVisibleOptions,
   prompt,
 }: {
   alignment: PromptAlignment;
+  maxVisibleOptions: number;
   prompt: Extract<ActivePrompt, { kind: "select" }>;
 }): React.ReactNode {
   const isCentered = alignment === "center";
   const promptWidth = isCentered ? "100%" : undefined;
+  const { columns } = useInkFrameSize();
+  const centeredLayout = isCentered
+    ? getCenteredSelectLayout(prompt.options)
+    : null;
+  const centeredOptionsWidth = centeredLayout
+    ? Math.min(centeredLayout.width, getPromptContentWidth(columns, alignment))
+    : undefined;
   const totalCount = prompt.options.length;
   const [highlighted, setHighlighted] = useState<number>(() =>
     Math.min(Math.max(prompt.initialIndex, 0), Math.max(0, totalCount - 1))
   );
+  const [windowStart, windowEnd] = getOptionWindow(
+    totalCount,
+    highlighted,
+    maxVisibleOptions
+  );
+  const visibleOptions = prompt.options.slice(windowStart, windowEnd);
+  const isWindowed = visibleOptions.length < totalCount;
 
   const shortcuts = useMemo<ShortcutBinding[]>(
     () => [
@@ -1357,8 +1573,13 @@ function SelectPrompt({
       width={promptWidth}
     >
       {isCentered ? (
-        <Box justifyContent="center" marginBottom={1} width="100%">
+        <Box gap={1} justifyContent="center" marginBottom={1} width="100%">
           <Text bold>{prompt.message}</Text>
+          {isWindowed ? (
+            <Text color={MUTED_DIM}>
+              ({highlighted + 1}/{totalCount})
+            </Text>
+          ) : null}
         </Box>
       ) : (
         <Box gap={1} marginBottom={1}>
@@ -1366,20 +1587,32 @@ function SelectPrompt({
             {ICONS.diamondOpen}
           </Text>
           <Text bold>{prompt.message}</Text>
+          {isWindowed ? (
+            <Text color={MUTED_DIM}>
+              ({highlighted + 1}/{totalCount})
+            </Text>
+          ) : null}
         </Box>
       )}
-      <Box flexDirection="column" width={promptWidth}>
-        {prompt.options.map((option, idx) => {
-          const isCursor = idx === highlighted;
-          return (
-            <SelectPromptOptionRow
-              centered={isCentered}
-              isCursor={isCursor}
-              key={option.value}
-              option={option}
-            />
-          );
-        })}
+      <Box
+        justifyContent={isCentered ? "center" : "flex-start"}
+        width={promptWidth}
+      >
+        <Box flexDirection="column" width={centeredOptionsWidth}>
+          {visibleOptions.map((option, visibleIndex) => {
+            const idx = windowStart + visibleIndex;
+            const isCursor = idx === highlighted;
+            return (
+              <SelectPromptOptionRow
+                centered={isCentered}
+                centeredLabelWidth={centeredLayout?.labelWidth}
+                isCursor={isCursor}
+                key={option.value}
+                option={option}
+              />
+            );
+          })}
+        </Box>
       </Box>
     </Box>
   );
@@ -1387,39 +1620,40 @@ function SelectPrompt({
 
 function SelectPromptOptionRow({
   centered,
+  centeredLabelWidth,
   isCursor,
   option,
 }: {
   centered: boolean;
+  centeredLabelWidth?: number;
   isCursor: boolean;
   option: SelectPromptOptionData;
 }): React.ReactNode {
-  const labelColor = isCursor ? undefined : MUTED;
   if (centered) {
     return (
-      <Box flexDirection="row" justifyContent="center" width="100%">
-        <Text color={ACCENT}>
-          {isCursor ? `${ICONS.triangleSmallRight} ` : "  "}
-        </Text>
-        <Text bold={isCursor} color={labelColor}>
-          {option.label}
-        </Text>
+      <Box flexDirection="row" height={1} overflow="hidden" width="100%">
+        <Box flexShrink={0} width={2}>
+          <Text color={ACCENT}>
+            {isCursor ? ICONS.triangleSmallRight : " "}
+          </Text>
+        </Box>
+        <Box flexShrink={0} width={centeredLabelWidth}>
+          <Text bold={isCursor}>{option.label}</Text>
+        </Box>
         {option.hint !== undefined && option.hint !== "" ? (
-          <Text color={MUTED_DIM}> {option.hint}</Text>
+          <Text color={MUTED}> {option.hint}</Text>
         ) : null}
       </Box>
     );
   }
   return (
-    <Box flexDirection="row">
+    <Box flexDirection="row" height={1} overflow="hidden">
       <Box flexShrink={0} width={3}>
         <Text color={ACCENT}>{isCursor ? ICONS.triangleSmallRight : " "}</Text>
       </Box>
-      <Text bold={isCursor} color={labelColor}>
-        {option.label}
-      </Text>
+      <Text bold={isCursor}>{option.label}</Text>
       {option.hint !== undefined && option.hint !== "" ? (
-        <Text color={MUTED_DIM}> {option.hint}</Text>
+        <Text color={MUTED}> {option.hint}</Text>
       ) : null}
     </Box>
   );
@@ -1499,9 +1733,11 @@ function ConfirmPrompt({
 
 function MultiSelectPrompt({
   alignment,
+  maxVisibleOptions,
   prompt,
 }: {
   alignment: PromptAlignment;
+  maxVisibleOptions: number;
   prompt: Extract<ActivePrompt, { kind: "multiselect" }>;
 }): React.ReactNode {
   const isCentered = alignment === "center";
@@ -1511,6 +1747,13 @@ function MultiSelectPrompt({
   );
   const [highlighted, setHighlighted] = useState<number>(0);
   const totalCount = prompt.options.length;
+  const [windowStart, windowEnd] = getOptionWindow(
+    totalCount,
+    highlighted,
+    maxVisibleOptions
+  );
+  const visibleOptions = prompt.options.slice(windowStart, windowEnd);
+  const isWindowed = visibleOptions.length < totalCount;
 
   const toggleAt = useCallback(
     (idx: number) => {
@@ -1596,7 +1839,9 @@ function MultiSelectPrompt({
   );
   useInkShortcuts("multiselect-prompt", shortcuts);
   const shortcutText = `space toggle ${ICONS.bullet} a all ${ICONS.bullet} enter confirm ${ICONS.bullet} esc cancel`;
-  const selectedCount = `${selected.size}/${totalCount}`;
+  const selectedCount = isWindowed
+    ? `${selected.size}/${totalCount} selected ${ICONS.bullet} ${highlighted + 1}/${totalCount}`
+    : `${selected.size}/${totalCount}`;
 
   return (
     <Box
@@ -1632,7 +1877,8 @@ function MultiSelectPrompt({
         </Box>
       ) : null}
       <Box flexDirection="column" width={promptWidth}>
-        {prompt.options.map((option, idx) => {
+        {visibleOptions.map((option, visibleIndex) => {
+          const idx = windowStart + visibleIndex;
           const isSelected = selected.has(option.value);
           const isCursor = idx === highlighted;
           return (
@@ -1662,30 +1908,36 @@ function MultiSelectPromptOptionRow({
   option: MultiSelectPromptOptionData;
 }): React.ReactNode {
   const marker = isSelected ? ICONS.squareFilled : ICONS.squareOpen;
-  const markerColor = isSelected ? COLOR_SUCCESS : MUTED_DIM;
+  const markerColor = isSelected ? COLOR_SUCCESS : MUTED;
   if (centered) {
     return (
-      <Box flexDirection="row" justifyContent="center" width="100%">
+      <Box
+        flexDirection="row"
+        height={1}
+        justifyContent="center"
+        overflow="hidden"
+        width="100%"
+      >
         <Text color={ACCENT}>
           {isCursor ? `${ICONS.triangleSmallRight} ` : "  "}
         </Text>
         <Text color={markerColor}>{marker} </Text>
         <Text bold={isCursor}>{option.label}</Text>
         {option.hint !== undefined && option.hint !== "" ? (
-          <Text color={MUTED_DIM}> {option.hint}</Text>
+          <Text color={MUTED}> {option.hint}</Text>
         ) : null}
       </Box>
     );
   }
   return (
-    <Box flexDirection="row">
+    <Box flexDirection="row" height={1} overflow="hidden">
       <Box flexShrink={0} width={3}>
         <Text color={ACCENT}>{isCursor ? ICONS.triangleSmallRight : " "}</Text>
       </Box>
       <Text color={markerColor}>{marker} </Text>
       <Text bold={isCursor}>{option.label}</Text>
       {option.hint !== undefined && option.hint !== "" ? (
-        <Text color={MUTED_DIM}> {option.hint}</Text>
+        <Text color={MUTED}> {option.hint}</Text>
       ) : null}
     </Box>
   );

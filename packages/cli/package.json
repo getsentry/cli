@@ -1,6 +1,6 @@
 {
   "name": "sentry",
-  "version": "0.42.0-dev.0",
+  "version": "0.43.0-dev.0",
   "description": "Sentry CLI - A command-line interface for using Sentry built by robots and humans for robots and humans",
   "repository": {
     "type": "git",
@@ -88,7 +88,7 @@
     "@clack/prompts": "0.11.0",
     "@hono/node-server": "^2.0.10",
     "@mastra/client-js": "^1.26.0",
-    "@sentry/api": "^0.253.0",
+    "@sentry/api": "^0.256.0",
     "@sentry/core": "10.63.0",
     "@sentry/node-core": "10.63.0",
     "@sentry/sqlish": "^1.0.1",
@@ -139,7 +139,6 @@
     "uuidv7": "^1.2.1",
     "valibot": "^1.4.2",
     "vitest": "^4.1.9",
-    "wrap-ansi": "^10.0.0",
-    "zod": "^3.25.76"
+    "wrap-ansi": "^10.0.0"
   }
 }

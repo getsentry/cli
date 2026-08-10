@@ -5,7 +5,7 @@ import {
   listTeams,
 } from "../api-client.js";
 import { getAuthToken } from "../db/auth.js";
-import { ApiError, WizardError } from "../errors.js";
+import { ApiError, AuthError, HostScopeError, WizardError } from "../errors.js";
 import { buildOrgNotFoundError, resolveOrCreateTeam } from "../resolve-team.js";
 import { currentOAuthGrantNeedsRefresh } from "../scope-recovery.js";
 import { slugify } from "../utils.js";
@@ -84,8 +84,10 @@ async function withPreflightHandling(
     }
 
     if (
-      error instanceof ApiError &&
-      (error.status === 401 || error.status === 403)
+      error instanceof AuthError ||
+      error instanceof HostScopeError ||
+      (error instanceof ApiError &&
+        (error.status === 401 || error.status === 403))
     ) {
       throw error;
     }
@@ -324,6 +326,9 @@ async function resolveExistingProjectChoice(opts: {
  * format() instead of collapsing to its bare message + status line.
  */
 function toPreflightWizardError(error: unknown): WizardError {
+  if (error instanceof AuthError || error instanceof HostScopeError) {
+    throw error;
+  }
   if (error instanceof WizardError) {
     return error;
   }
@@ -444,7 +449,9 @@ async function resolveImplicitTeam(
     return;
   }
 
-  const candidateTeams = teams.filter(canCreateProjectInTeam);
+  const candidateTeams = teams
+    .filter(canCreateProjectInTeam)
+    .sort((left, right) => left.slug.localeCompare(right.slug));
   if (candidateTeams.length === 0) {
     await assertOrgScopedCreationCanProceed(org);
     return;
@@ -524,6 +531,10 @@ async function resolveOrgSlug(
   } catch (error) {
     return await handleOrgListError(error);
   }
+  orgs.sort(
+    (left, right) =>
+      left.name.localeCompare(right.name) || left.slug.localeCompare(right.slug)
+  );
   if (orgs.length === 0) {
     return {
       ok: false,

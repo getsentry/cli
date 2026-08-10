@@ -42,6 +42,12 @@ importers:
       '@sentry/starlight-theme':
         specifier: ^0.8.0
         version: 0.8.1(@astrojs/starlight@0.41.6(@astrojs/markdown-remark@7.2.2)(astro@7.1.6(@astrojs/markdown-remark@7.2.2)(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0))(typescript@5.9.3))
+      '@vercel/analytics':
+        specifier: ^2.0.1
+        version: 2.0.1(react@19.2.8)
+      '@vercel/speed-insights':
+        specifier: ^2.0.0
+        version: 2.0.0(react@19.2.8)
       astro:
         specifier: ^7.1.1
         version: 7.1.6(@astrojs/markdown-remark@7.2.2)(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0)
@@ -72,10 +78,10 @@ importers:
         version: 2.1.0(hono@4.12.34)
       '@mastra/client-js':
         specifier: ^1.26.0
-        version: 1.36.0(express@5.2.1)(zod@3.25.76)
+        version: 1.36.0(express@5.2.1)(zod@4.4.3)
       '@sentry/api':
-        specifier: ^0.253.0
-        version: 0.253.0(zod@3.25.76)
+        specifier: ^0.256.0
+        version: 0.256.0(valibot@1.4.2(typescript@5.9.3))(zod@4.4.3)
       '@sentry/core':
         specifier: 10.63.0
         version: 10.63.0(patch_hash=e663994979ff877a26ab6d4dea5968fbaee4ccdfdeb85623983535a572678940)
@@ -229,9 +235,6 @@ importers:
       wrap-ansi:
         specifier: ^10.0.0
         version: 10.0.0
-      zod:
-        specifier: ^3.25.76
-        version: 3.25.76
 
 packages:
 
@@ -1478,12 +1481,15 @@ packages:
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
 
-  '@sentry/api@0.253.0':
-    resolution: {integrity: sha512-g6zU6Qa7HaqEAhcPkrAF2yIF9Th3UBxNIM2HjFt9eTLWT+cHqO1zvgPe8yl5IXVpn4xwZmytbdome43ba+FgSQ==}
+  '@sentry/api@0.256.0':
+    resolution: {integrity: sha512-6SL/EpZW569eAEAOHossu2bWHXl1ODJsvs1xWro0hbmLieDD2G4FjBIyNj+zPwbHcCpXNfPhpCTLmkLVih9khA==}
     engines: {node: '>=22'}
     peerDependencies:
+      valibot: '*'
       zod: ^3.24.0
     peerDependenciesMeta:
+      valibot:
+        optional: true
       zod:
         optional: true
 
@@ -1894,6 +1900,61 @@ packages:
 
   '@ungap/structured-clone@1.3.3':
     resolution: {integrity: sha512-60YRaenCQcVjYEKOcG824+DRGGIQ3VKErcBoAEDJZz5bKIs2ZG+X/H9Nk+Q6EVkwJk5QNApxbrc5QtBSwtrXAg==}
+
+  '@vercel/analytics@2.0.1':
+    resolution: {integrity: sha512-MTQG6V9qQrt1tsDeF+2Uoo5aPjqbVPys1xvnIftXSJYG2SrwXRHnqEvVoYID7BTruDz4lCd2Z7rM1BdkUehk2g==}
+    peerDependencies:
+      '@remix-run/react': ^2
+      '@sveltejs/kit': ^1 || ^2
+      next: '>= 13'
+      nuxt: '>= 3'
+      react: ^18 || ^19 || ^19.0.0-rc
+      svelte: '>= 4'
+      vue: ^3
+      vue-router: ^4
+    peerDependenciesMeta:
+      '@remix-run/react':
+        optional: true
+      '@sveltejs/kit':
+        optional: true
+      next:
+        optional: true
+      nuxt:
+        optional: true
+      react:
+        optional: true
+      svelte:
+        optional: true
+      vue:
+        optional: true
+      vue-router:
+        optional: true
+
+  '@vercel/speed-insights@2.0.0':
+    resolution: {integrity: sha512-jwkNcrTeafWxjmWq4AHBaptSqZiJkYU5adLC9QBSqeim0GcqDMgN5Ievh8OG1rJ6W3A4l1oiP7qr9CWxGuzu3w==}
+    peerDependencies:
+      '@sveltejs/kit': ^1 || ^2
+      next: '>= 13'
+      nuxt: '>= 3'
+      react: ^18 || ^19 || ^19.0.0-rc
+      svelte: '>= 4'
+      vue: ^3
+      vue-router: ^4
+    peerDependenciesMeta:
+      '@sveltejs/kit':
+        optional: true
+      next:
+        optional: true
+      nuxt:
+        optional: true
+      react:
+        optional: true
+      svelte:
+        optional: true
+      vue:
+        optional: true
+      vue-router:
+        optional: true
 
   '@vitest/coverage-v8@4.1.10':
     resolution: {integrity: sha512-IM49HmthevbgAO4anp1hwtoT9wYe59w0LR00gr+eagHE+ZJ5lK4sLPeO0ubgoJcwLk6dehU3R24N+FbEEKDc8g==}
@@ -4664,34 +4725,34 @@ snapshots:
     optionalDependencies:
       express: 5.2.1
 
-  '@ai-sdk/provider-utils@2.2.8(zod@3.25.76)':
+  '@ai-sdk/provider-utils@2.2.8(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 1.1.3
       nanoid: 3.3.16
       secure-json-parse: 2.7.0
-      zod: 3.25.76
+      zod: 4.4.3
 
-  '@ai-sdk/provider-utils@3.0.30(zod@3.25.76)':
+  '@ai-sdk/provider-utils@3.0.30(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 2.0.3
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.0
-      zod: 3.25.76
+      zod: 4.4.3
 
-  '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)':
+  '@ai-sdk/provider-utils@4.0.40(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 3.0.14
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.0
-      zod: 3.25.76
+      zod: 4.4.3
 
-  '@ai-sdk/provider-utils@5.0.11(zod@3.25.76)':
+  '@ai-sdk/provider-utils@5.0.11(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 4.0.3
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.0
-      zod: 3.25.76
+      zod: 4.4.3
 
   '@ai-sdk/provider@1.1.3':
     dependencies:
@@ -4709,12 +4770,12 @@ snapshots:
     dependencies:
       json-schema: 0.4.0
 
-  '@ai-sdk/ui-utils@1.2.11(zod@3.25.76)':
+  '@ai-sdk/ui-utils@1.2.11(zod@4.4.3)':
     dependencies:
       '@ai-sdk/provider': 1.1.3
-      '@ai-sdk/provider-utils': 2.2.8(zod@3.25.76)
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      '@ai-sdk/provider-utils': 2.2.8(zod@4.4.3)
+      zod: 4.4.3
+      zod-to-json-schema: 3.25.2(zod@4.4.3)
 
   '@alcalzone/ansi-tokenize@0.3.0':
     dependencies:
@@ -5579,16 +5640,16 @@ snapshots:
     dependencies:
       '@lukeed/csprng': 1.1.0
 
-  '@mastra/client-js@1.36.0(express@5.2.1)(zod@3.25.76)':
+  '@mastra/client-js@1.36.0(express@5.2.1)(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/ui-utils': 1.2.11(zod@3.25.76)
+      '@ai-sdk/ui-utils': 1.2.11(zod@4.4.3)
       '@lukeed/uuid': 2.0.1
-      '@mastra/core': 1.55.0(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.4(zod@3.25.76)
+      '@mastra/core': 1.55.0(express@5.2.1)(zod@4.4.3)
+      '@mastra/schema-compat': 1.3.4(zod@4.4.3)
       canonicalize: 1.0.8
       jose: 6.2.3
       json-schema: 0.4.0
-      zod: 3.25.76
+      zod: 4.4.3
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@cfworker/json-schema'
@@ -5601,23 +5662,23 @@ snapshots:
       - utf-8-validate
       - workflow
 
-  '@mastra/core@1.55.0(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.55.0(express@5.2.1)(zod@4.4.3)':
     dependencies:
       '@a2a-js/sdk': 0.3.14(express@5.2.1)
-      '@ai-sdk/provider-utils-v5': '@ai-sdk/provider-utils@3.0.30(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.11(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v5': '@ai-sdk/provider-utils@3.0.30(zod@4.4.3)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.4.3)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.11(zod@4.4.3)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.3'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.4(zod@3.25.76)
-      '@modelcontextprotocol/sdk': 1.30.0(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.4(zod@4.4.3)
+      '@modelcontextprotocol/sdk': 1.30.0(zod@4.4.3)
       '@sindresorhus/slugify': 2.2.1
       '@standard-schema/spec': 1.1.0
       ajv: 8.20.0
-      chat: 4.35.0(zod@3.25.76)
+      chat: 4.35.0(zod@4.4.3)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
@@ -5634,7 +5695,7 @@ snapshots:
       tokenx: 1.6.0
       ws: 8.21.1
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.4.3
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@cfworker/json-schema'
@@ -5647,13 +5708,13 @@ snapshots:
       - utf-8-validate
       - workflow
 
-  '@mastra/schema-compat@1.3.4(zod@3.25.76)':
+  '@mastra/schema-compat@1.3.4(zod@4.4.3)':
     dependencies:
       json-schema-to-zod: 2.8.1
-      zod: 3.25.76
+      zod: 4.4.3
       zod-from-json-schema: 0.5.5
       zod-from-json-schema-v3: zod-from-json-schema@0.0.5
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod-to-json-schema: 3.25.2(zod@4.4.3)
 
   '@mdx-js/mdx@3.1.1':
     dependencies:
@@ -5707,7 +5768,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@modelcontextprotocol/sdk@1.30.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.30.0(zod@4.4.3)':
     dependencies:
       '@hono/node-server': 2.0.12(hono@4.12.34)
       ajv: 8.20.0
@@ -5724,8 +5785,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 4.4.3
+      zod-to-json-schema: 3.25.2(zod@4.4.3)
     transitivePeerDependencies:
       - supports-color
 
@@ -5920,9 +5981,10 @@ snapshots:
 
   '@sec-ant/readable-stream@0.4.1': {}
 
-  '@sentry/api@0.253.0(zod@3.25.76)':
+  '@sentry/api@0.256.0(valibot@1.4.2(typescript@5.9.3))(zod@4.4.3)':
     optionalDependencies:
-      zod: 3.25.76
+      valibot: 1.4.2(typescript@5.9.3)
+      zod: 4.4.3
 
   '@sentry/astro@10.69.0(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(astro@7.1.6(@astrojs/markdown-remark@7.2.2)(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.13.3)(tsx@4.23.5)(yaml@2.9.0))':
     dependencies:
@@ -6387,6 +6449,14 @@ snapshots:
 
   '@ungap/structured-clone@1.3.3': {}
 
+  '@vercel/analytics@2.0.1(react@19.2.8)':
+    optionalDependencies:
+      react: 19.2.8
+
+  '@vercel/speed-insights@2.0.0(react@19.2.8)':
+    optionalDependencies:
+      react: 19.2.8
+
   '@vitest/coverage-v8@4.1.10(vitest@4.1.10)':
     dependencies:
       '@bcoe/v8-coverage': 1.0.2
@@ -6750,7 +6820,7 @@ snapshots:
 
   character-reference-invalid@2.0.1: {}
 
-  chat@4.35.0(zod@3.25.76):
+  chat@4.35.0(zod@4.4.3):
     dependencies:
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0
@@ -6760,7 +6830,7 @@ snapshots:
       remend: 1.3.0
       unified: 11.0.5
     optionalDependencies:
-      zod: 3.25.76
+      zod: 4.4.3
     transitivePeerDependencies:
       - supports-color
 
@@ -9608,10 +9678,6 @@ snapshots:
   zod-from-json-schema@0.5.5:
     dependencies:
       zod: 4.4.3
-
-  zod-to-json-schema@3.25.2(zod@3.25.76):
-    dependencies:
-      zod: 3.25.76
 
   zod-to-json-schema@3.25.2(zod@4.4.3):
     dependencies:

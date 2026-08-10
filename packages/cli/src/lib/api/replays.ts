@@ -8,8 +8,8 @@ import {
   type ListProjectReplayRecordingSegmentsResponse,
   listProjectReplayRecordingSegments,
 } from "@sentry/api";
-import { zListProjectReplayRecordingSegmentsResponse } from "@sentry/api/zod";
-import type { z } from "zod";
+import { vListProjectReplayRecordingSegmentsResponse } from "@sentry/api/valibot";
+import { type GenericSchema, safeParse } from "valibot";
 import {
   REPLAY_LIST_FIELDS,
   type ReplayDetails,
@@ -123,16 +123,16 @@ type FetchReplayRecordingSegmentsPageOptions = {
  * its object boundary. The SDK invokes response validators outside its normal
  * error-result path, so convert Zod failures to the CLI's API error type here.
  */
+// biome-ignore lint/suspicious/useAwait: the SDK's responseValidator hook requires a Promise-returning function
 async function validateReplayRecordingSegmentsResponse(
   data: unknown
 ): Promise<void> {
-  const result =
-    await zListProjectReplayRecordingSegmentsResponse.safeParseAsync(data);
+  const result = safeParse(vListProjectReplayRecordingSegmentsResponse, data);
   if (!result.success) {
     throw new ApiError(
       "Unexpected replay recording segments response",
       0,
-      result.error.message
+      result.issues.map((issue) => issue.message).join(", ")
     );
   }
 }
@@ -206,7 +206,10 @@ async function fetchReplayPage(
         start: options.start,
         end: options.end,
       },
-      schema: ReplayListResponseSchema as z.ZodType<ReplayListResponse>,
+      schema: ReplayListResponseSchema as GenericSchema<
+        unknown,
+        ReplayListResponse
+      >,
     }
   );
 
@@ -250,7 +253,10 @@ export async function getReplay(
     regionUrl,
     `/organizations/${orgSlug}/replays/${replayId}/`,
     {
-      schema: ReplayDetailsResponseSchema as z.ZodType<ReplayDetailsResponse>,
+      schema: ReplayDetailsResponseSchema as GenericSchema<
+        unknown,
+        ReplayDetailsResponse
+      >,
     }
   );
   return normalizeReplayProjectId(data.data);

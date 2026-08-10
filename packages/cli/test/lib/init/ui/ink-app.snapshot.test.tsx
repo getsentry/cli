@@ -13,7 +13,7 @@ import { Readable, Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { render } from "ink";
 import { createElement } from "react";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   bannerLinesWidth,
   FULL_BANNER_LINES,
@@ -37,11 +37,13 @@ const ENTER_CONFIRM_HINT_RE = /enter\s+confirm/;
 const ESC_CANCEL_HINT_RE = /esc\s+cancel/;
 const COMPLETED_SELECTING_FEATURES_RE = /✔\s+Selecting features/;
 const ANSI_ESCAPE_PREFIX = "\u001B[";
+const CURSOR_TO_LINE_START = "\u001B[G";
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in captured Ink output
 const ANSI_CSI_RE = /\u001B\[[0-9;?]*[ -/]*[@-~]/g;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in captured Ink output
 const ANSI_OSC_RE = /\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g;
 const LINE_SPLIT_RE = /\r?\n/;
+const DOWN_ARROW = "\u001B[B";
 const RIGHT_ARROW = "\u001B[C";
 const FEEDBACK_BANNER_TEXT = '$ sentry cli feedback "what worked or broke"';
 
@@ -53,6 +55,7 @@ const TEST_BANNER_ROWS = [
 
 class CaptureStream extends Writable {
   frames: string[] = [];
+  settledOutput = "";
   columns: number;
   rows: number;
   isTTY = true;
@@ -67,6 +70,13 @@ class CaptureStream extends Writable {
   }
   allOutput(): string {
     return this.frames.join("");
+  }
+  latestFrame(): string {
+    const output = this.settledOutput || this.allOutput();
+    const redrawStart = output.lastIndexOf(CURSOR_TO_LINE_START);
+    return redrawStart === -1
+      ? output
+      : output.slice(redrawStart + CURSOR_TO_LINE_START.length);
   }
 }
 
@@ -113,6 +123,7 @@ async function renderApp(
     await sleep(20);
   }
   await sleep(FRAME_SETTLE_MS);
+  out.settledOutput = out.allOutput();
   instance.unmount();
   // waitUntilExit() hangs in CI — race with a short unref'd timeout.
   await Promise.race([
@@ -129,6 +140,27 @@ async function renderApp(
   return out;
 }
 
+async function renderActiveTaskFrameAfter(elapsedMs: number): Promise<string> {
+  const out = new CaptureStream(120, 40);
+  const stdin = makeStdin();
+  const store = new WizardStore();
+  store.setStepStatus("detect-platform", "in_progress");
+  const instance = render(createElement(App, { store }), {
+    stdout: out as unknown as NodeJS.WriteStream,
+    stderr: out as unknown as NodeJS.WriteStream,
+    stdin: stdin as unknown as NodeJS.ReadStream,
+    patchConsole: false,
+    exitOnCtrlC: false,
+  });
+
+  try {
+    await vi.advanceTimersByTimeAsync(elapsedMs);
+  } finally {
+    instance.unmount();
+  }
+  return stripAnsi(out.allOutput());
+}
+
 function hasForcedWhiteForeground(output: string): boolean {
   return (
     output.includes(`${ANSI_ESCAPE_PREFIX}37m`) ||
@@ -142,6 +174,10 @@ function withoutFeedbackBanner(output: string): string {
     .split(LINE_SPLIT_RE)
     .filter((line) => !line.includes(FEEDBACK_BANNER_TEXT))
     .join("\n");
+}
+
+function stripFinalLineBreak(output: string): string {
+  return output.endsWith("\n") ? output.slice(0, -1) : output;
 }
 
 function stripAnsi(output: string): string {
@@ -232,6 +268,19 @@ describe("Ink App snapshot", () => {
     expect(frame.indexOf("Tasks")).toBeLessThan(frame.indexOf("Did you know?"));
   });
 
+  test("pulses the active task arrow without changing its width", async () => {
+    vi.useFakeTimers();
+    try {
+      const initialFrame = await renderActiveTaskFrameAfter(1);
+      expect(initialFrame).toContain("▶  Detecting platform");
+
+      const pulsedFrame = await renderActiveTaskFrameAfter(601);
+      expect(pulsedFrame).toContain("▷  Detecting platform");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("renders single-column layout at narrow width", async () => {
     const store = new WizardStore();
     store.appendLog("info", "Narrow terminal");
@@ -278,6 +327,50 @@ describe("Ink App snapshot", () => {
     expect(frame).toContain("Choose a feature");
     expect(frame).toContain("Error Monitoring");
     expect(hasForcedWhiteForeground(withoutFeedbackBanner(frame))).toBe(false);
+  });
+
+  test("centered select options share aligned label and hint columns", async () => {
+    const options = [
+      { value: "short", label: "Short", hint: "short-slug" },
+      { value: "empower", label: "Empower Plant", hint: "demo" },
+      { value: "sdks", label: "Sentry SDKs", hint: "sentry-sdks" },
+    ];
+    const store = new WizardStore({ bannerRows: [], layout: "intro" });
+    store.setPrompt({
+      kind: "select",
+      message: "Choose a project",
+      options,
+      initialIndex: 0,
+      resolve: ignorePromptResolution,
+    });
+
+    const frame = stripAnsi((await renderApp(store, 80)).allOutput());
+    const lines = frame.split(LINE_SPLIT_RE);
+    const renderedOptions = options.map(({ label, hint }) => {
+      const line = lines.find((candidate) => candidate.includes(label));
+      if (!line) {
+        throw new Error(`Missing rendered option: ${label}`);
+      }
+      const hintColumn = line.indexOf(hint);
+      if (hintColumn < 0) {
+        throw new Error(`Missing rendered hint: ${hint}`);
+      }
+      return {
+        hintColumn,
+        labelColumn: line.indexOf(label),
+      };
+    });
+
+    expect(renderedOptions.map(({ labelColumn }) => labelColumn)).toEqual([
+      renderedOptions[0]?.labelColumn,
+      renderedOptions[0]?.labelColumn,
+      renderedOptions[0]?.labelColumn,
+    ]);
+    expect(renderedOptions.map(({ hintColumn }) => hintColumn)).toEqual([
+      renderedOptions[0]?.hintColumn,
+      renderedOptions[0]?.hintColumn,
+      renderedOptions[0]?.hintColumn,
+    ]);
   });
 
   test("workflow screen hides logo and shows feedback banner", async () => {
@@ -533,6 +626,142 @@ describe("Ink App snapshot", () => {
     expect(frame).toContain("confirm");
     expect(frame).toContain("cancel");
     expect(frame).not.toContain("switch tab");
+  });
+
+  test("long select prompts only render options that fit the terminal", async () => {
+    const store = new WizardStore({
+      bannerRows: FULL_BANNER_LINES,
+      layout: "intro",
+    });
+    store.setPrompt({
+      kind: "select",
+      message: "Which team should own this project?",
+      options: Array.from({ length: 20 }, (_value, index) => ({
+        value: `team-${index + 1}`,
+        label: `Team ${index + 1}`,
+      })),
+      initialIndex: 0,
+      resolve: ignorePromptResolution,
+    });
+
+    const rendered = await renderApp(store, 120, { rows: 24 });
+    const frame = stripFinalLineBreak(stripAnsi(rendered.latestFrame()));
+    expect(frame).toContain("Which team should own this project?");
+    expect(frame).toContain("(1/20)");
+    expect(frame).toContain("Team 4");
+    expect(frame).not.toContain("Team 5");
+    expect(frame.split(LINE_SPLIT_RE).length).toBeLessThanOrEqual(24);
+    expect(frame).toContain(FEEDBACK_BANNER_TEXT);
+
+    const scrolledFrame = stripAnsi(
+      (
+        await renderApp(store, 120, {
+          input: Array.from({ length: 7 }, () => DOWN_ARROW),
+          rows: 24,
+        })
+      ).allOutput()
+    );
+    expect(scrolledFrame).toContain("(8/20)");
+    expect(scrolledFrame).toContain("Team 8");
+  });
+
+  test("long multiselect prompts only render options that fit the terminal", async () => {
+    const store = new WizardStore({ bannerRows: [] });
+    store.appendLog(
+      "warn",
+      "A warning remains visible while choosing features"
+    );
+    store.appendLog(
+      "error",
+      "An error remains visible while choosing features"
+    );
+    store.appendLog("warn", "A second warning also remains visible");
+    store.setPrompt({
+      kind: "multiselect",
+      message: "Select features\nReview the monitoring choices",
+      options: Array.from({ length: 20 }, (_value, index) => ({
+        value: `feature-${index + 1}`,
+        label: `Feature ${index + 1}`,
+      })),
+      initialSelected: [],
+      required: false,
+      resolve: ignorePromptResolution,
+    });
+
+    const rendered = await renderApp(store, 120, { rows: 16 });
+    const frame = stripFinalLineBreak(stripAnsi(rendered.latestFrame()));
+    expect(frame).toContain("0/20 selected • 1/20");
+    expect(frame).toContain("Review the monitoring choices");
+    expect(frame).toContain("A second warning also remains visible");
+    expect(frame).toContain("Feature 2");
+    expect(frame).not.toContain("Feature 3");
+    expect(frame.split(LINE_SPLIT_RE).length).toBeLessThanOrEqual(16);
+    expect(frame).toContain(FEEDBACK_BANNER_TEXT);
+
+    const scrolledFrame = stripFinalLineBreak(
+      stripAnsi(
+        (
+          await renderApp(store, 120, {
+            input: Array.from({ length: 19 }, () => DOWN_ARROW),
+            rows: 16,
+          })
+        ).latestFrame()
+      )
+    );
+    expect(scrolledFrame).toContain("0/20 selected • 20/20");
+    expect(scrolledFrame).toContain("Feature 20");
+    expect(scrolledFrame.split(LINE_SPLIT_RE).length).toBeLessThanOrEqual(16);
+    expect(scrolledFrame).toContain(FEEDBACK_BANNER_TEXT);
+  });
+
+  test("centered multiselect prompts fit with the full banner", async () => {
+    const store = new WizardStore({
+      bannerRows: FULL_BANNER_LINES,
+      layout: "intro",
+    });
+    store.setPrompt({
+      kind: "multiselect",
+      message: "Select features\nReview the monitoring choices",
+      options: Array.from({ length: 20 }, (_value, index) => ({
+        value: `feature-${index + 1}`,
+        label: `Feature ${index + 1}`,
+      })),
+      initialSelected: [],
+      required: false,
+      resolve: ignorePromptResolution,
+    });
+
+    const rendered = await renderApp(store, 120, { rows: 30 });
+    const frame = stripFinalLineBreak(stripAnsi(rendered.latestFrame()));
+    expect(frame).toContain("Review the monitoring choices");
+    expect(frame).toContain("Feature 6");
+    expect(frame).not.toContain("Feature 7");
+    expect(frame.split(LINE_SPLIT_RE).length).toBeLessThanOrEqual(30);
+    expect(frame).toContain(FEEDBACK_BANNER_TEXT);
+  });
+
+  test("long option hints stay on one terminal row", async () => {
+    const store = new WizardStore({ bannerRows: [], layout: "intro" });
+    store.setPrompt({
+      kind: "select",
+      message: "Choose a team",
+      options: [
+        {
+          value: "team-1",
+          label: "A",
+          hint: "This deliberately long team name would wrap onto another row UNIQUE_TAIL",
+        },
+        { value: "team-2", label: "Team 2" },
+      ],
+      initialIndex: 0,
+      resolve: ignorePromptResolution,
+    });
+
+    const frame = stripAnsi(
+      (await renderApp(store, 40, { rows: 24 })).allOutput()
+    );
+    expect(frame).toContain("A");
+    expect(frame).not.toContain("UNIQUE_TAIL");
   });
 
   test("file scroll shortcut appears only when the file tree overflows", async () => {
