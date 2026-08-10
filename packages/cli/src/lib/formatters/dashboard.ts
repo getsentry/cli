@@ -1601,18 +1601,18 @@ function renderHeatmapContent(
   const chartWidth = Math.max(1, innerWidth - gutterW);
 
   // Determine the actual number of time buckets from the longest series.
-  const maxLen = Math.max(
-    0,
-    ...series.map((s) => s.values.length)
-  );
+  const maxLen = Math.max(0, ...series.map((s) => s.values.length));
   const bucketCount = Math.min(chartWidth, maxLen || chartWidth);
 
   // Downsample every series to that bucket count; pad shorter series so every
   // row has exactly `bucketCount` cells (downsample returns early for short input).
   const rows = series.map((s) => {
-    const ds = downsample(s.values.map((v) => v.value), bucketCount);
+    const ds = downsample(
+      s.values.map((v) => v.value),
+      bucketCount
+    );
     return ds.length < bucketCount
-      ? [...ds, ...Array(bucketCount - ds.length).fill(0)]
+      ? [...ds, ...new Array(bucketCount - ds.length).fill(0)]
       : ds;
   });
   const globalMax = Math.max(1, ...rows.flat());
@@ -1635,8 +1635,9 @@ function renderHeatmapContent(
 
   // Bottom time axis, aligned to the chart area.
   // Find the longest series so its timestamps match the bucketCount.
-  const longest = series.reduce((a, b) =>
-    (b.values.length > a.values.length ? b : a), series[0] ?? { values: [] }
+  const longest = series.reduce(
+    (a, b) => (b.values.length > a.values.length ? b : a),
+    series[0] ?? { values: [] }
   );
   const axisTs = longest.values.map((v) => v.timestamp);
   if (axisTs.length > 0) {
