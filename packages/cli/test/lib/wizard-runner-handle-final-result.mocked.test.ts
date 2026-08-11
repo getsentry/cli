@@ -148,6 +148,67 @@ describe("handleFinalResult", () => {
     });
   });
 
+  describe("workflow bail telemetry", () => {
+    test("marks explicitly expected workflow exits as bailed", async () => {
+      const result = makeBailResult({
+        bailCategory: "expected",
+        bailReason: "unknown_platform",
+        bailStep: "detect-platform",
+        exitCode: 20,
+      });
+
+      await expect(
+        handleFinalResult(
+          result,
+          makeSpinnerHandle(),
+          makeSpinState(),
+          makeUI()
+        )
+      ).rejects.toThrow(WizardError);
+
+      expect(tags["wizard.outcome"]).toBe("bailed");
+      expect(tags["wizard.bail_category"]).toBe("expected");
+      expect(tags["wizard.bail_reason"]).toBe("unknown_platform");
+      expect(tags["wizard.step"]).toBe("detect-platform");
+    });
+
+    test("keeps unexpected and unclassified workflow exits as errors", async () => {
+      const unexpected = makeBailResult({
+        bailCategory: "unexpected",
+        bailReason: "agent_failure",
+        bailStep: "plan-codemods",
+      });
+
+      await expect(
+        handleFinalResult(
+          unexpected,
+          makeSpinnerHandle(),
+          makeSpinState(),
+          makeUI()
+        )
+      ).rejects.toThrow(WizardError);
+
+      expect(tags["wizard.outcome"]).toBe("errored");
+      expect(tags["wizard.bail_category"]).toBe("unexpected");
+
+      for (const key of Object.keys(tags)) {
+        delete tags[key];
+      }
+
+      await expect(
+        handleFinalResult(
+          makeBailResult(),
+          makeSpinnerHandle(),
+          makeSpinState(),
+          makeUI()
+        )
+      ).rejects.toThrow(WizardError);
+
+      expect(tags["wizard.outcome"]).toBe("errored");
+      expect(tags["wizard.bail_category"]).toBeUndefined();
+    });
+  });
+
   describe("WizardError message — result.error fallback", () => {
     test("uses result.error when result.result is absent (plain workflow failure)", async () => {
       const result: WorkflowRunResult = {

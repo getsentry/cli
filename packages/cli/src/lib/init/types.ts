@@ -226,6 +226,9 @@ export type ToolResult = {
 
 // Wizard output
 export type WizardOutput = {
+  bailCategory?: "expected" | "unexpected";
+  bailReason?: string;
+  bailStep?: string;
   platform?: string;
   projectDir?: string;
   features?: string[];

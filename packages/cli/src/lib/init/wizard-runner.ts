@@ -68,6 +68,7 @@ import type {
   ToolPayload,
   ToolResult,
   WizardOptions,
+  WizardOutput,
   WorkflowRunResult,
 } from "./types.js";
 import { getUIAsync } from "./ui/factory.js";
@@ -1191,6 +1192,23 @@ function syncWorkflowStepStatuses(
   }
 }
 
+function tagWorkflowFailure(output: WizardOutput | undefined): void {
+  const bailCategory = output?.bailCategory;
+  setTag("wizard.outcome", bailCategory === "expected" ? "bailed" : "errored");
+  if (bailCategory !== undefined) {
+    setTag("wizard.bail_category", bailCategory);
+  }
+  if (output?.bailReason !== undefined) {
+    setTag("wizard.bail_reason", output.bailReason);
+  }
+  if (output?.bailStep !== undefined) {
+    setTag("wizard.step", output.bailStep);
+  }
+  if (output?.exitCode !== undefined) {
+    setTag("wizard.exit_code", output.exitCode);
+  }
+}
+
 // biome-ignore lint/nursery/useMaxParams: existing 4-param shape; cwd is a defaulted extension
 export async function handleFinalResult(
   result: WorkflowRunResult,
@@ -1211,10 +1229,7 @@ export async function handleFinalResult(
     // Map workflow-internal exit codes to semantic EXIT.* constants
     const workflowCode = result.result?.exitCode;
     const exitCode = mapWorkflowExitCode(workflowCode);
-    setTag("wizard.outcome", "errored");
-    if (workflowCode !== undefined) {
-      setTag("wizard.exit_code", workflowCode);
-    }
+    tagWorkflowFailure(result.result);
     throw new WizardError(
       result.error ?? result.result?.message ?? "Workflow returned an error",
       { exitCode }
