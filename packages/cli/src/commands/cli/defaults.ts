@@ -323,7 +323,7 @@ export const defaultsCommand = buildCommand({
         guardNonInteractive(flags);
         if (!isConfirmationBypassed(flags)) {
           const confirmed = await log.prompt(
-            "This will clear all defaults (organization, project, telemetry, URL, headers, ca-cert). Continue?",
+            "This will clear all defaults (organization, project, telemetry, URL, headers, ca-cert, agent-skills). Continue?",
             { type: "confirm" }
           );
           if (confirmed !== true) {
