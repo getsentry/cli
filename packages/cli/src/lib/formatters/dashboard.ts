@@ -19,11 +19,13 @@ import type {
   TimeseriesResult,
   WidgetDataResult,
 } from "../../types/dashboard.js";
+import { getEnv } from "../env.js";
+import { canRenderSixel, terminalPixelWidth } from "../sixel.js";
 import { COLORS, muted, terminalLink } from "./colors.js";
 import { renderMarkdown } from "./markdown.js";
-
 import type { HumanRenderer } from "./output.js";
 import { isPlainOutput } from "./plain-detect.js";
+import { renderTimeseriesAsSixel } from "./sixel-timeseries.js";
 import { downsample, sparkline } from "./sparkline.js";
 
 // ---------------------------------------------------------------------------
@@ -1546,7 +1548,25 @@ function renderContentLines(opts: {
   const { data } = widget;
 
   switch (data.type) {
-    case "timeseries":
+    case "timeseries": {
+      // Opt-in sixel image rendering for timeseries widgets.
+      const env = getEnv();
+      if (
+        !isPlainOutput() &&
+        (env.SENTRY_DASHBOARD_SIXEL === "1" ||
+          widget.displayType === "timeseries_sixel") &&
+        canRenderSixel()
+      ) {
+        const pixelBudget = terminalPixelWidth();
+        const sixel = renderTimeseriesAsSixel(data, {
+          maxPixelWidth: pixelBudget ?? innerWidth * 8,
+          maxPixelHeight: contentHeight * 12,
+        });
+        if (sixel) {
+          return [sixel];
+        }
+      }
+
       if (widget.displayType === "categorical_bar") {
         return renderVerticalBarsContent(data, { innerWidth, contentHeight });
       }
@@ -1555,6 +1575,7 @@ function renderContentLines(opts: {
         return renderTimeseriesBarsContent(data, { innerWidth, contentHeight });
       }
       return renderTimeseriesContent(data, innerWidth);
+    }
 
     case "table":
       return renderTableContent(data, innerWidth);
@@ -1616,7 +1637,7 @@ function renderWidgetLines(
  * If longer, it is truncated (ANSI-aware via character iteration).
  */
 /** ANSI escape sequence type for the truncation state machine. */
-type EscapeType = "none" | "start" | "csi" | "osc";
+type EscapeType = "none" | "start" | "csi" | "osc" | "dcs";
 
 /** Check if a character is an ASCII letter (CSI sequence terminator). */
 function isAsciiLetter(ch: string): boolean {
@@ -1635,6 +1656,15 @@ function advanceEscape(
   ch: string,
   buffer: string
 ): boolean {
+  return advanceEscapeInner(state, ch, buffer.at(-1));
+}
+
+function advanceEscapeInner(
+  state: { type: EscapeType },
+  ch: string,
+  prev: string | undefined
+): boolean {
+  const stTerminator = ch === "\\" && prev === "\x1b";
   switch (state.type) {
     case "none":
       if (ch === "\x1b") {
@@ -1647,6 +1677,8 @@ function advanceEscape(
         state.type = "csi";
       } else if (ch === "]") {
         state.type = "osc";
+      } else if (ch === "P") {
+        state.type = "dcs";
       } else {
         state.type = "none";
       }
@@ -1658,7 +1690,13 @@ function advanceEscape(
       return true;
     case "osc":
       // OSC ends at BEL (\x07) or ST (\x1b\\)
-      if (ch === "\x07" || (ch === "\\" && buffer.at(-1) === "\x1b")) {
+      if (ch === "\x07" || stTerminator) {
+        state.type = "none";
+      }
+      return true;
+    case "dcs":
+      // DCS ends at ST (\x1b\\)
+      if (stTerminator) {
         state.type = "none";
       }
       return true;

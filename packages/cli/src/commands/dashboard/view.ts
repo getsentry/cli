@@ -54,6 +54,7 @@ type ViewFlags = {
   readonly period?: TimeRange;
   readonly json: boolean;
   readonly fields?: string[];
+  readonly sixel: boolean;
 };
 
 /**
@@ -188,6 +189,11 @@ export const viewCommand = buildCommand({
         brief: "Open in browser",
         default: false,
       },
+      sixel: {
+        kind: "boolean",
+        brief: "Render timeseries widgets as sixel images",
+        default: false,
+      },
       fresh: FRESH_FLAG,
       refresh: {
         kind: "parsed",
@@ -203,10 +209,19 @@ export const viewCommand = buildCommand({
         optional: true,
       },
     },
-    aliases: { ...FRESH_ALIASES, w: "web", r: "refresh", t: "period" },
+    aliases: {
+      ...FRESH_ALIASES,
+      w: "web",
+      s: "sixel",
+      r: "refresh",
+      t: "period",
+    },
   },
   async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
+    if (flags.sixel) {
+      process.env.SENTRY_DASHBOARD_SIXEL = "1";
+    }
     const { cwd } = this;
 
     const { dashboardRef, targetArg } = parseDashboardPositionalArgs(args);
