@@ -103,6 +103,26 @@ describe("filesystem tools", () => {
     expect((existsResult.data as any).exists["missing.txt"]).toBe(false);
   });
 
+  test("reads binary content when the workflow explicitly requests it", async () => {
+    const content = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x00, 0xff]);
+    fs.writeFileSync(path.join(testDir, "sentry-wizard"), content);
+
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: { paths: ["sentry-wizard"] },
+      },
+      makeContext(testDir)
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result.data as any).files["sentry-wizard"]).toBe(
+      content.toString("utf-8")
+    );
+  });
+
   test("applies patchsets and injects auth tokens into env files", async () => {
     const result = await executeTool(
       {

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isLikelyBinary } from "../scan/index.js";
 import { MAX_FILE_BYTES } from "./constants.js";
 import { detectSentry } from "./tools/detect-sentry.js";
 import { listDir } from "./tools/list-dir.js";
@@ -131,7 +132,12 @@ export async function preReadCommonFiles(
       if (stat.size > MAX_FILE_BYTES) {
         continue;
       }
-      const content = await fs.promises.readFile(absPath, "utf-8");
+      const buffer = await fs.promises.readFile(absPath);
+      if (isLikelyBinary(buffer)) {
+        cache[filePath] = null;
+        continue;
+      }
+      const content = buffer.toString("utf-8");
       if (totalBytes + content.length <= MAX_PREREAD_TOTAL_BYTES) {
         cache[filePath] = content;
         totalBytes += content.length;
