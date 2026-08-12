@@ -66,6 +66,7 @@ import {
   setLogLevel,
 } from "./logger.js";
 import { setArgsContext, setFlagContext, withTracing } from "./telemetry.js";
+import { tipsSuppressed } from "./tips.js";
 
 /**
  * Parse a string input as a number.
@@ -247,6 +248,21 @@ export const FIELDS_FLAG = {
   brief:
     "Comma-separated fields to include in JSON output (dot.notation supported)",
   optional: true as const,
+} as const;
+
+/**
+ * Hidden `--tips` flag injected into every command by {@link buildCommand}.
+ *
+ * Defaults to `true`; passing `--no-tips` sets it to `false`, which suppresses
+ * the "Tip: ..." footer hints. Hidden so it doesn't clutter individual command
+ * `--help` output — it's documented at the CLI level. Also controllable via the
+ * `SENTRY_DISABLE_TIPS` environment variable (see `tips.ts`).
+ */
+export const TIPS_FLAG = {
+  kind: "boolean" as const,
+  brief: "Show tip hints in command output (use --no-tips to disable)",
+  default: true,
+  hidden: true as const,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -435,6 +451,7 @@ const GLOBAL_FLAG_DEFAULTS: Record<string, unknown> = {
   verbose: VERBOSE_FLAG,
   org: ORG_FLAG,
   project: PROJECT_FLAG,
+  tips: TIPS_FLAG,
 };
 
 /** Flags that are always stripped (command never sees them). */
@@ -794,7 +811,12 @@ export function buildCommand<
       // "cached · 3m ago · use -f to refresh" when data was cached.
       // Skip bare `return;` paths (e.g. `--web` which opens a browser
       // without yielding) — no rendered output should mean no footer.
-      const finalHint = returned ? appendCacheHint(returned.hint) : undefined;
+      // Drop the command's "Tip: ..." hint when tips are suppressed via
+      // --no-tips or SENTRY_DISABLE_TIPS. The cache-age footer is a staleness
+      // indicator, not a tip, so it is still appended.
+      const suppressTips = tipsSuppressed(flags.tips as boolean | undefined);
+      const commandHint = suppressTips ? undefined : returned?.hint;
+      const finalHint = returned ? appendCacheHint(commandHint) : undefined;
       await withTracing("render", "cli.command.render", () => {
         writeFinalization(stdout, finalHint, cleanFlags.json, renderer);
       });

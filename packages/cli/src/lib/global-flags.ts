@@ -46,6 +46,9 @@ export const GLOBAL_FLAGS: readonly GlobalFlagDef[] = [
   { name: "log-level", short: null, kind: "value" },
   { name: "json", short: null, kind: "boolean" },
   { name: "fields", short: null, kind: "value" },
+  // `--no-tips` suppresses the "Tip: ..." footer hints. Registered as a
+  // boolean so Stricli recognizes the `--no-tips` negation token.
+  { name: "tips", short: null, kind: "boolean" },
   // Hidden compat shims: LLMs trained on the older sentry-cli generate
   // `--org` and `--project` flags. We silently accept them and map to
   // SENTRY_ORG / SENTRY_PROJECT env vars so the resolution chain handles them.
