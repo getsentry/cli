@@ -453,6 +453,19 @@ export function parsePositionalArgs(args: string[]): ParsedPositionalArgs {
     };
   }
 
+  // Detect issue short ID as second arg (e.g., "my-org/my-project BRUNCHIE-APP-29").
+  // Auto-redirect to that issue's latest event instead of treating the short
+  // ID as an event hex ID (which would fail validation).
+  if (looksLikeIssueShortId(second)) {
+    const extraEventIds = args.length > 2 ? args.slice(2) : undefined;
+    return {
+      eventId: LATEST_EVENT_SENTINEL,
+      targetArg: first,
+      issueShortId: second,
+      extraEventIds,
+    };
+  }
+
   // Two or more args - first is target, second is event ID.
   // Any additional args are extra event IDs (from newline-separated input).
   const extraEventIds = args.length > 2 ? args.slice(2) : undefined;
