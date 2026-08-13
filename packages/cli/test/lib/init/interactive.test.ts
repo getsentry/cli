@@ -210,6 +210,68 @@ describe("handleSelect with --app flag", () => {
     expect(result).toEqual({ selectedApp: "Web" });
   });
 
+  test("matches --app against app names even when options use different values", async () => {
+    const { ui } = createMockUI();
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Select the target application:",
+        kind: "select",
+        apps: [
+          { name: "web", path: "/repo/apps/web" },
+          { name: "api", path: "/repo/apps/api" },
+        ],
+        options: ["/repo/apps/web", "/repo/apps/api"],
+      },
+      makeOptions({ app: "web" }),
+      ui
+    );
+
+    expect(result).toEqual({ selectedApp: "web" });
+  });
+
+  test("matches --app against the app path basename when the agent decorates its name", async () => {
+    const { ui } = createMockUI();
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Select the target application:",
+        kind: "select",
+        apps: [
+          {
+            name: "empty (example Strapi app)",
+            path: "/repo/examples/empty",
+          },
+        ],
+        options: ["empty (example Strapi app)"],
+      },
+      makeOptions({ app: "empty" }),
+      ui
+    );
+
+    expect(result).toEqual({ selectedApp: "empty (example Strapi app)" });
+  });
+
+  test("rejects an ambiguous --app path basename", async () => {
+    const { ui } = createMockUI();
+    await expect(
+      handleInteractive(
+        {
+          type: "interactive",
+          prompt: "Select the target application:",
+          kind: "select",
+          apps: [
+            { name: "primary web", path: "/repo/apps/web" },
+            { name: "example web", path: "/repo/examples/web" },
+          ],
+          options: ["primary web", "example web"],
+        },
+        makeOptions({ app: "web" }),
+        ui
+      )
+    ).rejects.toThrow("ambiguous");
+  });
+
   test("throws WizardError when --app name is not found", async () => {
     const { ui, calls } = createMockUI();
     await expect(

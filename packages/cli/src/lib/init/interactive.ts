@@ -50,6 +50,46 @@ const DEFAULT_FEATURE_RANK = new Map<string, number>(
 const UNSUPPORTED_INIT_FEATURES = new Set(["userFeedback"]);
 const FEATURE_SELECTION_CONTEXT =
   "Based on your project, these features are available to set up.";
+const TRAILING_SLASHES_RE = /\/+$/;
+
+function appFlagAliases(app: AppEntry): string[] {
+  const normalizedPath = app.path
+    .replaceAll("\\", "/")
+    .replace(TRAILING_SLASHES_RE, "");
+  const pathBasename = normalizedPath.split("/").at(-1);
+  return [app.name, app.path, pathBasename]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.toLowerCase());
+}
+
+function resolveAppFlag(apps: AppEntry[], requestedApp: string): AppEntry[] {
+  const requested = requestedApp.toLowerCase();
+  const exactMatches = apps.filter(
+    (app) =>
+      app.name.toLowerCase() === requested ||
+      app.path.toLowerCase() === requested
+  );
+  return exactMatches.length > 0
+    ? exactMatches
+    : apps.filter((app) => appFlagAliases(app).includes(requested));
+}
+
+function buildAmbiguousAppMessage(
+  requested: string,
+  matches: AppEntry[]
+): string {
+  return [
+    `App alias "${requested}" is ambiguous in this monorepo.`,
+    "",
+    "Matching apps:",
+    ...formatAppList(
+      matches,
+      matches.map((app) => app.name)
+    ),
+    "",
+    "Re-run with the exact app name or full path.",
+  ].join("\n");
+}
 
 function sortFeatureOptions(features: string[]): string[] {
   return features.slice().sort((a, b) => {
@@ -152,6 +192,34 @@ function buildAppNotFoundMessage(
   ].join("\n");
 }
 
+function selectAppByFlag(
+  requestedApp: string,
+  apps: AppEntry[],
+  ui: WizardUI
+): Record<string, unknown> {
+  const matches = resolveAppFlag(apps, requestedApp);
+  if (matches.length !== 1) {
+    const message =
+      matches.length > 1
+        ? buildAmbiguousAppMessage(requestedApp, matches)
+        : buildAppNotFoundMessage(
+            requestedApp,
+            apps,
+            apps.map((app) => app.name)
+          );
+    ui.log.error(message);
+    throw new WizardError(message, { rendered: true });
+  }
+  const match = matches.at(0);
+  if (!match) {
+    throw new WizardError("App selection unexpectedly failed.", {
+      rendered: false,
+    });
+  }
+  ui.log.info(`Using app: ${match.name}`);
+  return { selectedApp: match.name };
+}
+
 async function handleSelect(
   payload: SelectPayload,
   options: InteractiveContext,
@@ -167,16 +235,7 @@ async function handleSelect(
   }
 
   if (options.app && payload.apps && payload.apps.length > 0) {
-    const match = items.find(
-      (item) => item.toLowerCase() === options.app?.toLowerCase()
-    );
-    if (!match) {
-      const message = buildAppNotFoundMessage(options.app, apps, items);
-      ui.log.error(message);
-      throw new WizardError(message, { rendered: true });
-    }
-    ui.log.info(`Using app: ${match}`);
-    return { selectedApp: match };
+    return selectAppByFlag(options.app, apps, ui);
   }
 
   if (options.yes && items.length === 1) {
