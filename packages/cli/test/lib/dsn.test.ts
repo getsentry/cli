@@ -27,6 +27,21 @@ describe("parseDsn edge cases", () => {
     const result = parseDsn(dsn);
     expect(result?.projectId).toBe("456");
   });
+
+  test("returns null for a placeholder DSN", () => {
+    const dsn = "https://examplePublicKey@o0.ingest.sentry.io/0";
+    expect(parseDsn(dsn)).toBeNull();
+  });
+
+  test("returns null for a zero SaaS organization ID", () => {
+    const dsn = "https://key@o0.ingest.sentry.io/456";
+    expect(parseDsn(dsn)).toBeNull();
+  });
+
+  test("returns null for a zero project ID", () => {
+    const dsn = "https://key@o123.ingest.sentry.io/0";
+    expect(parseDsn(dsn)).toBeNull();
+  });
 });
 
 describe("createDsnFingerprint: self-hosted DSNs", () => {

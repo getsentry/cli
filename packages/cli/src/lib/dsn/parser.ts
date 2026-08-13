@@ -81,12 +81,15 @@ export function parseDsn(dsn: string): ParsedDsn | null {
     // Project ID is the last path segment
     const pathParts = url.pathname.split("/").filter(Boolean);
     const projectId = pathParts.at(-1);
-    if (!projectId) {
+    if (!projectId || projectId === "0") {
       return null;
     }
 
     // Try to extract org ID from host (SaaS only)
     const orgId = extractOrgIdFromHost(host) ?? undefined;
+    if (orgId === "0") {
+      return null;
+    }
 
     return {
       protocol,
