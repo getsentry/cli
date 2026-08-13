@@ -46,7 +46,10 @@ describe("generated SDK positional arguments", () => {
   test("release deploy omits a trailing optional positional", async () => {
     const { calls, sdk } = createRecordingSDK();
 
-    await sdk.release.deploy({ orgVersion: "1.0.0", environment: "production" });
+    await sdk.release.deploy({
+      orgVersion: "1.0.0",
+      environment: "production",
+    });
 
     expect(calls[0]?.positional).toEqual(["1.0.0", "production"]);
   });
