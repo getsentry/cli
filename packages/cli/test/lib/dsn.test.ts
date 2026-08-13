@@ -33,7 +33,7 @@ describe("parseDsn edge cases", () => {
   test.each([
     // Canonical sentry-docs codeContext default
     "https://examplePublicKey@o0.ingest.sentry.io/0",
-    // Docs example with bare `public` key + o0 host
+    // Docs example with bare `public` key + o0 host (rejected via org id)
     "https://public@o0.ingest.sentry.io/1",
     // All-zero padded org host used in OTLP docs examples
     "https://abc123@o00000.ingest.sentry.io/1111111",
@@ -62,6 +62,19 @@ describe("parseDsn edge cases", () => {
       orgId: "1169445",
     });
   });
+
+  test("still accepts legacy public:secret DSNs with real org/project ids", () => {
+    // Bare "public" is a valid public key in legacy DSNs; do not reject it alone.
+    const dsn = "https://public:secret@o123.ingest.sentry.io/456";
+    const result = parseDsn(dsn);
+    expect(result).toEqual({
+      protocol: "https",
+      publicKey: "public",
+      host: "o123.ingest.sentry.io",
+      projectId: "456",
+      orgId: "123",
+    });
+  });
 });
 
 describe("placeholder helpers", () => {
@@ -79,7 +92,7 @@ describe("placeholder helpers", () => {
 
   test.each([
     "examplePublicKey",
-    "public",
+    "exampleKey",
     "YOUR_DSN_HERE",
     "___PUBLIC_DSN___",
     "__DSN__",
@@ -90,6 +103,8 @@ describe("placeholder helpers", () => {
 
   test.each([
     "abc123def456",
+    "public",
+    "publickey",
     "public-app-key",
   ])("isPlaceholderPublicKey rejects %s", (key) => {
     expect(isPlaceholderPublicKey(key)).toBe(false);

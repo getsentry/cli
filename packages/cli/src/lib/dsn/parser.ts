@@ -40,8 +40,12 @@ const ALL_ZERO_ID_PATTERN = /^0+$/;
  * SDK/docs example strings (examplePublicKey@o0..., YOUR_DSN_HERE, etc.).
  * Matched case-insensitively against the DSN username.
  */
+// Keep this list to unmistakable docs/template keys. Do NOT include bare
+// "public" or "publickey" — legacy DSNs and scanner fixtures use those as
+// real public keys (`public:secret@host/project`). Docs copies that use
+// bare `public` also use o0 / project 0 and are caught by numeric-id checks.
 const PLACEHOLDER_PUBLIC_KEY_PATTERN =
-  /^(?:example(?:public)?key|public(?:key)?|your(?:public)?key|your[_-]?dsn(?:[_-]?here)?|___+public[_-]?dsn___+|__+dsn__+|<[^<>]+>)$/i;
+  /^(?:example(?:public)?key|your(?:public)?key|your[_-]?dsn(?:[_-]?here)?|___+public[_-]?dsn___+|__+dsn__+|<[^<>]+>)$/i;
 
 /**
  * Extract organization ID from a Sentry ingest host
