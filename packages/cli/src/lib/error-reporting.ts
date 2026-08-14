@@ -54,8 +54,7 @@ type SilenceReason =
   | "output_error"
   | "auth_expected"
   | "api_user_error"
-  | "network_error"
-  | "validation_error";
+  | "network_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -66,13 +65,6 @@ type SilenceReason =
 export function classifySilenced(error: unknown): SilenceReason | null {
   if (error instanceof OutputError) {
     return "output_error";
-  }
-  // A ValidationError means the user supplied malformed input (e.g. an empty
-  // issue identifier passed by an AI agent). This is expected user-input noise,
-  // not a CLI bug — silence it so it does not pollute Sentry with actionable
-  // user errors (CLI-1HQ).
-  if (error instanceof ValidationError) {
-    return "validation_error";
   }
   // A raw `TypeError: "fetch failed"` (CLI-16W) means the CLI could not reach
   // Sentry at all (offline, DNS, connection refused/timeout). There is nothing
