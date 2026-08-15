@@ -305,10 +305,15 @@ describe("classifySilenced", () => {
     ],
     ["ValidationError", new ValidationError("bad")],
     ["SeerError", new SeerError("not_enabled")],
-    ["ConfigError", new ConfigError("bad")],
     ["generic Error", new Error("boom")],
   ])("does NOT silence %s", (_label, err) => {
     expect(classifySilenced(err)).toBeNull();
+  });
+
+  test("silences ConfigError as config_error (CLI-28M)", () => {
+    // ConfigError means the user omitted a required config value (e.g. no DSN).
+    // It is user misconfiguration, not a CLI bug — silence it to reduce noise.
+    expect(classifySilenced(new ConfigError("bad"))).toBe("config_error");
   });
 });
 
