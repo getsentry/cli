@@ -52,6 +52,8 @@ import {
   type SpinnerHandle,
   type WizardUI,
 } from "../../../src/lib/init/ui/types.js";
+// biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
+import * as verifySetupModule from "../../../src/lib/init/verify-setup.js";
 import { runWizard } from "../../../src/lib/init/wizard-runner.js";
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as workflowInputs from "../../../src/lib/init/workflow-inputs.js";
@@ -113,6 +115,7 @@ let getUISpy: ReturnType<typeof spyOn>;
 let formatBannerSpy: ReturnType<typeof spyOn>;
 let formatResultSpy: ReturnType<typeof spyOn>;
 let formatErrorSpy: ReturnType<typeof spyOn>;
+let verifySetupSpy: ReturnType<typeof spyOn>;
 let checkGitStatusSpy: ReturnType<typeof spyOn>;
 let handleInteractiveSpy: ReturnType<typeof spyOn>;
 let resolveInitContextSpy: ReturnType<typeof spyOn>;
@@ -253,6 +256,9 @@ beforeEach(() => {
   formatBannerSpy = vi.spyOn(banner, "formatBanner").mockReturnValue("BANNER");
   formatResultSpy = vi.spyOn(fmt, "formatResult").mockImplementation(noop);
   formatErrorSpy = vi.spyOn(fmt, "formatError").mockImplementation(noop);
+  verifySetupSpy = vi
+    .spyOn(verifySetupModule, "verifySetup")
+    .mockResolvedValue(undefined);
   checkGitStatusSpy = vi.spyOn(git, "checkGitStatus").mockResolvedValue(true);
   handleInteractiveSpy = vi
     .spyOn(inter, "handleInteractive")
@@ -334,6 +340,7 @@ afterEach(() => {
   formatBannerSpy.mockRestore();
   formatResultSpy.mockRestore();
   formatErrorSpy.mockRestore();
+  verifySetupSpy.mockRestore();
   checkGitStatusSpy.mockRestore();
   handleInteractiveSpy.mockRestore();
   resolveInitContextSpy.mockRestore();
@@ -439,6 +446,7 @@ describe("runWizard", () => {
     expect(formatResultSpy).toHaveBeenCalled();
     expect(formatErrorSpy).not.toHaveBeenCalled();
     expect(spinnerMock.stop).toHaveBeenCalledWith("Done");
+    expect(verifySetupSpy).toHaveBeenCalled();
   });
 
   test("throws when stdin is not a TTY without --yes", async () => {
@@ -473,6 +481,7 @@ describe("runWizard", () => {
       expect.anything()
     );
     expect(lastWarn()).toContain("Dry-run");
+    expect(verifySetupSpy).not.toHaveBeenCalled();
   });
 
   test("uses rich welcome screen when available", async () => {
