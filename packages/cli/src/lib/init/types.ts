@@ -98,13 +98,58 @@ export type ListDirPayload = {
   };
 };
 
+/** Stable reason a V2 file read could not return UTF-8 text. */
+export type ReadFileErrorCode =
+  | "invalid-offset"
+  | "not-file"
+  | "not-found"
+  | "not-text"
+  | "unreadable";
+
+/** Structured per-file result returned by the V2 read-files protocol. */
+export type ReadFileV2Result =
+  | {
+      /** Exact UTF-8 text returned for this chunk. */
+      content: string;
+      /** Stable identity used to prove that continuation chunks are from one file version. */
+      fileVersion: string;
+      /** Cursor for the next read when `truncated` is true. */
+      nextOffsetBytes?: number;
+      /** Byte offset at which this chunk starts. */
+      offsetBytes: number;
+      /** Number of source-file bytes represented by `content`. */
+      returnedBytes: number;
+      status: "ok";
+      /** Total source-file size in bytes. */
+      totalBytes: number;
+      /** Whether more bytes remain after this chunk. */
+      truncated: boolean;
+    }
+  | {
+      /** Stable reason the file could not be returned as UTF-8 text. */
+      error: ReadFileErrorCode;
+      status: "error";
+    };
+
+/** V2 read-files response envelope. */
+export type ReadFilesV2Data = {
+  /** Per-requested-path results. */
+  files: Record<string, ReadFileV2Result>;
+  version: 2;
+};
+
+/** Request for one or more sandboxed project file reads. */
 export type ReadFilesPayload = {
   type: "tool";
   operation: "read-files";
   cwd: string;
   params: {
+    /** Byte offset for a V2 single-file continuation read. */
+    offsetBytes?: number;
     paths: string[];
     maxBytes?: number;
+    /** Opts into structured per-file results; omitted for the legacy wire shape. */
+    resultVersion?: 2;
   };
 };
 

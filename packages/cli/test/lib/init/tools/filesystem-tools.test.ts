@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as dsnIndex from "../../../../src/lib/dsn/index.js";
 import { executeTool } from "../../../../src/lib/init/tools/registry.js";
 import type {
+  ReadFilesV2Data,
   ResolvedInitContext,
   ToolPayload,
 } from "../../../../src/lib/init/types.js";
@@ -101,6 +102,342 @@ describe("filesystem tools", () => {
     expect((readResult.data as any).files["missing.txt"]).toBeNull();
     expect((existsResult.data as any).exists["exists.txt"]).toBe(true);
     expect((existsResult.data as any).exists["missing.txt"]).toBe(false);
+  });
+
+  test("returns explicit V2 completion and file errors", async () => {
+    fs.writeFileSync(path.join(testDir, "exists.txt"), "hello");
+
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          paths: ["exists.txt", "missing.txt"],
+          resultVersion: 2,
+        },
+      },
+      makeContext(testDir)
+    );
+    const data = result.data as ReadFilesV2Data;
+
+    expect(data).toEqual({
+      files: {
+        "exists.txt": {
+          content: "hello",
+          fileVersion: expect.any(String),
+          offsetBytes: 0,
+          returnedBytes: 5,
+          status: "ok",
+          totalBytes: 5,
+          truncated: false,
+        },
+        "missing.txt": { error: "not-found", status: "error" },
+      },
+      version: 2,
+    });
+  });
+
+  test("does not replace a successful V2 read when closing fails", async () => {
+    fs.writeFileSync(path.join(testDir, "close-error.txt"), "hello");
+    const originalOpen = fs.promises.open.bind(fs.promises);
+    const openSpy = vi
+      .spyOn(fs.promises, "open")
+      .mockImplementation(
+        async (...args: Parameters<typeof fs.promises.open>) => {
+          const handle = await originalOpen(...args);
+          const originalClose = handle.close.bind(handle);
+          handle.close = async () => {
+            await originalClose();
+            throw new Error("simulated close failure");
+          };
+          return handle;
+        }
+      );
+
+    try {
+      const result = await executeTool(
+        {
+          type: "tool",
+          operation: "read-files",
+          cwd: testDir,
+          params: { paths: ["close-error.txt"], resultVersion: 2 },
+        },
+        makeContext(testDir)
+      );
+
+      expect(
+        (result.data as ReadFilesV2Data).files["close-error.txt"]
+      ).toMatchObject({ content: "hello", status: "ok" });
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
+  test("reports invalid UTF-8 at the start of a V2 file as not-text", async () => {
+    fs.writeFileSync(
+      path.join(testDir, "invalid-utf8.txt"),
+      Buffer.from([0x80, 0x41])
+    );
+
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: { paths: ["invalid-utf8.txt"], resultVersion: 2 },
+      },
+      makeContext(testDir)
+    );
+
+    expect((result.data as ReadFilesV2Data).files["invalid-utf8.txt"]).toEqual({
+      error: "not-text",
+      status: "error",
+    });
+  });
+
+  test.each([
+    { bytes: Buffer.from([0x80, 0x41]), title: "continuation byte" },
+    { bytes: Buffer.from([0xc0, 0x41]), title: "invalid sequence" },
+  ])("reports a torn V2 read as unreadable before classifying its $title", async ({
+    bytes,
+    title,
+  }) => {
+    const fileName = `${title.replaceAll(" ", "-")}.txt`;
+    const filePath = path.join(testDir, fileName);
+    fs.writeFileSync(filePath, bytes);
+    const originalOpen = fs.promises.open.bind(fs.promises);
+    const openSpy = vi
+      .spyOn(fs.promises, "open")
+      .mockImplementation(
+        async (...args: Parameters<typeof fs.promises.open>) => {
+          const handle = await originalOpen(...args);
+          const originalRead = handle.read.bind(handle);
+          handle.read = (async (
+            ...readArgs: Parameters<typeof handle.read>
+          ) => {
+            const result = await originalRead(...readArgs);
+            fs.appendFileSync(filePath, "changed");
+            return result;
+          }) as typeof handle.read;
+          return handle;
+        }
+      );
+
+    try {
+      const result = await executeTool(
+        {
+          type: "tool",
+          operation: "read-files",
+          cwd: testDir,
+          params: { paths: [fileName], resultVersion: 2 },
+        },
+        makeContext(testDir)
+      );
+
+      expect((result.data as ReadFilesV2Data).files[fileName]).toEqual({
+        error: "unreadable",
+        status: "error",
+      });
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
+  test("rejects a V2 retry read that makes no byte progress", async () => {
+    fs.writeFileSync(path.join(testDir, "retry-zero.txt"), "😀");
+    const originalOpen = fs.promises.open.bind(fs.promises);
+    const openSpy = vi
+      .spyOn(fs.promises, "open")
+      .mockImplementation(
+        async (...args: Parameters<typeof fs.promises.open>) => {
+          const handle = await originalOpen(...args);
+          const originalRead = handle.read.bind(handle);
+          let readCount = 0;
+          handle.read = (async (
+            ...readArgs: Parameters<typeof handle.read>
+          ) => {
+            readCount += 1;
+            if (readCount === 2) {
+              return { buffer: readArgs[0], bytesRead: 0 };
+            }
+            return originalRead(...readArgs);
+          }) as typeof handle.read;
+          return handle;
+        }
+      );
+
+    try {
+      const result = await executeTool(
+        {
+          type: "tool",
+          operation: "read-files",
+          cwd: testDir,
+          params: {
+            maxBytes: 1,
+            paths: ["retry-zero.txt"],
+            resultVersion: 2,
+          },
+        },
+        makeContext(testDir)
+      );
+
+      expect((result.data as ReadFilesV2Data).files["retry-zero.txt"]).toEqual({
+        error: "unreadable",
+        status: "error",
+      });
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
+  test("preserves a UTF-8 BOM in both wire versions", async () => {
+    const content = "\uFEFFexport {};\r\n";
+    fs.writeFileSync(path.join(testDir, "bom.ts"), content);
+
+    const legacy = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: { paths: ["bom.ts"] },
+      },
+      makeContext(testDir)
+    );
+    const v2 = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: { paths: ["bom.ts"], resultVersion: 2 },
+      },
+      makeContext(testDir)
+    );
+
+    expect(
+      (legacy.data as { files: Record<string, string> }).files["bom.ts"]
+    ).toBe(content);
+    expect((v2.data as ReadFilesV2Data).files["bom.ts"]).toMatchObject({
+      content,
+      returnedBytes: Buffer.byteLength(content),
+    });
+  });
+
+  test("preserves legacy replacement decoding at a byte-truncation boundary", async () => {
+    fs.writeFileSync(path.join(testDir, "legacy-invalid.txt"), "A😀");
+
+    const legacy = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: { maxBytes: 2, paths: ["legacy-invalid.txt"] },
+      },
+      makeContext(testDir)
+    );
+    const v2 = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          maxBytes: 2,
+          paths: ["legacy-invalid.txt"],
+          resultVersion: 2,
+        },
+      },
+      makeContext(testDir)
+    );
+
+    expect(
+      (legacy.data as { files: Record<string, string> }).files[
+        "legacy-invalid.txt"
+      ]
+    ).toBe("A�");
+    expect(
+      (v2.data as ReadFilesV2Data).files["legacy-invalid.txt"]
+    ).toMatchObject({
+      content: "A",
+      nextOffsetBytes: 1,
+    });
+  });
+
+  test("continues a V2 read with an exact UTF-8 byte cursor", async () => {
+    fs.writeFileSync(path.join(testDir, "unicode.txt"), "A😀BC");
+
+    const first = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          maxBytes: 3,
+          paths: ["unicode.txt"],
+          resultVersion: 2,
+        },
+      },
+      makeContext(testDir)
+    );
+    const firstFile = (first.data as ReadFilesV2Data).files["unicode.txt"];
+    expect(firstFile).toEqual({
+      content: "A",
+      fileVersion: expect.any(String),
+      nextOffsetBytes: 1,
+      offsetBytes: 0,
+      returnedBytes: 1,
+      status: "ok",
+      totalBytes: 7,
+      truncated: true,
+    });
+
+    const second = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          maxBytes: 3,
+          offsetBytes: 1,
+          paths: ["unicode.txt"],
+          resultVersion: 2,
+        },
+      },
+      makeContext(testDir)
+    );
+    const secondFile = (second.data as ReadFilesV2Data).files["unicode.txt"];
+    expect(secondFile).toEqual({
+      content: "😀",
+      fileVersion: expect.any(String),
+      nextOffsetBytes: 5,
+      offsetBytes: 1,
+      returnedBytes: 4,
+      status: "ok",
+      totalBytes: 7,
+      truncated: true,
+    });
+    expect(firstFile.status).toBe("ok");
+    expect(secondFile.status).toBe("ok");
+    if (firstFile.status === "ok" && secondFile.status === "ok") {
+      expect(secondFile.fileVersion).toBe(firstFile.fileVersion);
+    }
+
+    const invalid = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          offsetBytes: 2,
+          paths: ["unicode.txt"],
+          resultVersion: 2,
+        },
+      },
+      makeContext(testDir)
+    );
+    expect((invalid.data as ReadFilesV2Data).files["unicode.txt"]).toEqual({
+      error: "invalid-offset",
+      status: "error",
+    });
   });
 
   test("applies patchsets and injects auth tokens into env files", async () => {
