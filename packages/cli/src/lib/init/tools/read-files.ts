@@ -290,11 +290,11 @@ async function openProjectFile(
     );
     const stat = await handle.stat();
     if (!stat.isFile()) {
-      await handle.close();
+      await closeQuietly(handle);
       return { error: "not-file" };
     }
     if (!(await openedPathIsAllowed(cwd, absPath, stat))) {
-      await handle.close();
+      await closeQuietly(handle);
       return { error: "unreadable" };
     }
     return { handle, stat };
@@ -304,6 +304,12 @@ async function openProjectFile(
     });
     return { error: readErrorCode(error) };
   }
+}
+
+async function closeQuietly(handle: fs.promises.FileHandle): Promise<void> {
+  await handle.close().catch(() => {
+    // Descriptor cleanup must not replace the primary read classification.
+  });
 }
 
 async function openedPathIsAllowed(

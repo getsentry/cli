@@ -433,6 +433,34 @@ describe("filesystem tools", () => {
     });
   });
 
+  test("preserves not-file when descriptor cleanup fails", async () => {
+    const close = vi.fn().mockRejectedValue(new Error("close failed"));
+    const open = vi.spyOn(fs.promises, "open").mockResolvedValue({
+      close,
+      stat: vi.fn().mockResolvedValue({ isFile: () => false }),
+    } as unknown as fs.promises.FileHandle);
+
+    try {
+      const result = await executeTool(
+        {
+          type: "tool",
+          operation: "read-files",
+          cwd: testDir,
+          params: { paths: ["directory"], resultVersion: 2 },
+        },
+        makeContext(testDir)
+      );
+
+      expect(result.data).toEqual({
+        files: { directory: { error: "not-file", status: "error" } },
+        version: 2,
+      });
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      open.mockRestore();
+    }
+  });
+
   test("applies patchsets and injects auth tokens into env files", async () => {
     const result = await executeTool(
       {
