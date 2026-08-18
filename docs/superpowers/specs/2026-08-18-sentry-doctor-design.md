@@ -9,7 +9,10 @@ Source proposal: `hackweek-proposal-sentry-doctor.md`
 `sentry doctor` is a fast, read-only, repeatable health check for an existing
 Sentry install. It answers one question — *is Sentry actually working here, and
 if not, what's wrong* — in seconds, on any platform, and produces a
-consent-based export for support triage plus an agent-ready fix prompt.
+consent-based export for support triage plus agent-ready fix instructions.
+
+Read-only by default, including its liveness verdict (§9) — the one flag that
+writes, `--send-test-event`, says so in its name.
 
 Two commands, one seam:
 
@@ -144,25 +147,23 @@ type CheckResult = {
   status: "pass" | "fail" | "warn" | "skip";
   detail: string;
   evidence?: { file: string; line?: number }[];
-  remediation?: {
-    human: string;   // prose for the terminal render
-    agent: string;   // executable instructions for the --prompt render
-  };
+  remediation?: string;
 };
 ```
 
-`remediation` is split because the two renderers want different things: a human
-wants "stack traces stay obfuscated, set `autoUploadProguardMapping = true`,"
-while an agent wants the file, the exact edit, and the verification step.
-Collapsing both into one string makes the human render terse and the prompt
-vague. Adopted from PostHog's health-issue API (§18).
-```
+`remediation` is **one** string, written to be executable: "in
+`app/build.gradle.kts`, inside `sentry { }`, set
+`autoUploadProguardMapping = true`, then re-run `./gradlew assembleRelease`."
+There is exactly one output (§11), so a second, terser variant for human eyes
+would be the same instruction twice — the diagnosis and the location already
+live in `detail` and `evidence`. See §18 for why PostHog splits this and we do
+not.
 
 **Checks are pure over `(Capture, ServerFacts)`.** This is the load-bearing
 decision. It buys: checks testable against fixtures with no network or
-filesystem mocking; `--offline` for free (skip `resolve`, tier-1 checks return
-`skip` with a reason); a reproducible JSON report. It is also why capture is a
-value rather than something each check performs for itself.
+filesystem mocking; offline degradation for free (skip `resolve`, tier-1 checks
+return `skip` with a reason — §14); a reproducible JSON contract. It is also why
+capture is a value rather than something each check performs for itself.
 
 This is the seam `doctor perf` (proposal §7) plugs into later. A new check is a
 new object in a registry — no changes to collection, rendering, or export.
@@ -384,8 +385,10 @@ exactly this reason (§18).
 
 Three paths, in order:
 
-1. **In an agent** (`detectAgent()` returns a name) → emit the fix prompt.
-   Zero API calls, zero credentials, zero cost. The agent already has auth.
+1. **In an agent** (`detectAgent()` returns a name) → hand the judgement to the
+   agent already reading stdout: state what was captured and what is unresolved
+   in the `Fix` block, rather than classifying it ourselves. Zero API calls,
+   zero credentials, zero cost. The agent already has auth.
 2. **`ANTHROPIC_API_KEY` present** → one `messages.create` with
    `output_config: {format: {...}}` structured output returning
    `CheckResult[]`. A single classification call, not an agent loop — by tier 3
@@ -403,44 +406,57 @@ never a dependency — the command must be fully useful with it absent.
 
 ## 9. Live check
 
-**API round-trip, no process spawn.** Two variants, in order of cost:
+**Liveness is default, because the reads that establish it create nothing.**
+What blocked defaulting liveness was never the flag, it was the write. Splitting
+the failures by what actually detects them shows only one needs a write:
 
-1. Read `project.firstEvent` and the most recent issue's `lastSeen` — free,
-   already part of tier 1, and answers "no events since Tuesday" on every
-   platform.
-2. Optional `--live`: POST a synthetic envelope to the real DSN, then poll
-   `src/lib/api/events.ts` to confirm ingestion.
+| Failure | Detected by | Writes? |
+|---|---|---|
+| Never worked | `firstEvent: null` | no |
+| Worked, then stopped | most recent issue's `lastSeen` | no |
+| **Key revoked or rotated** | `getProjectKeys()`, match `dsn.public`, read `isActive` | no |
+| **Project deleted, DSN points nowhere** | `findProjectByDsnKey()` returns nothing | no |
+| Egress blocked, proxy, SDK never inits at runtime | synthetic envelope | **yes** |
 
-This replaces the proposal's spawn-the-dev-server approach, which cannot work
-for Android, iOS, or Go (it depends on `detectDevCommand`), costs a 15-second
-timeout, and proves only local SDK emission. The API round-trip is
+The first four are the common failures and all four are tier-1 reads on a
+project we have already resolved — the key-status check costs one additional
+call. `ProjectKey` carries `isActive` and `dsn.public`, confirmed at
+`src/lib/api/projects.ts:632`. So a bare `sentry doctor` can say "this DSN's key
+was deactivated" or "key active, last event 4 minutes ago" without touching the
+project.
+
+**`--send-test-event` is the escalation for the last row only.** It POSTs a
+synthetic envelope to the real DSN and polls `src/lib/api/events.ts` to confirm
+ingestion. It stays opt-in because it is a write: it consumes quota and leaves a
+real issue in the user's stream, which on every CI build would break §1's
+read-only, repeatable promise. The name says so — `--live` read as a liveness
+*read*, which is exactly what it is not.
+
+This whole section replaces the proposal's spawn-the-dev-server approach, which
+cannot work for Android, iOS, or Go (it depends on `detectDevCommand`), costs a
+15-second timeout, and proves only local SDK emission. API reads are
 platform-agnostic and CI-safe.
 
 ## 10. Report and export
 
-**The report is always available; it is never written unasked.** A bare
-`sentry doctor` prints to the terminal and touches no files — dropping
-`sentry-doctor-report.json` into someone's repository as a side effect of a
-health check is an unrequested write, and health checks must be safe to run
-repeatedly.
+**Doctor writes no files, ever.** `--json` puts the contract on stdout;
+`sentry doctor --json > report.json` writes it. The shell already does
+file-writing, so a `--report` flag would buy only a default filename, and a
+health check that drops `sentry-doctor-report.json` into someone's repository as
+a side effect fails the safe-to-run-repeatedly test. Upload holds the contract in
+memory, so it needs no file either. Net result: no path-handling, no overwrite
+prompt, no cleanup.
 
-Three explicit ways to get the machine contract:
-
-| Invocation | Effect |
-|---|---|
-| `--json` | contract to stdout; nothing written |
-| `--report [path]` | writes `sentry-doctor-report.json` (or `path`) |
-| upload (below) | implies a report, since that is the payload |
-
-Contents either way: `schema_version`, `cli_version`, `timestamp`, the redacted
-capture, server facts, and results. Snake_case machine contract, following the
-`info.ts` precedent. Works offline, with telemetry disabled, and in CI.
+Contents: `schema_version`, `cli_version`, `timestamp`, the redacted capture,
+server facts, and results — **every** result, including passes, since a display
+decision must not change what a machine consumer receives. Snake_case, following
+the `info.ts` precedent. Works offline, with telemetry disabled, and in CI.
 
 **Upload is consent-gated and opt-in.** `Sentry.captureFeedback()` tagged with
 failing check ids, following `src/commands/cli/feedback.ts`. Note that path
 hard-gates on `Sentry.isEnabled()` and throws a `ConfigError` when telemetry is
-off — which is precisely why the *local* paths above are the primary ones and
-upload is the extra, not the reverse.
+off — which is precisely why stdout is the primary path and upload is the extra,
+not the reverse.
 
 No support-ticket or Zendesk destination exists in this repository.
 `src/commands/feedback/index.ts` and `src/lib/api/feedback.ts` are read-only
@@ -455,19 +471,30 @@ finding rather than crashing — the `info.ts` pattern.
 
 | Flag | Effect |
 |---|---|
-| *(none)* | human render, grouped by status, failures first |
-| `--verbose` | list every check, including passes |
-| `--json` | machine contract to stdout |
-| `--report [path]` | write the contract to a file (§10) |
-| `--prompt` | agent-ready fix text |
-| `--offline` | skip `resolve()`; tier-1 checks `skip` |
-| `--live` | synthetic envelope round-trip (§9) |
+| *(none)* | findings, failures first, with a `Fix` block when anything failed |
+| `--json` | machine contract to stdout (§10) |
+| `--send-test-event` | synthetic envelope round-trip — a write (§9) |
 | `--fix` | escalate to the workflow (§12) |
 
-**Three renderers, one source — and the fix prompt is the third.** Proposal §5
-wants a printed fix prompt; §8 forbids auto-invoking an agent. Making
-`--prompt` a renderer over `CheckResult[]` plus `Capture` honors both: nothing
-is invoked, and there is no duplicated diagnosis logic to drift.
+**Three flags, because four flags were three too many.** The earlier draft had
+seven. `--offline` went because §14 already degrades tier 1 to `skip` on any
+`resolve()` failure, so the flag only ever saved a timeout. `--report` went to
+shell redirection (§10). `--verbose` went because the reasons to see all sixteen
+passes are debugging doctor and scripting, and `--json` serves both. `--prompt`
+went because the fix text is now simply printed — see below.
+
+**Two renderers, one source.** Human text and the `--json` contract are both
+functions of `CheckResult[]` plus `Capture`; there is no third mode and so no
+duplicated diagnosis logic to drift. Proposal §5 wants a printed fix prompt and
+§8 forbids auto-invoking an agent: printing the `Fix` block unconditionally
+honors both, and removes the need to know in advance whether a human or an agent
+will read it.
+
+**Inside an agent** (`detectAgent()` — the same call tier 3 makes in §8), the
+render drops color, glyphs, and the trailing `Next:` hints, keeping the findings
+and the `Fix` block. This is not a mode switch; it is the existing decision at
+`src/lib/init/wizard-runner.ts:608`, which suppresses the init banner because it
+"wastes tokens and adds noise to structured output without value to the agent."
 
 **Exit codes:** `0` when everything passes or skips, `1` when anything fails.
 Warnings do not fail the build. No `--strict` — add it when someone wants
@@ -501,13 +528,18 @@ Sentry Doctor
 
 ### Skipped
 
-  - live.roundtrip        Not requested. Run with --live.
+  - live.roundtrip        Not requested. Run with --send-test-event.
   - release.attribution   Requires an authenticated session.
 
-12 passed · 2 failed · 2 warnings · 2 skipped   (1.4s)
+### Fix
 
-Next: sentry doctor --prompt   hand the fixes to a coding agent
-      sentry doctor --verbose  see every check
+  1. In app/build.gradle.kts, inside the sentry { } block at line 52, set
+     autoUploadProguardMapping = true. Re-run ./gradlew assembleRelease and
+     confirm a mapping file appears under Settings → Debug Files.
+  2. Upgrade io.sentry:sentry-android to 8.2.0 in app/build.gradle.kts:14.
+  3. Gate debug behind a build type rather than enabling it unconditionally.
+
+12 passed · 2 failed · 2 warnings · 2 skipped   (1.4s)
 ```
 
 A healthy install:
@@ -515,24 +547,26 @@ A healthy install:
 ```
 Sentry Doctor
 
-✓ Sentry looks healthy — last event 4 minutes ago.
+✓ Sentry looks healthy — key active, last event 4 minutes ago.
 
 16 passed · 3 skipped   (1.2s)
-
-Run with --verbose to see every check.
 ```
 
-Four decisions those renders encode:
+Five decisions those renders encode:
 
 - **The verdict line states a conclusion, not a count.** "2 failed" does not
   tell you whether Sentry works; "configured but has never received an event"
   does. The counts stay, in the footer, where they answer a different question.
 - **Passing checks collapse to a number.** Sixteen green lines are noise on
-  every healthy run, and the healthy run is the common one. `--verbose` exists
-  for when the number is not enough.
+  every healthy run, and the healthy run is the common one. `--json` carries all
+  of them for anyone who needs more than the number.
 - **Skips are shown with reasons, sorted last.** §14 forbids conflating `skip`
   with `pass`, and a silent skip is exactly that conflation. Showing them last
   keeps them visible without competing with failures.
+- **The `Fix` block prints unconditionally when something failed,** rather than
+  hiding behind a flag. It is the whole deliverable of a diagnostic, it costs
+  nothing on a healthy run because there is nothing to print, and it is equally
+  usable by a human reading the terminal and an agent reading stdout.
 - **Evidence renders as `file:line`,** which most terminals make clickable — the
   shortest path from a finding to the code that caused it.
 
@@ -616,10 +650,10 @@ colocated).
 
 | Day | Work |
 |---|---|
-| 1 | Command skeleton, `Check`/`CheckResult`, registry, tier 1, `--json`/`--report`, human render |
+| 1 | Command skeleton, `Check`/`CheckResult`, registry, tier 1 incl. key status, `--json`, human render |
 | 2 | `captureBlock` engine, discovery preset, structured class, Gradle + manifest + `sentry.properties` |
 | 3 | JS bundler markers, Fastfile, init markers, config-shaped redaction |
-| 4 | Tier 3 judgement (both paths), `--prompt` renderer, consent-gated upload |
+| 4 | Tier 3 judgement (both paths), `Fix` block render, consent-gated upload |
 | 5 | `verifySetup` guard PR, `--fix`, demo |
 
 Day 1 is the demo on its own. Day 5 is cuttable.
@@ -654,12 +688,15 @@ The architecture is close enough to ours to be worth comparing: a local
 detection pass over project files, plus API-side queries against recent events,
 producing a list of typed "health issues." Three things came out of the review.
 
-**Adopted — the split remediation.** PostHog's health issues carry separate
-human-facing and machine-facing remediation text rather than one string. Our §5
-`CheckResult.remediation: {human, agent}` is that idea directly: the terminal
-render wants prose, the `--prompt` render wants the file, the edit, and the
-verification step, and collapsing them makes the first verbose and the second
-useless.
+**Considered and rejected — the split remediation.** PostHog's health issues
+carry separate human-facing and machine-facing remediation text rather than one
+string. That is right for them: they render into a web UI *and* serve a machine
+API, two consumers with genuinely different appetites. An earlier draft of this
+design copied it, then lost the justification when the output collapsed to one
+render (§11). With a single `Fix` block read by both humans and agents, a second
+terser variant would be the same instruction written twice, and `detail` plus
+`evidence` already carry the diagnosis and the location. §5 keeps one
+`remediation` string, written to be executable.
 
 **Adopted — the untrusted-input boundary.** PostHog's serializer states outright
 that captured project content is data rather than instructions, and its
