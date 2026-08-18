@@ -1285,12 +1285,14 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     ui.setStep?.(activeStepId, "completed");
   }
 
+  // A dry run promised no side effects; verification spawns the user's dev
+  // server, which is the largest side effect the wizard has.
   await handleFinalResult(
     result,
     spin,
     spinState,
     ui,
-    directory,
+    dryRun ? undefined : directory,
     sentryProjectRef.current
   );
   setTag("wizard.outcome", "completed");
