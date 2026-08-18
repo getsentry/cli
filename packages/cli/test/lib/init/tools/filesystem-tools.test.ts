@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as dsnIndex from "../../../../src/lib/dsn/index.js";
 import { executeTool } from "../../../../src/lib/init/tools/registry.js";
 import type {
-  ReadFilesV2Data,
   ResolvedInitContext,
   ToolPayload,
 } from "../../../../src/lib/init/types.js";
@@ -104,266 +103,11 @@ describe("filesystem tools", () => {
     expect((existsResult.data as any).exists["missing.txt"]).toBe(false);
   });
 
-  test("returns explicit V2 completion and file errors", async () => {
-    fs.writeFileSync(path.join(testDir, "exists.txt"), "hello");
-
-    const result = await executeTool(
-      {
-        type: "tool",
-        operation: "read-files",
-        cwd: testDir,
-        params: {
-          paths: ["exists.txt", "missing.txt"],
-          resultVersion: 2,
-        },
-      },
-      makeContext(testDir)
-    );
-    const data = result.data as ReadFilesV2Data;
-
-    expect(data).toEqual({
-      files: {
-        "exists.txt": {
-          content: "hello",
-          fileVersion: expect.any(String),
-          offsetBytes: 0,
-          returnedBytes: 5,
-          status: "ok",
-          totalBytes: 5,
-          truncated: false,
-        },
-        "missing.txt": { error: "not-found", status: "error" },
-      },
-      version: 2,
-    });
-  });
-
-  test("does not replace a successful V2 read when closing fails", async () => {
-    fs.writeFileSync(path.join(testDir, "close-error.txt"), "hello");
-    const originalOpen = fs.promises.open.bind(fs.promises);
-    const openSpy = vi
-      .spyOn(fs.promises, "open")
-      .mockImplementation(
-        async (...args: Parameters<typeof fs.promises.open>) => {
-          const handle = await originalOpen(...args);
-          const originalClose = handle.close.bind(handle);
-          handle.close = async () => {
-            await originalClose();
-            throw new Error("simulated close failure");
-          };
-          return handle;
-        }
-      );
-
-    try {
-      const result = await executeTool(
-        {
-          type: "tool",
-          operation: "read-files",
-          cwd: testDir,
-          params: { paths: ["close-error.txt"], resultVersion: 2 },
-        },
-        makeContext(testDir)
-      );
-
-      expect(
-        (result.data as ReadFilesV2Data).files["close-error.txt"]
-      ).toMatchObject({ content: "hello", status: "ok" });
-    } finally {
-      openSpy.mockRestore();
-    }
-  });
-
-  test("reports invalid UTF-8 at the start of a V2 file as not-text", async () => {
+  test("returns independent bounded V2 line ranges", async () => {
     fs.writeFileSync(
-      path.join(testDir, "invalid-utf8.txt"),
-      Buffer.from([0x80, 0x41])
+      path.join(testDir, "large.txt"),
+      Array.from({ length: 8 }, (_, index) => `line-${index + 1}`).join("\n")
     );
-
-    const result = await executeTool(
-      {
-        type: "tool",
-        operation: "read-files",
-        cwd: testDir,
-        params: { paths: ["invalid-utf8.txt"], resultVersion: 2 },
-      },
-      makeContext(testDir)
-    );
-
-    expect((result.data as ReadFilesV2Data).files["invalid-utf8.txt"]).toEqual({
-      error: "not-text",
-      status: "error",
-    });
-  });
-
-  test.each([
-    { bytes: Buffer.from([0x80, 0x41]), title: "continuation byte" },
-    { bytes: Buffer.from([0xc0, 0x41]), title: "invalid sequence" },
-  ])("reports a torn V2 read as unreadable before classifying its $title", async ({
-    bytes,
-    title,
-  }) => {
-    const fileName = `${title.replaceAll(" ", "-")}.txt`;
-    const filePath = path.join(testDir, fileName);
-    fs.writeFileSync(filePath, bytes);
-    const originalOpen = fs.promises.open.bind(fs.promises);
-    const openSpy = vi
-      .spyOn(fs.promises, "open")
-      .mockImplementation(
-        async (...args: Parameters<typeof fs.promises.open>) => {
-          const handle = await originalOpen(...args);
-          const originalRead = handle.read.bind(handle);
-          handle.read = (async (
-            ...readArgs: Parameters<typeof handle.read>
-          ) => {
-            const result = await originalRead(...readArgs);
-            fs.appendFileSync(filePath, "changed");
-            return result;
-          }) as typeof handle.read;
-          return handle;
-        }
-      );
-
-    try {
-      const result = await executeTool(
-        {
-          type: "tool",
-          operation: "read-files",
-          cwd: testDir,
-          params: { paths: [fileName], resultVersion: 2 },
-        },
-        makeContext(testDir)
-      );
-
-      expect((result.data as ReadFilesV2Data).files[fileName]).toEqual({
-        error: "unreadable",
-        status: "error",
-      });
-    } finally {
-      openSpy.mockRestore();
-    }
-  });
-
-  test("rejects a V2 retry read that makes no byte progress", async () => {
-    fs.writeFileSync(path.join(testDir, "retry-zero.txt"), "😀");
-    const originalOpen = fs.promises.open.bind(fs.promises);
-    const openSpy = vi
-      .spyOn(fs.promises, "open")
-      .mockImplementation(
-        async (...args: Parameters<typeof fs.promises.open>) => {
-          const handle = await originalOpen(...args);
-          const originalRead = handle.read.bind(handle);
-          let readCount = 0;
-          handle.read = (async (
-            ...readArgs: Parameters<typeof handle.read>
-          ) => {
-            readCount += 1;
-            if (readCount === 2) {
-              return { buffer: readArgs[0], bytesRead: 0 };
-            }
-            return originalRead(...readArgs);
-          }) as typeof handle.read;
-          return handle;
-        }
-      );
-
-    try {
-      const result = await executeTool(
-        {
-          type: "tool",
-          operation: "read-files",
-          cwd: testDir,
-          params: {
-            maxBytes: 1,
-            paths: ["retry-zero.txt"],
-            resultVersion: 2,
-          },
-        },
-        makeContext(testDir)
-      );
-
-      expect((result.data as ReadFilesV2Data).files["retry-zero.txt"]).toEqual({
-        error: "unreadable",
-        status: "error",
-      });
-    } finally {
-      openSpy.mockRestore();
-    }
-  });
-
-  test("preserves a UTF-8 BOM in both wire versions", async () => {
-    const content = "\uFEFFexport {};\r\n";
-    fs.writeFileSync(path.join(testDir, "bom.ts"), content);
-
-    const legacy = await executeTool(
-      {
-        type: "tool",
-        operation: "read-files",
-        cwd: testDir,
-        params: { paths: ["bom.ts"] },
-      },
-      makeContext(testDir)
-    );
-    const v2 = await executeTool(
-      {
-        type: "tool",
-        operation: "read-files",
-        cwd: testDir,
-        params: { paths: ["bom.ts"], resultVersion: 2 },
-      },
-      makeContext(testDir)
-    );
-
-    expect(
-      (legacy.data as { files: Record<string, string> }).files["bom.ts"]
-    ).toBe(content);
-    expect((v2.data as ReadFilesV2Data).files["bom.ts"]).toMatchObject({
-      content,
-      returnedBytes: Buffer.byteLength(content),
-    });
-  });
-
-  test("preserves legacy replacement decoding at a byte-truncation boundary", async () => {
-    fs.writeFileSync(path.join(testDir, "legacy-invalid.txt"), "A😀");
-
-    const legacy = await executeTool(
-      {
-        type: "tool",
-        operation: "read-files",
-        cwd: testDir,
-        params: { maxBytes: 2, paths: ["legacy-invalid.txt"] },
-      },
-      makeContext(testDir)
-    );
-    const v2 = await executeTool(
-      {
-        type: "tool",
-        operation: "read-files",
-        cwd: testDir,
-        params: {
-          maxBytes: 2,
-          paths: ["legacy-invalid.txt"],
-          resultVersion: 2,
-        },
-      },
-      makeContext(testDir)
-    );
-
-    expect(
-      (legacy.data as { files: Record<string, string> }).files[
-        "legacy-invalid.txt"
-      ]
-    ).toBe("A�");
-    expect(
-      (v2.data as ReadFilesV2Data).files["legacy-invalid.txt"]
-    ).toMatchObject({
-      content: "A",
-      nextOffsetBytes: 1,
-    });
-  });
-
-  test("continues a V2 read with an exact UTF-8 byte cursor", async () => {
-    fs.writeFileSync(path.join(testDir, "unicode.txt"), "A😀BC");
 
     const first = await executeTool(
       {
@@ -371,72 +115,321 @@ describe("filesystem tools", () => {
         operation: "read-files",
         cwd: testDir,
         params: {
-          maxBytes: 3,
-          paths: ["unicode.txt"],
+          maxLines: 3,
+          paths: ["large.txt"],
           resultVersion: 2,
         },
       },
       makeContext(testDir)
     );
-    const firstFile = (first.data as ReadFilesV2Data).files["unicode.txt"];
-    expect(firstFile).toEqual({
-      content: "A",
-      fileVersion: expect.any(String),
-      nextOffsetBytes: 1,
-      offsetBytes: 0,
-      returnedBytes: 1,
-      status: "ok",
-      totalBytes: 7,
-      truncated: true,
-    });
-
-    const second = await executeTool(
+    const later = await executeTool(
       {
         type: "tool",
         operation: "read-files",
         cwd: testDir,
         params: {
-          maxBytes: 3,
-          offsetBytes: 1,
-          paths: ["unicode.txt"],
+          maxLines: 2,
+          paths: ["large.txt"],
+          resultVersion: 2,
+          startLine: 5,
+        },
+      },
+      makeContext(testDir)
+    );
+
+    expect(first.data).toEqual({
+      files: {
+        "large.txt": {
+          content: "line-1\nline-2\nline-3\n",
+          status: "ok",
+          truncated: true,
+        },
+      },
+      version: 2,
+    });
+    expect(later.data).toEqual({
+      files: {
+        "large.txt": {
+          content: "line-5\nline-6\n",
+          status: "ok",
+          truncated: true,
+        },
+      },
+      version: 2,
+    });
+  });
+
+  test("preserves exact line endings in V2 snapshots", async () => {
+    fs.writeFileSync(path.join(testDir, "windows.txt"), "first\r\nsecond\r\n");
+
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          maxLines: 1,
+          paths: ["windows.txt"],
           resultVersion: 2,
         },
       },
       makeContext(testDir)
     );
-    const secondFile = (second.data as ReadFilesV2Data).files["unicode.txt"];
-    expect(secondFile).toEqual({
-      content: "😀",
-      fileVersion: expect.any(String),
-      nextOffsetBytes: 5,
-      offsetBytes: 1,
-      returnedBytes: 4,
-      status: "ok",
-      totalBytes: 7,
-      truncated: true,
+
+    expect(result.data).toEqual({
+      files: {
+        "windows.txt": {
+          content: "first\r\n",
+          status: "ok",
+          truncated: true,
+        },
+      },
+      version: 2,
     });
-    expect(firstFile.status).toBe("ok");
-    expect(secondFile.status).toBe("ok");
-    if (firstFile.status === "ok" && secondFile.status === "ok") {
-      expect(secondFile.fileVersion).toBe(firstFile.fileVersion);
+  });
+
+  test("rejects malformed V2 read requests before local I/O", async () => {
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: undefined,
+      } as unknown as ToolPayload,
+      makeContext(testDir)
+    );
+
+    expect(result).toEqual({
+      error: "read-files params must be an object",
+      ok: false,
+    });
+  });
+
+  test("keeps read-files bounds and sensitive-path policy local", async () => {
+    fs.writeFileSync(path.join(testDir, ".env.local"), "SECRET=value\n");
+    fs.writeFileSync(path.join(testDir, ".pypirc"), "token=secret\n");
+    fs.writeFileSync(path.join(testDir, "binary.txt"), Buffer.from([0, 1, 2]));
+    fs.symlinkSync(".env.local", path.join(testDir, "config.txt"));
+
+    const sensitive = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: { paths: [".env.local"], resultVersion: 2 },
+      },
+      makeContext(testDir)
+    );
+    const binary = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: { paths: ["binary.txt"], resultVersion: 2 },
+      },
+      makeContext(testDir)
+    );
+    const omittedSensitive = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: { paths: [".pypirc"], resultVersion: 2 },
+      },
+      makeContext(testDir)
+    );
+    const sensitiveAlias = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: { paths: ["config.txt"], resultVersion: 2 },
+      },
+      makeContext(testDir)
+    );
+
+    expect(sensitive.data).toEqual({
+      files: { ".env.local": { error: "unreadable", status: "error" } },
+      version: 2,
+    });
+    expect(omittedSensitive.data).toEqual({
+      files: { ".pypirc": { error: "unreadable", status: "error" } },
+      version: 2,
+    });
+    expect(binary.data).toEqual({
+      files: { "binary.txt": { error: "not-text", status: "error" } },
+      version: 2,
+    });
+    expect(sensitiveAlias.data).toEqual({
+      files: { "config.txt": { error: "unreadable", status: "error" } },
+      version: 2,
+    });
+  });
+
+  test("finds later lines without exposing a cursor protocol", async () => {
+    fs.writeFileSync(
+      path.join(testDir, "deep.txt"),
+      `${"x".repeat(270_000)}\ntarget\n`
+    );
+
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          maxLines: 1,
+          paths: ["deep.txt"],
+          resultVersion: 2,
+          startLine: 2,
+        },
+      },
+      makeContext(testDir)
+    );
+
+    expect(result.data).toEqual({
+      files: {
+        "deep.txt": {
+          content: "target\n",
+          status: "ok",
+          truncated: false,
+        },
+      },
+      version: 2,
+    });
+  });
+
+  test("bounds V2 content across a multi-file request", async () => {
+    const paths = Array.from({ length: 20 }, (_, index) => `file-${index}.txt`);
+    for (const filePath of paths) {
+      fs.writeFileSync(path.join(testDir, filePath), "x\n".repeat(5000));
     }
 
-    const invalid = await executeTool(
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: { maxBytes: 40_000, paths, resultVersion: 2 },
+      },
+      makeContext(testDir)
+    );
+    const files = (
+      result.data as { files: Record<string, { content: string }> }
+    ).files;
+
+    expect(result.ok).toBe(true);
+    expect(
+      Object.values(files).reduce(
+        (total, file) => total + Buffer.byteLength(file.content),
+        0
+      )
+    ).toBeLessThanOrEqual(40_000);
+  });
+
+  test("reads a short line that starts at the deep-scan boundary", async () => {
+    const scanBytes = 4 * 1024 * 1024;
+    const prefix = "x\n".repeat(scanBytes / 2);
+    fs.writeFileSync(path.join(testDir, "boundary.txt"), `${prefix}target\n`);
+
+    const result = await executeTool(
       {
         type: "tool",
         operation: "read-files",
         cwd: testDir,
         params: {
-          offsetBytes: 2,
-          paths: ["unicode.txt"],
+          maxLines: 1,
+          paths: ["boundary.txt"],
           resultVersion: 2,
+          startLine: scanBytes / 2 + 1,
         },
       },
       makeContext(testDir)
     );
-    expect((invalid.data as ReadFilesV2Data).files["unicode.txt"]).toEqual({
-      error: "invalid-offset",
-      status: "error",
+
+    expect(result.data).toEqual({
+      files: {
+        "boundary.txt": {
+          content: "target\n",
+          status: "ok",
+          truncated: false,
+        },
+      },
+      version: 2,
+    });
+  });
+
+  test("reports an existing line beyond the deep-scan boundary", async () => {
+    const scanBytes = 4 * 1024 * 1024;
+    const prefix = `${"x".repeat(scanBytes)}\n`;
+    fs.writeFileSync(path.join(testDir, "too-deep.txt"), `${prefix}target\n`);
+
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          maxLines: 1,
+          paths: ["too-deep.txt"],
+          resultVersion: 2,
+          startLine: 2,
+        },
+      },
+      makeContext(testDir)
+    );
+
+    expect(result.data).toEqual({
+      files: {
+        "too-deep.txt": { error: "range-too-deep", status: "error" },
+      },
+      version: 2,
+    });
+  });
+
+  test("rejects incomplete lines and invalid UTF-8 instead of clipping", async () => {
+    fs.writeFileSync(
+      path.join(testDir, "long-line.txt"),
+      `${"x".repeat(50_000)}\n`
+    );
+    fs.writeFileSync(
+      path.join(testDir, "invalid-utf8.txt"),
+      Buffer.from([0x61, 0x62, 0x63, 0xff])
+    );
+    fs.writeFileSync(path.join(testDir, "multibyte.txt"), "é\n");
+
+    const read = (filePath: string, maxBytes?: number) =>
+      executeTool(
+        {
+          type: "tool",
+          operation: "read-files",
+          cwd: testDir,
+          params: {
+            maxBytes,
+            paths: [filePath],
+            resultVersion: 2,
+          },
+        },
+        makeContext(testDir)
+      );
+
+    expect((await read("long-line.txt")).data).toEqual({
+      files: {
+        "long-line.txt": { error: "line-too-long", status: "error" },
+      },
+      version: 2,
+    });
+    expect((await read("invalid-utf8.txt")).data).toEqual({
+      files: {
+        "invalid-utf8.txt": { error: "not-text", status: "error" },
+      },
+      version: 2,
+    });
+    expect((await read("multibyte.txt", 1)).data).toEqual({
+      files: {
+        "multibyte.txt": { error: "line-too-long", status: "error" },
+      },
+      version: 2,
     });
   });
 
