@@ -70,7 +70,10 @@ Spec §13. `runWizard` passes `directory` unconditionally into `handleFinalResul
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `runWizard({ dryRun: true, ... })` is guaranteed not to spawn a child process.
+- Produces: `runWizard({ dryRun: true, ... })` is guaranteed not to spawn the user's dev
+  server and not to mutate state. (It is NOT guaranteed to spawn no child process at all:
+  `checkGitStatus` runs unconditionally and reaches `execFileSync("git", …)` in
+  `src/lib/git.ts`. Read-only and harmless — Task 15 must rely on the narrower guarantee.)
 
 - [ ] **Step 1: Read the call site and confirm the shape**
 
