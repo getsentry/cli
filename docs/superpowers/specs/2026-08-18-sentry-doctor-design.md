@@ -144,8 +144,18 @@ type CheckResult = {
   status: "pass" | "fail" | "warn" | "skip";
   detail: string;
   evidence?: { file: string; line?: number }[];
-  fixHint?: string;
+  remediation?: {
+    human: string;   // prose for the terminal render
+    agent: string;   // executable instructions for the --prompt render
+  };
 };
+```
+
+`remediation` is split because the two renderers want different things: a human
+wants "stack traces stay obfuscated, set `autoUploadProguardMapping = true`,"
+while an agent wants the file, the exact edit, and the verification step.
+Collapsing both into one string makes the human render terse and the prompt
+vague. Adopted from PostHog's health-issue API (§18).
 ```
 
 **Checks are pure over `(Capture, ServerFacts)`.** This is the load-bearing
@@ -345,6 +355,31 @@ Redact by default. **No `--no-redact` flag.** One deliberate exception: the DSN
 public key is preserved — `findProjectByDsnKey()` needs it and it is not
 secret.
 
+### 7.8 Captured content is untrusted
+
+Everything in `Capture` is attacker-influenceable. Config files come from the
+project under inspection, which may include vendored or dependency-supplied
+config; server facts include values like SDK name and version that originate
+from event payloads and are therefore writable by anyone holding the public
+DSN key.
+
+Two boundaries follow, and both are load-bearing because tier 3 pipes captured
+text into an LLM prompt:
+
+- **Captured text is data, never instructions.** Tier 3's prompt must frame the
+  capture as untrusted content to report on, not as directions to follow — even
+  when a captured comment or string looks like a command. Only our own check
+  definitions and `remediation` fields are trusted guidance.
+- **Validate before interpolating.** Any captured value spliced into a prompt,
+  a rendered line, or a report field is allowlisted first. Version-like values
+  match `^[A-Za-z0-9._+\-]+$`; identifiers and file paths are length-capped and
+  control-character-stripped. A value that fails validation is reported as
+  malformed rather than passed through.
+
+Prior art: PostHog's health-issue serializer states the same rule outright, and
+its `sdk_outdated` check allowlists `$lib_version` before interpolation for
+exactly this reason (§18).
+
 ## 8. Tier 3 — judgement
 
 Three paths, in order:
@@ -383,16 +418,29 @@ platform-agnostic and CI-safe.
 
 ## 10. Report and export
 
-**Always write a local file.** `sentry-doctor-report.json`, containing
-`schema_version`, `cli_version`, `timestamp`, the redacted capture, server
-facts, and results. Snake_case machine contract, following the `info.ts`
-precedent. Works offline, with telemetry disabled, and in CI.
+**The report is always available; it is never written unasked.** A bare
+`sentry doctor` prints to the terminal and touches no files — dropping
+`sentry-doctor-report.json` into someone's repository as a side effect of a
+health check is an unrequested write, and health checks must be safe to run
+repeatedly.
+
+Three explicit ways to get the machine contract:
+
+| Invocation | Effect |
+|---|---|
+| `--json` | contract to stdout; nothing written |
+| `--report [path]` | writes `sentry-doctor-report.json` (or `path`) |
+| upload (below) | implies a report, since that is the payload |
+
+Contents either way: `schema_version`, `cli_version`, `timestamp`, the redacted
+capture, server facts, and results. Snake_case machine contract, following the
+`info.ts` precedent. Works offline, with telemetry disabled, and in CI.
 
 **Upload is consent-gated and opt-in.** `Sentry.captureFeedback()` tagged with
 failing check ids, following `src/commands/cli/feedback.ts`. Note that path
 hard-gates on `Sentry.isEnabled()` and throws a `ConfigError` when telemetry is
-off — which is precisely why the local file is unconditional rather than a
-fallback.
+off — which is precisely why the *local* paths above are the primary ones and
+upload is the extra, not the reverse.
 
 No support-ticket or Zendesk destination exists in this repository.
 `src/commands/feedback/index.ts` and `src/lib/api/feedback.ts` are read-only
@@ -408,7 +456,9 @@ finding rather than crashing — the `info.ts` pattern.
 | Flag | Effect |
 |---|---|
 | *(none)* | human render, grouped by status, failures first |
+| `--verbose` | list every check, including passes |
 | `--json` | machine contract to stdout |
+| `--report [path]` | write the contract to a file (§10) |
 | `--prompt` | agent-ready fix text |
 | `--offline` | skip `resolve()`; tier-1 checks `skip` |
 | `--live` | synthetic envelope round-trip (§9) |
@@ -422,6 +472,69 @@ is invoked, and there is no duplicated diagnosis logic to drift.
 **Exit codes:** `0` when everything passes or skips, `1` when anything fails.
 Warnings do not fail the build. No `--strict` — add it when someone wants
 warnings to break CI.
+
+### 11.1 Default output
+
+Glyphs follow `src/lib/formatters/human.ts` — `✓` green, `✗` red, `⚠` yellow —
+with `-` for skips, which has no existing precedent in the repo.
+
+A broken Android install:
+
+```
+Sentry Doctor
+
+✗ Sentry is configured but has never received an event.
+
+### Failures
+
+  ✗ project.first_event   No event has ever reached javascript-android/my-app.
+                          app/build.gradle.kts:14
+  ✗ artifacts.uploaded    No ProGuard mappings for this project. Stack traces
+                          will stay obfuscated.
+                          app/build.gradle.kts:52
+
+### Warnings
+
+  ⚠ sdk.version           sentry-android 7.14.0 is 4 minor versions behind
+                          (latest 8.2.0).
+  ⚠ config.debug          debug = true is enabled unconditionally.
+
+### Skipped
+
+  - live.roundtrip        Not requested. Run with --live.
+  - release.attribution   Requires an authenticated session.
+
+12 passed · 2 failed · 2 warnings · 2 skipped   (1.4s)
+
+Next: sentry doctor --prompt   hand the fixes to a coding agent
+      sentry doctor --verbose  see every check
+```
+
+A healthy install:
+
+```
+Sentry Doctor
+
+✓ Sentry looks healthy — last event 4 minutes ago.
+
+16 passed · 3 skipped   (1.2s)
+
+Run with --verbose to see every check.
+```
+
+Four decisions those renders encode:
+
+- **The verdict line states a conclusion, not a count.** "2 failed" does not
+  tell you whether Sentry works; "configured but has never received an event"
+  does. The counts stay, in the footer, where they answer a different question.
+- **Passing checks collapse to a number.** Sixteen green lines are noise on
+  every healthy run, and the healthy run is the common one. `--verbose` exists
+  for when the number is not enough.
+- **Skips are shown with reasons, sorted last.** §14 forbids conflating `skip`
+  with `pass`, and a silent skip is exactly that conflation. Showing them last
+  keeps them visible without competing with failures.
+- **Evidence renders as `file:line`,** which most terminals make clickable — the
+  shortest path from a finding to the code that caused it.
 
 ## 12. `--fix` (stretch)
 
@@ -491,6 +604,9 @@ colocated).
 - **Redaction tests** — the three assignment styles crossed with secret key
   names, asserting no secret survives into rendered JSON. This is a security
   boundary; it gets explicit coverage.
+- **Allowlist tests** (§7.8) — a captured version string containing shell
+  metacharacters, a control character, or prompt-shaped text is reported as
+  malformed rather than interpolated. Also a security boundary.
 - **One integration test** against a real template from
   `test/init-eval/templates/`.
 - **No network in tests.** `resolve()` is one function at one boundary, so
@@ -500,7 +616,7 @@ colocated).
 
 | Day | Work |
 |---|---|
-| 1 | Command skeleton, `Check`/`CheckResult`, registry, tier 1, report file, human render |
+| 1 | Command skeleton, `Check`/`CheckResult`, registry, tier 1, `--json`/`--report`, human render |
 | 2 | `captureBlock` engine, discovery preset, structured class, Gradle + manifest + `sentry.properties` |
 | 3 | JS bundler markers, Fastfile, init markers, config-shaped redaction |
 | 4 | Tier 3 judgement (both paths), `--prompt` renderer, consent-gated upload |
@@ -527,9 +643,33 @@ Added by this design:
   project.
 - **`doctor perf`** is out of scope. It plugs into the §5 seam later.
 
-## 18. Open item
+## 18. Prior art: PostHog
 
-A parallel review of PostHog's CLI `doctor` (`github.com/PostHog/posthog/tree/master/cli`)
-is in flight to check for ideas worth adopting or mistakes worth avoiding.
-Findings will be folded in as a revision to this document; nothing above
-depends on them.
+**First, a correction to the premise.** PostHog's Rust CLI at
+`PostHog/posthog/tree/master/cli` has no `doctor` command — `grep -ri doctor`
+across that directory returns nothing. `doctor` lives in a different repo,
+`PostHog/wizard` (TypeScript, invoked as `npx @posthog/wizard doctor`).
+
+The architecture is close enough to ours to be worth comparing: a local
+detection pass over project files, plus API-side queries against recent events,
+producing a list of typed "health issues." Three things came out of the review.
+
+**Adopted — the split remediation.** PostHog's health issues carry separate
+human-facing and machine-facing remediation text rather than one string. Our §5
+`CheckResult.remediation: {human, agent}` is that idea directly: the terminal
+render wants prose, the `--prompt` render wants the file, the edit, and the
+verification step, and collapsing them makes the first verbose and the second
+useless.
+
+**Adopted — the untrusted-input boundary.** PostHog's serializer states outright
+that captured project content is data rather than instructions, and its
+`sdk_outdated` check allowlists `$lib_version` against a character class before
+interpolating it. Since that value arrives from event payloads, anyone with the
+public key can write it. §7.8 generalizes both rules to our whole capture.
+
+**Rejected — absence implies healthy.** PostHog treats several checks as passing
+when it finds no evidence of a problem, which conflates "verified fine" with
+"could not tell." §14 forbids that: a check that cannot reach its evidence
+returns `skip` with a reason. The whole value of `sentry doctor` is telling
+someone their install is silently broken, and a check that reports green when it
+learned nothing is the exact failure mode we are building the command to catch.
