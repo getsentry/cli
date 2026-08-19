@@ -35,7 +35,6 @@ import {
   abortIfCancelled,
   PROGRESS_ROTATE_INTERVAL_MS,
   STEP_ACTIVE_LABELS,
-  STEP_LABELS,
   STEP_PROGRESS_MESSAGES,
   WizardCancelledError,
 } from "./clack-utils.js";
@@ -44,6 +43,8 @@ import {
   EXIT_DEPENDENCY_INSTALL_FAILED,
   EXIT_PLATFORM_NOT_DETECTED,
   EXIT_VERIFICATION_FAILED,
+  INIT_PROTOCOL_VERSION,
+  INIT_REQUEST_CONFLICT_CODE,
   MASTRA_API_URL,
   VERIFY_CHANGES_STEP,
   WORKFLOW_ID,
@@ -63,6 +64,7 @@ import { checkReadiness } from "./readiness.js";
 
 import { describeTool, executeTool } from "./tools/registry.js";
 import type {
+  InteractivePayload,
   ResolvedInitContext,
   SuspendPayload,
   ToolPayload,
@@ -95,7 +97,7 @@ type CompactPhaseHistoryEntry = {
 };
 
 type StepContext = {
-  payload: SuspendPayload;
+  payload: InteractivePayload | ToolPayload;
   stepId: string;
   spin: SpinnerHandle;
   spinState: SpinState;
@@ -135,6 +137,20 @@ function hasHttpStatus(value: unknown): value is { status: number } {
     "status" in value &&
     typeof value.status === "number"
   );
+}
+
+/** Read a complete v1 identity while keeping legacy server payloads valid. */
+function initProtocolEnvelope(
+  payload: SuspendPayload
+): { protocolVersion: 1; requestId: string } | undefined {
+  return payload.protocolVersion === INIT_PROTOCOL_VERSION &&
+    typeof payload.requestId === "string" &&
+    payload.requestId.length > 0
+    ? {
+        protocolVersion: INIT_PROTOCOL_VERSION,
+        requestId: payload.requestId,
+      }
+    : undefined;
 }
 
 function hasActiveStepsPath(value: Record<string, unknown>): value is Record<
@@ -231,11 +247,7 @@ function formatReadFilesSummary(progress: ReadFilesDisplay): string {
  * Build a follow-up spinner message after a tool succeeds and the CLI is
  * waiting for the server to continue processing the returned data.
  */
-function describePostTool(payload: SuspendPayload): string | undefined {
-  if (payload.type !== "tool") {
-    return;
-  }
-
+function describePostTool(payload: ToolPayload): string | undefined {
   switch (payload.operation) {
     case "read-files":
       return formatReadFilesSummary({
@@ -333,7 +345,6 @@ async function handleSuspendedStep(
   stepHistory: Map<string, CompactPhaseHistoryEntry[]>
 ): Promise<Record<string, unknown>> {
   const { payload, stepId, spin, spinState, context, ui } = ctx;
-  const label = STEP_LABELS[stepId] ?? stepId;
 
   if (payload.type === "tool") {
     const message =
@@ -361,8 +372,14 @@ async function handleSuspendedStep(
     const toolResult = await executeTool(payload, context);
 
     if (toolResult.message) {
-      spin.stop(renderInlineMarkdown(toolResult.message));
-      spin.start("Processing...");
+      // Tool messages (e.g. "Using existing project ...") describe a
+      // completed sub-action that the sidebar Tasks checklist already
+      // tracks. Surface it as a transient spinner update instead of
+      // stopping the spinner to persist a ✔ line that just duplicates the
+      // checklist.
+      spin.message(
+        renderInlineMarkdown(truncateForTerminal(toolResult.message))
+      );
     } else {
       const followUpMessage =
         toolResult.ok === false ? undefined : describePostTool(payload);
@@ -407,7 +424,11 @@ async function handleSuspendedStep(
       };
     }
 
-    spin.stop(label);
+    // Stop the spinner to hand its row over to the interactive prompt, but
+    // pass an empty message so no ✔ line is persisted for the step label
+    // (e.g. "Selecting features"). The sidebar Tasks checklist already
+    // tracks step progress, so a duplicate line in the activity log is noise.
+    spin.stop("");
     spinState.running = false;
 
     const interactiveResult = await handleInteractive(payload, context, ui);
@@ -479,6 +500,7 @@ function assertWorkflowResult(raw: unknown): WorkflowRunResult {
   return obj as WorkflowRunResult;
 }
 
+/** Parse legacy or complete v1 suspend payloads, rejecting partial envelopes. */
 function assertSuspendPayload(raw: unknown): SuspendPayload {
   if (!raw || typeof raw !== "object") {
     throw new Error("Invalid suspend payload: expected object");
@@ -490,7 +512,25 @@ function assertSuspendPayload(raw: unknown): SuspendPayload {
   ) {
     throw new Error(`Unknown suspend payload type: ${String(obj.type)}`);
   }
-  return obj as SuspendPayload;
+  const payload = obj as SuspendPayload;
+  const hasProtocolFields =
+    Object.hasOwn(obj, "protocolVersion") || Object.hasOwn(obj, "requestId");
+  if (hasProtocolFields && !initProtocolEnvelope(payload)) {
+    throw new Error("Invalid init protocol envelope");
+  }
+  return payload;
+}
+
+/** Keep transport identity at the wire boundary, outside local tool and UI contracts. */
+function localSuspendPayload(
+  payload: SuspendPayload
+): InteractivePayload | ToolPayload {
+  const {
+    protocolVersion: _protocolVersion,
+    requestId: _requestId,
+    ...localPayload
+  } = payload;
+  return localPayload;
 }
 
 function withTimeout<T>(
@@ -666,6 +706,19 @@ function isStepAlreadyAdvancedError(err: unknown): boolean {
   return err instanceof Error && err.message.includes("was not suspended");
 }
 
+/** Match the API's stable stale-request response, not mutable error prose. */
+function isInitProtocolConflictError(err: unknown): boolean {
+  if (httpStatus(err) !== 409 || typeof err !== "object" || err === null) {
+    return false;
+  }
+  const body = Reflect.get(err, "body") as unknown;
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    Reflect.get(body, "code") === INIT_REQUEST_CONFLICT_CODE
+  );
+}
+
 function httpStatus(err: unknown): number | undefined {
   return hasHttpStatus(err) ? err.status : undefined;
 }
@@ -684,6 +737,11 @@ function runStateRecoveryBackoffMs(): number[] {
   return delays;
 }
 
+/**
+ * A v1 request advances only when the active request ID changed. Legacy
+ * servers fall back to payload equality during the temporary compatibility
+ * window.
+ */
 function isRecoverableRunState(
   result: WorkflowRunResult,
   resumedStepId: string,
@@ -696,6 +754,12 @@ function isRecoverableRunState(
   const recovered = extractSuspendPayload(result, resumedStepId);
   if (!recovered) {
     return false;
+  }
+
+  const resumedEnvelope = initProtocolEnvelope(resumedPayload);
+  const recoveredEnvelope = initProtocolEnvelope(recovered.payload);
+  if (resumedEnvelope && recoveredEnvelope) {
+    return recoveredEnvelope.requestId !== resumedEnvelope.requestId;
   }
 
   return !(
@@ -762,6 +826,10 @@ async function tryRecoverCurrentRunState(
   return null;
 }
 
+/**
+ * Resume once, then recover by observing durable run state. This never
+ * re-executes the local tool when a response was lost or its request is stale.
+ */
 async function resumeWithRecovery(
   args: ResumeRetryArgs
 ): Promise<WorkflowRunResult> {
@@ -776,10 +844,17 @@ async function resumeWithRecovery(
     ui,
     progressRotation,
   } = args;
+  const envelope = initProtocolEnvelope(payload);
+  const wireResumeData = envelope ? { ...resumeData, ...envelope } : resumeData;
   try {
     const raw = await withTimeout(
       withInitServiceAuthClassification(
-        () => run.resumeAsync({ step: stepId, resumeData, tracingOptions }),
+        () =>
+          run.resumeAsync({
+            step: stepId,
+            resumeData: wireResumeData,
+            tracingOptions,
+          }),
         WORKFLOW_RESUME_ASYNC_ENDPOINT
       ),
       API_TIMEOUT_MS,
@@ -787,7 +862,7 @@ async function resumeWithRecovery(
     );
     return assertWorkflowResult(raw);
   } catch (err) {
-    if (isStepAlreadyAdvancedError(err)) {
+    if (isStepAlreadyAdvancedError(err) || isInitProtocolConflictError(err)) {
       progressRotation?.pause();
       spin.message("Reconnecting...");
       const recovered = await tryRecoverCurrentRunState(
@@ -847,6 +922,7 @@ async function resumeWithRecovery(
   }
 }
 
+/** Run the wizard while negotiating v1 and echoing each suspended request ID. */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
 export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   // Note: a previous `forwardFreshTtyToStdin()` call lived here as a
@@ -980,6 +1056,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           () =>
             run.startAsync({
               inputData: {
+                client: {
+                  cliVersion: CLI_VERSION,
+                  protocolVersion: INIT_PROTOCOL_VERSION,
+                },
                 directory,
                 yes,
                 dryRun,
@@ -1064,7 +1144,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
 
       const resumeData = await handleSuspendedStep(
         {
-          payload: extracted.payload,
+          payload: localSuspendPayload(extracted.payload),
           stepId: extracted.stepId,
           spin,
           spinState,
