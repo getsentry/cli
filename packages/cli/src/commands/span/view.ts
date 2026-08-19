@@ -119,7 +119,17 @@ function tryAutoSplitSpanArg(arg: string): SpanViewArgs | null {
     return null;
   }
 
-  const traceTarget = parseSlashSeparatedTraceTarget(tracePrefix, USAGE_HINT);
+  let traceTarget: ReturnType<typeof parseSlashSeparatedTraceTarget>;
+  try {
+    traceTarget = parseSlashSeparatedTraceTarget(tracePrefix, USAGE_HINT);
+  } catch (error) {
+    // The prefix failed trace-target validation (e.g. the user passed
+    // org/project/<span-id> without a trace ID, so the project name was
+    // mistakenly parsed as a trace ID). Fall back to null so the caller
+    // can surface a proper ContextError instead of a confusing ValidationError.
+    log.debug("tryAutoSplitSpanArg: trace prefix failed validation, falling through", error);
+    return null;
+  }
   log.warn(
     `Interpreting '${arg}' as <trace-target>/<span-id>. ` +
       `Use separate arguments: sentry span view ${tracePrefix} ${possibleSpanId}`
