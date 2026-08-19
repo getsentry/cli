@@ -1855,7 +1855,8 @@ export function formatDashboardWithData(data: DashboardViewData): string {
     : data.widgets;
 
   if (gridWidgets.length > 0) {
-    lines.push(...renderGrid(gridWidgets, termWidth));
+    const packed = packGridY(gridWidgets);
+    lines.push(...renderGrid(packed, termWidth));
   }
   for (const w of sixelWidgets) {
     lines.push(...renderSixelWidget(w, termWidth));
@@ -1863,6 +1864,40 @@ export function formatDashboardWithData(data: DashboardViewData): string {
 
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * Return a shallow copy of the widgets with their `layout.y` renumbered so
+ * the remaining widgets pack contiguously from y=0 without blank bands.
+ * Widgets without a layout are left untouched. Relative order within the
+ * same original y-band is preserved (important for left/right widgets on
+ * the same row).
+ */
+function packGridY(
+  widgets: DashboardViewWidget[]
+): DashboardViewWidget[] {
+  const ys = Array.from(
+    new Set(
+      widgets
+        .map((w) => w.layout?.y)
+        .filter((y): y is number => typeof y === "number")
+    )
+  ).sort((a, b) => a - b);
+  if (ys.length === 0) {
+    return widgets;
+  }
+  const rank = new Map<number, number>(ys.map((y, i) => [y, i]));
+
+  return widgets.map((w) => {
+    if (!w.layout) {
+      return w;
+    }
+    const r = rank.get(w.layout.y);
+    if (r === undefined) {
+      return w;
+    }
+    return { ...w, layout: { ...w.layout, y: r } };
+  });
 }
 
 /**

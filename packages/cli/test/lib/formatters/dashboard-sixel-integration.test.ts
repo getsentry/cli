@@ -180,13 +180,13 @@ describe("dashboard sixel integration", () => {
 
     const output = formatDashboardWithData(data);
     const lines = output.split("\n");
-    // The DCS image must not share a terminal row with the neighboring widget's
-    // borders — the sixel line carries no box-drawing characters.
+    // The DCS image must not share a terminal row with any bordered widget.
     const sixelLine = lines.find((l) => l.includes(`${ESC}P`));
     expect(sixelLine).toBeDefined();
     expect(sixelLine).not.toContain("│");
     expect(sixelLine).not.toContain("─");
-    // The character grid (big-number widget) still renders above the image.
+    // The character grid (big-number widget) still renders; the sixel image
+    // appears after the grid (full-width, no hole in the packed layout).
     expect(output).toContain("Big Number");
     expect(output).toContain("Sixel Chart");
   });
