@@ -53,7 +53,9 @@ function buildProbeEnvelope(
     }
     const envelope = createEventEnvelope(
       {
-        message,
+        exception: {
+          values: [{ type: "TestError", value: message }],
+        },
         level: "info",
         tags: { source: "sentry-cli-doctor" },
         platform: "other",
