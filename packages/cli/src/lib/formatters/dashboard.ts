@@ -1872,6 +1872,10 @@ export function formatDashboardWithData(data: DashboardViewData): string {
  * Widgets without a layout are left untouched. Relative order within the
  * same original y-band is preserved (important for left/right widgets on
  * the same row).
+ *
+ * Packing is skipped for staggered layouts (widgets whose start y lies
+ * inside another widget's span) because correctly re-computing y for
+ * overlapping columns is out of scope for this opt-in experimental path.
  */
 function packGridY(
   widgets: DashboardViewWidget[]
@@ -1880,6 +1884,30 @@ function packGridY(
   if (withLayout.length === 0) {
     return widgets;
   }
+
+  // Detect staggered starts: a widget whose y is not equal to any other
+  // widget's y + h (for the tallest h at that y).
+  const bands = new Map<number, number>(); // y -> max h at that y
+  for (const w of withLayout) {
+    const y = w.layout!.y;
+    const h = w.layout!.h ?? 1;
+    bands.set(y, Math.max(bands.get(y) ?? 0, h));
+  }
+  let maxEnd = 0;
+  let staggered = false;
+  for (const [y, h] of Array.from(bands.entries()).sort(
+    (a, b) => a[0] - b[0]
+  )) {
+    if (y < maxEnd) {
+      staggered = true;
+      break;
+    }
+    maxEnd = y + h;
+  }
+  if (staggered) {
+    return widgets; // leave original y untouched
+  }
+
   // Stable sort by original y so relative vertical order is preserved.
   const sorted = [...withLayout].sort(
     (a, b) => (a.layout?.y ?? 0) - (b.layout?.y ?? 0)
@@ -1891,14 +1919,11 @@ function packGridY(
     if (newY.has(w)) {
       continue;
     }
-    // All widgets that share the same original y-band get the same new y.
     const bandY = w.layout!.y;
     const band = sorted.filter((ww) => ww.layout!.y === bandY);
     for (const b of band) {
       newY.set(b, nextY);
     }
-    // Advance past the tallest widget in the band so the next band starts
-    // immediately below (respecting each widget's original h).
     const maxH = Math.max(...band.map((b) => b.layout!.h ?? 1));
     nextY += maxH;
   }
