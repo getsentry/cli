@@ -62,6 +62,22 @@ describe("fixBlock", () => {
   it("is empty when nothing failed", () => {
     expect(fixBlock([results[0] as CheckResult])).toEqual([]);
   });
+
+  it("replaces traversal paths with [invalid path]", () => {
+    const poisoned: CheckResult[] = [
+      {
+        id: "bad.path",
+        status: "fail",
+        detail: "Poisoned evidence.",
+        evidence: [{ file: "../../etc/passwd" }],
+        remediation: "Check the file.",
+      },
+    ];
+    const lines = fixBlock(poisoned);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("[invalid path]");
+    expect(lines[0]).not.toContain("../../etc/passwd");
+  });
 });
 
 describe("renderHuman", () => {

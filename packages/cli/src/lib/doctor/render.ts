@@ -8,6 +8,7 @@
 
 import { detectAgent } from "../detect-agent.js";
 import { colorTag } from "../formatters/markdown.js";
+import { safeFilePath } from "./redact.js";
 import type {
   Capture,
   CheckResult,
@@ -102,7 +103,10 @@ export function fixBlock(results: readonly CheckResult[]): string[] {
       return [];
     }
     const where = (r.evidence ?? [])
-      .map((e) => (e.line === undefined ? e.file : `${e.file}:${e.line}`))
+      .map((e) => {
+        const file = safeFilePath(e.file) ?? "[invalid path]";
+        return e.line === undefined ? file : `${file}:${e.line}`;
+      })
       .join(", ");
     return [where ? `${r.remediation} (${where})` : r.remediation];
   });
