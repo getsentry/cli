@@ -7,7 +7,7 @@
  */
 
 import { detectAgent } from "../detect-agent.js";
-import { colorTag } from "../formatters/markdown.js";
+import { colorTag, renderMarkdown } from "../formatters/markdown.js";
 import { safeFilePath } from "./redact.js";
 import type {
   Capture,
@@ -214,12 +214,11 @@ export function renderHuman(args: {
  * call it without knowing anything about how doctor ran.
  */
 export function formatDoctorReport(report: DoctorReport): string {
-  return renderHuman({
+  const plain = detectAgent() !== undefined;
+  const text = renderHuman({
     results: report.results,
     elapsedMs: report.elapsed_ms,
-    // Inside an agent, drop decoration — the existing decision at
-    // wizard-runner.ts:608, where it "wastes tokens and adds noise to
-    // structured output without value to the agent."
-    plain: detectAgent() !== undefined,
+    plain,
   });
+  return plain ? text : renderMarkdown(text);
 }
