@@ -464,8 +464,9 @@ type DatasetConfig = {
  *
  * For the `replays` dataset this validates fields, resolves replay-specific
  * sort, and returns a fetch function that calls `listReplays`. For all other
- * datasets it validates environment usage, resolves explore sort (spans-only),
- * prepends `project:<slug>` to the query, and returns a `queryEvents` fetch.
+ * datasets it translates `--environment` values into `environment:...` query
+ * filter terms, resolves explore sort (spans-only), prepends `project:<slug>`
+ * to the query, and returns a `queryEvents` fetch.
  */
 function resolveDatasetConfig(params: {
   dataset: string;
@@ -518,13 +519,11 @@ function resolveDatasetConfig(params: {
     };
   }
 
-  // Non-replay datasets
-  if (environment) {
-    throw new ValidationError(
-      "--environment is only supported with --dataset replays. Use environment:... inside --query for other datasets.",
-      "environment"
-    );
-  }
+  // Non-replay datasets: translate --environment into query filter terms
+  // since the Discover/Events API expects environment:... in the query string.
+  const environmentQuery = environment
+    ? environment.map((e) => `environment:${e}`).join(" ")
+    : undefined;
 
   const firstAgg = findFirstAggregate(fieldList);
   const rawSort = flags.sort ?? (firstAgg ? `-${firstAgg}` : undefined);
@@ -541,7 +540,12 @@ function resolveDatasetConfig(params: {
     sort = undefined;
   }
 
-  const query = buildProjectQuery(flags.query, project);
+  const baseQuery = environmentQuery
+    ? flags.query
+      ? `${environmentQuery} ${flags.query}`
+      : environmentQuery
+    : flags.query;
+  const query = buildProjectQuery(baseQuery, project);
   return {
     sort,
     query,
