@@ -37,6 +37,9 @@ export async function runDoctor(
   const server = await resolveServerFacts(captured);
   const results = runChecks(REGISTRY, { capture: captured, server });
 
+  const { judge } = await import("../lib/doctor/judge.js");
+  results.push(...(await judge(captured)));
+
   if (flags.sendTestEvent) {
     const { liveRoundtripCheck } = await import("../lib/doctor/live.js");
     results.push(await liveRoundtripCheck(captured, server));
