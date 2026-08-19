@@ -122,7 +122,7 @@ export async function liveRoundtripCheck(
   }
 
   const nonce = options.nonce ?? makeNonce();
-  const result = buildProbeEnvelope(dsn.raw, `sentry doctor probe ${nonce}`);
+  const result = buildProbeEnvelope(dsn.raw, `Test event from sentry doctor (${nonce}). Safe to delete.`);
   if (isCheckResult(result)) {
     return result;
   }
