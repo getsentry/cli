@@ -123,6 +123,7 @@ async function discoverCandidates(
       caseSensitive: false,
       minDepth: 3,
       maxResults: MAX_GREP_RESULTS,
+      maxMatchesPerFile: 1,
       maxFileSize: MAX_FILE_BYTES,
       timeBudgetMs,
     });

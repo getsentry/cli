@@ -13,8 +13,6 @@ import { detectAgent } from "../detect-agent.js";
 import { logger } from "../logger.js";
 import type { DoctorReport } from "./render.js";
 
-/** Sentry's feedback message field is not a file upload; keep it sane. */
-const MAX_MESSAGE_BYTES = 60_000;
 const FLUSH_TIMEOUT_MS = 3000;
 
 export async function offerSupportExport(
@@ -48,14 +46,23 @@ export async function offerSupportExport(
     return false;
   }
 
-  // The report is already redacted at the capture boundary (Task 3); this is
-  // a size guard, not a second sanitization pass.
-  const body = JSON.stringify(report, null, 2).slice(0, MAX_MESSAGE_BYTES);
+  const body = JSON.stringify(report, null, 2);
 
-  Sentry.captureFeedback({
-    name: "sentry doctor",
-    message: `sentry doctor report\nfailing: ${ids}\n\n${body}`,
-  });
+  Sentry.captureFeedback(
+    {
+      name: "sentry doctor",
+      message: `sentry doctor report — failing: ${ids}`,
+    },
+    {
+      attachments: [
+        {
+          filename: "sentry-doctor-report.json",
+          data: body,
+          contentType: "application/json",
+        },
+      ],
+    }
+  );
   await Sentry.flush(FLUSH_TIMEOUT_MS);
 
   logger.success("Report sent. Reference the failing check ids with support.");
