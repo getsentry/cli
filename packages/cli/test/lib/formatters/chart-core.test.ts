@@ -146,4 +146,31 @@ describe("rasterizeChart", () => {
     // Top-left pixel is above the bars, so it shows the background fill.
     expect(img?.data[3]).toBe(255);
   });
+
+  test("downsamples dense series so late buckets stay on canvas", () => {
+    // Far more buckets than half the canvas width: without downsampling the
+    // rising tail would be clipped off the right edge. Put all the signal in
+    // the last quarter of the range so a clipped render would be near-empty.
+    const values = Array.from({ length: 400 }, (_, i) => ({
+      timestamp: 1_700_000_000 + i * 60,
+      value: i < 300 ? 0 : i,
+    }));
+    const model = buildChartModel(
+      makeTimeseries({ series: [{ label: "c", values }] })
+    );
+    const width = 64;
+    const img = rasterizeChart(model!, { width, height: 32 });
+
+    // Count opaque pixels in the right quarter — the tail must survive.
+    let rightOpaque = 0;
+    const data = img?.data ?? new Uint8Array();
+    for (let y = 0; y < 32; y++) {
+      for (let x = Math.floor(width * 0.75); x < width; x++) {
+        if ((data[(y * width + x) * 4 + 3] ?? 0) > 0) {
+          rightOpaque += 1;
+        }
+      }
+    }
+    expect(rightOpaque).toBeGreaterThan(0);
+  });
 });

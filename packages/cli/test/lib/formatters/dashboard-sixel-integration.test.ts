@@ -143,4 +143,51 @@ describe("dashboard sixel integration", () => {
     expect(output).toContain(`${ESC}P`);
     expect(output).toContain(`${ESC}\\`);
   });
+
+  test("categorical_bar widgets keep the ASCII renderer, not sixel", () => {
+    const data = makeDashboardData({
+      widgets: [
+        makeWidget({
+          title: "Categorical",
+          displayType: "categorical_bar",
+          layout: { x: 0, y: 0, w: 6, h: 2 },
+        }),
+      ],
+    });
+
+    const output = formatDashboardWithData(data);
+    expect(output).toContain("Categorical");
+    // The chart core has no categorical mode, so these must not be rasterized.
+    expect(output).not.toContain(`${ESC}P`);
+  });
+
+  test("sixel widgets render as a standalone block, keeping the grid intact", () => {
+    const data = makeDashboardData({
+      widgets: [
+        makeWidget({
+          title: "Big Number",
+          displayType: "big_number",
+          data: { type: "scalar", value: 42 },
+          layout: { x: 0, y: 0, w: 3, h: 2 },
+        }),
+        makeWidget({
+          title: "Sixel Chart",
+          displayType: "line",
+          layout: { x: 3, y: 0, w: 3, h: 2 },
+        }),
+      ],
+    });
+
+    const output = formatDashboardWithData(data);
+    const lines = output.split("\n");
+    // The DCS image must not share a terminal row with the neighboring widget's
+    // borders — the sixel line carries no box-drawing characters.
+    const sixelLine = lines.find((l) => l.includes(`${ESC}P`));
+    expect(sixelLine).toBeDefined();
+    expect(sixelLine).not.toContain("│");
+    expect(sixelLine).not.toContain("─");
+    // The character grid (big-number widget) still renders above the image.
+    expect(output).toContain("Big Number");
+    expect(output).toContain("Sixel Chart");
+  });
 });

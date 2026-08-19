@@ -11,6 +11,7 @@
 
 import type { TimeseriesResult } from "../../types/dashboard.js";
 import type { DecodedImage } from "../sixel-image.js";
+import { downsample } from "./sparkline.js";
 
 /**
  * Chart color palette based on Sentry's categorical chart hues.
@@ -157,16 +158,39 @@ export function rasterizeChart(
     return;
   }
 
-  const img = createCanvas(width, height, opts.backgroundTransparent ?? true);
-  const layout = computeBarLayout(width, model.buckets);
+  // Each column needs at least a 1px bar plus a 1px gap, so more buckets than
+  // ~half the canvas width would push later columns off-canvas and clip them.
+  // Downsample to fit, mirroring what the ASCII sparkline path already does.
+  const fitted = fitModelToWidth(model, width);
 
-  if (model.stacked) {
-    drawStackedColumns(img, model, height, layout);
+  const img = createCanvas(width, height, opts.backgroundTransparent ?? true);
+  const layout = computeBarLayout(width, fitted.buckets);
+
+  if (fitted.stacked) {
+    drawStackedColumns(img, fitted, height, layout);
   } else {
-    drawBars(img, model, height, layout);
+    drawBars(img, fitted, height, layout);
   }
 
   return img;
+}
+
+/**
+ * Downsample a model's series so the bucket count fits the canvas: with a 1px
+ * bar and 1px gap each column needs ~2px, so cap buckets at `width / 2`.
+ * Returns the model unchanged when it already fits.
+ */
+function fitModelToWidth(model: ChartModel, width: number): ChartModel {
+  const maxBuckets = Math.max(1, Math.floor(width / 2));
+  if (model.buckets <= maxBuckets) {
+    return model;
+  }
+  const series = model.series.map((s) => ({
+    label: s.label,
+    values: downsample(s.values, maxBuckets),
+  }));
+  const buckets = Math.max(...series.map((s) => s.values.length));
+  return { ...model, series, buckets };
 }
 
 /** Create an RGBA canvas, optionally transparent. */

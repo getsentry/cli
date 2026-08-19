@@ -1533,24 +1533,6 @@ function renderContentLines(opts: {
 
   switch (data.type) {
     case "timeseries": {
-      // Opt-in sixel image rendering for timeseries widgets.
-      const env = getEnv();
-      if (
-        !isPlainOutput() &&
-        (env.SENTRY_DASHBOARD_SIXEL === "1" ||
-          widget.displayType === "timeseries_sixel") &&
-        canRenderSixel()
-      ) {
-        const pixelBudget = terminalPixelWidth();
-        const sixel = renderTimeseriesAsSixel(data, {
-          maxPixelWidth: pixelBudget ?? innerWidth * 8,
-          maxPixelHeight: contentHeight * 12,
-        });
-        if (sixel) {
-          return [sixel];
-        }
-      }
-
       if (widget.displayType === "categorical_bar") {
         return renderVerticalBarsContent(data, { innerWidth, contentHeight });
       }
@@ -1697,7 +1679,7 @@ function fitToWidth(line: string, targetWidth: number): string {
   // Truncate: walk characters, tracking visible width
   let result = "";
   let width = 0;
-  const esc = { type: "none" as "none" | "start" | "csi" | "osc" };
+  const esc: { type: EscapeType } = { type: "none" };
   for (const ch of line) {
     if (advanceEscape(esc, ch, result)) {
       result += ch;
@@ -1862,9 +1844,69 @@ export function formatDashboardWithData(data: DashboardViewData): string {
   const termWidth = getTermWidth();
   const lines: string[] = [];
   lines.push(...renderHeader(data, termWidth));
-  lines.push(...renderGrid(data.widgets, termWidth));
+
+  // Sixel widgets can't be composed into the side-by-side framebuffer: a DCS
+  // image advances the cursor by many rows, which would trample the widget's
+  // own borders and any neighbor sharing its grid rows. Render them full-width
+  // and stacked, after the character grid, and keep the grid for the rest.
+  const sixelWidgets = data.widgets.filter(isSixelEligible);
+  const gridWidgets = sixelWidgets.length
+    ? data.widgets.filter((w) => !isSixelEligible(w))
+    : data.widgets;
+
+  if (gridWidgets.length > 0) {
+    lines.push(...renderGrid(gridWidgets, termWidth));
+  }
+  for (const w of sixelWidgets) {
+    lines.push(...renderSixelWidget(w, termWidth));
+  }
+
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * Whether a widget should render as an inline sixel image: opt-in is on, the
+ * data is a plain (non-categorical) timeseries, and the terminal supports
+ * sixel. Categorical bars are excluded — the chart core only models
+ * time-bucket columns, so they keep the ASCII per-category renderer.
+ */
+function isSixelEligible(widget: DashboardViewWidget): boolean {
+  if (
+    widget.data.type !== "timeseries" ||
+    widget.displayType === "categorical_bar"
+  ) {
+    return false;
+  }
+  const env = getEnv();
+  const optedIn =
+    env.SENTRY_DASHBOARD_SIXEL === "1" ||
+    widget.displayType === "timeseries_sixel";
+  return optedIn && !isPlainOutput() && canRenderSixel();
+}
+
+/**
+ * Render a single sixel widget as a full-width block: a title line followed by
+ * the inline image. Falls back to the normal bordered character rendering when
+ * the image can't be produced (empty data, no drawable pixels).
+ */
+function renderSixelWidget(
+  widget: DashboardViewWidget,
+  termWidth: number
+): string[] {
+  if (widget.data.type !== "timeseries") {
+    return renderWidgetLines(widget, termWidth);
+  }
+  const pixelBudget = terminalPixelWidth();
+  const sixel = renderTimeseriesAsSixel(widget.data, {
+    maxPixelWidth: pixelBudget ?? termWidth * 8,
+    maxPixelHeight: 2 * LINES_PER_UNIT * 12,
+  });
+  if (!sixel) {
+    return renderWidgetLines(widget, termWidth);
+  }
+  const title = isPlainOutput() ? widget.title : chalk.bold(widget.title);
+  return ["", title, sixel];
 }
 
 // ---------------------------------------------------------------------------
