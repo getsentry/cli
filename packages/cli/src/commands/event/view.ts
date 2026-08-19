@@ -901,9 +901,12 @@ async function resolveIssueShortcut(
   // alongside a hex event ID. Resolve the issue to get org/project.
   if (issueShortId) {
     // Use the explicit org from the parsed target if available (e.g.,
-    // "figma/" → org-all with org "figma"), otherwise fall back to
-    // auto-detection via DSN/env/config.
-    const explicitOrg = parsed.type === "org-all" ? parsed.org : undefined;
+    // "figma/" → org-all, or "figma/project" → explicit, both carry the
+    // org), otherwise fall back to auto-detection via DSN/env/config.
+    const explicitOrg =
+      parsed.type === "org-all" || parsed.type === "explicit"
+        ? parsed.org
+        : undefined;
     const resolved = await resolveOrg({ org: explicitOrg, cwd });
     if (!resolved) {
       throw new ContextError(
