@@ -31,12 +31,12 @@ function unreachable(id: string, ctx: CheckContext): CheckResult | null {
 }
 
 /** Uniform skip when a specific fact was not returned. */
-function missing(id: string, what: string): CheckResult {
-  return {
-    id,
-    status: "skip",
-    detail: `Sentry did not return ${what}, so this could not be determined.`,
-  };
+function missing(id: string, what: string, ctx: CheckContext): CheckResult {
+  const reason =
+    ctx.server.dsnMatchesProject === false
+      ? `The DSN did not resolve to a project, so ${what} could not be fetched.`
+      : `Sentry did not return ${what} (the API call may have failed).`;
+  return { id, status: "skip", detail: reason };
 }
 
 function daysSince(iso: string): number {
@@ -141,7 +141,7 @@ const dsnResolves: Check = {
       };
     }
     if (ctx.server.dsnMatchesProject === undefined) {
-      return missing("dsn.resolves", "a project for this DSN");
+      return missing("dsn.resolves", "a project for this DSN", ctx);
     }
     return {
       id: "dsn.resolves",
@@ -160,7 +160,7 @@ const projectFirstEvent: Check = {
     }
     const { firstEvent, org, project, projectPlatform } = ctx.server;
     if (firstEvent === undefined) {
-      return missing("project.first_event", "first-event data");
+      return missing("project.first_event", "first-event data", ctx);
     }
     if (firstEvent === null) {
       const label = projectPlatform
@@ -191,7 +191,7 @@ const projectLastEvent: Check = {
     }
     const { lastIssueSeen } = ctx.server;
     if (lastIssueSeen === undefined) {
-      return missing("project.last_event", "recent issue data");
+      return missing("project.last_event", "recent issue data", ctx);
     }
     if (lastIssueSeen === null) {
       return {
@@ -228,7 +228,7 @@ const projectKeyActive: Check = {
     const { keys } = ctx.server;
     const dsn = ctx.capture.dsns[0];
     if (!keys) {
-      return missing("project.key_active", "client keys");
+      return missing("project.key_active", "client keys", ctx);
     }
     if (!dsn) {
       return {
@@ -274,7 +274,7 @@ const projectEnvironments: Check = {
     }
     const { environments } = ctx.server;
     if (!environments) {
-      return missing("project.environments", "environment data");
+      return missing("project.environments", "environment data", ctx);
     }
     if (environments.length === 0) {
       return {
@@ -302,7 +302,7 @@ const releaseAttribution: Check = {
     }
     const { latestRelease } = ctx.server;
     if (latestRelease === undefined) {
-      return missing("release.attribution", "release data");
+      return missing("release.attribution", "release data", ctx);
     }
     if (latestRelease === null) {
       return {
@@ -339,7 +339,7 @@ const artifactsUploaded: Check = {
     }
     const { hasUploadedArtifacts } = ctx.server;
     if (hasUploadedArtifacts === undefined) {
-      return missing("artifacts.uploaded", "debug-file data");
+      return missing("artifacts.uploaded", "debug-file data", ctx);
     }
     return hasUploadedArtifacts
       ? {
