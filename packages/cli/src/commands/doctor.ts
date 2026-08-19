@@ -96,6 +96,9 @@ export const doctorCommand = buildCommand({
 
     yield new CommandOutput(report);
 
+    const { offerSupportExport } = await import("../lib/doctor/report.js");
+    await offerSupportExport(report);
+
     if (flags.fix && exitCode !== 0) {
       const { runFix } = await import("../lib/doctor/fix.js");
       await runFix(this, report);
