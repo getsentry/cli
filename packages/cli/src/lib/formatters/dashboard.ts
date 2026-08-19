@@ -1876,27 +1876,42 @@ export function formatDashboardWithData(data: DashboardViewData): string {
 function packGridY(
   widgets: DashboardViewWidget[]
 ): DashboardViewWidget[] {
-  const ys = Array.from(
-    new Set(
-      widgets
-        .map((w) => w.layout?.y)
-        .filter((y): y is number => typeof y === "number")
-    )
-  ).sort((a, b) => a - b);
-  if (ys.length === 0) {
+  const withLayout = widgets.filter((w) => w.layout);
+  if (withLayout.length === 0) {
     return widgets;
   }
-  const rank = new Map<number, number>(ys.map((y, i) => [y, i]));
+  // Stable sort by original y so relative vertical order is preserved.
+  const sorted = [...withLayout].sort(
+    (a, b) => (a.layout?.y ?? 0) - (b.layout?.y ?? 0)
+  );
+
+  let nextY = 0;
+  const newY = new Map<DashboardViewWidget, number>();
+  for (const w of sorted) {
+    if (newY.has(w)) {
+      continue;
+    }
+    // All widgets that share the same original y-band get the same new y.
+    const bandY = w.layout!.y;
+    const band = sorted.filter((ww) => ww.layout!.y === bandY);
+    for (const b of band) {
+      newY.set(b, nextY);
+    }
+    // Advance past the tallest widget in the band so the next band starts
+    // immediately below (respecting each widget's original h).
+    const maxH = Math.max(...band.map((b) => b.layout!.h ?? 1));
+    nextY += maxH;
+  }
 
   return widgets.map((w) => {
     if (!w.layout) {
       return w;
     }
-    const r = rank.get(w.layout.y);
-    if (r === undefined) {
+    const ny = newY.get(w);
+    if (ny === undefined) {
       return w;
     }
-    return { ...w, layout: { ...w.layout, y: r } };
+    return { ...w, layout: { ...w.layout, y: ny } };
   });
 }
 
