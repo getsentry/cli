@@ -127,7 +127,10 @@ function tryAutoSplitSpanArg(arg: string): SpanViewArgs | null {
     // org/project/<span-id> without a trace ID, so the project name was
     // mistakenly parsed as a trace ID). Fall back to null so the caller
     // can surface a proper ContextError instead of a confusing ValidationError.
-    log.debug("tryAutoSplitSpanArg: trace prefix failed validation, falling through", error);
+    log.debug(
+      "tryAutoSplitSpanArg: trace prefix failed validation, falling through",
+      error
+    );
     return null;
   }
   log.warn(
