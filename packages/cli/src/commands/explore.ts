@@ -524,7 +524,8 @@ function resolveDatasetConfig(params: {
   const envPrefix = environment
     ? environment.map((e) => `environment:${e}`).join(" ")
     : undefined;
-  const queryWithEnv = [envPrefix, flags.query].filter(Boolean).join(" ") || undefined;
+  const queryWithEnv =
+    [envPrefix, flags.query].filter(Boolean).join(" ") || undefined;
 
   const firstAgg = findFirstAggregate(fieldList);
   const rawSort = flags.sort ?? (firstAgg ? `-${firstAgg}` : undefined);

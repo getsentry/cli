@@ -888,7 +888,10 @@ describe("sentry explore", () => {
   describe("validation", () => {
     test("translates --environment into query filter terms on non-replay datasets", async () => {
       resolveTargetSpy.mockResolvedValue({ org: "test-org" });
-      queryEventsSpy.mockResolvedValue({ data: [], nextCursor: undefined });
+      queryEventsSpy.mockResolvedValue({
+        data: MOCK_EVENTS_RESPONSE,
+        nextCursor: undefined,
+      });
       const { context } = createContext();
 
       await func.call(
