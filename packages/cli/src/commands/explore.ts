@@ -521,9 +521,10 @@ function resolveDatasetConfig(params: {
 
   // Non-replay datasets: translate --environment into query filter terms
   // since the Discover/Events API expects environment:... in the query string.
-  const environmentQuery = environment
+  const envPrefix = environment
     ? environment.map((e) => `environment:${e}`).join(" ")
     : undefined;
+  const queryWithEnv = [envPrefix, flags.query].filter(Boolean).join(" ") || undefined;
 
   const firstAgg = findFirstAggregate(fieldList);
   const rawSort = flags.sort ?? (firstAgg ? `-${firstAgg}` : undefined);
@@ -540,12 +541,7 @@ function resolveDatasetConfig(params: {
     sort = undefined;
   }
 
-  const baseQuery = environmentQuery
-    ? flags.query
-      ? `${environmentQuery} ${flags.query}`
-      : environmentQuery
-    : flags.query;
-  const query = buildProjectQuery(baseQuery, project);
+  const query = buildProjectQuery(queryWithEnv, project);
   return {
     sort,
     query,
