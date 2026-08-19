@@ -176,7 +176,7 @@ export function renderHuman(args: {
     : colorTag(verdictGlyph.color, verdictGlyph.plain);
 
   const lines: string[] = [
-    "Sentry Doctor",
+    "# Sentry Doctor",
     "",
     `${mark} ${verdictFor(results)}`,
     ...section("Failures", failures, plain),
