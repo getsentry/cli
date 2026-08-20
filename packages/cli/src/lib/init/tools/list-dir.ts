@@ -101,36 +101,37 @@ function toDirEntry(
     };
   }
 
-  // File: attach size + a best-effort binary hint so the agent can decide what
-  // to read (like `ls -l`) without reading it first. Both are advisory.
+  // Only regular files carry size + a binary hint (like `ls -l`). Symlinks,
+  // FIFOs, sockets, and devices are listed as files but get no hints and are
+  // never opened — a named pipe must not be able to block the walk.
   return {
     name: entry.name,
     path: normalizePath(relNative),
     type: "file",
-    ...fileHints(abs),
+    ...(entry.isFile() ? fileHints(abs) : {}),
   };
 }
 
-/** Cheap, best-effort size + binary hint for a file. Never throws. */
+/**
+ * Best-effort size + binary hint for a regular file. Opens non-blocking (so a
+ * special file that slips past the Dirent check can't hang) and re-confirms it
+ * is a regular file before reading — the same guard read-files uses. Advisory;
+ * never blocks, never throws.
+ */
 function fileHints(abs: string): { size?: number; isBinary?: boolean } {
-  try {
-    const size = fs.statSync(abs).size;
-    return { isBinary: looksBinary(abs), size };
-  } catch {
-    return {};
-  }
-}
-
-/** True if the first bytes contain a NUL — a good-enough binary sniff. */
-function looksBinary(abs: string): boolean {
   let fd: number | undefined;
   try {
-    fd = fs.openSync(abs, "r");
+    // biome-ignore lint/suspicious/noBitwiseOperators: fs open flags are a bitmask.
+    fd = fs.openSync(abs, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      return {};
+    }
     const buf = Buffer.alloc(512);
     const read = fs.readSync(fd, buf, 0, buf.length, 0);
-    return buf.subarray(0, read).includes(0);
+    return { isBinary: buf.subarray(0, read).includes(0), size: stat.size };
   } catch {
-    return false;
+    return {};
   } finally {
     if (fd !== undefined) {
       fs.closeSync(fd);
