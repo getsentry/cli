@@ -126,21 +126,19 @@ function tryAutoSplitSpanArg(arg: string): SpanViewArgs | null {
   let traceTarget: ReturnType<typeof parseSlashSeparatedTraceTarget>;
   try {
     traceTarget = parseSlashSeparatedTraceTarget(tracePrefix, USAGE_HINT);
-  } catch (error) {
+  } catch (_error) {
     // We already confirmed the last segment is a span ID and the prefix
     // looked like a trace target, so a validation failure here means the
     // trace-target portion is bad — e.g. `org/project/<span-id>` (missing
     // the trace ID) or `org/project/<bad-trace>/<span-id>`. Surface a
     // trace-focused ContextError that preserves the underlying detail
     // rather than falling through to the misleading "missing span ID" path.
-    const detail =
-      error instanceof ValidationError || error instanceof ContextError
-        ? error.message
-        : String(error);
+    const suggestion = HEX_ID_RE.test(tracePrefix.split("/").pop() || "")
+      ? `Provide the correct trace ID: sentry span view ${tracePrefix} ${possibleSpanId}`
+      : `Provide the trace ID: sentry span view ${tracePrefix}/<trace-id> ${possibleSpanId}`;
     throw new ContextError("Trace ID", USAGE_HINT, [
       `'${arg}' is missing a valid trace ID before the span ID '${possibleSpanId}'`,
-      detail,
-      `Provide the trace ID: sentry span view ${tracePrefix}/<trace-id> ${possibleSpanId}`,
+      suggestion,
     ]);
   }
   log.warn(
