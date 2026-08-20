@@ -1345,9 +1345,9 @@ describe("completion screen", () => {
     const text = stripAnsi(
       (await renderApp(completionStore(false), 100)).allOutput()
     );
-    expect(text).toContain("Sentry is installed in my-app");
-    // "Here's what we set up" — the per-feature project info.
-    expect(text).toContain("Here's what we set up");
+    // Header flows into the per-feature project info via ", with:".
+    expect(text).toContain("Sentry is set up in my-app");
+    expect(text).toContain(", with:");
     expect(text).toContain("Error Monitoring");
     expect(text).toContain("Captures unhandled exceptions.");
     // Just the file count — no platform key in this footnote.
@@ -1355,6 +1355,8 @@ describe("completion screen", () => {
     expect(text).toContain("See your first error");
     expect(text).toContain("pnpm dev");
     expect(text).toContain("/issues/?project=4507");
+    // The link carries an inline "(o) to open" shortcut hint.
+    expect(text).toContain("(o) to open");
     expect(text).toContain("Open my Issues feed");
     expect(text).toContain("Set up the Sentry MCP");
     expect(text).toContain("Install the Sentry agent plugin");
@@ -1367,10 +1369,20 @@ describe("completion screen", () => {
     const text = stripAnsi(
       (await renderApp(completionStore(true), 100)).allOutput()
     );
-    expect(text).toContain("Sentry is installed in my-app");
+    expect(text).toContain("Sentry is set up in my-app");
     expect(text).toContain("First event received");
     expect(text).toContain("View my first event");
     expect(text).toContain("event.id:abc123");
+  });
+
+  test("pressing o opens the first-error link", async () => {
+    const text = stripAnsi(
+      (
+        await renderApp(completionStore(false), 100, { input: ["o"] })
+      ).allOutput()
+    );
+    // The `o` handler fires and confirms via a note.
+    expect(text).toContain("Opened Sentry in your browser.");
   });
 
   test("selecting the MCP step reveals the editor picker", async () => {

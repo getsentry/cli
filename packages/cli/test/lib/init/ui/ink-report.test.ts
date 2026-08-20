@@ -275,7 +275,7 @@ describe("formatSuccessExitLine", () => {
         completion: { ...baseCompletion, verification: { received: false } },
       })
     );
-    expect(output).toContain("Sentry is installed in my-app");
+    expect(output).toContain("Sentry is set up in my-app");
     expect(output).toContain("See your errors");
     expect(output).toContain("https://acme.sentry.io/issues/");
     // The full summary stays on the interactive screen, not the exit echo.

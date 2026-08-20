@@ -102,7 +102,7 @@ export function formatSuccessExitLine(
   const icon = chalk.hex(REPORT_SUCCESS)("✔");
   const lines: string[] = [
     "",
-    `${icon}  ${chalk.bold(`Sentry is installed in ${project}`)}`,
+    `${icon}  ${chalk.bold(`Sentry is set up in ${project}`)}`,
   ];
   const target = completion?.verification.eventUrl ?? completion?.issuesUrl;
   if (target) {

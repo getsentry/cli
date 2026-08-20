@@ -597,7 +597,7 @@ function ActionList<T extends string>({
               width="100%"
             >
               <Text color={ACCENT}>
-                {isCursor ? `${ICONS.triangleSmallRight} ` : "  "}
+                {isCursor ? `${ICONS.triangleRight} ` : "  "}
               </Text>
               <Text bold={isCursor}>{choice.label}</Text>
               {choice.hint ? <Text color={MUTED}> {choice.hint}</Text> : null}
@@ -607,9 +607,7 @@ function ActionList<T extends string>({
         return (
           <Box flexDirection="row" key={choice.value}>
             <Box flexShrink={0} width={4}>
-              <Text color={ACCENT}>
-                {isCursor ? ICONS.triangleSmallRight : " "}
-              </Text>
+              <Text color={ACCENT}>{isCursor ? ICONS.triangleRight : " "}</Text>
             </Box>
             <Text bold={isCursor}>{choice.label}</Text>
             {choice.hint ? <Text color={MUTED}> {choice.hint}</Text> : null}
@@ -799,6 +797,31 @@ function CompletionScreen({
     [actions]
   );
 
+  // `o` opens the first-error link directly (the hint next to it), separate
+  // from arrowing to "Open my Issues feed" in the menu.
+  const openShortcuts = useMemo<ShortcutBinding[]>(
+    () =>
+      primaryUrl
+        ? [
+            {
+              key: "o",
+              action: "open",
+              priority: 45,
+              match: (input, key) =>
+                !key.ctrl && (input === "o" || input === "O"),
+              run: () => {
+                actions.openUrl(primaryUrl);
+                setNote("Opened Sentry in your browser.");
+              },
+            },
+          ]
+        : [],
+    [actions, primaryUrl]
+  );
+  useInkShortcuts("completion-open", openShortcuts, {
+    isActive: mode === "menu",
+  });
+
   return (
     <Box
       flexDirection="column"
@@ -872,8 +895,9 @@ function CompletionSectionHeader({
 }
 
 /**
- * The ✔ headline. The ✔ shares the same glyph column as the `◇` section
- * headers below, so the whole screen reads down one clean left edge.
+ * The ✔ headline. When there's a feature list to show it flows straight into
+ * it ("Sentry is set up in <project>, with:"), so the list needs no separate
+ * subheader. The ✔ shares the glyph column with the numbered steps below.
  */
 function CompletionHeader({
   completion,
@@ -881,6 +905,9 @@ function CompletionHeader({
   completion: WizardCompletion | null;
 }): React.ReactNode {
   const projectName = completion?.projectName ?? "your project";
+  const hasSetup =
+    (completion?.featureBlurbs.length ?? 0) > 0 ||
+    (completion?.features.length ?? 0) > 0;
   return (
     <Box flexShrink={0} paddingX={1}>
       <Box flexShrink={0} width={3}>
@@ -888,10 +915,11 @@ function CompletionHeader({
           {ICON_BY_SEVERITY.success.glyph}
         </Text>
       </Box>
-      <Text bold>Sentry is installed in </Text>
+      <Text bold>Sentry is set up in </Text>
       <Text bold color={ACCENT}>
         {projectName}
       </Text>
+      {hasSetup ? <Text color={MUTED}>, with:</Text> : null}
     </Box>
   );
 }
@@ -908,9 +936,9 @@ function completionSummaryText(
 }
 
 /**
- * "Here's what we set up" — the project info: one small line per enabled
- * feature (AI blurbs when available, plain labels otherwise), mirroring the
- * in-run SummaryPanel so it feels continuous.
+ * The project info under the header's "…set up in <project>, with:" lead-in:
+ * one small line per enabled feature (AI blurbs when available, plain labels
+ * otherwise) plus a changed-files footnote.
  */
 function CompletionWhatWeSetUp({
   completion,
@@ -926,12 +954,7 @@ function CompletionWhatWeSetUp({
     return null;
   }
   return (
-    <Box flexDirection="column" flexShrink={0} marginTop={1} paddingX={1}>
-      <CompletionSectionHeader
-        color={MUTED_DIM}
-        marker=" "
-        title="Here's what we set up"
-      />
+    <Box flexDirection="column" flexShrink={0} paddingX={1}>
       <Box flexDirection="column" paddingLeft={3}>
         {featureBlurbs.length > 0
           ? featureBlurbs.map(({ label, blurb }) => (
@@ -999,6 +1022,7 @@ function CompletionFirstError({
             <Text color={COLOR_INFO} wrap="truncate">
               {primaryUrl}
             </Text>
+            <Text color={MUTED_DIM}>{"  (o) to open"}</Text>
           </Box>
         ) : null}
       </Box>
@@ -1006,7 +1030,8 @@ function CompletionFirstError({
   );
 }
 
-/** Option rows in the exact select-prompt idiom (▸ cursor, bold on focus). */
+/** Option rows for the completion menu: a bold ▶ cursor (bigger than the
+ * prompt's small ▸ so the selection is unmistakable), bold label on focus. */
 function CompletionOptions<T extends string>({
   choices,
   highlighted,
@@ -1014,8 +1039,10 @@ function CompletionOptions<T extends string>({
   choices: ChoiceRow<T>[];
   highlighted: number;
 }): React.ReactNode {
+  // Indent so the cursor sits directly under the section title (e.g. below the
+  // "N" of "Next steps"), not under the section's number marker.
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" paddingLeft={3}>
       {choices.map((choice, index) => {
         const isCursor = index === highlighted;
         return (
@@ -1026,8 +1053,8 @@ function CompletionOptions<T extends string>({
             overflow="hidden"
           >
             <Box flexShrink={0} width={3}>
-              <Text color={ACCENT}>
-                {isCursor ? ICONS.triangleSmallRight : " "}
+              <Text bold color={ACCENT}>
+                {isCursor ? ICONS.triangleRight : " "}
               </Text>
             </Box>
             <Text bold={isCursor}>{choice.label}</Text>
@@ -2618,9 +2645,7 @@ function SelectPromptOptionRow({
     return (
       <Box flexDirection="row" height={1} overflow="hidden" width="100%">
         <Box flexShrink={0} width={2}>
-          <Text color={ACCENT}>
-            {isCursor ? ICONS.triangleSmallRight : " "}
-          </Text>
+          <Text color={ACCENT}>{isCursor ? ICONS.triangleRight : " "}</Text>
         </Box>
         <Box flexShrink={0} width={centeredLabelWidth}>
           <Text bold={isCursor}>{option.label}</Text>
@@ -2634,7 +2659,7 @@ function SelectPromptOptionRow({
   return (
     <Box flexDirection="row" height={1} overflow="hidden">
       <Box flexShrink={0} width={3}>
-        <Text color={ACCENT}>{isCursor ? ICONS.triangleSmallRight : " "}</Text>
+        <Text color={ACCENT}>{isCursor ? ICONS.triangleRight : " "}</Text>
       </Box>
       <Text bold={isCursor}>{option.label}</Text>
       {option.hint !== undefined && option.hint !== "" ? (
@@ -3020,7 +3045,7 @@ function MultiSelectPromptOptionRow({
           width="100%"
         >
           <Text color={ACCENT}>
-            {isCursor ? `${ICONS.triangleSmallRight} ` : "  "}
+            {isCursor ? `${ICONS.triangleRight} ` : "  "}
           </Text>
           <Text color={markerColor}>{marker} </Text>
           <MultiSelectOptionLabel
@@ -3041,9 +3066,7 @@ function MultiSelectPromptOptionRow({
     <Box flexDirection="column" width="100%">
       <Box flexDirection="row" height={1} overflow="hidden">
         <Box flexShrink={0} width={3}>
-          <Text color={ACCENT}>
-            {isCursor ? ICONS.triangleSmallRight : " "}
-          </Text>
+          <Text color={ACCENT}>{isCursor ? ICONS.triangleRight : " "}</Text>
         </Box>
         <Text color={markerColor}>{marker} </Text>
         <MultiSelectOptionLabel
