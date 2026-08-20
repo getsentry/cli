@@ -44,14 +44,8 @@ const completion: WizardCompletion = {
         eventUrl: "https://acme.sentry.io/issues/?query=event.id:a1b2c3d4",
       }
     : { received: false },
-  mcp: {
-    url: "https://mcp.sentry.dev/mcp/acme/my-app",
-    orgSlug: "acme",
-    projectSlug: "my-app",
-  },
   agentInstallCommand: "npx @sentry/ai install",
   startCommand: "pnpm dev",
-  projectDir: "/tmp/my-app",
 };
 
 const store = new WizardStore({

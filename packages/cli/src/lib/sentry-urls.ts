@@ -264,25 +264,6 @@ export function parseOrgProjectFromSettingsUrl(url: string): {
   }
 }
 
-/** Host of the hosted Sentry MCP server. */
-const SENTRY_MCP_BASE_URL = "https://mcp.sentry.dev/mcp";
-
-/**
- * Build the project-scoped Sentry MCP endpoint, for wiring the Sentry MCP
- * server into a coding agent / editor. Always points at the hosted MCP service
- * (mcp.sentry.dev), independent of SaaS vs. self-hosted.
- *
- * @param orgSlug - Organization slug
- * @param projectSlug - Project slug
- * @returns Project-scoped MCP endpoint URL
- */
-export function buildSentryMcpUrl(
-  orgSlug: string,
-  projectSlug: string
-): string {
-  return `${SENTRY_MCP_BASE_URL}/${orgSlug}/${projectSlug}`;
-}
-
 // Settings URLs
 
 /**

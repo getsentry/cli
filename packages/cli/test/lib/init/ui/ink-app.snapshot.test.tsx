@@ -1313,14 +1313,8 @@ describe("completion screen", () => {
             eventUrl: "https://acme.sentry.io/issues/?query=event.id:abc123",
           }
         : { received: false },
-      mcp: {
-        url: "https://mcp.sentry.dev/mcp/acme/my-app",
-        orgSlug: "acme",
-        projectSlug: "my-app",
-      },
       agentInstallCommand: "npx @sentry/ai install",
       startCommand: "pnpm dev",
-      projectDir: "/tmp/my-app",
     };
     return new WizardStore({
       layout: "workflow",
@@ -1335,7 +1329,6 @@ describe("completion screen", () => {
           openUrl: () => {
             // no-op in tests
           },
-          writeMcpConfig: () => Promise.resolve(true),
         },
       },
     });
@@ -1358,8 +1351,9 @@ describe("completion screen", () => {
     // The link carries an inline "(o) to open" shortcut hint.
     expect(text).toContain("(o) to open");
     expect(text).toContain("Open my Issues feed");
-    expect(text).toContain("Set up the Sentry MCP");
     expect(text).toContain("Install the Sentry agent plugin");
+    // The raw MCP-config option was dropped — the plugin covers it.
+    expect(text).not.toContain("Set up the Sentry MCP");
     expect(text).toContain("Finish");
     // "Open the setup docs" was removed from the next steps.
     expect(text).not.toContain("Open the setup docs");
@@ -1383,21 +1377,5 @@ describe("completion screen", () => {
     );
     // The `o` handler fires and confirms via a note.
     expect(text).toContain("Opened Sentry in your browser.");
-  });
-
-  test("selecting the MCP step reveals the editor picker", async () => {
-    // Menu order is [issues, mcp, ...]; one arrow-down highlights the MCP
-    // step, Enter opens the editor sub-menu.
-    const text = stripAnsi(
-      (
-        await renderApp(completionStore(false), 100, {
-          input: [DOWN_ARROW, "\r"],
-        })
-      ).allOutput()
-    );
-    expect(text).toContain("Add the Sentry MCP to");
-    expect(text).toContain("Cursor");
-    expect(text).toContain(".cursor/mcp.json");
-    expect(text).toContain("Back");
   });
 });

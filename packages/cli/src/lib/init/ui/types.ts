@@ -213,32 +213,20 @@ export type WizardCompletion = {
    * event; `eventUrl` deep-links that exact event when its id was captured.
    */
   verification: { received: boolean; eventUrl?: string };
-  /** Project-scoped Sentry MCP endpoint + slugs for editor config writing. */
-  mcp?: { url: string; orgSlug: string; projectSlug: string };
   /** Command that installs the Sentry coding-agent plugin. */
   agentInstallCommand?: string;
   /** Best-effort "start your app" command shown in the recipe, e.g. "pnpm dev". */
   startCommand?: string;
-  /** Project directory — where editor MCP config files are written. */
-  projectDir?: string;
 };
-
-/** Editors the completion screen can write a project-scoped MCP config for. */
-export type McpEditor = "cursor" | "vscode" | "claude-code";
 
 /**
  * Side-effectful actions the completion screen invokes. Provided by `InkUI`
  * (which lives in the main bundle) so the pre-bundled Ink sidecar never has to
- * import Node built-ins (browser launch, filesystem) itself.
+ * import Node built-ins (browser launch) itself.
  */
 export type CompletionActions = {
   /** Open a URL in the user's browser. Best-effort, non-blocking. */
   openUrl: (url: string) => void;
-  /**
-   * Write the project-scoped Sentry MCP config for an editor. Resolves true on
-   * success, false when it couldn't (no data, write error).
-   */
-  writeMcpConfig: (editor: McpEditor) => Promise<boolean>;
 };
 
 /**

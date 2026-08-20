@@ -275,13 +275,15 @@ describe("formatSuccessExitLine", () => {
         completion: { ...baseCompletion, verification: { received: false } },
       })
     );
-    expect(output).toContain("Sentry is set up in my-app");
-    expect(output).toContain("See your errors");
+    expect(output).toContain("Sentry is watching my-app");
+    expect(output).toContain("See your first error");
     expect(output).toContain("https://acme.sentry.io/issues/");
     // The full summary stays on the interactive screen, not the exit echo.
     expect(output).not.toContain("Here's what we set up");
     expect(output).not.toContain("Changed files");
     expect(output).not.toContain("instrument.ts");
+    // No feedback prompt chained onto the success exit.
+    expect(output).not.toContain("sentry cli feedback");
   });
 
   test("celebrates and deep-links the event when verified", () => {

@@ -63,7 +63,6 @@ import {
   type WizardPromptKind,
 } from "../../telemetry.js";
 import { formatFeedbackHint, type InitFeedbackOutcome } from "../feedback.js";
-import { writeMcpConfig } from "../mcp-editor-config.js";
 import {
   formatFailureReport,
   formatSuccessExitLine,
@@ -524,9 +523,7 @@ export class InkUI implements WizardUI {
     this.pauseSidebarTimers();
     this.pendingOutro ??= createPendingOutro();
     // Bind the screen's side effects here (main bundle) so the Ink sidecar
-    // never imports Node built-ins. `summary()` runs before `outro()`, so the
-    // completion data is already on the store.
-    const completion = this.store.getSnapshot().summary?.completion;
+    // never imports Node built-ins (browser launch).
     this.store.setOutro({
       kind: "success",
       dismiss: () => this.dismissOutro(),
@@ -537,8 +534,6 @@ export class InkUI implements WizardUI {
             // ignore
           });
         },
-        writeMcpConfig: (editor) =>
-          writeMcpConfig(editor, completion?.mcp, completion?.projectDir),
       },
     });
   }
@@ -1072,7 +1067,7 @@ export class InkUI implements WizardUI {
     // The interactive completion screen already showed the full summary; on
     // exit leave only a compact confirmation rather than re-dumping everything.
     if (summary?.completion) {
-      return formatSuccessExitLine(summary, this.feedbackHint);
+      return formatSuccessExitLine(summary);
     }
     return formatSuccessReport(this.outroMessage, summary, this.feedbackHint);
   }

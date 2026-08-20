@@ -66,7 +66,6 @@ import { BLOCK_LINE_COUNT, LEARN_SEQUENCE } from "./learn-content.js";
 import { SENTRY_TIPS, type SentryTip } from "./sentry-tips.js";
 import type {
   CompletionActions,
-  McpEditor,
   PromptDetail,
   WizardCompletion,
   WizardSummary,
@@ -636,21 +635,11 @@ function FeedbackBanner({
 
 // ────────────────────────── Completion Screen ─────────────────────────
 
-type CompletionActionId = "issues" | "mcp" | "agent" | "finish";
+type CompletionActionId = "issues" | "agent" | "finish";
 
-const MCP_EDITOR_CHOICES: ChoiceRow<McpEditor>[] = [
-  { value: "cursor", label: "Cursor", hint: ".cursor/mcp.json" },
-  { value: "vscode", label: "VS Code", hint: ".vscode/mcp.json" },
-  { value: "claude-code", label: "Claude Code", hint: ".mcp.json" },
-];
-
-function editorLabel(editor: McpEditor): string {
-  return (
-    MCP_EDITOR_CHOICES.find((c) => c.value === editor)?.label ?? "your editor"
-  );
-}
-
-/** Build the "What's next?" menu from the completion data + current state. */
+/** Build the "What's next?" menu from the completion data + current state.
+ * Pick one, run it, and come back — the plugin item shows its queued state so
+ * doing several reads clearly. */
 function buildCompletionMenu({
   agentCommand,
   agentQueued,
@@ -677,13 +666,6 @@ function buildCompletionMenu({
             hint: "see your first error",
           }
     );
-  }
-  if (completion?.mcp) {
-    list.push({
-      value: "mcp",
-      label: "Set up the Sentry MCP",
-      hint: "for your coding agent",
-    });
   }
   if (agentCommand) {
     list.push({
@@ -727,7 +709,6 @@ function CompletionScreen({
   store: WizardStore;
   width: number;
 }): React.ReactNode {
-  const [mode, setMode] = useState<"menu" | "mcp">("menu");
   const [note, setNote] = useState("");
 
   const verified = completion?.verification.received ?? false;
@@ -757,10 +738,6 @@ function CompletionScreen({
             setNote("Opened Sentry in your browser.");
           }
           break;
-        case "mcp":
-          setNote("");
-          setMode("mcp");
-          break;
         case "agent":
           if (agentCommand) {
             if (agentQueued) {
@@ -780,21 +757,6 @@ function CompletionScreen({
       }
     },
     [actions, agentCommand, agentQueued, onDismiss, primaryUrl, store]
-  );
-
-  const onEditorChoose = useCallback(
-    (editor: McpEditor) => {
-      const finish = (ok: boolean) => {
-        setNote(
-          ok
-            ? `Added the Sentry MCP to ${editorLabel(editor)}.`
-            : `Couldn't write the ${editorLabel(editor)} config.`
-        );
-        setMode("menu");
-      };
-      actions.writeMcpConfig(editor).then(finish, () => finish(false));
-    },
-    [actions]
   );
 
   // `o` opens the first-error link directly (the hint next to it), separate
@@ -818,9 +780,7 @@ function CompletionScreen({
         : [],
     [actions, primaryUrl]
   );
-  useInkShortcuts("completion-open", openShortcuts, {
-    isActive: mode === "menu",
-  });
+  useInkShortcuts("completion-open", openShortcuts);
 
   return (
     <Box
@@ -833,18 +793,11 @@ function CompletionScreen({
         <CompletionHeader completion={completion} />
         <CompletionWhatWeSetUp completion={completion} />
         <CompletionFirstError completion={completion} verified={verified} />
-        {mode === "menu" ? (
-          <CompletionMenu
-            choices={menuChoices}
-            onChoose={onMenuChoose}
-            onDismiss={onDismiss}
-          />
-        ) : (
-          <CompletionMcpPicker
-            onBack={() => setMode("menu")}
-            onChoose={onEditorChoose}
-          />
-        )}
+        <CompletionMenu
+          choices={menuChoices}
+          onChoose={onMenuChoose}
+          onDismiss={onDismiss}
+        />
         {note ? (
           <Box flexShrink={0} marginTop={1} paddingX={1}>
             <Box flexShrink={0} width={3}>
@@ -1085,37 +1038,6 @@ function CompletionMenu({
   return (
     <Box flexDirection="column" flexShrink={0} marginTop={1} paddingX={1}>
       <CompletionSectionHeader marker="2" title="Next steps" />
-      <CompletionOptions choices={choices} highlighted={highlighted} />
-    </Box>
-  );
-}
-
-function CompletionMcpPicker({
-  onBack,
-  onChoose,
-}: {
-  onBack: () => void;
-  onChoose: (editor: McpEditor) => void;
-}): React.ReactNode {
-  const choices = useMemo<ChoiceRow<McpEditor | "__back">[]>(
-    () => [...MCP_EDITOR_CHOICES, { value: "__back", label: "Back" }],
-    []
-  );
-  const highlighted = useChoiceNavigation<McpEditor | "__back">({
-    choices,
-    onCancel: onBack,
-    onChoose: (value) => {
-      if (value === "__back") {
-        onBack();
-      } else {
-        onChoose(value);
-      }
-    },
-    scope: "completion-mcp",
-  });
-  return (
-    <Box flexDirection="column" flexShrink={0} marginTop={1} paddingX={1}>
-      <CompletionSectionHeader marker="2" title="Add the Sentry MCP to" />
       <CompletionOptions choices={choices} highlighted={highlighted} />
     </Box>
   );

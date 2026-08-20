@@ -21,7 +21,6 @@ import { stripAnsi } from "../formatters/plain-detect.js";
 import {
   buildEventSearchUrl,
   buildProjectIssuesUrl,
-  buildSentryMcpUrl,
   parseOrgProjectFromSettingsUrl,
 } from "../sentry-urls.js";
 import { featureLabel, sortFeatures } from "./clack-utils.js";
@@ -73,14 +72,13 @@ function buildCompletion(
   verify: VerifyResult | undefined,
   featureBlurbs: { label: string; blurb: string }[]
 ): WizardCompletion {
-  // The server may not hand the slugs back directly (older deploys), so fall
-  // back to recovering them from the settings URL it did send. This keeps the
-  // Issues link and MCP step working regardless of server version.
+  // The server may not hand the org slug back directly (older deploys), so
+  // fall back to recovering it from the settings URL it did send. This keeps
+  // the Issues link working regardless of server version.
   const parsed = output.sentryProjectUrl
     ? parseOrgProjectFromSettingsUrl(output.sentryProjectUrl)
     : {};
   const orgSlug = output.orgSlug ?? parsed.orgSlug;
-  const projectSlug = output.projectSlug ?? parsed.projectSlug;
   const { projectId } = output;
   // Prefer the project-scoped Issues stream (where errors land); fall back to
   // whatever project URL the server sent if we couldn't resolve the org.
@@ -92,10 +90,6 @@ function buildCompletion(
     received && verify?.eventId && orgSlug
       ? buildEventSearchUrl(orgSlug, verify.eventId)
       : undefined;
-  const mcp =
-    orgSlug && projectSlug
-      ? { url: buildSentryMcpUrl(orgSlug, projectSlug), orgSlug, projectSlug }
-      : undefined;
 
   return {
     projectName: deriveProjectName(output),
@@ -104,10 +98,8 @@ function buildCompletion(
     changedFileCount: output.changedFiles?.length ?? 0,
     issuesUrl,
     verification: { received, eventUrl },
-    mcp,
     agentInstallCommand: SENTRY_AGENT_INSTALL_COMMAND,
     startCommand: deriveStartCommand(output.commands),
-    projectDir: output.projectDir,
   };
 }
 

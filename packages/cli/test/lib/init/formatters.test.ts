@@ -216,14 +216,8 @@ describe("formatResult completion payload", () => {
     expect(completion?.projectName).toBe("my-app");
     expect(completion?.features).toHaveLength(2);
     expect(completion?.changedFileCount).toBe(1);
-    expect(completion?.mcp).toEqual({
-      url: "https://mcp.sentry.dev/mcp/acme/my-app",
-      orgSlug: "acme",
-      projectSlug: "my-app",
-    });
     expect(completion?.agentInstallCommand).toBe("npx @sentry/ai install");
     expect(completion?.startCommand).toBe("pnpm dev");
-    expect(completion?.projectDir).toBe("/work/my-app");
     expect(completion?.verification).toEqual({ received: false });
   });
 
@@ -243,14 +237,14 @@ describe("formatResult completion payload", () => {
     expect(completion?.verification.eventUrl).toContain("event.id:abc123def");
   });
 
-  test("recovers org/project from the settings URL when the server omits slugs", () => {
+  test("recovers the org from the settings URL when the server omits slugs", () => {
     const { ui, calls } = createMockUI();
     formatResult(
       {
         status: "success",
         result: {
           platform: "python",
-          // Older server: only the settings URL, no orgSlug/projectSlug.
+          // Older server: only the settings URL, no orgSlug.
           sentryProjectUrl: "https://acme.sentry.io/settings/projects/api/",
         },
       },
@@ -258,13 +252,8 @@ describe("formatResult completion payload", () => {
     );
 
     const completion = summaryCall(calls)?.completion;
-    // Issues stream + MCP are recovered from the settings URL.
+    // Issues stream is recovered from the settings URL's org.
     expect(completion?.issuesUrl).toBe("https://acme.sentry.io/issues/");
-    expect(completion?.mcp).toEqual({
-      url: "https://mcp.sentry.dev/mcp/acme/api",
-      orgSlug: "acme",
-      projectSlug: "api",
-    });
   });
 
   test("keeps the raw project URL only when the org can't be recovered", () => {
@@ -279,7 +268,6 @@ describe("formatResult completion payload", () => {
 
     const completion = summaryCall(calls)?.completion;
     expect(completion?.issuesUrl).toBe("not-a-url");
-    expect(completion?.mcp).toBeUndefined();
   });
 });
 
