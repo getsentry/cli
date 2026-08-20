@@ -91,7 +91,11 @@ type SpanViewArgs =
  * Handles one-slash (`<trace-id>/<span-id>`) and multi-slash
  * (`org/project/<trace-id>/<span-id>`) forms. Returns null when the arg
  * cannot be unambiguously split (e.g. left side is not a hex trace ID in
- * the single-slash case).
+ * the single-slash case). Throws a trace-focused {@link ContextError} when
+ * the arg clearly intends the `<trace-target>/<span-id>` form but the
+ * trace-target portion is invalid (e.g. `org/project/<span-id>`).
+ *
+ * @throws {ContextError} When the trace-target prefix fails validation.
  */
 function tryAutoSplitSpanArg(arg: string): SpanViewArgs | null {
   const lastSlashIdx = arg.lastIndexOf("/");
@@ -123,15 +127,21 @@ function tryAutoSplitSpanArg(arg: string): SpanViewArgs | null {
   try {
     traceTarget = parseSlashSeparatedTraceTarget(tracePrefix, USAGE_HINT);
   } catch (error) {
-    // The prefix failed trace-target validation (e.g. the user passed
-    // org/project/<span-id> without a trace ID, so the project name was
-    // mistakenly parsed as a trace ID). Fall back to null so the caller
-    // can surface a proper ContextError instead of a confusing ValidationError.
-    log.debug(
-      "tryAutoSplitSpanArg: trace prefix failed validation, falling through",
-      error
-    );
-    return null;
+    // We already confirmed the last segment is a span ID and the prefix
+    // looked like a trace target, so a validation failure here means the
+    // trace-target portion is bad — e.g. `org/project/<span-id>` (missing
+    // the trace ID) or `org/project/<bad-trace>/<span-id>`. Surface a
+    // trace-focused ContextError that preserves the underlying detail
+    // rather than falling through to the misleading "missing span ID" path.
+    const detail =
+      error instanceof ValidationError || error instanceof ContextError
+        ? error.message
+        : String(error);
+    throw new ContextError("Trace ID", USAGE_HINT, [
+      `'${arg}' is missing a valid trace ID before the span ID '${possibleSpanId}'`,
+      detail,
+      `Provide the trace ID: sentry span view ${tracePrefix}/<trace-id> ${possibleSpanId}`,
+    ]);
   }
   log.warn(
     `Interpreting '${arg}' as <trace-target>/<span-id>. ` +
