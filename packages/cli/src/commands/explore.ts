@@ -460,6 +460,23 @@ type DatasetConfig = {
 };
 
 /**
+ * Translate `--environment` values into a query filter term. A single value
+ * becomes `environment:foo`; multiple values use the `environment:[a,b]` list
+ * syntax so they are ORed rather than ANDed.
+ */
+function buildEnvironmentQuery(
+  environment: string[] | undefined
+): string | undefined {
+  if (!environment || environment.length === 0) {
+    return;
+  }
+  if (environment.length === 1) {
+    return `environment:${environment[0]}`;
+  }
+  return `environment:[${environment.join(",")}]`;
+}
+
+/**
  * Resolve dataset-specific configuration: sort, query, validation, and fetch.
  *
  * For the `replays` dataset this validates fields, resolves replay-specific
@@ -521,14 +538,7 @@ function resolveDatasetConfig(params: {
 
   // Non-replay datasets: translate --environment into query filter terms
   // since the Discover/Events API expects environment:... in the query string.
-  let envPrefix: string | undefined;
-  if (environment && environment.length > 0) {
-    if (environment.length === 1) {
-      envPrefix = `environment:${environment[0]}`;
-    } else {
-      envPrefix = `environment:[${environment.join(",")}]`;
-    }
-  }
+  const envPrefix = buildEnvironmentQuery(environment);
   const queryWithEnv =
     [envPrefix, flags.query].filter(Boolean).join(" ") || undefined;
 
