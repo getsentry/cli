@@ -93,11 +93,49 @@ function toDirEntry(
     }
   }
 
+  if (entry.isDirectory()) {
+    return {
+      name: entry.name,
+      path: normalizePath(relNative),
+      type: "directory",
+    };
+  }
+
+  // File: attach size + a best-effort binary hint so the agent can decide what
+  // to read (like `ls -l`) without reading it first. Both are advisory.
   return {
     name: entry.name,
     path: normalizePath(relNative),
-    type: entry.isDirectory() ? "directory" : "file",
+    type: "file",
+    ...fileHints(abs),
   };
+}
+
+/** Cheap, best-effort size + binary hint for a file. Never throws. */
+function fileHints(abs: string): { size?: number; isBinary?: boolean } {
+  try {
+    const size = fs.statSync(abs).size;
+    return { isBinary: looksBinary(abs), size };
+  } catch {
+    return {};
+  }
+}
+
+/** True if the first bytes contain a NUL — a good-enough binary sniff. */
+function looksBinary(abs: string): boolean {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(abs, "r");
+    const buf = Buffer.alloc(512);
+    const read = fs.readSync(fd, buf, 0, buf.length, 0);
+    return buf.subarray(0, read).includes(0);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      fs.closeSync(fd);
+    }
+  }
 }
 
 async function walkDirectory(
