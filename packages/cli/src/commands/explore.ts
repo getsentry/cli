@@ -521,9 +521,14 @@ function resolveDatasetConfig(params: {
 
   // Non-replay datasets: translate --environment into query filter terms
   // since the Discover/Events API expects environment:... in the query string.
-  const envPrefix = environment
-    ? environment.map((e) => `environment:${e}`).join(" ")
-    : undefined;
+  let envPrefix: string | undefined;
+  if (environment && environment.length > 0) {
+    if (environment.length === 1) {
+      envPrefix = `environment:${environment[0]}`;
+    } else {
+      envPrefix = `environment:[${environment.join(",")}]`;
+    }
+  }
   const queryWithEnv =
     [envPrefix, flags.query].filter(Boolean).join(" ") || undefined;
 

@@ -906,6 +906,28 @@ describe("sentry explore", () => {
       );
     });
 
+    test("translates multiple --environment values into environment:[...] syntax", async () => {
+      resolveTargetSpy.mockResolvedValue({ org: "test-org" });
+      queryEventsSpy.mockResolvedValue({
+        data: MOCK_EVENTS_RESPONSE,
+        nextCursor: undefined,
+      });
+      const { context } = createContext();
+
+      await func.call(
+        context,
+        { ...DEFAULT_FLAGS, environment: ["production", "canary"] },
+        "test-org/"
+      );
+
+      expect(queryEventsSpy).toHaveBeenCalledWith(
+        "test-org",
+        expect.objectContaining({
+          query: "environment:[production,canary]",
+        })
+      );
+    });
+
     test("rejects replay detail-only fields on the replay dataset", async () => {
       resolveTargetSpy.mockResolvedValue({ org: "test-org" });
       const { context } = createContext();
