@@ -112,6 +112,7 @@ function parseSingleSlashLogArg(
  * @returns Parsed raw log IDs and optional target arg
  * @throws {ContextError} If no arguments provided
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: positional arg parsing has many format branches by design
 export function parsePositionalArgs(args: string[]): {
   rawLogIds: string[];
   targetArg: string | undefined;
