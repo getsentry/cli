@@ -5,8 +5,6 @@ export type DirEntry = {
   /** File size in bytes; omitted for directories. Lets the agent skip huge
    *  files without reading them, like `ls -l`. */
   size?: number;
-  /** Best-effort binary hint (NUL byte in the first bytes); advisory only. */
-  isBinary?: boolean;
 };
 
 export type ExistingProjectData = {
