@@ -30,12 +30,20 @@ import {
   EXIT_VERIFICATION_FAILED,
   SENTRY_AGENT_INSTALL_COMMAND,
 } from "./constants.js";
-import type { WizardOutput, WorkflowRunResult } from "./types.js";
+import type {
+  SentryProjectIdentity,
+  WizardOutput,
+  WorkflowRunResult,
+} from "./types.js";
 import type { WizardCompletion, WizardSummary, WizardUI } from "./ui/types.js";
 import type { VerifyResult } from "./verify-setup.js";
 
 /** Package managers whose dev script we can name for the "start your app" step. */
 const KNOWN_PACKAGE_MANAGERS = ["pnpm", "yarn", "bun", "npm"] as const;
+
+/** A genuine Sentry project id is all digits — anything else (e.g. the
+ * "(dry-run)" stub) must not be used to scope the Issues stream. */
+const NUMERIC_PROJECT_ID = /^\d+$/;
 
 /** Best-effort human name for the project, for the completion header. */
 function deriveProjectName(output: WizardOutput): string {
@@ -79,7 +87,13 @@ function buildCompletion(
     ? parseOrgProjectFromSettingsUrl(output.sentryProjectUrl)
     : {};
   const orgSlug = output.orgSlug ?? parsed.orgSlug;
-  const { projectId } = output;
+  // Only a genuine numeric project id can scope the Issues stream. Guard against
+  // non-numeric placeholders — e.g. the "(dry-run)" sentinel from the dry-run
+  // project stub — leaking into the URL as `?project=(dry-run)`. A missing id
+  // just yields the org-wide Issues stream.
+  const projectId = NUMERIC_PROJECT_ID.test(output.projectId ?? "")
+    ? output.projectId
+    : undefined;
   // Prefer the project-scoped Issues stream (where errors land); fall back to
   // whatever project URL the server sent if we couldn't resolve the org.
   const issuesUrl = orgSlug
@@ -179,12 +193,37 @@ function buildSummary(
   };
 }
 
+/**
+ * Overlay the locally-captured Sentry project identity onto the workflow output.
+ *
+ * The CLI creates the project itself, so its captured org/project/projectId are
+ * authoritative and take precedence over anything the server echoes back. The
+ * server no longer sends these fields (see cli-init-api#239), but keeping the
+ * `output.*` fallback means the CLI still works against any server version.
+ */
+function mergeSentryProjectIdentity(
+  output: WizardOutput,
+  identity: SentryProjectIdentity | undefined
+): WizardOutput {
+  if (!identity) {
+    return output;
+  }
+  return {
+    ...output,
+    orgSlug: identity.orgSlug ?? output.orgSlug,
+    projectSlug: identity.projectSlug ?? output.projectSlug,
+    projectId: identity.projectId ?? output.projectId,
+    sentryProjectUrl: output.sentryProjectUrl ?? identity.url,
+  };
+}
+
 export function formatResult(
   result: WorkflowRunResult,
   ui: WizardUI,
-  verify?: VerifyResult
+  verify?: VerifyResult,
+  sentryProject?: SentryProjectIdentity
 ): void {
-  const output: WizardOutput = result.result ?? {};
+  const output = mergeSentryProjectIdentity(result.result ?? {}, sentryProject);
   const summary = buildSummary(output, verify);
 
   if (summary) {
