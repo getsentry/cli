@@ -75,7 +75,7 @@ import type {
 import { getUIAsync } from "./ui/factory.js";
 import { LoggingUIPromptError } from "./ui/logging-ui.js";
 import type { SpinnerHandle, WelcomeOptions, WizardUI } from "./ui/types.js";
-import { verifySetup } from "./verify-setup.js";
+import { type VerifyResult, verifySetup } from "./verify-setup.js";
 import {
   precomputeDirListing,
   precomputeSentryDetection,
@@ -1309,12 +1309,13 @@ export async function handleFinalResult(
 
   // Run verification before printing the final summary so the user
   // sees the result inline with the rest of the output.
+  let verify: VerifyResult | undefined;
   if (cwd) {
     if (spinState.running) {
       spin.message("Verifying setup...");
     }
     try {
-      await verifySetup(result, ui, cwd);
+      verify = await verifySetup(result, ui, cwd);
     } catch (error) {
       logger.debug("Verification threw unexpectedly", error);
     }
@@ -1324,7 +1325,7 @@ export async function handleFinalResult(
     spin.stop("Done");
     spinState.running = false;
   }
-  formatResult(result, ui);
+  formatResult(result, ui, verify);
 }
 
 /**

@@ -87,6 +87,34 @@ export function formatSuccessReport(
   return lines.join("\n");
 }
 
+/**
+ * Compact success echo for the interactive completion screen. That screen
+ * already showed the full picture (what we set up, changed files, next steps),
+ * so on exit we leave only a two-line confirmation in the user's scrollback —
+ * not the whole summary again.
+ */
+export function formatSuccessExitLine(
+  summary: WizardSummary | undefined,
+  feedbackHint?: string
+): string {
+  const completion = summary?.completion;
+  const project = completion?.projectName ?? "your project";
+  const icon = chalk.hex(REPORT_SUCCESS)("✔");
+  const lines: string[] = [
+    "",
+    `${icon}  ${chalk.bold(`Sentry is installed in ${project}`)}`,
+  ];
+  const target = completion?.verification.eventUrl ?? completion?.issuesUrl;
+  if (target) {
+    const label = completion?.verification.received
+      ? "View your first event"
+      : "See your errors";
+    lines.push(`   ${chalk.hex(REPORT_MUTED)(`${label} → ${target}`)}`);
+  }
+  appendFeedbackHint(lines, feedbackHint);
+  return lines.join("\n");
+}
+
 function appendFeedbackHint(lines: string[], feedbackHint?: string): void {
   if (!feedbackHint) {
     return;

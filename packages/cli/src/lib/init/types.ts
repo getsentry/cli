@@ -277,6 +277,9 @@ export type WizardOutput = {
   exitCode?: number;
   docsUrl?: string;
   sentryProjectUrl?: string;
+  orgSlug?: string;
+  projectSlug?: string;
+  projectId?: string;
   message?: string;
   featureBlurbs?: Array<{ feature: string; blurb: string }>;
 };

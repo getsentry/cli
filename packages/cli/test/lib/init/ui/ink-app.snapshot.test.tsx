@@ -1295,3 +1295,97 @@ describe("Ink App snapshot", () => {
     expect(store.getSnapshot().requestCancel).toBeUndefined();
   });
 });
+
+describe("completion screen", () => {
+  function completionStore(verified: boolean): WizardStore {
+    const completion = {
+      projectName: "my-app",
+      features: ["Errors", "Tracing"],
+      featureBlurbs: [
+        { label: "Error Monitoring", blurb: "Captures unhandled exceptions." },
+        { label: "Tracing", blurb: "Measures request performance." },
+      ],
+      changedFileCount: 4,
+      issuesUrl: "https://acme.sentry.io/issues/?project=4507",
+      verification: verified
+        ? {
+            received: true,
+            eventUrl: "https://acme.sentry.io/issues/?query=event.id:abc123",
+          }
+        : { received: false },
+      mcp: {
+        url: "https://mcp.sentry.dev/mcp/acme/my-app",
+        orgSlug: "acme",
+        projectSlug: "my-app",
+      },
+      agentInstallCommand: "npx @sentry/ai install",
+      startCommand: "pnpm dev",
+      projectDir: "/tmp/my-app",
+    };
+    return new WizardStore({
+      layout: "workflow",
+      cliVersion: "9.9.9",
+      summary: { fields: [], completion },
+      outroState: {
+        kind: "success",
+        dismiss: () => {
+          // no-op in tests
+        },
+        actions: {
+          openUrl: () => {
+            // no-op in tests
+          },
+          writeMcpConfig: () => Promise.resolve(true),
+        },
+      },
+    });
+  }
+
+  test("guides the user to their first error when unverified", async () => {
+    const text = stripAnsi(
+      (await renderApp(completionStore(false), 100)).allOutput()
+    );
+    expect(text).toContain("Sentry is installed in my-app");
+    // "Here's what we set up" — the per-feature project info.
+    expect(text).toContain("Here's what we set up");
+    expect(text).toContain("Error Monitoring");
+    expect(text).toContain("Captures unhandled exceptions.");
+    // Just the file count — no platform key in this footnote.
+    expect(text).toContain("4 files changed");
+    expect(text).toContain("See your first error");
+    expect(text).toContain("pnpm dev");
+    expect(text).toContain("/issues/?project=4507");
+    expect(text).toContain("Open my Issues feed");
+    expect(text).toContain("Set up the Sentry MCP");
+    expect(text).toContain("Install the Sentry agent plugin");
+    expect(text).toContain("Finish");
+    // "Open the setup docs" was removed from the next steps.
+    expect(text).not.toContain("Open the setup docs");
+  });
+
+  test("celebrates and deep-links the first event when verified", async () => {
+    const text = stripAnsi(
+      (await renderApp(completionStore(true), 100)).allOutput()
+    );
+    expect(text).toContain("Sentry is installed in my-app");
+    expect(text).toContain("First event received");
+    expect(text).toContain("View my first event");
+    expect(text).toContain("event.id:abc123");
+  });
+
+  test("selecting the MCP step reveals the editor picker", async () => {
+    // Menu order is [issues, mcp, ...]; one arrow-down highlights the MCP
+    // step, Enter opens the editor sub-menu.
+    const text = stripAnsi(
+      (
+        await renderApp(completionStore(false), 100, {
+          input: [DOWN_ARROW, "\r"],
+        })
+      ).allOutput()
+    );
+    expect(text).toContain("Add the Sentry MCP to");
+    expect(text).toContain("Cursor");
+    expect(text).toContain(".cursor/mcp.json");
+    expect(text).toContain("Back");
+  });
+});
