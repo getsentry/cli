@@ -121,7 +121,9 @@ export function renderDashboardAsSixel(
   for (const positioned of widgets) {
     drawWidget(image, positioned, options);
   }
-  return encodeImageToSixel(image, image.width);
+  // The canvas is already bounded by MAX_CANVAS_PIXELS and must match the
+  // terminal width exactly to preserve the dashboard grid.
+  return encodeImageToSixel(image, image.width, true);
 }
 
 /** Place layout-less widgets beneath the explicit dashboard grid. */

@@ -237,6 +237,17 @@ describe("dashboard sixel integration", () => {
     expect(output.split(`${ESC}P`)).toHaveLength(2);
   });
 
+  test("preserves wide terminal canvas width", () => {
+    vi.mocked(sixelModule.terminalPixelWidth).mockReturnValue(1024);
+    const output = formatDashboardWithData(
+      makeDashboardData({
+        widgets: [makeWidget({ layout: { x: 0, y: 0, w: 6, h: 1 } })],
+      })
+    );
+
+    expect(output).toContain('"1;1;1024;72');
+  });
+
   test("falls back to the complete character dashboard without cell geometry", () => {
     vi.mocked(sixelModule.terminalPixelHeight).mockReturnValue(undefined);
     const output = formatDashboardWithData(
