@@ -46,6 +46,8 @@ export type DashboardViewData = {
   url: string;
   dateCreated?: string;
   environment?: string[];
+  /** Per-invocation sixel opt-in from `dashboard view --sixel`. */
+  sixel?: boolean;
   widgets: DashboardViewWidget[];
 };
 
@@ -90,6 +92,12 @@ function getTermWidth(): number {
     return Math.max(MIN_TERM_WIDTH, cols);
   }
   return DEFAULT_TERM_WIDTH;
+}
+
+/** Actual terminal width for pixel-exact sixel output, without ASCII's floor. */
+function getSixelTermWidth(): number | undefined {
+  const columns = process.stdout.columns;
+  return columns && columns > 0 ? columns : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -1851,7 +1859,7 @@ export function formatDashboardWithData(data: DashboardViewData): string {
   const lines: string[] = [];
   lines.push(...renderHeader(data, termWidth));
 
-  const sixel = renderCompleteDashboardAsSixel(data, termWidth);
+  const sixel = renderCompleteDashboardAsSixel(data, getSixelTermWidth());
   if (sixel) {
     lines.push(sixel);
   } else {
@@ -1870,13 +1878,14 @@ export function formatDashboardWithData(data: DashboardViewData): string {
  */
 function renderCompleteDashboardAsSixel(
   data: DashboardViewData,
-  termWidth: number
+  termWidth: number | undefined
 ): string | undefined {
   const env = getEnv();
   const optedIn =
+    data.sixel === true ||
     env.SENTRY_DASHBOARD_SIXEL === "1" ||
     data.widgets.some((widget) => widget.displayType === "timeseries_sixel");
-  if (!optedIn || isPlainOutput() || !canRenderSixel()) {
+  if (!(optedIn && termWidth) || isPlainOutput() || !canRenderSixel()) {
     return;
   }
   const pixelWidth = terminalPixelWidth(termWidth);

@@ -108,7 +108,7 @@ function buildViewData(
   },
   widgetResults: Map<number, WidgetDataResult>,
   widgets: DashboardWidget[],
-  opts: { period: string; url: string }
+  opts: { period: string; url: string; sixel: boolean }
 ): DashboardViewData {
   return {
     id: dashboard.id,
@@ -118,6 +118,7 @@ function buildViewData(
     url: opts.url,
     dateCreated: dashboard.dateCreated,
     environment: dashboard.environment,
+    sixel: opts.sixel,
     widgets: widgets.map((w, i) => ({
       title: w.title,
       displayType: w.displayType,
@@ -219,9 +220,6 @@ export const viewCommand = buildCommand({
   },
   async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
-    if (flags.sixel) {
-      process.env.SENTRY_DASHBOARD_SIXEL = "1";
-    }
     const { cwd } = this;
 
     const { dashboardRef, targetArg } = parseDashboardPositionalArgs(args);
@@ -296,6 +294,7 @@ export const viewCommand = buildCommand({
           const viewData = buildViewData(dashboard, widgetData, widgets, {
             period: formatTimeRangeFlag(timeRange),
             url,
+            sixel: flags.sixel,
           });
 
           if (!isFirstRender) {
@@ -327,6 +326,7 @@ export const viewCommand = buildCommand({
       buildViewData(dashboard, widgetData, widgets, {
         period: formatTimeRangeFlag(timeRange),
         url,
+        sixel: flags.sixel,
       })
     );
     return { hint: `Dashboard: ${url}` };

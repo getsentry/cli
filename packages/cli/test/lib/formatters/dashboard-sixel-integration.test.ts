@@ -67,12 +67,15 @@ function makeDashboardData(
 describe("dashboard sixel integration", () => {
   let savedSixelEnv: string | undefined;
   let savedPlainOutput: string | undefined;
+  let savedColumns: number | undefined;
 
   beforeEach(() => {
     savedSixelEnv = process.env.SENTRY_DASHBOARD_SIXEL;
     savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
+    savedColumns = process.stdout.columns;
     process.env.SENTRY_DASHBOARD_SIXEL = "1";
     process.env.SENTRY_PLAIN_OUTPUT = "0";
+    process.stdout.columns = 40;
     vi.spyOn(sixelModule, "canRenderSixel").mockReturnValue(true);
     vi.spyOn(sixelModule, "terminalPixelWidth").mockReturnValue(320);
     vi.spyOn(sixelModule, "terminalPixelHeight").mockReturnValue(12);
@@ -90,6 +93,7 @@ describe("dashboard sixel integration", () => {
     } else {
       process.env.SENTRY_PLAIN_OUTPUT = savedPlainOutput;
     }
+    process.stdout.columns = savedColumns;
   });
 
   test("renders one sixel canvas for a timeseries widget when enabled", () => {
@@ -246,6 +250,17 @@ describe("dashboard sixel integration", () => {
     );
 
     expect(output).toContain('"1;1;1024;72');
+  });
+
+  test("uses the actual narrow terminal width for the sixel canvas", () => {
+    vi.mocked(sixelModule.terminalPixelWidth).mockReturnValue(320);
+    const output = formatDashboardWithData(
+      makeDashboardData({
+        widgets: [makeWidget({ layout: { x: 0, y: 0, w: 6, h: 1 } })],
+      })
+    );
+
+    expect(output).toContain('"1;1;320;72');
   });
 
   test("falls back to the complete character dashboard without cell geometry", () => {
