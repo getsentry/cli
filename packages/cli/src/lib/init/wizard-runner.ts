@@ -149,6 +149,7 @@ function isProjectCreationOperation(
   );
 }
 
+/** Validate untrusted tool output before using it to resolve local project context. */
 function isExistingSentryDetection(value: unknown): value is {
   status: "installed" | "partial" | "none";
   signals: string[];
@@ -255,6 +256,7 @@ function hasActiveStepsPath(value: Record<string, unknown>): value is Record<
   );
 }
 
+/** Accept both current and legacy Mastra run snapshots during resume recovery. */
 function hasSuspendedPaths(value: Record<string, unknown>): value is Record<
   string,
   unknown

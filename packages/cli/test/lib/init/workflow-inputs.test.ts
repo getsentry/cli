@@ -28,6 +28,22 @@ afterEach(async () => {
 });
 
 describe("precomputeSentrySetupTargets", () => {
+  test("uses a non-empty identifier for a setup at the repository root", async () => {
+    const directory = await makeProject();
+    await writeFile(
+      path.join(directory, "package.json"),
+      JSON.stringify({ name: "root-application" })
+    );
+    await writeFile(
+      path.join(directory, "instrumentation.ts"),
+      "Sentry.init({ dsn: process.env.SENTRY_DSN });"
+    );
+
+    await expect(precomputeSentrySetupTargets(directory)).resolves.toEqual([
+      { autoSelect: true, name: ".", path: directory },
+    ]);
+  });
+
   test("maps a runtime initialization signal to its nearest workspace package", async () => {
     const directory = await makeProject();
     await writeFile(
@@ -52,7 +68,7 @@ describe("precomputeSentrySetupTargets", () => {
     await expect(precomputeSentrySetupTargets(directory)).resolves.toEqual([
       {
         autoSelect: true,
-        name: "junior",
+        name: "packages/junior",
         path: path.join(directory, "packages", "junior"),
       },
     ]);
@@ -90,7 +106,7 @@ describe("precomputeSentrySetupTargets", () => {
     await expect(precomputeSentrySetupTargets(directory)).resolves.toEqual([
       {
         autoSelect: true,
-        name: "api",
+        name: "apps/api",
         path: path.join(directory, "apps", "api"),
       },
     ]);
@@ -112,7 +128,7 @@ describe("precomputeSentrySetupTargets", () => {
     await writeFile(path.join(appDir, sourceFile), source);
 
     await expect(precomputeSentrySetupTargets(directory)).resolves.toEqual([
-      { autoSelect: true, name: "worker", path: appDir },
+      { autoSelect: true, name: "apps/worker", path: appDir },
     ]);
   });
 
@@ -134,7 +150,10 @@ describe("precomputeSentrySetupTargets", () => {
 
     const targets = await precomputeSentrySetupTargets(directory);
 
-    expect(targets.map((target) => target.name)).toEqual(["api", "web"]);
+    expect(targets.map((target) => target.name)).toEqual([
+      "apps/api",
+      "apps/web",
+    ]);
     expect(targets.every((target) => target.autoSelect)).toBe(true);
   });
 
@@ -160,7 +179,10 @@ describe("precomputeSentrySetupTargets", () => {
 
     const targets = await precomputeSentrySetupTargets(directory);
 
-    expect(targets.map((target) => target.name)).toEqual(["api", "web"]);
+    expect(targets.map((target) => target.name)).toEqual([
+      "apps/api",
+      "apps/web",
+    ]);
   });
 
   test("keeps separate sources when workspaces share the same DSN", async () => {
@@ -182,7 +204,10 @@ describe("precomputeSentrySetupTargets", () => {
 
     const targets = await precomputeSentrySetupTargets(directory);
 
-    expect(targets.map((target) => target.name)).toEqual(["api", "web"]);
+    expect(targets.map((target) => target.name)).toEqual([
+      "apps/api",
+      "apps/web",
+    ]);
   });
 
   test("disables automatic selection when strong evidence is truncated", async () => {
@@ -205,7 +230,7 @@ describe("precomputeSentrySetupTargets", () => {
     );
 
     await expect(precomputeSentrySetupTargets(directory)).resolves.toEqual([
-      { autoSelect: false, name: "api", path: appDir },
+      { autoSelect: false, name: "apps/api", path: appDir },
     ]);
   });
 
@@ -232,7 +257,7 @@ describe("precomputeSentrySetupTargets", () => {
     );
 
     await expect(precomputeSentrySetupTargets(directory)).resolves.toEqual([
-      { autoSelect: true, name: "workspace-root", path: directory },
+      { autoSelect: true, name: ".", path: directory },
     ]);
   });
 
@@ -341,20 +366,20 @@ describe("precomputeWorkspaceTargetInventory", () => {
         {
           framework: "Nitro",
           label: "Junior Example",
-          name: "example",
+          name: "apps/example",
           path: exampleDir,
           role: "example",
         },
         {
           framework: "Astro",
           label: "Junior Docs",
-          name: "docs",
+          name: "packages/docs",
           path: docsDir,
           role: "documentation",
         },
         {
           label: "Junior",
-          name: "junior",
+          name: "packages/junior",
           path: runtimeDir,
           role: "runtime",
         },
@@ -409,9 +434,54 @@ describe("precomputeWorkspaceTargetInventory", () => {
         {
           framework: "Nitro",
           label: "Junior Consumer",
-          name: "consumer",
+          name: "apps/consumer",
           path: consumerDir,
           role: "example",
+        },
+      ],
+    });
+  });
+
+  test("does not classify every Astro application as documentation", async () => {
+    const directory = await makeProject();
+    await writeFile(
+      path.join(directory, "package.json"),
+      JSON.stringify({ name: "company-workspace" })
+    );
+    const websiteDir = path.join(directory, "apps", "website");
+    await mkdir(websiteDir, { recursive: true });
+    await writeFile(
+      path.join(websiteDir, "package.json"),
+      JSON.stringify({
+        name: "@company/website",
+        dependencies: { astro: "6.0.0" },
+        scripts: { deploy: "astro build" },
+      })
+    );
+    await writeFile(path.join(websiteDir, "astro.config.mjs"), "");
+
+    const listing = [
+      "apps/website/package.json",
+      "apps/website/astro.config.mjs",
+    ].map(
+      (filePath): DirEntry => ({
+        name: path.basename(filePath),
+        path: filePath,
+        type: "file",
+      })
+    );
+
+    await expect(
+      precomputeWorkspaceTargetInventory(directory, listing, [])
+    ).resolves.toEqual({
+      complete: false,
+      targets: [
+        {
+          framework: "Astro",
+          label: "Company Website",
+          name: "apps/website",
+          path: websiteDir,
+          role: "application",
         },
       ],
     });
@@ -464,7 +534,7 @@ describe("precomputeWorkspaceTargetInventory", () => {
         {
           framework: "Next.js",
           label: "Mixed Web",
-          name: "web",
+          name: "apps/web",
           path: webDir,
           role: "application",
         },

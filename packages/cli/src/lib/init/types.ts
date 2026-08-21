@@ -15,7 +15,7 @@ export type ExistingProjectData = {
   projectSlug: string;
   projectDisplay?: string;
   projectId: string;
-  dsn: string;
+  dsn?: string;
   url: string;
   platform?: string;
 };
@@ -54,7 +54,7 @@ export type ResolvedInitContext = {
    * Implicit team resolution is deferred until project creation so existing
    * projects never require a team choice.
    */
-  team?: ResolvedConcreteTeam;
+  team?: Omit<ResolvedConcreteTeam, "source"> & { source: "explicit" };
   project?: string;
   /** Pre-selected app name for monorepo runs. Passed through from `--app`. */
   app?: string;

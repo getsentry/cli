@@ -666,10 +666,19 @@ describe("resolveInitProjectContext", () => {
     expect(listProjectsSpy).toHaveBeenCalledWith("acme");
   });
 
-  test("honors an explicit project without running automatic resolution", async () => {
+  test("confirms an env-backed explicit project with independent canonical evidence", async () => {
     detectSentrySetupSpy.mockResolvedValue({
       status: "installed",
       signals: ["init: src/instrumentation.ts"],
+    });
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "acme",
+          project: "junior",
+          matchStrength: "exact",
+        },
+      ],
     });
     const { ui } = createMockUI();
 
@@ -681,7 +690,8 @@ describe("resolveInitProjectContext", () => {
     );
 
     expect(result.existingProject?.projectSlug).toBe("junior");
-    expect(resolveAllTargetsSpy).not.toHaveBeenCalled();
+    expect(result.setupIntent).toBe("improve-existing");
+    expect(resolveAllTargetsSpy).toHaveBeenCalled();
   });
 
   test("reuses a matching local DSN for an explicit existing project", async () => {
@@ -705,7 +715,7 @@ describe("resolveInitProjectContext", () => {
     );
   });
 
-  test("does not attach a local DSN from another project to an explicit target", async () => {
+  test("treats an explicit project with a different local DSN as another project", async () => {
     tryGetPrimaryDsnSpy.mockResolvedValueOnce(null);
     detectSentrySetupSpy.mockResolvedValue({
       dsn: "https://other@o1.ingest.sentry.io/different-id",
@@ -714,14 +724,87 @@ describe("resolveInitProjectContext", () => {
     });
     const { ui } = createMockUI();
 
-    await expect(
-      resolveInitProjectContext(
-        makeContext({ project: "junior" }),
-        "/work/checkout/apps/junior",
-        ui,
-        { supportsExistingSetupImprovement: true }
-      )
-    ).rejects.toThrow("could not obtain a matching DSN");
+    const result = await resolveInitProjectContext(
+      makeContext({ project: "junior" }),
+      "/work/checkout/apps/junior",
+      ui,
+      { supportsExistingSetupImprovement: true }
+    );
+
+    expect(result.existingProject).toEqual(
+      expect.objectContaining({ projectSlug: "junior" })
+    );
+    expect(result.existingProject?.dsn).toBeUndefined();
+    expect(result.setupIntent).toBeUndefined();
+  });
+
+  test("improves an existing setup even when project-key lookup is unavailable", async () => {
+    tryGetPrimaryDsnSpy.mockResolvedValueOnce(null);
+    detectSentrySetupSpy.mockResolvedValue({
+      signals: ["init: src/instrumentation.ts"],
+      status: "installed",
+    });
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "acme",
+          project: "junior",
+          matchStrength: "exact",
+        },
+      ],
+    });
+    const { ui } = createMockUI();
+
+    const result = await resolveInitProjectContext(
+      makeContext({ project: "junior" }),
+      "/work/checkout/apps/junior",
+      ui,
+      { supportsExistingSetupImprovement: true }
+    );
+
+    expect(result.existingProject).toEqual(
+      expect.objectContaining({ projectSlug: "junior" })
+    );
+    expect(result.existingProject?.dsn).toBeUndefined();
+    expect(result.setupIntent).toBe("improve-existing");
+  });
+
+  test("does not improve an env-backed explicit project without independent evidence", async () => {
+    tryGetPrimaryDsnSpy.mockResolvedValueOnce(null);
+    detectSentrySetupSpy.mockResolvedValue({
+      signals: ["init: src/instrumentation.ts"],
+      status: "installed",
+    });
+    const { ui } = createMockUI();
+
+    const result = await resolveInitProjectContext(
+      makeContext({ project: "junior" }),
+      "/work/checkout/apps/junior",
+      ui,
+      { supportsExistingSetupImprovement: true }
+    );
+
+    expect(result.existingProject?.projectSlug).toBe("junior");
+    expect(result.setupIntent).toBeUndefined();
+  });
+
+  test("does not match a self-hosted DSN to a SaaS project with the same ID", async () => {
+    tryGetPrimaryDsnSpy.mockResolvedValueOnce(null);
+    detectSentrySetupSpy.mockResolvedValue({
+      dsn: "https://local@sentry.example.com/id-junior",
+      signals: ["dsn: code (src/instrumentation.ts)"],
+      status: "installed",
+    });
+    const { ui } = createMockUI();
+
+    const result = await resolveInitProjectContext(
+      makeContext({ project: "junior" }),
+      "/work/checkout/apps/junior",
+      ui,
+      { supportsExistingSetupImprovement: true }
+    );
+
+    expect(result.setupIntent).toBeUndefined();
   });
 
   test("does not mark a missing explicit project as an existing setup improvement", async () => {
@@ -790,6 +873,36 @@ describe("resolveInitProjectContext", () => {
 
     expect(result).toEqual({
       project: undefined,
+      existingProject: undefined,
+    });
+    expect(calls.filter((call) => call.kind === "select")).toHaveLength(0);
+  });
+
+  test("chooses a non-conflicting slug non-interactively after rejecting a mismatch", async () => {
+    detectSentrySetupSpy.mockResolvedValue({
+      dsn: "https://other@o1.ingest.sentry.io/different-id",
+      signals: ["dsn: code (src/instrumentation.ts)"],
+      status: "installed",
+    });
+    resolveAllTargetsSpy.mockResolvedValue({
+      targets: [
+        {
+          org: "acme",
+          project: "junior",
+          matchStrength: "exact",
+        },
+      ],
+    });
+    const { ui, calls } = createMockUI();
+
+    const result = await resolveInitProjectContext(
+      makeContext({ yes: true }),
+      "/work/checkout/apps/junior",
+      ui
+    );
+
+    expect(result).toEqual({
+      project: "junior-2",
       existingProject: undefined,
     });
     expect(calls.filter((call) => call.kind === "select")).toHaveLength(0);

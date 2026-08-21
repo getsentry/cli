@@ -732,6 +732,27 @@ describe("project create", () => {
     expect(parsed.teamSlug).toBe("engineering");
   });
 
+  test("never offers an interactive team picker for JSON output", async () => {
+    listTeamsSpy.mockResolvedValue([sampleTeam, sampleTeam2]);
+    const { context: baseContext } = createMockContext();
+    const ttyProcess = Object.create(process) as NodeJS.Process;
+    Object.defineProperty(ttyProcess, "stdout", {
+      value: { isTTY: true },
+    });
+    const ttyStdin = Object.create(process.stdin) as SentryContext["stdin"];
+    Object.defineProperty(ttyStdin, "isTTY", { value: true });
+    const context = {
+      ...baseContext,
+      process: ttyProcess,
+      stdin: ttyStdin,
+    } satisfies SentryContext;
+    const func = await createCommand.loader();
+
+    await expect(
+      func.call(context, { json: true }, "my-app:node")
+    ).rejects.toThrow("Choose one explicitly with --team");
+  });
+
   test("handles DSN fetch failure gracefully", async () => {
     // Override to simulate DSN fetch failure inside createProjectWithDsn
     createProjectWithDsnSpy.mockResolvedValue({

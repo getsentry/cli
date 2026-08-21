@@ -786,6 +786,42 @@ describe("runWizard", () => {
     expect(spinnerMock.stop).not.toHaveBeenCalledWith("Sentry setup analyzed");
   });
 
+  test("passes an older service's missing improvement capability to project resolution", async () => {
+    vi.mocked(readiness.checkReadiness).mockResolvedValueOnce({
+      improveExistingSetup: false,
+    });
+    const detectionPayload: ToolPayload = {
+      type: "tool",
+      operation: "detect-sentry",
+      cwd: "/tmp/test",
+      params: {},
+    };
+    executeToolSpy.mockResolvedValue({
+      ok: true,
+      data: {
+        status: "installed",
+        signals: ["init: instrumentation.ts"],
+      },
+    });
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["check-existing-sentry"]],
+      steps: {
+        "check-existing-sentry": { suspendPayload: detectionPayload },
+      },
+    };
+    mockResumeResults = [{ status: "success", result: { exitCode: 0 } }];
+
+    await runWizard(makeOptions());
+
+    expect(resolveInitProjectContextSpy).toHaveBeenCalledWith(
+      makeContext(),
+      "/tmp/test",
+      expect.anything(),
+      expect.objectContaining({ supportsExistingSetupImprovement: false })
+    );
+  });
+
   test("keeps the workflow layout visible between app selection and the setup decision", async () => {
     const { ui, calls, respond } = createMockUI();
     respond.select("continue");

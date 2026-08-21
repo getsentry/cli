@@ -27,8 +27,8 @@ export async function tryGetExistingProjectData(
       projectSlug: project.slug,
       projectDisplay: project.name,
       projectId: project.id,
-      dsn: dsn ?? "",
       url: buildProjectUrl(orgSlug, project.slug),
+      ...(dsn ? { dsn } : {}),
       ...(project.platform ? { platform: project.platform } : {}),
     };
   } catch (error) {

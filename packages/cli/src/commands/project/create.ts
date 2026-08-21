@@ -658,7 +658,7 @@ export const createCommand = buildCommand({
     const teamAutoCreateSlug = parsed
       .map((p) => slugify(p.name))
       .find((slug) => slug !== "");
-    const chooseTeam = createTeamChooser(this);
+    const chooseTeam = flags.json ? undefined : createTeamChooser(this);
 
     // Create sequentially to respect rate limits. Results are emitted as one
     // value so --json stays parseable, including partial success before an error.

@@ -174,6 +174,52 @@ describe("createSentryProject", () => {
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 
+  test("fails early when a newly selected existing project has no readable DSN", async () => {
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: "my-app",
+      existingProject: {
+        orgSlug: "acme",
+        projectSlug: "my-app",
+        projectId: "42",
+        url: "https://sentry.io/settings/acme/projects/my-app/",
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: expect.stringContaining("Could not obtain a DSN"),
+    });
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+  });
+
+  test("allows an existing setup improvement to preserve its current DSN source", async () => {
+    const result = await createSentryProject(makePayload(), {
+      dryRun: false,
+      org: "acme",
+      team: undefined,
+      project: "my-app",
+      setupIntent: "improve-existing",
+      existingProject: {
+        orgSlug: "acme",
+        projectSlug: "my-app",
+        projectId: "42",
+        url: "https://sentry.io/settings/acme/projects/my-app/",
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      data: expect.objectContaining({
+        ensuredVia: "existing",
+        projectSlug: "my-app",
+      }),
+    });
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+  });
+
   test("returns error when project name produces an empty slug", async () => {
     const result = await createSentryProject(makePayload({ name: "---" }), {
       dryRun: false,

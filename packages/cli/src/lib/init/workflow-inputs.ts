@@ -1,3 +1,9 @@
+/**
+ * Builds the deterministic, project-scoped filesystem snapshot sent to the
+ * remote workflow. Files are opened through the project-file boundary and
+ * revalidated before their contents are trusted, so later AI discovery can
+ * narrow this inventory but cannot expand access beyond the selected project.
+ */
 import fs from "node:fs";
 import path from "node:path";
 import { logger } from "../logger.js";
@@ -132,7 +138,7 @@ const SDK_CONFIG_PATH_RE =
 export type SentrySetupTarget = {
   /** Whether complete, untruncated evidence makes unattended selection safe. */
   autoSelect: boolean;
-  /** Stable CLI identifier derived from the target's manifest or directory. */
+  /** Stable, non-empty repository-relative identifier. */
   name: string;
   /** Absolute filesystem path to the detected project root. */
   path: string;
@@ -322,6 +328,7 @@ async function readCommonConfigFile(
 export async function precomputeSentrySetupTargets(
   directory: string
 ): Promise<SentrySetupTarget[]> {
+  const root = path.resolve(directory);
   const detection = await detectSentrySetup(directory);
   if (detection.status !== "installed") {
     return [];
@@ -340,9 +347,9 @@ export async function precomputeSentrySetupTargets(
   }
 
   return await Promise.all(
-    [...roots].sort().map(async (projectRoot) => ({
+    [...roots].sort().map((projectRoot) => ({
       autoSelect: detection.evidenceTruncated !== true,
-      name: await projectName(projectRoot),
+      name: workspaceTargetId(root, projectRoot),
       path: projectRoot,
     }))
   );
@@ -552,7 +559,6 @@ async function inspectWorkspaceCandidate({
 
   const rawName = packageName(manifest) ?? path.basename(projectRoot);
   const role = classifyWorkspaceRole({
-    framework,
     hasSentrySetup,
     manifest,
     rawName,
@@ -564,7 +570,7 @@ async function inspectWorkspaceCandidate({
     target: {
       ...(framework ? { framework } : {}),
       label: workspaceLabel(rawName, repoName, role),
-      name: path.basename(projectRoot),
+      name: workspaceTargetId(root, projectRoot),
       path: projectRoot,
       role,
     },
@@ -631,14 +637,12 @@ function hasDeploymentIndicator(
 }
 
 function classifyWorkspaceRole({
-  framework,
   hasSentrySetup,
   manifest,
   rawName,
   readme,
   relativeRoot,
 }: {
-  framework?: string;
   hasSentrySetup: boolean;
   manifest: PackageManifest;
   rawName: string;
@@ -651,7 +655,6 @@ function classifyWorkspaceRole({
   }
   if (
     DOCS_NAME_RE.test(identity) ||
-    framework === "Astro" ||
     hasDependency(manifest, "@astrojs/starlight")
   ) {
     return "documentation";
@@ -848,6 +851,11 @@ function isPathWithin(root: string, candidate: string): boolean {
   return candidate === root || candidate.startsWith(`${root}${path.sep}`);
 }
 
+function workspaceTargetId(root: string, projectRoot: string): string {
+  const relative = path.relative(root, projectRoot).replaceAll("\\", "/");
+  return relative || ".";
+}
+
 async function tryRealpath(candidate: string): Promise<string | undefined> {
   try {
     return await fs.promises.realpath(candidate);
@@ -872,22 +880,4 @@ async function hasProjectManifest(directory: string): Promise<boolean> {
     logger.debug(`Failed to inspect project manifests: ${directory}`, error);
     return false;
   }
-}
-
-async function projectName(projectRoot: string): Promise<string> {
-  try {
-    const packagePath = path.join(projectRoot, "package.json");
-    const packageStat = await fs.promises.lstat(packagePath);
-    if (!packageStat.isFile()) {
-      return path.basename(projectRoot);
-    }
-    const raw = await fs.promises.readFile(packagePath, "utf-8");
-    const name = (JSON.parse(raw) as { name?: unknown }).name;
-    if (typeof name === "string" && name.trim()) {
-      return name.split("/").at(-1) ?? name;
-    }
-  } catch (error) {
-    logger.debug(`Failed to derive project name: ${projectRoot}`, error);
-  }
-  return path.basename(projectRoot);
 }

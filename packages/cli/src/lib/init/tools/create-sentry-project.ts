@@ -39,6 +39,27 @@ type ProjectData = {
   url: string;
 };
 
+function existingProjectResult(
+  context: Pick<ProjectCreationToolContext, "existingProject" | "setupIntent">
+): ToolResult | undefined {
+  if (!context.existingProject) {
+    return;
+  }
+  if (
+    !context.existingProject.dsn &&
+    context.setupIntent !== "improve-existing"
+  ) {
+    return {
+      ok: false,
+      error: `Could not obtain a DSN for existing project '${context.existingProject.orgSlug}/${context.existingProject.projectSlug}'. Check project-key access or choose a project whose keys you can read.`,
+    };
+  }
+  return {
+    ok: true,
+    data: { ...context.existingProject, ensuredVia: "existing" },
+  };
+}
+
 type ProjectCreationResponse = {
   project: {
     id: string;
@@ -124,13 +145,19 @@ async function createProjectWithPlatformFallback(opts: {
  * restricts project creation for members, we surface a clear error with an
  * escape hatch: the user can pass `sentry init <org>/<project-slug>` once an
  * admin creates the project, which resolves to an existing project and skips
- * creation entirely (preflight.ts:261).
+ * creation entirely (`resolveInitProjectContext` in preflight).
  */
 export async function createSentryProject(
   payload: CreateSentryProjectPayload | EnsureSentryProjectPayload,
   context: Pick<
     ProjectCreationToolContext,
-    "dryRun" | "existingProject" | "org" | "team" | "project" | "chooseTeam"
+    | "dryRun"
+    | "existingProject"
+    | "org"
+    | "team"
+    | "project"
+    | "setupIntent"
+    | "chooseTeam"
   > & { yes?: boolean }
 ): Promise<ToolResult> {
   const name = context.project ?? payload.params.name;
@@ -142,11 +169,9 @@ export async function createSentryProject(
     };
   }
 
-  if (context.existingProject) {
-    return {
-      ok: true,
-      data: { ...context.existingProject, ensuredVia: "existing" },
-    };
+  const existing = existingProjectResult(context);
+  if (existing) {
+    return existing;
   }
 
   const scopeRecovery = captureOAuthScopeRecoveryGate();
