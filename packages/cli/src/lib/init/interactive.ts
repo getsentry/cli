@@ -285,10 +285,16 @@ async function handleMultiSelect(
       (feature) => !UNSUPPORTED_INIT_FEATURES.has(feature)
     )
   );
+  const detectedExisting = (payload.initialFeatures ?? []).filter((feature) =>
+    available.includes(feature)
+  );
 
   if (options.yes) {
     const defaults = normalizeFeatureSelection(
-      available.filter((feature) => DEFAULT_FEATURES.has(feature))
+      available.filter(
+        (feature) =>
+          DEFAULT_FEATURES.has(feature) || detectedExisting.includes(feature)
+      )
     );
     ui.log.info(
       `Auto-selected default features: ${defaults.map(featureLabel).join(", ")}`
@@ -298,8 +304,9 @@ async function handleMultiSelect(
 
   const sorted = sortFeatureOptions(available);
   setTag("wizard.features.offered", available.join(","));
-  let initialValues: string[] = sorted.filter((feature) =>
-    DEFAULT_FEATURES.has(feature)
+  let initialValues: string[] = sorted.filter(
+    (feature) =>
+      DEFAULT_FEATURES.has(feature) || detectedExisting.includes(feature)
   );
 
   while (true) {

@@ -42,6 +42,54 @@ describe("detectSentrySetup", () => {
 
     expect(result.status).toBe("installed");
     expect(result.signals).toContain("init: src/instrumentation.ts");
+    expect(result.features).toEqual(["errorMonitoring"]);
+  });
+
+  test("reports features configured by an existing setup", async () => {
+    const directory = await makeProject();
+    await mkdir(path.join(directory, "src"));
+    await writeFile(
+      path.join(directory, "package.json"),
+      JSON.stringify({
+        dependencies: {
+          "@sentry/node": "^10.0.0",
+          "@sentry/profiling-node": "^10.0.0",
+        },
+      })
+    );
+    await writeFile(
+      path.join(directory, "src/instrumentation.ts"),
+      [
+        'import * as Sentry from "@sentry/node";',
+        "Sentry.init({",
+        "  enableLogs: true,",
+        "  tracesSampleRate: 0.2,",
+        '  profileLifecycle: "trace",',
+        "  profileSessionSampleRate: 0.1,",
+        "});",
+      ].join("\n")
+    );
+
+    const result = await detectSentrySetup(directory);
+
+    expect(result.features).toEqual([
+      "errorMonitoring",
+      "performanceMonitoring",
+      "profiling",
+      "logs",
+    ]);
+  });
+
+  test("does not infer features from commented examples", async () => {
+    const directory = await makeProject();
+    await writeFile(
+      path.join(directory, "sentry.server.config.ts"),
+      "// enableLogs: true\nexport const setup = true;\n"
+    );
+
+    const result = await detectSentrySetup(directory);
+
+    expect(result.features).toEqual(["errorMonitoring"]);
   });
 
   test("classifies an SDK dependency without initialization as partial", async () => {

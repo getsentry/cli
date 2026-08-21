@@ -33,6 +33,76 @@ const SDK_REFERENCE_PATTERN = [
   "getsentry/sentry-cocoa",
 ].join("|");
 
+const CONFIGURED_FEATURE_MARKERS = [
+  {
+    feature: "performanceMonitoring",
+    markers: [
+      "tracesSampleRate",
+      "tracesSampler",
+      "traces_sample_rate",
+      "traces_sampler",
+      "browserTracingIntegration",
+    ],
+  },
+  {
+    feature: "sessionReplay",
+    markers: [
+      "replaysSessionSampleRate",
+      "replaysOnErrorSampleRate",
+      "replayIntegration",
+      "new Sentry.Replay",
+    ],
+  },
+  {
+    feature: "profiling",
+    markers: [
+      "profilesSampleRate",
+      "profilesSampler",
+      "profileSessionSampleRate",
+      "profileLifecycle",
+      "profiles_sample_rate",
+      "profiles_sampler",
+      "profile_session_sample_rate",
+      "profile_lifecycle",
+      "nodeProfilingIntegration",
+      "browserProfilingIntegration",
+      "@sentry/profiling-node",
+    ],
+  },
+  { feature: "logs", markers: ["enableLogs", "enable_logs"] },
+  {
+    feature: "aiMonitoring",
+    markers: [
+      "openAIIntegration",
+      "vercelAIIntegration",
+      "anthropicAIIntegration",
+    ],
+  },
+  {
+    feature: "mcpObservability",
+    markers: ["wrapMcpServerWithSentry", "MCPIntegration"],
+  },
+  {
+    feature: "userFeedback",
+    markers: ["showReportDialog", "feedbackIntegration"],
+  },
+  {
+    feature: "reactFeatures",
+    markers: [
+      "Sentry.ErrorBoundary",
+      "withErrorBoundary",
+      "reactErrorHandler",
+      "captureReactException",
+    ],
+  },
+] as const;
+
+const FEATURE_SIGNAL_PATTERN = CONFIGURED_FEATURE_MARKERS.flatMap(
+  ({ markers }) => markers
+)
+  .map((marker) => marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  .join("|");
+
 const SDK_CONFIG_PATTERNS = [
   "**/sentry.*.config.*",
   "**/sentry.config.*",
@@ -87,9 +157,21 @@ export type ExistingSentryDetection = {
   status: ExistingSentryStatus;
   signals: string[];
   evidence?: ExistingSentryEvidence[];
+  features?: string[];
   dsn?: string;
   evidenceTruncated?: boolean;
 };
+
+function configuredFeatures(lines: readonly string[]): string[] {
+  const normalizedLines = lines.map((line) => line.toLowerCase());
+  return CONFIGURED_FEATURE_MARKERS.flatMap(({ feature, markers }) =>
+    markers.some((marker) =>
+      normalizedLines.some((line) => line.includes(marker.toLowerCase()))
+    )
+      ? [feature]
+      : []
+  );
+}
 
 async function findConfigFiles(
   cwd: string
@@ -117,29 +199,44 @@ export async function detectSentrySetup(
   cwd: string
 ): Promise<ExistingSentryDetection> {
   const { detectAllDsnOccurrences } = await import("../../dsn/index.js");
-  const [dsnOccurrences, initialization, sdkReferences, configResult] =
-    await Promise.all([
-      detectAllDsnOccurrences(cwd),
-      collectGrep({
-        cwd,
-        pattern: INITIALIZATION_PATTERN,
-        include: SOURCE_AND_MANIFEST_PATTERNS,
-        exclude: DETECTION_EXCLUDES,
-        alwaysSkipDirs: [...DEFAULT_SKIP_DIRS, ...DSN_ADDITIONAL_SKIP_DIRS],
-        maxMatchesPerFile: 1,
-        maxResults: 100,
-      }),
-      collectGrep({
-        cwd,
-        pattern: SDK_REFERENCE_PATTERN,
-        caseSensitive: false,
-        include: SOURCE_AND_MANIFEST_PATTERNS,
-        exclude: DETECTION_EXCLUDES,
-        alwaysSkipDirs: [...DEFAULT_SKIP_DIRS, ...DSN_ADDITIONAL_SKIP_DIRS],
-        maxResults: 20,
-      }),
-      findConfigFiles(cwd),
-    ]);
+  const [
+    dsnOccurrences,
+    initialization,
+    sdkReferences,
+    featureSignals,
+    configResult,
+  ] = await Promise.all([
+    detectAllDsnOccurrences(cwd),
+    collectGrep({
+      cwd,
+      pattern: INITIALIZATION_PATTERN,
+      include: SOURCE_AND_MANIFEST_PATTERNS,
+      exclude: DETECTION_EXCLUDES,
+      alwaysSkipDirs: [...DEFAULT_SKIP_DIRS, ...DSN_ADDITIONAL_SKIP_DIRS],
+      maxMatchesPerFile: 1,
+      maxResults: 100,
+    }),
+    collectGrep({
+      cwd,
+      pattern: SDK_REFERENCE_PATTERN,
+      caseSensitive: false,
+      include: SOURCE_AND_MANIFEST_PATTERNS,
+      exclude: DETECTION_EXCLUDES,
+      alwaysSkipDirs: [...DEFAULT_SKIP_DIRS, ...DSN_ADDITIONAL_SKIP_DIRS],
+      maxResults: 20,
+    }),
+    collectGrep({
+      cwd,
+      pattern: FEATURE_SIGNAL_PATTERN,
+      caseSensitive: false,
+      include: SOURCE_AND_MANIFEST_PATTERNS,
+      exclude: DETECTION_EXCLUDES,
+      alwaysSkipDirs: [...DEFAULT_SKIP_DIRS, ...DSN_ADDITIONAL_SKIP_DIRS],
+      maxMatchesPerFile: 20,
+      maxResults: 200,
+    }),
+    findConfigFiles(cwd),
+  ]);
 
   const dsn = dsnOccurrences[0];
   const configFiles = configResult.files;
@@ -189,11 +286,20 @@ export async function detectSentrySetup(
   } else if (uniqueSignals.length > 0) {
     status = "partial";
   }
+  const features = configuredFeatures(
+    featureSignals.matches
+      .filter((match) => !COMMENT_ONLY_LINE_RE.test(match.line))
+      .map((match) => match.line)
+  );
+  if (installed) {
+    features.unshift("errorMonitoring");
+  }
 
   return {
     status,
     signals: uniqueSignals,
     evidence,
+    ...(features.length > 0 ? { features } : {}),
     ...(dsn ? { dsn: dsn.raw } : {}),
     ...((initialization.stats.truncated || configResult.truncated) && {
       evidenceTruncated: true,

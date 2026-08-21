@@ -507,6 +507,61 @@ describe("handleMultiSelect", () => {
     ]);
   });
 
+  test("keeps detected existing features selected with --yes", async () => {
+    const { ui } = createMockUI();
+    const result = await handleInteractive(
+      {
+        availableFeatures: [
+          "errorMonitoring",
+          "performanceMonitoring",
+          "profiling",
+          "logs",
+        ],
+        initialFeatures: ["profiling"],
+        kind: "multi-select",
+        prompt: "Select features",
+        type: "interactive",
+      },
+      makeOptions({ yes: true }),
+      ui
+    );
+
+    expect(result.features).toContain("profiling");
+  });
+
+  test("preselects detected existing features in the interactive checklist", async () => {
+    const { calls, respond, ui } = createMockUI();
+    respond.multiselect(["profiling"]);
+    respond.select("continue");
+
+    await handleInteractive(
+      {
+        availableFeatures: [
+          "errorMonitoring",
+          "performanceMonitoring",
+          "profiling",
+          "logs",
+        ],
+        initialFeatures: ["profiling"],
+        kind: "multi-select",
+        prompt: "Select features",
+        type: "interactive",
+      },
+      makeOptions(),
+      ui
+    );
+
+    const prompt = calls.find((call) => call.kind === "multiselect");
+    expect(prompt?.initialValues).toEqual(
+      expect.arrayContaining([
+        "errorMonitoring",
+        "performanceMonitoring",
+        "logs",
+        "profiling",
+      ])
+    );
+  });
+
   test("returns error monitoring when no features are provided", async () => {
     const { ui, calls, respond } = createMockUI();
     respond.multiselect([]);

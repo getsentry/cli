@@ -335,6 +335,7 @@ export type MultiSelectPayload = {
   kind: "multi-select";
   prompt: string;
   availableFeatures?: string[];
+  initialFeatures?: string[];
   options?: string[];
 };
 
