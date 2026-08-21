@@ -368,14 +368,20 @@ function drawChartLabels(
   }
 ): void {
   const columns = Math.max(1, Math.floor(options.width / options.cellWidth));
+  const firstTimestamp = options.data.series[0]?.values[0]?.timestamp;
+  const lastTimestamp = options.data.series[0]?.values.at(-1)?.timestamp;
+  const spanDays =
+    firstTimestamp && lastTimestamp
+      ? (lastTimestamp - firstTimestamp) / (24 * 60 * 60)
+      : 0;
   const first =
     options.modelKind === "categorical"
       ? options.series[0]?.label
-      : formatTimestamp(options.data.series[0]?.values[0]?.timestamp);
+      : formatTimestamp(firstTimestamp, spanDays);
   const last =
     options.modelKind === "categorical"
       ? options.series.at(-1)?.label
-      : formatTimestamp(options.data.series[0]?.values.at(-1)?.timestamp);
+      : formatTimestamp(lastTimestamp, spanDays);
   drawPixelText(image, first ?? "", {
     x: options.x,
     y: options.y,
@@ -450,13 +456,22 @@ function formatChartValue(
   return unit ? `${formatted} ${unit}` : formatted;
 }
 
-/** Format timestamps in a compact time-axis form. */
-function formatTimestamp(timestamp: number | undefined): string {
+/** Format timestamps using the same span-aware form as the character dashboard. */
+export function formatTimestamp(
+  timestamp: number | undefined,
+  spanDays: number
+): string {
   if (!timestamp) {
     return "";
   }
   const date = new Date(timestamp * 1000);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  if (spanDays < 2) {
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  }
+  if (spanDays <= 30) {
+    return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+  }
+  return date.toLocaleString("en", { month: "short", day: "2-digit" });
 }
 
 /** Remove terminal formatting sequences before drawing text into a bitmap. */
