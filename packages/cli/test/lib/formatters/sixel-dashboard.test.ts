@@ -16,6 +16,9 @@ describe("formatTimestamp", () => {
     expect(formatTimestamp(0, 1)).toBe(
       `${String(epoch.getHours()).padStart(2, "0")}:${String(epoch.getMinutes()).padStart(2, "0")}`
     );
+    expect(formatTimestamp(0, 7)).toBe(
+      `${String(epoch.getMonth() + 1).padStart(2, "0")}/${String(epoch.getDate()).padStart(2, "0")}`
+    );
   });
 
   test("uses calendar dates for multi-day periods", () => {

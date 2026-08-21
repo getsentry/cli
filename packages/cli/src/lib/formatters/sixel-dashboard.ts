@@ -376,7 +376,7 @@ function drawChartLabels(
   const firstTimestamp = options.data.series[0]?.values[0]?.timestamp;
   const lastTimestamp = options.data.series[0]?.values.at(-1)?.timestamp;
   const spanDays =
-    firstTimestamp && lastTimestamp
+    typeof firstTimestamp === "number" && typeof lastTimestamp === "number"
       ? (lastTimestamp - firstTimestamp) / (24 * 60 * 60)
       : 0;
   const first =
