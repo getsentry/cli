@@ -189,6 +189,8 @@ export type WizardLayout = "intro" | "workflow";
 export type WizardSnapshot = {
   /** Top-level layout: centered intro/preflight or full workflow shell. */
   layout: WizardLayout;
+  /** Freeze the last rendered snapshot while the next prompt is prepared. */
+  presentationHold: boolean;
   /** CLI version displayed in the persistent Ink footer banner. */
   cliVersion: string | null;
   bannerRows: { content: string; color: string }[];
@@ -261,6 +263,7 @@ export class WizardStore {
   constructor(initial: Partial<WizardSnapshot> = {}) {
     this.snapshot = {
       layout: initial.layout ?? "workflow",
+      presentationHold: false,
       cliVersion: initial.cliVersion ?? null,
       bannerRows: initial.bannerRows ?? [],
       logs: initial.logs ?? [],
@@ -303,10 +306,15 @@ export class WizardStore {
   }
 
   setLayout(layout: WizardLayout): void {
-    if (this.snapshot.layout === layout) {
+    const releasePresentation =
+      layout === "workflow" && this.snapshot.presentationHold;
+    if (this.snapshot.layout === layout && !releasePresentation) {
       return;
     }
-    this.update({ layout });
+    this.update({
+      layout,
+      ...(releasePresentation ? { presentationHold: false } : {}),
+    });
   }
 
   appendLog(severity: LogSeverity, text: string): LogEntry {
@@ -362,7 +370,20 @@ export class WizardStore {
   }
 
   setPrompt(prompt: ActivePrompt | null): void {
-    this.update({ prompt });
+    this.update({
+      prompt,
+      ...(prompt && this.snapshot.presentationHold
+        ? { presentationHold: false }
+        : {}),
+    });
+  }
+
+  /** Freeze the visible frame until another prompt replaces this one. */
+  holdPresentation(): void {
+    if (this.snapshot.presentationHold) {
+      return;
+    }
+    this.update({ presentationHold: true });
   }
 
   setTipIndex(index: number): void {

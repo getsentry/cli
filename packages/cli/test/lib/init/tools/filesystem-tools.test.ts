@@ -22,15 +22,17 @@ function makeContext(directory: string): ResolvedInitContext {
 }
 
 let testDir: string;
-let detectDsnSpy: ReturnType<typeof spyOn>;
+let detectAllDsnOccurrencesSpy: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
   testDir = fs.mkdtempSync(path.join("/tmp", "init-tools-"));
-  detectDsnSpy = vi.spyOn(dsnIndex, "detectDsn").mockResolvedValue(null);
+  detectAllDsnOccurrencesSpy = vi
+    .spyOn(dsnIndex, "detectAllDsnOccurrences")
+    .mockResolvedValue([]);
 });
 
 afterEach(() => {
-  detectDsnSpy.mockRestore();
+  detectAllDsnOccurrencesSpy.mockRestore();
   fs.rmSync(testDir, { recursive: true, force: true });
 });
 
@@ -253,7 +255,7 @@ describe("filesystem tools", () => {
   });
 
   test("reports installed Sentry signals when a DSN is detected", async () => {
-    detectDsnSpy.mockResolvedValue({
+    const detectedDsn = {
       publicKey: "abc",
       protocol: "https",
       host: "o1.ingest.sentry.io",
@@ -261,7 +263,8 @@ describe("filesystem tools", () => {
       raw: "https://abc@o1.ingest.sentry.io/42",
       source: "env_file" as const,
       sourcePath: ".env",
-    });
+    };
+    detectAllDsnOccurrencesSpy.mockResolvedValue([detectedDsn]);
 
     const result = await executeTool(
       {

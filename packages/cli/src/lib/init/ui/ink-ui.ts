@@ -656,6 +656,9 @@ export class InkUI implements WizardUI {
           value: option.value,
           label: option.label,
           ...(option.hint ? { hint: option.hint } : {}),
+          ...(option.description
+            ? { description: stripAnsi(option.description) }
+            : {}),
         })),
         initialIndex,
         resolve: (value) => {
@@ -663,6 +666,13 @@ export class InkUI implements WizardUI {
             return;
           }
           settled = true;
+          if (value !== null && opts.holdPresentationOnResolve) {
+            this.activePromptCancel = undefined;
+            this.completedPrompt = prompt;
+            this.store.holdPresentation();
+            resolve(value as T);
+            return;
+          }
           this.completePrompt(
             prompt,
             value === null ? CANCELLED : (value as T),

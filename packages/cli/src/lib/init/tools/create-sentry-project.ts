@@ -130,14 +130,8 @@ export async function createSentryProject(
   payload: CreateSentryProjectPayload | EnsureSentryProjectPayload,
   context: Pick<
     ProjectCreationToolContext,
-    | "dryRun"
-    | "existingProject"
-    | "org"
-    | "team"
-    | "project"
-    | "chooseTeam"
-    | "yes"
-  >
+    "dryRun" | "existingProject" | "org" | "team" | "project" | "chooseTeam"
+  > & { yes?: boolean }
 ): Promise<ToolResult> {
   const name = context.project ?? payload.params.name;
   const slug = slugify(name);
@@ -151,8 +145,7 @@ export async function createSentryProject(
   if (context.existingProject) {
     return {
       ok: true,
-      message: `Using existing project "${context.existingProject.projectSlug}" in ${context.existingProject.orgSlug}`,
-      data: context.existingProject,
+      data: { ...context.existingProject, ensuredVia: "existing" },
     };
   }
 
@@ -194,6 +187,7 @@ export async function createSentryProject(
         projectId: projectData.projectId,
         dsn: projectData.dsn,
         url: projectData.url,
+        ensuredVia: "created",
       },
     };
   } catch (error) {
@@ -212,7 +206,7 @@ export async function createSentryProject(
     }
     if (
       await scopeRecovery.shouldDelegate(error, {
-        unattended: context.yes || context.dryRun,
+        unattended: context.yes === true || context.dryRun,
       })
     ) {
       throw error;

@@ -419,6 +419,24 @@ describe("WizardStore overlay lifecycle", () => {
     });
   });
 
+  test("a recovery overlay preserves a held presentation", () => {
+    const store = new WizardStore();
+    store.holdPresentation();
+
+    store.setOverlay({
+      kind: "health",
+      message: "Connection interrupted, retrying...",
+      retryCount: 1,
+    });
+
+    expect(store.getSnapshot().presentationHold).toBe(true);
+    expect(store.getSnapshot().overlay).toEqual({
+      kind: "health",
+      message: "Connection interrupted, retrying...",
+      retryCount: 1,
+    });
+  });
+
   test("clearOverlay nulls the overlay and notifies", () => {
     const store = new WizardStore();
     store.setOverlay({ kind: "health", message: "x", retryCount: 0 });

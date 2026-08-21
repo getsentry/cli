@@ -94,7 +94,7 @@ function makeContext(
     yes: true,
     dryRun: false,
     org: "acme",
-    team: "platform",
+    team: { slug: "platform", source: "explicit" },
     authToken: "test-token",
     ...overrides,
   };
@@ -103,6 +103,7 @@ function makeContext(
 let mockStartResult: WorkflowRunResult;
 let mockResumeResults: WorkflowRunResult[];
 let resumeCallCount = 0;
+let resumeCallArgs: Record<string, unknown>[];
 let startAsyncMock: ReturnType<typeof mock>;
 let mockRunByIdResult: WorkflowRunResult | Error;
 let runByIdMock: ReturnType<typeof mock>;
@@ -114,11 +115,13 @@ let formatErrorSpy: ReturnType<typeof spyOn>;
 let checkGitStatusSpy: ReturnType<typeof spyOn>;
 let handleInteractiveSpy: ReturnType<typeof spyOn>;
 let resolveInitContextSpy: ReturnType<typeof spyOn>;
+let resolveInitProjectContextSpy: ReturnType<typeof spyOn>;
 let describeToolSpy: ReturnType<typeof spyOn>;
 let executeToolSpy: ReturnType<typeof spyOn>;
 let precomputeDirListingSpy: ReturnType<typeof spyOn>;
+let precomputeSentrySetupTargetsSpy: ReturnType<typeof spyOn>;
+let precomputeWorkspaceInventorySpy: ReturnType<typeof spyOn>;
 let preReadCommonFilesSpy: ReturnType<typeof spyOn>;
-let precomputeSentryDetectionSpy: ReturnType<typeof spyOn>;
 let getWorkflowSpy: ReturnType<typeof spyOn>;
 let stderrSpy: ReturnType<typeof spyOn>;
 /**
@@ -165,6 +168,7 @@ beforeEach(() => {
 
   mockStartResult = { status: "success", result: { platform: "React" } };
   mockResumeResults = [];
+  resumeCallArgs = [];
   resumeCallCount = 0;
   mockRunByIdResult = new Error("runById not configured");
   process.exitCode = 0;
@@ -189,7 +193,9 @@ beforeEach(() => {
   };
   getUISpy = vi.spyOn(uiFactory, "getUIAsync").mockResolvedValue(wrapped);
 
-  vi.spyOn(readiness, "checkReadiness").mockResolvedValue(undefined);
+  vi.spyOn(readiness, "checkReadiness").mockResolvedValue({
+    improveExistingSetup: true,
+  });
   formatBannerSpy = vi.spyOn(banner, "formatBanner").mockReturnValue("BANNER");
   formatResultSpy = vi.spyOn(fmt, "formatResult").mockImplementation(noop);
   formatErrorSpy = vi.spyOn(fmt, "formatError").mockImplementation(noop);
@@ -202,6 +208,12 @@ beforeEach(() => {
   resolveInitContextSpy = vi
     .spyOn(preflight, "resolveInitContext")
     .mockResolvedValue(makeContext());
+  resolveInitProjectContextSpy = vi
+    .spyOn(preflight, "resolveInitProjectContext")
+    .mockImplementation(async (context) => ({
+      project: context.project,
+      existingProject: context.existingProject,
+    }));
   describeToolSpy = vi
     .spyOn(registry, "describeTool")
     .mockReturnValue("Running tool...");
@@ -212,15 +224,15 @@ beforeEach(() => {
   precomputeDirListingSpy = vi
     .spyOn(workflowInputs, "precomputeDirListing")
     .mockResolvedValue([]);
+  precomputeSentrySetupTargetsSpy = vi
+    .spyOn(workflowInputs, "precomputeSentrySetupTargets")
+    .mockResolvedValue([]);
+  precomputeWorkspaceInventorySpy = vi
+    .spyOn(workflowInputs, "precomputeWorkspaceTargetInventory")
+    .mockResolvedValue({ complete: false, targets: [] });
   preReadCommonFilesSpy = vi
     .spyOn(workflowInputs, "preReadCommonFiles")
     .mockResolvedValue({});
-  precomputeSentryDetectionSpy = vi
-    .spyOn(workflowInputs, "precomputeSentryDetection")
-    .mockResolvedValue({
-      ok: true,
-      data: { status: "none", signals: [] },
-    });
   stderrSpy = vi
     .spyOn(process.stderr, "write")
     .mockImplementation(() => true as any);
@@ -234,7 +246,8 @@ beforeEach(() => {
   const run = {
     runId: "test-run-id",
     startAsync: startAsyncMock,
-    resumeAsync: vi.fn(() => {
+    resumeAsync: vi.fn((args: Record<string, unknown>) => {
+      resumeCallArgs.push(args);
       const result = mockResumeResults[resumeCallCount] ?? {
         status: "success",
       };
@@ -273,11 +286,13 @@ afterEach(() => {
   checkGitStatusSpy.mockRestore();
   handleInteractiveSpy.mockRestore();
   resolveInitContextSpy.mockRestore();
+  resolveInitProjectContextSpy.mockRestore();
   describeToolSpy.mockRestore();
   executeToolSpy.mockRestore();
   precomputeDirListingSpy.mockRestore();
+  precomputeSentrySetupTargetsSpy.mockRestore();
+  precomputeWorkspaceInventorySpy.mockRestore();
   preReadCommonFilesSpy.mockRestore();
-  precomputeSentryDetectionSpy.mockRestore();
   getWorkflowSpy.mockRestore();
   stderrSpy.mockRestore();
 
@@ -616,6 +631,235 @@ describe("runWizard", () => {
     expect(spinnerMock.message).toHaveBeenCalledWith("Running tool...");
   });
 
+  test("resolves the project from the selected app detection before platform analysis", async () => {
+    const detectionPayload: ToolPayload = {
+      type: "tool",
+      operation: "detect-sentry",
+      cwd: "/tmp/test/apps/junior",
+      params: {},
+    };
+    const creationPayload: ToolPayload = {
+      type: "tool",
+      operation: "create-sentry-project",
+      cwd: "/tmp/test/apps/junior",
+      params: { name: "junior", platform: "javascript-nextjs" },
+    };
+    const existingProject = {
+      orgSlug: "acme",
+      projectSlug: "junior",
+      projectId: "42",
+      dsn: "https://key@o1.ingest.sentry.io/42",
+      url: "https://sentry.io/settings/acme/projects/junior/",
+      platform: "javascript-nextjs",
+    };
+    resolveInitProjectContextSpy.mockResolvedValue({
+      project: "junior",
+      existingProject,
+      setupIntent: "improve-existing",
+    });
+    executeToolSpy.mockImplementation(async (payload, executionContext) => {
+      if (payload.operation === "detect-sentry") {
+        return {
+          ok: true,
+          data: {
+            status: "installed",
+            signals: ["init: instrumentation.ts"],
+          },
+        };
+      }
+      expect(executionContext.existingProject).toBe(existingProject);
+      return { ok: true, data: {} };
+    });
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["check-existing-sentry"]],
+      steps: {
+        "check-existing-sentry": { suspendPayload: detectionPayload },
+      },
+    };
+    mockResumeResults = [
+      {
+        status: "suspended",
+        suspended: [["ensure-sentry-project"]],
+        steps: {
+          "ensure-sentry-project": { suspendPayload: creationPayload },
+        },
+      },
+      { status: "success" },
+    ];
+
+    await runWizard(makeOptions());
+
+    expect(resolveInitProjectContextSpy).toHaveBeenCalledTimes(1);
+    expect(resolveInitProjectContextSpy).toHaveBeenCalledWith(
+      makeContext(),
+      "/tmp/test/apps/junior",
+      expect.anything(),
+      {
+        setup: {
+          status: "installed",
+          signals: ["init: instrumentation.ts"],
+        },
+        suggestedProjectName: "junior",
+        supportsExistingSetupImprovement: true,
+      }
+    );
+    expect(resumeCallArgs[0]?.resumeData).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          setupIntent: "improve-existing",
+        }),
+      })
+    );
+    expect(executeToolSpy).toHaveBeenCalledTimes(2);
+    expect(spinnerMock.stop).not.toHaveBeenCalledWith("Sentry setup analyzed");
+  });
+
+  test("keeps the focused screen visible between app selection and the setup decision", async () => {
+    const { ui, calls, respond } = createMockUI();
+    respond.select("continue");
+    useMockUI(ui, calls);
+    resolveInitContextSpy.mockResolvedValue(
+      makeContext({ yes: false, dryRun: false })
+    );
+    handleInteractiveSpy.mockResolvedValue({ selectedApp: "junior" });
+
+    const detectionPayload: ToolPayload = {
+      type: "tool",
+      operation: "detect-sentry",
+      cwd: "/tmp/test/packages/junior",
+      params: {},
+    };
+    executeToolSpy.mockResolvedValue({
+      ok: true,
+      data: {
+        status: "installed",
+        signals: ["init: src/instrumentation.ts"],
+      },
+    });
+    resolveInitProjectContextSpy.mockImplementation(async () => {
+      const latestLayoutChange = calls.findLast(
+        (call) => call.kind === "setIntroMode"
+      );
+      expect(latestLayoutChange).toEqual({
+        kind: "setIntroMode",
+        enabled: true,
+      });
+      return {
+        project: "junior",
+        existingProject: {
+          orgSlug: "sentry",
+          projectSlug: "junior",
+          projectId: "42",
+          dsn: "https://key@o1.ingest.sentry.io/42",
+          url: "https://sentry.io/settings/sentry/projects/junior/",
+        },
+      };
+    });
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["select-target-app"]],
+      steps: {
+        "select-target-app": {
+          suspendPayload: {
+            type: "interactive",
+            kind: "select",
+            prompt: "Select the target application or package:",
+            options: ["junior", "docs", "example"],
+          },
+        },
+      },
+    };
+    mockResumeResults = [
+      {
+        status: "suspended",
+        suspended: [["check-existing-sentry"]],
+        steps: {
+          "check-existing-sentry": { suspendPayload: detectionPayload },
+        },
+      },
+      { status: "success" },
+    ];
+
+    await forceStdinTty(() =>
+      runWizard(makeOptions({ yes: false, dryRun: false }))
+    );
+
+    const layoutChanges = calls.filter((call) => call.kind === "setIntroMode");
+    expect(layoutChanges).toEqual([
+      { kind: "setIntroMode", enabled: true },
+      { kind: "setIntroMode", enabled: false },
+      { kind: "setIntroMode", enabled: true },
+      { kind: "setIntroMode", enabled: false },
+    ]);
+    const transitionIntroIndex = calls.findIndex(
+      (call, index) => index > 0 && call.kind === "setIntroMode" && call.enabled
+    );
+    const detectionStepIndex = calls.findIndex(
+      (call) =>
+        call.kind === "setStep" && call.stepId === "check-existing-sentry"
+    );
+    const decisionCompleteIndex = calls.findLastIndex(
+      (call) => call.kind === "setIntroMode" && !call.enabled
+    );
+    expect(detectionStepIndex).toBeGreaterThan(transitionIntroIndex);
+    expect(detectionStepIndex).toBeLessThan(decisionCompleteIndex);
+    expect(handleInteractiveSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "select" }),
+      expect.anything(),
+      expect.anything(),
+      { holdPresentationOnSelect: true }
+    );
+    expect(spinnerMock.stop).not.toHaveBeenCalledWith(
+      "Selecting target application"
+    );
+    expect(spinnerMock.stop).not.toHaveBeenCalledWith("Sentry setup analyzed");
+  });
+
+  test("does not inspect project context when app-scoped detection is sandbox-blocked", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "detect-sentry",
+      cwd: "/outside/project",
+      params: {},
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["check-existing-sentry"]],
+      steps: {
+        "check-existing-sentry": { suspendPayload: payload },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions());
+
+    expect(executeToolSpy).not.toHaveBeenCalled();
+    expect(resolveInitProjectContextSpy).not.toHaveBeenCalled();
+  });
+
+  test("does not resolve a project for an out-of-sandbox creation fallback", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "create-sentry-project",
+      cwd: "/outside/project",
+      params: { name: "outside", platform: "javascript-node" },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["ensure-sentry-project"]],
+      steps: {
+        "ensure-sentry-project": { suspendPayload: payload },
+      },
+    };
+    mockResumeResults = [{ status: "success" }];
+
+    await runWizard(makeOptions());
+
+    expect(executeToolSpy).not.toHaveBeenCalled();
+    expect(resolveInitProjectContextSpy).not.toHaveBeenCalled();
+  });
+
   test("gives interactive project creation a narrow team-choice capability", async () => {
     const { ui, calls, respond } = createMockUI();
     respond.select("continue");
@@ -663,6 +907,9 @@ describe("runWizard", () => {
       options: ["create", "existing"],
     });
     expect(spinnerMock.stop).toHaveBeenCalledWith("Found available teams");
+    expect(spinnerMock.stop).not.toHaveBeenCalledWith(
+      "Project context analyzed"
+    );
     expect(spinnerMock.start).toHaveBeenCalledWith(
       "Creating Sentry project..."
     );
@@ -693,7 +940,8 @@ describe("runWizard", () => {
         prompt: "Continue?",
       },
       makeContext(),
-      expect.anything()
+      expect.anything(),
+      {}
     );
   });
 
@@ -915,19 +1163,33 @@ describe("runWizard", () => {
     expect(messages).toContain("Analyzing 2 files...");
   });
 
-  test("passes precomputed dirListing/fileCache/existingSentry via initialState, not inputData", async () => {
+  test("passes precomputed dirListing/fileCache via initialState and defers Sentry detection", async () => {
     const dirListing = [
       { name: "package.json", path: "package.json", type: "file" as const },
     ];
     const fileCache = { "package.json": '{"name":"app"}' };
-    const detectedSentry = { status: "none" as const, signals: [] };
-
+    const sentrySetupTargets = [
+      {
+        autoSelect: true,
+        name: "junior",
+        path: "/tmp/test/packages/junior",
+      },
+    ];
+    const workspaceTargets = [
+      {
+        label: "Junior",
+        name: "junior",
+        path: "/tmp/test/packages/junior",
+        role: "runtime" as const,
+      },
+    ];
     precomputeDirListingSpy.mockResolvedValue(dirListing);
-    preReadCommonFilesSpy.mockResolvedValue(fileCache);
-    precomputeSentryDetectionSpy.mockResolvedValue({
-      ok: true,
-      data: detectedSentry,
+    precomputeSentrySetupTargetsSpy.mockResolvedValue(sentrySetupTargets);
+    precomputeWorkspaceInventorySpy.mockResolvedValue({
+      complete: true,
+      targets: workspaceTargets,
     });
+    preReadCommonFilesSpy.mockResolvedValue(fileCache);
 
     await runWizard(makeOptions());
 
@@ -949,7 +1211,10 @@ describe("runWizard", () => {
     expect(args.inputData).not.toHaveProperty("existingSentry");
     expect(args.initialState?.dirListing).toEqual(dirListing);
     expect(args.initialState?.fileCache).toEqual(fileCache);
-    expect(args.initialState?.existingSentry).toEqual(detectedSentry);
+    expect(args.initialState?.sentrySetupTargets).toEqual(sentrySetupTargets);
+    expect(args.initialState?.workspaceTargets).toEqual(workspaceTargets);
+    expect(args.initialState?.workspaceTargetsComplete).toBe(true);
+    expect(args.initialState).not.toHaveProperty("existingSentry");
   });
 
   test("renders tool result messages via the spinner stop state", async () => {
@@ -2043,4 +2308,3 @@ describe("runWizard — progress rotation for long-running steps", () => {
     await runPromise;
   });
 });
-

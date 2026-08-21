@@ -37,6 +37,8 @@ const A_ALL_HINT_RE = /a\s+all/;
 const ENTER_CONTINUE_HINT_RE = /enter\s+continue/;
 const ESC_CANCEL_HINT_RE = /esc\s+cancel/;
 const COMPLETED_SELECTING_FEATURES_RE = /✔\s+Selecting features/;
+const DOTS_SPINNER_GLYPH_RE = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/gu;
+const WRAPPED_SETUP_DECISION_RE = /What would you like to\s+do\?/;
 const ANSI_ESCAPE_PREFIX = "\u001B[";
 const CURSOR_TO_LINE_START = "\u001B[G";
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in captured Ink output
@@ -374,6 +376,189 @@ describe("Ink App snapshot", () => {
       renderedOptions[0]?.hintColumn,
       renderedOptions[0]?.hintColumn,
     ]);
+  });
+
+  test("select option descriptions render as muted lines below their labels", async () => {
+    const store = new WizardStore({ bannerRows: [], layout: "intro" });
+    store.setPrompt({
+      kind: "select",
+      message: "What would you like to do with this Sentry setup?",
+      options: [
+        {
+          value: "improve",
+          label: "Improve your Sentry setup",
+          description:
+            "Add features like tracing or Replay, repair issues, or upgrade your current setup.",
+        },
+        {
+          value: "other",
+          label: "Use or create another Sentry project",
+          description: "Use another project or create a new one.",
+        },
+      ],
+      initialIndex: 0,
+      resolve: ignorePromptResolution,
+    });
+
+    const previousChalkLevel = chalk.level;
+    chalk.level = 3;
+    let rawFrame: string;
+    try {
+      rawFrame = (await renderApp(store, 80)).allOutput();
+    } finally {
+      chalk.level = previousChalkLevel;
+    }
+    const frame = stripAnsi(rawFrame);
+    const lines = frame.split(LINE_SPLIT_RE);
+    const improveLabelLine = lines.findIndex((line) =>
+      line.includes("Improve your Sentry setup")
+    );
+    const improveDescriptionFirstLine = lines.findIndex((line) =>
+      line.includes("Add features like tracing or Replay")
+    );
+    const improveDescriptionLastLine = lines.findIndex((line) =>
+      line.includes("setup.")
+    );
+    const otherLabelLine = lines.findIndex((line) =>
+      line.includes("Use or create another Sentry project")
+    );
+    const otherDescriptionLine = lines.findIndex((line) =>
+      line.includes("Use another project or create a new one.")
+    );
+
+    expect(frame).toContain("Add features like tracing or Replay");
+    expect(frame.replaceAll(/\s+/g, " ")).toContain(
+      "Add features like tracing or Replay, repair issues, or upgrade your current setup."
+    );
+    expect(frame).toContain("Use another project or create a new one.");
+    expect(rawFrame).toContain(
+      `${ANSI_ESCAPE_PREFIX}38;2;137;130;148mAdd features like tracing or Replay`
+    );
+    expect(improveDescriptionFirstLine).toBe(improveLabelLine + 1);
+    expect(improveDescriptionLastLine).toBe(improveDescriptionFirstLine + 1);
+    expect(otherLabelLine).toBe(improveDescriptionLastLine + 1);
+    expect(otherDescriptionLine).toBe(otherLabelLine + 1);
+  });
+
+  test("holds the target selector until the next setup prompt is ready", async () => {
+    const store = new WizardStore({ bannerRows: [] });
+    store.setPrompt({
+      kind: "select",
+      message: "Select the target application or package:",
+      options: [
+        { value: "junior", label: "Junior", hint: "Sentry detected" },
+        { value: "docs", label: "Junior Docs", hint: "Astro" },
+      ],
+      initialIndex: 0,
+      resolve: ignorePromptResolution,
+    });
+    const out = new CaptureStream(120, 40);
+    const stdin = makeStdin();
+    const instance = render(createElement(App, { store }), {
+      stdout: out as unknown as NodeJS.WriteStream,
+      stderr: out as unknown as NodeJS.WriteStream,
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      patchConsole: false,
+      exitOnCtrlC: false,
+    });
+
+    try {
+      await sleep(FRAME_SETTLE_MS);
+      const transitionFrameIndex = out.frames.length;
+      store.holdPresentation();
+      store.setLayout("intro");
+      store.appendLog("success", "Selecting target application");
+      store.startSpinner("Checking for your existing Sentry setup");
+      store.setStepStatus("check-existing-sentry", "in_progress");
+      store.appendLog("success", "Sentry setup analyzed");
+      await sleep(FRAME_SETTLE_MS * 3);
+
+      const heldFrame = stripAnsi(out.latestFrame());
+      const heldOutput = stripAnsi(
+        out.frames.slice(transitionFrameIndex).join("")
+      );
+      const heldSpinnerGlyphs = new Set(
+        heldOutput.match(DOTS_SPINNER_GLYPH_RE) ?? []
+      );
+      expect(heldFrame).toContain("Select the target application or package:");
+      expect(heldFrame).toContain("Junior");
+      expect(heldFrame).not.toContain("▸ Junior");
+      expect(heldSpinnerGlyphs.size).toBeGreaterThanOrEqual(2);
+      expect(heldFrame).not.toContain("Selecting target application");
+      expect(heldFrame).not.toContain(
+        "Checking for your existing Sentry setup"
+      );
+      expect(heldFrame).not.toContain("Sentry setup analyzed");
+
+      store.setOverlay({
+        kind: "health",
+        message: "Connection interrupted, retrying...",
+        retryCount: 1,
+      });
+      await sleep(FRAME_SETTLE_MS);
+      const recoveryFrame = stripAnsi(out.latestFrame());
+      expect(recoveryFrame).toContain(
+        "Select the target application or package:"
+      );
+      expect(recoveryFrame).toContain("Connection interrupted, retrying...");
+      expect(store.getSnapshot().presentationHold).toBe(true);
+      store.clearOverlay();
+
+      store.stopSpinner();
+      store.setPrompt({
+        kind: "select",
+        message:
+          "Sentry detected for project junior in organization Sentry. What would you like to do?",
+        options: [
+          { value: "improve", label: "Improve your Sentry setup" },
+          {
+            value: "other",
+            label: "Use or create another Sentry project",
+          },
+        ],
+        initialIndex: 0,
+        resolve: ignorePromptResolution,
+      });
+      await sleep(FRAME_SETTLE_MS);
+
+      const transitionOutput = stripAnsi(
+        out.frames.slice(transitionFrameIndex).join("")
+      );
+      const nextFrame = stripAnsi(out.latestFrame());
+      expect(transitionOutput).not.toContain("Selecting target application");
+      expect(transitionOutput).not.toContain(
+        "Checking for your existing Sentry setup"
+      );
+      expect(transitionOutput).not.toContain("Sentry setup analyzed");
+      expect(nextFrame).toContain("Sentry detected for project junior");
+      expect(nextFrame).toContain("in organization Sentry");
+      expect(nextFrame).toMatch(WRAPPED_SETUP_DECISION_RE);
+      expect(nextFrame).not.toContain("Selecting target application");
+      expect(nextFrame).not.toContain(
+        "Checking for your existing Sentry setup"
+      );
+      expect(nextFrame).not.toContain("Sentry setup analyzed");
+    } finally {
+      instance.unmount();
+    }
+  });
+
+  test("dry-run auto-resolution renders only the user-facing scan status", async () => {
+    const store = new WizardStore({ bannerRows: [] });
+    store.appendLog("warn", "Dry-run mode: no files will be modified.");
+    store.setStepStatus("discover-context", "completed");
+    store.setStepStatus("detect-platform", "in_progress");
+    store.startSpinner("Scanning project files...");
+
+    const frame = stripAnsi((await renderApp(store, 120)).latestFrame());
+
+    expect(frame).toContain("Dry-run mode: no files will be modified.");
+    expect(frame).toContain("Scanning project files...");
+    expect(frame).not.toContain("Selecting target application");
+    expect(frame).not.toContain("Auto-selected existing Sentry setup");
+    expect(frame).not.toContain("Sentry setup analyzed");
+    expect(frame).not.toContain("Sentry detected");
+    expect(frame).not.toContain("Project junior in organization Sentry");
   });
 
   test("workflow screen hides logo and shows feedback banner", async () => {
@@ -1117,6 +1302,57 @@ describe("Ink App snapshot", () => {
     );
     expect(scrolledFrame).toContain("(8/20)");
     expect(scrolledFrame).toContain("Team 8");
+  });
+
+  test("wrapped select descriptions account for every row when windowing", async () => {
+    const store = new WizardStore({ bannerRows: [] });
+    store.setPrompt({
+      kind: "select",
+      message: "Choose an action",
+      options: Array.from({ length: 8 }, (_value, index) => ({
+        value: `action-${index + 1}`,
+        label: `Action ${index + 1}`,
+        description: `Description ${index + 1} has enough supporting detail to wrap onto another line.`,
+      })),
+      initialIndex: 0,
+      resolve: ignorePromptResolution,
+    });
+
+    const rendered = await renderApp(store, 80, { rows: 16 });
+    const frame = stripFinalLineBreak(stripAnsi(rendered.latestFrame()));
+    const frameLines = frame.split(LINE_SPLIT_RE);
+    const descriptionTwoLine = frameLines.findIndex((line) =>
+      line.includes("Description 2 has enough supporting detail")
+    );
+    expect(frame).toContain("(1/8)");
+    expect(descriptionTwoLine).toBeGreaterThanOrEqual(0);
+    expect(frameLines[descriptionTwoLine + 1]).toContain(
+      "to wrap onto another line."
+    );
+    expect(frame).not.toContain("Action 3");
+    expect(frameLines.length).toBeLessThanOrEqual(16);
+
+    const scrolledFrame = stripFinalLineBreak(
+      stripAnsi(
+        (
+          await renderApp(store, 80, {
+            input: Array.from({ length: 7 }, () => DOWN_ARROW),
+            rows: 16,
+          })
+        ).latestFrame()
+      )
+    );
+    const scrolledLines = scrolledFrame.split(LINE_SPLIT_RE);
+    const descriptionEightLine = scrolledLines.findIndex((line) =>
+      line.includes("Description 8 has enough supporting detail")
+    );
+    expect(scrolledFrame).toContain("(8/8)");
+    expect(scrolledFrame).toContain("Action 8");
+    expect(descriptionEightLine).toBeGreaterThanOrEqual(0);
+    expect(scrolledLines[descriptionEightLine + 1]).toContain(
+      "to wrap onto another line."
+    );
+    expect(scrolledLines.length).toBeLessThanOrEqual(16);
   });
 
   test("long multiselect prompts only render options that fit the terminal", async () => {

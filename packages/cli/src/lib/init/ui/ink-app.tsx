@@ -184,11 +184,23 @@ export function App({ store }: AppProps): React.ReactNode {
 }
 
 function AppBody({ store }: AppProps): React.ReactNode {
-  const snapshot = useSyncExternalStore(
+  const liveSnapshot = useSyncExternalStore(
     store.subscribe,
     store.getSnapshot,
     store.getSnapshot
   );
+  const lastVisibleSnapshot = useRef(liveSnapshot);
+  const snapshot = liveSnapshot.presentationHold
+    ? lastVisibleSnapshot.current
+    : liveSnapshot;
+  const visibleOverlay = liveSnapshot.presentationHold
+    ? liveSnapshot.overlay
+    : snapshot.overlay;
+  useEffect(() => {
+    if (!liveSnapshot.presentationHold) {
+      lastVisibleSnapshot.current = liveSnapshot;
+    }
+  }, [liveSnapshot]);
   const { columns, rows } = useInkFrameSize();
   const [activeTab, setActiveTab] = useState(0);
 
@@ -212,7 +224,7 @@ function AppBody({ store }: AppProps): React.ReactNode {
         priority: 0,
         showInFooter: false,
         match: (input, key) => key.ctrl && input === "c",
-        run: () => snapshot.requestCancel?.(),
+        run: () => liveSnapshot.requestCancel?.(),
       },
       {
         key: "\u2190\u2192",
@@ -230,9 +242,28 @@ function AppBody({ store }: AppProps): React.ReactNode {
       },
     ];
     return bindings;
-  }, [snapshot.requestCancel, tabs.length]);
+  }, [liveSnapshot.requestCancel, tabs.length]);
   useInkShortcuts("init-app", appShortcuts, {
-    isActive: snapshot.layout === "workflow" && snapshot.prompt === null,
+    isActive:
+      !liveSnapshot.presentationHold &&
+      snapshot.layout === "workflow" &&
+      snapshot.prompt === null,
+  });
+  const heldPresentationShortcuts = useMemo<ShortcutBinding[]>(
+    () => [
+      {
+        key: "ctrl+c",
+        action: "cancel",
+        priority: 0,
+        showInFooter: false,
+        match: (input, key) => key.ctrl && input === "c",
+        run: () => liveSnapshot.requestCancel?.(),
+      },
+    ],
+    [liveSnapshot.requestCancel]
+  );
+  useInkShortcuts("held-presentation", heldPresentationShortcuts, {
+    isActive: liveSnapshot.presentationHold,
   });
 
   if (snapshot.layout === "intro" || snapshot.prompt?.kind === "welcome") {
@@ -251,12 +282,14 @@ function AppBody({ store }: AppProps): React.ReactNode {
         >
           <IntroScreen
             bannerRows={snapshot.bannerRows}
+            interactionDisabled={liveSnapshot.presentationHold}
             logs={snapshot.logs}
             prompt={snapshot.prompt}
             spinner={snapshot.spinner}
             width={width}
           />
         </Box>
+        {visibleOverlay ? <OverlayPanel overlay={visibleOverlay} /> : null}
         <FeedbackBanner cliVersion={snapshot.cliVersion} width={width} />
       </Box>
     );
@@ -284,6 +317,7 @@ function AppBody({ store }: AppProps): React.ReactNode {
             <Box flexDirection="column" flexGrow={1} overflow="hidden">
               {activeTab === 0 ? (
                 <ActivityPane
+                  interactionDisabled={liveSnapshot.presentationHold}
                   logs={snapshot.logs}
                   prompt={snapshot.prompt}
                   spinner={snapshot.spinner}
@@ -308,9 +342,7 @@ function AppBody({ store }: AppProps): React.ReactNode {
             ) : null}
           </Box>
 
-          {snapshot.overlay ? (
-            <OverlayPanel overlay={snapshot.overlay} />
-          ) : null}
+          {visibleOverlay ? <OverlayPanel overlay={visibleOverlay} /> : null}
 
           <TabFooter
             activeColor={ACCENT}
@@ -365,12 +397,14 @@ function Sidebar({
 // ─────────────────────────── Activity Pane ────────────────────────────
 
 function ActivityPane({
+  interactionDisabled,
   logs,
   spinner,
   prompt,
   summary,
   terminalRows,
 }: {
+  interactionDisabled: boolean;
   logs: LogEntry[];
   spinner: SpinnerState;
   prompt: ActivePrompt | null;
@@ -415,6 +449,7 @@ function ActivityPane({
       {summary ? <SummaryPanel summary={summary} /> : null}
       {prompt ? (
         <PromptArea
+          interactionDisabled={interactionDisabled}
           occupiedRows={visibleLogs.length + (spinner.active ? 2 : 0)}
           prompt={prompt}
         />
@@ -613,12 +648,14 @@ function FeedbackBanner({
 
 function IntroScreen({
   bannerRows,
+  interactionDisabled,
   logs,
   prompt,
   spinner,
   width,
 }: {
   bannerRows: BannerLine[];
+  interactionDisabled: boolean;
   logs: LogEntry[];
   prompt: ActivePrompt | null;
   spinner: SpinnerState;
@@ -667,7 +704,12 @@ function IntroScreen({
         </>
       ) : null}
       {welcomePrompt ? null : (
-        <IntroPreflightContent logs={logs} prompt={prompt} spinner={spinner} />
+        <IntroPreflightContent
+          interactionDisabled={interactionDisabled}
+          logs={logs}
+          prompt={prompt}
+          spinner={spinner}
+        />
       )}
     </Box>
   );
@@ -710,10 +752,12 @@ function WelcomeActions({
 }
 
 function IntroPreflightContent({
+  interactionDisabled,
   logs,
   prompt,
   spinner,
 }: {
+  interactionDisabled: boolean;
   logs: LogEntry[];
   prompt: ActivePrompt | null;
   spinner: SpinnerState;
@@ -730,6 +774,7 @@ function IntroPreflightContent({
     <Box alignItems="center" width="100%">
       <PromptArea
         alignment="center"
+        interactionDisabled={interactionDisabled}
         occupiedRows={spinner.active ? 2 : 0}
         prompt={prompt}
       />
@@ -1325,9 +1370,16 @@ function getCenteredSelectLayout(
     0,
     ...options.map((option) => stringWidth(option.hint ?? ""))
   );
+  const descriptionWidth = Math.max(
+    0,
+    ...options.map((option) => stringWidth(option.description ?? ""))
+  );
   return {
     labelWidth,
-    width: 2 + labelWidth + (hintWidth > 0 ? hintWidth + 1 : 0),
+    width: Math.max(
+      2 + labelWidth + (hintWidth > 0 ? hintWidth + 1 : 0),
+      2 + descriptionWidth
+    ),
   };
 }
 
@@ -1837,10 +1889,12 @@ function SelectPromptHeader({
 
 function SelectPromptArea({
   alignment,
+  interactionDisabled,
   occupiedRows,
   prompt,
 }: {
   alignment: PromptAlignment;
+  interactionDisabled: boolean;
   occupiedRows: number;
   prompt: Extract<ActivePrompt, { kind: "select" }>;
 }): React.ReactNode {
@@ -1863,6 +1917,7 @@ function SelectPromptArea({
         alignment={alignment}
         compact={layout.compact}
         detailWidth={layout.detailWidth}
+        interactionDisabled={interactionDisabled}
         maxVisibleDetailRows={layout.maxVisibleDetailRows}
         maxVisibleOptions={layout.maxVisibleOptions}
         prompt={prompt}
@@ -1903,6 +1958,7 @@ function SelectPromptArea({
       alignment={alignment}
       compact={optionLimit < minimumVisibleOptions}
       detailWidth={getPromptDetailWidth(columns, alignment)}
+      interactionDisabled={interactionDisabled}
       maxVisibleDetailRows={maxVisibleDetailRows}
       maxVisibleOptions={Math.max(minimumVisibleOptions, optionLimit)}
       prompt={prompt}
@@ -1955,12 +2011,22 @@ function MultiSelectPromptArea({
   );
 }
 
+function getWrappedTextRows(text: string, width: number): number {
+  return wrapAnsi(text, Math.max(1, width), {
+    hard: true,
+    trim: false,
+    wordWrap: true,
+  }).split("\n").length;
+}
+
 function PromptArea({
   alignment = "start",
+  interactionDisabled = false,
   occupiedRows = 0,
   prompt,
 }: {
   alignment?: PromptAlignment;
+  interactionDisabled?: boolean;
   occupiedRows?: number;
   prompt: ActivePrompt;
 }): React.ReactNode {
@@ -1968,6 +2034,7 @@ function PromptArea({
     return (
       <SelectPromptArea
         alignment={alignment}
+        interactionDisabled={interactionDisabled}
         occupiedRows={occupiedRows}
         prompt={prompt}
       />
@@ -1992,6 +2059,7 @@ function SelectPrompt({
   alignment,
   compact,
   detailWidth,
+  interactionDisabled,
   maxVisibleDetailRows,
   maxVisibleOptions,
   prompt,
@@ -1999,6 +2067,7 @@ function SelectPrompt({
   alignment: PromptAlignment;
   compact: boolean;
   detailWidth: number;
+  interactionDisabled: boolean;
   maxVisibleDetailRows: number;
   maxVisibleOptions: number;
   prompt: Extract<ActivePrompt, { kind: "select" }>;
@@ -2021,17 +2090,25 @@ function SelectPrompt({
   const centeredLayout = isCentered
     ? getCenteredSelectLayout(prompt.options)
     : null;
-  const centeredOptionsWidth = centeredLayout
-    ? Math.min(centeredLayout.width, getPromptContentWidth(columns, alignment))
-    : undefined;
+  const contentWidth = getPromptContentWidth(columns, alignment);
+  const optionsWidth = centeredLayout
+    ? Math.min(centeredLayout.width, contentWidth)
+    : contentWidth;
+  const descriptionWidth = Math.max(1, optionsWidth - (isCentered ? 2 : 3));
   const totalCount = prompt.options.length;
+  const optionRowHeights = prompt.options.map((option) =>
+    option.description
+      ? 1 + getWrappedTextRows(option.description, descriptionWidth)
+      : 1
+  );
+  const maximumOptionRowHeight = Math.max(1, ...optionRowHeights);
   const [highlighted, setHighlighted] = useState<number>(() =>
     Math.min(Math.max(prompt.initialIndex, 0), Math.max(0, totalCount - 1))
   );
   const [windowStart, windowEnd] = getOptionWindow(
     totalCount,
     highlighted,
-    maxVisibleOptions
+    Math.max(1, Math.floor(maxVisibleOptions / maximumOptionRowHeight))
   );
   const visibleOptions = prompt.options.slice(windowStart, windowEnd);
   const isWindowed = visibleOptions.length < totalCount;
@@ -2074,7 +2151,9 @@ function SelectPrompt({
     ],
     [detailShortcut, highlighted, prompt, totalCount]
   );
-  useInkShortcuts("select-prompt", shortcuts);
+  useInkShortcuts("select-prompt", shortcuts, {
+    isActive: !interactionDisabled,
+  });
 
   return (
     <Box
@@ -2098,7 +2177,7 @@ function SelectPrompt({
         justifyContent={isCentered ? "center" : "flex-start"}
         width={promptWidth}
       >
-        <Box flexDirection="column" width={centeredOptionsWidth}>
+        <Box flexDirection="column" width={optionsWidth}>
           {visibleOptions.map((option, visibleIndex) => {
             const idx = windowStart + visibleIndex;
             const isCursor = idx === highlighted;
@@ -2106,9 +2185,11 @@ function SelectPrompt({
               <SelectPromptOptionRow
                 centered={isCentered}
                 centeredLabelWidth={centeredLayout?.labelWidth}
+                interactionDisabled={interactionDisabled}
                 isCursor={isCursor}
                 key={option.value}
                 option={option}
+                rowHeight={optionRowHeights[idx] ?? 1}
               />
             );
           })}
@@ -2121,42 +2202,97 @@ function SelectPrompt({
 function SelectPromptOptionRow({
   centered,
   centeredLabelWidth,
+  interactionDisabled,
   isCursor,
   option,
+  rowHeight,
 }: {
   centered: boolean;
   centeredLabelWidth?: number;
+  interactionDisabled: boolean;
   isCursor: boolean;
   option: SelectPromptOptionData;
+  rowHeight: number;
 }): React.ReactNode {
+  const description = option.description;
   if (centered) {
     return (
-      <Box flexDirection="row" height={1} overflow="hidden" width="100%">
-        <Box flexShrink={0} width={2}>
-          <Text color={ACCENT}>
-            {isCursor ? ICONS.triangleSmallRight : " "}
-          </Text>
+      <Box
+        flexDirection="column"
+        height={rowHeight}
+        overflow="hidden"
+        width="100%"
+      >
+        <Box flexDirection="row" height={1} overflow="hidden" width="100%">
+          <Box flexShrink={0} width={2}>
+            <SelectOptionCursor
+              active={isCursor}
+              loading={interactionDisabled}
+            />
+          </Box>
+          <Box flexShrink={0} width={centeredLabelWidth}>
+            <Text bold={isCursor}>{option.label}</Text>
+          </Box>
+          {option.hint !== undefined && option.hint !== "" ? (
+            <Text color={MUTED}> {option.hint}</Text>
+          ) : null}
         </Box>
-        <Box flexShrink={0} width={centeredLabelWidth}>
-          <Text bold={isCursor}>{option.label}</Text>
-        </Box>
-        {option.hint !== undefined && option.hint !== "" ? (
-          <Text color={MUTED}> {option.hint}</Text>
+        {description ? (
+          <Box
+            flexDirection="row"
+            height={rowHeight - 1}
+            overflow="hidden"
+            width="100%"
+          >
+            <Box flexShrink={0} width={2} />
+            <Text color={MUTED} wrap="wrap">
+              {description}
+            </Text>
+          </Box>
         ) : null}
       </Box>
     );
   }
   return (
-    <Box flexDirection="row" height={1} overflow="hidden">
-      <Box flexShrink={0} width={3}>
-        <Text color={ACCENT}>{isCursor ? ICONS.triangleSmallRight : " "}</Text>
+    <Box flexDirection="column" height={rowHeight} overflow="hidden">
+      <Box flexDirection="row" height={1} overflow="hidden">
+        <Box flexShrink={0} width={3}>
+          <SelectOptionCursor active={isCursor} loading={interactionDisabled} />
+        </Box>
+        <Text bold={isCursor}>{option.label}</Text>
+        {option.hint !== undefined && option.hint !== "" ? (
+          <Text color={MUTED}> {option.hint}</Text>
+        ) : null}
       </Box>
-      <Text bold={isCursor}>{option.label}</Text>
-      {option.hint !== undefined && option.hint !== "" ? (
-        <Text color={MUTED}> {option.hint}</Text>
+      {description ? (
+        <Box
+          flexDirection="row"
+          height={rowHeight - 1}
+          overflow="hidden"
+          width="100%"
+        >
+          <Box flexShrink={0} width={3} />
+          <Text color={MUTED} wrap="wrap">
+            {description}
+          </Text>
+        </Box>
       ) : null}
     </Box>
   );
+}
+
+function SelectOptionCursor({
+  active,
+  loading,
+}: {
+  active: boolean;
+  loading: boolean;
+}): React.ReactNode {
+  let content: React.ReactNode = " ";
+  if (active) {
+    content = loading ? <Spinner type="dots" /> : ICONS.triangleSmallRight;
+  }
+  return <Text color={ACCENT}>{content}</Text>;
 }
 
 function ConfirmPrompt({

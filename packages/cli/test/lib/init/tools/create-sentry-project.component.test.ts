@@ -11,6 +11,10 @@ vi.mock("../../../../src/lib/api-client.js", async (importOriginal) => {
   );
 });
 
+vi.mock("../../../../src/lib/scope-recovery.js", () => ({
+  captureOAuthScopeRecoveryGate: vi.fn(),
+}));
+
 // biome-ignore lint/performance/noNamespaceImport: assertions need module spies
 import * as apiClient from "../../../../src/lib/api-client.js";
 import { ApiError } from "../../../../src/lib/errors.js";
@@ -18,6 +22,8 @@ import { WizardCancelledError } from "../../../../src/lib/init/clack-utils.js";
 import { createSentryProject } from "../../../../src/lib/init/tools/create-sentry-project.js";
 import { executeTool } from "../../../../src/lib/init/tools/registry.js";
 import type { CreateSentryProjectPayload } from "../../../../src/lib/init/types.js";
+// biome-ignore lint/performance/noNamespaceImport: mocked recovery gate needs per-test behavior
+import * as scopeRecovery from "../../../../src/lib/scope-recovery.js";
 
 const payload: CreateSentryProjectPayload = {
   type: "tool",
@@ -33,9 +39,15 @@ const context = {
   project: undefined,
 };
 
+const shouldDelegateScopeRecovery = vi.fn();
+
 describe("createSentryProject with the real team resolver", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    shouldDelegateScopeRecovery.mockResolvedValue(false);
+    vi.mocked(scopeRecovery.captureOAuthScopeRecoveryGate).mockReturnValue({
+      shouldDelegate: shouldDelegateScopeRecovery,
+    });
     vi.mocked(apiClient.listTeams).mockResolvedValue([
       {
         id: "1",
@@ -80,6 +92,7 @@ describe("createSentryProject with the real team resolver", () => {
     vi.mocked(apiClient.createTeam).mockRejectedValueOnce(
       new ApiError("Forbidden", 403, "Missing team permission")
     );
+    shouldDelegateScopeRecovery.mockResolvedValueOnce(true);
 
     await expect(
       executeTool(payload, {

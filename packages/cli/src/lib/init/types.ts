@@ -8,7 +8,9 @@ export type DirEntry = {
 
 export type ExistingProjectData = {
   orgSlug: string;
+  orgDisplay?: string;
   projectSlug: string;
+  projectDisplay?: string;
   projectId: string;
   dsn: string;
   url: string;
@@ -55,6 +57,8 @@ export type ResolvedInitContext = {
   app?: string;
   authToken?: string;
   existingProject?: ExistingProjectData;
+  /** Existing setup should be preserved, reviewed, and brought up to date. */
+  setupIntent?: "improve-existing";
 };
 
 export type InteractiveContext = Pick<
@@ -241,12 +245,28 @@ export type InteractivePayload =
   | MultiSelectPayload
   | ConfirmPayload;
 
+/** One stable target identity plus optional human-facing selector metadata. */
+export type AppEntry = {
+  /** Presentation-only target name; selection and `--app` use `name`. */
+  label?: string;
+  /** Stable identifier returned through workflow suspend/resume. */
+  name: string;
+  /** Absolute filesystem path to the target root. */
+  path: string;
+  /** Framework proven or inferred for the target, when available. */
+  framework?: string;
+  /** Product role used to explain the target in the selector. */
+  role?: "application" | "documentation" | "example" | "runtime";
+  /** Deterministic existing-setup status and unattended-selection safety. */
+  sentrySetup?: "detected" | "auto-select";
+};
+
 export type SelectPayload = {
   type: "interactive";
   kind: "select";
   prompt: string;
   options?: string[];
-  apps?: Array<{ name: string; path: string; framework?: string }>;
+  apps?: AppEntry[];
 };
 
 export type MultiSelectPayload = {

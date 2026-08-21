@@ -11,6 +11,10 @@ vi.mock("../../../../src/lib/api-client.js", async (importOriginal) => {
   );
 });
 
+vi.mock("../../../../src/lib/scope-recovery.js", () => ({
+  captureOAuthScopeRecoveryGate: vi.fn(),
+}));
+
 // biome-ignore lint/performance/noNamespaceImport: spyOn requires object reference
 import * as apiClient from "../../../../src/lib/api-client.js";
 import { ApiError } from "../../../../src/lib/errors.js";
@@ -22,6 +26,8 @@ import type {
   CreateSentryProjectPayload,
   EnsureSentryProjectPayload,
 } from "../../../../src/lib/init/types.js";
+// biome-ignore lint/performance/noNamespaceImport: mocked at the module boundary
+import * as scopeRecovery from "../../../../src/lib/scope-recovery.js";
 
 vi.mock("../../../../src/lib/resolve-team.js", async (importOriginal) => {
   const actual =
@@ -85,8 +91,13 @@ const autoSelectedTeam = {
 let createProjectWithDsnSpy: ReturnType<typeof spyOn>;
 let createProjectWithAutoTeamSpy: ReturnType<typeof spyOn>;
 let resolveOrCreateTeamSpy: ReturnType<typeof spyOn>;
+let shouldDelegateScopeRecovery: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  shouldDelegateScopeRecovery = vi.fn().mockResolvedValue(false);
+  vi.mocked(scopeRecovery.captureOAuthScopeRecoveryGate).mockReturnValue({
+    shouldDelegate: shouldDelegateScopeRecovery,
+  });
   createProjectWithDsnSpy = vi
     .spyOn(apiClient, "createProjectWithDsn")
     .mockResolvedValue({
@@ -114,6 +125,7 @@ afterEach(() => {
   createProjectWithDsnSpy.mockRestore();
   createProjectWithAutoTeamSpy.mockRestore();
   resolveOrCreateTeamSpy.mockRestore();
+  vi.mocked(scopeRecovery.captureOAuthScopeRecoveryGate).mockReset();
 });
 
 describe("createSentryProject", () => {
@@ -133,7 +145,9 @@ describe("createSentryProject", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.message).toContain("Using existing project");
+    expect(result.data).toEqual(
+      expect.objectContaining({ ensuredVia: "existing" })
+    );
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
     expect(resolveOrCreateTeamSpy).not.toHaveBeenCalled();
   });
@@ -154,7 +168,9 @@ describe("createSentryProject", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.message).toContain("Using existing project");
+    expect(result.data).toEqual(
+      expect.objectContaining({ ensuredVia: "existing" })
+    );
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 
@@ -343,6 +359,7 @@ describe("createSentryProject", () => {
   });
 
   test("identifies the team scope hidden by a team-scoped policy 403", async () => {
+    shouldDelegateScopeRecovery.mockResolvedValueOnce(true);
     resolveOrCreateTeamSpy.mockResolvedValueOnce(autoSelectedTeam);
     createProjectWithDsnSpy.mockRejectedValueOnce(
       new ApiError(
@@ -400,4 +417,3 @@ describe("createSentryProject", () => {
     expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
   });
 });
-

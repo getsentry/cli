@@ -12,6 +12,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import nodePath from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import { MastraClient } from "@mastra/client-js";
@@ -60,10 +61,11 @@ import {
   withInitServiceAuthClassification,
 } from "./init-service-auth.js";
 import { handleInteractive } from "./interactive.js";
-import { resolveInitContext } from "./preflight.js";
+import { resolveInitContext, resolveInitProjectContext } from "./preflight.js";
 import { checkReadiness } from "./readiness.js";
 
 import { describeTool, executeTool } from "./tools/registry.js";
+import { validateToolSandbox } from "./tools/shared.js";
 import type {
   ResolvedInitContext,
   SuspendPayload,
@@ -78,7 +80,8 @@ import type { SpinnerHandle, WelcomeOptions, WizardUI } from "./ui/types.js";
 import { verifySetup } from "./verify-setup.js";
 import {
   precomputeDirListing,
-  precomputeSentryDetection,
+  precomputeSentrySetupTargets,
+  precomputeWorkspaceTargetInventory,
   preReadCommonFiles,
 } from "./workflow-inputs.js";
 
@@ -88,6 +91,7 @@ const INIT_SERVICE_AUTH_FAILED_LABEL = "Authentication failed";
 const INIT_SCOPE_UPDATE_REQUIRED_LABEL = "Authorization update required";
 
 const APPLY_CODEMODS_STEP = "apply-codemods";
+const SELECT_TARGET_APP_STEP = "select-target-app";
 
 type CompactPhaseHistoryEntry = {
   ok: boolean;
@@ -103,11 +107,72 @@ type StepContext = {
   spin: SpinnerHandle;
   spinState: SpinState;
   context: ResolvedInitContext;
+  supportsExistingSetupImprovement: boolean;
+  projectContextState: ProjectContextState;
   ui: WizardUI;
 };
 
+type ProjectContextState = {
+  cwd?: string;
+  decisionIntroActive?: boolean;
+  selection?: Pick<
+    ResolvedInitContext,
+    "project" | "existingProject" | "setupIntent"
+  >;
+};
+
+function setProjectDecisionIntro(
+  state: ProjectContextState,
+  ui: WizardUI,
+  enabled: boolean
+): void {
+  if (state.decisionIntroActive === enabled) {
+    return;
+  }
+  state.decisionIntroActive = enabled;
+  ui.setIntroMode?.(enabled);
+}
+
+function isProjectDecisionPayload(payload: SuspendPayload): boolean {
+  return (
+    payload.type === "tool" &&
+    (payload.operation === "detect-sentry" ||
+      isProjectCreationOperation(payload))
+  );
+}
+
 function supportsInteractiveTeamChoice(ui: WizardUI): boolean {
   return ui.supportsInteractivePrompts === true;
+}
+
+function isProjectCreationOperation(
+  payload: ToolPayload
+): payload is Extract<
+  ToolPayload,
+  { operation: "create-sentry-project" | "ensure-sentry-project" }
+> {
+  return (
+    payload.operation === "create-sentry-project" ||
+    payload.operation === "ensure-sentry-project"
+  );
+}
+
+function isExistingSentryDetection(value: unknown): value is {
+  status: "installed" | "partial" | "none";
+  signals: string[];
+  dsn?: string;
+} {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as { status?: unknown; signals?: unknown };
+  return (
+    (candidate.status === "installed" ||
+      candidate.status === "partial" ||
+      candidate.status === "none") &&
+    Array.isArray(candidate.signals) &&
+    candidate.signals.every((signal) => typeof signal === "string")
+  );
 }
 
 function nextPhase(
@@ -339,7 +404,16 @@ async function handleSuspendedStep(
   stepPhases: Map<string, number>,
   stepHistory: Map<string, CompactPhaseHistoryEntry[]>
 ): Promise<Record<string, unknown>> {
-  const { payload, stepId, spin, spinState, context, ui } = ctx;
+  const {
+    payload,
+    stepId,
+    spin,
+    spinState,
+    context,
+    supportsExistingSetupImprovement,
+    projectContextState,
+    ui,
+  } = ctx;
   const label = STEP_LABELS[stepId] ?? stepId;
 
   if (payload.type === "tool") {
@@ -365,14 +439,108 @@ async function handleSuspendedStep(
       ui.recordFilesReading?.(payload.params.paths);
     }
 
+    let executionContext = context;
+    let toolResult: ToolResult | undefined = validateToolSandbox(
+      payload,
+      context.directory
+    );
+
+    // Once the concrete target directory is resolved, execute detection
+    // through the registry first (which enforces the cwd sandbox), then
+    // resolve the Sentry project from that exact directory.
+    // Keep the choice locally so the later ensure step does not prompt twice.
+    if (!toolResult && payload.operation === "detect-sentry") {
+      const useDecisionIntro = !(context.yes || context.dryRun);
+      if (useDecisionIntro) {
+        setProjectDecisionIntro(projectContextState, ui, true);
+      }
+      try {
+        toolResult = await executeTool(payload, context);
+        if (toolResult.ok && isExistingSentryDetection(toolResult.data)) {
+          spin.stop("");
+          spinState.running = false;
+          const selection = await resolveInitProjectContext(
+            context,
+            payload.cwd,
+            ui,
+            {
+              setup: toolResult.data,
+              suggestedProjectName: nodePath.basename(payload.cwd),
+              supportsExistingSetupImprovement,
+            }
+          );
+          projectContextState.cwd = payload.cwd;
+          projectContextState.selection = selection;
+          toolResult = {
+            ...toolResult,
+            data: {
+              ...toolResult.data,
+              ...(selection.existingProject?.platform
+                ? { knownPlatform: selection.existingProject.platform }
+                : {}),
+              ...(selection.setupIntent
+                ? { setupIntent: selection.setupIntent }
+                : {}),
+            },
+          };
+          spin.start("Preparing project setup...");
+          spinState.running = true;
+        }
+      } finally {
+        if (useDecisionIntro) {
+          setProjectDecisionIntro(projectContextState, ui, false);
+        }
+      }
+    }
+
+    if (!toolResult && isProjectCreationOperation(payload)) {
+      let projectContext =
+        projectContextState.cwd === payload.cwd
+          ? projectContextState.selection
+          : undefined;
+      if (!projectContext) {
+        const useDecisionIntro = !(context.yes || context.dryRun);
+        if (useDecisionIntro) {
+          setProjectDecisionIntro(projectContextState, ui, true);
+        }
+        spin.stop("");
+        spinState.running = false;
+        try {
+          projectContext = await resolveInitProjectContext(
+            context,
+            payload.cwd,
+            ui,
+            {
+              suggestedProjectName: payload.params.name,
+              supportsExistingSetupImprovement,
+            }
+          );
+        } finally {
+          if (useDecisionIntro) {
+            setProjectDecisionIntro(projectContextState, ui, false);
+          }
+        }
+        projectContextState.cwd = payload.cwd;
+        projectContextState.selection = projectContext;
+      }
+      executionContext = { ...context, ...projectContext };
+      if (!spinState.running) {
+        spin.start(
+          projectContext.existingProject
+            ? "Preparing existing Sentry project..."
+            : "Preparing Sentry project..."
+        );
+        spinState.running = true;
+      }
+    }
+
     const canChooseTeam =
-      (payload.operation === "create-sentry-project" ||
-        payload.operation === "ensure-sentry-project") &&
+      isProjectCreationOperation(payload) &&
       !context.yes &&
       !context.dryRun &&
       supportsInteractiveTeamChoice(ui);
-    const toolResult = canChooseTeam
-      ? await executeTool(payload, context, {
+    toolResult ??= canChooseTeam
+      ? await executeTool(payload, executionContext, {
           chooseTeam: async (teams) => {
             spin.stop("Found available teams");
             spinState.running = false;
@@ -384,7 +552,7 @@ async function handleSuspendedStep(
             return choice;
           },
         })
-      : await executeTool(payload, context);
+      : await executeTool(payload, executionContext);
 
     if (toolResult.message) {
       spin.stop(renderInlineMarkdown(toolResult.message));
@@ -433,10 +601,14 @@ async function handleSuspendedStep(
       };
     }
 
-    spin.stop(label);
+    spin.stop(stepId === SELECT_TARGET_APP_STEP ? "" : label);
     spinState.running = false;
 
-    const interactiveResult = await handleInteractive(payload, context, ui);
+    const interactiveResult = await handleInteractive(payload, context, ui, {
+      ...(stepId === SELECT_TARGET_APP_STEP && !(context.yes || context.dryRun)
+        ? { holdPresentationOnSelect: true }
+        : {}),
+    });
 
     // Safety net: { cancelled: true } would send malformed resume data to the
     // server and produce a cryptic HTTP 500. All interactive handlers should
@@ -447,6 +619,13 @@ async function handleSuspendedStep(
         "Setup could not complete: interactive step was not resolved.",
         { rendered: false }
       );
+    }
+
+    if (stepId === SELECT_TARGET_APP_STEP && !context.yes && !context.dryRun) {
+      // Keep the workflow chrome hidden while the server resumes and the
+      // selected target is scanned. The next project-decision prompt then
+      // appears on the same focused screen without flashing the checklist.
+      setProjectDecisionIntro(projectContextState, ui, true);
     }
 
     // Feature review is complete, so name the next visible phase instead of
@@ -909,7 +1088,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     return;
   }
 
-  await checkReadiness(ui);
+  const serviceCapabilities = await checkReadiness(ui);
 
   const effectiveOptions = dryRun
     ? { ...initialOptions, yes: true }
@@ -982,19 +1161,33 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   let run: Awaited<ReturnType<typeof workflow.createRun>>;
   let result: WorkflowRunResult;
   try {
-    const [dirListing, existingSentry] = await Promise.all([
+    const [dirListing, sentrySetupTargets] = await Promise.all([
       precomputeDirListing(directory),
-      precomputeSentryDetection(directory).catch(() => null),
+      precomputeSentrySetupTargets(directory).catch((error) => {
+        logger.debug("Failed to precompute Sentry setup targets", error);
+        return [];
+      }),
     ]);
-    const fileCache = await preReadCommonFiles(directory, dirListing);
+    const [fileCache, workspaceInventory] = await Promise.all([
+      preReadCommonFiles(directory, dirListing),
+      precomputeWorkspaceTargetInventory(
+        directory,
+        dirListing,
+        sentrySetupTargets
+      ).catch((error) => {
+        logger.debug("Failed to precompute workspace targets", error);
+        return { complete: false, targets: [] };
+      }),
+    ]);
     ui.setIntroMode?.(false);
     spin.message("Connecting to wizard...");
     run = await withInitServiceAuthClassification(
       () => workflow.createRun(),
       WORKFLOW_CREATE_RUN_ENDPOINT
     );
-    // Large shared context (dirListing, fileCache, existingSentry)
-    // travels via Mastra's workflow `initialState` instead of `inputData`.
+    // Large shared context (dirListing and fileCache), deterministic workspace
+    // inventory, and existing-setup evidence travel via Mastra's workflow
+    // `initialState` instead of `inputData`.
     // Keeping it on state means the server stores it exactly once per run
     // rather than duplicating it across every step's output in the D1
     // snapshot — which used to overflow the per-row size limit on big
@@ -1014,7 +1207,9 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
               initialState: {
                 dirListing,
                 fileCache,
-                existingSentry: existingSentry?.data,
+                sentrySetupTargets,
+                workspaceTargets: workspaceInventory.targets,
+                workspaceTargetsComplete: workspaceInventory.complete,
                 knownPlatform: context.existingProject?.platform,
               },
               tracingOptions,
@@ -1041,6 +1236,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
 
   const stepPhases = new Map<string, number>();
   const stepHistory = new Map<string, CompactPhaseHistoryEntry[]>();
+  const projectContextState: ProjectContextState = {};
 
   syncWorkflowStepStatuses(result, ui);
 
@@ -1068,6 +1264,13 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         throw new WizardError(`No suspend payload found for step "${stepId}"`);
       }
 
+      if (
+        projectContextState.decisionIntroActive &&
+        !isProjectDecisionPayload(extracted.payload)
+      ) {
+        setProjectDecisionIntro(projectContextState, ui, false);
+      }
+
       // Step transition: if the active step just changed, mark the
       // previous one completed before flipping this one to
       // in_progress. The store back-fills any earlier `pending`
@@ -1080,9 +1283,13 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       let activeLabel = STEP_ACTIVE_LABELS[extracted.stepId];
       if (
         extracted.stepId === "detect-platform" &&
-        context.existingProject?.platform
+        (projectContextState.selection?.existingProject?.platform ??
+          context.existingProject?.platform)
       ) {
-        activeLabel = `Analyzing project (existing Sentry platform: ${context.existingProject.platform})...`;
+        const knownPlatform =
+          projectContextState.selection?.existingProject?.platform ??
+          context.existingProject?.platform;
+        activeLabel = `Analyzing project (existing Sentry platform: ${knownPlatform})...`;
       }
       if (activeLabel && spinState.running) {
         spin.message(activeLabel);
@@ -1095,6 +1302,9 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           spin,
           spinState,
           context,
+          supportsExistingSetupImprovement:
+            serviceCapabilities.improveExistingSetup,
+          projectContextState,
           ui,
         },
         stepPhases,
@@ -1125,11 +1335,9 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     }
   } catch (err) {
     const isAuthFailure = err instanceof ApiError && err.status === 401;
-    const isPermissionFailure =
-      err instanceof ApiError && err.status === 403;
+    const isPermissionFailure = err instanceof ApiError && err.status === 403;
     const isScopeFailure =
-      isPermissionFailure &&
-      extractRequiredScopes(err.detail).length > 0;
+      isPermissionFailure && extractRequiredScopes(err.detail).length > 0;
     // A running spinner owns a live interval, so stop it before any early
     // return or rethrow to avoid leaving the event loop artificially busy.
     if (spinState.running) {
