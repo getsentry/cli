@@ -536,16 +536,26 @@ async function runSetupOnNewBinary(opts: SetupOptions): Promise<void> {
   if (install) {
     args.push("--install");
   }
-  if (ensureAuthScopes) {
-    args.push("--ensure-auth-scopes");
-  }
   if (noAgentSkills) {
     args.push("--no-agent-skills");
   }
 
-  const env = installDir
-    ? { ...process.env, SENTRY_INSTALL_DIR: installDir }
-    : undefined;
+  // Signal "refresh OAuth scopes" through an env var, never a CLI flag. The
+  // spawned binary may be an ARBITRARY version — a downgrade, or a nightly
+  // upgrading to a stable release that predates this feature — and its strict
+  // argument parser aborts (non-zero exit) on any flag it doesn't recognize,
+  // failing the whole upgrade. An unknown env var is silently ignored, so only
+  // binaries that understand SENTRY_ENSURE_AUTH_SCOPES act on it. Any future
+  // setup signal that isn't guaranteed to exist in every upgradeable-from/-to
+  // version must travel this same way.
+  const childEnv: NodeJS.ProcessEnv = { ...process.env };
+  if (installDir) {
+    childEnv.SENTRY_INSTALL_DIR = installDir;
+  }
+  if (ensureAuthScopes) {
+    childEnv.SENTRY_ENSURE_AUTH_SCOPES = "1";
+  }
+  const env = installDir || ensureAuthScopes ? childEnv : undefined;
 
   const exitCode = await spawnWithRetry(binaryPath, args, env);
   if (exitCode !== 0) {

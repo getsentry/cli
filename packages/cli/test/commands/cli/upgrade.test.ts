@@ -679,7 +679,11 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
   useTestConfigDir("test-upgrade-spawn-");
 
   let testDir: string;
-  let spawnedArgs: Array<{ cmd: string; args: string[] }>;
+  let spawnedArgs: Array<{
+    cmd: string;
+    args: string[];
+    env?: NodeJS.ProcessEnv;
+  }>;
   let spawnSpy: ReturnType<typeof spyOn>;
   let restoreStderr: (() => void) | undefined;
 
@@ -709,10 +713,16 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     // Spy on child_process.spawn — captures args and resolves with exit 0
     spawnSpy = vi
       .spyOn(child_process, "spawn")
-      .mockImplementation((cmd: string, args?: readonly string[]) => {
-        spawnedArgs.push({ cmd, args: [...(args ?? [])] });
-        return fakeChildProcess(0);
-      });
+      .mockImplementation(
+        (
+          cmd: string,
+          args?: readonly string[],
+          options?: { env?: NodeJS.ProcessEnv }
+        ) => {
+          spawnedArgs.push({ cmd, args: [...(args ?? [])], env: options?.env });
+          return fakeChildProcess(0);
+        }
+      );
   });
 
   afterEach(async () => {
@@ -780,7 +790,10 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     expect(setupCall?.args).toContain("--method");
     expect(setupCall?.args).toContain("curl");
     expect(setupCall?.args).toContain("--install");
-    expect(setupCall?.args).toContain("--ensure-auth-scopes");
+    // Scope-refresh intent travels via env var, not a flag a version-skewed
+    // target binary could reject.
+    expect(setupCall?.args).not.toContain("--ensure-auth-scopes");
+    expect(setupCall?.env?.SENTRY_ENSURE_AUTH_SCOPES).toBe("1");
   });
 
   test("does not launch interactive auth from JSON upgrades", async () => {
@@ -794,6 +807,7 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     const setupCall = spawnedArgs.find((entry) => entry.args.includes("setup"));
     expect(setupCall).toBeDefined();
     expect(setupCall?.args).not.toContain("--ensure-auth-scopes");
+    expect(setupCall?.env?.SENTRY_ENSURE_AUTH_SCOPES).toBeUndefined();
   });
 
   test("does not pass --no-agent-skills to setup by default", async () => {
@@ -840,7 +854,8 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
 
     const setupCall = spawnedArgs.find((entry) => entry.args.includes("setup"));
     expect(setupCall?.cmd).toBe(entryPath);
-    expect(setupCall?.args).toContain("--ensure-auth-scopes");
+    expect(setupCall?.args).not.toContain("--ensure-auth-scopes");
+    expect(setupCall?.env?.SENTRY_ENSURE_AUTH_SCOPES).toBe("1");
   });
 
   test("runs the new Homebrew binary and keeps JSON upgrades non-interactive", async () => {
@@ -860,6 +875,7 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     const setupCall = spawnedArgs.find((entry) => entry.args.includes("setup"));
     expect(setupCall?.cmd).toBe(binaryPath);
     expect(setupCall?.args).not.toContain("--ensure-auth-scopes");
+    expect(setupCall?.env?.SENTRY_ENSURE_AUTH_SCOPES).toBeUndefined();
   });
 
   test("reports setup failure when spawn exits non-zero", async () => {

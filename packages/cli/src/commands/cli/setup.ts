@@ -516,9 +516,14 @@ export const setupCommand = buildCommand({
         brief: "Skip agent skill installation for AI coding assistants",
         default: false,
       },
+      // Legacy internal flag. `cli upgrade` now signals this intent through the
+      // SENTRY_ENSURE_AUTH_SCOPES env var (see upgrade.ts) so version-skewed
+      // spawns don't crash on an unknown flag. Retained (still honored below)
+      // only so that already-deployed pre-fix binaries, which still pass this
+      // flag, don't fail their argument parse when upgrading to this binary.
       "ensure-auth-scopes": {
         kind: "boolean",
-        brief: "Refresh an outdated stored OAuth authorization",
+        brief: "Refresh an outdated stored OAuth authorization (legacy)",
         default: false,
         hidden: true as const,
       },
@@ -579,7 +584,12 @@ export const setupCommand = buildCommand({
       warn,
     });
 
-    if (flags["ensure-auth-scopes"]) {
+    // Honor either the env var (the mechanism `cli upgrade` uses now) or the
+    // legacy flag (still passed by pre-fix binaries upgrading to this one).
+    const ensureAuthScopes =
+      flags["ensure-auth-scopes"] ||
+      process.env.SENTRY_ENSURE_AUTH_SCOPES === "1";
+    if (ensureAuthScopes) {
       await bestEffort(
         "Authorization",
         async () => {

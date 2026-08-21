@@ -178,7 +178,38 @@ describe("sentry cli setup", () => {
     expect(getOutput()).toBe("");
   });
 
-  test("checks OAuth scopes when invoked by the upgrade command", async () => {
+  test("checks OAuth scopes when SENTRY_ENSURE_AUTH_SCOPES is set", async () => {
+    // This is the mechanism `cli upgrade` uses now: an env var, so a
+    // version-skewed target binary that predates the feature ignores it
+    // instead of aborting on an unknown flag.
+    const { context, restore } = createMockContext({
+      homeDir: testDir,
+      env: { SENTRY_ENSURE_AUTH_SCOPES: "1" },
+    });
+    restoreStderr = restore;
+
+    await run(
+      app,
+      [
+        "cli",
+        "setup",
+        "--quiet",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+      ],
+      context
+    );
+
+    expect(scopeRecovery.ensureCurrentOAuthScopes).toHaveBeenCalledOnce();
+    expect(scopeRecovery.ensureCurrentOAuthScopes).toHaveBeenCalledWith(
+      interactiveLogin.runInteractiveLogin
+    );
+  });
+
+  test("still honors the legacy --ensure-auth-scopes flag from pre-fix binaries", async () => {
+    // Retained for backward compat: already-deployed upgrade binaries pass this
+    // flag, and their target (this binary) must not fail its argument parse.
     const { context, restore } = createMockContext({ homeDir: testDir });
     restoreStderr = restore;
 
