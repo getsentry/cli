@@ -3,7 +3,7 @@
  *
  * Stubs `canRenderSixel` and `terminalPixelWidth` so the dashboard formatter
  * takes the sixel rendering path deterministically, then verifies that the
- * output contains a sixel DCS sequence for eligible timeseries widgets.
+ * output contains one sixel DCS sequence for the complete dashboard grid.
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -66,13 +66,16 @@ function makeDashboardData(
 
 describe("dashboard sixel integration", () => {
   let savedSixelEnv: string | undefined;
+  let savedPlainOutput: string | undefined;
 
   beforeEach(() => {
     savedSixelEnv = process.env.SENTRY_DASHBOARD_SIXEL;
+    savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
     process.env.SENTRY_DASHBOARD_SIXEL = "1";
     process.env.SENTRY_PLAIN_OUTPUT = "0";
     vi.spyOn(sixelModule, "canRenderSixel").mockReturnValue(true);
     vi.spyOn(sixelModule, "terminalPixelWidth").mockReturnValue(320);
+    vi.spyOn(sixelModule, "terminalPixelHeight").mockReturnValue(12);
   });
 
   afterEach(() => {
@@ -82,9 +85,14 @@ describe("dashboard sixel integration", () => {
     } else {
       process.env.SENTRY_DASHBOARD_SIXEL = savedSixelEnv;
     }
+    if (savedPlainOutput === undefined) {
+      delete process.env.SENTRY_PLAIN_OUTPUT;
+    } else {
+      process.env.SENTRY_PLAIN_OUTPUT = savedPlainOutput;
+    }
   });
 
-  test("renders a sixel DCS sequence for timeseries widgets when enabled", () => {
+  test("renders one sixel canvas for a timeseries widget when enabled", () => {
     const data = makeDashboardData({
       widgets: [
         makeWidget({
@@ -98,7 +106,8 @@ describe("dashboard sixel integration", () => {
     const output = formatDashboardWithData(data);
     expect(output).toContain(`${ESC}P`);
     expect(output).toContain(`${ESC}\\`);
-    expect(output).toContain("Sixel Chart");
+    expect(output.split(`${ESC}P`)).toHaveLength(2);
+    expect(output).toContain('"1;1;320;144');
   });
 
   test("uses displayType=timeseries_sixel as an opt-in signal", () => {
@@ -117,10 +126,10 @@ describe("dashboard sixel integration", () => {
     const output = formatDashboardWithData(data);
     expect(output).toContain(`${ESC}P`);
     expect(output).toContain(`${ESC}\\`);
-    expect(output).toContain("Explicit Sixel");
+    expect(output.split(`${ESC}P`)).toHaveLength(2);
   });
 
-  test("does not emit sixel for non-timeseries widget types", () => {
+  test("renders scalar and timeseries widgets in the same sixel canvas", () => {
     const data = makeDashboardData({
       widgets: [
         makeWidget({
@@ -138,13 +147,57 @@ describe("dashboard sixel integration", () => {
     });
 
     const output = formatDashboardWithData(data);
-    expect(output).toContain("Big Number");
-    expect(output).toContain("Sixel Chart");
     expect(output).toContain(`${ESC}P`);
     expect(output).toContain(`${ESC}\\`);
+    expect(output.split(`${ESC}P`)).toHaveLength(2);
+    expect(output).not.toContain("Big Number");
+    expect(output).not.toContain("Sixel Chart");
   });
 
-  test("categorical_bar widgets keep the ASCII renderer, not sixel", () => {
+  test("renders every non-chart widget type inside the sixel canvas", () => {
+    const output = formatDashboardWithData(
+      makeDashboardData({
+        widgets: [
+          makeWidget({
+            title: "Table Widget",
+            displayType: "table",
+            layout: { x: 0, y: 0, w: 3, h: 1 },
+            data: {
+              type: "table",
+              columns: [{ name: "count" }],
+              rows: [{ count: 42 }],
+            },
+          }),
+          makeWidget({
+            title: "Text Widget",
+            displayType: "text",
+            layout: { x: 3, y: 0, w: 3, h: 1 },
+            data: { type: "text", content: "Dashboard note" },
+          }),
+          makeWidget({
+            title: "Failed Widget",
+            displayType: "line",
+            layout: { x: 0, y: 1, w: 3, h: 1 },
+            data: { type: "error", message: "Query failed" },
+          }),
+          makeWidget({
+            title: "Unsupported Widget",
+            displayType: "wheel",
+            layout: { x: 3, y: 1, w: 3, h: 1 },
+            data: { type: "unsupported", reason: "Not implemented" },
+          }),
+        ],
+      })
+    );
+
+    expect(output.split(`${ESC}P`)).toHaveLength(2);
+    expect(output).not.toContain("Table Widget");
+    expect(output).not.toContain("Dashboard note");
+    expect(output).not.toContain("Query failed");
+    expect(output).not.toContain("Unsupported Widget");
+  });
+
+  test("renders categorical_bar widgets as sixel bars", () => {
     const data = makeDashboardData({
       widgets: [
         makeWidget({
@@ -156,12 +209,11 @@ describe("dashboard sixel integration", () => {
     });
 
     const output = formatDashboardWithData(data);
-    expect(output).toContain("Categorical");
-    // The chart core has no categorical mode, so these must not be rasterized.
-    expect(output).not.toContain(`${ESC}P`);
+    expect(output).toContain(`${ESC}P`);
+    expect(output).toContain(`${ESC}\\`);
   });
 
-  test("sixel widgets render as a standalone block, keeping the grid intact", () => {
+  test("preserves side-by-side widget layout in one sixel canvas", () => {
     const data = makeDashboardData({
       widgets: [
         makeWidget({
@@ -179,15 +231,26 @@ describe("dashboard sixel integration", () => {
     });
 
     const output = formatDashboardWithData(data);
-    const lines = output.split("\n");
-    // The DCS image must not share a terminal row with any bordered widget.
-    const sixelLine = lines.find((l) => l.includes(`${ESC}P`));
-    expect(sixelLine).toBeDefined();
-    expect(sixelLine).not.toContain("│");
-    expect(sixelLine).not.toContain("─");
-    // The character grid (big-number widget) still renders; the sixel image
-    // appears after the grid (full-width, no hole in the packed layout).
-    expect(output).toContain("Big Number");
-    expect(output).toContain("Sixel Chart");
+    // A DCS sequence reserves one full 320x144 pixel dashboard grid, so two
+    // adjacent widgets always share their original row instead of serializing.
+    expect(output).toContain('"1;1;320;144');
+    expect(output.split(`${ESC}P`)).toHaveLength(2);
+  });
+
+  test("falls back to the complete character dashboard without cell geometry", () => {
+    vi.mocked(sixelModule.terminalPixelHeight).mockReturnValue(undefined);
+    const output = formatDashboardWithData(
+      makeDashboardData({
+        widgets: [
+          makeWidget({
+            title: "Fallback Widget",
+            layout: { x: 0, y: 0, w: 6, h: 1 },
+          }),
+        ],
+      })
+    );
+
+    expect(output).not.toContain(`${ESC}P`);
+    expect(output).toContain("Fallback Widget");
   });
 });

@@ -191,7 +191,7 @@ export const viewCommand = buildCommand({
       },
       sixel: {
         kind: "boolean",
-        brief: "Render timeseries widgets as sixel images",
+        brief: "Render the dashboard as a sixel image",
         default: false,
       },
       fresh: FRESH_FLAG,

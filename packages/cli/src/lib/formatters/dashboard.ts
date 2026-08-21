@@ -20,13 +20,17 @@ import type {
   WidgetDataResult,
 } from "../../types/dashboard.js";
 import { getEnv } from "../env.js";
-import { canRenderSixel, terminalPixelWidth } from "../sixel.js";
+import {
+  canRenderSixel,
+  terminalPixelHeight,
+  terminalPixelWidth,
+} from "../sixel.js";
 import { SERIES_PALETTE } from "./chart-core.js";
 import { COLORS, muted, terminalLink } from "./colors.js";
 import { renderMarkdown } from "./markdown.js";
 import type { HumanRenderer } from "./output.js";
 import { isPlainOutput } from "./plain-detect.js";
-import { renderTimeseriesAsSixel } from "./sixel-timeseries.js";
+import { renderDashboardAsSixel } from "./sixel-dashboard.js";
 import { downsample, sparkline } from "./sparkline.js";
 
 // ---------------------------------------------------------------------------
@@ -1523,8 +1527,10 @@ function renderPlaceholderContent(message: string): string[] {
  * Returns raw content lines (no title, no border). The caller handles
  * border wrapping and height enforcement.
  */
+type ContentWidget = Pick<DashboardViewWidget, "displayType" | "data">;
+
 function renderContentLines(opts: {
-  widget: DashboardViewWidget;
+  widget: ContentWidget;
   innerWidth: number;
   contentHeight: number;
 }): string[] {
@@ -1845,21 +1851,11 @@ export function formatDashboardWithData(data: DashboardViewData): string {
   const lines: string[] = [];
   lines.push(...renderHeader(data, termWidth));
 
-  // Sixel widgets can't be composed into the side-by-side framebuffer: a DCS
-  // image advances the cursor by many rows, which would trample the widget's
-  // own borders and any neighbor sharing its grid rows. Render them full-width
-  // and stacked, after the character grid, and keep the grid for the rest.
-  const sixelWidgets = data.widgets.filter(isSixelEligible);
-  const gridWidgets = sixelWidgets.length
-    ? data.widgets.filter((w) => !isSixelEligible(w))
-    : data.widgets;
-
-  if (gridWidgets.length > 0) {
-    const packed = packGridY(gridWidgets);
-    lines.push(...renderGrid(packed, termWidth));
-  }
-  for (const w of sixelWidgets) {
-    lines.push(...renderSixelWidget(w, termWidth));
+  const sixel = renderCompleteDashboardAsSixel(data, termWidth);
+  if (sixel) {
+    lines.push(sixel);
+  } else {
+    lines.push(...renderGrid(data.widgets, termWidth));
   }
 
   lines.push("");
@@ -1867,121 +1863,43 @@ export function formatDashboardWithData(data: DashboardViewData): string {
 }
 
 /**
- * Return a shallow copy of the widgets with their `layout.y` renumbered so
- * the remaining widgets pack contiguously from y=0 without blank bands.
- * Widgets without a layout are left untouched. Relative order within the
- * same original y-band is preserved (important for left/right widgets on
- * the same row).
- *
- * Packing is skipped for staggered layouts (widgets whose start y lies
- * inside another widget's span) because correctly re-computing y for
- * overlapping columns is out of scope for this opt-in experimental path.
+ * Render the complete dashboard as one sixel canvas only when the terminal
+ * exposes both cell dimensions. A sixel-only feature must never partially
+ * replace the framebuffer: unavailable geometry always returns the complete
+ * established character rendering.
  */
-function packGridY(
-  widgets: DashboardViewWidget[]
-): DashboardViewWidget[] {
-  const withLayout = widgets.filter((w) => w.layout);
-  if (withLayout.length === 0) {
-    return widgets;
-  }
-
-  // Detect staggered starts: a widget whose y is not equal to any other
-  // widget's y + h (for the tallest h at that y).
-  const bands = new Map<number, number>(); // y -> max h at that y
-  for (const w of withLayout) {
-    const y = w.layout!.y;
-    const h = w.layout!.h ?? 1;
-    bands.set(y, Math.max(bands.get(y) ?? 0, h));
-  }
-  let maxEnd = 0;
-  let staggered = false;
-  for (const [y, h] of Array.from(bands.entries()).sort(
-    (a, b) => a[0] - b[0]
-  )) {
-    if (y < maxEnd) {
-      staggered = true;
-      break;
-    }
-    maxEnd = y + h;
-  }
-  if (staggered) {
-    return widgets; // leave original y untouched
-  }
-
-  // Stable sort by original y so relative vertical order is preserved.
-  const sorted = [...withLayout].sort(
-    (a, b) => (a.layout?.y ?? 0) - (b.layout?.y ?? 0)
-  );
-
-  let nextY = 0;
-  const newY = new Map<DashboardViewWidget, number>();
-  for (const w of sorted) {
-    if (newY.has(w)) {
-      continue;
-    }
-    const bandY = w.layout!.y;
-    const band = sorted.filter((ww) => ww.layout!.y === bandY);
-    for (const b of band) {
-      newY.set(b, nextY);
-    }
-    const maxH = Math.max(...band.map((b) => b.layout!.h ?? 1));
-    nextY += maxH;
-  }
-
-  return widgets.map((w) => {
-    if (!w.layout) {
-      return w;
-    }
-    const ny = newY.get(w);
-    if (ny === undefined) {
-      return w;
-    }
-    return { ...w, layout: { ...w.layout, y: ny } };
-  });
-}
-
-/**
- * Whether a widget should render as an inline sixel image: opt-in is on, the
- * data is a plain (non-categorical) timeseries, and the terminal supports
- * sixel. Categorical bars are excluded — the chart core only models
- * time-bucket columns, so they keep the ASCII per-category renderer.
- */
-function isSixelEligible(widget: DashboardViewWidget): boolean {
-  if (
-    widget.data.type !== "timeseries" ||
-    widget.displayType === "categorical_bar"
-  ) {
-    return false;
-  }
+function renderCompleteDashboardAsSixel(
+  data: DashboardViewData,
+  termWidth: number
+): string | undefined {
   const env = getEnv();
   const optedIn =
     env.SENTRY_DASHBOARD_SIXEL === "1" ||
-    widget.displayType === "timeseries_sixel";
-  return optedIn && !isPlainOutput() && canRenderSixel();
-}
-
-/**
- * Render a single sixel widget as a full-width block: a title line followed by
- * the inline image. Falls back to the normal bordered character rendering when
- * the image can't be produced (empty data, no drawable pixels).
- */
-function renderSixelWidget(
-  widget: DashboardViewWidget,
-  termWidth: number
-): string[] {
-  if (widget.data.type !== "timeseries") {
-    return renderWidgetLines(widget, termWidth);
+    data.widgets.some((widget) => widget.displayType === "timeseries_sixel");
+  if (!optedIn || isPlainOutput() || !canRenderSixel()) {
+    return;
   }
-  const pixelBudget = terminalPixelWidth();
-  const sixel = renderTimeseriesAsSixel(widget.data, {
-    maxPixelWidth: pixelBudget ?? termWidth * 8,
-    maxPixelHeight: 2 * LINES_PER_UNIT * 12,
+  const pixelWidth = terminalPixelWidth(termWidth);
+  const cellHeight = terminalPixelHeight(1);
+  if (!(pixelWidth && cellHeight)) {
+    return;
+  }
+  const cellWidth = Math.floor(pixelWidth / termWidth);
+  if (cellWidth < 1) {
+    return;
+  }
+  return renderDashboardAsSixel(data, {
+    pixelWidth,
+    cellWidth,
+    cellHeight,
+    renderTextContent(widget, innerWidth, contentHeight) {
+      return renderContentLines({
+        widget,
+        innerWidth,
+        contentHeight,
+      });
+    },
   });
-  if (!sixel) {
-    return renderWidgetLines(widget, termWidth);
-  }
-  const title = isPlainOutput() ? widget.title : chalk.bold(widget.title);
-  return ["", title, sixel];
 }
 
 // ---------------------------------------------------------------------------

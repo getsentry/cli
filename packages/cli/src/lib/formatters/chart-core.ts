@@ -11,6 +11,7 @@
 
 import type { TimeseriesResult } from "../../types/dashboard.js";
 import type { DecodedImage } from "../sixel-image.js";
+import { createPixelCanvas, drawPixelRect } from "./pixel-canvas.js";
 import { downsample } from "./sparkline.js";
 
 /**
@@ -82,6 +83,8 @@ export type ChartSeries = {
  * are drawn as stacked segments (multi-series) or as plain bars (single).
  */
 export type ChartModel = {
+  /** Source shape: timeseries buckets or independently sized categories. */
+  kind: "timeseries" | "categorical";
   series: ChartSeries[];
   buckets: number;
   maxVal: number;
@@ -110,7 +113,43 @@ export function buildChartModel(
     ? Math.max(...bucketTotals(series, buckets), 1)
     : Math.max(...(series[0]?.values ?? []), 1);
 
-  return { series, buckets, maxVal, stacked };
+  return { kind: "timeseries", series, buckets, maxVal, stacked };
+}
+
+/** Build a bar-per-category model from a categorical timeseries result. */
+export function buildCategoricalChartModel(
+  data: TimeseriesResult
+): ChartModel | undefined {
+  const series = data.series
+    .map((item) => ({
+      label: item.label,
+      values: [item.values.reduce((total, value) => total + value.value, 0)],
+    }))
+    .sort((a, b) => {
+      if (a.label === "Other") {
+        return 1;
+      }
+      if (b.label === "Other") {
+        return -1;
+      }
+      return (b.values[0] ?? 0) - (a.values[0] ?? 0);
+    });
+  if (series.length === 0) {
+    return;
+  }
+
+  // "Other" can dwarf every real category. Match the text renderer by scaling
+  // against real categories first and clipping Other to the chart height.
+  const nonOther = series.filter((item) => item.label !== "Other");
+  const scaleSeries = nonOther.length > 0 ? nonOther : series;
+  const maxVal = Math.max(...scaleSeries.map((item) => item.values[0] ?? 0), 1);
+  return {
+    kind: "categorical",
+    series,
+    buckets: series.length,
+    maxVal,
+    stacked: false,
+  };
 }
 
 /** Sum each bucket across every series. */
@@ -128,8 +167,8 @@ function bucketTotals(series: ChartSeries[], buckets: number): number[] {
   return totals;
 }
 
-/** RGBA for the default background when transparency is off. */
-const BACKGROUND_RGBA: [number, number, number, number] = [30, 30, 30, 255];
+/** RGB for the default background when transparency is off. */
+const BACKGROUND_RGB: [number, number, number] = [30, 30, 30];
 
 /** Options for {@link rasterizeChart}. */
 export type RasterizeOpts = {
@@ -163,10 +202,17 @@ export function rasterizeChart(
   // Downsample to fit, mirroring what the ASCII sparkline path already does.
   const fitted = fitModelToWidth(model, width);
 
-  const img = createCanvas(width, height, opts.backgroundTransparent ?? true);
+  const transparent = opts.backgroundTransparent ?? true;
+  const img = createPixelCanvas({
+    width,
+    height,
+    background: transparent ? undefined : BACKGROUND_RGB,
+  });
   const layout = computeBarLayout(width, fitted.buckets);
 
-  if (fitted.stacked) {
+  if (fitted.kind === "categorical") {
+    drawCategoricalBars(img, fitted, height, layout);
+  } else if (fitted.stacked) {
     drawStackedColumns(img, fitted, height, layout);
   } else {
     drawBars(img, fitted, height, layout);
@@ -182,7 +228,7 @@ export function rasterizeChart(
  */
 function fitModelToWidth(model: ChartModel, width: number): ChartModel {
   const maxBuckets = Math.max(1, Math.floor(width / 2));
-  if (model.buckets <= maxBuckets) {
+  if (model.buckets <= maxBuckets || model.kind === "categorical") {
     return model;
   }
   const series = model.series.map((s) => ({
@@ -191,26 +237,6 @@ function fitModelToWidth(model: ChartModel, width: number): ChartModel {
   }));
   const buckets = Math.max(...series.map((s) => s.values.length));
   return { ...model, series, buckets };
-}
-
-/** Create an RGBA canvas, optionally transparent. */
-function createCanvas(
-  width: number,
-  height: number,
-  transparent: boolean
-): DecodedImage {
-  const size = width * height * 4;
-  const data = new Uint8Array(size);
-  if (!transparent) {
-    const [r, g, b, a] = BACKGROUND_RGBA;
-    for (let i = 0; i < size; i += 4) {
-      data[i] = r;
-      data[i + 1] = g;
-      data[i + 2] = b;
-      data[i + 3] = a;
-    }
-  }
-  return { width, height, data };
 }
 
 /** Gap and bar width for evenly distributed columns. */
@@ -243,11 +269,11 @@ function drawBars(
     const value = series.values[i] ?? 0;
     const h = Math.round((value / model.maxVal) * height);
     const x0 = i * (layout.barWidth + layout.gap);
-    drawRect(img, {
+    drawPixelRect(img, {
       x: x0,
       y: height - h,
-      w: layout.barWidth,
-      h,
+      width: layout.barWidth,
+      height: h,
       color,
     });
   }
@@ -279,11 +305,11 @@ function drawStackedColumns(
         Math.max(1, Math.round((value / model.maxVal) * height))
       );
       const yTop = Math.max(0, yBottom - segmentHeight);
-      drawRect(img, {
+      drawPixelRect(img, {
         x: x0,
         y: yTop,
-        w: layout.barWidth,
-        h: yBottom - yTop,
+        width: layout.barWidth,
+        height: yBottom - yTop,
         color: hexToRgb(seriesColor(series.label, s)),
       });
       yBottom = yTop;
@@ -291,25 +317,29 @@ function drawStackedColumns(
   }
 }
 
-/** Parameters for {@link drawRect}. */
-type RectOpts = {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  color: [number, number, number];
-};
-
-/** Fill a solid rectangle in the canvas. */
-function drawRect(img: DecodedImage, opts: RectOpts): void {
-  const { x, y, w, h, color } = opts;
-  for (let py = Math.max(0, y); py < Math.min(img.height, y + h); py++) {
-    for (let px = Math.max(0, x); px < Math.min(img.width, x + w); px++) {
-      const i = (py * img.width + px) * 4;
-      img.data[i] = color[0];
-      img.data[i + 1] = color[1];
-      img.data[i + 2] = color[2];
-      img.data[i + 3] = 255;
+/** Draw one independently scaled bar for every category. */
+function drawCategoricalBars(
+  image: DecodedImage,
+  model: ChartModel,
+  height: number,
+  layout: BarLayout
+): void {
+  for (let index = 0; index < model.series.length; index += 1) {
+    const series = model.series[index];
+    if (!series) {
+      continue;
     }
+    const value = series.values[0] ?? 0;
+    const barHeight = Math.min(
+      height,
+      Math.max(0, Math.round((value / model.maxVal) * height))
+    );
+    drawPixelRect(image, {
+      x: index * (layout.barWidth + layout.gap),
+      y: height - barHeight,
+      width: layout.barWidth,
+      height: barHeight,
+      color: hexToRgb(seriesColor(series.label, index)),
+    });
   }
 }

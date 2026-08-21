@@ -4,6 +4,7 @@
 
 import { describe, expect, test } from "vitest";
 import {
+  buildCategoricalChartModel,
   buildChartModel,
   hexToRgb,
   rasterizeChart,
@@ -75,6 +76,7 @@ describe("buildChartModel", () => {
     const model = buildChartModel(makeTimeseries());
     expect(model).toBeDefined();
     expect(model?.stacked).toBe(false);
+    expect(model?.kind).toBe("timeseries");
     expect(model?.buckets).toBe(4);
     expect(model?.maxVal).toBe(30);
   });
@@ -104,6 +106,28 @@ describe("buildChartModel", () => {
     expect(model?.buckets).toBe(2);
     // Largest per-bucket total is 20 + 10 = 30.
     expect(model?.maxVal).toBe(30);
+  });
+});
+
+describe("buildCategoricalChartModel", () => {
+  test("sorts category bars while keeping Other last and out of the scale", () => {
+    const model = buildCategoricalChartModel(
+      makeTimeseries({
+        series: [
+          { label: "Other", values: [{ timestamp: 1, value: 1000 }] },
+          { label: "US", values: [{ timestamp: 1, value: 20 }] },
+          { label: "GB", values: [{ timestamp: 1, value: 10 }] },
+        ],
+      })
+    );
+
+    expect(model?.kind).toBe("categorical");
+    expect(model?.series.map((series) => series.label)).toEqual([
+      "US",
+      "GB",
+      "Other",
+    ]);
+    expect(model?.maxVal).toBe(20);
   });
 });
 
@@ -172,5 +196,25 @@ describe("rasterizeChart", () => {
       }
     }
     expect(rightOpaque).toBeGreaterThan(0);
+  });
+
+  test("draws independent categorical bars instead of a stacked column", () => {
+    const model = buildCategoricalChartModel(
+      makeTimeseries({
+        series: [
+          { label: "alpha", values: [{ timestamp: 1, value: 10 }] },
+          { label: "beta", values: [{ timestamp: 1, value: 20 }] },
+        ],
+      })
+    );
+    const image = rasterizeChart(model!, { width: 40, height: 20 });
+    const data = image?.data ?? new Uint8Array();
+    const leftBarAlpha = data[(19 * 40 + 0) * 4 + 3] ?? 0;
+    const rightBarAlpha = data[(19 * 40 + 21) * 4 + 3] ?? 0;
+    const gapAlpha = data[(19 * 40 + 19) * 4 + 3] ?? 0;
+
+    expect(leftBarAlpha).toBe(255);
+    expect(rightBarAlpha).toBe(255);
+    expect(gapAlpha).toBe(0);
   });
 });
