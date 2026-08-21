@@ -278,8 +278,13 @@ function drawChartContent(
     (hasLegend ? 1 : 0) * options.cellHeight +
     (hasAxisLabels ? 1 : 0) * options.cellHeight;
   const chartX = options.x + gutterWidth;
-  const chartWidth = Math.max(16, options.width - gutterWidth);
-  const chartHeight = Math.max(8, options.height - footerHeight);
+  const chartWidth = options.width - gutterWidth;
+  const chartHeight = options.height - footerHeight;
+  // rasterizeChart enforces a 16x8 minimum, which must never escape this
+  // widget's allocated rectangle on exceptionally narrow terminals.
+  if (chartWidth < 16 || chartHeight < 8) {
+    return;
+  }
   const chart = rasterizeChart(model, {
     width: chartWidth,
     height: chartHeight,

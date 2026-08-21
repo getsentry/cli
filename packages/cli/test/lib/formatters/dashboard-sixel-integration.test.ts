@@ -263,6 +263,24 @@ describe("dashboard sixel integration", () => {
     expect(output).toContain('"1;1;320;72');
   });
 
+  test("keeps charts inside exceptionally narrow widget bounds", () => {
+    process.stdout.columns = 4;
+    vi.mocked(sixelModule.terminalPixelWidth).mockReturnValue(32);
+    const output = formatDashboardWithData(
+      makeDashboardData({
+        widgets: [
+          makeWidget({ layout: { x: 0, y: 0, w: 1, h: 1 } }),
+          makeWidget({
+            title: "Neighbor",
+            layout: { x: 1, y: 0, w: 1, h: 1 },
+          }),
+        ],
+      })
+    );
+
+    expect(output).toContain('"1;1;32;72');
+  });
+
   test("falls back to the complete character dashboard without cell geometry", () => {
     vi.mocked(sixelModule.terminalPixelHeight).mockReturnValue(undefined);
     const output = formatDashboardWithData(
