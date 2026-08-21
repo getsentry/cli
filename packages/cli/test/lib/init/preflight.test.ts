@@ -441,7 +441,7 @@ describe("resolveInitProjectContext", () => {
     );
   });
 
-  test("blocks improvement when the setup service does not advertise support", async () => {
+  test("does not offer improvement when the setup service does not advertise support", async () => {
     detectSentrySetupSpy.mockResolvedValue({
       status: "installed",
       signals: ["init: src/instrumentation.ts"],
@@ -455,17 +455,28 @@ describe("resolveInitProjectContext", () => {
         },
       ],
     });
-    const { ui, respond } = createMockUI();
-    respond.select("improve");
+    const { ui, calls, respond } = createMockUI();
+    respond.select("create");
 
-    await expect(
-      resolveInitProjectContext(
-        makeContext(),
-        "/work/checkout/apps/junior",
-        ui,
-        { supportsExistingSetupImprovement: false }
-      )
-    ).rejects.toThrow("cannot safely improve an existing Sentry setup");
+    const result = await resolveInitProjectContext(
+      makeContext(),
+      "/work/checkout/apps/junior",
+      ui,
+      { supportsExistingSetupImprovement: false }
+    );
+
+    expect(result).toEqual({
+      project: "junior-2",
+      existingProject: undefined,
+    });
+    expect(
+      calls.filter((call) => call.kind === "select").map((call) => call.options)
+    ).toEqual([["create", "existing"]]);
+    expect(calls).toContainEqual({
+      kind: "log.warn",
+      message:
+        "The current setup service cannot safely improve this existing Sentry setup. Choose another project or create a new one.",
+    });
   });
 
   test("nests create versus existing under the other-project path", async () => {

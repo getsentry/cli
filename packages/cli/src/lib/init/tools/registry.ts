@@ -1,11 +1,6 @@
 import { ApiError } from "../../errors.js";
 import { WizardCancelledError } from "../clack-utils.js";
-import type {
-  ResolvedInitContext,
-  ToolOperation,
-  ToolPayload,
-  ToolResult,
-} from "../types.js";
+import type { ToolOperation, ToolPayload, ToolResult } from "../types.js";
 import { applyPatchsetTool } from "./apply-patchset.js";
 import {
   createSentryProjectTool,
@@ -19,7 +14,11 @@ import { listDirTool } from "./list-dir.js";
 import { readFilesTool } from "./read-files.js";
 import { runCommandsTool } from "./run-commands.js";
 import { formatToolError, validateToolSandbox } from "./shared.js";
-import type { AnyInitToolDefinition, ToolCapabilities } from "./types.js";
+import type {
+  AnyInitToolDefinition,
+  ToolCapabilities,
+  ToolContext,
+} from "./types.js";
 
 const PROJECT_CREATION_OPERATIONS = new Set<ToolOperation>([
   "create-sentry-project",
@@ -43,6 +42,12 @@ const toolRegistry = new Map<ToolOperation, AnyInitToolDefinition>(
   toolDefinitions.map((tool) => [tool.operation, tool] as const)
 );
 
+/** Sentry API operations never inspect or mutate the local filesystem. */
+const CWD_INDEPENDENT_OPERATIONS = new Set<ToolOperation>([
+  "create-sentry-project",
+  "ensure-sentry-project",
+]);
+
 /**
  * Build the spinner message for a suspended tool request.
  */
@@ -56,14 +61,9 @@ export function describeTool(payload: ToolPayload): string {
  */
 export async function executeTool(
   payload: ToolPayload,
-  context: ResolvedInitContext,
+  context: ToolContext,
   capabilities: ToolCapabilities = {}
 ): Promise<ToolResult> {
-  const sandboxError = validateToolSandbox(payload, context.directory);
-  if (sandboxError) {
-    return sandboxError;
-  }
-
   const tool = toolRegistry.get(payload.operation);
   if (!tool) {
     return {
@@ -72,11 +72,23 @@ export async function executeTool(
     };
   }
 
+  let sandboxedPayload = payload;
+  if (!CWD_INDEPENDENT_OPERATIONS.has(payload.operation)) {
+    const sandbox = validateToolSandbox(payload, context.directory);
+    if ("ok" in sandbox) {
+      return sandbox;
+    }
+    sandboxedPayload = { ...payload, cwd: sandbox.cwd } as ToolPayload;
+  }
+
   try {
     const executionContext = PROJECT_CREATION_OPERATIONS.has(payload.operation)
       ? { ...context, chooseTeam: capabilities.chooseTeam }
       : context;
-    return await tool.execute(payload as never, executionContext);
+    return await tool.execute(
+      sandboxedPayload as never,
+      executionContext as never
+    );
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       throw error;

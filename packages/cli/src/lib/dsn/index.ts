@@ -52,6 +52,8 @@ export {
   createDsnFingerprint,
   extractOrgIdFromHost,
   inferPackagePath,
+  isPlaceholderNumericId,
+  isPlaceholderPublicKey,
   isValidDsn,
   parseDsn,
   stripDsnOrgPrefix,

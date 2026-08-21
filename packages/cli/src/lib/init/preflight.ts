@@ -230,7 +230,8 @@ function assertImprovementSupported(
     options.supportsExistingSetupImprovement !== true
   ) {
     throw new WizardError(
-      "This setup service version cannot safely improve an existing Sentry setup. Deploy or update the setup service before using this CLI version."
+      "This setup service version cannot safely improve an existing Sentry setup. Deploy or update the setup service before using this CLI version.",
+      { rendered: false }
     );
   }
 }
@@ -310,6 +311,16 @@ async function resolveDetectedSetupChoice(
     suggestedProjectName,
     supportsExistingSetupImprovement,
   } = options;
+  if (supportsExistingSetupImprovement === false) {
+    ui.log.warn(
+      "The current setup service cannot safely improve this existing Sentry setup. Choose another project or create a new one."
+    );
+    return await resolveImplicitProjectSelection(context.org, false, ui, {
+      avoidProjectSlug:
+        detected.existingProject?.projectSlug ?? detected.project,
+      suggestedProjectName,
+    });
+  }
   const project = detected.existingProject;
   const setupContext = project
     ? `Sentry detected for project ${project.projectDisplay ?? project.projectSlug} in organization ${project.orgDisplay ?? project.orgSlug}. What would you like to do?`

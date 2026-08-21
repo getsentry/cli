@@ -6,10 +6,11 @@
  */
 
 import { execSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import fs, { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { MAX_FILE_BYTES } from "../../src/lib/init/constants.js";
 import { applyPatchset } from "../../src/lib/init/tools/apply-patchset.js";
 import { readFiles } from "../../src/lib/init/tools/read-files.js";
 import type { DirEntry } from "../../src/lib/init/types.js";
@@ -135,7 +136,7 @@ describe("init read-files FIFO safety", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("returns null entry for a FIFO path instead of hanging", async () => {
+  test("returns a structured error for a FIFO path instead of hanging", async () => {
     writeFileSync(join(dir, "real.ts"), "export {};\n");
     createFifo(join(dir, ".env"));
 
@@ -143,17 +144,24 @@ describe("init read-files FIFO safety", () => {
       type: "tool",
       operation: "read-files",
       cwd: dir,
-      params: { paths: ["real.ts", ".env"] },
+      params: { paths: ["real.ts", ".env"], resultVersion: 2 },
     });
 
     expect(result.ok).toBe(true);
-    const files = (result.data as { files: Record<string, string | null> })
-      .files;
-    expect(files["real.ts"]).toBe("export {};\n");
-    expect(files[".env"]).toBeNull();
+    expect(result.data).toEqual({
+      files: {
+        ".env": { error: "not-file", status: "error" },
+        "real.ts": {
+          content: "export {};\n",
+          status: "ok",
+          truncated: false,
+        },
+      },
+      version: 2,
+    });
   });
 
-  test("returns null entry for a symlink to a FIFO (1Password pattern)", async () => {
+  test("returns a structured error for a symlink to a FIFO", async () => {
     // 1Password's `.env` integration uses a symlink → FIFO to stream
     // secrets. `stat` follows the symlink so `isFile()` is false on
     // the FIFO target, correctly rejected by the guard.
@@ -166,13 +174,14 @@ describe("init read-files FIFO safety", () => {
       type: "tool",
       operation: "read-files",
       cwd: dir,
-      params: { paths: [".env"] },
+      params: { paths: [".env"], resultVersion: 2 },
     });
 
     expect(result.ok).toBe(true);
-    const files = (result.data as { files: Record<string, string | null> })
-      .files;
-    expect(files[".env"]).toBeNull();
+    expect(result.data).toEqual({
+      files: { ".env": { error: "not-file", status: "error" } },
+      version: 2,
+    });
   });
 });
 
@@ -191,55 +200,57 @@ describe("init apply-patchset FIFO safety", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("throws targeted error for a FIFO target instead of hanging", async () => {
+  test("returns a targeted error for a FIFO target instead of hanging", async () => {
     createFifo(join(dir, "config.ts"));
 
-    await expect(
-      applyPatchset(
-        {
-          type: "tool",
-          operation: "apply-patchset",
-          cwd: dir,
-          params: {
-            patches: [
-              {
-                action: "modify",
-                path: "config.ts",
-                edits: [{ oldString: "foo", newString: "bar" }],
-              },
-            ],
-          },
+    const result = await applyPatchset(
+      {
+        type: "tool",
+        operation: "apply-patchset",
+        cwd: dir,
+        params: {
+          patches: [
+            {
+              action: "modify",
+              path: "config.ts",
+              edits: [{ oldString: "foo", newString: "bar" }],
+            },
+          ],
         },
-        { dryRun: false, authToken: undefined }
-      )
-    ).rejects.toThrow(/not a regular file|read failed/);
+      },
+      { dryRun: false, authToken: undefined }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/not a (?:readable )?regular file/);
   });
 
-  test("throws targeted error for a symlink to a FIFO", async () => {
+  test("returns a targeted error for a symlink to a FIFO", async () => {
     const fifo = join(dir, "config.pipe");
     const link = join(dir, "config.ts");
     createFifo(fifo);
     execSync(`ln -s ${JSON.stringify(fifo)} ${JSON.stringify(link)}`);
 
-    await expect(
-      applyPatchset(
-        {
-          type: "tool",
-          operation: "apply-patchset",
-          cwd: dir,
-          params: {
-            patches: [
-              {
-                action: "modify",
-                path: "config.ts",
-                edits: [{ oldString: "foo", newString: "bar" }],
-              },
-            ],
-          },
+    const result = await applyPatchset(
+      {
+        type: "tool",
+        operation: "apply-patchset",
+        cwd: dir,
+        params: {
+          patches: [
+            {
+              action: "modify",
+              path: "config.ts",
+              edits: [{ oldString: "foo", newString: "bar" }],
+            },
+          ],
         },
-        { dryRun: false, authToken: undefined }
-      )
-    ).rejects.toThrow(/not a regular file|read failed/);
+      },
+      { dryRun: false, authToken: undefined }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/not a (?:readable )?regular file/);
   });
 });
 
@@ -271,5 +282,62 @@ describe("workflow-inputs preReadCommonFiles FIFO safety", () => {
     const cache = await preReadCommonFiles(dir, listing);
     expect(cache["package.json"]).toBe('{"name":"x"}');
     expect(cache["tsconfig.json"]).toBeNull();
+  });
+
+  test("rejects a common-config alias to sensitive metadata", async () => {
+    writeFileSync(
+      join(dir, ".netrc"),
+      "machine example.test login user password secret\n"
+    );
+    symlinkSync(".netrc", join(dir, "package.json"));
+
+    const listing: DirEntry[] = [
+      { name: "package.json", path: "package.json", type: "file" },
+    ];
+
+    const cache = await preReadCommonFiles(dir, listing);
+    expect(cache["package.json"]).toBeNull();
+  });
+
+  test("skips an oversized common config instead of truncating it", async () => {
+    writeFileSync(join(dir, "package.json"), "x".repeat(MAX_FILE_BYTES + 1));
+    const listing: DirEntry[] = [
+      { name: "package.json", path: "package.json", type: "file" },
+    ];
+
+    const cache = await preReadCommonFiles(dir, listing);
+    expect(cache).not.toHaveProperty("package.json");
+  });
+
+  test("fills the common-config buffer after short descriptor reads", async () => {
+    const filePath = join(dir, "package.json");
+    const content = '{"name":"short-read-project"}\n';
+    writeFileSync(filePath, content);
+    const actualHandle = await fs.promises.open(filePath, "r");
+    const shortRead = vi.fn(
+      (
+        buffer: Buffer,
+        offset: number,
+        length: number,
+        position: number | null
+      ) => actualHandle.read(buffer, offset, Math.min(length, 3), position)
+    );
+    const openSpy = vi.spyOn(fs.promises, "open").mockResolvedValue({
+      close: vi.fn().mockResolvedValue(undefined),
+      read: shortRead,
+      stat: () => actualHandle.stat(),
+    } as unknown as fs.promises.FileHandle);
+
+    try {
+      const cache = await preReadCommonFiles(dir, [
+        { name: "package.json", path: "package.json", type: "file" },
+      ]);
+
+      expect(cache["package.json"]).toBe(content);
+      expect(shortRead.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      openSpy.mockRestore();
+      await actualHandle.close();
+    }
   });
 });

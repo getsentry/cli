@@ -13,7 +13,6 @@
 
 import { randomBytes } from "node:crypto";
 import nodePath from "node:path";
-import { isDeepStrictEqual } from "node:util";
 
 import { MastraClient } from "@mastra/client-js";
 import {
@@ -38,7 +37,6 @@ import {
   abortIfCancelled,
   PROGRESS_ROTATE_INTERVAL_MS,
   STEP_ACTIVE_LABELS,
-  STEP_LABELS,
   STEP_PROGRESS_MESSAGES,
   WizardCancelledError,
 } from "./clack-utils.js";
@@ -47,6 +45,8 @@ import {
   EXIT_DEPENDENCY_INSTALL_FAILED,
   EXIT_PLATFORM_NOT_DETECTED,
   EXIT_VERIFICATION_FAILED,
+  INIT_PROTOCOL_VERSION,
+  INIT_REQUEST_CONFLICT_CODE,
   MASTRA_API_URL,
   VERIFY_CHANGES_STEP,
   WORKFLOW_ID,
@@ -67,7 +67,9 @@ import { checkReadiness } from "./readiness.js";
 import { describeTool, executeTool } from "./tools/registry.js";
 import { validateToolSandbox } from "./tools/shared.js";
 import type {
+  InteractivePayload,
   ResolvedInitContext,
+  SentryProjectIdentity,
   SuspendPayload,
   ToolPayload,
   ToolResult,
@@ -77,7 +79,7 @@ import type {
 import { getUIAsync } from "./ui/factory.js";
 import { LoggingUIPromptError } from "./ui/logging-ui.js";
 import type { SpinnerHandle, WelcomeOptions, WizardUI } from "./ui/types.js";
-import { verifySetup } from "./verify-setup.js";
+import { type VerifyResult, verifySetup } from "./verify-setup.js";
 import {
   precomputeDirListing,
   precomputeSentrySetupTargets,
@@ -101,8 +103,18 @@ type CompactPhaseHistoryEntry = {
   data?: { files: Record<string, null> };
 };
 
+/**
+ * Mutable holder for the Sentry project identity captured mid-run.
+ *
+ * The `create-sentry-project` / `ensure-sentry-project` tool runs locally and
+ * returns the org/project identifiers, but that result only travels back to the
+ * server in `resumeData`. This ref lets the runner retain it so the final
+ * completion screen can build the Issues link without a server round-trip.
+ */
+type SentryProjectRef = { current?: SentryProjectIdentity };
+
 type StepContext = {
-  payload: SuspendPayload;
+  payload: InteractivePayload | ToolPayload;
   stepId: string;
   spin: SpinnerHandle;
   spinState: SpinState;
@@ -110,6 +122,7 @@ type StepContext = {
   supportsExistingSetupImprovement: boolean;
   projectContextState: ProjectContextState;
   ui: WizardUI;
+  sentryProject: SentryProjectRef;
 };
 
 type ProjectContextState = {
@@ -154,6 +167,36 @@ function isExistingSentryDetection(value: unknown): value is {
   );
 }
 
+/** Tool operations that create/resolve the Sentry project and return its identity. */
+const SENTRY_PROJECT_OPERATIONS = new Set<ToolPayload["operation"]>([
+  "create-sentry-project",
+  "ensure-sentry-project",
+]);
+
+/** Narrow a tool result's `data` to a Sentry project identity, if it has one. */
+function extractSentryProjectIdentity(
+  data: unknown
+): SentryProjectIdentity | undefined {
+  if (!data || typeof data !== "object") {
+    return;
+  }
+  const d = data as Record<string, unknown>;
+  if (
+    typeof d.orgSlug === "string" &&
+    typeof d.projectSlug === "string" &&
+    typeof d.projectId === "string"
+  ) {
+    return {
+      orgSlug: d.orgSlug,
+      projectSlug: d.projectSlug,
+      projectId: d.projectId,
+      dsn: typeof d.dsn === "string" ? d.dsn : undefined,
+      url: typeof d.url === "string" ? d.url : undefined,
+    };
+  }
+  return;
+}
+
 function nextPhase(
   stepPhases: Map<string, number>,
   stepId: string,
@@ -186,6 +229,17 @@ function hasHttpStatus(value: unknown): value is { status: number } {
     "status" in value &&
     typeof value.status === "number"
   );
+}
+
+/** Copy the validated v1 request identity onto a resume payload. */
+function initProtocolEnvelope(payload: SuspendPayload): {
+  protocolVersion: 1;
+  requestId: string;
+} {
+  return {
+    protocolVersion: INIT_PROTOCOL_VERSION,
+    requestId: payload.requestId,
+  };
 }
 
 function hasActiveStepsPath(value: Record<string, unknown>): value is Record<
@@ -295,11 +349,7 @@ function formatReadFilesSummary(progress: ReadFilesDisplay): string {
  * Build a follow-up spinner message after a tool succeeds and the CLI is
  * waiting for the server to continue processing the returned data.
  */
-function describePostTool(payload: SuspendPayload): string | undefined {
-  if (payload.type !== "tool") {
-    return;
-  }
-
+function describePostTool(payload: ToolPayload): string | undefined {
   switch (payload.operation) {
     case "read-files":
       return formatReadFilesSummary({
@@ -405,8 +455,8 @@ async function handleSuspendedStep(
     supportsExistingSetupImprovement,
     projectContextState,
     ui,
+    sentryProject,
   } = ctx;
-  const label = STEP_LABELS[stepId] ?? stepId;
 
   if (payload.type === "tool") {
     const message =
@@ -431,32 +481,35 @@ async function handleSuspendedStep(
       ui.recordFilesReading?.(payload.params.paths);
     }
 
+    const sandbox = validateToolSandbox(payload, context.directory);
+    const sandboxedPayload =
+      "ok" in sandbox
+        ? payload
+        : ({ ...payload, cwd: sandbox.cwd } as ToolPayload);
     let executionContext = context;
-    let toolResult: ToolResult | undefined = validateToolSandbox(
-      payload,
-      context.directory
-    );
+    let toolResult: ToolResult | undefined =
+      "ok" in sandbox ? sandbox : undefined;
 
     // Once the concrete target directory is resolved, execute detection
     // through the registry first (which enforces the cwd sandbox), then
     // resolve the Sentry project from that exact directory.
     // Keep the choice locally so the later ensure step does not prompt twice.
-    if (!toolResult && payload.operation === "detect-sentry") {
-      toolResult = await executeTool(payload, context);
+    if (!toolResult && sandboxedPayload.operation === "detect-sentry") {
+      toolResult = await executeTool(sandboxedPayload, context);
       if (toolResult.ok && isExistingSentryDetection(toolResult.data)) {
         spin.stop("");
         spinState.running = false;
         const selection = await resolveInitProjectContext(
           context,
-          payload.cwd,
+          sandboxedPayload.cwd,
           ui,
           {
             setup: toolResult.data,
-            suggestedProjectName: nodePath.basename(payload.cwd),
+            suggestedProjectName: nodePath.basename(sandboxedPayload.cwd),
             supportsExistingSetupImprovement,
           }
         );
-        projectContextState.cwd = payload.cwd;
+        projectContextState.cwd = sandboxedPayload.cwd;
         projectContextState.selection = selection;
         toolResult = {
           ...toolResult,
@@ -475,9 +528,9 @@ async function handleSuspendedStep(
       }
     }
 
-    if (!toolResult && isProjectCreationOperation(payload)) {
+    if (!toolResult && isProjectCreationOperation(sandboxedPayload)) {
       let projectContext =
-        projectContextState.cwd === payload.cwd
+        projectContextState.cwd === sandboxedPayload.cwd
           ? projectContextState.selection
           : undefined;
       if (!projectContext) {
@@ -485,14 +538,14 @@ async function handleSuspendedStep(
         spinState.running = false;
         projectContext = await resolveInitProjectContext(
           context,
-          payload.cwd,
+          sandboxedPayload.cwd,
           ui,
           {
-            suggestedProjectName: payload.params.name,
+            suggestedProjectName: sandboxedPayload.params.name,
             supportsExistingSetupImprovement,
           }
         );
-        projectContextState.cwd = payload.cwd;
+        projectContextState.cwd = sandboxedPayload.cwd;
         projectContextState.selection = projectContext;
       }
       executionContext = { ...context, ...projectContext };
@@ -507,12 +560,12 @@ async function handleSuspendedStep(
     }
 
     const canChooseTeam =
-      isProjectCreationOperation(payload) &&
+      isProjectCreationOperation(sandboxedPayload) &&
       !context.yes &&
       !context.dryRun &&
       supportsInteractiveTeamChoice(ui);
     toolResult ??= canChooseTeam
-      ? await executeTool(payload, executionContext, {
+      ? await executeTool(sandboxedPayload, executionContext, {
           chooseTeam: async (teams) => {
             spin.stop("Found available teams");
             spinState.running = false;
@@ -524,11 +577,30 @@ async function handleSuspendedStep(
             return choice;
           },
         })
-      : await executeTool(payload, executionContext);
+      : await executeTool(sandboxedPayload, executionContext);
+
+    // The CLI creates the Sentry project itself — retain the identity it just
+    // resolved so the completion screen can build the Issues link locally,
+    // without the server having to echo org/project/projectId back.
+    if (
+      SENTRY_PROJECT_OPERATIONS.has(sandboxedPayload.operation) &&
+      toolResult.ok !== false
+    ) {
+      const identity = extractSentryProjectIdentity(toolResult.data);
+      if (identity) {
+        sentryProject.current = identity;
+      }
+    }
 
     if (toolResult.message) {
-      spin.stop(renderInlineMarkdown(toolResult.message));
-      spin.start("Processing...");
+      // Tool messages (e.g. "Using existing project ...") describe a
+      // completed sub-action that the sidebar Tasks checklist already
+      // tracks. Surface it as a transient spinner update instead of
+      // stopping the spinner to persist a ✔ line that just duplicates the
+      // checklist.
+      spin.message(
+        renderInlineMarkdown(truncateForTerminal(toolResult.message))
+      );
     } else {
       const followUpMessage =
         toolResult.ok === false ? undefined : describePostTool(payload);
@@ -573,7 +645,11 @@ async function handleSuspendedStep(
       };
     }
 
-    spin.stop(stepId === SELECT_TARGET_APP_STEP ? "" : label);
+    // Stop the spinner to hand its row over to the interactive prompt, but
+    // pass an empty message so no ✔ line is persisted for the step label
+    // (e.g. "Selecting features"). The sidebar Tasks checklist already
+    // tracks step progress, so a duplicate line in the activity log is noise.
+    spin.stop("");
     spinState.running = false;
 
     const interactiveResult = await handleInteractive(payload, context, ui, {
@@ -655,6 +731,7 @@ function assertWorkflowResult(raw: unknown): WorkflowRunResult {
   return obj as WorkflowRunResult;
 }
 
+/** Parse suspend payloads and require the complete v1 transport identity. */
 function assertSuspendPayload(raw: unknown): SuspendPayload {
   if (!raw || typeof raw !== "object") {
     throw new Error("Invalid suspend payload: expected object");
@@ -666,7 +743,26 @@ function assertSuspendPayload(raw: unknown): SuspendPayload {
   ) {
     throw new Error(`Unknown suspend payload type: ${String(obj.type)}`);
   }
+  if (
+    obj.protocolVersion !== INIT_PROTOCOL_VERSION ||
+    typeof obj.requestId !== "string" ||
+    obj.requestId.length === 0
+  ) {
+    throw new Error("Invalid init protocol envelope");
+  }
   return obj as SuspendPayload;
+}
+
+/** Keep transport identity at the wire boundary, outside local tool and UI contracts. */
+function localSuspendPayload(
+  payload: SuspendPayload
+): InteractivePayload | ToolPayload {
+  const {
+    protocolVersion: _protocolVersion,
+    requestId: _requestId,
+    ...localPayload
+  } = payload;
+  return localPayload;
 }
 
 function withTimeout<T>(
@@ -842,6 +938,19 @@ function isStepAlreadyAdvancedError(err: unknown): boolean {
   return err instanceof Error && err.message.includes("was not suspended");
 }
 
+/** Match the API's stable stale-request response, not mutable error prose. */
+function isInitProtocolConflictError(err: unknown): boolean {
+  if (httpStatus(err) !== 409 || typeof err !== "object" || err === null) {
+    return false;
+  }
+  const body = Reflect.get(err, "body") as unknown;
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    Reflect.get(body, "code") === INIT_REQUEST_CONFLICT_CODE
+  );
+}
+
 function httpStatus(err: unknown): number | undefined {
   return hasHttpStatus(err) ? err.status : undefined;
 }
@@ -860,6 +969,7 @@ function runStateRecoveryBackoffMs(): number[] {
   return delays;
 }
 
+/** A v1 request advances only when the active request ID changed. */
 function isRecoverableRunState(
   result: WorkflowRunResult,
   resumedStepId: string,
@@ -874,10 +984,7 @@ function isRecoverableRunState(
     return false;
   }
 
-  return !(
-    recovered.stepId === resumedStepId &&
-    isDeepStrictEqual(recovered.payload, resumedPayload)
-  );
+  return recovered.payload.requestId !== resumedPayload.requestId;
 }
 
 /**
@@ -939,6 +1046,10 @@ async function tryRecoverCurrentRunState(
   return null;
 }
 
+/**
+ * Resume once, then recover by observing durable run state. This never
+ * re-executes the local tool when a response was lost or its request is stale.
+ */
 async function resumeWithRecovery(
   args: ResumeRetryArgs
 ): Promise<WorkflowRunResult> {
@@ -953,10 +1064,19 @@ async function resumeWithRecovery(
     ui,
     progressRotation,
   } = args;
+  const wireResumeData = {
+    ...resumeData,
+    ...initProtocolEnvelope(payload),
+  };
   try {
     const raw = await withTimeout(
       withInitServiceAuthClassification(
-        () => run.resumeAsync({ step: stepId, resumeData, tracingOptions }),
+        () =>
+          run.resumeAsync({
+            step: stepId,
+            resumeData: wireResumeData,
+            tracingOptions,
+          }),
         WORKFLOW_RESUME_ASYNC_ENDPOINT
       ),
       API_TIMEOUT_MS,
@@ -964,7 +1084,7 @@ async function resumeWithRecovery(
     );
     return assertWorkflowResult(raw);
   } catch (err) {
-    if (isStepAlreadyAdvancedError(err)) {
+    if (isStepAlreadyAdvancedError(err) || isInitProtocolConflictError(err)) {
       progressRotation?.pause();
       spin.message("Reconnecting...");
       const recovered = await tryRecoverCurrentRunState(
@@ -1024,6 +1144,7 @@ async function resumeWithRecovery(
   }
 }
 
+/** Run the wizard while negotiating v1 and echoing each suspended request ID. */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
 export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   // Note: a previous `forwardFreshTtyToStdin()` call lived here as a
@@ -1171,6 +1292,10 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
           () =>
             run.startAsync({
               inputData: {
+                client: {
+                  cliVersion: CLI_VERSION,
+                  protocolVersion: INIT_PROTOCOL_VERSION,
+                },
                 directory,
                 yes,
                 dryRun,
@@ -1209,6 +1334,9 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   const stepPhases = new Map<string, number>();
   const stepHistory = new Map<string, CompactPhaseHistoryEntry[]>();
   const projectContextState: ProjectContextState = {};
+  // Populated when the create/ensure-sentry-project tool runs; read at the end
+  // to build the completion screen's Issues link from local data.
+  const sentryProjectRef: SentryProjectRef = {};
 
   syncWorkflowStepStatuses(result, ui);
 
@@ -1252,7 +1380,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
 
       const resumeData = await handleSuspendedStep(
         {
-          payload: extracted.payload,
+          payload: localSuspendPayload(extracted.payload),
           stepId: extracted.stepId,
           spin,
           spinState,
@@ -1261,6 +1389,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
             serviceCapabilities.improveExistingSetup,
           projectContextState,
           ui,
+          sentryProject: sentryProjectRef,
         },
         stepPhases,
         stepHistory
@@ -1340,7 +1469,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       throw err;
     }
     if (err instanceof WizardError) {
-      showFailedFeedback(ui);
+      showFailedFeedback(ui, err.rendered ? "Setup failed" : err.message);
       setTag("wizard.outcome", "errored");
       throw err;
     }
@@ -1359,7 +1488,14 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     ui.setStep?.(activeStepId, "completed");
   }
 
-  await handleFinalResult(result, spin, spinState, ui, directory);
+  await handleFinalResult(
+    result,
+    spin,
+    spinState,
+    ui,
+    directory,
+    sentryProjectRef.current
+  );
   setTag("wizard.outcome", "completed");
   if (result.result?.platform) {
     setTag("wizard.platform", String(result.result.platform));
@@ -1396,44 +1532,75 @@ function syncWorkflowStepStatuses(
   }
 }
 
-// biome-ignore lint/nursery/useMaxParams: existing 4-param shape; cwd is a defaulted extension
+type WorkflowFailure = {
+  message: string;
+  resultForDisplay: WorkflowRunResult;
+  workflowCode: number | undefined;
+};
+
+function getWorkflowFailure(
+  result: WorkflowRunResult
+): WorkflowFailure | undefined {
+  const workflowCode = result.result?.exitCode;
+  if (result.status === "success" && workflowCode === 0) {
+    return;
+  }
+
+  const missingExitCodeMessage =
+    result.status === "success" && workflowCode === undefined
+      ? "Workflow reported success without an explicit exit code"
+      : undefined;
+  const message =
+    missingExitCodeMessage ??
+    result.error ??
+    result.result?.message ??
+    "Workflow returned an error";
+
+  return {
+    message,
+    resultForDisplay: missingExitCodeMessage
+      ? { ...result, error: message }
+      : result,
+    workflowCode,
+  };
+}
+
+// biome-ignore lint/nursery/useMaxParams: cwd and sentryProject are optional trailing extensions
 export async function handleFinalResult(
   result: WorkflowRunResult,
   spin: SpinnerHandle,
   spinState: SpinState,
   ui: WizardUI,
-  cwd?: string
+  cwd?: string,
+  sentryProject?: SentryProjectIdentity
 ): Promise<void> {
-  const hasError = result.status !== "success" || result.result?.exitCode;
+  const failure = getWorkflowFailure(result);
 
-  if (hasError) {
+  if (failure) {
     if (spinState.running) {
       spin.stop("Failed", 1);
       spinState.running = false;
     }
-    formatError(result, ui);
+    formatError(failure.resultForDisplay, ui);
 
     // Map workflow-internal exit codes to semantic EXIT.* constants
-    const workflowCode = result.result?.exitCode;
-    const exitCode = mapWorkflowExitCode(workflowCode);
+    const exitCode = mapWorkflowExitCode(failure.workflowCode);
     setTag("wizard.outcome", "errored");
-    if (workflowCode !== undefined) {
-      setTag("wizard.exit_code", workflowCode);
+    if (failure.workflowCode !== undefined) {
+      setTag("wizard.exit_code", failure.workflowCode);
     }
-    throw new WizardError(
-      result.error ?? result.result?.message ?? "Workflow returned an error",
-      { exitCode }
-    );
+    throw new WizardError(failure.message, { exitCode });
   }
 
   // Run verification before printing the final summary so the user
   // sees the result inline with the rest of the output.
+  let verify: VerifyResult | undefined;
   if (cwd) {
     if (spinState.running) {
       spin.message("Verifying setup...");
     }
     try {
-      await verifySetup(result, ui, cwd);
+      verify = await verifySetup(result, ui, cwd);
     } catch (error) {
       logger.debug("Verification threw unexpectedly", error);
     }
@@ -1443,7 +1610,7 @@ export async function handleFinalResult(
     spin.stop("Done");
     spinState.running = false;
   }
-  formatResult(result, ui);
+  formatResult(result, ui, verify, sentryProject);
 }
 
 /**
