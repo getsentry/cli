@@ -28,11 +28,13 @@ After installation, restart Claude Code. The skills will be automatically invoke
 
 ### Cursor
 
-Skills are automatically available in `.cursor/skills/` for Cursor users.
+Skills are automatically available in `.cursor/skills/` for Cursor users (via symlinks in the repo). The CLI also installs skills to `~/.agents/skills/sentry-cli/` which Cursor reads.
 
 ### Other Agents
 
-Copy the `plugins/sentry-cli/skills/` directory to your agent's skills location, or reference the SKILL.md files directly according to your agent's documentation.
+The CLI automatically installs skills to `~/.agents/skills/sentry-cli/` and `~/.claude/skills/sentry-cli/` when those directories exist. Agents that scan these paths (OpenCode, Gemini CLI, etc.) pick up the skill without additional configuration.
+
+For agents that don't read from these standard paths, copy the `plugins/sentry-cli/skills/` directory to your agent's skills location, or reference the SKILL.md files directly according to your agent's documentation.
 
 ## Available Skills
 

@@ -34,6 +34,22 @@ The `--version` flag takes precedence over `SENTRY_VERSION` if both are set.
 The chosen channel is persisted so that `sentry cli upgrade` automatically
 tracks the same channel on future updates.
 
+The install script accepts these optional flags:
+
+| Flag | Description |
+|------|-------------|
+| `--no-modify-path` | Don't modify shell config files (`.zshrc`, `.bashrc`, etc.) |
+| `--no-completions` | Don't install shell completions |
+| `--no-agent-skills` | Don't install AI agent skills |
+
+And these environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `SENTRY_INSTALL_DIR` | Override the installation directory |
+| `SENTRY_VERSION` | Pin a specific version (e.g., `0.42.2`, `nightly`) |
+| `SENTRY_INIT` | Set to `1` to run `sentry init` after installing |
+
 ### Supported Platforms
 
 {/* GENERATED:START platform-support */}
