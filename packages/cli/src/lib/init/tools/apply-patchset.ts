@@ -96,24 +96,57 @@ export async function applyPatchset(
 
   for (const patch of payload.params.patches) {
     const absPath = safePath(payload.cwd, patch.path);
-
-    if (patch.action === "modify") {
-      try {
-        await fs.promises.access(absPath);
-      } catch {
-        return {
-          ok: false,
-          error: `Cannot modify "${patch.path}": file does not exist`,
-          data: { applied },
-        };
-      }
+    const targetError = await validatePatchTarget(absPath, patch);
+    if (targetError) {
+      return { ok: false, error: targetError, data: { applied } };
     }
-
-    await applySinglePatch(absPath, patch, context.authToken);
+    const applyError = await applySinglePatchSafely(
+      absPath,
+      patch,
+      context.authToken
+    );
+    if (applyError) {
+      return { ok: false, error: applyError, data: { applied } };
+    }
     applied.push({ path: patch.path, action: patch.action });
   }
 
   return { ok: true, data: { applied } };
+}
+
+async function validatePatchTarget(
+  absPath: string,
+  patch: ApplyPatchsetPatch
+): Promise<string | undefined> {
+  try {
+    await fs.promises.access(absPath);
+    return patch.action === "create"
+      ? `Cannot create "${patch.path}": file already exists`
+      : undefined;
+  } catch {
+    return patch.action === "modify"
+      ? `Cannot modify "${patch.path}": file does not exist`
+      : undefined;
+  }
+}
+
+async function applySinglePatchSafely(
+  absPath: string,
+  patch: ApplyPatchsetPatch,
+  authToken?: string
+): Promise<string | undefined> {
+  try {
+    await applySinglePatch(absPath, patch, authToken);
+    return;
+  } catch (error) {
+    if (
+      patch.action === "create" &&
+      (error as NodeJS.ErrnoException).code === "EEXIST"
+    ) {
+      return `Cannot create "${patch.path}": file already exists`;
+    }
+    throw error;
+  }
 }
 
 function applyPatchsetDryRun(payload: ApplyPatchsetPayload): ToolResult {
@@ -142,7 +175,10 @@ async function applySinglePatch(
         patch as ApplyPatchsetPatch & { patch: string },
         authToken
       );
-      await fs.promises.writeFile(absPath, content, "utf-8");
+      await fs.promises.writeFile(absPath, content, {
+        encoding: "utf-8",
+        flag: "wx",
+      });
       break;
     }
     case "modify": {

@@ -114,32 +114,11 @@ type StepContext = {
 
 type ProjectContextState = {
   cwd?: string;
-  decisionIntroActive?: boolean;
   selection?: Pick<
     ResolvedInitContext,
     "project" | "existingProject" | "setupIntent"
   >;
 };
-
-function setProjectDecisionIntro(
-  state: ProjectContextState,
-  ui: WizardUI,
-  enabled: boolean
-): void {
-  if (state.decisionIntroActive === enabled) {
-    return;
-  }
-  state.decisionIntroActive = enabled;
-  ui.setIntroMode?.(enabled);
-}
-
-function isProjectDecisionPayload(payload: SuspendPayload): boolean {
-  return (
-    payload.type === "tool" &&
-    (payload.operation === "detect-sentry" ||
-      isProjectCreationOperation(payload))
-  );
-}
 
 function supportsInteractiveTeamChoice(ui: WizardUI): boolean {
   return ui.supportsInteractivePrompts === true;
@@ -219,6 +198,19 @@ function hasActiveStepsPath(value: Record<string, unknown>): value is Record<
     typeof value.activeStepsPath === "object" &&
     value.activeStepsPath !== null &&
     !Array.isArray(value.activeStepsPath)
+  );
+}
+
+function hasSuspendedPaths(value: Record<string, unknown>): value is Record<
+  string,
+  unknown
+> & {
+  suspendedPaths: Record<string, unknown>;
+} {
+  return (
+    typeof value.suspendedPaths === "object" &&
+    value.suspendedPaths !== null &&
+    !Array.isArray(value.suspendedPaths)
   );
 }
 
@@ -450,46 +442,36 @@ async function handleSuspendedStep(
     // resolve the Sentry project from that exact directory.
     // Keep the choice locally so the later ensure step does not prompt twice.
     if (!toolResult && payload.operation === "detect-sentry") {
-      const useDecisionIntro = !(context.yes || context.dryRun);
-      if (useDecisionIntro) {
-        setProjectDecisionIntro(projectContextState, ui, true);
-      }
-      try {
-        toolResult = await executeTool(payload, context);
-        if (toolResult.ok && isExistingSentryDetection(toolResult.data)) {
-          spin.stop("");
-          spinState.running = false;
-          const selection = await resolveInitProjectContext(
-            context,
-            payload.cwd,
-            ui,
-            {
-              setup: toolResult.data,
-              suggestedProjectName: nodePath.basename(payload.cwd),
-              supportsExistingSetupImprovement,
-            }
-          );
-          projectContextState.cwd = payload.cwd;
-          projectContextState.selection = selection;
-          toolResult = {
-            ...toolResult,
-            data: {
-              ...toolResult.data,
-              ...(selection.existingProject?.platform
-                ? { knownPlatform: selection.existingProject.platform }
-                : {}),
-              ...(selection.setupIntent
-                ? { setupIntent: selection.setupIntent }
-                : {}),
-            },
-          };
-          spin.start("Preparing project setup...");
-          spinState.running = true;
-        }
-      } finally {
-        if (useDecisionIntro) {
-          setProjectDecisionIntro(projectContextState, ui, false);
-        }
+      toolResult = await executeTool(payload, context);
+      if (toolResult.ok && isExistingSentryDetection(toolResult.data)) {
+        spin.stop("");
+        spinState.running = false;
+        const selection = await resolveInitProjectContext(
+          context,
+          payload.cwd,
+          ui,
+          {
+            setup: toolResult.data,
+            suggestedProjectName: nodePath.basename(payload.cwd),
+            supportsExistingSetupImprovement,
+          }
+        );
+        projectContextState.cwd = payload.cwd;
+        projectContextState.selection = selection;
+        toolResult = {
+          ...toolResult,
+          data: {
+            ...toolResult.data,
+            ...(selection.existingProject?.platform
+              ? { knownPlatform: selection.existingProject.platform }
+              : {}),
+            ...(selection.setupIntent
+              ? { setupIntent: selection.setupIntent }
+              : {}),
+          },
+        };
+        spin.start("Preparing project setup...");
+        spinState.running = true;
       }
     }
 
@@ -499,27 +481,17 @@ async function handleSuspendedStep(
           ? projectContextState.selection
           : undefined;
       if (!projectContext) {
-        const useDecisionIntro = !(context.yes || context.dryRun);
-        if (useDecisionIntro) {
-          setProjectDecisionIntro(projectContextState, ui, true);
-        }
         spin.stop("");
         spinState.running = false;
-        try {
-          projectContext = await resolveInitProjectContext(
-            context,
-            payload.cwd,
-            ui,
-            {
-              suggestedProjectName: payload.params.name,
-              supportsExistingSetupImprovement,
-            }
-          );
-        } finally {
-          if (useDecisionIntro) {
-            setProjectDecisionIntro(projectContextState, ui, false);
+        projectContext = await resolveInitProjectContext(
+          context,
+          payload.cwd,
+          ui,
+          {
+            suggestedProjectName: payload.params.name,
+            supportsExistingSetupImprovement,
           }
-        }
+        );
         projectContextState.cwd = payload.cwd;
         projectContextState.selection = projectContext;
       }
@@ -621,13 +593,6 @@ async function handleSuspendedStep(
       );
     }
 
-    if (stepId === SELECT_TARGET_APP_STEP && !context.yes && !context.dryRun) {
-      // Keep the workflow chrome hidden while the server resumes and the
-      // selected target is scanned. The next project-decision prompt then
-      // appears on the same focused screen without flashing the checklist.
-      setProjectDecisionIntro(projectContextState, ui, true);
-    }
-
     // Feature review is complete, so name the next visible phase instead of
     // briefly falling back to generic processing while the server advances.
     spin.start(
@@ -680,6 +645,12 @@ function assertWorkflowResult(raw: unknown): WorkflowRunResult {
     if (activeStepIds.length > 0) {
       obj.suspended = activeStepIds.map((id) => [id]);
     }
+  }
+  if (
+    (!Array.isArray(obj.suspended) || obj.suspended.length === 0) &&
+    hasSuspendedPaths(obj)
+  ) {
+    obj.suspended = Object.keys(obj.suspendedPaths).map((id) => [id]);
   }
   return obj as WorkflowRunResult;
 }
@@ -946,6 +917,7 @@ async function tryRecoverCurrentRunState(
             "suspended",
             "steps",
             "activeStepsPath",
+            "suspendedPaths",
             "suspendPayload",
             "result",
             "error",
@@ -1264,13 +1236,6 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         throw new WizardError(`No suspend payload found for step "${stepId}"`);
       }
 
-      if (
-        projectContextState.decisionIntroActive &&
-        !isProjectDecisionPayload(extracted.payload)
-      ) {
-        setProjectDecisionIntro(projectContextState, ui, false);
-      }
-
       // Step transition: if the active step just changed, mark the
       // previous one completed before flipping this one to
       // in_progress. The store back-fills any earlier `pending`
@@ -1280,17 +1245,7 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
       }
       activeStepId = extracted.stepId;
       ui.setStep?.(extracted.stepId, "in_progress");
-      let activeLabel = STEP_ACTIVE_LABELS[extracted.stepId];
-      if (
-        extracted.stepId === "detect-platform" &&
-        (projectContextState.selection?.existingProject?.platform ??
-          context.existingProject?.platform)
-      ) {
-        const knownPlatform =
-          projectContextState.selection?.existingProject?.platform ??
-          context.existingProject?.platform;
-        activeLabel = `Analyzing project (existing Sentry platform: ${knownPlatform})...`;
-      }
+      const activeLabel = STEP_ACTIVE_LABELS[extracted.stepId];
       if (activeLabel && spinState.running) {
         spin.message(activeLabel);
       }

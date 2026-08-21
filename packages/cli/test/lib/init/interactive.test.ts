@@ -450,8 +450,8 @@ describe("handleMultiSelect", () => {
     );
   });
 
-  test("auto-selects all features with --yes", async () => {
-    const { ui } = createMockUI();
+  test("auto-selects only the safe defaults with --yes", async () => {
+    const { ui, calls } = createMockUI();
     const result = await handleInteractive(
       {
         type: "interactive",
@@ -461,6 +461,8 @@ describe("handleMultiSelect", () => {
           "errorMonitoring",
           "performanceMonitoring",
           "sessionReplay",
+          "logs",
+          "profiling",
           "userFeedback",
         ],
       },
@@ -470,8 +472,38 @@ describe("handleMultiSelect", () => {
 
     expect(result.features).toEqual([
       "errorMonitoring",
-      "performanceMonitoring",
+      "logs",
       "sessionReplay",
+      "performanceMonitoring",
+    ]);
+    expect(result.features).not.toContain("profiling");
+    expect(calls.find((call) => call.kind === "log.info")?.message).toBe(
+      "Auto-selected default features: Error Monitoring, Logging, Session Replay, Tracing"
+    );
+  });
+
+  test("keeps profiling optional for the Junior runtime defaults", async () => {
+    const { ui } = createMockUI();
+    const result = await handleInteractive(
+      {
+        type: "interactive",
+        prompt: "Select features",
+        kind: "multi-select",
+        availableFeatures: [
+          "errorMonitoring",
+          "performanceMonitoring",
+          "profiling",
+          "logs",
+        ],
+      },
+      makeOptions({ yes: true }),
+      ui
+    );
+
+    expect(result.features).toEqual([
+      "errorMonitoring",
+      "logs",
+      "performanceMonitoring",
     ]);
   });
 

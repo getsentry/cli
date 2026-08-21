@@ -287,10 +287,13 @@ async function handleMultiSelect(
   );
 
   if (options.yes) {
-    ui.log.info(
-      `Auto-selected all features: ${available.map(featureLabel).join(", ")}`
+    const defaults = normalizeFeatureSelection(
+      available.filter((feature) => DEFAULT_FEATURES.has(feature))
     );
-    return { features: available };
+    ui.log.info(
+      `Auto-selected default features: ${defaults.map(featureLabel).join(", ")}`
+    );
+    return { features: defaults };
   }
 
   const sorted = sortFeatureOptions(available);

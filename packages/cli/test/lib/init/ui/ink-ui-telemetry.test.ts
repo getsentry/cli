@@ -258,7 +258,7 @@ describe("InkUI prompt telemetry", () => {
     await ui[Symbol.asyncDispose]();
   });
 
-  test("holds a resolved select until the next prompt is mounted", async () => {
+  test("holds a resolved workflow select until the next prompt is mounted", async () => {
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const { ui, store } = createUi();
     const snapshots: Array<{
@@ -289,7 +289,6 @@ describe("InkUI prompt telemetry", () => {
 
     await expect(resultPromise).resolves.toBe("junior");
     expect(store.getSnapshot().presentationHold).toBe(true);
-    store.setLayout("intro");
     const nextPrompt = ui.select({
       message: "What would you like to do with this Sentry setup?",
       options: [{ label: "Improve Sentry", value: "improve" }],
@@ -297,8 +296,7 @@ describe("InkUI prompt telemetry", () => {
     expect(snapshots).toEqual([
       { held: false, layout: "workflow", prompt: "select" },
       { held: true, layout: "workflow", prompt: "select" },
-      { held: true, layout: "intro", prompt: "select" },
-      { held: false, layout: "intro", prompt: "select" },
+      { held: false, layout: "workflow", prompt: "select" },
     ]);
     const mountedPrompt = store.getSnapshot().prompt;
     if (mountedPrompt?.kind !== "select") {
@@ -308,7 +306,7 @@ describe("InkUI prompt telemetry", () => {
     await expect(nextPrompt).resolves.toBe("improve");
     expect(
       snapshots
-        .slice(0, 4)
+        .slice(0, 3)
         .some(({ prompt: promptKind }) => promptKind === null)
     ).toBe(false);
     unsubscribe();

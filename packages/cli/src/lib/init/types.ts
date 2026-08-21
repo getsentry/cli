@@ -289,6 +289,7 @@ export type WorkflowRunResult = {
   status: "suspended" | "success" | "failed";
   suspended?: string[][];
   activeStepsPath?: Record<string, unknown>;
+  suspendedPaths?: Record<string, unknown>;
   steps?: Record<
     string,
     {

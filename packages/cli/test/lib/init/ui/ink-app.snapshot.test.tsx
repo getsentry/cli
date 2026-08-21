@@ -38,7 +38,6 @@ const ENTER_CONTINUE_HINT_RE = /enter\s+continue/;
 const ESC_CANCEL_HINT_RE = /esc\s+cancel/;
 const COMPLETED_SELECTING_FEATURES_RE = /✔\s+Selecting features/;
 const DOTS_SPINNER_GLYPH_RE = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/gu;
-const WRAPPED_SETUP_DECISION_RE = /What would you like to\s+do\?/;
 const ANSI_ESCAPE_PREFIX = "\u001B[";
 const CURSOR_TO_LINE_START = "\u001B[G";
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI escape sequences in captured Ink output
@@ -466,7 +465,6 @@ describe("Ink App snapshot", () => {
       await sleep(FRAME_SETTLE_MS);
       const transitionFrameIndex = out.frames.length;
       store.holdPresentation();
-      store.setLayout("intro");
       store.appendLog("success", "Selecting target application");
       store.startSpinner("Checking for your existing Sentry setup");
       store.setStepStatus("check-existing-sentry", "in_progress");
@@ -532,7 +530,9 @@ describe("Ink App snapshot", () => {
       expect(transitionOutput).not.toContain("Sentry setup analyzed");
       expect(nextFrame).toContain("Sentry detected for project junior");
       expect(nextFrame).toContain("in organization Sentry");
-      expect(nextFrame).toMatch(WRAPPED_SETUP_DECISION_RE);
+      expect(nextFrame).toContain("What would you");
+      expect(nextFrame).toContain("like to do?");
+      expect(nextFrame).toContain("Tasks");
       expect(nextFrame).not.toContain("Selecting target application");
       expect(nextFrame).not.toContain(
         "Checking for your existing Sentry setup"

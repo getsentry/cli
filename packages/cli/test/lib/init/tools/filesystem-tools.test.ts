@@ -130,6 +130,65 @@ describe("filesystem tools", () => {
     ).toContain("sntrys_test_token_123");
   });
 
+  test("create patches never overwrite existing files", async () => {
+    const filePath = path.join(testDir, "instrumentation.ts");
+    fs.writeFileSync(filePath, "const dsn = process.env.SENTRY_DSN;\n");
+
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "apply-patchset",
+        cwd: testDir,
+        params: {
+          patches: [
+            {
+              path: "instrumentation.ts",
+              action: "create",
+              patch: 'Sentry.init({ dsn: "https://public@example" });\n',
+            },
+          ],
+        },
+      },
+      makeContext(testDir)
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("file already exists");
+    expect(fs.readFileSync(filePath, "utf-8")).toBe(
+      "const dsn = process.env.SENTRY_DSN;\n"
+    );
+  });
+
+  test("concurrent create patches atomically allow only one writer", async () => {
+    const makePayload = (patch: string) => ({
+      type: "tool" as const,
+      operation: "apply-patchset" as const,
+      cwd: testDir,
+      params: {
+        patches: [
+          {
+            path: "raced-instrumentation.ts",
+            action: "create" as const,
+            patch,
+          },
+        ],
+      },
+    });
+    const contents = ["first writer\n", "second writer\n"];
+    const results = await Promise.all(
+      contents.map((content) =>
+        executeTool(makePayload(content), makeContext(testDir))
+      )
+    );
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    const rejected = results.find((result) => !result.ok);
+    expect(rejected?.error).toContain("file already exists");
+    expect(contents).toContain(
+      fs.readFileSync(path.join(testDir, "raced-instrumentation.ts"), "utf-8")
+    );
+  });
+
   test("rejects unsafe apply-patchset paths before writing", async () => {
     const unsafePaths: unknown[] = [
       null,

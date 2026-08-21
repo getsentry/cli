@@ -715,7 +715,7 @@ describe("runWizard", () => {
     expect(spinnerMock.stop).not.toHaveBeenCalledWith("Sentry setup analyzed");
   });
 
-  test("keeps the focused screen visible between app selection and the setup decision", async () => {
+  test("keeps the workflow layout visible between app selection and the setup decision", async () => {
     const { ui, calls, respond } = createMockUI();
     respond.select("continue");
     useMockUI(ui, calls);
@@ -743,7 +743,7 @@ describe("runWizard", () => {
       );
       expect(latestLayoutChange).toEqual({
         kind: "setIntroMode",
-        enabled: true,
+        enabled: false,
       });
       return {
         project: "junior",
@@ -789,21 +789,12 @@ describe("runWizard", () => {
     expect(layoutChanges).toEqual([
       { kind: "setIntroMode", enabled: true },
       { kind: "setIntroMode", enabled: false },
-      { kind: "setIntroMode", enabled: true },
-      { kind: "setIntroMode", enabled: false },
     ]);
-    const transitionIntroIndex = calls.findIndex(
-      (call, index) => index > 0 && call.kind === "setIntroMode" && call.enabled
-    );
     const detectionStepIndex = calls.findIndex(
       (call) =>
         call.kind === "setStep" && call.stepId === "check-existing-sentry"
     );
-    const decisionCompleteIndex = calls.findLastIndex(
-      (call) => call.kind === "setIntroMode" && !call.enabled
-    );
-    expect(detectionStepIndex).toBeGreaterThan(transitionIntroIndex);
-    expect(detectionStepIndex).toBeLessThan(decisionCompleteIndex);
+    expect(detectionStepIndex).toBeGreaterThanOrEqual(0);
     expect(handleInteractiveSpy).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "select" }),
       expect.anything(),
@@ -1661,6 +1652,58 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     expect(runByIdMock).toHaveBeenCalledTimes(1);
   });
 
+  test("continues from suspendedPaths when a timed-out resume already advanced", async () => {
+    vi.useFakeTimers();
+    const nextPayload: ToolPayload = {
+      type: "tool",
+      operation: "run-commands",
+      cwd: "/tmp/test",
+      params: { commands: ["echo next-step"] },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: { "detect-platform": { suspendPayload: toolPayload } },
+    };
+    mockRunByIdResult = {
+      status: "suspended",
+      activeStepsPath: {},
+      suspendedPaths: { "ensure-sentry-project": [5] },
+      steps: {
+        "detect-platform": { status: "success" },
+        "ensure-sentry-project": {
+          status: "suspended",
+          suspendPayload: nextPayload,
+        },
+      },
+    };
+
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      if (resumeCount === 1) {
+        return new Promise<WorkflowRunResult>(() => {
+          /* The server advances, but the original response never arrives. */
+        });
+      }
+      return Promise.resolve({ status: "success" });
+    });
+
+    const run = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(210_000);
+    await run;
+
+    expect(runByIdMock).toHaveBeenCalledWith(
+      "test-run-id",
+      expect.objectContaining({
+        fields: expect.arrayContaining(["suspendedPaths"]),
+      })
+    );
+    expect(executeToolSpy).toHaveBeenCalledWith(nextPayload, makeContext());
+    expect(resumeCount).toBe(2);
+    expect(formatResultSpy).toHaveBeenCalled();
+  });
+
   test("throws when stale-step error occurs and runById keeps failing", async () => {
     vi.useFakeTimers();
     mockStartResult = {
@@ -2089,7 +2132,7 @@ describe("runWizard — additional coverage", () => {
     });
   });
 
-  test("uses existing platform name in detect-platform spinner label", async () => {
+  test("does not present stale project metadata as the detected platform", async () => {
     resolveInitContextSpy.mockResolvedValue(
       makeContext({ existingProject: { platform: "javascript-nextjs" } })
     );
@@ -2114,7 +2157,8 @@ describe("runWizard — additional coverage", () => {
     const messages = spinnerMock.message.mock.calls.map(
       (c: unknown[]) => c[0] as string
     );
-    expect(messages.some((m) => m.includes("javascript-nextjs"))).toBe(true);
+    expect(messages).toContain("Detecting framework and platform...");
+    expect(messages.some((m) => m.includes("javascript-nextjs"))).toBe(false);
   });
 });
 
