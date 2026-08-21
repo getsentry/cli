@@ -11,6 +11,13 @@ describe("formatTimestamp", () => {
     );
   });
 
+  test("formats the Unix epoch instead of treating it as missing", () => {
+    const epoch = new Date(0);
+    expect(formatTimestamp(0, 1)).toBe(
+      `${String(epoch.getHours()).padStart(2, "0")}:${String(epoch.getMinutes()).padStart(2, "0")}`
+    );
+  });
+
   test("uses calendar dates for multi-day periods", () => {
     expect(formatTimestamp(timestamp, 7)).toBe(
       `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`

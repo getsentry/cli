@@ -461,7 +461,7 @@ export function formatTimestamp(
   timestamp: number | undefined,
   spanDays: number
 ): string {
-  if (!timestamp) {
+  if (timestamp === undefined) {
     return "";
   }
   const date = new Date(timestamp * 1000);
