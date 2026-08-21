@@ -27,6 +27,10 @@
     // non-deterministically as error vs warning. See biome issue tracker.
     "includes": [
       "!test/init-eval/templates",
+      // Migration fixtures are intentionally v10-era code, and the `expected`
+      // files are byte-compared against codemod output. Formatting either side
+      // would rewrite the very thing under test.
+      "!test/lib/migrate/fixtures",
       "!dist-build",
       // The codemod package is a self-contained Codemod (jssg) project with
       // its own tooling/tests (`codemods/sentry-v3-to-v4`); it uses the

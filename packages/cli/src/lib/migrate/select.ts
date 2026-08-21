@@ -14,16 +14,16 @@
  */
 
 import type { Migration, MigrationFit, ProjectProbe } from "./framework.js";
+import { sentryJavascriptV11 } from "./migrations/sentry-javascript-v11/index.js";
 import { createProbe } from "./probe.js";
 
 /**
  * Every migration this CLI ships, in the order they are offered.
  *
- * Empty until a migration registers itself here. The registry exists so that
- * adding one is a line in this array rather than a rewrite of the runner and
- * the command.
+ * One entry today. The registry exists so the second one is a line here rather
+ * than a rewrite of the runner and the command.
  */
-export const MIGRATIONS: Migration[] = [];
+export const MIGRATIONS: Migration[] = [sentryJavascriptV11];
 
 export type MigrationChoice = {
   migration: Migration;
