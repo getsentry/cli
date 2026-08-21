@@ -17,14 +17,21 @@ import type { InitToolDefinition } from "./types.js";
 const DEFAULT_MAX_LINES = 1000;
 const MAX_SCAN_BYTES = 4 * 1024 * 1024;
 const MAX_V2_CONTENT_BYTES = 40_000;
+const MAX_DETERMINISTIC_V2_CONTENT_BYTES = MAX_FILE_BYTES;
 const MAX_READ_LINES = 2000;
 const MAX_READ_PATHS = 20;
+const MAX_DETERMINISTIC_READ_PATHS = 256;
 const PATH_SEGMENT_RE = /[/\\\\]/u;
 
 type ReadBounds = {
   maxBytes: number;
   maxLines: number;
   startLine: number;
+};
+
+type V2ReadLimits = {
+  aggregateMaxBytes: number;
+  maxBytes: number;
 };
 
 /**
@@ -44,7 +51,7 @@ export async function readFiles(
   }
 
   if (payload.params.resultVersion === 2) {
-    return readFilesV2(payload, boundedV2MaxBytes(payload.params.maxBytes));
+    return readFilesV2(payload, v2ReadLimits(payload.params.maxBytes));
   }
   const maxBytes = boundedLegacyMaxBytes(payload.params.maxBytes);
 
@@ -92,14 +99,17 @@ async function readSingleFileV1(
 
 async function readFilesV2(
   payload: ReadFilesPayload,
-  maxBytes: number
+  limits: V2ReadLimits
 ): Promise<ToolResult> {
   const startLine = payload.params.startLine ?? 1;
-  const maxLines = boundedMaxLines(payload.params.maxLines);
   const perFileMaxBytes = Math.min(
-    maxBytes,
-    Math.max(1, Math.floor(MAX_V2_CONTENT_BYTES / payload.params.paths.length))
+    limits.maxBytes,
+    Math.max(
+      1,
+      Math.floor(limits.aggregateMaxBytes / payload.params.paths.length)
+    )
   );
+  const maxLines = v2MaxLines(payload.params.maxLines, limits, perFileMaxBytes);
   const bounds = {
     maxBytes: perFileMaxBytes,
     maxLines,
@@ -263,17 +273,19 @@ function validateReadRequest(payload: ReadFilesPayload): string | undefined {
   }
   const { maxBytes, maxLines, paths, resultVersion, startLine } =
     params as Partial<ReadFilesPayload["params"]>;
-  const pathError = validateReadPaths(paths);
+  if (isInvalidPositiveInteger(maxBytes)) {
+    return "read-files maxBytes must be a positive safe integer";
+  }
+  const profileError = validateReadProfile(resultVersion, maxBytes);
+  if (profileError) {
+    return profileError;
+  }
+  const maxPaths = maxReadPaths(resultVersion, maxBytes);
+  const pathError = validateReadPaths(paths, maxPaths);
   if (pathError) {
     return pathError;
   }
   const validPaths = paths as string[];
-  if (isInvalidPositiveInteger(maxBytes)) {
-    return "read-files maxBytes must be a positive safe integer";
-  }
-  if (resultVersion !== undefined && resultVersion !== 2) {
-    return "read-files resultVersion is not supported";
-  }
   if (isInvalidPositiveInteger(startLine)) {
     return "read-files startLine must be a positive safe integer";
   }
@@ -291,13 +303,37 @@ function validateReadRequest(payload: ReadFilesPayload): string | undefined {
   }
 }
 
-function validateReadPaths(paths: unknown): string | undefined {
+function validateReadProfile(
+  resultVersion: ReadFilesPayload["params"]["resultVersion"],
+  maxBytes: number | undefined
+): string | undefined {
+  if (resultVersion !== undefined && resultVersion !== 2) {
+    return "read-files resultVersion is not supported";
+  }
   if (
-    !Array.isArray(paths) ||
-    paths.length === 0 ||
-    paths.length > MAX_READ_PATHS
+    resultVersion === 2 &&
+    maxBytes !== undefined &&
+    maxBytes > MAX_DETERMINISTIC_V2_CONTENT_BYTES
   ) {
-    return `read-files requires between 1 and ${MAX_READ_PATHS} paths`;
+    return `read-files V2 maxBytes cannot exceed ${MAX_DETERMINISTIC_V2_CONTENT_BYTES}`;
+  }
+}
+
+function maxReadPaths(
+  resultVersion: ReadFilesPayload["params"]["resultVersion"],
+  maxBytes: number | undefined
+): number {
+  return resultVersion === 2 && isDeterministicV2Request(maxBytes)
+    ? MAX_DETERMINISTIC_READ_PATHS
+    : MAX_READ_PATHS;
+}
+
+function validateReadPaths(
+  paths: unknown,
+  maxPaths: number
+): string | undefined {
+  if (!Array.isArray(paths) || paths.length === 0 || paths.length > maxPaths) {
+    return `read-files requires between 1 and ${maxPaths} paths`;
   }
   if (
     paths.some(
@@ -324,10 +360,31 @@ function boundedLegacyMaxBytes(value: number | undefined): number {
     : Math.max(1, Math.min(value, MAX_FILE_BYTES));
 }
 
-function boundedV2MaxBytes(value: number | undefined): number {
-  return value === undefined
-    ? MAX_V2_CONTENT_BYTES
-    : Math.max(1, Math.min(value, MAX_V2_CONTENT_BYTES));
+function v2ReadLimits(value: number | undefined): V2ReadLimits {
+  const maxBytes = value ?? MAX_V2_CONTENT_BYTES;
+  return {
+    aggregateMaxBytes: isDeterministicV2Request(maxBytes)
+      ? MAX_DETERMINISTIC_V2_CONTENT_BYTES
+      : MAX_V2_CONTENT_BYTES,
+    maxBytes,
+  };
+}
+
+function isDeterministicV2Request(maxBytes: number | undefined): boolean {
+  return maxBytes !== undefined && maxBytes > MAX_V2_CONTENT_BYTES;
+}
+
+function v2MaxLines(
+  value: number | undefined,
+  limits: V2ReadLimits,
+  perFileMaxBytes: number
+): number {
+  if (value !== undefined) {
+    return boundedMaxLines(value);
+  }
+  return limits.aggregateMaxBytes === MAX_DETERMINISTIC_V2_CONTENT_BYTES
+    ? perFileMaxBytes
+    : DEFAULT_MAX_LINES;
 }
 
 function boundedMaxLines(value: number | undefined): number {

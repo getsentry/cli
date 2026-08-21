@@ -471,7 +471,7 @@ describe("filesystem tools", () => {
     });
   });
 
-  test("bounds V2 content across a multi-file request", async () => {
+  test("allows 20 normal V2 paths, bounds their content, and rejects 21", async () => {
     const paths = Array.from({ length: 20 }, (_, index) => `file-${index}.txt`);
     for (const filePath of paths) {
       fs.writeFileSync(path.join(testDir, filePath), "x\n".repeat(5000));
@@ -486,6 +486,18 @@ describe("filesystem tools", () => {
       },
       makeContext(testDir)
     );
+    const overLimit = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          paths: [...paths, "file-20.txt"],
+          resultVersion: 2,
+        },
+      },
+      makeContext(testDir)
+    );
     const files = (
       result.data as { files: Record<string, { content: string }> }
     ).files;
@@ -497,6 +509,194 @@ describe("filesystem tools", () => {
         0
       )
     ).toBeLessThanOrEqual(40_000);
+    expect(overLimit).toEqual({
+      error: "read-files requires between 1 and 20 paths",
+      ok: false,
+    });
+  });
+
+  test("allows 256 deterministic V2 paths and rejects 257", async () => {
+    const paths = Array.from(
+      { length: 256 },
+      (_, index) => `deterministic-${index}.txt`
+    );
+    for (const filePath of paths) {
+      fs.writeFileSync(path.join(testDir, filePath), "x\n");
+    }
+
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: { maxBytes: 40_001, paths, resultVersion: 2 },
+      },
+      makeContext(testDir)
+    );
+    const overLimit = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          maxBytes: 40_001,
+          paths: [...paths, "deterministic-256.txt"],
+          resultVersion: 2,
+        },
+      },
+      makeContext(testDir)
+    );
+    const files = (
+      result.data as {
+        files: Record<
+          string,
+          { content: string; status: "ok"; truncated: boolean }
+        >;
+      }
+    ).files;
+
+    expect(result.ok).toBe(true);
+    expect(Object.keys(files)).toHaveLength(256);
+    expect(Object.values(files)).toEqual(
+      Array.from({ length: 256 }, () => ({
+        content: "x\n",
+        status: "ok",
+        truncated: false,
+      }))
+    );
+    expect(overLimit).toEqual({
+      error: "read-files requires between 1 and 256 paths",
+      ok: false,
+    });
+  });
+
+  test("returns a complete 200 KB file in deterministic V2 mode", async () => {
+    const content = `${"x".repeat(249)}\n`.repeat(800);
+    fs.writeFileSync(path.join(testDir, "snapshot.txt"), content);
+
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          maxBytes: 262_144,
+          paths: ["snapshot.txt"],
+          resultVersion: 2,
+        },
+      },
+      makeContext(testDir)
+    );
+
+    expect(Buffer.byteLength(content)).toBe(200_000);
+    expect(result.data).toEqual({
+      files: {
+        "snapshot.txt": { content, status: "ok", truncated: false },
+      },
+      version: 2,
+    });
+  });
+
+  test("uses bytes instead of the normal line default for deterministic V2 reads", async () => {
+    const content = "x\n".repeat(1500);
+    fs.writeFileSync(path.join(testDir, "many-lines.txt"), content);
+
+    const normal = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: { paths: ["many-lines.txt"], resultVersion: 2 },
+      },
+      makeContext(testDir)
+    );
+    const deterministic = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          maxBytes: 262_144,
+          paths: ["many-lines.txt"],
+          resultVersion: 2,
+        },
+      },
+      makeContext(testDir)
+    );
+
+    expect(normal.data).toEqual({
+      files: {
+        "many-lines.txt": {
+          content: "x\n".repeat(1000),
+          status: "ok",
+          truncated: true,
+        },
+      },
+      version: 2,
+    });
+    expect(deterministic.data).toEqual({
+      files: {
+        "many-lines.txt": { content, status: "ok", truncated: false },
+      },
+      version: 2,
+    });
+  });
+
+  test("truncates deterministic V2 reads at the aggregate byte limit", async () => {
+    const content = `${"x".repeat(127)}\n`.repeat(1500);
+    const paths = ["first.txt", "second.txt"];
+    for (const filePath of paths) {
+      fs.writeFileSync(path.join(testDir, filePath), content);
+    }
+
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          maxBytes: 262_144,
+          maxLines: 2000,
+          paths,
+          resultVersion: 2,
+        },
+      },
+      makeContext(testDir)
+    );
+    const files = (
+      result.data as {
+        files: Record<string, { content: string; truncated: boolean }>;
+      }
+    ).files;
+
+    expect(
+      Object.values(files).reduce(
+        (total, file) => total + Buffer.byteLength(file.content),
+        0
+      )
+    ).toBe(262_144);
+    expect(Object.values(files).every((file) => file.truncated)).toBe(true);
+  });
+
+  test("rejects deterministic V2 byte requests above the hard limit", async () => {
+    const result = await executeTool(
+      {
+        type: "tool",
+        operation: "read-files",
+        cwd: testDir,
+        params: {
+          maxBytes: 262_145,
+          paths: ["missing.txt"],
+          resultVersion: 2,
+        },
+      },
+      makeContext(testDir)
+    );
+
+    expect(result).toEqual({
+      error: "read-files V2 maxBytes cannot exceed 262144",
+      ok: false,
+    });
   });
 
   test("reads a short line that starts at the deep-scan boundary", async () => {
