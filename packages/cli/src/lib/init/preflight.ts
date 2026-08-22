@@ -411,8 +411,7 @@ async function resolveDetectedSetupChoice(
       {
         value: "improve",
         label: "Improve your Sentry setup",
-        description:
-          "Reuse this project and bring its SDKs and configuration up to date.",
+        description: "Upgrade your current setup and add more Sentry features.",
       },
       {
         value: "other",

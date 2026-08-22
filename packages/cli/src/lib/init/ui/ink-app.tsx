@@ -1463,7 +1463,6 @@ function FilesPanel({
   maxRows: number;
   hasActivePrompt: boolean;
 }): React.ReactNode {
-  const [pinnedToBottom, setPinnedToBottom] = useState(true);
   const [offset, setOffset] = useState(0);
 
   const tree = buildReadTree(filesRead);
@@ -1474,26 +1473,14 @@ function FilesPanel({
   const canScroll = totalRows > viewport;
 
   const maxOffset = Math.max(0, totalRows - viewport);
-  const effectiveOffset = pinnedToBottom ? 0 : Math.min(offset, maxOffset);
-
-  const sliceEnd = totalRows - effectiveOffset;
-  const sliceStart = Math.max(0, sliceEnd - viewport);
+  const effectiveOffset = Math.min(offset, maxOffset);
+  const sliceStart = effectiveOffset;
+  const sliceEnd = Math.min(totalRows, sliceStart + viewport);
   const visible = rows.slice(sliceStart, sliceEnd);
 
-  const prevTotalRef = useRef(totalRows);
   useEffect(() => {
-    const prev = prevTotalRef.current;
-    prevTotalRef.current = totalRows;
-    if (pinnedToBottom) {
-      return;
-    }
-    const newMax = Math.max(0, totalRows - viewport);
-    if (totalRows > prev) {
-      setOffset((current) => Math.min(newMax, current + (totalRows - prev)));
-    } else if (totalRows < prev) {
-      setOffset((current) => Math.min(current, newMax));
-    }
-  }, [totalRows, viewport, pinnedToBottom]);
+    setOffset((current) => Math.min(current, maxOffset));
+  }, [maxOffset]);
 
   const fileShortcuts = useMemo<ShortcutBinding[]>(() => {
     if (!canScroll) {
@@ -1507,17 +1494,10 @@ function FilesPanel({
         match: (_input, key) => key.upArrow || key.downArrow,
         run: (_input, key) => {
           if (key.upArrow) {
-            setPinnedToBottom(false);
-            setOffset((current) => Math.min(maxOffset, current + 1));
+            setOffset((current) => Math.max(0, current - 1));
             return;
           }
-          setOffset((current) => {
-            const next = Math.max(0, current - 1);
-            if (next === 0) {
-              setPinnedToBottom(true);
-            }
-            return next;
-          });
+          setOffset((current) => Math.min(maxOffset, current + 1));
         },
       },
       {
@@ -1528,17 +1508,10 @@ function FilesPanel({
         match: (_input, key) => key.pageUp || key.pageDown,
         run: (_input, key) => {
           if (key.pageUp) {
-            setPinnedToBottom(false);
-            setOffset((current) => Math.min(maxOffset, current + viewport));
+            setOffset((current) => Math.max(0, current - viewport));
             return;
           }
-          setOffset((current) => {
-            const next = Math.max(0, current - viewport);
-            if (next === 0) {
-              setPinnedToBottom(true);
-            }
-            return next;
-          });
+          setOffset((current) => Math.min(maxOffset, current + viewport));
         },
       },
       {
@@ -1549,12 +1522,10 @@ function FilesPanel({
         match: (_input, key) => key.home || key.end,
         run: (_input, key) => {
           if (key.home) {
-            setPinnedToBottom(false);
-            setOffset(maxOffset);
+            setOffset(0);
             return;
           }
-          setPinnedToBottom(true);
-          setOffset(0);
+          setOffset(maxOffset);
         },
       },
     ];
@@ -1579,7 +1550,7 @@ function FilesPanel({
           Files analyzed
         </Text>
         <Text color={MUTED_DIM}>
-          {pinnedToBottom ? "" : "\u2191 "}
+          {effectiveOffset === 0 ? "" : "\u2191 "}
           {analyzedCount}/{filesRead.length}
         </Text>
       </Box>
@@ -1619,7 +1590,7 @@ function Scrollbar({
   const maxOff = Math.max(1, totalRows - viewport);
   const thumbSize = Math.max(1, Math.floor((viewport * viewport) / totalRows));
   const trackSpan = Math.max(1, viewport - thumbSize);
-  const thumbStart = Math.round(((maxOff - offset) / maxOff) * trackSpan);
+  const thumbStart = Math.round((offset / maxOff) * trackSpan);
   const cells = Array.from({ length: viewport }, (_v, i) => {
     const inThumb = i >= thumbStart && i < thumbStart + thumbSize;
     return inThumb ? "\u2588" : ICONS.verticalLine;

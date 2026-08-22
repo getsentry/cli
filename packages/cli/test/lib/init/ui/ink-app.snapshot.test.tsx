@@ -1,9 +1,9 @@
 /**
  * Smoke-test the Ink App by mounting it with mocked stdin/stdout
- * inside `bun test`. Verifies the full-screen layout (tabbed
+ * inside Vitest. Verifies the full-screen layout (tabbed
  * content and keyboard hints) without needing a real TTY.
  *
- * Note: The first Ink render() in a bun test CI worker can hang
+ * Note: The first Ink render() in a CI worker can hang
  * indefinitely (Ink's internal reconciler keeps the event loop
  * alive in non-TTY). Tests that call renderApp() rely on a 500ms
  * timeout race to prevent blocking.
@@ -29,8 +29,8 @@ const LEARN_HEADER_RE = /How Sentry Works/;
 const TASKS_HEADER_RE = /Tasks\b/;
 const STATUS_TAB_RE = /Status/;
 const FILES_TAB_RE = /Files/;
-const FILES_HEADER_PINNED_RE = /Files analyzed\s+\d+\/\d+/;
-const FILES_HEADER_UNPINNED_RE = /Files analyzed\s+\u2191\s+\d+\/\d+/;
+const FILES_HEADER_AT_TOP_RE = /Files analyzed\s+\d+\/\d+/;
+const FILES_HEADER_SCROLLED_RE = /Files analyzed\s+\u2191\s+\d+\/\d+/;
 const KEYBOARD_HINT_RE = /switch tab/;
 const SPACE_TOGGLE_HINT_RE = /space\s+toggle/;
 const A_ALL_HINT_RE = /a\s+all/;
@@ -1467,7 +1467,7 @@ describe("Ink App snapshot", () => {
         rows: 16,
       })
     ).allOutput();
-    expect(shortFrame).toMatch(FILES_HEADER_PINNED_RE);
+    expect(shortFrame).toMatch(FILES_HEADER_AT_TOP_RE);
     expect(shortFrame).not.toContain("scroll");
 
     const tallTree = new WizardStore({ bannerRows: [] });
@@ -1475,14 +1475,23 @@ describe("Ink App snapshot", () => {
     tallTree.recordFilesReading(readFiles);
     tallTree.markFilesAnalyzed(readFiles);
 
-    const tallFrame = (
-      await renderApp(tallTree, 120, {
-        input: [RIGHT_ARROW],
-        rows: 16,
-      })
-    ).allOutput();
-    expect(tallFrame).toMatch(FILES_HEADER_PINNED_RE);
+    const tallRendered = await renderApp(tallTree, 120, {
+      input: [RIGHT_ARROW],
+      rows: 16,
+    });
+    const tallFrame = stripAnsi(tallRendered.latestFrame());
+    expect(tallFrame).toMatch(FILES_HEADER_AT_TOP_RE);
     expect(tallFrame).toContain("scroll");
+    expect(tallFrame).toContain("file-01.ts");
+    expect(tallFrame).not.toContain("file-12.ts");
+
+    const scrolledRendered = await renderApp(tallTree, 120, {
+      input: [RIGHT_ARROW, ...Array.from({ length: 20 }, () => DOWN_ARROW)],
+      rows: 16,
+    });
+    const scrolledFrame = stripAnsi(scrolledRendered.latestFrame());
+    expect(scrolledFrame).toMatch(FILES_HEADER_SCROLLED_RE);
+    expect(scrolledFrame).toContain("file-12.ts");
   });
 
   test("Status screen shows logs and banner, not file tree", async () => {
@@ -1493,8 +1502,8 @@ describe("Ink App snapshot", () => {
 
     const frame = (await renderApp(store, 120)).allOutput();
     expect(frame).toContain("Checking project...");
-    expect(frame).not.toMatch(FILES_HEADER_PINNED_RE);
-    expect(frame).not.toMatch(FILES_HEADER_UNPINNED_RE);
+    expect(frame).not.toMatch(FILES_HEADER_AT_TOP_RE);
+    expect(frame).not.toMatch(FILES_HEADER_SCROLLED_RE);
   });
 
   test("SummaryPanel renders featureBlurbs as Here's what we set up section", async () => {
