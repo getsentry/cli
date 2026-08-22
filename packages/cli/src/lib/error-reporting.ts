@@ -29,6 +29,7 @@ import {
   ApiError,
   AuthError,
   CliError,
+  ConfigError,
   ContextError,
   DeviceFlowError,
   HostScopeError,
@@ -54,7 +55,8 @@ type SilenceReason =
   | "output_error"
   | "auth_expected"
   | "api_user_error"
-  | "network_error";
+  | "network_error"
+  | "config_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -93,6 +95,13 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   }
   if (error instanceof ApiError && error.status > 400 && error.status < 500) {
     return "api_user_error";
+  }
+  // A ConfigError means the user did not provide a required configuration value
+  // (e.g. no DSN via --dsn or SENTRY_DSN). This is expected user
+  // misconfiguration, not a CLI bug — silencing it removes noise from
+  // telemetry while the `cli.error.silenced` metric preserves volume (CLI-28M).
+  if (error instanceof ConfigError) {
+    return "config_error";
   }
   // A 400 (Bad Request) signals a malformed request the CLI built — a code
   // defect — so it is always captured. A user's unparseable `--query` is NOT a
