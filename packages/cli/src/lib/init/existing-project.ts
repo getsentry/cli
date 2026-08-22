@@ -1,4 +1,8 @@
-import { getProject, tryGetPrimaryDsn } from "../api-client.js";
+import {
+  getProject,
+  resolveOrgDisplayName,
+  tryGetPrimaryDsn,
+} from "../api-client.js";
 import { ApiError } from "../errors.js";
 import { buildProjectUrl } from "../sentry-urls.js";
 import type { ExistingProjectData } from "./types.js";
@@ -19,10 +23,12 @@ export async function tryGetExistingProjectData(
     const dsn = await tryGetPrimaryDsn(orgSlug, project.slug);
     return {
       orgSlug,
+      orgDisplay: resolveOrgDisplayName(orgSlug, project.organization?.name),
       projectSlug: project.slug,
+      projectDisplay: project.name,
       projectId: project.id,
-      dsn: dsn ?? "",
       url: buildProjectUrl(orgSlug, project.slug),
+      ...(dsn ? { dsn } : {}),
       ...(project.platform ? { platform: project.platform } : {}),
     };
   } catch (error) {

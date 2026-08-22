@@ -258,7 +258,7 @@ export const STEP_PROGRESS_MESSAGES: Record<string, string[]> = {
     "Scanning project files...",
     "Identifying framework and language...",
     "Analyzing project configuration...",
-    "Determining SDK compatibility...",
+    "Matching this app to a Sentry SDK...",
   ],
 };
 
