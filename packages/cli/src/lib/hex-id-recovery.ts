@@ -457,6 +457,10 @@ const eventAdapter: FuzzyLookupAdapter = async (ctx) => {
     statsPeriod: ctx.period ?? SCAN_PERIODS.event,
     sort: "date",
   });
+  if (!Array.isArray(data)) {
+    log.debug("listTransactions returned non-array data", typeof data);
+    return [];
+  }
   return (data as TransactionListItem[]).map((t) => t.id);
 };
 
@@ -469,6 +473,10 @@ const traceAdapter: FuzzyLookupAdapter = async (ctx) => {
     statsPeriod: ctx.period ?? SCAN_PERIODS.trace,
     sort: "date",
   });
+  if (!Array.isArray(data)) {
+    log.debug("listSpans (trace) returned non-array data", typeof data);
+    return [];
+  }
   return (data as SpanListItem[]).map((s) => s.trace);
 };
 
@@ -494,6 +502,10 @@ const spanAdapter: FuzzyLookupAdapter = async (ctx) => {
     statsPeriod: ctx.period ?? SCAN_PERIODS.span,
     sort: "date",
   });
+  if (!Array.isArray(data)) {
+    log.debug("listSpans (span) returned non-array data", typeof data);
+    return [];
+  }
   return (data as SpanListItem[]).map((s) => s.id);
 };
 
