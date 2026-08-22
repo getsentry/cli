@@ -101,6 +101,22 @@ sentry issue list --verbose
 The `sentry api` command also uses `--verbose` to show full HTTP request/response details. When used with `sentry api`, it serves both purposes (debug logging + HTTP output).
 :::
 
+### `--no-tips`
+
+Suppress the `Tip: ...` footer hints that some commands print below their output (for example `sentry issue view`). Useful for scripting or when you find the extra guidance noisy.
+
+```bash
+sentry issue view CLI-K9 --no-tips
+```
+
+You can also disable tips for every command by setting the `SENTRY_DISABLE_TIPS` environment variable:
+
+```bash
+export SENTRY_DISABLE_TIPS=1
+```
+
+The cache-age footer (`cached · 3m ago · use -f to refresh`) is a staleness indicator, not a tip, and is not affected.
+
 ## Credential Storage
 
 We store credentials and caches in a SQLite database (`cli.db`) inside the config directory (`~/.sentry/` by default, overridable via `SENTRY_CONFIG_DIR`). The database file and its WAL side-files are created with restricted permissions (mode 600) so that only the current user can read them. The database also caches:

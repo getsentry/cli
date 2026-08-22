@@ -82,6 +82,7 @@ const GLOBAL_FLAG_NAMES = new Set([
   "help",
   "helpAll",
   "log-level",
+  "tips",
 ]);
 
 /** Routes that don't need their own documentation page */
