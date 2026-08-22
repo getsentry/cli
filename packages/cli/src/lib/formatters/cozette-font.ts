@@ -44,8 +44,9 @@ const UNKNOWN_GLYPH = new Uint8Array([
 
 /**
  * Printable ASCII, full block, and black square raster rows generated from
- * Cozette's v1.30.0 BDF release. Each glyph has 13 rows of six left-aligned
- * bits. Source SHA-256: 8d740166af3a14053773ac7a8846bf288c8818a44f73ab28d4725d91b03a5639.
+ * Cozette's v1.30.0 BDF release. Each glyph has 13 rows packed into the low
+ * six bits of a byte, with bit 5 as the leftmost pixel. Source SHA-256:
+ * 8d740166af3a14053773ac7a8846bf288c8818a44f73ab28d4725d91b03a5639.
  */
 const GLYPH_ROWS = Uint8Array.from(
   Buffer.from(

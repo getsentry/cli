@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { getCozetteGlyph } from "../../../src/lib/formatters/cozette-font.js";
 import {
   createPixelCanvas,
   drawPixelText,
@@ -30,6 +31,10 @@ describe("drawPixelText", () => {
     expect(opaquePixelCount(image)).toBe(20);
     expect(image.data[(2 * image.width + 2) * 4 + 3]).toBe(255);
     expect(image.data[(0 * image.width + 1) * 4 + 3]).toBe(0);
+  });
+
+  test("packs Cozette rows with bit five as the leftmost pixel", () => {
+    expect(getCozetteGlyph("A")[2]).toBe(0b00_1110);
   });
 
   test("fills non-integer terminal cells with proportional bitmap scaling", () => {
