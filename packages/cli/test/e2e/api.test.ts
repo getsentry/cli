@@ -97,6 +97,22 @@ describe("sentry api", () => {
     });
   });
 
+  test("--dry-run --json applies --fields to the request preview", async () => {
+    await ctx.setAuthToken(TEST_TOKEN);
+
+    const result = await ctx.run([
+      "api",
+      "organizations/",
+      "--dry-run",
+      "--json",
+      "--fields",
+      "method",
+    ]);
+
+    expect(result.exitCode, result.stderr + result.stdout).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ method: "GET" });
+  });
+
   test("empty error bodies report the HTTP status and request", async () => {
     await ctx.setAuthToken(TEST_TOKEN);
 

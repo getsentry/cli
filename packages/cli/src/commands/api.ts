@@ -1023,7 +1023,7 @@ function formatApiResponseJson(data: unknown, fields?: string[]): unknown {
     !("status" in data) ||
     !("body" in data)
   ) {
-    return data;
+    return fields && fields.length > 0 ? filterFields(data, fields) : data;
   }
 
   const response = data as ApiResponseOutput;
