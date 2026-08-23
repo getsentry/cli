@@ -276,10 +276,10 @@ describe("Ink App snapshot", () => {
     vi.useFakeTimers();
     try {
       const initialFrame = await renderActiveTaskFrameAfter(1);
-      expect(initialFrame).toContain("▶  Detecting platform");
+      expect(initialFrame).toContain("▶  Checking Sentry support");
 
       const pulsedFrame = await renderActiveTaskFrameAfter(601);
-      expect(pulsedFrame).toContain("▷  Detecting platform");
+      expect(pulsedFrame).toContain("▷  Checking Sentry support");
     } finally {
       vi.useRealTimers();
     }

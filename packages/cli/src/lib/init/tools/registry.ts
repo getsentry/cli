@@ -1,6 +1,7 @@
 import { ApiError } from "../../errors.js";
 import { WizardCancelledError } from "../clack-utils.js";
 import type { ToolOperation, ToolPayload, ToolResult } from "../types.js";
+import { agentCheckpointTool } from "./agent-checkpoint.js";
 import { applyPatchsetTool } from "./apply-patchset.js";
 import {
   createSentryProjectTool,
@@ -26,6 +27,7 @@ const PROJECT_CREATION_OPERATIONS = new Set<ToolOperation>([
 ]);
 
 const toolDefinitions = [
+  agentCheckpointTool,
   listDirTool,
   readFilesTool,
   fileExistsBatchTool,
@@ -44,6 +46,7 @@ const toolRegistry = new Map<ToolOperation, AnyInitToolDefinition>(
 
 /** Sentry API operations never inspect or mutate the local filesystem. */
 const CWD_INDEPENDENT_OPERATIONS = new Set<ToolOperation>([
+  "agent-checkpoint",
   "create-sentry-project",
   "ensure-sentry-project",
 ]);
