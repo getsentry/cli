@@ -34,13 +34,22 @@ async function postDocs<T>(
   const text = await response.text();
   if (!response.ok) {
     let detail = text;
+    let parsed: { code?: unknown; error?: unknown } | undefined;
     try {
-      const parsed = JSON.parse(text) as { error?: unknown };
-      if (typeof parsed.error === "string") {
-        detail = parsed.error;
-      }
+      parsed = JSON.parse(text) as { code?: unknown; error?: unknown };
     } catch {
       // Keep the compact plain-text response as the detail.
+    }
+    if (parsed?.code === "DOCS_UNGROUNDED") {
+      throw new ApiError(
+        "Could not produce a verified documentation answer.",
+        response.status,
+        "Try rephrasing the question so it can be answered from current Sentry documentation.",
+        path
+      );
+    }
+    if (typeof parsed?.error === "string") {
+      detail = parsed.error;
     }
     throw new ApiError(
       "Docs service request failed",
