@@ -11,10 +11,10 @@
  * 3. `.sentryclirc` config file (walked up from CWD, merged with global)
  * 4. Config defaults (SQLite)
  * 5. DSN auto-detection (source code, .env files, environment variables)
- * 6. Directory name inference (matches project slugs with word boundaries)
+ * 6. Codebase-name inference (specific project root/cwd, git remote, fuzzy root fallback)
  */
 
-import { basename } from "node:path";
+import { basename, resolve as resolvePath } from "node:path";
 import { isatty } from "node:tty";
 import pLimit from "p-limit";
 import type { SentryOrganization, SentryProject } from "../types/index.js";
@@ -66,12 +66,17 @@ import {
   withAuthGuard,
 } from "./errors.js";
 import { fuzzyMatch } from "./fuzzy.js";
+import { inferRepositoryName, inferRepositoryRoot } from "./git.js";
 import { interactivePromptsAllowed } from "./interactive-prompts.js";
 import { logger } from "./logger.js";
 import { resolveEffectiveOrg } from "./region.js";
-import { CONFIG_FILENAME, loadSentryCliRc } from "./sentryclirc.js";
+import {
+  CONFIG_FILENAME,
+  getGlobalPaths,
+  loadSentryCliRc,
+} from "./sentryclirc.js";
 import { setOrgProjectContext, withTracingSpan } from "./telemetry.js";
-import { isAllDigits } from "./utils.js";
+import { isAllDigits, slugify } from "./utils.js";
 
 const log = logger.withTag("resolve-target");
 
@@ -123,6 +128,10 @@ export type ResolvedTarget = {
   packagePath?: string;
   /** Full project data when already fetched (avoids redundant getProject re-fetch) */
   projectData?: SentryProject;
+  /** Exact detected DSN that produced this target, when DSN-resolved. */
+  detectedDsn?: DetectedDsn;
+  /** Whether a name-based signal matched the project slug exactly or fuzzily. */
+  matchStrength?: "exact" | "fuzzy";
 };
 
 /**
@@ -168,7 +177,28 @@ export type ResolveOptions = {
    * invocations never block on a prompt).
    */
   interactive?: boolean;
+  /**
+   * Resolution policy. `codebase` ignores account-wide defaults and accepts
+   * `.sentryclirc` only when its project came from a file in the cwd ancestry.
+   * Use it for create-first workflows that must not reuse an unrelated global
+   * default when the checked-out code has no concrete project signal.
+   */
+  resolutionMode?: "standard" | "codebase";
+  /**
+   * Restrict auto-detected targets to one organization while still allowing
+   * lower-priority signals to run when a higher-priority signal points at a
+   * different organization. Explicit `org` + `project` inputs still win.
+   */
+  organizationFilter?: string;
 };
+
+/** Whether a resolved `.sentryclirc` project came from the cwd ancestry. */
+function hasLocalRcProject(
+  config: Awaited<ReturnType<typeof loadSentryCliRc>>
+) {
+  const source = config.sources.project;
+  return source !== undefined && !getGlobalPaths().has(source);
+}
 
 /**
  * Options for resolving org only.
@@ -207,6 +237,7 @@ export async function resolveFromDsn(
       orgDisplay: cached.orgName,
       projectDisplay: cached.projectName,
       detectedFrom,
+      detectedDsn: dsn,
     };
   }
 
@@ -233,6 +264,7 @@ export async function resolveFromDsn(
       orgDisplay: orgName,
       projectDisplay: projectInfo.name,
       detectedFrom,
+      detectedDsn: dsn,
     };
   }
 
@@ -244,6 +276,7 @@ export async function resolveFromDsn(
     orgDisplay: dsn.orgId,
     projectDisplay: projectInfo.name,
     detectedFrom,
+    detectedDsn: dsn,
   };
 }
 
@@ -346,6 +379,7 @@ export async function resolveDsnByPublicKey(
       projectDisplay: cached.projectName,
       detectedFrom,
       packagePath: dsn.packagePath,
+      detectedDsn: dsn,
     };
   }
 
@@ -378,6 +412,7 @@ export async function resolveDsnByPublicKey(
         projectDisplay: projectInfo.name,
         detectedFrom,
         packagePath: dsn.packagePath,
+        detectedDsn: dsn,
       };
     }
 
@@ -423,6 +458,7 @@ async function resolveDsnToTarget(
       projectDisplay: cached.projectName,
       detectedFrom,
       packagePath,
+      detectedDsn: dsn,
     };
   }
 
@@ -451,6 +487,7 @@ async function resolveDsnToTarget(
         projectDisplay: projectInfo.name,
         detectedFrom,
         packagePath,
+        detectedDsn: dsn,
       };
     }
 
@@ -463,6 +500,7 @@ async function resolveDsnToTarget(
       projectDisplay: projectInfo.name,
       detectedFrom,
       packagePath,
+      detectedDsn: dsn,
     };
   });
   return result.ok ? result.value : null;
@@ -488,18 +526,27 @@ export function isValidDirNameForInference(dirName: string): boolean {
   return true;
 }
 
+/** Classify a directory signal against one concrete project slug. */
+function projectNameMatchStrength(
+  projectSlug: string,
+  directoryName: string
+): "exact" | "fuzzy" {
+  return projectSlug === slugify(directoryName) ? "exact" : "fuzzy";
+}
+
 /**
- * Infer project(s) from directory name when DSN detection fails.
+ * Infer project(s) from the discovered project-root name.
  * Uses word-boundary matching (`\b`) against all accessible projects.
  *
  * Caches results in dsn_cache with source: "inferred" for performance.
  * Cache is invalidated when directory mtime changes or after 24h TTL.
  *
- * @param cwd - Current working directory
+ * @param projectRoot - Project root selected by local project discovery
  * @returns Resolved targets, or empty if no matches found
  */
-async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
-  const { projectRoot } = await findProjectRoot(cwd);
+async function inferFromProjectRootName(
+  projectRoot: string
+): Promise<ResolvedTargets> {
   const dirName = basename(projectRoot);
 
   // Skip inference for invalid directory names
@@ -514,12 +561,13 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
 
     // Return all cached targets if available
     if (cached.allResolved && cached.allResolved.length > 0) {
-      const targets = cached.allResolved.map((r) => ({
+      const targets: ResolvedTarget[] = cached.allResolved.map((r) => ({
         org: r.orgSlug,
         project: r.projectSlug,
         orgDisplay: r.orgName,
         projectDisplay: r.projectName,
         detectedFrom,
+        matchStrength: projectNameMatchStrength(r.projectSlug, dirName),
       }));
       return {
         targets,
@@ -540,6 +588,10 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
             orgDisplay: cached.resolved.orgName,
             projectDisplay: cached.resolved.projectName,
             detectedFrom,
+            matchStrength: projectNameMatchStrength(
+              cached.resolved.projectSlug,
+              dirName
+            ),
           },
         ],
       };
@@ -586,6 +638,7 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
     orgDisplay: m.organization?.name ?? m.orgSlug,
     projectDisplay: m.name,
     detectedFrom,
+    matchStrength: projectNameMatchStrength(m.slug, dirName),
   }));
 
   return {
@@ -594,6 +647,193 @@ async function inferFromDirectoryName(cwd: string): Promise<ResolvedTargets> {
       matches.length > 1
         ? `Found ${matches.length} projects matching directory "${dirName}"`
         : undefined,
+  };
+}
+
+/**
+ * Resolve all accessible projects for an exact slug signal.
+ */
+async function inferFromExactProjectSlug(options: {
+  projectSlug: string;
+  detectedFrom: string;
+  matchDescription: string;
+  logDescription: string;
+}): Promise<ResolvedTargets> {
+  try {
+    const { projects } = await findProjectsBySlug(options.projectSlug);
+    const targets: ResolvedTarget[] = projects.map((project) => ({
+      org: project.orgSlug,
+      project: project.slug,
+      projectId: toNumericId(project.id),
+      orgDisplay: project.organization?.name ?? project.orgSlug,
+      projectDisplay: project.name,
+      projectData: project,
+      detectedFrom: options.detectedFrom,
+      matchStrength: "exact",
+    }));
+    return {
+      targets,
+      footer:
+        targets.length > 1
+          ? `Found ${targets.length} projects matching ${options.matchDescription}`
+          : undefined,
+    };
+  } catch (error) {
+    log.debug(`${options.logDescription} project inference failed`, error);
+    return { targets: [] };
+  }
+}
+
+/**
+ * Infer projects from the exact leaf name of the local git remote.
+ *
+ * Unlike directory inference this does not use fuzzy matching: a repository
+ * named `owner/junior` only resolves projects whose slug is exactly `junior`.
+ * Multiple cross-organization matches are preserved so callers can decide
+ * whether the result is concrete enough for their workflow.
+ */
+async function inferFromRepositoryName(cwd: string): Promise<ResolvedTargets> {
+  const repository = inferRepositoryName(cwd);
+  const repositoryName = repository?.name.split("/").at(-1);
+  const projectSlug = repositoryName ? slugify(repositoryName) : "";
+  if (!(repository && projectSlug)) {
+    return { targets: [] };
+  }
+
+  return await inferFromExactProjectSlug({
+    projectSlug,
+    detectedFrom: `git ${repository.remote} remote "${repository.name}"`,
+    matchDescription: `git repository "${repository.name}"`,
+    logDescription: "Git repository",
+  });
+}
+
+/**
+ * Infer projects from the exact current working-directory name.
+ *
+ * This is intentionally exact because nested directory names such as `src`
+ * are common and must not trigger broad fuzzy matches. Project-root inference
+ * remains the final word-boundary fallback.
+ */
+async function inferFromWorkingDirectoryName(
+  cwd: string
+): Promise<ResolvedTargets> {
+  const directoryName = basename(cwd);
+  if (!isValidDirNameForInference(directoryName)) {
+    return { targets: [] };
+  }
+
+  const projectSlug = slugify(directoryName);
+  if (!projectSlug) {
+    return { targets: [] };
+  }
+  return await inferFromExactProjectSlug({
+    projectSlug,
+    detectedFrom: `working directory name "${directoryName}"`,
+    matchDescription: `working directory "${directoryName}"`,
+    logDescription: "Working-directory",
+  });
+}
+
+/** Resolve an exact project slug from the root selected by project discovery. */
+async function inferFromExactProjectRoot(
+  projectRoot: string
+): Promise<ResolvedTargets> {
+  const directoryName = basename(projectRoot);
+  if (!isValidDirNameForInference(directoryName)) {
+    return { targets: [] };
+  }
+  const projectSlug = slugify(directoryName);
+  if (!projectSlug) {
+    return { targets: [] };
+  }
+  return await inferFromExactProjectSlug({
+    projectSlug,
+    detectedFrom: `project root name "${directoryName}"`,
+    matchDescription: `project root "${directoryName}"`,
+    logDescription: "Project-root",
+  });
+}
+
+/**
+ * Resolve name-based codebase signals without letting a repository-root name
+ * override a more specific monorepo app, or an arbitrary checkout directory
+ * override the canonical remote name.
+ */
+async function inferFromCodebaseNames(
+  cwd: string,
+  organizationFilter?: string
+): Promise<ResolvedTargets> {
+  const projectRootInfo = await findProjectRoot(cwd);
+  const repositoryRoot = inferRepositoryRoot(cwd);
+  const resolvedCwd = resolvePath(cwd);
+  const resolvedProjectRoot = resolvePath(projectRootInfo.projectRoot);
+  const resolvedRepositoryRoot = repositoryRoot
+    ? resolvePath(repositoryRoot)
+    : undefined;
+
+  const workingDirectoryResult = filterTargetsByOrganization(
+    await inferFromWorkingDirectoryName(resolvedCwd),
+    organizationFilter
+  );
+  const projectRootResult =
+    resolvedProjectRoot === resolvedCwd
+      ? workingDirectoryResult
+      : filterTargetsByOrganization(
+          await inferFromExactProjectRoot(resolvedProjectRoot),
+          organizationFilter
+        );
+
+  const projectRootIsSpecific =
+    resolvedRepositoryRoot !== undefined &&
+    resolvedProjectRoot !== resolvedRepositoryRoot;
+  if (projectRootIsSpecific && projectRootResult.targets.length > 0) {
+    return projectRootResult;
+  }
+
+  if (projectRootIsSpecific && workingDirectoryResult.targets.length > 0) {
+    return workingDirectoryResult;
+  }
+
+  const repositoryResult = filterTargetsByOrganization(
+    await inferFromRepositoryName(cwd),
+    organizationFilter
+  );
+  if (repositoryResult.targets.length > 0) {
+    return repositoryResult;
+  }
+  if (projectRootResult.targets.length > 0) {
+    return projectRootResult;
+  }
+  if (workingDirectoryResult.targets.length > 0) {
+    return workingDirectoryResult;
+  }
+
+  return filterTargetsByOrganization(
+    await inferFromProjectRootName(resolvedProjectRoot),
+    organizationFilter
+  );
+}
+
+/** Keep auto-detected targets inside an already resolved organization. */
+function filterTargetsByOrganization(
+  result: ResolvedTargets,
+  organizationFilter?: string
+): ResolvedTargets {
+  if (!organizationFilter) {
+    return result;
+  }
+  const targets = result.targets.filter(
+    (target) => target.org === organizationFilter
+  );
+  if (targets.length === result.targets.length) {
+    return result;
+  }
+  return {
+    ...result,
+    targets,
+    footer:
+      targets.length > 1 ? formatMultipleProjectsFooter(targets) : undefined,
   };
 }
 
@@ -1072,7 +1312,7 @@ async function resolveDsnsWithTimeout(
  * 3. `.sentryclirc` config file - returns single target
  * 4. Config defaults - returns single target
  * 5. DSN auto-detection - may return multiple targets
- * 6. Directory name inference - matches project slugs with word boundaries
+ * 6. Codebase-name inference (specific project root/cwd, git remote, fuzzy root fallback)
  *
  * @param options - Resolution options with org, project, and cwd
  * @returns All resolved targets and optional footer message
@@ -1086,7 +1326,8 @@ export async function resolveAllTargets(
     "resolve",
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Priority-based resolution cascade requires sequential checks.
     async (span) => {
-      const { org, project, cwd } = options;
+      const { org, project, cwd, organizationFilter } = options;
+      const codebaseMode = options.resolutionMode === "codebase";
 
       // 1. CLI flags take priority (both must be provided together)
       if (org && project) {
@@ -1117,7 +1358,10 @@ export async function resolveAllTargets(
 
       // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
       const envVars = resolveFromEnvVars();
-      if (envVars?.project) {
+      if (
+        envVars?.project &&
+        (!organizationFilter || envVars.org === organizationFilter)
+      ) {
         span.setAttribute("resolve.method", "env_vars");
         setOrgProjectContext([envVars.org], [envVars.project]);
         return {
@@ -1139,7 +1383,12 @@ export async function resolveAllTargets(
 
       // 3. .sentryclirc config file (walked up from cwd, merged with global)
       const rcConfig = await loadSentryCliRc(cwd);
-      if (rcConfig.org && rcConfig.project) {
+      if (
+        rcConfig.org &&
+        rcConfig.project &&
+        (!organizationFilter || rcConfig.org === organizationFilter) &&
+        (!codebaseMode || hasLocalRcProject(rcConfig))
+      ) {
         span.setAttribute("resolve.method", "sentryclirc");
         setOrgProjectContext([rcConfig.org], [rcConfig.project]);
         return {
@@ -1155,24 +1404,34 @@ export async function resolveAllTargets(
         };
       }
 
-      log.debug(`No ${CONFIG_FILENAME} org/project, trying config defaults`);
+      log.debug(
+        codebaseMode
+          ? `No local ${CONFIG_FILENAME} org/project, skipping account defaults`
+          : `No ${CONFIG_FILENAME} org/project, trying config defaults`
+      );
 
       // 4. Config defaults
-      const defaultOrg = getDefaultOrganization();
-      const defaultProject = getDefaultProject();
-      if (defaultOrg && defaultProject) {
-        span.setAttribute("resolve.method", "defaults");
-        setOrgProjectContext([defaultOrg], [defaultProject]);
-        return {
-          targets: [
-            {
-              org: defaultOrg,
-              project: defaultProject,
-              orgDisplay: defaultOrg,
-              projectDisplay: defaultProject,
-            },
-          ],
-        };
+      if (!codebaseMode) {
+        const defaultOrg = getDefaultOrganization();
+        const defaultProject = getDefaultProject();
+        if (
+          defaultOrg &&
+          defaultProject &&
+          (!organizationFilter || defaultOrg === organizationFilter)
+        ) {
+          span.setAttribute("resolve.method", "defaults");
+          setOrgProjectContext([defaultOrg], [defaultProject]);
+          return {
+            targets: [
+              {
+                org: defaultOrg,
+                project: defaultProject,
+                orgDisplay: defaultOrg,
+                projectDisplay: defaultProject,
+              },
+            ],
+          };
+        }
       }
 
       log.debug("No config defaults set, trying DSN auto-detection");
@@ -1180,30 +1439,38 @@ export async function resolveAllTargets(
       // 5. DSN auto-detection (may find multiple in monorepos)
       const detection = await detectAllDsns(cwd);
 
-      if (detection.all.length === 0) {
-        log.debug(
-          "No DSNs found in source code or env files, trying directory name inference"
+      if (detection.all.length > 0) {
+        const dsnResult = filterTargetsByOrganization(
+          await resolveDetectedDsns(detection),
+          organizationFilter
         );
-        // 6. Fallback: infer from directory name
-        const result = await inferFromDirectoryName(cwd);
-        if (result.targets.length === 0) {
-          span.setAttribute("resolve.method", "none");
-          log.debug(
-            "Directory name inference found no matching projects — auto-detection failed"
-          );
-        } else {
-          span.setAttribute("resolve.method", "inference");
-          const uniqueOrgs = [...new Set(result.targets.map((t) => t.org))];
-          const uniqueProjects = [
-            ...new Set(result.targets.map((t) => t.project)),
-          ];
-          setOrgProjectContext(uniqueOrgs, uniqueProjects);
+        if (dsnResult.targets.length > 0 || dsnResult.skippedSelfHosted) {
+          span.setAttribute("resolve.method", "dsn");
+          return dsnResult;
         }
-        return result;
+        log.debug(
+          organizationFilter
+            ? `Detected DSNs did not match organization '${organizationFilter}', trying codebase name inference`
+            : "Detected DSNs could not be resolved, trying codebase name inference"
+        );
       }
 
-      span.setAttribute("resolve.method", "dsn");
-      return resolveDetectedDsns(detection);
+      log.debug("No matching DSNs found, trying codebase name inference");
+      const result = await inferFromCodebaseNames(cwd, organizationFilter);
+      if (result.targets.length === 0) {
+        span.setAttribute("resolve.method", "none");
+        log.debug(
+          "Codebase name inference found no matching projects — auto-detection failed"
+        );
+      } else {
+        span.setAttribute("resolve.method", "codebase-name");
+        const uniqueOrgs = [...new Set(result.targets.map((t) => t.org))];
+        const uniqueProjects = [
+          ...new Set(result.targets.map((t) => t.project)),
+        ];
+        setOrgProjectContext(uniqueOrgs, uniqueProjects);
+      }
+      return result;
     },
     { "resolve.mode": "multi" }
   );
@@ -1296,7 +1563,7 @@ async function resolveDetectedDsns(
  * 3. `.sentryclirc` config file
  * 4. Config defaults
  * 5. DSN auto-detection
- * 6. Directory name inference - matches project slugs with word boundaries
+ * 6. Codebase-name inference (specific project root/cwd, git remote, fuzzy root fallback)
  *
  * @param options - Resolution options with org, project, and cwd
  * @returns Resolved target, or null if resolution failed
@@ -1310,7 +1577,8 @@ export async function resolveOrgAndProject(
     "resolve",
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Priority-based resolution cascade requires sequential checks.
     async (span) => {
-      const { org, project, cwd } = options;
+      const { org, project, cwd, organizationFilter } = options;
+      const codebaseMode = options.resolutionMode === "codebase";
 
       // 1. CLI flags take priority (both must be provided together)
       if (org && project) {
@@ -1334,7 +1602,10 @@ export async function resolveOrgAndProject(
 
       // 2. SENTRY_ORG / SENTRY_PROJECT environment variables
       const envVars = resolveFromEnvVars();
-      if (envVars?.project) {
+      if (
+        envVars?.project &&
+        (!organizationFilter || envVars.org === organizationFilter)
+      ) {
         span.setAttribute("resolve.method", "env_vars");
         return withTelemetryContext({
           org: envVars.org,
@@ -1347,7 +1618,12 @@ export async function resolveOrgAndProject(
 
       // 3. .sentryclirc config file
       const rcConfig = await loadSentryCliRc(cwd);
-      if (rcConfig.org && rcConfig.project) {
+      if (
+        rcConfig.org &&
+        rcConfig.project &&
+        (!organizationFilter || rcConfig.org === organizationFilter) &&
+        (!codebaseMode || hasLocalRcProject(rcConfig))
+      ) {
         span.setAttribute("resolve.method", "sentryclirc");
         return withTelemetryContext({
           org: rcConfig.org,
@@ -1359,22 +1635,31 @@ export async function resolveOrgAndProject(
       }
 
       // 4. Config defaults
-      const defaultOrg = getDefaultOrganization();
-      const defaultProject = getDefaultProject();
-      if (defaultOrg && defaultProject) {
-        span.setAttribute("resolve.method", "defaults");
-        return withTelemetryContext({
-          org: defaultOrg,
-          project: defaultProject,
-          orgDisplay: defaultOrg,
-          projectDisplay: defaultProject,
-        });
+      if (!codebaseMode) {
+        const defaultOrg = getDefaultOrganization();
+        const defaultProject = getDefaultProject();
+        if (
+          defaultOrg &&
+          defaultProject &&
+          (!organizationFilter || defaultOrg === organizationFilter)
+        ) {
+          span.setAttribute("resolve.method", "defaults");
+          return withTelemetryContext({
+            org: defaultOrg,
+            project: defaultProject,
+            orgDisplay: defaultOrg,
+            projectDisplay: defaultProject,
+          });
+        }
       }
 
       // 5. DSN auto-detection
       try {
         const dsnResult = await resolveFromDsn(cwd);
-        if (dsnResult) {
+        if (
+          dsnResult &&
+          (!organizationFilter || dsnResult.org === organizationFilter)
+        ) {
           span.setAttribute("resolve.method", "dsn");
           return withTelemetryContext(dsnResult);
         }
@@ -1382,35 +1667,37 @@ export async function resolveOrgAndProject(
         // Fall through to directory inference
       }
 
-      // 6. Fallback: infer from directory name
-      const inferred = await inferFromDirectoryName(cwd);
+      // 6-8. Resolve cwd, project-root, and git-remote names as one policy.
+      const inferred = await inferFromCodebaseNames(cwd, organizationFilter);
       const [first] = inferred.targets;
+      if (inferred.targets.length > 1) {
+        span.setAttribute("resolve.method", "codebase-name-ambiguous");
+        return null;
+      }
       if (!first) {
-        // 7. Authenticated last resort: if the account has exactly one
+        // 9. Authenticated last resort: if the account has exactly one
         //    accessible org with exactly one project, that pair is the only
         //    possible target — use it instead of failing. This removes the
         //    "Could not auto-detect organization and project" dead-end for
         //    single-org/single-project accounts (CLI-3B). Callers that rely on
         //    a null return (e.g. event view's cross-org search) are unaffected:
         //    this only ever turns a null into a uniquely-determined target.
-        const sole = await resolveSoleAccountTarget();
-        if (sole) {
-          span.setAttribute("resolve.method", "account_sole");
-          return withTelemetryContext(sole);
+        if (!codebaseMode) {
+          const sole = await resolveSoleAccountTarget();
+          if (
+            sole &&
+            (!organizationFilter || sole.org === organizationFilter)
+          ) {
+            span.setAttribute("resolve.method", "account_sole");
+            return withTelemetryContext(sole);
+          }
         }
         span.setAttribute("resolve.method", "none");
         return null;
       }
 
-      span.setAttribute("resolve.method", "inference");
-      // If multiple matches, note it in detectedFrom
-      return withTelemetryContext({
-        ...first,
-        detectedFrom:
-          inferred.targets.length > 1
-            ? `${first.detectedFrom} (1 of ${inferred.targets.length} matches)`
-            : first.detectedFrom,
-      });
+      span.setAttribute("resolve.method", "codebase-name");
+      return withTelemetryContext(first);
     },
     { "resolve.mode": "single" }
   );
