@@ -52,4 +52,19 @@ describe("detectDocsContextFromReader", () => {
       sentryConfigured: false,
     });
   });
+
+  test("does not infer Next.js from an unrelated substring", async () => {
+    const context = await detectDocsContextFromReader({
+      async readManifest(name) {
+        return name === "package.json"
+          ? '{"description":"context"}'
+          : undefined;
+      },
+      async hasConfig() {
+        return false;
+      },
+    });
+
+    expect(context.frameworks).toEqual([]);
+  });
 });

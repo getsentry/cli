@@ -33,6 +33,20 @@ const DOCS_CONTEXT_CONFIGS = [
   "sentry.properties",
 ] as const;
 
+const FRAMEWORK_SIGNALS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\bnext(?:\.js)?\b/i, "nextjs"],
+  [/@remix-run/i, "remix"],
+  [/@sveltejs/i, "sveltekit"],
+  [/@angular/i, "angular"],
+  [/\bnestjs\b/i, "nestjs"],
+  [/\bfastapi\b/i, "fastapi"],
+  [/\bdjango\b/i, "django"],
+  [/\bflask\b/i, "flask"],
+  [/\brails\b/i, "rails"],
+  [/\blaravel\b/i, "laravel"],
+  [/\bflutter\b/i, "flutter"],
+];
+
 export type DocsContextReader = {
   hasConfig: (name: (typeof DOCS_CONTEXT_CONFIGS)[number]) => Promise<boolean>;
   readManifest: (
@@ -41,22 +55,8 @@ export type DocsContextReader = {
 };
 
 function addFrameworkSignals(text: string, frameworks: Set<string>): void {
-  const normalized = text.toLowerCase();
-  const candidates: [string, string][] = [
-    ["next", "nextjs"],
-    ["@remix-run", "remix"],
-    ["@sveltejs", "sveltekit"],
-    ["@angular", "angular"],
-    ["nestjs", "nestjs"],
-    ["fastapi", "fastapi"],
-    ["django", "django"],
-    ["flask", "flask"],
-    ["rails", "rails"],
-    ["laravel", "laravel"],
-    ["flutter", "flutter"],
-  ];
-  for (const [needle, framework] of candidates) {
-    if (normalized.includes(needle)) {
+  for (const [signal, framework] of FRAMEWORK_SIGNALS) {
+    if (signal.test(text)) {
       frameworks.add(framework);
     }
   }
