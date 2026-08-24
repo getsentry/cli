@@ -1,7 +1,7 @@
 import { customFetch } from "./custom-ca.js";
 import { refreshToken } from "./db/auth.js";
 import type { DocsProjectContext } from "./docs-context.js";
-import { ApiError } from "./errors.js";
+import { ApiError, CliError, EXIT } from "./errors.js";
 import { MASTRA_API_URL } from "./init/constants.js";
 import { assertHostedInitServiceAcceptsTokenHost } from "./init/init-service-auth.js";
 
@@ -41,11 +41,10 @@ async function postDocs<T>(
       // Keep the compact plain-text response as the detail.
     }
     if (parsed?.code === "DOCS_UNGROUNDED") {
-      throw new ApiError(
-        "Could not produce a verified documentation answer.",
-        response.status,
-        "Try rephrasing the question so it can be answered from current Sentry documentation.",
-        path
+      throw new CliError(
+        "Could not produce a verified documentation answer.\n" +
+          "  Try rephrasing the question so it can be answered from current Sentry documentation.",
+        EXIT.API
       );
     }
     if (typeof parsed?.error === "string") {

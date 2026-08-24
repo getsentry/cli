@@ -14,6 +14,7 @@ vi.mock("../../src/lib/init/init-service-auth.js", () => ({
 }));
 
 import { queryDocs } from "../../src/lib/docs-service.js";
+import { EXIT, isUserError } from "../../src/lib/errors.js";
 
 describe("queryDocs", () => {
   test("explains when the service cannot verify a cited answer", async () => {
@@ -36,10 +37,32 @@ describe("queryDocs", () => {
         sentryConfigured: false,
       })
     ).rejects.toMatchObject({
-      detail:
-        "Try rephrasing the question so it can be answered from current Sentry documentation.",
-      message: "Could not produce a verified documentation answer.",
-      status: 502,
+      exitCode: EXIT.API,
+      message: expect.stringContaining(
+        "Could not produce a verified documentation answer."
+      ),
     });
+  });
+
+  test("treats an ungrounded answer as a user-facing failure", async () => {
+    refreshToken.mockResolvedValue({ token: "test-token" });
+    customFetch.mockResolvedValue({
+      ok: false,
+      status: 502,
+      text: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          code: "DOCS_UNGROUNDED",
+          error: "Sentry documentation answer could not be verified",
+        })
+      ),
+    });
+
+    const error = await queryDocs("How do I configure tracing?", {
+      frameworks: [],
+      languages: [],
+      sentryConfigured: false,
+    }).catch((caught: unknown) => caught);
+
+    expect(isUserError(error)).toBe(true);
   });
 });
