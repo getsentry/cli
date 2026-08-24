@@ -683,7 +683,7 @@ export const exploreCommand = buildListCommand("explore", {
         kind: "parsed",
         parse: String,
         brief:
-          "Replay environment filter for --dataset replays (repeatable, comma-separated)",
+          "Environment filter (repeatable, comma-separated)",
         variadic: true,
         optional: true,
       },
