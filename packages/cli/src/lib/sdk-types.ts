@@ -50,8 +50,8 @@ export type SentryOptions = {
   /**
    * Extra HTTP headers to send with every request to a self-hosted Sentry
    * instance, for reverse proxies that require them (e.g., Google IAP,
-   * Cloudflare Access). Equivalent to `SENTRY_CUSTOM_HEADERS`; ignored when
-   * targeting sentry.io.
+   * Cloudflare Access). Same rules as `SENTRY_CUSTOM_HEADERS`, which this
+   * option replaces when set (even when empty); ignored when targeting sentry.io.
    */
   headers?: Record<string, string>;
 

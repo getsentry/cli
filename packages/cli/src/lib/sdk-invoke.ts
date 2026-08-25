@@ -18,7 +18,6 @@ import { homedir } from "node:os";
 import type { Span } from "@sentry/core";
 import type { Writer } from "../types/index.js";
 import { type AsyncChannel, createAsyncChannel } from "./async-channel.js";
-import { formatCustomHeaders } from "./custom-headers.js";
 import { setEnv } from "./env.js";
 import { SentryError, type SentryOptions } from "./sdk-types.js";
 
@@ -32,7 +31,7 @@ function hasStreamingFlag(args: string[]): boolean {
 
 /**
  * Build an isolated env from options, inheriting the consumer's process.env.
- * Sets auth token, host URL, default org/project, custom headers, and output format.
+ * Sets auth token, host URL, default org/project, and output format.
  */
 function buildIsolatedEnv(
   options?: SentryOptions,
@@ -51,12 +50,6 @@ function buildIsolatedEnv(
   }
   if (options?.project) {
     env.SENTRY_PROJECT = options.project;
-  }
-  if (options?.headers) {
-    const customHeaders = formatCustomHeaders(options.headers);
-    if (customHeaders) {
-      env.SENTRY_CUSTOM_HEADERS = customHeaders;
-    }
   }
   if (jsonByDefault && !options?.text) {
     env.SENTRY_OUTPUT_FORMAT = "json";
@@ -199,6 +192,19 @@ export function applyFlagDefaults(
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences use ESC (0x1b)
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
+/**
+ * Install the structured `headers` option for this invocation.
+ *
+ * Lazy import: `custom-headers.ts` pulls in the SQLite defaults module, which
+ * must not load when the SDK is merely imported.
+ */
+async function applyHeadersOption(
+  headers: Record<string, string> | undefined
+): Promise<void> {
+  const { setCustomHeadersOverride } = await import("./custom-headers.js");
+  setCustomHeadersOverride(headers);
+}
 
 /** Flush Sentry telemetry (no beforeExit handler in library mode). */
 async function flushTelemetry(): Promise<void> {
@@ -410,6 +416,7 @@ async function executeWithCapture<T>(
   setEnv(env);
 
   try {
+    await applyHeadersOption(options?.headers);
     const captureCtx = await buildCaptureContext(env, cwd);
     const { withTelemetry } = await import("./telemetry.js");
 
@@ -448,6 +455,7 @@ async function executeWithCapture<T>(
       captureCtx.stdoutChunks
     );
   } finally {
+    await applyHeadersOption(undefined);
     setEnv(process.env);
   }
 }
@@ -492,6 +500,7 @@ function executeWithStream<T>(
 
     let captureCtx: CaptureContext | undefined;
     try {
+      await applyHeadersOption(options?.headers);
       captureCtx = await buildCaptureContext(env, cwd, {
         channel: channel as AsyncChannel<unknown>,
         abortSignal: controller.signal,
@@ -536,6 +545,7 @@ function executeWithStream<T>(
       channel.error(err);
     } finally {
       await flushTelemetry();
+      await applyHeadersOption(undefined);
       setEnv(process.env);
     }
   })();
