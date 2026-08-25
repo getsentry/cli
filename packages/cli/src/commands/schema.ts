@@ -201,12 +201,14 @@ function jsonTransformSchema(data: SchemaResult, fields?: string[]): unknown {
 function noResourceMatchError(resource: string): ResolutionError {
   const names = getResourceSummaries().map((r) => r.name);
   const [closest] = fuzzyMatch(resource, names, { maxResults: 1 });
-  const browseHint = "sentry schema                    Browse all resources";
+  const browseHint = "sentry schema";
   const searchHint = `sentry schema --search ${resource}    Search endpoints by keyword`;
   // Lead with the closest resource name when a typo has an obvious fix
   // (e.g. "committers" → "commits"); otherwise point at the full browse.
   const primaryHint = closest ? `sentry schema ${closest}` : browseHint;
-  const suggestions = closest ? [browseHint, searchHint] : [searchHint];
+  const suggestions = closest
+    ? ["sentry schema                    Browse all resources", searchHint]
+    : [searchHint];
   return new ResolutionError(
     `Resource "${resource}"`,
     "does not exist in the schema",
