@@ -19,6 +19,7 @@ Upload builds to a project
 - `--build-configuration <value> - Build configuration for the upload (defaults to the current version)`
 - `--release-notes <value> - Release notes for the build`
 - `--install-group <value>... - Install group(s) for this build (repeatable); builds sharing a group show updates for each other`
+- `--dsym <value>... - Path to a dSYM bundle, a directory of dSYM bundles, or a ZIP of either to include with an IPA upload (repeatable)`
 - `--head-sha <value> - VCS commit SHA (defaults to the current commit)`
 - `--base-sha <value> - VCS base commit SHA (defaults to the merge-base with the base ref)`
 - `--vcs-provider <value> - VCS provider (defaults to the current remote's provider)`
@@ -46,6 +47,9 @@ sentry build upload ./app-release.apk
 # Upload an iOS build (XCArchive directory or IPA)
 sentry build upload ./MyApp.xcarchive
 sentry build upload ./MyApp.ipa
+
+# Attach dSYMs to an IPA upload (bundle, directory of bundles, or ZIP; repeatable)
+sentry build upload ./MyApp.ipa --dsym ./MyApp.app.dSYM --dsym ./Frameworks.dSYMs.zip
 
 # Upload with a build configuration and release notes
 sentry build upload ./app.aab --build-configuration Release --release-notes "Nightly"
