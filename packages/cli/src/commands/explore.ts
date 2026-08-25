@@ -682,8 +682,7 @@ export const exploreCommand = buildListCommand("explore", {
       environment: {
         kind: "parsed",
         parse: String,
-        brief:
-          "Environment filter (repeatable, comma-separated)",
+        brief: "Environment filter (repeatable, comma-separated)",
         variadic: true,
         optional: true,
       },
