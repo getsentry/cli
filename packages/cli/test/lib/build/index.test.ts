@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { afterEach, describe, expect, test } from "vitest";
 import {
+  collectDsymEntries,
   detectBuildFormat,
   extractIpaAppName,
   normalizeBuildDirectory,
@@ -350,6 +351,152 @@ describe("normalizeIpa", () => {
   test("throws when the IPA has no single .app", () => {
     expect(() => normalizeIpa(zipSync({ "readme.txt": strToU8("x") }), null)).toThrow(
       "exactly one"
+    );
+  });
+
+  test("embeds dSYM entries under the archive's dSYMs/ directory", () => {
+    const entries = unzipSync(
+      normalizeIpa(fakeIpaBytes(), null, [
+        {
+          relPath: "MyApp.app.dSYM/Contents/Resources/DWARF/MyApp",
+          content: strToU8("dwarf"),
+        },
+      ])
+    );
+    expect(
+      entries["archive.xcarchive/dSYMs/MyApp.app.dSYM/Contents/Resources/DWARF/MyApp"]
+    ).toEqual(strToU8("dwarf"));
+  });
+});
+
+describe("collectDsymEntries", () => {
+  let tmp: string;
+
+  afterEach(() => {
+    if (tmp) {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  function makeTmp(): string {
+    tmp = mkdtempSync(join(tmpdir(), "dsym-test-"));
+    return tmp;
+  }
+
+  /** Write a minimal `.dSYM` bundle with a single symbols file. */
+  function writeDsym(root: string, name: string, contents: string): string {
+    const bundle = join(root, name);
+    mkdirSync(join(bundle, "Contents", "Resources", "DWARF"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(bundle, "Contents", "Resources", "DWARF", "sym"),
+      contents
+    );
+    return bundle;
+  }
+
+  test("accepts a direct .dSYM bundle and a directory of bundles", async () => {
+    const root = makeTmp();
+    const direct = writeDsym(root, "DemoApp.app.dSYM", "app symbols");
+    const symbolsDir = join(root, "Symbols");
+    writeDsym(symbolsDir, "DemoFramework.framework.dSYM", "framework symbols");
+    writeFileSync(join(symbolsDir, "README.txt"), "ignored");
+
+    const entries = await collectDsymEntries([direct, symbolsDir]);
+    const byPath = new Map(
+      entries.map((e) => [e.relPath, new TextDecoder().decode(e.content)])
+    );
+    expect(
+      byPath.get("DemoApp.app.dSYM/Contents/Resources/DWARF/sym")
+    ).toBe("app symbols");
+    expect(
+      byPath.get("DemoFramework.framework.dSYM/Contents/Resources/DWARF/sym")
+    ).toBe("framework symbols");
+    expect([...byPath.keys()].some((k) => k.includes("README"))).toBe(false);
+  });
+
+  test("accepts a bare ZIP and a ZIP wrapping a single directory", async () => {
+    const root = makeTmp();
+    const bareZip = join(root, "bundle.zip");
+    writeFileSync(
+      bareZip,
+      zipSync({
+        "DemoApp.app.dSYM/Contents/Resources/DWARF/sym": strToU8("app"),
+      })
+    );
+    const wrappedZip = join(root, "wrapped.zip");
+    writeFileSync(
+      wrappedZip,
+      zipSync({
+        "dSYMs/DemoFramework.framework.dSYM/Contents/Resources/DWARF/sym":
+          strToU8("fw"),
+      })
+    );
+
+    const entries = await collectDsymEntries([bareZip, wrappedZip]);
+    const byPath = new Map(
+      entries.map((e) => [e.relPath, new TextDecoder().decode(e.content)])
+    );
+    expect(
+      byPath.get("DemoApp.app.dSYM/Contents/Resources/DWARF/sym")
+    ).toBe("app");
+    expect(
+      byPath.get("DemoFramework.framework.dSYM/Contents/Resources/DWARF/sym")
+    ).toBe("fw");
+  });
+
+  test("ignores macOS metadata inside a ZIP", async () => {
+    const root = makeTmp();
+    const zip = join(root, "symbols.zip");
+    writeFileSync(
+      zip,
+      zipSync({
+        "dSYMs/DemoApp.app.dSYM/Contents/Resources/DWARF/sym": strToU8("sym"),
+        "__MACOSX/dSYMs/DemoApp.app.dSYM/._sym": strToU8("meta"),
+      })
+    );
+
+    const entries = await collectDsymEntries([zip]);
+    expect(entries.every((e) => !e.relPath.includes("__MACOSX"))).toBe(true);
+    expect(entries.some((e) => e.relPath.includes("._sym"))).toBe(false);
+  });
+
+  test("throws when a path does not exist", async () => {
+    const root = makeTmp();
+    await expect(
+      collectDsymEntries([join(root, "missing.dSYM")])
+    ).rejects.toThrow("does not exist");
+  });
+
+  test("throws when a directory contains no bundles", async () => {
+    const root = makeTmp();
+    const empty = join(root, "empty");
+    mkdirSync(empty);
+    writeFileSync(join(empty, "note.txt"), "x");
+    await expect(collectDsymEntries([empty])).rejects.toThrow(
+      "No .dSYM bundles found"
+    );
+  });
+
+  test("rejects two inputs contributing the same bundle name", async () => {
+    const root = makeTmp();
+    const a = join(root, "a");
+    const b = join(root, "b");
+    writeDsym(a, "DemoApp.app.dSYM", "one");
+    writeDsym(b, "DemoApp.app.dSYM", "two");
+    await expect(
+      collectDsymEntries([join(a, "DemoApp.app.dSYM"), join(b, "DemoApp.app.dSYM")])
+    ).rejects.toThrow("multiple dSYM bundles named");
+  });
+
+  test("rejects a symlinked dSYM path", async () => {
+    const root = makeTmp();
+    const real = writeDsym(root, "Real.app.dSYM", "sym");
+    const link = join(root, "Link.app.dSYM");
+    symlinkSync(real, link);
+    await expect(collectDsymEntries([link])).rejects.toThrow(
+      "cannot be symlinks"
     );
   });
 });

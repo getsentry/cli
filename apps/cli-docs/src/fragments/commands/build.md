@@ -10,6 +10,9 @@ sentry build upload ./app-release.apk
 sentry build upload ./MyApp.xcarchive
 sentry build upload ./MyApp.ipa
 
+# Attach dSYMs to an IPA upload (bundle, directory of bundles, or ZIP; repeatable)
+sentry build upload ./MyApp.ipa --dsym ./MyApp.app.dSYM --dsym ./Frameworks.dSYMs.zip
+
 # Upload with a build configuration and release notes
 sentry build upload ./app.aab --build-configuration Release --release-notes "Nightly"
 
@@ -38,6 +41,10 @@ sentry build download 1234567890 --json
   images (that required native macOS frameworks), so the server sees the raw
   `.car` rather than a per-image breakdown. XCArchive symlinks and Unix file
   permissions are preserved.
+- `--dsym` attaches debug symbols to an **IPA** upload (IPAs are often missing
+  dSYMs after app thinning). Each value may be a `.dSYM` bundle, a directory of
+  bundles, or a ZIP of either, and the flag is repeatable. It only applies when
+  uploading a single IPA.
 - Multiple paths may be uploaded at once; the command exits non-zero if any
   build fails to upload.
 - Git metadata (commit, branch, PR number, repo) is **auto-collected in CI**
