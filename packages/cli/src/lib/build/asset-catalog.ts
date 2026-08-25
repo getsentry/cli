@@ -154,6 +154,12 @@ function collectTreeLeaves(
         walk(valueIndex);
       }
     }
+    // B-tree node with N keys has N+1 children. The loop consumed `count`
+    // (keyIndex,valueIndex) pairs; the final child pointer is the next u32.
+    if (!isLeaf) {
+      const finalChild = view.getUint32(cursor);
+      walk(finalChild);
+    }
   };
 
   walk(rootNodeId);
