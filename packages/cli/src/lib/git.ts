@@ -13,6 +13,7 @@
 
 import { execFileSync } from "node:child_process";
 
+import { getEnv } from "./env.js";
 import { ValidationError, validationError } from "./errors.js";
 
 /** `execFileSync` failure shape when git exits non-zero. */
@@ -255,19 +256,39 @@ export function getCommitLog(
   });
 }
 
+/** Default git remote name when `SENTRY_VCS_REMOTE` is not set. */
+const DEFAULT_VCS_REMOTE = "origin";
+
 /**
- * Get the repository name from the "origin" remote URL.
+ * Name of the git remote the CLI uses to identify the repository.
+ *
+ * Reads `SENTRY_VCS_REMOTE` (same variable the legacy sentry-cli honored) and
+ * falls back to `origin`. A name starting with `-` is ignored because git
+ * would parse it as a flag, and remote names cannot start with `-` anyway.
+ *
+ * @returns The remote name to pass to `git remote get-url` and friends
+ */
+export function getVcsRemote(): string {
+  const configured = getEnv().SENTRY_VCS_REMOTE?.trim();
+  if (!configured || configured.startsWith("-")) {
+    return DEFAULT_VCS_REMOTE;
+  }
+  return configured;
+}
+
+/**
+ * Get the repository name from the configured remote URL (see {@link getVcsRemote}).
  *
  * Parses both HTTPS and SSH remote formats:
  * - `https://github.com/owner/repo.git` → `owner/repo`
  * - `git@github.com:owner/repo.git` → `owner/repo`
  *
  * @param cwd - Working directory
- * @returns `owner/repo` string, or undefined if no origin remote
+ * @returns `owner/repo` string, or undefined if the remote does not exist
  */
 export function getRepositoryName(cwd?: string): string | undefined {
   try {
-    const url = git(["remote", "get-url", "origin"], cwd);
+    const url = git(["remote", "get-url", getVcsRemote()], cwd);
     return parseRemoteUrl(url);
   } catch {
     return;
@@ -275,14 +296,14 @@ export function getRepositoryName(cwd?: string): string | undefined {
 }
 
 /**
- * Get the raw URL of the "origin" remote.
+ * Get the raw URL of the configured remote (see {@link getVcsRemote}).
  *
  * @param cwd - Working directory
- * @returns The remote URL, or undefined when there is no origin remote
+ * @returns The remote URL, or undefined when the remote does not exist
  */
 export function getRemoteUrl(cwd?: string): string | undefined {
   try {
-    return git(["remote", "get-url", "origin"], cwd);
+    return git(["remote", "get-url", getVcsRemote()], cwd);
   } catch {
     return;
   }
@@ -324,9 +345,9 @@ export function getMergeBase(ref: string, cwd?: string): string | undefined {
 }
 
 /**
- * Get the short name of the "origin" remote's default branch.
+ * Get the short name of the configured remote's default branch (see {@link getVcsRemote}).
  *
- * Reads `refs/remotes/origin/HEAD` (populated by `git clone`/`git remote set-head`).
+ * Reads `refs/remotes/<remote>/HEAD` (populated by `git clone`/`git remote set-head`).
  *
  * @param cwd - Working directory
  * @returns The default branch name (e.g. "main"), or undefined when unknown
@@ -334,8 +355,8 @@ export function getMergeBase(ref: string, cwd?: string): string | undefined {
  */
 export function getRemoteDefaultBranch(cwd?: string): string | undefined {
   try {
-    const ref = git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd);
-    const prefix = "refs/remotes/origin/";
+    const prefix = `refs/remotes/${getVcsRemote()}/`;
+    const ref = git(["symbolic-ref", `${prefix}HEAD`], cwd);
     return ref.startsWith(prefix)
       ? ref.slice(prefix.length) || undefined
       : undefined;

@@ -48,6 +48,13 @@ export type SentryOptions = {
   cwd?: string;
 
   /**
+   * Name of the git remote used to identify the repository, e.g. for
+   * `release.set-commits({ auto: true })`. Equivalent to `SENTRY_VCS_REMOTE`.
+   * Defaults to `origin`.
+   */
+  vcsRemote?: string;
+
+  /**
    * Abort signal for cancelling streaming commands.
    * When aborted, streaming iterables stop on the next poll cycle.
    * Consumer `break` in `for await...of` also triggers abort automatically.

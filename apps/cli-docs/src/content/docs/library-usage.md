@@ -153,6 +153,7 @@ const sdk = createSentrySDK({ token: "...", text: true, cwd: "/my/project" });
 | `project` | `string` | Auto-detected | Default project slug |
 | `text` | `boolean` | `false` | Return human-readable text instead of parsed JSON (`run()` only) |
 | `cwd` | `string` | `process.cwd()` | Working directory for DSN auto-detection |
+| `vcsRemote` | `string` | `origin` | Git remote used to identify the repository (same as [`SENTRY_VCS_REMOTE`](./configuration/#sentry_vcs_remote)) |
 | `signal` | `AbortSignal` | — | Abort signal for cancelling streaming commands |
 
 ## Return Values

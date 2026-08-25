@@ -131,6 +131,14 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     selfHosted: true,
     devGuide: "Sentry OAuth app client ID",
   },
+  // -- Git --
+  {
+    name: "SENTRY_VCS_REMOTE",
+    description:
+      "Name of the git remote the CLI reads to identify the repository (for example when `release set-commits --auto` matches the checkout against the repositories connected to your Sentry organization). Defaults to `origin`.\n\n" +
+      "Set this when the remote that Sentry knows is not `origin`, for example in fork-based workflows where `origin` is your fork and `upstream` is the repository connected to Sentry.",
+    example: "upstream",
+  },
   // -- Custom headers --
   {
     name: "SENTRY_CUSTOM_HEADERS",

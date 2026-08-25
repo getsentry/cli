@@ -31,7 +31,7 @@ function hasStreamingFlag(args: string[]): boolean {
 
 /**
  * Build an isolated env from options, inheriting the consumer's process.env.
- * Sets auth token, host URL, default org/project, and output format.
+ * Sets auth token, host URL, default org/project, git remote, and output format.
  */
 function buildIsolatedEnv(
   options?: SentryOptions,
@@ -50,6 +50,9 @@ function buildIsolatedEnv(
   }
   if (options?.project) {
     env.SENTRY_PROJECT = options.project;
+  }
+  if (options?.vcsRemote) {
+    env.SENTRY_VCS_REMOTE = options.vcsRemote;
   }
   if (jsonByDefault && !options?.text) {
     env.SENTRY_OUTPUT_FORMAT = "json";
