@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { afterEach, describe, expect, test } from "vitest";
+import { buildFakeCar } from "./car-fixture.js";
 import {
   detectBuildFormat,
   extractIpaAppName,
@@ -171,6 +172,49 @@ describe("normalizeBuildDirectory", () => {
     expect(a.equals(b)).toBe(true);
   });
 
+  test("emits a ParsedAssets manifest next to a parseable Assets.car", async () => {
+    const xc = fakeXcarchive();
+    const car = buildFakeCar([
+      { name: "AppIcon", width: 120, height: 120, scale: 2, pixelFormat: "ARGB", payload: 32 },
+    ]);
+    writeFileSync(
+      join(xc, "Products", "Applications", "MyApp.app", "Assets.car"),
+      car
+    );
+
+    const entries = unzipSync(await normalizeBuildDirectory(xc, null));
+    // The raw .car is still present, and the manifest sits under ParsedAssets/.
+    expect(
+      entries["MyApp.xcarchive/Products/Applications/MyApp.app/Assets.car"]
+    ).toBeDefined();
+    const manifestKey =
+      "MyApp.xcarchive/ParsedAssets/Products/Applications/MyApp.app/Assets.json";
+    expect(entries[manifestKey]).toBeDefined();
+    const manifest = JSON.parse(
+      new TextDecoder().decode(entries[manifestKey])
+    );
+    expect(manifest.assets).toHaveLength(1);
+    expect(manifest.assets[0]).toMatchObject({
+      name: "AppIcon",
+      width: 120,
+      height: 120,
+      scale: 2,
+      vector: false,
+    });
+  });
+
+  test("carries an unparseable Assets.car through without a manifest", async () => {
+    const xc = fakeXcarchive();
+    writeFileSync(
+      join(xc, "Products", "Applications", "MyApp.app", "Assets.car"),
+      "not-a-real-car"
+    );
+    const entries = unzipSync(await normalizeBuildDirectory(xc, null));
+    expect(
+      Object.keys(entries).some((n) => n.includes("ParsedAssets"))
+    ).toBe(false);
+  });
+
   // Symlinks require privileges on Windows; the unit suite runs on Linux.
   test.skipIf(process.platform === "win32")(
     "preserves symlinks as entries (stores the target path, not followed content)",
@@ -297,10 +341,14 @@ describe("normalizeIpa", () => {
       entries["archive.xcarchive/Info.plist"]
     );
     expect(plist).toContain("<string>Applications/MyApp.app</string>");
-    // Assets.car is carried through verbatim (not parsed).
+    // The raw Assets.car is always carried through; a manifest is added only
+    // when it parses (these fixture bytes are not a real BOM catalog).
     expect(
       entries["archive.xcarchive/Products/Applications/MyApp.app/Assets.car"]
     ).toEqual(strToU8("carbytes"));
+    expect(
+      Object.keys(entries).some((n) => n.includes("ParsedAssets"))
+    ).toBe(false);
   });
 
   test("remaps nested framework entries under the app", () => {
@@ -331,6 +379,20 @@ describe("normalizeIpa", () => {
         "archive.xcarchive/Products/Applications/MyApp.app/MyApp"
       )
     ).toBe(true);
+  });
+
+  test("emits a ParsedAssets manifest for a parseable Assets.car", () => {
+    const ipa = zipSync({
+      "Payload/MyApp.app/Info.plist": strToU8("<app/>"),
+      "Payload/MyApp.app/Assets.car": buildFakeCar([
+        { name: "Logo", width: 0, height: 0, scale: 1, pixelFormat: "PDF ", payload: 64 },
+      ]),
+    });
+    const entries = unzipSync(normalizeIpa(ipa, null));
+    const manifestKey =
+      "archive.xcarchive/ParsedAssets/Products/Applications/MyApp.app/Assets.json";
+    const manifest = JSON.parse(new TextDecoder().decode(entries[manifestKey]));
+    expect(manifest.assets[0]).toMatchObject({ name: "Logo", vector: true });
   });
 
   test("skips path-traversal entries", () => {

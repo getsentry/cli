@@ -19,8 +19,10 @@
  *
  * Handles Android APK/AAB (file wrappers) and iOS XCArchive (directory) / IPA
  * (converted to an XCArchive layout). Unlike the legacy CLI, iOS is not gated to
- * Apple Silicon — the only native dependency was `Assets.car` parsing, which is
- * intentionally skipped (see `normalizeBuildDirectory`).
+ * Apple Silicon: `Assets.car` catalogs are parsed into a per-rendition size
+ * manifest with a pure-TypeScript BOM reader (see `normalizeBuildDirectory` and
+ * `parseAssetCatalog`) rather than the native macOS CoreUI path, which the
+ * legacy CLI needed to decode pixels.
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
@@ -30,8 +32,51 @@ import { strToU8, unzipSync, type Zippable, zipSync } from "fflate";
 import { CLI_VERSION } from "../constants.js";
 import { ValidationError } from "../errors.js";
 import { logger } from "../logger.js";
+import { type AssetCatalogEntry, parseAssetCatalog } from "./asset-catalog.js";
 
 const log = logger.withTag("build.normalize");
+
+/** Directory prefix under which parsed asset-catalog manifests are stored. */
+const PARSED_ASSETS_DIR = "ParsedAssets";
+
+/** Filename of the per-catalog manifest emitted next to each `Assets.car`. */
+const ASSET_CATALOG_MANIFEST = "Assets.json";
+
+/** Whether an archive-relative path is an `Assets.car` asset catalog. */
+function isAssetCatalogPath(relPath: string): boolean {
+  return relPath === "Assets.car" || relPath.endsWith("/Assets.car");
+}
+
+/** The ParsedAssets manifest path for an `Assets.car` at `carRelPath`. */
+function manifestPathFor(archiveRoot: string, carRelPath: string): string {
+  const slash = carRelPath.lastIndexOf("/");
+  const dir = slash === -1 ? "" : carRelPath.slice(0, slash);
+  const prefix = dir ? `${dir}/` : "";
+  return `${archiveRoot}/${PARSED_ASSETS_DIR}/${prefix}${ASSET_CATALOG_MANIFEST}`;
+}
+
+/** Serialize an asset-catalog manifest to deterministic JSON bytes. */
+function manifestBytes(assets: AssetCatalogEntry[]): Uint8Array {
+  return strToU8(`${JSON.stringify({ assets }, null, 2)}\n`);
+}
+
+/**
+ * Parse an `Assets.car` into a manifest, returning `null` if it can't be read.
+ *
+ * The `.car` format is only loosely documented, so a parse failure on an
+ * unusual catalog is expected; callers fall back to shipping the raw `.car`.
+ */
+function tryParseAssetCatalog(
+  carRelPath: string,
+  content: Uint8Array
+): AssetCatalogEntry[] | null {
+  try {
+    return parseAssetCatalog(content);
+  } catch (err) {
+    log.debug(`Failed to parse asset catalog ${carRelPath}`, err);
+    return null;
+  }
+}
 
 /** A recognized mobile build format. */
 export type BuildFormat = "apk" | "aab" | "ipa" | "xcarchive";
@@ -310,9 +355,12 @@ async function collectArchiveEntries(root: string): Promise<ArchiveEntry[]> {
  * Symlinks and Unix permissions are preserved (see {@link collectArchiveEntries});
  * validate the directory first with {@link validateXcarchiveDirectory}.
  *
- * Documented gap: `Assets.car` asset catalogs are not parsed into per-asset
- * images (that required native macOS frameworks), so no `ParsedAssets/` tree is
- * added — the raw `.car` is uploaded as-is.
+ * Each `Assets.car` asset catalog is additionally parsed into a per-rendition
+ * size manifest written under `<dir>/ParsedAssets/<car-dir>/Assets.json` (the
+ * raw `.car` is still uploaded as-is). Unlike the legacy CLI this does not
+ * decode pixels — that needed native macOS frameworks — but it gives preprod
+ * size analysis the per-asset breakdown it needs on every platform. See
+ * {@link parseAssetCatalog}.
  *
  * The whole directory is read into memory; a very large XCArchive (e.g. with
  * dSYMs) could exceed Node's ~2 GiB Buffer cap — streaming is a follow-up.
@@ -334,6 +382,15 @@ export async function normalizeBuildDirectory(
       entry.content,
       { level: 0, mtime: FIXED_MTIME, os: ZIP_OS_UNIX, attrs: entry.attrs },
     ];
+    if (isAssetCatalogPath(entry.relPath)) {
+      const assets = tryParseAssetCatalog(entry.relPath, entry.content);
+      if (assets) {
+        entries[manifestPathFor(dirName, entry.relPath)] = [
+          manifestBytes(assets),
+          ENTRY_OPTIONS,
+        ];
+      }
+    }
   }
   entries[METADATA_FILENAME] = [
     strToU8(buildMetadataFile(plugin)),
@@ -425,10 +482,17 @@ export function normalizeIpa(
     if (stripped.split("/").includes("..")) {
       continue;
     }
-    archiveEntries.push([
-      `${archiveDir}/Products/Applications/${stripped}`,
-      bytes,
-    ]);
+    const productRelPath = `Products/Applications/${stripped}`;
+    archiveEntries.push([`${archiveDir}/${productRelPath}`, bytes]);
+    if (isAssetCatalogPath(productRelPath)) {
+      const assets = tryParseAssetCatalog(productRelPath, bytes);
+      if (assets) {
+        archiveEntries.push([
+          manifestPathFor(archiveDir, productRelPath),
+          manifestBytes(assets),
+        ]);
+      }
+    }
   }
   archiveEntries.push([
     `${archiveDir}/Info.plist`,
