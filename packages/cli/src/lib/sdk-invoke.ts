@@ -18,6 +18,7 @@ import { homedir } from "node:os";
 import type { Span } from "@sentry/core";
 import type { Writer } from "../types/index.js";
 import { type AsyncChannel, createAsyncChannel } from "./async-channel.js";
+import { formatCustomHeaders } from "./custom-headers.js";
 import { setEnv } from "./env.js";
 import { SentryError, type SentryOptions } from "./sdk-types.js";
 
@@ -31,7 +32,7 @@ function hasStreamingFlag(args: string[]): boolean {
 
 /**
  * Build an isolated env from options, inheriting the consumer's process.env.
- * Sets auth token, host URL, default org/project, and output format.
+ * Sets auth token, host URL, default org/project, custom headers, and output format.
  */
 function buildIsolatedEnv(
   options?: SentryOptions,
@@ -50,6 +51,12 @@ function buildIsolatedEnv(
   }
   if (options?.project) {
     env.SENTRY_PROJECT = options.project;
+  }
+  if (options?.headers) {
+    const customHeaders = formatCustomHeaders(options.headers);
+    if (customHeaders) {
+      env.SENTRY_CUSTOM_HEADERS = customHeaders;
+    }
   }
   if (jsonByDefault && !options?.text) {
     env.SENTRY_OUTPUT_FORMAT = "json";

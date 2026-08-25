@@ -13,11 +13,54 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   _resetCustomHeadersCache,
   applyCustomHeaders,
+  formatCustomHeaders,
   getCustomHeaders,
   parseCustomHeaders,
 } from "../../src/lib/custom-headers.js";
 import { setDefaultHeaders } from "../../src/lib/db/defaults.js";
 import { useTestConfigDir } from "../helpers.js";
+
+// ---------------------------------------------------------------------------
+// formatCustomHeaders — serialization for SentryOptions.headers
+// ---------------------------------------------------------------------------
+
+describe("formatCustomHeaders", () => {
+  test("returns undefined for an empty map", () => {
+    expect(formatCustomHeaders({})).toBeUndefined();
+  });
+
+  test("joins headers as semicolon-separated Name: Value pairs", () => {
+    expect(formatCustomHeaders({ "X-First": "one", "X-Second": "two" })).toBe(
+      "X-First: one; X-Second: two"
+    );
+  });
+
+  test("round-trips through parseCustomHeaders", () => {
+    const headers = {
+      "X-IAP-Token": "abc123",
+      "X-Url": "https://example.com/path",
+    };
+    const formatted = formatCustomHeaders(headers);
+    expect(parseCustomHeaders(formatted ?? "")).toEqual(
+      Object.entries(headers)
+    );
+  });
+
+  test("rejects values containing a semicolon", () => {
+    expect(() => formatCustomHeaders({ "X-Bad": "a; b" })).toThrow(
+      "Invalid value for header 'X-Bad'"
+    );
+  });
+
+  test("rejects values containing line breaks", () => {
+    expect(() => formatCustomHeaders({ "X-Bad": "a\nb" })).toThrow(
+      "Invalid value for header 'X-Bad'"
+    );
+    expect(() => formatCustomHeaders({ "X-Bad": "a\r" })).toThrow(
+      "Invalid value for header 'X-Bad'"
+    );
+  });
+});
 
 // ---------------------------------------------------------------------------
 // parseCustomHeaders — parsing logic

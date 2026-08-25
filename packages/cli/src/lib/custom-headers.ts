@@ -127,6 +127,34 @@ export function parseCustomHeaders(raw: string): readonly [string, string][] {
 }
 
 /**
+ * Serialize a header map into the `SENTRY_CUSTOM_HEADERS` string format.
+ *
+ * Inverse of {@link parseCustomHeaders}: the result round-trips through it.
+ * A value containing a separator (`;` or a line break) would be split into a
+ * bogus extra header on parse, so it is rejected up front.
+ *
+ * @param headers - Header name/value map (e.g., from `SentryOptions.headers`)
+ * @returns Semicolon-separated `Name: Value` string, or `undefined` when empty
+ * @throws {ConfigError} On separator characters in a value
+ */
+export function formatCustomHeaders(
+  headers: Record<string, string>
+): string | undefined {
+  const entries = Object.entries(headers);
+  if (entries.length === 0) {
+    return;
+  }
+  for (const [name, value] of entries) {
+    if (HEADER_SEPARATOR_RE.test(value) || TRAILING_CR_RE.test(value)) {
+      throw new ConfigError(
+        `Invalid value for header '${name}': values must not contain ';' or line breaks.`
+      );
+    }
+  }
+  return entries.map(([name, value]) => `${name}: ${value}`).join("; ");
+}
+
+/**
  * Check whether the current target is a self-hosted Sentry instance.
  *
  * Self-hosted = `SENTRY_HOST` or `SENTRY_URL` is set to a non-SaaS URL.
