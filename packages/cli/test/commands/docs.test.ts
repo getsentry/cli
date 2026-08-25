@@ -1,14 +1,18 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { SentryContext } from "../../src/context.js";
 
-const { detectDocsContext, listDocs, queryDocs } = vi.hoisted(() => ({
-  detectDocsContext: vi.fn(),
-  listDocs: vi.fn(),
-  queryDocs: vi.fn(),
-}));
+const { detectDocsContext, listDocs, queryDocs, withProgress } = vi.hoisted(
+  () => ({
+    detectDocsContext: vi.fn(),
+    listDocs: vi.fn(),
+    queryDocs: vi.fn(),
+    withProgress: vi.fn(),
+  })
+);
 
 vi.mock("../../src/lib/docs-context.js", () => ({ detectDocsContext }));
 vi.mock("../../src/lib/docs-service.js", () => ({ listDocs, queryDocs }));
+vi.mock("../../src/lib/polling.js", () => ({ withProgress }));
 
 import { listCommand } from "../../src/commands/docs/list.js";
 import { queryCommand } from "../../src/commands/docs/query.js";
@@ -34,6 +38,12 @@ function createContext(): {
 }
 
 beforeEach(() => {
+  withProgress.mockReset();
+  withProgress.mockImplementation(async (_options, fn) =>
+    fn(() => {
+      /* Progress rendering is covered by polling tests. */
+    })
+  );
   detectDocsContext.mockResolvedValue({
     frameworks: ["nextjs"],
     languages: ["javascript"],
@@ -79,6 +89,20 @@ describe("docs commands", () => {
       },
       sources: ["https://docs.sentry.io/platforms/javascript/tracing/"],
     });
+    expect(withProgress).toHaveBeenCalledWith(
+      {
+        json: true,
+        message: "Searching Sentry docs…",
+        rotatingMessages: [
+          "Finding the relevant bits…",
+          "Cross-checking the details…",
+          "It’s getting there…",
+          "Collecting trusted sources…",
+        ],
+        rotationIntervalMs: 4000,
+      },
+      expect.any(Function)
+    );
   });
 
   test("lists deterministic keyword matches with a bounded limit", async () => {
@@ -91,5 +115,6 @@ describe("docs commands", () => {
     expect(stdoutWrite.mock.calls.map((call) => call[0]).join("")).toContain(
       "Tracing"
     );
+    expect(withProgress).not.toHaveBeenCalled();
   });
 });
