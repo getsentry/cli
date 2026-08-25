@@ -127,4 +127,27 @@ describe("withProgress", () => {
 
     expect(stdoutWrite).not.toHaveBeenCalled();
   });
+
+  test("keeps forced-rich piped output free of interactive-only progress", async () => {
+    Object.defineProperty(process.stdout, "isTTY", {
+      configurable: true,
+      value: false,
+    });
+    vi.stubEnv("SENTRY_PLAIN_OUTPUT", "0");
+    const stdoutWrite = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+
+    await expect(
+      withProgress(
+        {
+          interactiveOnly: true,
+          message: "Searching Sentry docs…",
+          rotatingMessages: ["It’s getting there…"],
+          rotationIntervalMs: 4000,
+        },
+        async () => "done"
+      )
+    ).resolves.toBe("done");
+
+    expect(stdoutWrite).not.toHaveBeenCalled();
+  });
 });

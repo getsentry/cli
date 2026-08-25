@@ -56,6 +56,7 @@ export const queryCommand = buildCommand({
     const detectedContext = await detectDocsContext(this.cwd);
     const result = await withProgress(
       {
+        interactiveOnly: true,
         json: _flags.json,
         message: "Searching Sentry docs…",
         rotatingMessages: DOCS_QUERY_PROGRESS_MESSAGES,

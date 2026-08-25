@@ -1,4 +1,6 @@
+import { buildApplication, run } from "@stricli/core";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { docsRoute } from "../../src/commands/docs/index.js";
 import type { SentryContext } from "../../src/context.js";
 
 const { detectDocsContext, listDocs, queryDocs, withProgress } = vi.hoisted(
@@ -35,6 +37,14 @@ function createContext(): {
     },
     stdoutWrite,
   };
+}
+
+async function runDocsRoute(
+  context: SentryContext,
+  args: string[]
+): Promise<void> {
+  const app = buildApplication(docsRoute, { name: "sentry docs" });
+  await run(app, args, context);
 }
 
 beforeEach(() => {
@@ -92,6 +102,7 @@ describe("docs commands", () => {
     expect(withProgress).toHaveBeenCalledWith(
       {
         json: true,
+        interactiveOnly: true,
         message: "Searching Sentry docs…",
         rotatingMessages: [
           "Finding the relevant bits…",
@@ -103,6 +114,22 @@ describe("docs commands", () => {
       },
       expect.any(Function)
     );
+  });
+
+  test.each([
+    ["default query", ["How", "do", "I", "trace?", "--json"]],
+    ["explicit query", ["query", "How", "do", "I", "trace?", "--json"]],
+    ["search alias", ["search", "How", "do", "I", "trace?", "--json"]],
+  ])("routes %s to the docs query command", async (_name, args) => {
+    const { context } = createContext();
+
+    await runDocsRoute(context, args);
+
+    expect(queryDocs).toHaveBeenLastCalledWith("How do I trace?", {
+      frameworks: ["nextjs"],
+      languages: ["javascript"],
+      sentryConfigured: true,
+    });
   });
 
   test("lists deterministic keyword matches with a bounded limit", async () => {

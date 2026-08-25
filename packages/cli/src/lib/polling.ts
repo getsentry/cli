@@ -166,6 +166,12 @@ export type WithProgressOptions = {
    *  without a spinner — matching the behaviour of {@link poll}. */
   json?: boolean;
   /**
+   * Suppress progress when stdout is not a terminal, even if rich output is
+   * explicitly forced. Use for terminal-only feedback that must not enter a
+   * machine-readable pipe.
+   */
+  interactiveOnly?: boolean;
+  /**
    * Messages to show in sequence while the operation is pending. Omit or pass
    * an empty array to leave the initial message in place.
    */
@@ -215,7 +221,11 @@ export async function withProgress<T>(
   options: WithProgressOptions,
   fn: (setMessage: (msg: string) => void) => Promise<T>
 ): Promise<T> {
-  if (options.json || isPlainOutput()) {
+  if (
+    options.json ||
+    isPlainOutput() ||
+    (options.interactiveOnly && !process.stdout.isTTY)
+  ) {
     // JSON mode or non-TTY: skip the spinner entirely, pass a no-op setMessage
     return fn(() => {
       /* spinner suppressed */
