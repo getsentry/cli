@@ -36,9 +36,11 @@ sentry build download 1234567890 --json
   upload. **Sentry SaaS only.**
 - iOS `Assets.car` asset catalogs are parsed into a per-rendition size manifest
   (`ParsedAssets/.../Assets.json`) so the server gets a per-asset breakdown; the
-  raw `.car` is still uploaded alongside it. Pixel extraction (which needs
-  native macOS frameworks) is **not** performed. XCArchive symlinks and Unix
-  file permissions are preserved.
+  raw `.car` is still uploaded alongside it. On **macOS (Apple Silicon)** the
+  renditions are additionally decoded to PNGs under `ParsedAssets/.../images/`
+  via the native CoreUI framework; on other platforms the manifest carries
+  size/geometry only. XCArchive symlinks and Unix file permissions are
+  preserved.
 - Multiple paths may be uploaded at once; the command exits non-zero if any
   build fails to upload.
 - Git metadata (commit, branch, PR number, repo) is **auto-collected in CI**

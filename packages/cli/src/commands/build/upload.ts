@@ -156,8 +156,10 @@ export const uploadCommand = buildCommand({
       "chunk-upload + assemble protocol.\n\n" +
       "Supported formats: Android APK/AAB, iOS XCArchive (a directory) and IPA. " +
       "iOS Assets.car asset catalogs are parsed into a per-asset size manifest " +
-      "(ParsedAssets/.../Assets.json); pixel extraction still requires macOS " +
-      "and is not performed. This feature only works with Sentry SaaS.\n\n" +
+      "(ParsedAssets/.../Assets.json). On macOS (Apple Silicon) renditions are " +
+      "also decoded to PNGs under ParsedAssets/.../images/ via CoreUI; on other " +
+      "platforms the manifest carries size/geometry only. This feature only " +
+      "works with Sentry SaaS.\n\n" +
       "Usage:\n" +
       "  sentry build upload ./app-release.apk\n" +
       "  sentry build upload ./MyApp.xcarchive\n" +

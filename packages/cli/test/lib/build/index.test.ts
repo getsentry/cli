@@ -15,7 +15,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { strToU8, unzipSync, zipSync } from "fflate";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import * as assetCatalogExtract from "../../../src/lib/build/asset-catalog-extract.js";
 import { buildFakeCar } from "./car-fixture.js";
 import {
   detectBuildFormat,
@@ -213,6 +214,55 @@ describe("normalizeBuildDirectory", () => {
     expect(
       Object.keys(entries).some((n) => n.includes("ParsedAssets"))
     ).toBe(false);
+  });
+
+  test("folds native-extracted images into ParsedAssets and the manifest", async () => {
+    // The native CoreUI helper only runs on macOS arm64; mock it so the folding
+    // path (manifest.images + images/*.png) is exercised on every runner.
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const extract = vi
+      .spyOn(assetCatalogExtract, "extractAssetCatalogImages")
+      .mockReturnValue([
+        {
+          name: "AppIcon",
+          file: "AppIcon@2x.png",
+          width: 120,
+          height: 120,
+          scale: 2,
+          bytes: png.length,
+          content: png,
+        },
+      ]);
+    try {
+      const xc = fakeXcarchive();
+      writeFileSync(
+        join(xc, "Products", "Applications", "MyApp.app", "Assets.car"),
+        buildFakeCar([
+          { name: "AppIcon", width: 120, height: 120, scale: 2, pixelFormat: "ARGB", payload: 32 },
+        ])
+      );
+
+      const entries = unzipSync(await normalizeBuildDirectory(xc, null));
+      const base =
+        "MyApp.xcarchive/ParsedAssets/Products/Applications/MyApp.app";
+      // The decoded PNG is written under images/ next to the manifest.
+      expect(entries[`${base}/images/AppIcon@2x.png`]).toEqual(png);
+      const manifest = JSON.parse(
+        new TextDecoder().decode(entries[`${base}/Assets.json`])
+      );
+      expect(manifest.images).toEqual([
+        {
+          name: "AppIcon",
+          file: "AppIcon@2x.png",
+          width: 120,
+          height: 120,
+          scale: 2,
+          bytes: png.length,
+        },
+      ]);
+    } finally {
+      extract.mockRestore();
+    }
   });
 
   // Symlinks require privileges on Windows; the unit suite runs on Linux.

@@ -33,6 +33,10 @@ import { CLI_VERSION } from "../constants.js";
 import { ValidationError } from "../errors.js";
 import { logger } from "../logger.js";
 import { type AssetCatalogEntry, parseAssetCatalog } from "./asset-catalog.js";
+import {
+  type ExtractedImage,
+  extractAssetCatalogImages,
+} from "./asset-catalog-extract.js";
 
 const log = logger.withTag("build.normalize");
 
@@ -47,35 +51,77 @@ function isAssetCatalogPath(relPath: string): boolean {
   return relPath === "Assets.car" || relPath.endsWith("/Assets.car");
 }
 
-/** The ParsedAssets manifest path for an `Assets.car` at `carRelPath`. */
-function manifestPathFor(archiveRoot: string, carRelPath: string): string {
+/** Subdirectory (under a catalog's ParsedAssets dir) holding decoded PNGs. */
+const EXTRACTED_IMAGES_DIR = "images";
+
+/** The ParsedAssets directory for an `Assets.car` at `carRelPath`. */
+function parsedAssetsDirFor(archiveRoot: string, carRelPath: string): string {
   const slash = carRelPath.lastIndexOf("/");
   const dir = slash === -1 ? "" : carRelPath.slice(0, slash);
   const prefix = dir ? `${dir}/` : "";
-  return `${archiveRoot}/${PARSED_ASSETS_DIR}/${prefix}${ASSET_CATALOG_MANIFEST}`;
+  return `${archiveRoot}/${PARSED_ASSETS_DIR}/${prefix}`;
 }
 
+/** A generated ParsedAssets entry (manifest JSON or a decoded image). */
+type ParsedAssetEntry = { path: string; content: Uint8Array };
+
 /** Serialize an asset-catalog manifest to deterministic JSON bytes. */
-function manifestBytes(assets: AssetCatalogEntry[]): Uint8Array {
-  return strToU8(`${JSON.stringify({ assets }, null, 2)}\n`);
+function manifestBytes(
+  assets: AssetCatalogEntry[],
+  images: ExtractedImage[] | null
+): Uint8Array {
+  const manifest: {
+    assets: AssetCatalogEntry[];
+    images?: Array<Omit<ExtractedImage, "content">>;
+  } = { assets };
+  if (images && images.length > 0) {
+    // Drop the in-memory PNG bytes; the manifest records metadata only, the
+    // decoded files live alongside it under `images/`.
+    manifest.images = images.map(({ content: _content, ...meta }) => meta);
+  }
+  return strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 /**
- * Parse an `Assets.car` into a manifest, returning `null` if it can't be read.
+ * Build the ParsedAssets entries for an `Assets.car`: a size/geometry manifest
+ * (JSON) plus, on macOS arm64, the decoded per-rendition PNGs.
  *
- * The `.car` format is only loosely documented, so a parse failure on an
- * unusual catalog is expected; callers fall back to shipping the raw `.car`.
+ * Returns `null` when the catalog can't be parsed at all, so callers fall back
+ * to shipping the raw `.car` unchanged. The `.car` format is only loosely
+ * documented, so a parse failure on an unusual catalog is expected. Pixel
+ * extraction is additive: on any non-macOS-arm64 platform (or a helper failure)
+ * the manifest is still emitted with size/geometry only and no images.
  */
-function tryParseAssetCatalog(
+function buildParsedAssets(
+  archiveRoot: string,
   carRelPath: string,
   content: Uint8Array
-): AssetCatalogEntry[] | null {
+): ParsedAssetEntry[] | null {
+  let assets: AssetCatalogEntry[];
   try {
-    return parseAssetCatalog(content);
+    assets = parseAssetCatalog(content);
   } catch (err) {
     log.debug(`Failed to parse asset catalog ${carRelPath}`, err);
     return null;
   }
+
+  const images = extractAssetCatalogImages(carRelPath, content);
+  const baseDir = parsedAssetsDirFor(archiveRoot, carRelPath);
+  const entries: ParsedAssetEntry[] = [
+    {
+      path: `${baseDir}${ASSET_CATALOG_MANIFEST}`,
+      content: manifestBytes(assets, images),
+    },
+  ];
+  if (images) {
+    for (const image of images) {
+      entries.push({
+        path: `${baseDir}${EXTRACTED_IMAGES_DIR}/${image.file}`,
+        content: image.content,
+      });
+    }
+  }
+  return entries;
 }
 
 /** A recognized mobile build format. */
@@ -357,10 +403,10 @@ async function collectArchiveEntries(root: string): Promise<ArchiveEntry[]> {
  *
  * Each `Assets.car` asset catalog is additionally parsed into a per-rendition
  * size manifest written under `<dir>/ParsedAssets/<car-dir>/Assets.json` (the
- * raw `.car` is still uploaded as-is). Unlike the legacy CLI this does not
- * decode pixels — that needed native macOS frameworks — but it gives preprod
- * size analysis the per-asset breakdown it needs on every platform. See
- * {@link parseAssetCatalog}.
+ * raw `.car` is still uploaded as-is). On macOS arm64 the renditions are also
+ * decoded to PNGs (via the native CoreUI helper) under
+ * `<dir>/ParsedAssets/<car-dir>/images/`; on every other platform the manifest
+ * carries size/geometry only. See {@link buildParsedAssets}.
  *
  * The whole directory is read into memory; a very large XCArchive (e.g. with
  * dSYMs) could exceed Node's ~2 GiB Buffer cap — streaming is a follow-up.
@@ -383,12 +429,11 @@ export async function normalizeBuildDirectory(
       { level: 0, mtime: FIXED_MTIME, os: ZIP_OS_UNIX, attrs: entry.attrs },
     ];
     if (isAssetCatalogPath(entry.relPath)) {
-      const assets = tryParseAssetCatalog(entry.relPath, entry.content);
-      if (assets) {
-        entries[manifestPathFor(dirName, entry.relPath)] = [
-          manifestBytes(assets),
-          ENTRY_OPTIONS,
-        ];
+      const parsed = buildParsedAssets(dirName, entry.relPath, entry.content);
+      if (parsed) {
+        for (const asset of parsed) {
+          entries[asset.path] = [asset.content, ENTRY_OPTIONS];
+        }
       }
     }
   }
@@ -485,12 +530,11 @@ export function normalizeIpa(
     const productRelPath = `Products/Applications/${stripped}`;
     archiveEntries.push([`${archiveDir}/${productRelPath}`, bytes]);
     if (isAssetCatalogPath(productRelPath)) {
-      const assets = tryParseAssetCatalog(productRelPath, bytes);
-      if (assets) {
-        archiveEntries.push([
-          manifestPathFor(archiveDir, productRelPath),
-          manifestBytes(assets),
-        ]);
+      const parsed = buildParsedAssets(archiveDir, productRelPath, bytes);
+      if (parsed) {
+        for (const asset of parsed) {
+          archiveEntries.push([asset.path, asset.content]);
+        }
       }
     }
   }
