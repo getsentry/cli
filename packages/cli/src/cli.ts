@@ -246,6 +246,7 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   const { recoverWithAutoLogin } = await import("./lib/auto-auth.js");
   const { getEnvLogLevel, setLogLevel } = await import("./lib/logger.js");
   const { scheduleForceExit } = await import("./lib/force-exit.js");
+  const { closeGlobalDispatcher } = await import("./lib/close-dispatcher.js");
   const { isTrialEligible, promptAndStartTrial } = await import(
     "./lib/seer-trial.js"
   );
@@ -640,9 +641,12 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   } finally {
     // Abort any pending version check to allow clean exit
     abortPendingVersionCheck();
-    // Runs after auto-auth, scope recovery, and command retry have reached a
-    // terminal result, so the macOS/Bun force-exit timer cannot interrupt
-    // them. Covers every command, not just init (see #1237).
+    // Release undici's pooled keep-alive sockets so the event loop can drain
+    // on its own — the root-cause fix for the process-hang (see #1237).
+    await closeGlobalDispatcher();
+    // Backstop for any handle the dispatcher close can't reach (a libuv
+    // refcount quirk on macOS). The unref'd timer only fires if the loop is
+    // still referenced after a drained command, so it's a no-op otherwise.
     scheduleForceExit();
   }
 
