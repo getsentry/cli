@@ -334,7 +334,11 @@ export const IssueViewOutputSchema = pipe(
     event: optional(
       pipe(
         nullable(unknown()),
-        description("Latest event for the issue (full detail)")
+        description(
+          "Latest event for the issue (full detail). Select named fields with " +
+            "`--fields event.id,event.title` to avoid pulling the whole payload; " +
+            "the `request` entry may include live session data."
+        )
       )
     ),
     org: optional(pipe(nullable(string()), description("Organization slug"))),
@@ -874,7 +878,7 @@ export type RequestEntry = {
     fragment?: string | null;
     query?: [string, string][] | string | Record<string, string> | null;
     data?: unknown;
-    headers?: [string, string][] | null;
+    headers?: [string, string][] | Record<string, string> | null;
     cookies?: [string, string][] | Record<string, string> | null;
     env?: Record<string, string> | null;
     inferredContentType?: string | null;

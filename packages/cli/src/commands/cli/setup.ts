@@ -24,6 +24,10 @@ import {
   installCompletions,
 } from "../../lib/completions.js";
 import { CLI_VERSION } from "../../lib/constants.js";
+import {
+  getAgentSkillsPreference,
+  setAgentSkillsPreference,
+} from "../../lib/db/defaults.js";
 import { setInstallInfo } from "../../lib/db/install-info.js";
 import {
   parseReleaseChannel,
@@ -51,6 +55,7 @@ type SetupFlags = {
   readonly "no-modify-path": boolean;
   readonly "no-completions": boolean;
   readonly "no-agent-skills": boolean;
+  readonly "ensure-auth-scopes": boolean;
   readonly quiet: boolean;
 };
 
@@ -431,8 +436,20 @@ async function runConfigurationSteps(opts: ConfigStepOptions) {
     );
   }
 
-  // 4. Install agent skills (auto-detected, silent when no agent found)
-  if (!flags["no-agent-skills"]) {
+  // 4. Install agent skills (auto-detected, silent when no agent found).
+  // Persist an explicit --no-agent-skills opt-out so later upgrades (which
+  // re-run setup without the flag) keep honoring it. Re-enable with
+  // `sentry cli defaults agent-skills on`.
+  if (flags["no-agent-skills"]) {
+    await bestEffort(
+      "Recording agent skills preference",
+      () => setAgentSkillsPreference(false),
+      warn
+    );
+  }
+  const skipAgentSkills =
+    flags["no-agent-skills"] || getAgentSkillsPreference() === false;
+  if (!skipAgentSkills) {
     await bestEffort(
       "Agent skills",
       () => handleAgentSkills(homeDir, emit),
@@ -499,6 +516,12 @@ export const setupCommand = buildCommand({
         brief: "Skip agent skill installation for AI coding assistants",
         default: false,
       },
+      "ensure-auth-scopes": {
+        kind: "boolean",
+        brief: "Refresh an outdated stored OAuth authorization",
+        default: false,
+        hidden: true as const,
+      },
       quiet: {
         kind: "boolean",
         brief: "Suppress output (for scripted usage)",
@@ -555,6 +578,21 @@ export const setupCommand = buildCommand({
       emit,
       warn,
     });
+
+    if (flags["ensure-auth-scopes"]) {
+      await bestEffort(
+        "Authorization",
+        async () => {
+          const [{ runInteractiveLogin }, { ensureCurrentOAuthScopes }] =
+            await Promise.all([
+              import("../../lib/interactive-login.js"),
+              import("../../lib/scope-recovery.js"),
+            ]);
+          await ensureCurrentOAuthScopes(runInteractiveLogin);
+        },
+        warn
+      );
+    }
 
     // 5. Print welcome message only on fresh install — upgrades are silent
     // since the upgrade command itself prints a success message.

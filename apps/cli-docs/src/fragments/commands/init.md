@@ -55,8 +55,7 @@ Path-like arguments (starting with `.`, `/`, or `~`) are always treated as the d
 | `profiling` | Profiling |
 | `sourcemaps` | Source map uploads |
 | `crons` | Cron job monitoring |
-| `ai-monitoring` | AI/LLM monitoring |
-| `user-feedback` | User feedback widget |
+| `agent-tracing` | Agent tracing for AI/LLM apps |
 
 ## What the Wizard Does
 

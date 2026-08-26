@@ -243,13 +243,10 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   );
   const { error } = await import("./lib/formatters/colors.js");
   const { runInteractiveLogin } = await import("./lib/interactive-login.js");
-  const { assertAutoLoginHostTrusted, recoverWithAutoLogin } = await import(
-    "./lib/auto-auth.js"
-  );
+  const { recoverWithAutoLogin } = await import("./lib/auto-auth.js");
   const { getEnvLogLevel, setLogLevel } = await import("./lib/logger.js");
-  const { scheduleInitForceExitIfRequested } = await import(
-    "./lib/init/force-exit.js"
-  );
+  const { scheduleForceExit } = await import("./lib/force-exit.js");
+  const { closeGlobalDispatcher } = await import("./lib/close-dispatcher.js");
   const { isTrialEligible, promptAndStartTrial } = await import(
     "./lib/seer-trial.js"
   );
@@ -439,96 +436,15 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   };
 
   /**
-   * Check whether a caught error is a recoverable 403 missing-scope error.
-   *
-   * Returns the extracted scope names when all conditions are met:
-   * - Interactive TTY (stdin)
-   * - Error is an `ApiError` with status 403
-   * - Token is an OAuth token (not env-var — those can't be re-scoped via CLI)
-   * - The 403 detail mentions specific missing scopes
-   *
-   * Returns `null` when recovery is not possible, signaling the caller to
-   * re-throw.
-   */
-  async function extractRecoverableScopes(
-    err: unknown
-  ): Promise<string[] | null> {
-    if (!isatty(0)) {
-      return null;
-    }
-    const { ApiError } = await import("./lib/errors.js");
-    if (!(err instanceof ApiError) || err.status !== 403) {
-      return null;
-    }
-    const { isEnvTokenActive } = await import("./lib/db/auth.js");
-    if (isEnvTokenActive()) {
-      return null;
-    }
-    const { extractRequiredScopes } = await import("./lib/api-scope.js");
-    const scopes = extractRequiredScopes(err.detail);
-    return scopes.length > 0 ? scopes : null;
-  }
-
-  /**
    * Scope recovery middleware.
    *
-   * Catches 403 Forbidden errors for OAuth tokens (not env-var tokens) in
-   * interactive TTYs. When specific missing scopes are detected in the API
-   * response, offers to re-authenticate with those scopes and retries the
-   * command — mirroring `gh auth refresh -s <scope>`.
-   *
-   * Env-var tokens are excluded: the user must regenerate those manually
-   * via the Sentry web UI (the 403 enrichment already directs them there).
+   * After a 401/403, compare a stored OAuth grant with the CLI's current scope
+   * set. Re-authorize stale grants and retry exactly once. Non-interactive and
+   * explicitly unattended commands never enter a device flow.
    */
   const scopeRecoveryMiddleware: ErrorMiddleware = async (next, argv) => {
-    try {
-      await next(argv);
-    } catch (err) {
-      const scopes = await extractRecoverableScopes(err);
-      if (!scopes) {
-        throw err;
-      }
-
-      // Same host-trust gate as auto-login: re-authenticating to add scopes
-      // also runs the OAuth device flow, so refuse an unconfirmed self-hosted
-      // host before prompting (an injected env.SENTRY_URL must not steer the
-      // browser to an attacker's login page).
-      assertAutoLoginHostTrusted();
-
-      const scopeList = scopes.map((s) => `'${s}'`).join(", ");
-      const { logger: logModule } = await import("./lib/logger.js");
-      const confirmed = await logModule
-        .withTag("auth")
-        .prompt(
-          `Missing scope(s): ${scopeList}. Re-authenticate with default scopes?`,
-          { type: "confirm", initial: true }
-        );
-
-      // Symbol(clack:cancel) is truthy — strict equality check
-      if (confirmed !== true) {
-        throw err;
-      }
-
-      process.stderr.write("\n");
-      // Merge missing scopes with the default set so the new token retains
-      // all previously-held scopes plus the ones the API requested.
-      const { OAUTH_SCOPES, resolveOAuthScopeString } = await import(
-        "./lib/oauth.js"
-      );
-      const merged = [...new Set([...OAUTH_SCOPES, ...scopes])];
-      const scope = resolveOAuthScopeString({ scopes: merged });
-      const loginSuccess = await runInteractiveLogin({ scope });
-
-      if (loginSuccess) {
-        process.stderr.write("\nRetrying command...\n\n");
-        await next(argv);
-        return;
-      }
-
-      // Login failed or was cancelled — re-throw so the user sees the
-      // original 403 message with the scope hint.
-      throw err;
-    }
+    const { runWithScopeRecovery } = await import("./lib/scope-recovery.js");
+    await runWithScopeRecovery(next, argv, runInteractiveLogin);
   };
 
   /**
@@ -725,9 +641,14 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   } finally {
     // Abort any pending version check to allow clean exit
     abortPendingVersionCheck();
-    // Runs after auto-auth, scope recovery, and command retry have reached a
-    // terminal result, so the init-specific macOS timer cannot interrupt them.
-    scheduleInitForceExitIfRequested();
+    // Arm the backstop first so it fires regardless of what the dispatcher
+    // teardown does. The unref'd timer only triggers if the loop is still
+    // referenced after a drained command, so it's a no-op on clean exits
+    // (a libuv refcount quirk on macOS keeps it worthwhile — see #1237).
+    scheduleForceExit();
+    // Release undici's pooled keep-alive sockets so the event loop can drain
+    // on its own — the root-cause fix. Never rejects (see close-dispatcher.ts).
+    await closeGlobalDispatcher();
   }
 
   // Show update notification after command completes

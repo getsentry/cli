@@ -25,7 +25,6 @@ import { looksLikePath, parseOrgProjectArg } from "../lib/arg-parsing.js";
 import { buildCommand } from "../lib/command.js";
 import { refreshToken } from "../lib/db/auth.js";
 import { ContextError, ValidationError } from "../lib/errors.js";
-import { requestInitForceExit } from "../lib/init/force-exit.js";
 import { warmOrgDetection } from "../lib/init/org-prefetch.js";
 import { runWizard } from "../lib/init/wizard-runner.js";
 import { validateResourceId } from "../lib/input-validation.js";
@@ -56,10 +55,12 @@ const FEATURE_ALIASES = {
   sourcemaps: "sourceMaps",
   sourceMaps: "sourceMaps",
   crons: "crons",
-  "ai-monitoring": "aiMonitoring",
+  attachments: "attachments",
   aiMonitoring: "aiMonitoring",
-  "user-feedback": "userFeedback",
-  userFeedback: "userFeedback",
+  "agent-tracing": "aiMonitoring",
+  agentTracing: "aiMonitoring",
+  "mcp-observability": "mcpObservability",
+  mcpObservability: "mcpObservability",
 } as const;
 
 const SUPPORTED_FEATURE_NAMES = [
@@ -71,8 +72,9 @@ const SUPPORTED_FEATURE_NAMES = [
   "profiling",
   "sourcemaps",
   "crons",
-  "ai-monitoring",
-  "user-feedback",
+  "attachments",
+  "agent-tracing",
+  "mcp-observability",
 ] as const;
 
 const SUPPORTED_FEATURE_TEXT = SUPPORTED_FEATURE_NAMES.join(", ");
@@ -337,7 +339,7 @@ export const initCommand = buildCommand<
         kind: "parsed",
         parse: String,
         brief:
-          "Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,ai-monitoring,user-feedback",
+          "Features to enable: errors,tracing,logs,replay,metrics,profiling,sourcemaps,crons,attachments,agent-tracing,mcp-observability",
         variadic: true,
         optional: true,
       },
@@ -416,10 +418,7 @@ export const initCommand = buildCommand<
       warmOrgDetection(targetDir);
     }
 
-    // 6. Run the wizard. The outer CLI pipeline schedules the macOS/Bun
-    // force-exit safety net after recovery middleware (including auto-auth)
-    // has finished, so it cannot interrupt login or command retry.
-    requestInitForceExit();
+    // 6. Run the wizard.
     await runWizard({
       directory: targetDir,
       yes: flags.yes,

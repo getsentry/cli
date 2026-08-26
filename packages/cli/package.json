@@ -1,6 +1,6 @@
 {
   "name": "sentry",
-  "version": "0.43.0-dev.0",
+  "version": "0.44.0-dev.0",
   "description": "Sentry CLI - A command-line interface for using Sentry built by robots and humans for robots and humans",
   "repository": {
     "type": "git",
@@ -34,6 +34,7 @@
     "dist/node-sqlite3-wasm.wasm",
     "dist/vendor/symbolic_bg.wasm",
     "LICENSE.md",
+    "THIRD_PARTY_LICENSES.md",
     "README.md"
   ],
   "license": "FSL-1.1-Apache-2.0",
@@ -80,6 +81,7 @@
     "check:errors": "pnpm tsx script/check-error-patterns.ts",
     "check:patches": "pnpm tsx script/check-patches.ts",
     "check:docs-sections": "pnpm tsx script/generate-docs-sections.ts --check",
+    "check:env-coverage": "pnpm tsx script/check-env-coverage.ts",
     "check:stale-refs": "pnpm tsx script/check-stale-references.ts"
   },
   "devDependencies": {
@@ -87,7 +89,7 @@
     "@biomejs/biome": "2.3.8",
     "@clack/prompts": "0.11.0",
     "@hono/node-server": "^2.0.10",
-    "@mastra/client-js": "^1.26.0",
+    "@mastra/client-js": "^1.38.0",
     "@sentry/api": "^0.256.0",
     "@sentry/core": "10.63.0",
     "@sentry/node-core": "10.63.0",

@@ -65,7 +65,7 @@ pnpm exec vitest                         # Watch mode
 
 When adding a package, always use `pnpm add -D <package>` (the `-D` flag).
 
-When the `@sentry/api` SDK provides types for an API response, import them directly from `@sentry/api` instead of creating redundant Zod schemas in `src/types/sentry.ts`.
+When the `@sentry/api` SDK provides types for an API response, import them directly from `@sentry/api` instead of creating redundant Valibot schemas in `src/types/sentry.ts`.
 
 ## Rules: Use Node.js APIs
 
@@ -121,7 +121,7 @@ Top-level layout:
   `db/` (SQLite layer), `dsn/` (DSN detection, with per-language extractors under
   `dsn/languages/`), and `formatters/` (output formatting). See the file-locations
   table below and the JSDoc in each module for details.
-- **`src/types/`** — TypeScript types and Zod schemas.
+- **`src/types/`** — TypeScript types and Valibot schemas.
 - **`test/`** — tests mirroring `src/` (unit, `*.property.test.ts`,
   `*.model-based.test.ts`, `e2e/`, `fixtures/`, `mocks/`).
 - **`../../apps/cli-docs/`** — documentation site (Astro + Starlight);
@@ -432,30 +432,31 @@ All command docs and skill files are generated via `pnpm run generate:docs` (whi
 - `pnpm run check:fragments` validates fragment ↔ route consistency.
 - Positional `placeholder` values must be descriptive: `"org/project/trace-id"` not `"args"`.
 
-### Zod Schemas for Validation
+### Valibot Schemas for Validation
 
-All config and API types use Zod schemas:
+All config and API types use Valibot schemas:
 
 ```typescript
-import { z } from "zod";
+import { type InferOutput, object, string, optional, number } from "valibot";
 
-export const MySchema = z.object({
-  field: z.string(),
-  optional: z.number().optional(),
+export const MySchema = object({
+  field: string(),
+  optional: optional(number()),
 });
 
-export type MyType = z.infer<typeof MySchema>;
+export type MyType = InferOutput<typeof MySchema>;
 
 // Validate data
-const result = MySchema.safeParse(data);
+import { safeParse } from "valibot";
+const result = safeParse(MySchema, data);
 if (result.success) {
-  // result.data is typed
+  // result.output is typed
 }
 ```
 
 ### Type Organization
 
-- Define Zod schemas alongside types in `src/types/*.ts`
+- Define Valibot schemas alongside types in `src/types/*.ts`
 - Key type files: `sentry.ts` (API types), `config.ts` (configuration), `oauth.ts` (auth flow), `seer.ts` (Seer AI)
 - Re-export from `src/types/index.ts`
 - Use `type` imports: `import type { MyType } from "../types/index.js"`
@@ -525,7 +526,7 @@ CliError (base, exitCode=1)
 - Pass `alternatives: []` when defaults are irrelevant (e.g., for missing Trace ID, Event ID)
 - Use `" and "` in `resource` for plural grammar: `"Trace ID and span ID"` → "are required"
 
-**CI enforcement:** `pnpm run check:errors` scans for `ContextError` with multiline commands, `CliError` with ad-hoc "Try:" strings, and silent `catch` blocks (advisory).
+**CI enforcement:** `pnpm run check:errors` scans for `ContextError` with multiline commands, `CliError` with ad-hoc "Try:" strings, and silent `catch` blocks (ratchet baseline — new ones fail CI).
 
 ```typescript
 // Usage examples
@@ -571,9 +572,12 @@ Use `logger.withTag("command-name")` for tagged logging in command files.
 
 **CI enforcement:** `pnpm run check:errors` includes a silent-catch scan that flags
 `catch` blocks which are empty, comment-only, or return-only without surfacing the
-error. It is currently **advisory** (warns, does not fail CI) because of a pre-existing
-backlog; run with `SENTRY_STRICT_SILENT_CATCH=1` to enforce. Do not add new silent
-catches — they will appear in the scan output during review.
+error. It is enforced with a **ratchet baseline** (`script/silent-catch-baseline.json`)
+recording the per-file count of the pre-existing backlog: a *new* silent catch (a file
+exceeding its baseline, or one not in the baseline) fails CI, and removing silent
+catches without lowering the baseline also fails — so the backlog can only shrink.
+When you fix or intentionally add a silent catch, refresh the baseline with
+`pnpm run check:errors -- --update` and commit it.
 
 ### Auto-Recovery for Wrong Entity Types
 
@@ -637,10 +641,10 @@ Every new `src/lib/**/*.ts` file must start with a module-level JSDoc comment de
 - Use `type` keyword for type-only imports
 
 ```typescript
-import { z } from "zod";
+import { object, string, optional } from "valibot";
 import { buildCommand } from "../../lib/command.js";
 import type { SentryContext } from "../../context.js";
-import { getAuthToken } from "../../lib/config.js";
+import { getAuthToken } from "../../lib/db/auth.js";
 ```
 
 ### List Command Infrastructure

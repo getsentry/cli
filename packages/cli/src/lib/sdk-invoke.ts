@@ -40,6 +40,7 @@ function buildIsolatedEnv(
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (options?.token) {
     env.SENTRY_AUTH_TOKEN = options.token;
+    env.SENTRY_FORCE_ENV_TOKEN = "1";
   }
   if (options?.url) {
     env.SENTRY_HOST = options.url;
@@ -191,6 +192,19 @@ export function applyFlagDefaults(
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences use ESC (0x1b)
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
+/**
+ * Install the structured `headers` option for this invocation.
+ *
+ * Lazy import: `custom-headers.ts` pulls in the SQLite defaults module, which
+ * must not load when the SDK is merely imported.
+ */
+async function applyHeadersOption(
+  headers: Record<string, string> | undefined
+): Promise<void> {
+  const { setCustomHeadersOverride } = await import("./custom-headers.js");
+  setCustomHeadersOverride(headers);
+}
 
 /** Flush Sentry telemetry (no beforeExit handler in library mode). */
 async function flushTelemetry(): Promise<void> {
@@ -402,6 +416,7 @@ async function executeWithCapture<T>(
   setEnv(env);
 
   try {
+    await applyHeadersOption(options?.headers);
     const captureCtx = await buildCaptureContext(env, cwd);
     const { withTelemetry } = await import("./telemetry.js");
 
@@ -440,6 +455,7 @@ async function executeWithCapture<T>(
       captureCtx.stdoutChunks
     );
   } finally {
+    await applyHeadersOption(undefined);
     setEnv(process.env);
   }
 }
@@ -484,6 +500,7 @@ function executeWithStream<T>(
 
     let captureCtx: CaptureContext | undefined;
     try {
+      await applyHeadersOption(options?.headers);
       captureCtx = await buildCaptureContext(env, cwd, {
         channel: channel as AsyncChannel<unknown>,
         abortSignal: controller.signal,
@@ -528,6 +545,7 @@ function executeWithStream<T>(
       channel.error(err);
     } finally {
       await flushTelemetry();
+      await applyHeadersOption(undefined);
       setEnv(process.env);
     }
   })();

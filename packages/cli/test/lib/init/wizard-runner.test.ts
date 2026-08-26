@@ -40,6 +40,7 @@ import * as readiness from "../../../src/lib/init/readiness.js";
 import * as registry from "../../../src/lib/init/tools/registry.js";
 import type {
   ResolvedInitContext,
+  SuspendPayload,
   ToolPayload,
   WizardOptions,
   WorkflowRunResult,
@@ -103,6 +104,7 @@ function makeContext(
 let mockStartResult: WorkflowRunResult;
 let mockResumeResults: WorkflowRunResult[];
 let resumeCallCount = 0;
+let sharedResumeAsyncMock: ReturnType<typeof mock>;
 let startAsyncMock: ReturnType<typeof mock>;
 let mockRunByIdResult: WorkflowRunResult | Error;
 let runByIdMock: ReturnType<typeof mock>;
@@ -130,6 +132,59 @@ let capturedClientOptions: { abortSignal?: AbortSignal; retries?: number }[] =
   [];
 
 let savedPlainOutput: string | undefined;
+let testRequestSequence = 0;
+let testEnvelopeByPayload = new WeakMap<
+  object,
+  { protocolVersion: 1; requestId: string }
+>();
+
+/** Model the current server: every valid suspend payload carries a v1 ID. */
+function withV1SuspendEnvelope(raw: unknown): unknown {
+  if (
+    typeof raw !== "object" ||
+    raw === null ||
+    !("type" in raw) ||
+    !["tool", "interactive"].includes(String(raw.type)) ||
+    "protocolVersion" in raw ||
+    "requestId" in raw
+  ) {
+    return raw;
+  }
+
+  let envelope = testEnvelopeByPayload.get(raw);
+  if (!envelope) {
+    testRequestSequence += 1;
+    envelope = {
+      protocolVersion: 1,
+      requestId: `00000000-0000-4000-8000-${String(testRequestSequence).padStart(12, "0")}`,
+    };
+    testEnvelopeByPayload.set(raw, envelope);
+  }
+  return { ...raw, ...envelope };
+}
+
+function withV1SuspendEnvelopes(result: WorkflowRunResult): WorkflowRunResult {
+  const steps = result.steps
+    ? Object.fromEntries(
+        Object.entries(result.steps).map(([stepId, step]) => [
+          stepId,
+          step.suspendPayload === undefined
+            ? step
+            : {
+                ...step,
+                suspendPayload: withV1SuspendEnvelope(step.suspendPayload),
+              },
+        ])
+      )
+    : undefined;
+  return {
+    ...result,
+    ...(steps ? { steps } : {}),
+    ...(result.suspendPayload === undefined
+      ? {}
+      : { suspendPayload: withV1SuspendEnvelope(result.suspendPayload) }),
+  };
+}
 
 function forceStdinTty<T>(action: () => Promise<T>): Promise<T> {
   const originalDescriptor = Object.getOwnPropertyDescriptor(
@@ -163,10 +218,15 @@ beforeEach(() => {
   savedPlainOutput = process.env.SENTRY_PLAIN_OUTPUT;
   process.env.SENTRY_PLAIN_OUTPUT = "0";
 
-  mockStartResult = { status: "success", result: { platform: "React" } };
+  mockStartResult = {
+    status: "success",
+    result: { exitCode: 0, platform: "React" },
+  };
   mockResumeResults = [];
   resumeCallCount = 0;
   mockRunByIdResult = new Error("runById not configured");
+  testRequestSequence = 0;
+  testEnvelopeByPayload = new WeakMap();
   process.exitCode = 0;
 
   spinnerMock.start.mockClear();
@@ -225,22 +285,26 @@ beforeEach(() => {
     .spyOn(process.stderr, "write")
     .mockImplementation(() => true as any);
 
-  startAsyncMock = vi.fn(() => Promise.resolve(mockStartResult));
+  startAsyncMock = vi.fn(() =>
+    Promise.resolve(withV1SuspendEnvelopes(mockStartResult))
+  );
   runByIdMock = vi.fn(() =>
     mockRunByIdResult instanceof Error
       ? Promise.reject(mockRunByIdResult)
-      : Promise.resolve(mockRunByIdResult)
+      : Promise.resolve(withV1SuspendEnvelopes(mockRunByIdResult))
   );
+  sharedResumeAsyncMock = vi.fn(() => {
+    const result = mockResumeResults[resumeCallCount] ?? {
+      status: "success",
+      result: { exitCode: 0 },
+    };
+    resumeCallCount += 1;
+    return Promise.resolve(withV1SuspendEnvelopes(result));
+  });
   const run = {
     runId: "test-run-id",
     startAsync: startAsyncMock,
-    resumeAsync: vi.fn(() => {
-      const result = mockResumeResults[resumeCallCount] ?? {
-        status: "success",
-      };
-      resumeCallCount += 1;
-      return Promise.resolve(result);
-    }),
+    resumeAsync: sharedResumeAsyncMock,
   };
   const workflow = {
     createRun: vi.fn(() => Promise.resolve(run)),
@@ -607,7 +671,7 @@ describe("runWizard", () => {
         "apply-codemods": { suspendPayload: payload },
       },
     };
-    mockResumeResults = [{ status: "success" }];
+    mockResumeResults = [{ status: "success", result: { exitCode: 0 } }];
 
     await runWizard(makeOptions());
 
@@ -616,7 +680,44 @@ describe("runWizard", () => {
     expect(spinnerMock.message).toHaveBeenCalledWith("Running tool...");
   });
 
-  test("dispatches interactive payloads to the prompt handler", async () => {
+  test("keeps v1 transport metadata out of local tool payloads", async () => {
+    const requestId = "8c7ee6b9-e955-4514-9164-f01844584a28";
+    const toolPayload: ToolPayload = {
+      type: "tool",
+      operation: "apply-patchset",
+      cwd: "/tmp/test",
+      params: { patches: [] },
+    };
+    const protocolPayload: SuspendPayload = {
+      ...toolPayload,
+      protocolVersion: 1,
+      requestId,
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["apply-codemods"]],
+      steps: {
+        "apply-codemods": { suspendPayload: protocolPayload },
+      },
+    };
+    mockResumeResults = [{ status: "success", result: { exitCode: 0 } }];
+
+    await runWizard(makeOptions());
+
+    expect(describeToolSpy).toHaveBeenCalledWith(toolPayload);
+    expect(executeToolSpy).toHaveBeenCalledWith(toolPayload, makeContext());
+    expect(sharedResumeAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeData: expect.objectContaining({
+          protocolVersion: 1,
+          requestId,
+        }),
+      })
+    );
+  });
+
+  test("keeps v1 transport metadata out of interactive payloads", async () => {
+    const requestId = "8c7ee6b9-e955-4514-9164-f01844584a28";
     mockStartResult = {
       status: "suspended",
       suspended: [["pick-feature"]],
@@ -626,11 +727,13 @@ describe("runWizard", () => {
             type: "interactive",
             kind: "confirm",
             prompt: "Continue?",
+            protocolVersion: 1,
+            requestId,
           },
         },
       },
     };
-    mockResumeResults = [{ status: "success" }];
+    mockResumeResults = [{ status: "success", result: { exitCode: 0 } }];
 
     await runWizard(makeOptions());
 
@@ -643,9 +746,41 @@ describe("runWizard", () => {
       makeContext(),
       expect.anything()
     );
+    expect(sharedResumeAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeData: expect.objectContaining({
+          protocolVersion: 1,
+          requestId,
+        }),
+      })
+    );
+  });
+
+  test("moves feature review directly into code-planning progress", async () => {
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["select-features"]],
+      steps: {
+        "select-features": {
+          suspendPayload: {
+            type: "interactive",
+            kind: "multi-select",
+            prompt: "Select features to enable",
+            availableFeatures: ["errorMonitoring", "performanceMonitoring"],
+          },
+        },
+      },
+    };
+    mockResumeResults = [{ status: "success", result: { exitCode: 0 } }];
+
+    await runWizard(makeOptions());
+
+    expect(spinnerMock.start).toHaveBeenCalledWith("Planning code changes...");
+    expect(spinnerMock.start).not.toHaveBeenCalledWith("Processing...");
   });
 
   test("skips verify-changes interactive prompts during dry-run", async () => {
+    const requestId = "3bc6b6f4-e2f5-40e4-9ac5-bbd69bf7af70";
     resolveInitContextSpy.mockResolvedValue(makeContext({ dryRun: true }));
     mockStartResult = {
       status: "suspended",
@@ -656,15 +791,25 @@ describe("runWizard", () => {
             type: "interactive",
             kind: "confirm",
             prompt: "Verify changes?",
+            protocolVersion: 1,
+            requestId,
           },
         },
       },
     };
-    mockResumeResults = [{ status: "success" }];
+    mockResumeResults = [{ status: "success", result: { exitCode: 0 } }];
 
     await runWizard(makeOptions({ dryRun: true }));
 
     expect(handleInteractiveSpy).not.toHaveBeenCalled();
+    expect(sharedResumeAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeData: expect.objectContaining({
+          protocolVersion: 1,
+          requestId,
+        }),
+      })
+    );
   });
 
   test("surfaces malformed suspend payload types", async () => {
@@ -684,6 +829,34 @@ describe("runWizard", () => {
     };
 
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
+  });
+
+  test.each([
+    ["a missing envelope", {}],
+    ["an unsupported version", { protocolVersion: 2, requestId: "request" }],
+    ["a missing request ID", { protocolVersion: 1 }],
+    ["an empty request ID", { protocolVersion: 1, requestId: "" }],
+  ])("rejects suspend payloads with %s", async (_label, envelope) => {
+    startAsyncMock.mockResolvedValueOnce({
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: {
+        "detect-platform": {
+          suspendPayload: {
+            type: "tool",
+            operation: "list-dir",
+            cwd: "/tmp/test",
+            params: { path: "." },
+            ...envelope,
+          },
+        },
+      },
+    });
+
+    await expect(runWizard(makeOptions())).rejects.toThrow(
+      "Invalid init protocol envelope"
+    );
+    expect(executeToolSpy).not.toHaveBeenCalled();
   });
 
   test("fails when a suspended step has no payload", async () => {
@@ -719,6 +892,32 @@ describe("runWizard", () => {
     expect(spinnerMock.stop).toHaveBeenCalledWith("Error", 1);
     expect(lastCancelMessage()).toBe("Setup failed");
     expect(lastFeedbackOutcome()).toBe("failed");
+  });
+
+  test("preserves 403 errors thrown for command-level scope inspection", async () => {
+    const payload: ToolPayload = {
+      type: "tool",
+      operation: "create-sentry-project",
+      cwd: "/tmp/test",
+      params: { name: "my-app", platform: "javascript-react" },
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["ensure-sentry-project"]],
+      steps: {
+        "ensure-sentry-project": { suspendPayload: payload },
+      },
+    };
+    const scopeError = new ApiError("Forbidden", 403);
+    executeToolSpy.mockRejectedValue(scopeError);
+
+    await expect(runWizard(makeOptions())).rejects.toBe(scopeError);
+
+    expect(spinnerMock.stop).toHaveBeenCalledWith(
+      "Sentry API request denied",
+      1
+    );
+    expect(lastCancelMessage()).toBe("Sentry API request denied");
   });
 
   test("tears down forwarding and stops the spinner on cancellation", async () => {
@@ -792,12 +991,13 @@ describe("runWizard", () => {
             cwd: "/tmp/test",
             params: {
               paths: ["src/settings.py", "src/urls.py"],
+              resultVersion: 2,
             },
           },
         },
       },
     };
-    mockResumeResults = [{ status: "success" }];
+    mockResumeResults = [{ status: "success", result: { exitCode: 0 } }];
 
     await runWizard(makeOptions());
 
@@ -840,12 +1040,16 @@ describe("runWizard", () => {
     expect(args.inputData).not.toHaveProperty("dirListing");
     expect(args.inputData).not.toHaveProperty("fileCache");
     expect(args.inputData).not.toHaveProperty("existingSentry");
+    expect(args.inputData?.client).toEqual({
+      cliVersion: expect.any(String),
+      protocolVersion: 1,
+    });
     expect(args.initialState?.dirListing).toEqual(dirListing);
     expect(args.initialState?.fileCache).toEqual(fileCache);
     expect(args.initialState?.existingSentry).toEqual(detectedSentry);
   });
 
-  test("renders tool result messages via the spinner stop state", async () => {
+  test("renders tool result messages as a transient spinner message, not a persisted line", async () => {
     mockStartResult = {
       status: "suspended",
       suspended: [["ensure-sentry-project"]],
@@ -865,11 +1069,53 @@ describe("runWizard", () => {
       message: "Using existing project",
       data: {},
     });
-    mockResumeResults = [{ status: "success" }];
+    mockResumeResults = [{ status: "success", result: { exitCode: 0 } }];
 
     await runWizard(makeOptions());
 
-    expect(spinnerMock.stop).toHaveBeenCalledWith("Using existing project");
+    // Tool messages update the live spinner instead of persisting a ✔ line —
+    // the sidebar Tasks checklist already tracks step completion, so a
+    // duplicate line in the activity log is just noise.
+    expect(spinnerMock.message).toHaveBeenCalledWith("Using existing project");
+    expect(spinnerMock.stop).not.toHaveBeenCalledWith("Using existing project");
+  });
+
+  test("captures the created Sentry project identity and forwards it to formatResult", async () => {
+    const identity = {
+      orgSlug: "acme",
+      projectSlug: "my-app",
+      projectId: "4507",
+      dsn: "https://k@o0.ingest.sentry.io/4507",
+      url: "https://acme.sentry.io/settings/projects/my-app/",
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["ensure-sentry-project"]],
+      steps: {
+        "ensure-sentry-project": {
+          suspendPayload: {
+            type: "tool",
+            operation: "create-sentry-project",
+            cwd: "/tmp/test",
+            params: { name: "my-app", platform: "javascript-react" },
+          },
+        },
+      },
+    };
+    executeToolSpy.mockResolvedValue({ ok: true, data: identity });
+    mockResumeResults = [{ status: "success", result: { exitCode: 0 } }];
+
+    await runWizard(makeOptions());
+
+    // The identity comes from the local tool result, not the server output —
+    // the CLI creates the project itself, so it passes what it already knows
+    // as formatResult's 4th arg to build the Issues link without a round-trip.
+    expect(formatResultSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      identity
+    );
   });
 
   test("shows --yes hint when LoggingUI prompt fails", async () => {
@@ -976,7 +1222,9 @@ describe("runWizard — MastraClient lifecycle", () => {
         createRun: vi.fn(() =>
           Promise.resolve({
             startAsync: startAsyncMock,
-            resumeAsync: vi.fn(() => Promise.resolve({ status: "success" })),
+            resumeAsync: vi.fn(() =>
+              Promise.resolve({ status: "success", result: { exitCode: 0 } })
+            ),
           })
         ),
       } as any;
@@ -993,6 +1241,15 @@ describe("runWizard — MastraClient lifecycle", () => {
 // ─── Additional coverage tests ───────────────────────────────────────────────
 
 describe("runWizard — workflow exit codes", () => {
+  test("rejects workflow success without an explicit exit code", async () => {
+    mockStartResult = { status: "success", result: { platform: "React" } };
+
+    const error = await runWizard(makeOptions()).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(WizardError);
+    expect((error as WizardError).exitCode).not.toBe(0);
+  });
+
   // handleFinalResult calls mapWorkflowExitCode when the workflow result
   // carries a non-zero exitCode. Each case maps a server-internal code to
   // the CLI's semantic EXIT constant.
@@ -1045,7 +1302,9 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
           Promise.resolve({
             runId: "test-run-id",
             startAsync: startAsyncMock,
-            resumeAsync: vi.fn(resumeAsyncImpl),
+            resumeAsync: vi.fn(async (args) =>
+              withV1SuspendEnvelopes(await resumeAsyncImpl(args))
+            ),
           })
         ),
         runById: runByIdRef,
@@ -1056,10 +1315,10 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
   function httpError(
     status: number,
     body: unknown
-  ): Error & { status: number } {
+  ): Error & { body: unknown; status: number } {
     return Object.assign(
       new Error(`HTTP error! status: ${status} - ${JSON.stringify(body)}`),
-      { status }
+      { body, status }
     );
   }
 
@@ -1073,6 +1332,16 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
   function staleRunError(status = 500): Error & { status: number } {
     return httpError(status, {
       error: "This workflow run was not suspended",
+    });
+  }
+
+  function protocolConflictError(): Error & {
+    body: unknown;
+    status: number;
+  } {
+    return httpError(409, {
+      code: "init_request_conflict",
+      error: "The init tool result does not match the active suspended request",
     });
   }
 
@@ -1090,6 +1359,108 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     return selected;
   }
 
+  test("echoes the v1 request identity with the local tool result", async () => {
+    const protocolPayload: SuspendPayload = {
+      ...toolPayload,
+      protocolVersion: 1,
+      requestId: "8c7ee6b9-e955-4514-9164-f01844584a28",
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: protocolPayload } },
+    };
+    let capturedResume: Record<string, unknown> | undefined;
+    makeStaleStepRun((args) => {
+      capturedResume = args.resumeData as Record<string, unknown>;
+      return Promise.resolve({ status: "success", result: { exitCode: 0 } });
+    });
+
+    await runWizard(makeOptions());
+
+    expect(capturedResume).toMatchObject({
+      protocolVersion: 1,
+      requestId: protocolPayload.requestId,
+    });
+  });
+
+  test("sends the explicit agent-checkpoint acknowledgement", async () => {
+    const checkpointPayload: SuspendPayload = {
+      cwd: "/tmp/test",
+      detail: "Checking Sentry support for the detected project",
+      operation: "agent-checkpoint",
+      params: {},
+      protocolVersion: 1,
+      requestId: "5f61cbd5-1051-4b52-928f-06eb78ba40ee",
+      type: "tool",
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["detect-platform"]],
+      steps: {
+        "detect-platform": { suspendPayload: checkpointPayload },
+      },
+    };
+    executeToolSpy.mockResolvedValue({
+      data: { acknowledged: true },
+      ok: true,
+    });
+    let capturedResume: Record<string, unknown> | undefined;
+    makeStaleStepRun((args) => {
+      capturedResume = args.resumeData as Record<string, unknown>;
+      return Promise.resolve({ status: "success", result: { exitCode: 0 } });
+    });
+
+    await runWizard(makeOptions());
+
+    expect(executeToolSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: "agent-checkpoint" }),
+      expect.anything()
+    );
+    expect(capturedResume).toMatchObject({
+      data: { acknowledged: true },
+      ok: true,
+      protocolVersion: 1,
+      requestId: checkpointPayload.requestId,
+    });
+  });
+
+  test("uses request identity instead of mutable payload details during recovery", async () => {
+    vi.useFakeTimers();
+    const requestId = "8c7ee6b9-e955-4514-9164-f01844584a28";
+    const protocolPayload: SuspendPayload = {
+      ...toolPayload,
+      protocolVersion: 1,
+      requestId,
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: protocolPayload } },
+    };
+    runByIdMock
+      .mockResolvedValueOnce({
+        status: "suspended",
+        suspendPayload: { ...protocolPayload, detail: "new display text" },
+      })
+      .mockResolvedValueOnce({
+        status: "success",
+        result: { exitCode: 0 },
+      });
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      return Promise.reject(staleRunError(409));
+    });
+
+    const run = runWizard(makeOptions());
+    await vi.advanceTimersByTimeAsync(250);
+    await run;
+
+    expect(runByIdMock).toHaveBeenCalledTimes(2);
+    expect(resumeCount).toBe(1);
+  });
+
   test("recovers from a sparse 409 stale-resume conflict", async () => {
     mockStartResult = {
       status: "suspended",
@@ -1098,6 +1469,7 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     };
     const currentRunState: WorkflowRunResult = {
       status: "success",
+      result: { exitCode: 0 },
       suspended: [],
     };
     runByIdMock.mockImplementation(
@@ -1111,7 +1483,7 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
       if (resumeCount === 1) {
         return Promise.reject(staleStepError(409));
       }
-      return Promise.resolve({ status: "success" });
+      return Promise.resolve({ status: "success", result: { exitCode: 0 } });
     });
 
     await runWizard(makeOptions());
@@ -1131,19 +1503,55 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     expect(resumeCount).toBe(1);
   });
 
-  test("keeps polling when runById returns the same suspended payload snapshot", async () => {
-    vi.useFakeTimers();
+  test("recovers from a v1 request-correlation conflict", async () => {
+    const protocolPayload: SuspendPayload = {
+      ...toolPayload,
+      protocolVersion: 1,
+      requestId: "8c7ee6b9-e955-4514-9164-f01844584a28",
+    };
     mockStartResult = {
       status: "suspended",
       suspended: [["tool-step"]],
-      steps: { "tool-step": { suspendPayload: toolPayload } },
+      steps: { "tool-step": { suspendPayload: protocolPayload } },
+    };
+    runByIdMock.mockResolvedValue({
+      status: "success",
+      result: { exitCode: 0 },
+      suspended: [],
+    });
+    let resumeCount = 0;
+    makeStaleStepRun(() => {
+      resumeCount += 1;
+      return Promise.reject(protocolConflictError());
+    });
+
+    await runWizard(makeOptions());
+
+    expect(runByIdMock).toHaveBeenCalledTimes(1);
+    expect(resumeCount).toBe(1);
+  });
+
+  test("keeps polling when runById returns the same suspended payload snapshot", async () => {
+    vi.useFakeTimers();
+    const protocolPayload: SuspendPayload = {
+      ...toolPayload,
+      protocolVersion: 1,
+      requestId: "8c7ee6b9-e955-4514-9164-f01844584a28",
+    };
+    mockStartResult = {
+      status: "suspended",
+      suspended: [["tool-step"]],
+      steps: { "tool-step": { suspendPayload: protocolPayload } },
     };
     runByIdMock
       .mockResolvedValueOnce({
         status: "suspended",
-        suspendPayload: toolPayload,
+        suspendPayload: protocolPayload,
       })
-      .mockResolvedValueOnce({ status: "success" });
+      .mockResolvedValueOnce({
+        status: "success",
+        result: { exitCode: 0 },
+      });
 
     let resumeCount = 0;
     makeStaleStepRun(() => {
@@ -1165,7 +1573,7 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
       type: "tool",
       operation: "read-files",
       cwd: "/tmp/test",
-      params: { paths: ["old-package.json"] },
+      params: { paths: ["old-package.json"], resultVersion: 2 },
     };
     const activePayload: ToolPayload = {
       type: "tool",
@@ -1194,7 +1602,7 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
       if (resumeCount === 1) {
         return Promise.reject(staleStepError());
       }
-      return Promise.resolve({ status: "success" });
+      return Promise.resolve({ status: "success", result: { exitCode: 0 } });
     });
 
     await runWizard(makeOptions());
@@ -1267,7 +1675,7 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
       suspended: [["tool-step"]],
       steps: { "tool-step": { suspendPayload: toolPayload } },
     };
-    mockRunByIdResult = { status: "success" };
+    mockRunByIdResult = { status: "success", result: { exitCode: 0 } };
 
     let resumeCount = 0;
     makeStaleStepRun(() => {
@@ -1322,7 +1730,7 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
       type: "tool",
       operation: "read-files",
       cwd: "/tmp/test",
-      params: { paths: ["package.json"] },
+      params: { paths: ["package.json"], resultVersion: 2 },
     };
     const applyPayload: ToolPayload = {
       type: "tool",
@@ -1338,7 +1746,16 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
     executeToolSpy
       .mockResolvedValueOnce({
         ok: true,
-        data: { files: { "package.json": largeContent } },
+        data: {
+          files: {
+            "package.json": {
+              content: largeContent,
+              status: "ok",
+              truncated: false,
+            },
+          },
+          version: 2,
+        },
       })
       .mockResolvedValueOnce({
         ok: false,
@@ -1355,7 +1772,7 @@ describe("runWizard — resumeWithRetry stale-step recovery", () => {
           steps: { "apply-codemods": { suspendPayload: applyPayload } },
         });
       }
-      return Promise.resolve({ status: "success" });
+      return Promise.resolve({ status: "success", result: { exitCode: 0 } });
     });
 
     await runWizard(makeOptions());
@@ -1542,14 +1959,14 @@ describe("runWizard — additional coverage", () => {
         "step-b": { suspendPayload: payload },
       },
     };
-    mockResumeResults = [{ status: "success" }];
+    mockResumeResults = [{ status: "success", result: { exitCode: 0 } }];
 
     await expect(runWizard(makeOptions())).rejects.toThrow(WizardError);
 
     expect(executeToolSpy).not.toHaveBeenCalledWith(payload, makeContext());
   });
 
-  test("uses legacy fallback only when no active step info exists and one payload is present", async () => {
+  test("uses the sole payload fallback when no active step info exists", async () => {
     const payload: ToolPayload = {
       type: "tool",
       operation: "run-commands",
@@ -1562,7 +1979,7 @@ describe("runWizard — additional coverage", () => {
         "step-b": { suspendPayload: payload },
       },
     };
-    mockResumeResults = [{ status: "success" }];
+    mockResumeResults = [{ status: "success", result: { exitCode: 0 } }];
 
     await runWizard(makeOptions());
 
@@ -1580,7 +1997,7 @@ describe("runWizard — additional coverage", () => {
       type: "tool",
       operation: "read-files",
       cwd: "/tmp/test",
-      params: { paths: ["package.json"] },
+      params: { paths: ["package.json"], resultVersion: 2 },
     };
 
     mockStartResult = {
@@ -1594,7 +2011,7 @@ describe("runWizard — additional coverage", () => {
         suspended: [["detect-platform"]],
         steps: { "detect-platform": { suspendPayload: payloadB } },
       },
-      { status: "success" },
+      { status: "success", result: { exitCode: 0 } },
     ];
 
     await runWizard(makeOptions());
@@ -1635,7 +2052,7 @@ describe("runWizard — additional coverage", () => {
       type: "tool",
       operation: "read-files",
       cwd: "/tmp/test",
-      params: { paths: ["package.json"] },
+      params: { paths: ["package.json"], resultVersion: 2 },
     };
 
     mockStartResult = {
@@ -1649,6 +2066,7 @@ describe("runWizard — additional coverage", () => {
     mockResumeResults = [
       {
         status: "success",
+        result: { exitCode: 0 },
         steps: {
           "discover-context": { status: "success" },
           "detect-platform": { status: "success" },
@@ -1735,7 +2153,7 @@ describe("runWizard — additional coverage", () => {
         },
       },
     };
-    mockResumeResults = [{ status: "success" }];
+    mockResumeResults = [{ status: "success", result: { exitCode: 0 } }];
 
     await runWizard(makeOptions());
 
@@ -1753,7 +2171,7 @@ describe("runWizard — progress rotation for long-running steps", () => {
       type: "tool" as const,
       operation: "read-files",
       cwd: "/tmp/test",
-      params: { paths: ["src/app.tsx"] },
+      params: { paths: ["src/app.tsx"], resultVersion: 2 },
     };
     mockStartResult = {
       status: "suspended",
@@ -1818,7 +2236,7 @@ describe("runWizard — progress rotation for long-running steps", () => {
     ).toBe(true);
 
     // Resolve the resume and let the wizard finish
-    resolveResume({ status: "success" });
+    resolveResume({ status: "success", result: { exitCode: 0 } });
     await vi.advanceTimersByTimeAsync(100);
     await runPromise;
   });
@@ -1829,7 +2247,7 @@ describe("runWizard — progress rotation for long-running steps", () => {
       type: "tool" as const,
       operation: "read-files",
       cwd: "/tmp/test",
-      params: { paths: ["src/app.tsx"] },
+      params: { paths: ["src/app.tsx"], resultVersion: 2 },
     };
     mockStartResult = {
       status: "suspended",
@@ -1875,7 +2293,7 @@ describe("runWizard — progress rotation for long-running steps", () => {
     // After exhausting messages, should show elapsed time
     expect(messages.some((m) => /\(\d+s\)/.test(m))).toBe(true);
 
-    resolveResume({ status: "success" });
+    resolveResume({ status: "success", result: { exitCode: 0 } });
     await vi.advanceTimersByTimeAsync(100);
     await runPromise;
   });
@@ -1931,7 +2349,7 @@ describe("runWizard — progress rotation for long-running steps", () => {
     // No new messages should have been added by the rotation timer
     expect(messagesAfter).toBe(messagesBefore);
 
-    resolveResume({ status: "success" });
+    resolveResume({ status: "success", result: { exitCode: 0 } });
     await vi.advanceTimersByTimeAsync(100);
     await runPromise;
   });

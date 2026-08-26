@@ -1,4 +1,6 @@
+import { ApiError } from "../../errors.js";
 import type { ToolOperation, ToolPayload, ToolResult } from "../types.js";
+import { agentCheckpointTool } from "./agent-checkpoint.js";
 import { applyPatchsetTool } from "./apply-patchset.js";
 import {
   createSentryProjectTool,
@@ -15,6 +17,7 @@ import { formatToolError, validateToolSandbox } from "./shared.js";
 import type { AnyInitToolDefinition, ToolContext } from "./types.js";
 
 const toolDefinitions = [
+  agentCheckpointTool,
   listDirTool,
   readFilesTool,
   fileExistsBatchTool,
@@ -31,6 +34,13 @@ const toolRegistry = new Map<ToolOperation, AnyInitToolDefinition>(
   toolDefinitions.map((tool) => [tool.operation, tool] as const)
 );
 
+/** Sentry API operations never inspect or mutate the local filesystem. */
+const CWD_INDEPENDENT_OPERATIONS = new Set<ToolOperation>([
+  "agent-checkpoint",
+  "create-sentry-project",
+  "ensure-sentry-project",
+]);
+
 /**
  * Build the spinner message for a suspended tool request.
  */
@@ -46,11 +56,6 @@ export async function executeTool(
   payload: ToolPayload,
   context: ToolContext
 ): Promise<ToolResult> {
-  const sandboxError = validateToolSandbox(payload, context.directory);
-  if (sandboxError) {
-    return sandboxError;
-  }
-
   const tool = toolRegistry.get(payload.operation);
   if (!tool) {
     return {
@@ -59,9 +64,24 @@ export async function executeTool(
     };
   }
 
+  let sandboxedPayload = payload;
+  if (!CWD_INDEPENDENT_OPERATIONS.has(payload.operation)) {
+    const sandbox = validateToolSandbox(payload, context.directory);
+    if ("ok" in sandbox) {
+      return sandbox;
+    }
+    sandboxedPayload = { ...payload, cwd: sandbox.cwd } as ToolPayload;
+  }
+
   try {
-    return await tool.execute(payload as never, context);
+    return await tool.execute(sandboxedPayload as never, context);
   } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.status === 401 || error.status === 403)
+    ) {
+      throw error;
+    }
     return { ok: false, error: formatToolError(error) };
   }
 }

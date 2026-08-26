@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.43.0-dev.0
+version: 0.44.0-dev.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -11,18 +11,20 @@ requires:
 
 Help users interact with Sentry from the command line using the `sentry` CLI.
 
+> **Core rule for agents: just run the command.** The `sentry` CLI auto-detects your org and project (from `.sentryclirc`, DSNs in `.env`/source, and the directory name), so **do not** list organizations and then list their projects to work out which one this checkout maps to — that manual discovery only duplicates work the CLI already does on every command. Pass an explicit `<org>/<project>` only when the CLI reports it can't detect the target or picks the wrong one.
+
 ## Agent Guidance
 
 Best practices and operational guidance for AI coding agents using the Sentry CLI.
 
 ### Key Principles
 
-- **Just run the command** — the CLI handles authentication and org/project detection automatically. Don't pre-authenticate or look up org/project before running commands. If auth is needed, the CLI prompts interactively.
+- **Just run the command** — the CLI handles authentication and org/project detection automatically. Don't pre-authenticate or look up org/project before running commands. The CLI prompts for login if needed.
 - **Prefer CLI commands over raw API calls** — the CLI has dedicated commands for most tasks. Reach for `sentry issue view`, `sentry issue list`, `sentry trace view`, etc. before constructing API calls manually or fetching external documentation.
 - **Use `sentry schema` to explore the API** — if you need to discover API endpoints, run `sentry schema` to browse interactively or `sentry schema <resource>` to search. This is faster than fetching OpenAPI specs externally.
 - **Use `sentry issue view <id>` to investigate issues** — when asked about a specific issue (e.g., `CLI-G5`, `PROJECT-123`), use `sentry issue view` directly.
 - **Use `--json` for machine-readable output** — pipe through `jq` for filtering. Human-readable output includes formatting that is hard to parse.
-- **The CLI auto-detects org/project** — most commands work without explicit targets by checking `.sentryclirc` config files, scanning for DSNs in `.env` files and source code, and matching directory names. Only specify `<org>/<project>` when the CLI reports it can't detect the target or detects the wrong one.
+- **The CLI auto-detects org/project — don't discover it yourself** — most commands work without explicit targets by checking `.sentryclirc` config files, scanning for DSNs in `.env` files and source code, and matching directory names. Do **not** run `sentry org list` and then `sentry project list` to figure out which project this checkout belongs to — that manual fan-out just replicates the detection the CLI already runs on every command. Only specify `<org>/<project>` when the CLI reports it can't detect the target or detects the wrong one.
 
 ### Design Principles
 
@@ -70,14 +72,33 @@ See [Exit Codes](/exit-codes/) for the complete reference.
 # 1. Find the issue (auto-detects org/project from DSN or config)
 sentry issue list --query "is:unresolved" --limit 5
 
-# 2. Get details
-sentry issue view PROJECT-123
+# 2. Get details. For agents, prefer --json — it includes the full issue plus
+# the latest event under `event`, so you get everything in one call.
+sentry issue view PROJECT-123 --json
 
 # 3. Get AI root cause analysis
 sentry issue explain PROJECT-123
 
 # 4. Get a fix plan
 sentry issue plan PROJECT-123
+```
+
+`sentry issue view <SHORT-ID> --json` is the fastest way to get an agent up to
+speed on an issue. Select just the fields you need with `--fields` instead of
+consuming the whole payload — the latest event's `request` entry can carry live
+session data (cookies, headers, body), so extract named fields rather than
+dumping the entire object:
+
+```bash
+# Top-level issue fields
+sentry issue view PROJECT-123 --json --fields shortId,title,culprit,count,userCount,permalink
+
+# Named fields from the latest event — avoids pulling the full request/session blob
+sentry issue view PROJECT-123 --json --fields event.id,event.title,event.dateCreated
+
+# Just the request URL and method (not the whole request entry). Event data
+# lives under event.entries[], each tagged with a `type` and `data` payload.
+sentry issue view PROJECT-123 --json | jq '.event.entries[] | select(.type == "request") | .data | {url, method}'
 ```
 
 #### Explore Traces and Performance
@@ -199,7 +220,7 @@ Display types with default sizes:
 
 Use **common** types for general dashboards. Use **specialized** only when specifically requested. Avoid **internal** types unless the user explicitly asks.
 
-Available datasets: `spans` (default), `tracemetrics`, `discover`, `issue`, `error-events`, `logs`. Run `sentry dashboard widget --help` for dataset descriptions, query formats, and examples.
+Available datasets: `spans` (default), `errors`, `transactions`, `metrics`, `issue`, `logs`. Run `sentry dashboard widget --help` for dataset descriptions, query formats, and examples.
 
 **Row-filling examples:**
 
@@ -260,6 +281,7 @@ When querying the Events API (directly or via `sentry api`), valid dataset value
 - **Pre-authenticating unnecessarily**: Don't run `sentry auth login` before every command. The CLI detects missing/expired auth and prompts automatically. Only run `sentry auth login` if you need to switch accounts.
 - **Missing `--json` for piping**: Human-readable output includes formatting. Use `--json` when parsing output programmatically.
 - **Specifying org/project when not needed**: Auto-detection resolves org/project from `.sentryclirc` config files, DSNs, env vars, and directory names. Let it work first — only add `<org>/<project>` if the CLI says it can't detect the target or detects the wrong one.
+- **Manually discovering the project before running a command**: Don't list the orgs you belong to, then list every project in each, to match the local checkout to a project — the CLI already does exactly this resolution internally on each command. Skip the fan-out and run the command directly; correct the target afterwards only if the output shows the wrong org/project.
 - **Confusing `--query` syntax**: The `--query` flag uses Sentry search syntax (e.g., `is:unresolved`, `assigned:me`), not free text search.
 - **Not using `--web`**: View commands support `-w`/`--web` to open the resource in the browser — useful for sharing links.
 - **Fetching API schemas instead of using the CLI**: Prefer `sentry schema` to browse the API and `sentry api` to make requests — the CLI handles authentication and endpoint resolution, so there's rarely a need to download OpenAPI specs separately.
@@ -389,6 +411,7 @@ Manage mobile build artifacts
 
 CLI-related commands
 
+- `sentry cli completion <shell>` — Print the shell completion script
 - `sentry cli defaults <key value...>` — View and manage default settings
 - `sentry cli feedback <message...>` — Send feedback about the CLI
 - `sentry cli fix` — Diagnose and repair CLI database issues
@@ -407,14 +430,14 @@ Manage code mappings for stack trace linking
 
 → Full flags and examples: `references/code-mappings.md`
 
-### Conversation
+### Agent-conversation
 
-List and view AI conversations
+List and view agent conversations
 
-- `sentry conversation list <org>` — List recent AI conversations
-- `sentry conversation view <org/conversation-id>` — View an AI conversation transcript
+- `sentry agent-conversation list <org>` — List recent agent conversations
+- `sentry agent-conversation view <org/conversation-id>` — View an agent conversation transcript
 
-→ Full flags and examples: `references/conversation.md`
+→ Full flags and examples: `references/agent-conversation.md`
 
 ### Dart-symbol-map
 
@@ -451,6 +474,15 @@ Manage Sentry dashboards
 - `sentry dashboard restore <org/dashboard...>` — Restore a dashboard revision
 
 → Full flags and examples: `references/dashboard.md`
+
+### Docs
+
+Search and query current Sentry documentation
+
+- `sentry docs list <keywords...>` — Find Sentry documentation pages by keyword
+- `sentry docs query <question...>` — Ask a cited question about Sentry documentation
+
+→ Full flags and examples: `references/docs.md`
 
 ### Platform
 

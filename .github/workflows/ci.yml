@@ -594,13 +594,49 @@ jobs:
       - name: E2E Tests
         env:
           SENTRY_CLI_BINARY: ${{ github.workspace }}/dist-bin/sentry-linux-x64
-          # Pass the eval provider key only when skill files changed — the
-          # skill-eval e2e test auto-skips when no key is present, so non-skill
-          # PRs aren't affected. OpenRouter is preferred; ANTHROPIC_API_KEY is
-          # kept as a fallback for direct-Anthropic runs.
-          OPENROUTER_API_KEY: ${{ needs.changes.outputs.skill == 'true' && secrets.OPENROUTER_API_KEY || '' }}
-          ANTHROPIC_API_KEY: ${{ needs.changes.outputs.skill == 'true' && secrets.ANTHROPIC_API_KEY || '' }}
+          # No eval provider key here: the skill eval runs in the dedicated
+          # `eval-skill` job (non-forks) and `eval-skill-fork.yml` (forks). The
+          # inline skill-eval e2e test stays for local runs and auto-skips in
+          # CI when no key is present, so it never double-runs the eval.
         run: pnpm run test:e2e
+  eval-skill:
+    name: Eval SKILL.md
+    needs: [changes]
+    # Skill eval for non-fork PRs and pushes. Fork PRs are handled separately
+    # by eval-skill-fork.yml (they can't read secrets on pull_request, so they
+    # go through a label-gated pull_request_target flow). Fork PRs skip here
+    # because head.repo.fork is true; same-repo PRs and pushes have secrets.
+    if: >-
+      needs.changes.outputs.skill == 'true'
+      && (github.event_name != 'pull_request'
+          || github.event.pull_request.head.repo.fork == false)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          # Pinned to a patched 24 — the skill-eval planner makes keep-alive
+          # HTTPS calls and would hit the ERR_STREAM_PREMATURE_CLOSE regression
+          # on a floating "24". See NODE_VERSION_24 in the top-level env block.
+          node-version: ${{ env.NODE_VERSION_24 }}
+      - uses: actions/cache@v5
+        id: cache
+        with:
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile
+      - name: Generate docs and skill files
+        run: pnpm run generate:schema && pnpm run generate:docs
+      - name: Eval SKILL.md
+        run: pnpm run eval:skill
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
   build-npm:
     name: Build npm Package (smoke Node ${{ matrix.node }})
@@ -777,7 +813,7 @@ jobs:
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-generated, build-binary, build-npm, build-docs, test-e2e, generate-patches, codemod-test]
+    needs: [changes, check-generated, build-binary, build-npm, build-docs, test-e2e, eval-skill, generate-patches, codemod-test]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -786,7 +822,10 @@ jobs:
           # Check for explicit failures or cancellations in all jobs
           # generate-patches is skipped on PRs — that's expected
           # publish-nightly is excluded: it's infrastructure (GHCR push), not code quality
-          results="${{ needs.check-generated.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.generate-patches.result }} ${{ needs.codemod-test.result }}"
+          # eval-skill is skipped on fork PRs (handled by eval-skill-fork.yml)
+          # and when skill files didn't change — a "skipped" result is fine, we
+          # only fail on an actual failure/cancellation.
+          results="${{ needs.check-generated.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.eval-skill.result }} ${{ needs.generate-patches.result }} ${{ needs.codemod-test.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "::error::CI failed"

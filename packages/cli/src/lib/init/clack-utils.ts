@@ -34,44 +34,66 @@ export function abortIfCancelled<T>(value: T): Exclude<T, symbol> {
   return value as Exclude<T, symbol>;
 }
 
-const FEATURE_INFO: Record<string, { label: string; hint: string }> = {
+const FEATURE_INFO: Record<string, { label: string; description: string }> = {
   errorMonitoring: {
     label: "Error Monitoring",
-    hint: "Group exceptions into issues with context",
+    description: "Automatically capture exceptions and stack traces",
   },
   performanceMonitoring: {
     label: "Tracing",
-    hint: "See request paths, spans, and bottlenecks",
+    description:
+      "Find bottlenecks, broken requests, and understand application flow end-to-end",
   },
   sessionReplay: {
     label: "Session Replay",
-    hint: "Replay sessions linked to errors",
+    description: "Watch real user sessions to see what went wrong",
   },
   profiling: {
     label: "Profiling",
-    hint: "Find CPU-heavy functions in production",
+    description:
+      "Pinpoint the functions and lines of code responsible for performance issues",
   },
-  logs: { label: "Logging", hint: "Search logs beside errors and traces" },
-  metrics: { label: "Metrics", hint: "Track custom measurements over time" },
+  logs: {
+    label: "Logs",
+    description: "See logs in context with errors and performance issues",
+  },
+  metrics: {
+    label: "Application Metrics",
+    description:
+      "Track application performance and usage over time with custom metrics",
+  },
   sourceMaps: {
     label: "Source Maps",
-    hint: "Turn minified stacks into your source",
+    description:
+      "Turn minified production stack traces back into your original source code",
   },
   crons: {
-    label: "Crons",
-    hint: "Alert on failed or missed scheduled jobs",
+    label: "Crons & Uptime Monitors",
+    description: "Detect failed, missed, or delayed scheduled jobs",
+  },
+  attachments: {
+    label: "Attachments",
+    description: "Link user-supplied data to captured events",
   },
   aiMonitoring: {
-    label: "AI Monitoring",
-    hint: "Track AI calls, latency, cost, and failures",
+    label: "Agent Tracing",
+    description:
+      "Understand AI calls, latency, token usage, cost, and failures",
+  },
+  mcpObservability: {
+    label: "MCP Observability",
+    description:
+      "Trace MCP tool calls and understand failures across agent workflows",
   },
   userFeedback: {
     label: "User Feedback",
-    hint: "Collect user reports with issue context",
+    description:
+      "Collect user reports with the error and session context needed to investigate",
   },
   reactFeatures: {
     label: "React Features",
-    hint: "Add React-specific context and integrations",
+    description:
+      "Capture React-specific errors with component and rendering context",
   },
 };
 
@@ -79,25 +101,28 @@ export function featureLabel(id: string): string {
   return FEATURE_INFO[id]?.label ?? id;
 }
 
-export function featureHint(id: string): string | undefined {
-  return FEATURE_INFO[id]?.hint;
+/** Returns product-oriented supporting copy for a known feature. */
+export function featureDescription(id: string): string | undefined {
+  return FEATURE_INFO[id]?.description;
 }
 
 const FEATURE_DISPLAY_ORDER = [
   "errorMonitoring",
+  "logs",
   "sessionReplay",
   "performanceMonitoring",
-  "logs",
-  "metrics",
-  "profiling",
-  "sourceMaps",
-  "crons",
   "aiMonitoring",
-  "userFeedback",
+  "attachments",
+  "crons",
+  "metrics",
+  "mcpObservability",
+  "profiling",
   "reactFeatures",
+  "sourceMaps",
+  "userFeedback",
 ];
 
-/** Sort features into canonical display order for the multi-select prompt. */
+/** Sort features into the canonical order used by summaries and final output. */
 export function sortFeatures(features: string[]): string[] {
   return features.slice().sort((a, b) => {
     const ai = FEATURE_DISPLAY_ORDER.indexOf(a);
@@ -114,7 +139,7 @@ export const STEP_LABELS: Record<string, string> = {
   "select-target-app": "Selecting target application",
   "resolve-dir": "Resolving project directory",
   "check-existing-sentry": "Checking for existing Sentry installation",
-  "detect-platform": "Detecting platform and framework",
+  "detect-platform": "Analyzing project and Sentry features",
   "ensure-sentry-project": "Setting up Sentry project",
   "select-features": "Selecting features",
   "plan-codemods": "Planning code modifications",
@@ -184,7 +209,7 @@ export const STEP_ACTIVE_LABELS: Record<string, string> = {
   "select-target-app": "Selecting target application...",
   "resolve-dir": "Resolving project directory...",
   "check-existing-sentry": "Checking for existing Sentry setup...",
-  "detect-platform": "Detecting framework and platform...",
+  "detect-platform": "Analyzing project and Sentry support...",
   "ensure-sentry-project": "Configuring Sentry project...",
   "select-features": "Preparing feature selection...",
   "plan-codemods": "Planning code changes...",
@@ -201,8 +226,8 @@ export const STEP_ACTIVE_LABELS: Record<string, string> = {
  * Falls back to the full label if a step isn't listed here.
  */
 export const STEP_LABELS_SHORT: Record<string, string> = {
-  "discover-context": "Analyzing project",
-  "detect-platform": "Detecting platform",
+  "discover-context": "Discovering project",
+  "detect-platform": "Checking Sentry support",
   "ensure-sentry-project": "Setting up project",
   "select-features": "Selecting features",
   "plan-codemods": "Planning changes",
@@ -236,9 +261,11 @@ export const STEP_PROGRESS_MESSAGES: Record<string, string[]> = {
   ],
   "detect-platform": [
     "Scanning project files...",
-    "Identifying framework and language...",
-    "Analyzing project configuration...",
-    "Determining SDK compatibility...",
+    "Identifying framework and runtime...",
+    "Matching the Sentry SDK...",
+    "Searching official Sentry docs...",
+    "Checking feature support...",
+    "Validating project recommendations...",
   ],
 };
 

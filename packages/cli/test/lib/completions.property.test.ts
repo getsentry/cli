@@ -185,13 +185,14 @@ describe("proposeCompletions: Stricli integration", () => {
   // instead. These groups are tested separately below.
   const groupsWithDefaultCommand = new Set([
     "auth",
-    "conversation",
+    "agent-conversation",
     "issue",
     "event",
     "org",
     "project",
     "replay",
     "dashboard",
+    "docs",
     "trace",
     "span",
     "log",

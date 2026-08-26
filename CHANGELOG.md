@@ -1,6 +1,74 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.43.0
+
+### New Features ✨
+
+#### Cli
+
+- Add completion command by @MunifTanjim in [#1427](https://github.com/getsentry/cli/pull/1427)
+- Persist agent-skills preference and improve skill docs by @jared-outpost in [#1408](https://github.com/getsentry/cli/pull/1408)
+
+#### Init
+
+- Redesign the completion screen around the first error by @betegon in [#1444](https://github.com/getsentry/cli/pull/1444)
+- Add bounded stateless file reads by @betegon in [#1437](https://github.com/getsentry/cli/pull/1437)
+- Echo workflow request IDs when resuming by @betegon in [#1436](https://github.com/getsentry/cli/pull/1436)
+- Add feature setup review by @betegon in [#1413](https://github.com/getsentry/cli/pull/1413)
+
+#### Other
+
+- (docs) Add Vercel analytics and speed insights by @betegon in [#1399](https://github.com/getsentry/cli/pull/1399)
+- (upgrade) Add --no-agent-skills flag by @jared-outpost in [#1407](https://github.com/getsentry/cli/pull/1407)
+
+### Bug Fixes 🐛
+
+#### Init
+
+- Require explicit zero workflow exit by @betegon in [#1451](https://github.com/getsentry/cli/pull/1451)
+- Start the plugin-installer handoff at the top of the screen by @betegon in [#1448](https://github.com/getsentry/cli/pull/1448)
+- Align local file read policy by @betegon in [#1447](https://github.com/getsentry/cli/pull/1447)
+- Stop duplicating step checks in the activity log by @betegon in [#1439](https://github.com/getsentry/cli/pull/1439)
+- Keep protocol metadata out of local tools by @betegon in [#1438](https://github.com/getsentry/cli/pull/1438)
+- Apply file changes safely by @betegon in [#1435](https://github.com/getsentry/cli/pull/1435)
+
+#### Other
+
+- (auth) Request team admin OAuth scope by @betegon in [#1373](https://github.com/getsentry/cli/pull/1373)
+- (bundle) Stop writing a Bun polyfill onto globalThis by @JPeer264 in [#1421](https://github.com/getsentry/cli/pull/1421)
+- (cli) Guard markdown rendering against undefined input by @sentry in [#1422](https://github.com/getsentry/cli/pull/1422)
+- (dsn) Ignore docs placeholder DSNs by @sentry-junior in [#1416](https://github.com/getsentry/cli/pull/1416)
+- (event) Handle issue short ID as second positional arg by @sentry in [#1420](https://github.com/getsentry/cli/pull/1420)
+- (explore) Translate --environment to query for non-replays by @sentry in [#1442](https://github.com/getsentry/cli/pull/1442)
+- (issue) Handle object headers in buildRequestMarkdown by @sentry in [#1441](https://github.com/getsentry/cli/pull/1441)
+- (log) Handle org/log-id shorthand to prevent ContextError by @sentry in [#1445](https://github.com/getsentry/cli/pull/1445)
+- (proguard) Restore leading slash in DIF assemble name by @gabriellanata in [#1372](https://github.com/getsentry/cli/pull/1372)
+- (sdk) Pass each positional argument as its own argv token by @JPeer264 in [#1415](https://github.com/getsentry/cli/pull/1415)
+- (snapshots) Create all-unchanged selective uploads by @betegon in [#1398](https://github.com/getsentry/cli/pull/1398)
+- (span) Handle invalid trace ID in tryAutoSplitSpanArg by @sentry in [#1443](https://github.com/getsentry/cli/pull/1443)
+- (trace) Scope trace/span list by numeric project ID by @MathurAditya724 in [#1364](https://github.com/getsentry/cli/pull/1364)
+
+### Documentation 📚
+
+- Weekly documentation audit — fix Zod→Valibot drift, stale versions, dataset list by @cursor in [#1400](https://github.com/getsentry/cli/pull/1400)
+
+### Internal Changes 🔧
+
+#### Init
+
+- Simplify V2 file reads by @betegon in [#1450](https://github.com/getsentry/cli/pull/1450)
+- Make list_dir bounded and metadata-only by @betegon in [#1446](https://github.com/getsentry/cli/pull/1446)
+
+#### Other
+
+- (deps) Upgrade Mastra client to 1.38 by @betegon in [#1411](https://github.com/getsentry/cli/pull/1411)
+- Regenerate docs by @github-actions[bot] in [90768e40](https://github.com/getsentry/cli/commit/90768e40d7e0033aae5c126cd5b3309de271a236)
+
+### Other
+
+- upgrade eval agent models to sonnet-5 and gpt-5.6-luna by @jared-outpost in [#1393](https://github.com/getsentry/cli/pull/1393)
+
 ## 0.42.2
 
 ### Internal Changes 🔧
@@ -64,7 +132,7 @@
 - (help) Support JSON output for --help flags by @jared-outpost in [#1337](https://github.com/getsentry/cli/pull/1337)
 - (local) Inject Spotlight as a Wrangler Worker binding by @MathurAditya724 in [#1351](https://github.com/getsentry/cli/pull/1351)
 - (project) Create multiple projects in one command by @betegon in [#1191](https://github.com/getsentry/cli/pull/1191)
-- Add `sentry conversation` command group for inspecting AI agent transcripts by @sergical in [#1020](https://github.com/getsentry/cli/pull/1020)
+- Add `sentry agent-conversation` command group for inspecting AI agent transcripts by @sergical in [#1020](https://github.com/getsentry/cli/pull/1020)
 
 ### Bug Fixes 🐛
 
@@ -2070,4 +2138,3 @@
 ## 0.2.0
 
 - No documented changes.
-
