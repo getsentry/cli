@@ -51,6 +51,27 @@ List and search User Feedback
 | `hasSeen` | boolean | Whether the feedback has been read |
 | `latestEventHasAttachments` | boolean | Whether the latest event has attachments |
 
+**Examples:**
+
+```bash
+# Auto-detect the organization from the current project
+sentry feedback list
+
+# List Feedback for one project
+sentry feedback list my-org/frontend
+
+# List Feedback across every project in an organization
+sentry feedback list my-org/
+
+# Search for a project across accessible organizations
+sentry feedback list frontend
+
+sentry feedback list my-org/frontend --status resolved
+sentry feedback list my-org/frontend --status spam
+sentry feedback list my-org/frontend --status all --period 90d
+sentry feedback list my-org/frontend --query "message:*checkout*"
+```
+
 ### `sentry feedback view <feedback>`
 
 View a User Feedback item
@@ -90,5 +111,27 @@ View a User Feedback item
 | `event` | unknown \| null | Latest feedback event |
 | `replayIds` | array | Related Session Replay IDs |
 | `attachments` | array | Attachments on the latest feedback event |
+
+**Examples:**
+
+```bash
+# Most recent unresolved Feedback, with detected or explicit organization
+sentry feedback view @latest
+sentry feedback view my-org/@latest
+
+# Short ID or numeric ID
+sentry feedback view FRONTEND-2SDJ
+sentry feedback view 5146636313
+
+# Explicit organization
+sentry feedback view my-org/FRONTEND-2SDJ
+
+# `view` is the default command; `show` is an alias
+sentry feedback my-org/FRONTEND-2SDJ
+sentry feedback show my-org/FRONTEND-2SDJ
+
+# Open the Feedback item in Sentry
+sentry feedback view my-org/FRONTEND-2SDJ --web
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

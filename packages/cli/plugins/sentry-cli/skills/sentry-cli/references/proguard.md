@@ -24,4 +24,14 @@ Upload ProGuard/R8 mapping files to Sentry
 
 Compute the UUID for a ProGuard mapping file
 
+**Examples:**
+
+```bash
+# Compute the UUID for a ProGuard/R8 mapping file
+sentry proguard uuid ./app/build/outputs/mapping/release/mapping.txt
+
+# Output as JSON (includes the file path)
+sentry proguard uuid mapping.txt --json
+```
+
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

@@ -32,4 +32,17 @@ List teams
 | `teamRole` | string \| null | Your role in the team |
 | `memberCount` | number | Number of members |
 
+**Examples:**
+
+```bash
+# List teams
+sentry team list my-org/
+
+# Paginate through teams
+sentry team list my-org/ -c next
+
+# Output as JSON
+sentry team list --json
+```
+
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

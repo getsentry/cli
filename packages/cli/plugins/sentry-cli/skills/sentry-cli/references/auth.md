@@ -23,9 +23,33 @@ Authenticate with Sentry
 - `--read-only - Request only read-only OAuth scopes (project:read, org:read, event:read, member:read, team:read). Useful for handing tokens to AI agents or CI jobs that should not be able to mutate Sentry state.`
 - `-s, --scope <value>... - Request specific OAuth scopes (repeatable, comma-separated). E.g. --scope project:read --scope org:read. Overrides the default scope set.`
 
+**Examples:**
+
+```bash
+sentry auth
+
+sentry auth --token YOUR_SENTRY_API_TOKEN
+
+sentry auth --read-only
+
+sentry auth --scope project:read --scope org:read
+sentry auth --scope project:read,event:read
+
+sentry auth --url https://sentry.example.com
+SENTRY_URL=https://sentry.example.com sentry auth
+
+sentry auth --token YOUR_TOKEN --url https://sentry.example.com
+```
+
 ### `sentry auth logout`
 
 Log out of Sentry
+
+**Examples:**
+
+```bash
+sentry auth logout
+```
 
 ### `sentry auth refresh`
 
@@ -36,6 +60,12 @@ Refresh your OAuth access token
 - `--read-only - Re-authenticate with read-only OAuth scopes (project:read, org:read, event:read, member:read, team:read)`
 - `-s, --scope <value>... - Re-authenticate with specific OAuth scopes (repeatable, comma-separated). E.g. --scope project:read --scope org:read`
 
+**Examples:**
+
+```bash
+sentry auth refresh
+```
+
 ### `sentry auth status`
 
 View authentication status
@@ -44,9 +74,27 @@ View authentication status
 - `--show-token - Show the stored token (masked by default)`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+**Examples:**
+
+```bash
+sentry auth status
+
+# Show the raw token
+sentry auth status --show-token
+
+# View current user
+sentry auth whoami
+```
+
 ### `sentry auth token`
 
 Print the stored authentication token
+
+**Examples:**
+
+```bash
+sentry auth token
+```
 
 ### `sentry auth whoami`
 

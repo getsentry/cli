@@ -38,4 +38,23 @@ Upload React Native sourcemaps (Xcode build step)
 - `--no-auto-release - Don't read the release from Xcode project files`
 - `--allow-xcode-infoplist-preprocessing - Run the C preprocessor over Info.plist (INFOPLIST_PREPROCESS)`
 
+**Examples:**
+
+```bash
+# Upload a bundle + sourcemap by debug ID (called by the Gradle plugin)
+sentry react-native gradle \
+  --bundle index.android.bundle \
+  --sourcemap index.android.bundle.map
+
+# Also associate with a release and distribution(s)
+sentry react-native gradle \
+  --bundle index.android.bundle \
+  --sourcemap index.android.bundle.map \
+  --release com.example.app@1.0.0 \
+  --dist 1000
+
+# Xcode build phase (usually added automatically to your build script)
+../node_modules/.bin/sentry-cli react-native xcode
+```
+
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
