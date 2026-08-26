@@ -34,17 +34,4 @@ List repositories
 | `externalSlug` | string \| null | External slug (e.g. org/repo) |
 | `externalId` | string \| null | External ID |
 
-**Examples:**
-
-```bash
-# List repositories (auto-detect org)
-sentry repo list
-
-# List repos in a specific org with pagination
-sentry repo list my-org/ -c next
-
-# Output as JSON
-sentry repo list --json
-```
-
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

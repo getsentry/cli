@@ -430,14 +430,14 @@ Manage code mappings for stack trace linking
 
 → Full flags and examples: `references/code-mappings.md`
 
-### Conversation
+### Agent-conversation
 
-List and view AI conversations
+List and view agent conversations
 
-- `sentry conversation list <org>` — List recent AI conversations
-- `sentry conversation view <org/conversation-id>` — View an AI conversation transcript
+- `sentry agent-conversation list <org>` — List recent agent conversations
+- `sentry agent-conversation view <org/conversation-id>` — View an agent conversation transcript
 
-→ Full flags and examples: `references/conversation.md`
+→ Full flags and examples: `references/agent-conversation.md`
 
 ### Dart-symbol-map
 
@@ -669,29 +669,8 @@ Browse the Sentry API schema
 
 → Full flags and examples: `references/schema.md`
 
-## Global Options
-
-All commands support the following global options:
-
-- `--help` - Show help for the command
-- `--version` - Show CLI version
-- `--log-level <level>` - Set log verbosity (`error`, `warn`, `log`, `info`, `debug`, `trace`). Overrides `SENTRY_LOG_LEVEL`
-- `--verbose` - Shorthand for `--log-level debug`
-
 ## Output Formats
 
-### JSON Output
+Most commands support `--json` flag for JSON output, making it easy to integrate with other tools.
 
-Most list and view commands support `--json` flag for JSON output, making it easy to integrate with other tools:
-
-```bash
-sentry org list --json | jq '.[] | .slug'
-```
-
-### Opening in Browser
-
-View commands support `-w` or `--web` flag to open the resource in your browser:
-
-```bash
-sentry issue view PROJ-123 -w
-```
+View commands support `-w` or `--web` flag to open the resource in your browser.

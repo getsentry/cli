@@ -47,27 +47,4 @@ List cron monitors
 | `dateCreated` | string | Creation date (ISO 8601) |
 | `project` | object | Owning project |
 
-**Examples:**
-
-```bash
-# Wrap a command with cron monitor check-ins (DSN-based)
-SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0 \
-  sentry monitor run nightly-job -- python manage.py cron
-
-# The -- separator is optional when the command has no flags
-sentry monitor run nightly-job npm run task
-
-# Create/update the monitor on the first check-in via --schedule (crontab)
-sentry monitor run nightly-job -s "0 0 * * *" --max-runtime 30 --timezone UTC -- ./backup.sh
-
-# List cron monitors in an org
-sentry monitor list my-org/
-
-# Paginate through monitors
-sentry monitor list my-org/ -c next
-
-# Output as JSON
-sentry monitor list --json
-```
-
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
