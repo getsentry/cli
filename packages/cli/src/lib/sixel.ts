@@ -258,7 +258,7 @@ export function terminalPixelWidth(
   columns: number = process.stdout.columns ?? 80
 ): number | undefined {
   const caps = detectSixelCaps();
-  if (!(caps.supported && caps.cellWidth && caps.cellWidth > 0)) {
+  if (!((caps.supported || caps.kitty) && caps.cellWidth && caps.cellWidth > 0)) {
     return;
   }
   return columns * caps.cellWidth;
@@ -275,7 +275,7 @@ export function terminalPixelHeight(
   rows: number = process.stdout.rows ?? 24
 ): number | undefined {
   const caps = detectSixelCaps();
-  if (!(caps.supported && caps.cellHeight && caps.cellHeight > 0)) {
+  if (!((caps.supported || caps.kitty) && caps.cellHeight && caps.cellHeight > 0)) {
     return;
   }
   return rows * caps.cellHeight;
