@@ -80,6 +80,26 @@ describe("parseSixelCaps", () => {
       { numRuns: DEFAULT_NUM_RUNS }
     );
   });
+
+  test("detects kitty support from an OK graphics reply", () => {
+    const caps = parseSixelCaps(`${ESC}_Gi=31;OK${ESC}\\${ESC}[?62c`);
+    expect(caps.kitty).toBe(true);
+  });
+
+  test("kitty support does not imply sixel support", () => {
+    const caps = parseSixelCaps(`${ESC}_Gi=31;OK${ESC}\\${ESC}[?62c`);
+    expect(caps.supported).toBe(false);
+  });
+
+  test("reports both when the terminal advertises sixel and kitty", () => {
+    const caps = parseSixelCaps(`${ESC}_Gi=31;OK${ESC}\\${ESC}[?62;4c`);
+    expect(caps).toMatchObject({ supported: true, kitty: true });
+  });
+
+  test("a kitty error reply is not treated as support", () => {
+    const caps = parseSixelCaps(`${ESC}_Gi=31;ENOENT:bad${ESC}\\${ESC}[?62c`);
+    expect(caps.kitty).toBeUndefined();
+  });
 });
 
 describe("sixelFits", () => {

@@ -202,7 +202,7 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
   {
     name: "SENTRY_NO_SIXEL",
     description:
-      "Disable sixel graphics on terminals that support it; the banner falls back to block art, and image attachments printed by `sentry api` are written as raw bytes instead of rendered inline.",
+      "Disable inline terminal graphics (sixel and kitty) on terminals that support them; the banner falls back to block art, and image attachments printed by `sentry api` are written as raw bytes instead of rendered inline.",
     example: "1",
   },
   {
