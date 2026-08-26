@@ -27,7 +27,6 @@ import { resolveOrgRegion } from "../region.js";
 import {
   API_MAX_PER_PAGE,
   apiRequestToRegion,
-  autoPaginate,
   getOrgSdkConfig,
   MAX_PAGINATION_PAGES,
   type PaginatedResponse,
