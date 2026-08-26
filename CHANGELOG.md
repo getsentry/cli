@@ -132,7 +132,7 @@
 - (help) Support JSON output for --help flags by @jared-outpost in [#1337](https://github.com/getsentry/cli/pull/1337)
 - (local) Inject Spotlight as a Wrangler Worker binding by @MathurAditya724 in [#1351](https://github.com/getsentry/cli/pull/1351)
 - (project) Create multiple projects in one command by @betegon in [#1191](https://github.com/getsentry/cli/pull/1191)
-- Add `sentry conversation` command group for inspecting AI agent transcripts by @sergical in [#1020](https://github.com/getsentry/cli/pull/1020)
+- Add `sentry agent-conversation` command group for inspecting AI agent transcripts by @sergical in [#1020](https://github.com/getsentry/cli/pull/1020)
 
 ### Bug Fixes 🐛
 
@@ -2138,4 +2138,3 @@
 ## 0.2.0
 
 - No documented changes.
-
