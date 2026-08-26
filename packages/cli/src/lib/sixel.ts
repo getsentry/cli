@@ -310,6 +310,9 @@ export function sixelBanner(
   if (optedOut()) {
     return;
   }
+  if (getGraphicsPreference() === false) {
+    return;
+  }
   const caps = detectSixelCaps();
   return sixelFits(caps, columns, BANNER_SIXEL.width)
     ? BANNER_SIXEL.data
