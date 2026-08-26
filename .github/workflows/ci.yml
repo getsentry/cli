@@ -813,7 +813,8 @@ jobs:
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-generated, build-binary, build-npm, build-docs, test-e2e, eval-skill, generate-patches, codemod-test]    runs-on: ubuntu-latest
+    needs: [changes, check-generated, build-binary, build-npm, build-docs, test-e2e, eval-skill, generate-patches, codemod-test]
+    runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Check CI status
