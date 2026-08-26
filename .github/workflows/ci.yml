@@ -825,7 +825,8 @@ jobs:
           # eval-skill is skipped on fork PRs (handled by eval-skill-fork.yml)
           # and when skill files didn't change — a "skipped" result is fine, we
           # only fail on an actual failure/cancellation.
-          results="${{ needs.check-generated.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.eval-skill.result }} ${{ needs.generate-patches.result }} ${{ needs.codemod-test.result }}"          for result in $results; do
+          results="${{ needs.check-generated.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.eval-skill.result }} ${{ needs.generate-patches.result }} ${{ needs.codemod-test.result }}"
+          for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "::error::CI failed"
               exit 1
