@@ -1678,14 +1678,10 @@ function renderContentLines(opts: {
   const { data } = widget;
 
   switch (data.type) {
-<<<<<<< HEAD
-    case "timeseries":
+    case "timeseries": {
       if (widget.displayType === "heatmap") {
         return renderHeatmapContent(data, { innerWidth, contentHeight });
       }
-=======
-    case "timeseries": {
->>>>>>> main
       if (widget.displayType === "categorical_bar") {
         return renderVerticalBarsContent(data, { innerWidth, contentHeight });
       }
