@@ -140,6 +140,7 @@ describe("defaults storage", () => {
       url: "https://sentry.example.com",
       headers: null,
       "ca-cert": null,
+      graphics: null,
     });
   });
 
@@ -153,6 +154,7 @@ describe("defaults storage", () => {
       url: null,
       headers: null,
       "ca-cert": null,
+      graphics: null,
     });
   });
 

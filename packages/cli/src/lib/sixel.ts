@@ -19,6 +19,7 @@
 import { execSync } from "node:child_process";
 import { closeSync, openSync, readSync, writeSync } from "node:fs";
 import { BANNER_SIXEL } from "../generated/banner-sixel.js";
+import { getGraphicsPreference } from "./db/defaults.js";
 import { getEnv } from "./env.js";
 import { isPlainOutput, isTruthyEnv } from "./formatters/plain-detect.js";
 
@@ -114,7 +115,7 @@ export function sixelFits(
  */
 export function optedOut(): boolean {
   // Use the isolation-aware env (matches isPlainOutput) so library/test runs
-  // that call setEnv() see consistent TERM / SENTRY_NO_SIXEL values.
+  // that call setEnv() see consistent TERM / SENTRY_NO_GRAPHICS values.
   const env = getEnv();
   return (
     !(process.stdout.isTTY && process.stdin.isTTY) ||
@@ -122,6 +123,7 @@ export function optedOut(): boolean {
     isPlainOutput() ||
     !env.TERM ||
     env.TERM === "dumb" ||
+    isTruthyEnv(env.SENTRY_NO_GRAPHICS ?? "") ||
     isTruthyEnv(env.SENTRY_NO_SIXEL ?? "")
   );
 }
@@ -217,7 +219,8 @@ export function detectSixelCaps(): SixelCaps {
 
 /**
  * True when the current terminal can display sixel graphics right now: it's an
- * interactive TTY, not opted out (plain-output / SENTRY_NO_SIXEL / non-unix),
+ * interactive TTY, not opted out (plain-output / SENTRY_NO_GRAPHICS /
+ * SENTRY_NO_SIXEL / non-unix), the persistent graphics=off default is not set,
  * and it advertised sixel support in the DA1 probe.
  *
  * Used by callers that render arbitrary images (not just the baked banner),
@@ -227,18 +230,25 @@ export function canRenderSixel(): boolean {
   if (optedOut()) {
     return false;
   }
+  if (getGraphicsPreference() === false) {
+    return false;
+  }
   return detectSixelCaps().supported;
 }
 
 /**
  * True when the current terminal can display kitty graphics right now: it's an
- * interactive TTY, not opted out, and it answered the kitty graphics query with
- * `OK`. Newer terminals prefer this protocol, so callers rendering arbitrary
- * images (e.g. `sentry api` attachments) check this before falling back to
- * {@link canRenderSixel}.
+ * interactive TTY, not opted out (plain-output / SENTRY_NO_GRAPHICS /
+ * SENTRY_NO_SIXEL / non-unix), the persistent graphics=off default is not set,
+ * and it answered the kitty graphics query with `OK`. Newer terminals prefer
+ * this protocol, so callers rendering arbitrary images (e.g. `sentry api`
+ * attachments) check this before falling back to {@link canRenderSixel}.
  */
 export function canRenderKitty(): boolean {
   if (optedOut()) {
+    return false;
+  }
+  if (getGraphicsPreference() === false) {
     return false;
   }
   return detectSixelCaps().kitty === true;
@@ -258,7 +268,9 @@ export function terminalPixelWidth(
   columns: number = process.stdout.columns ?? 80
 ): number | undefined {
   const caps = detectSixelCaps();
-  if (!((caps.supported || caps.kitty) && caps.cellWidth && caps.cellWidth > 0)) {
+  if (
+    !((caps.supported || caps.kitty) && caps.cellWidth && caps.cellWidth > 0)
+  ) {
     return;
   }
   return columns * caps.cellWidth;
@@ -275,7 +287,9 @@ export function terminalPixelHeight(
   rows: number = process.stdout.rows ?? 24
 ): number | undefined {
   const caps = detectSixelCaps();
-  if (!((caps.supported || caps.kitty) && caps.cellHeight && caps.cellHeight > 0)) {
+  if (
+    !((caps.supported || caps.kitty) && caps.cellHeight && caps.cellHeight > 0)
+  ) {
     return;
   }
   return rows * caps.cellHeight;

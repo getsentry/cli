@@ -191,6 +191,7 @@ describe("optedOut", () => {
     stdin: process.stdin.isTTY,
     TERM: process.env.TERM,
     SENTRY_NO_SIXEL: process.env.SENTRY_NO_SIXEL,
+    SENTRY_NO_GRAPHICS: process.env.SENTRY_NO_GRAPHICS,
     NO_COLOR: process.env.NO_COLOR,
     SENTRY_PLAIN_OUTPUT: process.env.SENTRY_PLAIN_OUTPUT,
     FORCE_COLOR: process.env.FORCE_COLOR,
@@ -209,6 +210,7 @@ describe("optedOut", () => {
     process.stdin.isTTY = saved.stdin;
     setEnv("TERM", saved.TERM);
     setEnv("SENTRY_NO_SIXEL", saved.SENTRY_NO_SIXEL);
+    setEnv("SENTRY_NO_GRAPHICS", saved.SENTRY_NO_GRAPHICS);
     setEnv("NO_COLOR", saved.NO_COLOR);
     setEnv("SENTRY_PLAIN_OUTPUT", saved.SENTRY_PLAIN_OUTPUT);
     setEnv("FORCE_COLOR", saved.FORCE_COLOR);
@@ -270,6 +272,11 @@ describe("optedOut", () => {
     if (process.platform !== "win32") {
       expect(optedOut()).toBe(false);
     }
+  });
+
+  test("SENTRY_NO_GRAPHICS opts out", () => {
+    setEnv("SENTRY_NO_GRAPHICS", "1");
+    expect(optedOut()).toBe(true);
   });
 });
 
