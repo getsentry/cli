@@ -14,18 +14,18 @@ afterEach(() => {
 });
 
 describe("closeGlobalDispatcher", () => {
-  test("closes the global dispatcher when one is registered", async () => {
-    let closed = false;
+  test("destroys the global dispatcher when one is registered", async () => {
+    let destroyed = false;
     global[GLOBAL_DISPATCHER] = {
-      close: () => {
-        closed = true;
+      destroy: () => {
+        destroyed = true;
         return Promise.resolve();
       },
     };
 
     await closeGlobalDispatcher();
 
-    expect(closed).toBe(true);
+    expect(destroyed).toBe(true);
   });
 
   test("resolves without throwing when no dispatcher is registered", async () => {
@@ -34,8 +34,16 @@ describe("closeGlobalDispatcher", () => {
     await expect(closeGlobalDispatcher()).resolves.toBeUndefined();
   });
 
-  test("resolves when the dispatcher has no close method", async () => {
+  test("resolves when the dispatcher has no destroy method", async () => {
     global[GLOBAL_DISPATCHER] = {};
+
+    await expect(closeGlobalDispatcher()).resolves.toBeUndefined();
+  });
+
+  test("swallows a rejection from destroy so the exit path is never disrupted", async () => {
+    global[GLOBAL_DISPATCHER] = {
+      destroy: () => Promise.reject(new Error("socket teardown failed")),
+    };
 
     await expect(closeGlobalDispatcher()).resolves.toBeUndefined();
   });

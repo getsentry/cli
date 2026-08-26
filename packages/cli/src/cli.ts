@@ -641,13 +641,14 @@ export async function runCli(cliArgs: string[]): Promise<void> {
   } finally {
     // Abort any pending version check to allow clean exit
     abortPendingVersionCheck();
-    // Release undici's pooled keep-alive sockets so the event loop can drain
-    // on its own — the root-cause fix for the process-hang (see #1237).
-    await closeGlobalDispatcher();
-    // Backstop for any handle the dispatcher close can't reach (a libuv
-    // refcount quirk on macOS). The unref'd timer only fires if the loop is
-    // still referenced after a drained command, so it's a no-op otherwise.
+    // Arm the backstop first so it fires regardless of what the dispatcher
+    // teardown does. The unref'd timer only triggers if the loop is still
+    // referenced after a drained command, so it's a no-op on clean exits
+    // (a libuv refcount quirk on macOS keeps it worthwhile — see #1237).
     scheduleForceExit();
+    // Release undici's pooled keep-alive sockets so the event loop can drain
+    // on its own — the root-cause fix. Never rejects (see close-dispatcher.ts).
+    await closeGlobalDispatcher();
   }
 
   // Show update notification after command completes
