@@ -51,7 +51,7 @@ const INK_APP_PATH = join(ROOT_DIR, "dist/ink-app.js");
 describe("npm bundle", () => {
   beforeAll(async () => {
     await ensureBundleBuilt();
-  }, 60_000); // Bundle can take a while
+  }, 120_000); // Bundle can take a while — it re-runs codegen + esbuild on a cold runner
 
   test("bundle file exists", () => {
     expect(existsSync(BUNDLE_BIN_PATH)).toBe(true);

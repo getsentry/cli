@@ -88,7 +88,7 @@ async function runNodeScriptOk(
 describe("library mode (bundled)", () => {
   beforeAll(async () => {
     await ensureBundleBuilt();
-  }, 60_000);
+  }, 120_000);
 
   // --- Bundle structure ---
 
