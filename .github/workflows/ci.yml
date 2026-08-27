@@ -96,9 +96,13 @@ jobs:
           {
             echo 'matrix<<MATRIX_EOF'
             if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-              # PRs build linux-x64 (smoke test + e2e)
+              # PRs build linux-x64 (smoke test + e2e) and darwin-arm64. The
+              # darwin-arm64 build runs natively on macOS so the CoreUI-based
+              # Assets.car pixel extractor is compiled and exercised on PRs, not
+              # just on main/release.
               echo '{"include":[
-                {"target":"linux-x64", "os":"ubuntu-latest", "can-test":true}
+                {"target":"linux-x64",    "os":"ubuntu-latest", "can-test":true},
+                {"target":"darwin-arm64", "os":"macos-latest",  "can-test":true}
               ]}'
             else
               # main, release/**, workflow_call: full cross-platform matrix.
