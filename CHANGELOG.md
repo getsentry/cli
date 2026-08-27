@@ -1,6 +1,66 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.44.0
+
+### New Features ✨
+
+#### Docs
+
+- Add query loading feedback by @MathurAditya724 in [#1475](https://github.com/getsentry/cli/pull/1475)
+- Add docs command suite by @MathurAditya724 in [#1457](https://github.com/getsentry/cli/pull/1457)
+
+#### Errors
+
+- Replace silent-catch ratchet with a biome lint rule by @jared-outpost in [#1487](https://github.com/getsentry/cli/pull/1487)
+- Enforce silent-catch check with a ratchet baseline by @jared-outpost in [#1471](https://github.com/getsentry/cli/pull/1471)
+
+#### Other
+
+- (api) Add shared paginate() helper for list endpoints by @jared-outpost in [#1486](https://github.com/getsentry/cli/pull/1486)
+- (dashboard) Render complete dashboards as sixel by @jared-outpost in [#1410](https://github.com/getsentry/cli/pull/1410)
+- (init) Support project-aware feature selection by @betegon in [#1455](https://github.com/getsentry/cli/pull/1455)
+- (sdk) Add headers option to createSentrySDK by @JPeer264 in [#1465](https://github.com/getsentry/cli/pull/1465)
+- (skill) Steer agents away from manual org/project discovery by @jared-outpost in [#1479](https://github.com/getsentry/cli/pull/1479)
+- (ui) Add kitty graphics protocol support for inline images by @jared-outpost in [#1484](https://github.com/getsentry/cli/pull/1484)
+
+### Bug Fixes 🐛
+
+#### Cli
+
+- Remediate vulnerable dependencies by @BYK in [#1495](https://github.com/getsentry/cli/pull/1495)
+- Close undici global dispatcher on exit by @jared-outpost in [#1488](https://github.com/getsentry/cli/pull/1488)
+- Force-exit safety net for all commands, not just init by @jared-outpost in [#1396](https://github.com/getsentry/cli/pull/1396)
+- Rename AI conversations to agent conversations by @ArthurKnaus in [#1485](https://github.com/getsentry/cli/pull/1485)
+
+#### Other
+
+- (api) Report empty error responses by @BYK in [#1452](https://github.com/getsentry/cli/pull/1452)
+- (conversations) Cap per_page at API_MAX_PER_PAGE and add auto-pagination by @cursor in [#1458](https://github.com/getsentry/cli/pull/1458)
+- (dashboard) Scale Cozette sixel text by @BYK in [#1454](https://github.com/getsentry/cli/pull/1454)
+- (db) Fix TDZ ReferenceError in getConfigDir by @sentry in [#1456](https://github.com/getsentry/cli/pull/1456)
+- (lint) Flag three-arg autoPaginate in prefer-paginate-helper by @jared-outpost in [#1489](https://github.com/getsentry/cli/pull/1489)
+- (release) Make missing git remote for set-commits --auto actionable by @jared-outpost in [#1474](https://github.com/getsentry/cli/pull/1474)
+- (resolve) Skip org/project discovery when the DSN already identifies the target by @jared-outpost in [#1476](https://github.com/getsentry/cli/pull/1476)
+- (schema) Report no-match searches instead of dumping the full list by @jared-outpost in [#1466](https://github.com/getsentry/cli/pull/1466)
+- (sdk) Honor explicit token precedence by @MathurAditya724 in [#1464](https://github.com/getsentry/cli/pull/1464)
+- (seer) Add debug logging to silent catch blocks in seer-trial by @cursor in [#1460](https://github.com/getsentry/cli/pull/1460)
+- (telemetry) Add debug logging to silent catch blocks in completion-telemetry by @cursor in [#1459](https://github.com/getsentry/cli/pull/1459)
+
+### Documentation 📚
+
+- (agentic-usage) Add dotagents install path by @jared-outpost in [#1492](https://github.com/getsentry/cli/pull/1492)
+- Weekly documentation audit — fix DSN table, Zod→Valibot drift, missing env vars, new commands by @cursor in [#1461](https://github.com/getsentry/cli/pull/1461)
+
+### Internal Changes 🔧
+
+- Add darwin-arm64 support to PR builds by @BYK in [#1490](https://github.com/getsentry/cli/pull/1490)
+- Fix another syntax error by @BYK in [b3a4edfa](https://github.com/getsentry/cli/commit/b3a4edfa314b6cd89a52ef92a36338f75374b0c3)
+- Fix syntax error by @BYK in [92853b30](https://github.com/getsentry/cli/commit/92853b30d3258631e905628e7b77507b5016a1d3)
+- Fix eval-skill runs by @BYK in [#1483](https://github.com/getsentry/cli/pull/1483)
+- Remove leftover Bun polyfills from the npm bundle by @jared-outpost in [#1468](https://github.com/getsentry/cli/pull/1468)
+- Regenerate docs by @github-actions[bot] in [9850495c](https://github.com/getsentry/cli/commit/9850495cb1cddb5303df22e0602cdd4523a986a5)
+
 ## 0.43.0
 
 ### New Features ✨
