@@ -145,10 +145,14 @@ export function extractAssetCatalogImages(
     return null;
   }
 
-  const workDir = mkdtempSync(join(tmpdir(), "sentry-car-"));
-  const inputPath = join(workDir, "input.car");
-  const outputDir = join(workDir, "out");
+  // `mkdtempSync` itself can throw (no disk space, bad TMPDIR, permissions), so
+  // it lives inside the try — otherwise the helper's own temp dir would leak
+  // and the throw would escape this function's "never throws" contract.
+  let workDir: string | undefined;
   try {
+    workDir = mkdtempSync(join(tmpdir(), "sentry-car-"));
+    const inputPath = join(workDir, "input.car");
+    const outputDir = join(workDir, "out");
     writeFileSync(inputPath, content);
     const stdout = execFileSync(helper.path, [inputPath, outputDir], {
       encoding: "buffer",
@@ -164,7 +168,9 @@ export function extractAssetCatalogImages(
     log.debug(`Native asset-catalog extraction failed for ${carRelPath}`, err);
     return null;
   } finally {
-    rmSync(workDir, { recursive: true, force: true });
+    if (workDir) {
+      rmSync(workDir, { recursive: true, force: true });
+    }
     if (helper.cleanupDir) {
       rmSync(helper.cleanupDir, { recursive: true, force: true });
     }
