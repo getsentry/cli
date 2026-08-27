@@ -696,12 +696,15 @@ export function normalizeIpa(
     `${archiveDir}/Info.plist`,
     strToU8(xcarchiveInfoPlist(appName)),
   ]);
-  for (const entry of dsymEntries) {
-    archiveEntries.push([
-      `${archiveDir}/dSYMs/${entry.relPath}`,
-      entry.content,
-    ]);
-  }
+  archiveEntries.push(
+    ...dsymEntries.map(
+      (entry) =>
+        [`${archiveDir}/dSYMs/${entry.relPath}`, entry.content] as [
+          string,
+          Uint8Array,
+        ]
+    )
+  );
   archiveEntries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 
   const entries: Zippable = {};
