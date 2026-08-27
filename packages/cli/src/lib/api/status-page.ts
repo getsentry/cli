@@ -87,7 +87,7 @@ type SummaryResponse = {
  * @param baseUrl - Status page base URL (defaults to status.sentry.io). Pass a
  *   custom URL to point at a self-hosted or regional Statuspage instance.
  */
-export function fetchSentryStatus(
+export async function fetchSentryStatus(
   baseUrl: string = SENTRY_STATUS_PAGE_URL
 ): Promise<SentryStatus> {
   const normalized = baseUrl.replace(TRAILING_SLASHES, "");
@@ -110,9 +110,21 @@ export function fetchSentryStatus(
     host.endsWith(".statuspage.io") ||
     host.includes("status");
 
-  return isStatuspageHost
-    ? fetchStatuspageSummary(normalized)
-    : probeSelfHostedHealth(normalized);
+  if (isStatuspageHost) {
+    try {
+      return await fetchStatuspageSummary(normalized);
+    } catch (err) {
+      // Swallow only *unexpected* failures (network, JSON parse, etc.).
+      // Explicit ApiError responses (4xx/5xx) are still reported to the
+      // caller so the existing test expectations and CLI error handling
+      // continue to work.
+      if (!(err instanceof ApiError)) {
+        return probeSelfHostedHealth(normalized);
+      }
+      throw err;
+    }
+  }
+  return probeSelfHostedHealth(normalized);
 }
 
 /** Fetch and shape a Statuspage `/api/v2/summary.json` response. */
