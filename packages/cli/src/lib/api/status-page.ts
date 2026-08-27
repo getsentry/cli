@@ -87,7 +87,7 @@ type SummaryResponse = {
  * @param baseUrl - Status page base URL (defaults to status.sentry.io). Pass a
  *   custom URL to point at a self-hosted or regional Statuspage instance.
  */
-export async function fetchSentryStatus(
+export function fetchSentryStatus(
   baseUrl: string = SENTRY_STATUS_PAGE_URL
 ): Promise<SentryStatus> {
   const normalized = baseUrl.replace(TRAILING_SLASHES, "");
@@ -110,21 +110,9 @@ export async function fetchSentryStatus(
     host.endsWith(".statuspage.io") ||
     host.includes("status");
 
-  if (isStatuspageHost) {
-    try {
-      return await fetchStatuspageSummary(normalized);
-    } catch (err) {
-      // Swallow only *unexpected* failures (network, JSON parse, etc.).
-      // Explicit ApiError responses (4xx/5xx) are still reported to the
-      // caller so the existing test expectations and CLI error handling
-      // continue to work.
-      if (!(err instanceof ApiError)) {
-        return probeSelfHostedHealth(normalized);
-      }
-      throw err;
-    }
-  }
-  return probeSelfHostedHealth(normalized);
+  return isStatuspageHost
+    ? fetchStatuspageSummary(normalized)
+    : probeSelfHostedHealth(normalized);
 }
 
 /** Fetch and shape a Statuspage `/api/v2/summary.json` response. */
@@ -176,11 +164,15 @@ async function fetchStatuspageSummary(
  * Probe a self-hosted Sentry's `/_health/` endpoint. Never throws — network or
  * HTTP failures are reported as a synthetic "major" status so the command can
  * still render something useful when the instance is down.
+ *
+ * Uses `?full=1` so the check exercises every subsystem (Postgres, Redis,
+ * Celery, …) rather than the bare liveness probe: without it Sentry returns
+ * HTTP 200 whenever the web process is up, masking real backend outages.
  */
 async function probeSelfHostedHealth(
   normalized: string
 ): Promise<SentryStatus> {
-  const healthEndpoint = `${normalized}/_health/`;
+  const healthEndpoint = `${normalized}/_health/?full=1`;
   try {
     const resp = await customFetch(healthEndpoint, {
       signal: AbortSignal.timeout(HEALTH_REQUEST_TIMEOUT_MS),

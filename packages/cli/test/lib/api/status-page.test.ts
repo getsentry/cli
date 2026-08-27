@@ -26,7 +26,7 @@ test("self-hosted URL probes /_health/ and returns operational (none) on 200", a
   expect(status.url).toBe("https://example.com");
 
   const [calledUrl, calledInit] = customFetchMock.mock.calls[0] ?? [];
-  expect(calledUrl).toBe("https://example.com/_health/");
+  expect(calledUrl).toBe("https://example.com/_health/?full=1");
   expect(calledInit).toHaveProperty("signal");
 });
 
