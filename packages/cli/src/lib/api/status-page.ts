@@ -19,6 +19,9 @@ export const SENTRY_STATUS_PAGE_URL = "https://status.sentry.io";
 /** Bound the request so a status check never hangs, even during an outage. */
 const STATUS_REQUEST_TIMEOUT_MS = 10_000;
 
+/** Shorter timeout for the lightweight /_health/ probe (self-hosted or sentry.io). */
+const HEALTH_REQUEST_TIMEOUT_MS = 5_000;
+
 /** Matches one or more trailing slashes so base URLs normalize cleanly. */
 const TRAILING_SLASHES = /\/+$/;
 
@@ -166,7 +169,7 @@ async function probeSelfHostedHealth(
   const healthEndpoint = `${normalized}/_health/`;
   try {
     const resp = await customFetch(healthEndpoint, {
-      signal: AbortSignal.timeout(STATUS_REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(HEALTH_REQUEST_TIMEOUT_MS),
     });
 
     return {
