@@ -4,7 +4,13 @@
  * branches in `buildEmptyDiscoveryError`.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -717,6 +723,81 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       const urls = callArgs?.files.map((f) => f.url);
       expect(urls?.some((u) => u?.includes("correct.js.map"))).toBe(true);
       expect(urls?.some((u) => u?.includes("wrong.js.map"))).toBe(false);
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
+  test("pre-existing map debug ID: uploaded on both entries, files untouched", async () => {
+    // What a bundler plugin running with `sourcemaps.disable: 'disable-upload'`
+    // emits: the ID lives on the map, and the bundle is left alone so its
+    // subresource-integrity hash stays valid.
+    const pluginId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const jsPath = join(dir, "app.js");
+    const mapPath = join(dir, "app.js.map");
+    const js = `;!function(){e._sentryDebugIdIdentifier="sentry-dbid-${pluginId}"}();\nconsole.log(1)\n//# sourceMappingURL=app.js.map\n`;
+    const map = JSON.stringify({
+      version: 3,
+      sources: ["app.ts"],
+      names: [],
+      mappings: "AAAA",
+      debug_id: pluginId,
+    });
+    writeFileSync(jsPath, js);
+    writeFileSync(mapPath, map);
+
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
+    try {
+      const ctx = makeContext();
+      await func.call(ctx, {}, dir);
+      const files = uploadSpy.mock.calls[0]?.[0]?.files ?? [];
+      expect(files).toHaveLength(2);
+      expect(files.find((f) => f.type === "minified_source")?.debugId).toBe(
+        pluginId
+      );
+      expect(files.find((f) => f.type === "source_map")?.debugId).toBe(
+        pluginId
+      );
+      expect(readFileSync(jsPath, "utf-8")).toBe(js);
+      expect(readFileSync(mapPath, "utf-8")).toBe(map);
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
+  test("pre-existing inline map debug ID: uploaded on both entries", async () => {
+    const pluginId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const jsPath = join(dir, "inline-plugin.js");
+    const map = {
+      version: 3,
+      sources: ["a.ts"],
+      names: [],
+      mappings: "AAAA",
+      debug_id: pluginId,
+    };
+    const dataUrl = `data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString("base64")}`;
+    const js = `console.log(1)\n//# sourceMappingURL=${dataUrl}\n`;
+    writeFileSync(jsPath, js);
+
+    const uploadSpy = vi
+      .spyOn(sourcemapsApi, "uploadSourcemaps")
+      .mockResolvedValue(undefined);
+    try {
+      const ctx = makeContext();
+      await func.call(ctx, {}, dir);
+      const files = uploadSpy.mock.calls[0]?.[0]?.files ?? [];
+      expect(files).toHaveLength(2);
+      const mapFile = files.find((f) => f.type === "source_map");
+      expect(files.find((f) => f.type === "minified_source")?.debugId).toBe(
+        pluginId
+      );
+      expect(mapFile?.debugId).toBe(pluginId);
+      expect(
+        JSON.parse((mapFile?.content as Buffer).toString("utf-8")).debug_id
+      ).toBe(pluginId);
+      expect(readFileSync(jsPath, "utf-8")).toBe(js);
     } finally {
       uploadSpy.mockRestore();
     }
