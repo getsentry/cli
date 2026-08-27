@@ -39,6 +39,7 @@ import {
   Unzip,
   type UnzipFile,
   UnzipInflate,
+  UnzipPassThrough,
   unzipSync,
 } from "fflate";
 import { CLI_VERSION } from "../constants.js";
@@ -151,6 +152,7 @@ export async function detectBuildFormatFromFile(
     const names: string[] = [];
     const unzip = new Unzip();
     unzip.register(UnzipInflate);
+    unzip.register(UnzipPassThrough);
     // Record each entry name but never call `file.start()`, so fflate skips the
     // entry's data entirely (no decompression, no buffering).
     unzip.onfile = (file: UnzipFile) => {
@@ -489,6 +491,7 @@ async function stageIpaPayload(
 
   const unzip = new Unzip();
   unzip.register(UnzipInflate);
+  unzip.register(UnzipPassThrough);
   unzip.onfile = (file: UnzipFile) => {
     const wanted = !file.name.endsWith("/") && file.name.startsWith("Payload/");
     if (!wanted) {
