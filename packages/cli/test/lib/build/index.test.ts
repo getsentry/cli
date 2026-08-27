@@ -499,4 +499,46 @@ describe("collectDsymEntries", () => {
       "cannot be symlinks"
     );
   });
+
+  test("rejects a symlink entry stored inside a ZIP", async () => {
+    const root = makeTmp();
+    const zip = join(root, "symlink.zip");
+    // Craft a ZIP where one entry is stored as a Unix symlink (S_IFLNK) via
+    // fflate's external-attributes option; unzipSync would silently turn it
+    // into a regular file, so extraction must reject it.
+    const symlinkAttrs = ((0o120777 << 16) >>> 0);
+    writeFileSync(
+      zip,
+      zipSync({
+        "DemoApp.app.dSYM/Contents/Resources/DWARF/sym": strToU8("real"),
+        "DemoApp.app.dSYM/evil": [strToU8("/etc/passwd"), { attrs: symlinkAttrs }],
+      })
+    );
+    await expect(collectDsymEntries([zip])).rejects.toThrow(
+      "Symlinks are not supported in dSYM ZIPs"
+    );
+  });
+
+  test("rejects a ZIP entry that escapes the extraction dir via ..\\", async () => {
+    const root = makeTmp();
+    const zip = join(root, "traversal.zip");
+    writeFileSync(
+      zip,
+      zipSync({
+        "DemoApp.app.dSYM/Contents/Resources/DWARF/sym": strToU8("ok"),
+        "..\\..\\escape": strToU8("evil"),
+      })
+    );
+    // Backslash traversal is skipped, so no bundle-escaping write occurs; the
+    // valid bundle is still collected.
+    const entries = await collectDsymEntries([zip]);
+    expect(
+      entries.some((e) => e.relPath.includes("escape"))
+    ).toBe(false);
+    expect(
+      entries.some(
+        (e) => e.relPath === "DemoApp.app.dSYM/Contents/Resources/DWARF/sym"
+      )
+    ).toBe(true);
+  });
 });

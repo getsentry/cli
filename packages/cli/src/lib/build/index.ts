@@ -35,7 +35,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { strToU8, unzipSync, type Zippable, zipSync } from "fflate";
 import { CLI_VERSION } from "../constants.js";
 import { ValidationError } from "../errors.js";
@@ -450,23 +450,61 @@ async function discoverDsymBundles(
   return bundles;
 }
 
+/**
+ * Names of ZIP entries stored as symlinks (Unix mode `S_IFLNK`).
+ *
+ * fflate's `unzipSync` drops file attributes, so a symlink entry would silently
+ * materialize as a regular file holding the link target. We parse the central
+ * directory ourselves to read the external-attributes field and reject any
+ * symlink up front, matching the reference implementation.
+ */
+function zipSymlinkNames(zipBytes: Uint8Array): Set<string> {
+  const symlinks = new Set<string>();
+  const view = new DataView(
+    zipBytes.buffer,
+    zipBytes.byteOffset,
+    zipBytes.byteLength
+  );
+  const decoder = new TextDecoder();
+  const CENTRAL_SIG = 0x02014b50;
+  const S_IFLNK = 0xa000;
+  for (let i = 0; i + 4 <= zipBytes.length; i++) {
+    if (view.getUint32(i, true) !== CENTRAL_SIG) {
+      continue;
+    }
+    const nameLen = view.getUint16(i + 28, true);
+    const extraLen = view.getUint16(i + 30, true);
+    const commentLen = view.getUint16(i + 32, true);
+    const externalAttrs = view.getUint32(i + 38, true);
+    const unixMode = externalAttrs >>> 16;
+    const nameStart = i + 46;
+    const name = decoder.decode(zipBytes.subarray(nameStart, nameStart + nameLen));
+    if ((unixMode & 0xf000) === S_IFLNK) {
+      symlinks.add(name);
+    }
+    i = nameStart + nameLen + extraLen + commentLen - 1;
+  }
+  return symlinks;
+}
+
 /** Extract a dSYM ZIP into `destDir`, skipping macOS metadata and unsafe paths.
- * Rejects any `..` segment (forward or backslash) and verifies the resolved
- * target stays inside `destDir` (covers Windows `..\\`).
+ * Rejects symlink entries and any path that would escape `destDir` (including
+ * Windows `..\\` segments).
  */
 async function extractDsymZip(
   zipBytes: Uint8Array,
   destDir: string
 ): Promise<void> {
-  const safeJoin = (base: string, rel: string): string => {
-    const resolved = resolve(base, rel.replace(/\\/g, "/"));
-    if (!resolved.startsWith(base + "/") && resolved !== base) {
-      throw new ValidationError(
-        `Unsafe path in dSYM ZIP: ${rel}`,
-        "dsym"
-      );
+  const base = resolve(destDir);
+  const symlinks = zipSymlinkNames(zipBytes);
+
+  const safeJoin = (rel: string): string => {
+    const target = resolve(base, rel.replace(/\\/g, "/"));
+    const rel2 = relative(base, target);
+    if (rel2 === "" || rel2.startsWith("..") || isAbsolute(rel2)) {
+      throw new ValidationError(`Unsafe path in dSYM ZIP: ${rel}`, "dsym");
     }
-    return resolved;
+    return target;
   };
 
   for (const [name, bytes] of Object.entries(unzipSync(zipBytes))) {
@@ -476,7 +514,13 @@ async function extractDsymZip(
     if (isMacosMetadata(name)) {
       continue;
     }
-    const target = safeJoin(destDir, name);
+    if (symlinks.has(name)) {
+      throw new ValidationError(
+        `Symlinks are not supported in dSYM ZIPs: ${name}`,
+        "dsym"
+      );
+    }
+    const target = safeJoin(name);
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, bytes);
   }
@@ -518,16 +562,6 @@ export async function collectDsymEntries(
       if (stats.isFile()) {
         tempDir = await mkdtemp(join(tmpdir(), "sentry-dsym-"));
         await extractDsymZip(await readFile(input), tempDir);
-        // Explicitly reject any symlink that somehow appeared (fflate never
-        // produces them, but we guarantee the invariant regardless of parser).
-        for (const entry of await readdir(tempDir, { withFileTypes: true })) {
-          if (entry.isSymbolicLink()) {
-            throw new ValidationError(
-              `Symlinks are not supported in dSYM ZIPs: ${join(tempDir, entry.name)}`,
-              "dsym"
-            );
-          }
-        }
         root = tempDir;
         allowWrapper = true;
       } else if (!stats.isDirectory()) {
