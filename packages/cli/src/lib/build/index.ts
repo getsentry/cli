@@ -450,19 +450,33 @@ async function discoverDsymBundles(
   return bundles;
 }
 
-/** Extract a dSYM ZIP into `destDir`, skipping macOS metadata and unsafe paths. */
+/** Extract a dSYM ZIP into `destDir`, skipping macOS metadata and unsafe paths.
+ * Rejects any `..` segment (forward or backslash) and verifies the resolved
+ * target stays inside `destDir` (covers Windows `..\\`).
+ */
 async function extractDsymZip(
   zipBytes: Uint8Array,
   destDir: string
 ): Promise<void> {
+  const safeJoin = (base: string, rel: string): string => {
+    const resolved = resolve(base, rel.replace(/\\/g, "/"));
+    if (!resolved.startsWith(base + "/") && resolved !== base) {
+      throw new ValidationError(
+        `Unsafe path in dSYM ZIP: ${rel}`,
+        "dsym"
+      );
+    }
+    return resolved;
+  };
+
   for (const [name, bytes] of Object.entries(unzipSync(zipBytes))) {
-    if (name.endsWith("/") || name.split("/").includes("..")) {
+    if (name.endsWith("/") || name.split(/[/\\]/).includes("..")) {
       continue;
     }
     if (isMacosMetadata(name)) {
       continue;
     }
-    const target = join(destDir, name);
+    const target = safeJoin(destDir, name);
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, bytes);
   }
@@ -504,6 +518,16 @@ export async function collectDsymEntries(
       if (stats.isFile()) {
         tempDir = await mkdtemp(join(tmpdir(), "sentry-dsym-"));
         await extractDsymZip(await readFile(input), tempDir);
+        // Explicitly reject any symlink that somehow appeared (fflate never
+        // produces them, but we guarantee the invariant regardless of parser).
+        for (const entry of await readdir(tempDir, { withFileTypes: true })) {
+          if (entry.isSymbolicLink()) {
+            throw new ValidationError(
+              `Symlinks are not supported in dSYM ZIPs: ${join(tempDir, entry.name)}`,
+              "dsym"
+            );
+          }
+        }
         root = tempDir;
         allowWrapper = true;
       } else if (!stats.isDirectory()) {
