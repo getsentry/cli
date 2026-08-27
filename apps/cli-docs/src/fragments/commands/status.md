@@ -24,6 +24,6 @@ sentry status --json
 ```
 
 ```bash
-# Check a self-hosted or regional status page
-sentry status --url https://status.example.com
+# Check a self-hosted or regional status page (Statuspage CNAME)
+sentry status --url https://status.acme.com
 ```

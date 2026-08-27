@@ -100,13 +100,15 @@ export function fetchSentryStatus(
   } catch {
     parsedUrl = undefined;
   }
-  const host = parsedUrl?.hostname.toLowerCase();
+  const host = parsedUrl?.hostname.toLowerCase() ?? "";
   // Sentry's public status page (status.sentry.io) is a Statuspage instance,
-  // as are any *.statuspage.io hosts. Everything else is treated as a
-  // self-hosted Sentry and probed via /_health/.
-  const isStatuspageHost = host
-    ? host === "status.sentry.io" || host.endsWith(".statuspage.io")
-    : false;
+  // as are any *.statuspage.io hosts and common CNAMEs containing "status"
+  // (status.example.com, statuspage.acme.com, …). Everything else falls back
+  // to the lightweight self-hosted /_health/ probe.
+  const isStatuspageHost =
+    host === "status.sentry.io" ||
+    host.endsWith(".statuspage.io") ||
+    host.includes("status");
 
   return isStatuspageHost
     ? fetchStatuspageSummary(normalized)

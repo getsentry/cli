@@ -57,3 +57,20 @@ test("default status.sentry.io uses the Statuspage summary endpoint", async () =
   const [calledUrl] = customFetchMock.mock.calls[0] ?? [];
   expect(calledUrl).toBe("https://status.sentry.io/api/v2/summary.json");
 });
+
+test("custom Statuspage CNAME uses the summary endpoint", async () => {
+  customFetchMock.mockResolvedValue(
+    Response.json({
+      page: { url: "https://status.acme.com" },
+      status: { indicator: "minor", description: "Minor Service Outage" },
+      components: [],
+      incidents: [],
+    })
+  );
+
+  const status = await fetchSentryStatus("https://status.acme.com");
+
+  expect(status.indicator).toBe("minor");
+  const [calledUrl] = customFetchMock.mock.calls[0] ?? [];
+  expect(calledUrl).toBe("https://status.acme.com/api/v2/summary.json");
+});
