@@ -11,6 +11,7 @@
  */
 
 import { ApiError } from "../errors.js";
+import { customFetch } from "../custom-ca.js";
 
 /** Default Sentry status page base URL. */
 export const SENTRY_STATUS_PAGE_URL = "https://status.sentry.io";
@@ -87,43 +88,92 @@ export async function fetchSentryStatus(
   baseUrl: string = SENTRY_STATUS_PAGE_URL
 ): Promise<SentryStatus> {
   const normalized = baseUrl.replace(TRAILING_SLASHES, "");
-  const endpoint = `${normalized}/api/v2/summary.json`;
 
-  const response = await fetch(endpoint, {
-    signal: AbortSignal.timeout(STATUS_REQUEST_TIMEOUT_MS),
-  });
-
-  if (!response.ok) {
-    throw new ApiError(
-      "Failed to fetch Sentry status",
-      response.status,
-      await response.text(),
-      endpoint
-    );
+  // Statuspage hosts (statuspage.io) use the /api/v2/summary.json flow.
+  // All other hosts (self-hosted) are probed via the generic /_health/ endpoint.
+  let parsedUrl: URL | undefined;
+  try {
+    parsedUrl = new URL(normalized);
+  } catch {
+    parsedUrl = undefined;
   }
+  const isStatuspageHost = parsedUrl
+    ? parsedUrl.hostname.endsWith("statuspage.io")
+    : false;
 
-  const summary = (await response.json()) as SummaryResponse;
+  if (isStatuspageHost) {
+    const endpoint = `${normalized}/api/v2/summary.json`;
 
-  const components: StatusComponent[] = (summary.components ?? [])
-    // Group headers carry no operational status of their own.
-    .filter((c) => !c.group && typeof c.name === "string")
-    .map((c) => ({
-      name: c.name as string,
-      status: (c.status as ComponentStatus) ?? "operational",
+    const response = await customFetch(endpoint, {
+      signal: AbortSignal.timeout(STATUS_REQUEST_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      throw new ApiError(
+        "Failed to fetch Sentry status",
+        response.status,
+        await response.text(),
+        endpoint
+      );
+    }
+
+    const summary = (await response.json()) as SummaryResponse;
+
+    const components: StatusComponent[] = (summary.components ?? [])
+      // Group headers carry no operational status of their own.
+      .filter((c) => !c.group && typeof c.name === "string")
+      .map((c) => ({
+        name: c.name as string,
+        status: (c.status as ComponentStatus) ?? "operational",
+      }));
+
+    const incidents: StatusIncident[] = (summary.incidents ?? []).map((i) => ({
+      name: i.name ?? "Unnamed incident",
+      status: i.status ?? "unknown",
+      impact: i.impact ?? "none",
+      shortlink: i.shortlink ?? normalized,
     }));
 
-  const incidents: StatusIncident[] = (summary.incidents ?? []).map((i) => ({
-    name: i.name ?? "Unnamed incident",
-    status: i.status ?? "unknown",
-    impact: i.impact ?? "none",
-    shortlink: i.shortlink ?? normalized,
-  }));
+    return {
+      indicator: (summary.status?.indicator as StatusIndicator) ?? "none",
+      description: summary.status?.description ?? "Unknown",
+      url: summary.page?.url ?? normalized,
+      components,
+      incidents,
+    };
+  }
 
-  return {
-    indicator: (summary.status?.indicator as StatusIndicator) ?? "none",
-    description: summary.status?.description ?? "Unknown",
-    url: summary.page?.url ?? normalized,
-    components,
-    incidents,
-  };
+  // Self-hosted fallback: probe /_health/ (never throws; returns synthetic status).
+  const healthEndpoint = `${normalized}/_health/`;
+  try {
+    const resp = await customFetch(healthEndpoint, {
+      signal: AbortSignal.timeout(STATUS_REQUEST_TIMEOUT_MS),
+    });
+
+    if (resp.ok) {
+      return {
+        indicator: "none",
+        description: resp.statusText || "OK",
+        url: normalized,
+        components: [],
+        incidents: [],
+      };
+    }
+
+    return {
+      indicator: "major",
+      description: resp.statusText || `HTTP ${resp.status}`,
+      url: normalized,
+      components: [],
+      incidents: [],
+    };
+  } catch (err) {
+    return {
+      indicator: "major",
+      description: err instanceof Error ? err.message : String(err),
+      url: normalized,
+      components: [],
+      incidents: [],
+    };
+  }
 }
