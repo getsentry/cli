@@ -3,7 +3,9 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { fetchSentryStatus } from "../../../src/lib/api/status-page.js";
 
 const { customFetchMock } = vi.hoisted(() => ({ customFetchMock: vi.fn() }));
-vi.mock("../../../src/lib/custom-ca.js", () => ({ customFetch: customFetchMock }));
+vi.mock("../../../src/lib/custom-ca.js", () => ({
+  customFetch: customFetchMock,
+}));
 
 beforeEach(() => {
   customFetchMock.mockReset();
@@ -37,4 +39,21 @@ test("self-hosted URL reports major on non-2xx", async () => {
 
   expect(status.indicator).toBe("major");
   expect(status.description).toContain("Service Unavailable");
+});
+
+test("default status.sentry.io uses the Statuspage summary endpoint", async () => {
+  customFetchMock.mockResolvedValue(
+    Response.json({
+      page: { url: "https://status.sentry.io" },
+      status: { indicator: "none", description: "All Systems Operational" },
+      components: [],
+      incidents: [],
+    })
+  );
+
+  const status = await fetchSentryStatus();
+
+  expect(status.description).toBe("All Systems Operational");
+  const [calledUrl] = customFetchMock.mock.calls[0] ?? [];
+  expect(calledUrl).toBe("https://status.sentry.io/api/v2/summary.json");
 });

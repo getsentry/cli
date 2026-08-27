@@ -10,8 +10,8 @@
  * Sentry API itself is degraded.
  */
 
-import { ApiError } from "../errors.js";
 import { customFetch } from "../custom-ca.js";
+import { ApiError } from "../errors.js";
 
 /** Default Sentry status page base URL. */
 export const SENTRY_STATUS_PAGE_URL = "https://status.sentry.io";
@@ -84,7 +84,7 @@ type SummaryResponse = {
  * @param baseUrl - Status page base URL (defaults to status.sentry.io). Pass a
  *   custom URL to point at a self-hosted or regional Statuspage instance.
  */
-export async function fetchSentryStatus(
+export function fetchSentryStatus(
   baseUrl: string = SENTRY_STATUS_PAGE_URL
 ): Promise<SentryStatus> {
   const normalized = baseUrl.replace(TRAILING_SLASHES, "");
@@ -97,72 +97,81 @@ export async function fetchSentryStatus(
   } catch {
     parsedUrl = undefined;
   }
-  const isStatuspageHost = parsedUrl
-    ? parsedUrl.hostname.endsWith("statuspage.io")
+  const host = parsedUrl?.hostname.toLowerCase();
+  // Sentry's public status page (status.sentry.io) is a Statuspage instance,
+  // as are any *.statuspage.io hosts. Everything else is treated as a
+  // self-hosted Sentry and probed via /_health/.
+  const isStatuspageHost = host
+    ? host === "status.sentry.io" || host.endsWith(".statuspage.io")
     : false;
 
-  if (isStatuspageHost) {
-    const endpoint = `${normalized}/api/v2/summary.json`;
+  return isStatuspageHost
+    ? fetchStatuspageSummary(normalized)
+    : probeSelfHostedHealth(normalized);
+}
 
-    const response = await customFetch(endpoint, {
-      signal: AbortSignal.timeout(STATUS_REQUEST_TIMEOUT_MS),
-    });
+/** Fetch and shape a Statuspage `/api/v2/summary.json` response. */
+async function fetchStatuspageSummary(
+  normalized: string
+): Promise<SentryStatus> {
+  const endpoint = `${normalized}/api/v2/summary.json`;
 
-    if (!response.ok) {
-      throw new ApiError(
-        "Failed to fetch Sentry status",
-        response.status,
-        await response.text(),
-        endpoint
-      );
-    }
+  const response = await customFetch(endpoint, {
+    signal: AbortSignal.timeout(STATUS_REQUEST_TIMEOUT_MS),
+  });
 
-    const summary = (await response.json()) as SummaryResponse;
-
-    const components: StatusComponent[] = (summary.components ?? [])
-      // Group headers carry no operational status of their own.
-      .filter((c) => !c.group && typeof c.name === "string")
-      .map((c) => ({
-        name: c.name as string,
-        status: (c.status as ComponentStatus) ?? "operational",
-      }));
-
-    const incidents: StatusIncident[] = (summary.incidents ?? []).map((i) => ({
-      name: i.name ?? "Unnamed incident",
-      status: i.status ?? "unknown",
-      impact: i.impact ?? "none",
-      shortlink: i.shortlink ?? normalized,
-    }));
-
-    return {
-      indicator: (summary.status?.indicator as StatusIndicator) ?? "none",
-      description: summary.status?.description ?? "Unknown",
-      url: summary.page?.url ?? normalized,
-      components,
-      incidents,
-    };
+  if (!response.ok) {
+    throw new ApiError(
+      "Failed to fetch Sentry status",
+      response.status,
+      await response.text(),
+      endpoint
+    );
   }
 
-  // Self-hosted fallback: probe /_health/ (never throws; returns synthetic status).
+  const summary = (await response.json()) as SummaryResponse;
+
+  const components: StatusComponent[] = (summary.components ?? [])
+    // Group headers carry no operational status of their own.
+    .filter((c) => !c.group && typeof c.name === "string")
+    .map((c) => ({
+      name: c.name as string,
+      status: (c.status as ComponentStatus) ?? "operational",
+    }));
+
+  const incidents: StatusIncident[] = (summary.incidents ?? []).map((i) => ({
+    name: i.name ?? "Unnamed incident",
+    status: i.status ?? "unknown",
+    impact: i.impact ?? "none",
+    shortlink: i.shortlink ?? normalized,
+  }));
+
+  return {
+    indicator: (summary.status?.indicator as StatusIndicator) ?? "none",
+    description: summary.status?.description ?? "Unknown",
+    url: summary.page?.url ?? normalized,
+    components,
+    incidents,
+  };
+}
+
+/**
+ * Probe a self-hosted Sentry's `/_health/` endpoint. Never throws — network or
+ * HTTP failures are reported as a synthetic "major" status so the command can
+ * still render something useful when the instance is down.
+ */
+async function probeSelfHostedHealth(
+  normalized: string
+): Promise<SentryStatus> {
   const healthEndpoint = `${normalized}/_health/`;
   try {
     const resp = await customFetch(healthEndpoint, {
       signal: AbortSignal.timeout(STATUS_REQUEST_TIMEOUT_MS),
     });
 
-    if (resp.ok) {
-      return {
-        indicator: "none",
-        description: resp.statusText || "OK",
-        url: normalized,
-        components: [],
-        incidents: [],
-      };
-    }
-
     return {
-      indicator: "major",
-      description: resp.statusText || `HTTP ${resp.status}`,
+      indicator: resp.ok ? "none" : "major",
+      description: resp.statusText || (resp.ok ? "OK" : `HTTP ${resp.status}`),
       url: normalized,
       components: [],
       incidents: [],
