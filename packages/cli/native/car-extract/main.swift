@@ -43,6 +43,18 @@ let outputDir = args[2]
 try? FileManager.default.createDirectory(
   atPath: outputDir, withIntermediateDirectories: true)
 
+// CoreUI is a private framework, so it isn't linked at build time and its
+// classes aren't registered in the process until the dylib is loaded.
+// dlopen it first; NSClassFromString only finds already-registered classes and
+// would otherwise return nil even on a system that has CoreUI.
+let coreUIPaths = [
+  "/System/Library/PrivateFrameworks/CoreUI.framework/CoreUI",
+  "/System/Library/PrivateFrameworks/CoreUI.framework/Versions/A/CoreUI",
+]
+if !coreUIPaths.contains(where: { dlopen($0, RTLD_LAZY) != nil }) {
+  fail("could not load the CoreUI private framework")
+}
+
 // CUICatalog(URL:error:) opens the catalog; allImageNames() lists renditions;
 // imagesWithName: returns CUINamedImage instances (one per scale/idiom).
 guard let catalogClass = NSClassFromString("CUICatalog") as? NSObject.Type else {

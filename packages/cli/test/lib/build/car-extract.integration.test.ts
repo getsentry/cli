@@ -36,7 +36,8 @@ function hasAssetToolchain(): boolean {
     return false;
   }
   try {
-    execFileSync("actool", ["--version"], { stdio: "ignore" });
+    // actool ships inside Xcode, not on PATH — locate it via xcrun.
+    execFileSync("xcrun", ["--find", "actool"], { stdio: "ignore" });
     execFileSync("swiftc", ["--version"], { stdio: "ignore" });
     return true;
   } catch {
@@ -75,8 +76,9 @@ function compileAssetCatalog(workDir: string): string {
   const outDir = join(workDir, "compiled");
   mkdirSync(outDir, { recursive: true });
   execFileSync(
-    "actool",
+    "xcrun",
     [
+      "actool",
       xcassets,
       "--compile",
       outDir,
@@ -104,12 +106,14 @@ describe.skipIf(!toolchainAvailable)("car-extract (native CoreUI)", () => {
   let helper: string | null = null;
 
   beforeAll(() => {
-    // Compile the Swift helper against the package root (SOURCE/OUTPUT are
-    // resolved relative to cwd there).
+    // buildCarExtract resolves SOURCE/OUTPUT relative to cwd, so run it from
+    // the package root. It returns a package-relative path; resolve it against
+    // PKG_ROOT so it's still valid after the cwd is restored.
     const prev = process.cwd();
     process.chdir(PKG_ROOT);
     try {
-      helper = buildCarExtract();
+      const out = buildCarExtract();
+      helper = out === null ? null : join(PKG_ROOT, out);
     } finally {
       process.chdir(prev);
     }
