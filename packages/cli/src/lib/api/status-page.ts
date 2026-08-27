@@ -20,7 +20,7 @@ export const SENTRY_STATUS_PAGE_URL = "https://status.sentry.io";
 const STATUS_REQUEST_TIMEOUT_MS = 10_000;
 
 /** Shorter timeout for the lightweight /_health/ probe (self-hosted or sentry.io). */
-const HEALTH_REQUEST_TIMEOUT_MS = 5_000;
+const HEALTH_REQUEST_TIMEOUT_MS = 5000;
 
 /** Matches one or more trailing slashes so base URLs normalize cleanly. */
 const TRAILING_SLASHES = /\/+$/;
