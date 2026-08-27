@@ -27,8 +27,8 @@ sentry status
 # Get machine-readable status (useful in scripts)
 sentry status --json
 
-# Check a self-hosted or regional status page
-sentry status --url https://status.example.com
+# Check a self-hosted or regional status page (Statuspage CNAME)
+sentry status --url https://status.acme.com
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
