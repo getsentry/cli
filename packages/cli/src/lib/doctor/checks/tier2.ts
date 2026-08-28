@@ -82,6 +82,59 @@ const initPresent: Check = {
   },
 };
 
+const androidDoubleInit: Check = {
+  id: "android.double_init",
+  run: ({ capture }) => {
+    const manifests = capture.initSites.filter(
+      (b) => b.kind === "android-manifest"
+    );
+    const code = capture.initSites.filter((b) => !AUTO_INIT_KINDS.has(b.kind));
+    if (manifests.length === 0 || code.length === 0) {
+      return {
+        id: "android.double_init",
+        status: "skip",
+        detail:
+          "No Android manifest alongside a code init, so auto-init cannot double-fire.",
+      };
+    }
+
+    const flags = manifests.map((b) => b.keys["auto-init"]);
+    if (flags.some((k) => k && !k.dynamic && k.value === "false")) {
+      return {
+        id: "android.double_init",
+        status: "pass",
+        detail:
+          "`io.sentry.auto-init` is false, so the code init is the only one.",
+        evidence: [...manifests, ...code].map((b) => ({
+          file: b.file,
+          line: b.line,
+        })),
+      };
+    }
+    if (flags.some((k) => k?.dynamic)) {
+      return {
+        id: "android.double_init",
+        status: "skip",
+        detail:
+          "`auto-init` is set from a runtime expression; whether it is false could not be read.",
+      };
+    }
+
+    return {
+      id: "android.double_init",
+      status: "warn",
+      detail:
+        "SentryAndroid.init runs in code while Android auto-init is still on, so Sentry initializes twice.",
+      evidence: [...manifests, ...code].map((b) => ({
+        file: b.file,
+        line: b.line,
+      })),
+      remediation:
+        "Set `io.sentry.auto-init` to `false` in AndroidManifest.xml when you call SentryAndroid.init yourself.",
+    };
+  },
+};
+
 const configDsnSet: Check = {
   id: "config.dsn_set",
   run: ({ capture }) => {
@@ -175,7 +228,15 @@ const configDebug: Check = {
   },
 };
 
-const SAMPLE_RATE_KEYS = ["tracesSampleRate", "traces_sample_rate"] as const;
+/** Error `sampleRate` / `sample_rate` / `sample-rate` — 1.0 is the default. */
+function isSampleRateKey(name: string): boolean {
+  const n = name.replace(/[-_]/g, "").toLowerCase();
+  // Replay on-error rate is meant to be 1.0.
+  if (n.includes("onerror")) {
+    return false;
+  }
+  return n.includes("sample") && n.endsWith("rate") && n !== "samplerate";
+}
 
 function judgeSampleRate(
   site: CapturedBlock,
@@ -186,16 +247,16 @@ function judgeSampleRate(
     return {
       id: "config.sample_rate",
       status: "warn",
-      detail: `${key} is 0, so no performance data is sent.`,
+      detail: `${key} is 0, so nothing is sent.`,
       evidence: [{ file: site.file, line: site.line }],
-      remediation: `Raise ${key} above 0, or remove it if you do not want tracing.`,
+      remediation: `Raise ${key} above 0, or remove it if you do not want this signal.`,
     };
   }
   if (rate === 1) {
     return {
       id: "config.sample_rate",
       status: "warn",
-      detail: `${key} is 1.0, which sends every transaction — fine in development, expensive in production.`,
+      detail: `${key} is 1.0, which samples everything — fine in development, expensive in production.`,
       evidence: [{ file: site.file, line: site.line }],
       remediation: `Lower ${key} for production builds, or drive it from your environment.`,
     };
@@ -209,9 +270,12 @@ const configSampleRate: Check = {
     const results: CheckResult[] = [];
 
     for (const site of capture.initSites) {
-      for (const key of SAMPLE_RATE_KEYS) {
-        const entry = site.keys[key];
-        if (!entry || entry.dynamic || entry.value === undefined) {
+      for (const [key, entry] of Object.entries(site.keys)) {
+        if (
+          !(isSampleRateKey(key) && entry) ||
+          entry.dynamic ||
+          entry.value === undefined
+        ) {
           continue;
         }
         const rate = Number(entry.value);
@@ -230,7 +294,7 @@ const configSampleRate: Check = {
       : {
           id: "config.sample_rate",
           status: "pass",
-          detail: "Trace sampling is not set to an extreme value.",
+          detail: "No sampling option is set to an extreme value.",
         };
   },
 };
@@ -290,6 +354,7 @@ const captureComplete: Check = {
 
 export const TIER2_CHECKS: readonly Check[] = [
   initPresent,
+  androidDoubleInit,
   configDsnSet,
   configEnvironment,
   configDebug,

@@ -1,7 +1,7 @@
 /**
  * The support export: the report, sent to Sentry, only if asked in person.
  *
- * Four gates, and every one of them is a reason not to ask. The report is
+ * Two gates, and every one of them is a reason not to ask. The report is
  * already on stdout — `sentry doctor --json` is the primary path and this is
  * a convenience, so a silent no-op is always an acceptable outcome here.
  */
@@ -15,56 +15,78 @@ import type { DoctorReport } from "./render.js";
 
 const FLUSH_TIMEOUT_MS = 3000;
 
+/** This payload is opt-in. Telemetry-off must not swallow a yes. */
+async function sendSupportReport(
+  report: DoctorReport,
+  summary: string
+): Promise<void> {
+  const body = JSON.stringify(report, null, 2);
+  const client = Sentry.getClient();
+  const opts = client?.getOptions();
+  const wasOff = opts?.enabled === false;
+  if (wasOff && opts) {
+    opts.enabled = true;
+  }
+  try {
+    const { getUserInfo } = await import("../db/user.js");
+    const user = getUserInfo();
+    Sentry.captureFeedback(
+      {
+        message: `sentry doctor report — ${summary}`,
+        email: user?.email,
+        name: user?.name ?? user?.username,
+      },
+      {
+        attachments: [
+          {
+            filename: "sentry-doctor-report.json",
+            data: body,
+            contentType: "application/json",
+          },
+        ],
+      }
+    );
+    await Sentry.flush(FLUSH_TIMEOUT_MS);
+  } finally {
+    if (wasOff && opts) {
+      opts.enabled = false;
+    }
+  }
+}
+
 export async function offerSupportExport(
   report: DoctorReport
 ): Promise<boolean> {
-  const failing = report.results.filter((r) => r.status === "fail");
-
-  // Gate 1: nothing to send.
-  if (failing.length === 0) {
-    return false;
-  }
-  // Gates 2 and 3: nobody is here to consent, or the party present cannot
-  // consent on the user's behalf.
+  // Nobody is here to consent, or the party present cannot consent
+  // on the user's behalf.
   if (!isatty(0) || detectAgent() !== undefined) {
     return false;
   }
-  // Gate 4: the telemetry gate `feedback.ts` already enforces. Saying so beats
-  // prompting for something that would then fail.
-  if (!Sentry.isEnabled()) {
-    logger.debug("Doctor support export skipped: telemetry disabled");
-    return false;
-  }
 
+  const failing = report.results.filter((r) => r.status === "fail");
   const ids = failing.map((r) => r.id).join(", ");
+  const summary =
+    failing.length > 0
+      ? `${failing.length} failing check(s): ${ids}`
+      : "no failing checks";
   const answer = await logger.prompt(
-    `Send this report to Sentry support? (${failing.length} failing check(s): ${ids})`,
-    { type: "confirm", initial: false }
+    `Send this report to Sentry support? (${summary})`,
+    {
+      type: "confirm",
+      initial: false,
+    }
   );
   // Symbol(clack:cancel) is truthy — strict equality check
   if (answer !== true) {
     return false;
   }
 
-  const body = JSON.stringify(report, null, 2);
+  await sendSupportReport(report, summary);
 
-  Sentry.captureFeedback(
-    {
-      name: "sentry doctor",
-      message: `sentry doctor report — failing: ${ids}`,
-    },
-    {
-      attachments: [
-        {
-          filename: "sentry-doctor-report.json",
-          data: body,
-          contentType: "application/json",
-        },
-      ],
-    }
+  logger.success(
+    failing.length > 0
+      ? "Report sent. Reference the failing check ids with support."
+      : "Report sent."
   );
-  await Sentry.flush(FLUSH_TIMEOUT_MS);
-
-  logger.success("Report sent. Reference the failing check ids with support.");
   return true;
 }

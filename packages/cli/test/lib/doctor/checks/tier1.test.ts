@@ -70,6 +70,7 @@ describe("tier 1", () => {
   it("fails when no DSN is present anywhere", () => {
     const results = run(makeCapture({ dsns: [] }), { reachable: false });
     expect(results.get("dsn.present")?.status).toBe("fail");
+    expect(results.get("dsn.conflict")?.status).toBe("skip");
   });
 
   it("fails on a placeholder DSN copied from the docs", () => {
@@ -102,6 +103,15 @@ describe("tier 1", () => {
       dsnMatchesProject: false,
     });
     expect(results.get("dsn.resolves")?.status).toBe("fail");
+  });
+
+  it("warns when no recent release has events", () => {
+    const results = run(makeCapture(), {
+      ...HEALTHY,
+      latestRelease: { version: "app@1.0.0", lastEvent: null },
+    });
+    expect(results.get("release.attribution")?.status).toBe("warn");
+    expect(results.get("release.attribution")?.detail).toContain("app@1.0.0");
   });
 
   it("skips every server check when Sentry is unreachable, and never fails", () => {

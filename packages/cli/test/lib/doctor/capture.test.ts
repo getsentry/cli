@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
+import { SENTRY_CLI_DSN } from "../../../src/lib/constants.js";
 import { capture } from "../../../src/lib/doctor/capture.js";
 
 let root: string;
@@ -90,5 +91,164 @@ describe("capture", () => {
   it("marks the capture incomplete when the budget is exhausted", async () => {
     const result = await capture(root, { timeBudgetMs: 0 });
     expect(result.incomplete).toBeTruthy();
+  });
+
+  it("drops the CLI telemetry DSN so probes do not go to the CLI project", async () => {
+    await writeFile(
+      join(root, "src", "telemetry.ts"),
+      `export const DSN = "${SENTRY_CLI_DSN}";\n`
+    );
+    const result = await capture(root);
+    expect(result.dsns.map((d) => d.raw)).not.toContain(SENTRY_CLI_DSN);
+    expect(result.dsns.some((d) => d.publicKey === "abc123")).toBe(true);
+  });
+
+  it("skips NDK .cxx output and still captures an AndroidManifest auto-init", async () => {
+    const androidRoot = await mkdtemp(join(tmpdir(), "doctor-android-"));
+    await mkdir(join(androidRoot, ".cxx", "Debug"), { recursive: true });
+    await mkdir(join(androidRoot, "src", "main", "java"), { recursive: true });
+
+    for (let i = 0; i < 5; i++) {
+      await writeFile(
+        join(androidRoot, ".cxx", "Debug", `cmake-${i}.txt`),
+        "sentry native cmake junk\n"
+      );
+    }
+    await writeFile(
+      join(androidRoot, "src", "main", "AndroidManifest.xml"),
+      [
+        "<manifest>",
+        "  <application>",
+        "    <meta-data",
+        '      android:name="io.sentry.dsn"',
+        '      android:value="https://abc123@o1.ingest.sentry.io/42" />',
+        "    <meta-data",
+        '      android:name="io.sentry.environment"',
+        '      android:value="debug" />',
+        "  </application>",
+        "</manifest>",
+      ].join("\n")
+    );
+    await writeFile(
+      join(androidRoot, "src", "main", "java", "App.java"),
+      "package io.sentry.samples;\nclass App {}\n"
+    );
+
+    const result = await capture(androidRoot, { maxFiles: 3 });
+
+    expect(result.incomplete).toBeUndefined();
+    expect(result.ecosystems).toContain("java");
+    const manifest = result.initSites.find(
+      (b) => b.kind === "android-manifest"
+    );
+    expect(manifest?.file).toBe("src/main/AndroidManifest.xml");
+    expect(manifest?.keys.dsn).toEqual({
+      value: "https://abc123@o1.ingest.sentry.io/42",
+      dynamic: false,
+    });
+    expect(manifest?.keys.environment).toEqual({
+      value: "debug",
+      dynamic: false,
+    });
+  });
+
+  it("resolves a unique Gradle manifest placeholder into the Android DSN", async () => {
+    const androidRoot = await mkdtemp(join(tmpdir(), "doctor-ph-"));
+    await mkdir(join(androidRoot, "src", "main"), { recursive: true });
+    await writeFile(
+      join(androidRoot, "src", "main", "AndroidManifest.xml"),
+      [
+        "<manifest>",
+        "  <application>",
+        "    <meta-data",
+        '      android:name="io.sentry.dsn"',
+        '      android:value="${sentryDsn}" />',
+        "    <meta-data",
+        '      android:name="io.sentry.environment"',
+        '      android:value="${sentryEnvironment}" />',
+        "  </application>",
+        "</manifest>",
+      ].join("\n")
+    );
+    await writeFile(
+      join(androidRoot, "build.gradle.kts"),
+      [
+        "android {",
+        "  buildTypes {",
+        '    getByName("debug") {',
+        '      addManifestPlaceholders(mapOf("sentryDsn" to "https://abc123@o1.ingest.sentry.io/42", "sentryEnvironment" to "debug"))',
+        "    }",
+        '    getByName("release") {',
+        '      addManifestPlaceholders(mapOf("sentryEnvironment" to "release"))',
+        "    }",
+        "  }",
+        "}",
+      ].join("\n")
+    );
+
+    const result = await capture(androidRoot);
+
+    const manifest = result.initSites.find(
+      (b) => b.kind === "android-manifest"
+    );
+    expect(manifest?.keys.dsn).toEqual({
+      value: "https://abc123@o1.ingest.sentry.io/42",
+      dynamic: false,
+    });
+    // debug vs release disagree — leave it as the Gradle placeholder.
+    expect(manifest?.keys.environment).toEqual({
+      value: "${sentryEnvironment}",
+      dynamic: true,
+    });
+  });
+
+  it("reads a gitignored AndroidManifest and SentryAndroid.init", async () => {
+    const androidRoot = await mkdtemp(join(tmpdir(), "doctor-gi-"));
+    await mkdir(join(androidRoot, "app", "src", "main", "java"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(androidRoot, ".gitignore"),
+      "app/src/main/AndroidManifest.xml\n"
+    );
+    await writeFile(
+      join(androidRoot, "app", "src", "main", "AndroidManifest.xml"),
+      [
+        "<manifest>",
+        "  <application>",
+        "    <meta-data",
+        '      android:name="io.sentry.dsn"',
+        '      android:value="https://abc123@o1.ingest.sentry.io/42" />',
+        "  </application>",
+        "</manifest>",
+      ].join("\n")
+    );
+    await writeFile(
+      join(androidRoot, "app", "src", "main", "java", "MyApplication.java"),
+      "SentryAndroid.init(this, options -> {\n});\n"
+    );
+
+    const result = await capture(androidRoot);
+
+    expect(result.initSites.some((b) => b.kind === "android-manifest")).toBe(
+      true
+    );
+    expect(result.initSites.some((b) => b.kind === "init")).toBe(true);
+    expect(result.dsns.some((d) => d.publicKey === "abc123")).toBe(true);
+  });
+
+  it("still respects gitignore for ordinary source", async () => {
+    const giRoot = await mkdtemp(join(tmpdir(), "doctor-gi-src-"));
+    await mkdir(join(giRoot, "src"), { recursive: true });
+    await writeFile(join(giRoot, ".gitignore"), "src/secret.ts\n");
+    await writeFile(
+      join(giRoot, "src", "secret.ts"),
+      "Sentry.init({ dsn: 'https://secret@o1.ingest.sentry.io/1' });\n"
+    );
+
+    const result = await capture(giRoot);
+
+    expect(result.initSites).toEqual([]);
+    expect(result.dsns).toEqual([]);
   });
 });

@@ -23,14 +23,18 @@ function makeReport(overrides: Partial<DoctorReport> = {}): DoctorReport {
     timestamp: "2026-08-18T00:00:00.000Z",
     elapsed_ms: 1400,
     capture: {
-      cwd: "/tmp/app",
       ecosystems: ["javascript"],
       dsns: [],
       initSites: [],
       buildConfigs: [],
       manifests: {},
     },
-    server: { reachable: false },
+    server: {
+      reachable: true,
+      org: "acme",
+      project: "web",
+      dsnMatchesProject: true,
+    },
     results: [
       { id: "project.first_event", status: "fail", detail: "never" },
       { id: "artifacts.uploaded", status: "fail", detail: "none" },
@@ -52,6 +56,14 @@ describe("deriveFeatures", () => {
     });
     expect(deriveFeatures(report)).toEqual([]);
   });
+
+  it("asks for performance when sample rate is a warning", async () => {
+    const { deriveFeatures } = await import("../../../src/lib/doctor/fix.js");
+    const report = makeReport({
+      results: [{ id: "config.sample_rate", status: "warn", detail: "1.0" }],
+    });
+    expect(deriveFeatures(report)).toEqual(["performance"]);
+  });
 });
 
 describe("runFix", () => {
@@ -63,6 +75,24 @@ describe("runFix", () => {
 
     const args = runWizard.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(args.dryRun).toBe(true);
+    expect(args.org).toBe("acme");
+    expect(args.project).toBe("web");
+  });
+
+  it("does not start the wizard when the DSN did not resolve", async () => {
+    runWizard.mockClear();
+    written.length = 0;
+    const { runFix } = await import("../../../src/lib/doctor/fix.js");
+
+    await runFix(
+      { cwd: "/tmp/app" } as never,
+      makeReport({
+        server: { reachable: true, dsnMatchesProject: false },
+      })
+    );
+
+    expect(runWizard).not.toHaveBeenCalled();
+    expect(written.join("\n")).toMatch(/DSN/i);
   });
 
   it("renders each codemod entry with its risk level", async () => {

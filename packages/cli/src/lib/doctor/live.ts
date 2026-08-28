@@ -9,13 +9,14 @@
  */
 
 import { createEventEnvelope, makeDsn, serializeEnvelope } from "@sentry/core";
-import { listIssuesPaginated } from "../api/issues.js";
+import { queryEvents } from "../api/explore.js";
 import { sendEnvelopeRequest } from "../envelope/transport.js";
 import { logger } from "../logger.js";
 import type { Capture, CheckResult, ServerFacts } from "./types.js";
 
 const ID = "live.roundtrip";
-const DEFAULT_POLL_ATTEMPTS = 6;
+// First attempt is immediate; the rest are 2s apart → ~1 min.
+const DEFAULT_POLL_ATTEMPTS = 31;
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 
 export type LiveOptions = {
@@ -40,7 +41,7 @@ function sleep(ms: number): Promise<void> {
 /** Build the serialized envelope for a probe event, or return a skip result. */
 function buildProbeEnvelope(
   rawDsn: string,
-  message: string
+  nonce: string
 ): { body: string | Uint8Array } | CheckResult {
   try {
     const dsnComponents = makeDsn(rawDsn);
@@ -54,10 +55,15 @@ function buildProbeEnvelope(
     const envelope = createEventEnvelope(
       {
         exception: {
-          values: [{ type: "TestError", value: message }],
+          values: [
+            {
+              type: "TestError",
+              value: `Test event from sentry doctor (${nonce}). Safe to delete.`,
+            },
+          ],
         },
-        level: "info",
-        tags: { source: "sentry-cli-doctor" },
+        level: "error",
+        tags: { source: "sentry-cli-doctor", probe: nonce },
         platform: "other",
       },
       dsnComponents
@@ -72,7 +78,7 @@ function buildProbeEnvelope(
   }
 }
 
-/** Poll the issues search for the nonce. Returns `true` if found. */
+/** Poll the events search for this probe. Returns `true` if found. */
 async function pollForEvent(
   org: string,
   project: string,
@@ -85,20 +91,20 @@ async function pollForEvent(
       await sleep(intervalMs);
     }
     try {
-      const page = await listIssuesPaginated(org, project, {
-        query: nonce,
-        perPage: 5,
-        sort: "date",
+      // Message text, not a custom tag: `probe:` is not searchable until
+      // Sentry has indexed that tag key. The nonce is already in the event.
+      const page = await queryEvents(org, {
+        fields: ["title"],
+        dataset: "errors",
+        query: `project:${project} ${nonce}`,
+        limit: 1,
+        statsPeriod: "1h",
       });
-      const found = (page.data ?? []).some((issue: unknown) =>
-        JSON.stringify(issue).includes(nonce)
-      );
-      if (found) {
+      if ((page.data.data ?? []).length > 0) {
         return true;
       }
     } catch (error) {
       logger.debug("Doctor live-check search failed", error);
-      return false;
     }
   }
   return false;
@@ -123,8 +129,19 @@ export async function liveRoundtripCheck(
     };
   }
 
+  if (server.dsnMatchesProject === false) {
+    return {
+      id: ID,
+      status: "fail",
+      detail:
+        "The configured DSN does not match any Sentry project you can access, so a test event would not show up where you can see it.",
+      remediation:
+        "Confirm the DSN belongs to a project in an organization you are a member of, then copy it again from Settings → Client Keys (DSN).",
+    };
+  }
+
   const nonce = options.nonce ?? makeNonce();
-  const result = buildProbeEnvelope(dsn.raw, `Test event from sentry doctor (${nonce}). Safe to delete.`);
+  const result = buildProbeEnvelope(dsn.raw, nonce);
   if (isCheckResult(result)) {
     return result;
   }

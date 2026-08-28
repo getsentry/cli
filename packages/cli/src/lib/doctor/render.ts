@@ -11,6 +11,7 @@ import { colorTag, renderMarkdown } from "../formatters/markdown.js";
 import { safeFilePath } from "./redact.js";
 import type {
   Capture,
+  CapturedBlock,
   CheckResult,
   CheckStatus,
   ServerFacts,
@@ -19,16 +20,26 @@ import type {
 /** Bump when a consumer-visible field changes shape. */
 const SCHEMA_VERSION = 1;
 
+/** Capture as serialized: keys and cwd stay in memory, not in the report. */
+type PublicCapture = Omit<Capture, "cwd" | "initSites" | "buildConfigs"> & {
+  initSites: Omit<CapturedBlock, "keys">[];
+  buildConfigs: Omit<CapturedBlock, "keys">[];
+};
+
 export type DoctorReport = {
   schema_version: number;
   cli_version: string;
   timestamp: string;
   /** On the report, not a render argument, so `human` stays a pure function. */
   elapsed_ms: number;
-  capture: Capture;
+  capture: PublicCapture;
   server: ServerFacts;
   results: CheckResult[];
 };
+
+function withoutKeys({ keys: _keys, ...rest }: CapturedBlock) {
+  return rest;
+}
 
 /** Every result, passes included — a display decision must not change this. */
 export function buildReport(args: {
@@ -44,7 +55,15 @@ export function buildReport(args: {
     cli_version: args.cliVersion,
     timestamp: args.timestamp,
     elapsed_ms: args.elapsedMs,
-    capture: args.capture,
+    // Keys and cwd stay on the in-memory Capture; they are not report fields.
+    capture: {
+      ecosystems: args.capture.ecosystems,
+      dsns: args.capture.dsns,
+      initSites: args.capture.initSites.map(withoutKeys),
+      buildConfigs: args.capture.buildConfigs.map(withoutKeys),
+      manifests: args.capture.manifests,
+      incomplete: args.capture.incomplete,
+    },
     server: args.server,
     results: [...args.results],
   };
@@ -96,8 +115,9 @@ export function verdictFor(results: readonly CheckResult[]): string {
   return first ? first.detail : "Sentry has problems worth fixing.";
 }
 
-/** One numbered instruction per failure, safe to hand to a coding agent. */
+/** One numbered instruction per unique remediation, safe to hand to a coding agent. */
 export function fixBlock(results: readonly CheckResult[]): string[] {
+  const seen = new Set<string>();
   return byStatus(results, "fail").flatMap((r) => {
     if (!r.remediation) {
       return [];
@@ -108,7 +128,12 @@ export function fixBlock(results: readonly CheckResult[]): string[] {
         return e.line === undefined ? file : `${file}:${e.line}`;
       })
       .join(", ");
-    return [where ? `${r.remediation} (${where})` : r.remediation];
+    const line = where ? `${r.remediation} (${where})` : r.remediation;
+    if (seen.has(line)) {
+      return [];
+    }
+    seen.add(line);
+    return [line];
   });
 }
 
@@ -125,7 +150,8 @@ const ID_COLUMN = 22;
 function renderRow(result: CheckResult, plain: boolean): string[] {
   const glyph = GLYPHS[result.status];
   const mark = plain ? glyph.plain : colorTag(glyph.color, glyph.plain);
-  const id = result.id.padEnd(ID_COLUMN);
+  // padEnd alone is a no-op once an id reaches ID_COLUMN, so glue a space first.
+  const id = `${result.id} `.padEnd(ID_COLUMN);
   const lines = [`  ${mark} ${id}${result.detail}`];
 
   for (const e of result.evidence ?? []) {
@@ -181,6 +207,7 @@ export function renderHuman(args: {
     `${mark} ${verdictFor(results)}`,
     ...section("Failures", failures, plain),
     ...section("Warnings", warnings, plain),
+    ...section("Passed", passes, plain),
     // Skips sort last so they stay visible without competing with failures.
     ...section("Skipped", skips, plain),
   ];

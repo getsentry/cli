@@ -63,6 +63,24 @@ describe("fixBlock", () => {
     expect(fixBlock([results[0] as CheckResult])).toEqual([]);
   });
 
+  it("dedupes identical remediations", () => {
+    const lines = fixBlock([
+      {
+        id: "dsn.resolves",
+        status: "fail",
+        detail: "a",
+        remediation: "Copy the DSN again.",
+      },
+      {
+        id: "live.roundtrip",
+        status: "fail",
+        detail: "b",
+        remediation: "Copy the DSN again.",
+      },
+    ]);
+    expect(lines).toEqual(["Copy the DSN again."]);
+  });
+
   it("replaces traversal paths with [invalid path]", () => {
     const poisoned: CheckResult[] = [
       {
@@ -83,10 +101,15 @@ describe("fixBlock", () => {
 describe("renderHuman", () => {
   const output = renderHuman({ results, elapsedMs: 1400, plain: true });
 
-  it("collapses passes to a count and keeps failures verbatim", () => {
-    expect(output).not.toContain("dsn.present");
+  it("lists passes so it is clear what was checked", () => {
+    expect(output).toContain("dsn.present");
+    expect(output).toContain("DSN found (code).");
     expect(output).toContain("project.first_event");
     expect(output).toContain("1 passed");
+    expect(output.indexOf("Passed")).toBeGreaterThan(
+      output.indexOf("Warnings")
+    );
+    expect(output.indexOf("Skipped")).toBeGreaterThan(output.indexOf("Passed"));
   });
 
   it("renders evidence as file:line", () => {
@@ -109,6 +132,23 @@ describe("renderHuman", () => {
   it("emits no color tags in plain mode", () => {
     expect(output).not.toContain("<green>");
     expect(output).not.toContain("<red>");
+  });
+
+  it("keeps a space between a long check id and its detail", () => {
+    const long = renderHuman({
+      results: [
+        {
+          id: "build.upload_configured",
+          status: "warn",
+          detail:
+            "No source-map or debug-file upload configuration found for java.",
+        },
+      ],
+      elapsedMs: 100,
+      plain: true,
+    });
+    expect(long).toMatch(/build\.upload_configured\s+No source-map/);
+    expect(long).not.toContain("build.upload_configuredNo");
   });
 });
 
@@ -134,5 +174,51 @@ describe("buildReport", () => {
     expect(report.schema_version).toBe(1);
     expect(report.cli_version).toBe("1.2.3");
     expect(report.elapsed_ms).toBe(1400);
+  });
+
+  it("omits keys and cwd from the serialized report", () => {
+    const capture = {
+      cwd: "/tmp/app",
+      ecosystems: ["javascript"],
+      dsns: [],
+      initSites: [
+        {
+          kind: "init",
+          file: "src/instrument.ts",
+          line: 3,
+          text: "Sentry.init({ dsn: 'https://abc@o1.ingest.sentry.io/1' })",
+          keys: {
+            dsn: { value: "https://abc@o1.ingest.sentry.io/1", dynamic: false },
+          },
+        },
+      ],
+      buildConfigs: [
+        {
+          kind: "bundler-plugin",
+          file: "vite.config.ts",
+          line: 1,
+          text: "sentryVitePlugin({})",
+          keys: { org: { value: "acme", dynamic: false } },
+        },
+      ],
+      manifests: {},
+    };
+
+    const report = buildReport({
+      capture,
+      server: { reachable: false },
+      results,
+      cliVersion: "1.2.3",
+      timestamp: "2026-08-18T00:00:00.000Z",
+      elapsedMs: 1400,
+    });
+
+    expect(report.capture.initSites[0]).not.toHaveProperty("keys");
+    expect(report.capture.buildConfigs[0]).not.toHaveProperty("keys");
+    expect(report.capture).not.toHaveProperty("cwd");
+    expect(report.capture.initSites[0]?.text).toContain("Sentry.init");
+    // In-memory capture used by checks is untouched.
+    expect(capture.initSites[0]?.keys.dsn?.value).toContain("abc");
+    expect(capture.cwd).toBe("/tmp/app");
   });
 });

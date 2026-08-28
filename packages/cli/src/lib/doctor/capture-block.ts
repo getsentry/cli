@@ -10,7 +10,7 @@
 import type { CapturedKey } from "./types.js";
 
 /** Delimiter style. `ruby` is keyword-delimited (`do` … `end`). */
-export type BlockDelims = "brace" | "paren" | "ruby";
+export type BlockDelims = "brace" | "paren" | "ruby" | "none";
 
 /** A captured span: 1-based start line plus the verbatim text. */
 export type BlockSpan = { line: number; text: string };
@@ -142,6 +142,14 @@ export function captureBlock(
   }
 
   const start = match.index;
+  // Manifests and plugin-id hits have no delimited block — the rest of
+  // the file is the config.
+  if (delims === "none") {
+    return {
+      line: content.slice(0, start).split("\n").length,
+      text: content.slice(start),
+    };
+  }
   const afterMarker = start + match[0].length;
   const end =
     delims === "ruby"
@@ -158,13 +166,14 @@ export function captureBlock(
   };
 }
 
-/** `key: value`, `key = value`, and `KEY=value`, one per capture. */
-const KEY_ASSIGN_RE = /(?:^|[\s,{(])([A-Za-z_][\w.]*)\s*[:=]\s*([^\n,]+)/gm;
+/** `key: value`, `key = value`, `'key' => value`, `"key": value`. */
+const KEY_ASSIGN_RE =
+  /(?:^|[\s,{(])(?:["']([A-Za-z_][\w.-]*)["']|([A-Za-z_][\w.-]*))\s*(?:=>|:|=)\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}{\]\[]+)/gm;
 
 const QUOTED_RE = /^(["'`])([\s\S]*)\1$/;
 const BOOLEAN_RE = /^(true|false)$/i;
 const NUMBER_RE = /^-?\d+(?:\.\d+)?$/;
-const TRAILING_PUNCT_RE = /[,;]+$/;
+const TRAILING_PUNCT_RE = /[\s,;}\]]+$/;
 
 /**
  * `dynamic: true` means "the key is present but its value is an expression we
@@ -182,7 +191,22 @@ function classifyValue(raw: string): CapturedKey {
   if (NUMBER_RE.test(raw)) {
     return { value: raw, dynamic: false };
   }
+  // Unquoted URL / token (sentry.properties). Calls and process.env stay dynamic.
+  if (!/[()\s]/.test(raw) && !raw.includes("process.env")) {
+    return { value: raw, dynamic: false };
+  }
   return { dynamic: true };
+}
+
+/** Keys checks actually read — not locals inside an init callback. */
+function isJudgedKey(name: string): boolean {
+  const n = name.replace(/[-_]/g, "").toLowerCase();
+  return (
+    n === "dsn" ||
+    n === "environment" ||
+    n === "debug" ||
+    (n.includes("sample") && n.endsWith("rate"))
+  );
 }
 
 /** Pull scalar keys out of a captured block. First occurrence wins. */
@@ -192,15 +216,98 @@ export function extractKeys(text: string): Record<string, CapturedKey> {
 
   let match = KEY_ASSIGN_RE.exec(text);
   while (match !== null) {
-    const qualified = match[1] ?? "";
+    const qualified = match[1] ?? match[2] ?? "";
     const name = qualified.split(".").pop() ?? qualified;
-    const raw = (match[2] ?? "").trim().replace(TRAILING_PUNCT_RE, "");
+    const raw = (match[3] ?? "").trim().replace(TRAILING_PUNCT_RE, "");
 
-    if (name && !(name in keys)) {
+    if (name && isJudgedKey(name) && !(name in keys)) {
       keys[name] = classifyValue(raw);
     }
     match = KEY_ASSIGN_RE.exec(text);
   }
 
+  // Java/Kotlin: options.getSessionReplay().setSessionSampleRate(1.0)
+  const setter = /\.set([A-Z]\w*SampleRate)\s*\(\s*([^)]+?)\s*\)/g;
+  let set = setter.exec(text);
+  while (set !== null) {
+    const name = (set[1] ?? "").replace(/^[A-Z]/, (c) => c.toLowerCase());
+    const raw = (set[2] ?? "").trim();
+    if (name && !(name in keys)) {
+      keys[name] = classifyValue(raw);
+    }
+    set = setter.exec(text);
+  }
+
+  // AndroidManifest: <meta-data android:name="io.sentry.dsn" android:value="…" />
+  // ponytail: sample-app package ids look like io.sentry.samples.*
+  const androidMeta =
+    /android:name="io\.sentry\.(?!samples(?:\.|"))([^"]+)"[\s\S]*?android:value="([^"]*)"/g;
+  let android = androidMeta.exec(text);
+  while (android !== null) {
+    // Keep the full name after io.sentry. so traces.sample-rate
+    // does not collapse onto session-replay.session-sample-rate.
+    const name = android[1] ?? "";
+    const raw = android[2] ?? "";
+    if (name) {
+      // Keep `${sentryDsn}` so capture can fill it from Gradle.
+      keys[name] = /^\$\{[^}]+\}$/.test(raw)
+        ? { value: raw, dynamic: true }
+        : { value: raw, dynamic: false };
+    }
+    android = androidMeta.exec(text);
+  }
+
   return keys;
+}
+
+/** `name to value` (Kotlin) and `name: value` (Groovy) assignments. */
+const GRADLE_KV_RE =
+  /(?:["'](\w+)["']\s+to\s+|(\w+)\s*:\s*)("[^"]*"|'[^']*'|true|false|-?\d+(?:\.\d+)?)/g;
+
+/** Collect placeholder assignments. Multiple values for one name stay in the set. */
+export function gradlePlaceholderValues(
+  text: string,
+  names?: readonly string[]
+): Map<string, Set<string>> {
+  const wanted = names ? new Set(names) : undefined;
+  const out = new Map<string, Set<string>>();
+  GRADLE_KV_RE.lastIndex = 0;
+
+  let match = GRADLE_KV_RE.exec(text);
+  while (match !== null) {
+    const name = match[1] ?? match[2] ?? "";
+    const raw = match[3] ?? "";
+    if (name && (!wanted || wanted.has(name))) {
+      const quoted = QUOTED_RE.exec(raw);
+      const value = quoted?.[2] ?? raw;
+      const set = out.get(name) ?? new Set<string>();
+      set.add(value);
+      out.set(name, set);
+    }
+    match = GRADLE_KV_RE.exec(text);
+  }
+  return out;
+}
+
+const PLACEHOLDER_RE = /^\$\{([^}]+)\}$/;
+
+/** Fill `${name}` keys when Gradle has exactly one value for that name. */
+export function resolveGradlePlaceholders(
+  keys: Record<string, CapturedKey>,
+  table: ReadonlyMap<string, ReadonlySet<string>>
+): void {
+  for (const [key, entry] of Object.entries(keys)) {
+    const name = entry.value && PLACEHOLDER_RE.exec(entry.value)?.[1];
+    if (!name) {
+      continue;
+    }
+    const values = table.get(name);
+    if (values?.size !== 1) {
+      continue;
+    }
+    const value = [...values][0];
+    if (value !== undefined) {
+      keys[key] = { value, dynamic: false };
+    }
+  }
 }

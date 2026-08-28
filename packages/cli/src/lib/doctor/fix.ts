@@ -24,7 +24,7 @@ const FEATURE_BY_CHECK: Record<string, string> = {
 export function deriveFeatures(report: DoctorReport): string[] {
   const features = new Set<string>();
   for (const result of report.results) {
-    if (result.status !== "fail") {
+    if (result.status !== "fail" && result.status !== "warn") {
       continue;
     }
     const feature = FEATURE_BY_CHECK[result.id];
@@ -39,6 +39,15 @@ export async function runFix(
   ctx: SentryContext,
   report: DoctorReport
 ): Promise<void> {
+  const org = report.server.org;
+  const project = report.server.project;
+  if (!(org && project) || report.server.dsnMatchesProject === false) {
+    logger.warn(
+      "Could not build a fix plan: the DSN did not resolve to a project you can access, so there is nothing to plan against. The findings above still stand."
+    );
+    return;
+  }
+
   logger.info(
     "Running the setup workflow to build a fix plan. This takes a few minutes and changes nothing on disk."
   );
@@ -50,6 +59,8 @@ export async function runFix(
       yes: true,
       dryRun: true,
       features: deriveFeatures(report),
+      org,
+      project,
     });
   } catch (error) {
     // A failed fix plan is not a failed diagnosis. The report already shipped.

@@ -7,6 +7,8 @@
  * than one that reports four of five facts.
  */
 
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { apiRequestToRegion } from "../api/infrastructure.js";
 import { listIssuesPaginated } from "../api/issues.js";
 import { findProjectByDsnKey, getProjectKeys } from "../api/projects.js";
@@ -14,10 +16,59 @@ import {
   listProjectEnvironments,
   listReleasesForProject,
 } from "../api/releases.js";
+import { getDefaultOrganization, getDefaultProject } from "../db/defaults.js";
 import { parseDsn } from "../dsn/index.js";
+import { parseIni } from "../ini.js";
 import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
+import { getActiveTokenHost, isHostTrusted } from "../token-host.js";
 import type { Capture, ProjectKeyFact, ServerFacts } from "./types.js";
+
+/** Skip lookup when the DSN is not on this CLI session's instance. */
+function sessionMismatch(dsn: {
+  protocol: string;
+  host: string;
+}): string | undefined {
+  const tokenHost = getActiveTokenHost();
+  if (!tokenHost) {
+    return;
+  }
+  if (isHostTrusted(`${dsn.protocol}://${dsn.host}`, tokenHost)) {
+    return;
+  }
+  let loggedIn = tokenHost;
+  try {
+    loggedIn = new URL(tokenHost).host;
+  } catch {
+    // keep the raw origin
+  }
+  return `DSN is on ${dsn.host}; this CLI is logged into ${loggedIn}.`;
+}
+
+/** Org/project from flags, then sentry.properties, then CLI defaults. */
+async function orgProjectHint(
+  cwd: string,
+  flags: { org?: string; project?: string }
+): Promise<{ org?: string; project?: string }> {
+  let org = flags.org;
+  let project = flags.project;
+  try {
+    const global = parseIni(
+      await readFile(join(cwd, "sentry.properties"), "utf-8")
+    )[""];
+    org ??= global?.["defaults.org"] || undefined;
+    project ??= global?.["defaults.project"] || undefined;
+  } catch {
+    // no sentry.properties
+  }
+  try {
+    org ??= getDefaultOrganization() ?? undefined;
+    project ??= getDefaultProject() ?? undefined;
+  } catch {
+    // no CLI defaults store
+  }
+  return { org, project };
+}
 
 /** Run a fact-producing call, swallowing failure into `undefined`. */
 async function tryFact<T>(
@@ -43,7 +94,7 @@ async function hasUploadedArtifacts(
     // response-shape drift cannot break the check.
     const { data } = await apiRequestToRegion<unknown[]>(
       region,
-      `projects/${org}/${project}/files/difs/`
+      `projects/${org}/${project}/files/dsyms/`
     );
     return Array.isArray(data) && data.length > 0;
   });
@@ -62,6 +113,11 @@ export async function resolveServerFacts(
     };
   }
 
+  const mismatch = sessionMismatch(dsn);
+  if (mismatch) {
+    return { reachable: false, unreachableReason: mismatch };
+  }
+
   let projectInfo: Awaited<ReturnType<typeof findProjectByDsnKey>>;
   try {
     projectInfo = await findProjectByDsnKey(dsn.publicKey);
@@ -74,6 +130,26 @@ export async function resolveServerFacts(
   }
 
   if (!projectInfo) {
+    const hint = await orgProjectHint(capture.cwd, flags);
+    const { org: hintOrg, project: hintProject } = hint;
+    if (hintOrg && hintProject) {
+      const keys = await tryFact("project keys", () =>
+        getProjectKeys(hintOrg, hintProject)
+      );
+      const matched = keys?.some(
+        (key) => parseDsn(key.dsn.public)?.publicKey === dsn.publicKey
+      );
+      if (matched) {
+        const facts: ServerFacts = {
+          reachable: true,
+          org: hintOrg,
+          project: hintProject,
+          dsnMatchesProject: true,
+        };
+        await populateEndpointFacts(facts, hintOrg, hintProject);
+        return facts;
+      }
+    }
     return {
       reachable: true,
       dsnMatchesProject: false,
@@ -102,6 +178,21 @@ export async function resolveServerFacts(
   return facts;
 }
 
+/** Newest release that has events, else the newest unused one, else none. */
+function pickAttributedRelease(
+  releases: readonly { version: string; lastEvent?: string | null }[]
+): ServerFacts["latestRelease"] {
+  if (releases.length === 0) {
+    return null;
+  }
+  const attributed = releases.find((r) => r.lastEvent);
+  const chosen = attributed ?? releases[0];
+  if (!chosen) {
+    return null;
+  }
+  return { version: chosen.version, lastEvent: chosen.lastEvent ?? null };
+}
+
 /** Fetch per-project facts in parallel and merge them into `facts`. */
 async function populateEndpointFacts(
   facts: ServerFacts,
@@ -115,7 +206,7 @@ async function populateEndpointFacts(
     ),
     tryFact("environments", () => listProjectEnvironments(org, slug)),
     tryFact("releases", () =>
-      listReleasesForProject(org, slug, { perPage: 1 })
+      listReleasesForProject(org, slug, { perPage: 20 })
     ),
     hasUploadedArtifacts(org, slug),
   ]);
@@ -137,10 +228,11 @@ async function populateEndpointFacts(
       .map((env) => env.name);
   }
   if (releases) {
-    const newest = releases[0];
-    facts.latestRelease = newest
-      ? { version: newest.version, lastEvent: newest.lastEvent ?? null }
-      : null;
+    // lastEvent is on the wire (release view already reads it) but not on
+    // SentryRelease's generated type.
+    facts.latestRelease = pickAttributedRelease(
+      releases as { version: string; lastEvent?: string | null }[]
+    );
   }
   if (artifacts !== undefined) {
     facts.hasUploadedArtifacts = artifacts;

@@ -65,7 +65,7 @@ export const INIT_MARKERS: readonly MarkerRule[] = [
     ecosystem: "java",
     kind: "init",
     file: /\.(?:java|kt)$/,
-    marker: /Sentry\.init\s*\(/,
+    marker: /Sentry(?:Android)?\.init\s*\(/,
     delims: "paren",
   },
   {
@@ -81,6 +81,13 @@ export const INIT_MARKERS: readonly MarkerRule[] = [
     file: /\.(?:swift|m)$/,
     marker: /SentrySDK\.start\s*\(/,
     delims: "paren",
+  },
+  {
+    ecosystem: "apple",
+    kind: "init",
+    file: /\.(?:swift|m)$/,
+    marker: /SentrySDK\.start\s*\{/,
+    delims: "brace",
   },
   {
     ecosystem: "dart",
@@ -101,8 +108,9 @@ export const INIT_MARKERS: readonly MarkerRule[] = [
     ecosystem: "java",
     kind: "android-manifest",
     file: /^AndroidManifest\.xml$/,
-    marker: /<application\b/,
-    delims: "paren",
+    // ponytail: sample-app package ids look like io.sentry.samples.*
+    marker: /android:name="io\.sentry\.(?!samples(?:\.|"))/,
+    delims: "none",
     autoInit: true,
   },
   {
@@ -128,6 +136,13 @@ export const INIT_MARKERS: readonly MarkerRule[] = [
     marker: /return\s*\[/,
     delims: "paren",
     autoInit: true,
+  },
+  {
+    ecosystem: "java",
+    kind: "sentry-properties",
+    file: /^sentry\.properties$/,
+    marker: /./,
+    delims: "none",
   },
 ];
 

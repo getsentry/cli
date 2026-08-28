@@ -83,6 +83,7 @@ cli/
 │   │   ├── trace/       # list, logs, view
 │   │   ├── trial/       # list, start
 │   │   ├── api.ts       # Make an authenticated API request
+│   │   ├── doctor.ts    # Check whether Sentry is correctly set up and actually working
 │   │   ├── explore.ts   # Query aggregate event data (Explore)
 │   │   ├── help.ts      # Help command
 │   │   ├── info.ts      # Print configuration and verify authentication

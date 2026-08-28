@@ -9,10 +9,16 @@
 
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { detectAllDsns } from "../dsn/index.js";
+import { SENTRY_CLI_DSN } from "../constants.js";
+import { createDetectedDsn, detectAllDsns, parseDsn } from "../dsn/index.js";
 import { logger } from "../logger.js";
-import { collectGrep } from "../scan/index.js";
-import { captureBlock, extractKeys } from "./capture-block.js";
+import { collectGlob, collectGrep } from "../scan/index.js";
+import {
+  captureBlock,
+  extractKeys,
+  gradlePlaceholderValues,
+  resolveGradlePlaceholders,
+} from "./capture-block.js";
 import { isManifest, parseManifest } from "./manifests.js";
 import {
   BUILD_MARKERS,
@@ -38,6 +44,7 @@ type CaptureAccumulator = {
   initSites: CapturedBlock[];
   buildConfigs: CapturedBlock[];
   manifests: Record<string, ParsedManifest>;
+  placeholders: Map<string, Set<string>>;
 };
 
 const DEFAULT_TIME_BUDGET_MS = 1500;
@@ -47,6 +54,21 @@ const MAX_FILE_BYTES = 512 * 1024;
 
 /** Broad enough to catch every marker table entry in a single pass. */
 const SENTRY_PATTERN = /sentry/i;
+
+/** Auto-init config files, even when gitignored. Not every xml/json. */
+const CONFIG_FILE_GLOBS = [
+  "AndroidManifest.xml",
+  "application.properties",
+  "application.yml",
+  "application.yaml",
+  "application-*.properties",
+  "application-*.yml",
+  "application-*.yaml",
+  "appsettings.json",
+  "appsettings.*.json",
+  "sentry.php",
+  "sentry.properties",
+];
 
 /** Basename extension to ecosystem, for files that identify a stack by existing. */
 const ECOSYSTEM_BY_EXTENSION: readonly [RegExp, string][] = [
@@ -61,6 +83,19 @@ const ECOSYSTEM_BY_EXTENSION: readonly [RegExp, string][] = [
   [/\.dart$/, "dart"],
   [/\.rs$/, "rust"],
 ];
+
+function mergePlaceholderTable(
+  into: Map<string, Set<string>>,
+  from: Map<string, Set<string>>
+): void {
+  for (const [name, values] of from) {
+    const set = into.get(name) ?? new Set<string>();
+    for (const value of values) {
+      set.add(value);
+    }
+    into.set(name, set);
+  }
+}
 
 function ecosystemFor(path: string): string | undefined {
   for (const [pattern, ecosystem] of ECOSYSTEM_BY_EXTENSION) {
@@ -129,6 +164,18 @@ async function discoverCandidates(
     });
 
     const candidates = [...new Set(matches.map((m) => m.path))];
+    const { files: configFiles } = await collectGlob({
+      cwd,
+      patterns: CONFIG_FILE_GLOBS,
+      respectGitignore: false,
+      timeBudgetMs,
+      maxResults: DEFAULT_MAX_FILES,
+    });
+    for (const file of configFiles) {
+      if (!candidates.includes(file)) {
+        candidates.push(file);
+      }
+    }
     const incomplete = stats.truncated
       ? `Search stopped after ${MAX_GREP_RESULTS} matches; some files were not read.`
       : undefined;
@@ -166,6 +213,9 @@ async function classifyFile(
   collectBlocks(BUILD_MARKERS, relPath, content, acc);
 
   const base = basename(relPath);
+  if (/^build\.gradle(?:\.kts)?$/.test(base)) {
+    mergePlaceholderTable(acc.placeholders, gradlePlaceholderValues(content));
+  }
   if (isManifest(base)) {
     const parsed = parseManifest(relPath, content);
     if (parsed) {
@@ -187,6 +237,7 @@ export async function capture(
     initSites: [],
     buildConfigs: [],
     manifests: {},
+    placeholders: new Map(),
   };
   let incomplete: string | undefined;
 
@@ -211,9 +262,30 @@ export async function capture(
     await classifyFile(cwd, relPath, acc);
   }
 
+  if (acc.placeholders.size > 0) {
+    for (const site of acc.initSites) {
+      resolveGradlePlaceholders(site.keys, acc.placeholders);
+    }
+  }
+
   let dsns: Capture["dsns"] = [];
   try {
-    dsns = (await detectAllDsns(cwd)).all;
+    // The CLI's own DSN lives in this repo's source; sending a probe there
+    // looks like a successful write to a project the user cannot open.
+    const cliKey = parseDsn(SENTRY_CLI_DSN)?.publicKey;
+    dsns = (await detectAllDsns(cwd)).all.filter((d) => d.publicKey !== cliKey);
+    const seen = new Set(dsns.map((d) => d.raw));
+    for (const site of acc.initSites) {
+      const raw = site.keys.dsn?.value;
+      if (!raw || site.keys.dsn?.dynamic || seen.has(raw)) {
+        continue;
+      }
+      const extra = createDetectedDsn(raw, "code", site.file);
+      if (extra && extra.publicKey !== cliKey) {
+        dsns.push(extra);
+        seen.add(raw);
+      }
+    }
   } catch (error) {
     logger.debug("doctor: DSN detection failed", error);
     incomplete ??= "DSN detection failed; DSN checks were skipped.";

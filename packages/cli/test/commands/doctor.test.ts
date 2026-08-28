@@ -53,4 +53,16 @@ describe("runDoctor", () => {
 
     await expect(runDoctor({ cwd: empty } as never, {})).resolves.toBeDefined();
   });
+
+  it("reports stage progress", async () => {
+    vi.resetModules();
+    vi.doMock("../../src/lib/doctor/resolve.js", () => ({
+      resolveServerFacts: vi.fn().mockResolvedValue({ reachable: false }),
+    }));
+    const { runDoctor } = await import("../../src/commands/doctor.js");
+    const messages: string[] = [];
+    await runDoctor({ cwd: root } as never, {}, (m) => messages.push(m));
+    expect(messages[0]).toContain("Scanning");
+    expect(messages.some((m) => m.includes("Sentry"))).toBe(true);
+  });
 });

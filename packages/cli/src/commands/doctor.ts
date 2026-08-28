@@ -20,27 +20,36 @@ import {
 import { resolveServerFacts } from "../lib/doctor/resolve.js";
 import { runChecks } from "../lib/doctor/types.js";
 import { CommandOutput } from "../lib/formatters/output.js";
+import { withProgress } from "../lib/polling.js";
 
 export type DoctorFlags = {
   sendTestEvent: boolean;
   fix: boolean;
+  json?: boolean;
 };
 
 /** The whole command, minus presentation — so tests never touch the CLI. */
 export async function runDoctor(
   ctx: SentryContext,
-  flags: Partial<DoctorFlags> = {}
+  flags: Partial<DoctorFlags> = {},
+  setMessage: (msg: string) => void = () => {
+    /* tests / JSON mode */
+  }
 ): Promise<{ report: DoctorReport; exitCode: 0 | 1 }> {
   const started = Date.now();
 
+  setMessage("Scanning this project...");
   const captured = await capture(ctx.cwd);
+  setMessage("Asking Sentry...");
   const server = await resolveServerFacts(captured);
+  setMessage("Checking configuration...");
   const results = runChecks(REGISTRY, { capture: captured, server });
 
   const { judge } = await import("../lib/doctor/judge.js");
   results.push(...(await judge(captured)));
 
   if (flags.sendTestEvent) {
+    setMessage("Sending a test event...");
     const { liveRoundtripCheck } = await import("../lib/doctor/live.js");
     results.push(await liveRoundtripCheck(captured, server));
   } else {
@@ -92,14 +101,20 @@ export const doctorCommand = buildCommand({
     positional: { kind: "tuple", parameters: [] },
   },
   async *func(this: SentryContext, flags: DoctorFlags) {
-    const { report, exitCode } = await runDoctor(this, flags);
+    const { report, exitCode } = await withProgress(
+      { message: "Scanning this project...", json: flags.json },
+      (setMessage) => runDoctor(this, flags, setMessage)
+    );
 
     yield new CommandOutput(report);
 
     const { offerSupportExport } = await import("../lib/doctor/report.js");
     await offerSupportExport(report);
 
-    if (flags.fix && exitCode !== 0) {
+    if (
+      flags.fix &&
+      report.results.some((r) => r.status === "fail" || r.status === "warn")
+    ) {
       const { runFix } = await import("../lib/doctor/fix.js");
       await runFix(this, report);
     }

@@ -103,7 +103,14 @@ const dsnConflict: Check = {
   id: "dsn.conflict",
   run: ({ capture }) => {
     const distinct = new Set(capture.dsns.map((d) => d.raw));
-    if (distinct.size <= 1) {
+    if (distinct.size === 0) {
+      return {
+        id: "dsn.conflict",
+        status: "skip",
+        detail: "No DSN to compare.",
+      };
+    }
+    if (distinct.size === 1) {
       return {
         id: "dsn.conflict",
         status: "pass",

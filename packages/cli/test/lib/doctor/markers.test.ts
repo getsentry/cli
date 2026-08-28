@@ -43,6 +43,11 @@ describe("marker tables", () => {
         file: "main.go",
         source: 'sentry.Init(sentry.ClientOptions{\n  Dsn: "x",\n})',
       },
+      java: {
+        file: "AndroidManifest.xml",
+        source:
+          '<application>\n  <meta-data android:name="io.sentry.dsn" android:value="https://k@h/1" />\n</application>',
+      },
     };
 
     for (const [ecosystem, sample] of Object.entries(samples)) {
@@ -53,6 +58,33 @@ describe("marker tables", () => {
       const block = captureBlock(sample.source, rule!.marker, rule!.delims);
       expect(block, `${ecosystem} did not capture`).not.toBeNull();
     }
+  });
+
+  it("captures SentrySDK.start with a trailing closure", () => {
+    const rule = markersForFile(INIT_MARKERS, "AppDelegate.swift").find(
+      (r) => r.delims === "brace"
+    );
+    expect(rule).toBeDefined();
+    const block = captureBlock(
+      'SentrySDK.start { options in\n  options.dsn = "x"\n}',
+      rule!.marker,
+      rule!.delims
+    );
+    expect(block).not.toBeNull();
+    expect(block?.text).toContain("options.dsn");
+  });
+
+  it("captures SentryAndroid.init in Java", () => {
+    const rule = markersForFile(INIT_MARKERS, "MyApplication.java").find(
+      (r) => r.kind === "init"
+    );
+    expect(rule).toBeDefined();
+    const block = captureBlock(
+      'SentryAndroid.init(this, options -> {\n  options.setDsn("x");\n});',
+      rule!.marker,
+      rule!.delims
+    );
+    expect(block).not.toBeNull();
   });
 
   it("recognizes build configs", () => {

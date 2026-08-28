@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Capture, ServerFacts } from "../../../src/lib/doctor/types.js";
 
 const sendEnvelopeRequest = vi.fn();
-const listIssuesPaginated = vi.fn();
+const queryEvents = vi.fn();
 
 vi.mock("../../../src/lib/envelope/transport.js", () => ({
   sendEnvelopeRequest: (...args: unknown[]) => sendEnvelopeRequest(...args),
 }));
-vi.mock("../../../src/lib/api/issues.js", () => ({
-  listIssuesPaginated: (...args: unknown[]) => listIssuesPaginated(...args),
+vi.mock("../../../src/lib/api/explore.js", () => ({
+  queryEvents: (...args: unknown[]) => queryEvents(...args),
 }));
 
 const capture: Capture = {
@@ -39,7 +39,7 @@ describe("liveRoundtripCheck", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sendEnvelopeRequest.mockResolvedValue(undefined);
-    listIssuesPaginated.mockResolvedValue({ data: [] });
+    queryEvents.mockResolvedValue({ data: { data: [] } });
   });
 
   it("fails when the envelope cannot be delivered", async () => {
@@ -55,8 +55,8 @@ describe("liveRoundtripCheck", () => {
   });
 
   it("passes when the event is found in search", async () => {
-    listIssuesPaginated.mockImplementation((_o, _p, opts) => ({
-      data: [{ id: "1", title: `sentry doctor probe ${extractNonce(opts)}` }],
+    queryEvents.mockImplementation((_org, opts) => ({
+      data: { data: [{ id: "1", message: extractNonce(opts) }] },
     }));
     const { liveRoundtripCheck } = await import(
       "../../../src/lib/doctor/live.js"
@@ -67,6 +67,17 @@ describe("liveRoundtripCheck", () => {
       pollIntervalMs: 0,
     });
     expect(result.status).toBe("pass");
+    expect(queryEvents).toHaveBeenCalledWith(
+      "acme",
+      expect.objectContaining({
+        dataset: "errors",
+        fields: ["title"],
+        query: expect.stringMatching(/project:web \w+/),
+      })
+    );
+    const body = String(sendEnvelopeRequest.mock.calls[0]?.[1] ?? "");
+    expect(body).toContain('"level":"error"');
+    expect(body).toContain("TestError");
   });
 
   it("warns — never fails — when delivery succeeded but search is empty", async () => {
@@ -80,7 +91,7 @@ describe("liveRoundtripCheck", () => {
     });
     expect(result.status).toBe("warn");
     expect(result.detail).toContain("accepted");
-    expect(listIssuesPaginated).toHaveBeenCalledTimes(2);
+    expect(queryEvents).toHaveBeenCalledTimes(2);
   });
 
   it("skips when there is no DSN to send to", async () => {
@@ -100,11 +111,26 @@ describe("liveRoundtripCheck", () => {
 
     const result = await liveRoundtripCheck(capture, { reachable: false });
     expect(result.status).toBe("warn");
-    expect(listIssuesPaginated).not.toHaveBeenCalled();
+    expect(queryEvents).not.toHaveBeenCalled();
+  });
+
+  it("fails when the DSN did not resolve to a project", async () => {
+    const { liveRoundtripCheck } = await import(
+      "../../../src/lib/doctor/live.js"
+    );
+
+    const result = await liveRoundtripCheck(capture, {
+      reachable: true,
+      dsnMatchesProject: false,
+    });
+    expect(result.status).toBe("fail");
+    expect(result.detail).toMatch(/does not match/i);
+    expect(sendEnvelopeRequest).not.toHaveBeenCalled();
+    expect(queryEvents).not.toHaveBeenCalled();
   });
 });
 
-/** Pull the nonce back out of the search query the implementation built. */
+/** Pull the nonce back out of the events search query. */
 function extractNonce(opts: { query?: string }): string {
-  return (opts.query ?? "").replace(/[^\w-]/g, "");
+  return (opts.query ?? "").match(/project:\S+\s+(\w+)/)?.[1] ?? "";
 }
