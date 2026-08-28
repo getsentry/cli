@@ -54,7 +54,8 @@ type SilenceReason =
   | "output_error"
   | "auth_expected"
   | "api_user_error"
-  | "network_error";
+  | "network_error"
+  | "feature_disabled";
 
 /**
  * Classify whether an error should be silenced.
@@ -93,6 +94,12 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   }
   if (error instanceof ApiError && error.status > 400 && error.status < 500) {
     return "api_user_error";
+  }
+  // SeerError means the Seer feature is not available for this org (not enabled,
+  // AI features disabled, or no budget). These are expected feature-gate
+  // conditions — not CLI bugs — so they should not surface as actionable issues.
+  if (error instanceof SeerError) {
+    return "feature_disabled";
   }
   // A 400 (Bad Request) signals a malformed request the CLI built — a code
   // defect — so it is always captured. A user's unparseable `--query` is NOT a
