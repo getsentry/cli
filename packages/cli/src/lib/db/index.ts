@@ -93,7 +93,14 @@ export function resolveConfigDir(env: NodeJS.ProcessEnv, home: string): string {
   }
 
   const legacyDir = join(home, LEGACY_CONFIG_DIR_NAME);
-  if (existsSync(legacyDir)) {
+  // Only treat the legacy directory as a prior config install when it
+  // contains the actual database or the old JSON config. A bare
+  // `~/.sentry/bin` created by the curl installer should not block XDG.
+  if (
+    existsSync(legacyDir) &&
+    (existsSync(join(legacyDir, DB_FILENAME)) ||
+      existsSync(join(legacyDir, "config.json")))
+  ) {
     return legacyDir;
   }
 

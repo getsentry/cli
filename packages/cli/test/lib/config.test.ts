@@ -589,8 +589,16 @@ describe("resolveConfigDir", () => {
   });
 
   test("uses the legacy ~/.sentry directory when it already exists", () => {
-    mkdirSync(join(home, ".sentry"));
-    expect(resolveConfigDir({}, home)).toBe(join(home, ".sentry"));
+    const legacy = join(home, ".sentry");
+    mkdirSync(legacy);
+    writeFileSync(join(legacy, "cli.db"), ""); // simulate a prior config install
+    expect(resolveConfigDir({}, home)).toBe(legacy);
+  });
+
+  test("ignores a bare ~/.sentry/bin (installer artifact) and falls back to XDG", () => {
+    const legacy = join(home, ".sentry");
+    mkdirSync(join(legacy, "bin"), { recursive: true });
+    expect(resolveConfigDir({}, home)).toBe(join(home, ".config", "sentry"));
   });
 
   test("uses XDG_CONFIG_HOME/sentry when set to an absolute path", () => {
