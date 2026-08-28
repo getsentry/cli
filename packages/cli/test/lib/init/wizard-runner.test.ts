@@ -1122,7 +1122,7 @@ describe("runWizard", () => {
     expect(formatResultSpy).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      expect.anything(),
+      undefined,
       identity
     );
   });
