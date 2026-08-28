@@ -4,14 +4,7 @@
  * branches in `buildEmptyDiscoveryError`.
  */
 
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -53,12 +46,12 @@ describe("sourcemap inject command — --allow-empty behavior", () => {
   let func: CmdFunc<InjectFuncArgs>;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "sentry-inject-cmd-"));
+    dir = await mkdtemp(join(tmpdir(), "sentry-inject-cmd-"));
     func = (await injectCommand.loader()) as unknown as CmdFunc<InjectFuncArgs>;
   });
 
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
   });
 
   test("empty directory: throws actionable ValidationError", async () => {
@@ -83,15 +76,15 @@ describe("sourcemap inject command — --allow-empty behavior", () => {
   });
 
   test("directory with a .js + .map pair: succeeds (0 pairs guard not triggered)", async () => {
-    writeFileSync(join(dir, "app.js"), "console.log(1)\n");
-    writeFileSync(join(dir, "app.js.map"), '{"version":3}\n');
+    await writeFile(join(dir, "app.js"), "console.log(1)\n");
+    await writeFile(join(dir, "app.js.map"), '{"version":3}\n');
     const ctx = makeContext();
     await expect(func.call(ctx, {}, dir)).resolves.toBeUndefined();
   });
 
   test(".js files without matching .map files: throws with bundler hint", async () => {
-    writeFileSync(join(dir, "app.js"), "console.log(1)\n");
-    writeFileSync(join(dir, "other.js"), "console.log(2)\n");
+    await writeFile(join(dir, "app.js"), "console.log(1)\n");
+    await writeFile(join(dir, "other.js"), "console.log(2)\n");
     const ctx = makeContext();
     try {
       await func.call(ctx, {}, dir);
@@ -106,7 +99,7 @@ describe("sourcemap inject command — --allow-empty behavior", () => {
   });
 
   test(".map files without matching .js files: throws with mismatch hint", async () => {
-    writeFileSync(join(dir, "app.js.map"), '{"version":3}\n');
+    await writeFile(join(dir, "app.js.map"), '{"version":3}\n');
     const ctx = makeContext();
     try {
       await func.call(ctx, {}, dir);
@@ -120,8 +113,8 @@ describe("sourcemap inject command — --allow-empty behavior", () => {
   });
 
   test("js and map present but no basename match: reports both counts", async () => {
-    writeFileSync(join(dir, "app.abc123.js"), "console.log(1)\n");
-    writeFileSync(join(dir, "app.js.map"), '{"version":3}\n');
+    await writeFile(join(dir, "app.abc123.js"), "console.log(1)\n");
+    await writeFile(join(dir, "app.js.map"), '{"version":3}\n');
     const ctx = makeContext();
     try {
       await func.call(ctx, {}, dir);
@@ -152,7 +145,7 @@ describe("sourcemap inject command — --allow-empty behavior", () => {
 
   test("path is a file, not a directory: throws with distinct message", async () => {
     const filePath = join(dir, "not-a-dir.txt");
-    writeFileSync(filePath, "hello\n");
+    await writeFile(filePath, "hello\n");
     const ctx = makeContext();
     try {
       await func.call(ctx, {}, filePath);
@@ -181,12 +174,12 @@ describe("sourcemap inject command — --allow-empty behavior", () => {
 
   test("sourceMappingURL: follows external map reference when convention fails", async () => {
     // JS file with sourceMappingURL pointing to a differently-named map
-    writeFileSync(
+    await writeFile(
       join(dir, "bundle.js"),
       "console.log(1)\n//# sourceMappingURL=bundle.abc123.js.map\n"
     );
     // Map file with non-convention name (no bundle.js.map exists)
-    writeFileSync(
+    await writeFile(
       join(dir, "bundle.abc123.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
@@ -196,17 +189,17 @@ describe("sourcemap inject command — --allow-empty behavior", () => {
 
   test("sourceMappingURL: prefers convention naming over directive", async () => {
     // JS file with sourceMappingURL pointing to a different file
-    writeFileSync(
+    await writeFile(
       join(dir, "app.js"),
       "console.log(1)\n//# sourceMappingURL=other.js.map\n"
     );
     // Convention map exists — should be used
-    writeFileSync(
+    await writeFile(
       join(dir, "app.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
     // The directive target also exists
-    writeFileSync(
+    await writeFile(
       join(dir, "other.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
@@ -217,7 +210,7 @@ describe("sourcemap inject command — --allow-empty behavior", () => {
 
   test("sourceMappingURL: valid inline data: URL is injected (1 pair)", async () => {
     // eyJ2ZXJzaW9uIjozfQ== === {"version":3}
-    writeFileSync(
+    await writeFile(
       join(dir, "inline.js"),
       "console.log(1)\n//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozfQ==\n"
     );
@@ -227,7 +220,7 @@ describe("sourcemap inject command — --allow-empty behavior", () => {
   });
 
   test("sourceMappingURL: invalid inline base64 is skipped (zero pairs)", async () => {
-    writeFileSync(
+    await writeFile(
       join(dir, "bad-inline.js"),
       "console.log(1)\n//# sourceMappingURL=data:application/json;base64,@@@not-base64@@@\n"
     );
@@ -245,7 +238,7 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   let savedEnv: Record<string, string | undefined>;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "sentry-upload-cmd-"));
+    dir = await mkdtemp(join(tmpdir(), "sentry-upload-cmd-"));
     // Short-circuit resolveOrgAndProject so tests don't need DSN/config.
     savedEnv = {
       SENTRY_ORG: process.env.SENTRY_ORG,
@@ -256,8 +249,8 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
     func = (await uploadCommand.loader()) as unknown as CmdFunc<UploadFuncArgs>;
   });
 
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
     for (const [k, v] of Object.entries(savedEnv)) {
       if (v === undefined) {
         delete process.env[k];
@@ -300,8 +293,8 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   });
 
   test("directory with .js files but no .map files: throws", async () => {
-    mkdirSync(join(dir, "_astro"));
-    writeFileSync(join(dir, "_astro", "app.js"), "console.log(1)\n");
+    await mkdir(join(dir, "_astro"));
+    await writeFile(join(dir, "_astro", "app.js"), "console.log(1)\n");
     const ctx = makeContext();
     await expect(func.call(ctx, {}, dir)).rejects.toBeInstanceOf(
       ValidationError
@@ -327,10 +320,10 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   test("error path does not mutate files (js-only dir)", async () => {
     // Discovery must be read-only — injection only runs once we've
     // decided the upload will proceed.
-    mkdirSync(join(dir, "_astro"));
+    await mkdir(join(dir, "_astro"));
     const jsPath = join(dir, "_astro", "app.js");
     const original = "console.log(1)\n";
-    writeFileSync(jsPath, original);
+    await writeFile(jsPath, original);
     const ctx = makeContext();
     await expect(func.call(ctx, {}, dir)).rejects.toBeInstanceOf(
       ValidationError
@@ -342,11 +335,11 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   });
 
   test("happy path: directory with JS+map pair invokes uploadSourcemaps", async () => {
-    mkdirSync(join(dir, "_astro"));
+    await mkdir(join(dir, "_astro"));
     const jsPath = join(dir, "_astro", "app.js");
     const mapPath = join(dir, "_astro", "app.js.map");
-    writeFileSync(jsPath, "console.log(1)\n");
-    writeFileSync(
+    await writeFile(jsPath, "console.log(1)\n");
+    await writeFile(
       mapPath,
       JSON.stringify({
         version: 3,
@@ -379,7 +372,10 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
     const jsPath = join(dir, "inline.js");
     const map = { version: 3, sources: ["a.ts"], names: [], mappings: "AAAA" };
     const dataUrl = `data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString("base64")}`;
-    writeFileSync(jsPath, `console.log(1)\n//# sourceMappingURL=${dataUrl}\n`);
+    await writeFile(
+      jsPath,
+      `console.log(1)\n//# sourceMappingURL=${dataUrl}\n`
+    );
 
     const uploadSpy = vi
       .spyOn(sourcemapsApi, "uploadSourcemaps")
@@ -410,7 +406,10 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
     const jsPath = join(dir, "inline-norw.js");
     const map = { version: 3, sources: ["b.ts"], names: [], mappings: "BBBB" };
     const dataUrl = `data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString("base64")}`;
-    writeFileSync(jsPath, `console.log(1)\n//# sourceMappingURL=${dataUrl}\n`);
+    await writeFile(
+      jsPath,
+      `console.log(1)\n//# sourceMappingURL=${dataUrl}\n`
+    );
 
     const uploadSpy = vi
       .spyOn(sourcemapsApi, "uploadSourcemaps")
@@ -438,9 +437,9 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   });
 
   test("--dist flag: passes dist to uploadSourcemaps", async () => {
-    mkdirSync(join(dir, "_astro"));
-    writeFileSync(join(dir, "_astro", "app.js"), "console.log(1)\n");
-    writeFileSync(
+    await mkdir(join(dir, "_astro"));
+    await writeFile(join(dir, "_astro", "app.js"), "console.log(1)\n");
+    await writeFile(
       join(dir, "_astro", "app.js.map"),
       JSON.stringify({
         version: 3,
@@ -466,12 +465,12 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   });
 
   test("--no-rewrite: uploads without injecting debug IDs", async () => {
-    mkdirSync(join(dir, "_astro"));
+    await mkdir(join(dir, "_astro"));
     const jsPath = join(dir, "_astro", "app.js");
     const mapPath = join(dir, "_astro", "app.js.map");
     const originalJs = "console.log(1)\n";
-    writeFileSync(jsPath, originalJs);
-    writeFileSync(
+    await writeFile(jsPath, originalJs);
+    await writeFile(
       mapPath,
       JSON.stringify({
         version: 3,
@@ -503,8 +502,8 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   });
 
   test("--ext: discovers files with custom extensions", async () => {
-    writeFileSync(join(dir, "app.ts"), "console.log(1)\n");
-    writeFileSync(
+    await writeFile(join(dir, "app.ts"), "console.log(1)\n");
+    await writeFile(
       join(dir, "app.ts.map"),
       JSON.stringify({
         version: 3,
@@ -514,7 +513,7 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       })
     );
     // A .js file that should NOT be discovered when --ext is .ts
-    writeFileSync(join(dir, "other.js"), "console.log(2)\n");
+    await writeFile(join(dir, "other.js"), "console.log(2)\n");
 
     const uploadSpy = vi
       .spyOn(sourcemapsApi, "uploadSourcemaps")
@@ -534,16 +533,16 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   });
 
   test("--ignore: excludes matching files from upload", async () => {
-    mkdirSync(join(dir, "vendor"));
+    await mkdir(join(dir, "vendor"));
     // File that should be excluded
-    writeFileSync(join(dir, "vendor", "lib.js"), "console.log(1)\n");
-    writeFileSync(
+    await writeFile(join(dir, "vendor", "lib.js"), "console.log(1)\n");
+    await writeFile(
       join(dir, "vendor", "lib.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
     // File that should be included
-    writeFileSync(join(dir, "app.js"), "console.log(2)\n");
-    writeFileSync(
+    await writeFile(join(dir, "app.js"), "console.log(2)\n");
+    await writeFile(
       join(dir, "app.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
@@ -567,20 +566,20 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   });
 
   test("--ignore-file: reads patterns from a file", async () => {
-    mkdirSync(join(dir, "vendor"));
-    writeFileSync(join(dir, "vendor", "lib.js"), "console.log(1)\n");
-    writeFileSync(
+    await mkdir(join(dir, "vendor"));
+    await writeFile(join(dir, "vendor", "lib.js"), "console.log(1)\n");
+    await writeFile(
       join(dir, "vendor", "lib.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
-    writeFileSync(join(dir, "app.js"), "console.log(2)\n");
-    writeFileSync(
+    await writeFile(join(dir, "app.js"), "console.log(2)\n");
+    await writeFile(
       join(dir, "app.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
     // Write an ignore file
     const ignoreFilePath = join(dir, ".sourcemapignore");
-    writeFileSync(ignoreFilePath, "vendor/\n");
+    await writeFile(ignoreFilePath, "vendor/\n");
 
     const uploadSpy = vi
       .spyOn(sourcemapsApi, "uploadSourcemaps")
@@ -600,8 +599,8 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   });
 
   test("--ignore-file with non-existent file: throws ValidationError", async () => {
-    writeFileSync(join(dir, "app.js"), "console.log(1)\n");
-    writeFileSync(
+    await writeFile(join(dir, "app.js"), "console.log(1)\n");
+    await writeFile(
       join(dir, "app.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
@@ -616,9 +615,9 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   });
 
   test("--strip-prefix: removes explicit prefix from uploaded URLs", async () => {
-    mkdirSync(join(dir, "static", "js"), { recursive: true });
-    writeFileSync(join(dir, "static", "js", "app.js"), "console.log(1)\n");
-    writeFileSync(
+    await mkdir(join(dir, "static", "js"), { recursive: true });
+    await writeFile(join(dir, "static", "js", "app.js"), "console.log(1)\n");
+    await writeFile(
       join(dir, "static", "js", "app.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
@@ -641,17 +640,20 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   });
 
   test("--strip-common-prefix: auto-strips shared directory prefix", async () => {
-    mkdirSync(join(dir, "build", "output"), { recursive: true });
-    writeFileSync(join(dir, "build", "output", "main.js"), "console.log(1)\n");
-    writeFileSync(
+    await mkdir(join(dir, "build", "output"), { recursive: true });
+    await writeFile(
+      join(dir, "build", "output", "main.js"),
+      "console.log(1)\n"
+    );
+    await writeFile(
       join(dir, "build", "output", "main.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
-    writeFileSync(
+    await writeFile(
       join(dir, "build", "output", "vendor.js"),
       "console.log(2)\n"
     );
-    writeFileSync(
+    await writeFile(
       join(dir, "build", "output", "vendor.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
@@ -675,8 +677,8 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
   });
 
   test("--strip-prefix + --strip-common-prefix: mutually exclusive", async () => {
-    writeFileSync(join(dir, "app.js"), "console.log(1)\n");
-    writeFileSync(
+    await writeFile(join(dir, "app.js"), "console.log(1)\n");
+    await writeFile(
       join(dir, "app.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
@@ -694,19 +696,19 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
     // Simulates a concatenated bundle with two directives in the tail.
     // No convention map (concat.js.map) exists, so discovery falls back
     // to sourceMappingURL. The last directive should win.
-    writeFileSync(
+    await writeFile(
       join(dir, "concat.js"),
       "console.log(1)\n" +
         "//# sourceMappingURL=wrong.js.map\n" +
         "console.log(2)\n" +
         "//# sourceMappingURL=correct.js.map\n"
     );
-    writeFileSync(
+    await writeFile(
       join(dir, "correct.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
     // wrong.js.map also exists — but the last directive should win
-    writeFileSync(
+    await writeFile(
       join(dir, "wrong.js.map"),
       JSON.stringify({ version: 3, sources: [], names: [], mappings: "" })
     );
@@ -743,8 +745,8 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       mappings: "AAAA",
       debug_id: pluginId,
     });
-    writeFileSync(jsPath, js);
-    writeFileSync(mapPath, map);
+    await writeFile(jsPath, js);
+    await writeFile(mapPath, map);
 
     const uploadSpy = vi
       .spyOn(sourcemapsApi, "uploadSourcemaps")
@@ -760,8 +762,8 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       expect(files.find((f) => f.type === "source_map")?.debugId).toBe(
         pluginId
       );
-      expect(readFileSync(jsPath, "utf-8")).toBe(js);
-      expect(readFileSync(mapPath, "utf-8")).toBe(map);
+      expect(await readFile(jsPath, "utf-8")).toBe(js);
+      expect(await readFile(mapPath, "utf-8")).toBe(map);
     } finally {
       uploadSpy.mockRestore();
     }
@@ -779,7 +781,7 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
     };
     const dataUrl = `data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString("base64")}`;
     const js = `console.log(1)\n//# sourceMappingURL=${dataUrl}\n`;
-    writeFileSync(jsPath, js);
+    await writeFile(jsPath, js);
 
     const uploadSpy = vi
       .spyOn(sourcemapsApi, "uploadSourcemaps")
@@ -797,7 +799,7 @@ describe("sourcemap upload command — --allow-empty behavior", () => {
       expect(
         JSON.parse((mapFile?.content as Buffer).toString("utf-8")).debug_id
       ).toBe(pluginId);
-      expect(readFileSync(jsPath, "utf-8")).toBe(js);
+      expect(await readFile(jsPath, "utf-8")).toBe(js);
     } finally {
       uploadSpy.mockRestore();
     }

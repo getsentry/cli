@@ -21,6 +21,7 @@
 
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import { UUID_DASH_RE } from "../hex-id.js";
 import { logger } from "../logger.js";
 import {
   type DecodedInlineMap,
@@ -35,12 +36,8 @@ const DEBUGID_COMMENT_PREFIX = "//# debugId=";
 /** Regex to extract an existing debug ID from a JS file. @internal */
 export const EXISTING_DEBUGID_RE = /\/\/# debugId=([0-9a-fA-F-]{36})/;
 
-/** UUID format: 8-4-4-4-12 hex with hyphens. */
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
- * Read a pre-existing debug ID off a parsed sourcemap.å
+ * Read a pre-existing debug ID off a parsed sourcemap.
  *
  * `debug_id` wins over `debugId` when both are present. A value that is not a
  * well-formed UUID is treated as absent so the caller falls through to minting.
@@ -55,7 +52,7 @@ export function readSourcemapDebugId(map: unknown): string | undefined {
   }
   const { debug_id: snake, debugId: camel } = map as SourcemapJson;
   for (const candidate of [snake, camel]) {
-    if (typeof candidate === "string" && UUID_RE.test(candidate)) {
+    if (typeof candidate === "string" && UUID_DASH_RE.test(candidate)) {
       return candidate;
     }
   }

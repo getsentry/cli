@@ -159,7 +159,9 @@ async function readMapDebugId(map: MapSource): Promise<string | undefined> {
       JSON.parse(await readFile(map.mapPath, "utf-8"))
     );
   } catch (err) {
-    log.debug(`failed to read debug ID from sourcemap: ${map.mapPath}`, err);
+    log.warn(
+      `could not read a debug ID from ${map.mapPath}: ${err instanceof Error ? err.message : String(err)}`
+    );
     return;
   }
 }
@@ -842,33 +844,33 @@ export function buildEmptyDiscoveryError(
   if (jsFiles === 0 && mapFiles === 0) {
     return new ValidationError(
       `Directory '${dir}' contains no JS or sourcemap files. ` +
-        "Check the path points at your build output, or pass " +
-        "--allow-empty to suppress this error.",
+      "Check the path points at your build output, or pass " +
+      "--allow-empty to suppress this error.",
       "directory"
     );
   }
   if (jsFiles > 0 && mapFiles === 0) {
     return new ValidationError(
       `Found ${jsFiles} JS file(s) in '${dir}' but no companion .map ` +
-        "files. Your bundler is not emitting sourcemaps. For Vite/Astro: " +
-        "`vite.environments.client.build.sourcemap: 'hidden'`. For webpack: " +
-        "`devtool: 'hidden-source-map'`. Pass --allow-empty to suppress.",
+      "files. Your bundler is not emitting sourcemaps. For Vite/Astro: " +
+      "`vite.environments.client.build.sourcemap: 'hidden'`. For webpack: " +
+      "`devtool: 'hidden-source-map'`. Pass --allow-empty to suppress.",
       "directory"
     );
   }
   if (mapFiles > 0 && jsFiles === 0) {
     return new ValidationError(
       `Found ${mapFiles} .map file(s) in '${dir}' but no companion JS ` +
-        "files. Ensure your build emits both JS and maps to the same " +
-        "directory. Pass --allow-empty to suppress.",
+      "files. Ensure your build emits both JS and maps to the same " +
+      "directory. Pass --allow-empty to suppress.",
       "directory"
     );
   }
   return new ValidationError(
     `Found ${jsFiles} JS and ${mapFiles} .map file(s) in '${dir}' but ` +
-      "no JS file has a matching `<name>.map` companion. Check that your " +
-      "bundler emits JS and sourcemaps with matching basenames. Pass " +
-      "--allow-empty to suppress.",
+    "no JS file has a matching `<name>.map` companion. Check that your " +
+    "bundler emits JS and sourcemaps with matching basenames. Pass " +
+    "--allow-empty to suppress.",
     "directory"
   );
 }
