@@ -103,7 +103,7 @@ The `sentry api` command also uses `--verbose` to show full HTTP request/respons
 
 ## Credential Storage
 
-We store credentials and caches in a SQLite database (`cli.db`) inside the config directory (`~/.sentry/` by default, overridable via `SENTRY_CONFIG_DIR`). The database file and its WAL side-files are created with restricted permissions (mode 600) so that only the current user can read them. The database also caches:
+We store credentials and caches in a SQLite database (`cli.db`) inside the config directory. The location follows the [XDG Base Directory specification](https://specifications.freedesktop.org/basedir/latest/): by default the CLI uses `$XDG_CONFIG_HOME/sentry` (i.e. `~/.config/sentry/` when `XDG_CONFIG_HOME` is unset), and you can override it with `SENTRY_CONFIG_DIR`. For backward compatibility, if a legacy `~/.sentry/` directory already exists it continues to be used. The database file and its WAL side-files are created with restricted permissions (mode 600) so that only the current user can read them. The database also caches:
 
 - Organization and project defaults
 - DSN resolution results
