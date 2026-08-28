@@ -91,4 +91,44 @@ describe("marker tables", () => {
     expect(markersForFile(BUILD_MARKERS, "vite.config.ts")).not.toEqual([]);
     expect(markersForFile(BUILD_MARKERS, "build.gradle.kts")).not.toEqual([]);
   });
+
+  it("captures Spring application.properties without paren delimiters", () => {
+    const rule = markersForFile(INIT_MARKERS, "application.properties").find(
+      (r) => r.kind === "spring-config"
+    );
+    expect(rule?.delims).toBe("none");
+    const block = captureBlock(
+      "sentry.dsn=https://k@h/1\nsentry.traces-sample-rate=0.5\n",
+      rule!.marker,
+      rule!.delims
+    );
+    expect(block).not.toBeNull();
+    expect(block?.text).toContain("sentry.dsn");
+  });
+
+  it("captures Laravel sentry.php as the rest of the file", () => {
+    const rule = markersForFile(INIT_MARKERS, "sentry.php").find(
+      (r) => r.kind === "laravel-config"
+    );
+    expect(rule?.delims).toBe("none");
+    const block = captureBlock(
+      "<?php\nreturn [\n  'dsn' => env('SENTRY_DSN'),\n];\n",
+      rule!.marker,
+      rule!.delims
+    );
+    expect(block).not.toBeNull();
+    expect(block?.text).toContain("'dsn'");
+  });
+
+  it("captures a Fastfile sentry_upload_dsym call", () => {
+    const rule = markersForFile(BUILD_MARKERS, "Fastfile")[0];
+    expect(rule).toBeDefined();
+    const block = captureBlock(
+      'lane :release do\n  sentry_upload_dsym(\n    auth_token: ENV["SENTRY_AUTH_TOKEN"],\n  )\nend\n',
+      rule!.marker,
+      rule!.delims
+    );
+    expect(block).not.toBeNull();
+    expect(block?.text).toContain("sentry_upload_dsym");
+  });
 });

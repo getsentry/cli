@@ -221,18 +221,25 @@ export function extractKeys(text: string): Record<string, CapturedKey> {
     const raw = (match[3] ?? "").trim().replace(TRAILING_PUNCT_RE, "");
 
     if (name && isJudgedKey(name) && !(name in keys)) {
-      keys[name] = classifyValue(raw);
+      // Checks look up dsn/environment/debug in lowercase; Go and
+      // appsettings.json spell them Dsn/Environment/Debug.
+      const canon = name.replace(/[-_]/g, "").toLowerCase();
+      const stored =
+        canon === "dsn" || canon === "environment" || canon === "debug"
+          ? canon
+          : name;
+      keys[stored] = classifyValue(raw);
     }
     match = KEY_ASSIGN_RE.exec(text);
   }
 
-  // Java/Kotlin: options.getSessionReplay().setSessionSampleRate(1.0)
-  const setter = /\.set([A-Z]\w*SampleRate)\s*\(\s*([^)]+?)\s*\)/g;
+  // Java/Kotlin: options.setDsn("x") / setEnvironment / set*SampleRate
+  const setter = /\.set([A-Z]\w+)\s*\(\s*([^)]+?)\s*\)/g;
   let set = setter.exec(text);
   while (set !== null) {
     const name = (set[1] ?? "").replace(/^[A-Z]/, (c) => c.toLowerCase());
     const raw = (set[2] ?? "").trim();
-    if (name && !(name in keys)) {
+    if (name && isJudgedKey(name) && !(name in keys)) {
       keys[name] = classifyValue(raw);
     }
     set = setter.exec(text);

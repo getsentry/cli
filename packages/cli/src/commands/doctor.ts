@@ -109,7 +109,7 @@ export const doctorCommand = buildCommand({
     yield new CommandOutput(report);
 
     const { offerSupportExport } = await import("../lib/doctor/report.js");
-    await offerSupportExport(report);
+    await offerSupportExport(report, flags.json);
 
     if (
       flags.fix &&

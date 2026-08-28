@@ -108,6 +108,15 @@ describe("offerSupportExport", () => {
     expect(captureFeedback).toHaveBeenCalledOnce();
   });
 
+  it("never prompts in --json mode even when stdin is a TTY", async () => {
+    const { offerSupportExport } = await import(
+      "../../../src/lib/doctor/report.js"
+    );
+
+    expect(await offerSupportExport(makeReport(true), true)).toBe(false);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
   it("never prompts outside a TTY", async () => {
     isatty.mockReturnValue(false);
     const { offerSupportExport } = await import(

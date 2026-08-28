@@ -83,21 +83,39 @@ async function tryFact<T>(
   }
 }
 
-/** Debug files uploaded for this project — presence is all any check needs. */
+/** True if the list endpoint returned at least one item. */
+async function listingNonEmpty(
+  region: string,
+  path: string
+): Promise<boolean | undefined> {
+  return await tryFact(path, async () => {
+    const { data } = await apiRequestToRegion<unknown[]>(region, path);
+    return Array.isArray(data) && data.length > 0;
+  });
+}
+
+/**
+ * Debug files (`/files/dsyms/`) or JS source maps (`artifact-bundles`,
+ * `source-maps`). Presence on any of those is enough.
+ */
 async function hasUploadedArtifacts(
   org: string,
   project: string
 ): Promise<boolean | undefined> {
-  return await tryFact("artifact listing", async () => {
-    const region = await resolveOrgRegion(org);
-    // Typed defensively: we assert only that the list is non-empty, so
-    // response-shape drift cannot break the check.
-    const { data } = await apiRequestToRegion<unknown[]>(
-      region,
-      `projects/${org}/${project}/files/dsyms/`
-    );
-    return Array.isArray(data) && data.length > 0;
-  });
+  const region = await resolveOrgRegion(org);
+  const prefix = `projects/${org}/${project}/files`;
+  const [dsyms, bundles, maps] = await Promise.all([
+    listingNonEmpty(region, `${prefix}/dsyms/`),
+    listingNonEmpty(region, `${prefix}/artifact-bundles/`),
+    listingNonEmpty(region, `${prefix}/source-maps/`),
+  ]);
+  if (dsyms === true || bundles === true || maps === true) {
+    return true;
+  }
+  if (dsyms === false || bundles === false || maps === false) {
+    return false;
+  }
+  return;
 }
 
 export async function resolveServerFacts(

@@ -116,10 +116,51 @@ describe("resolveServerFacts", () => {
       "us",
       "projects/acme/web/files/dsyms/"
     );
+    expect(apiRequestToRegion).toHaveBeenCalledWith(
+      "us",
+      "projects/acme/web/files/artifact-bundles/"
+    );
     expect(apiRequestToRegion).not.toHaveBeenCalledWith(
       "us",
       "projects/acme/web/files/difs/"
     );
+  });
+
+  it("treats a non-empty artifact-bundles listing as uploaded artifacts", async () => {
+    vi.resetModules();
+    const apiRequestToRegion = vi.fn().mockImplementation((_region, path) => {
+      if (String(path).includes("artifact-bundles")) {
+        return { data: [{ id: "bundle-1" }] };
+      }
+      return { data: [] };
+    });
+    vi.doMock("../../../src/lib/api/infrastructure.js", () => ({
+      apiRequestToRegion,
+    }));
+    vi.doMock("../../../src/lib/region.js", () => ({
+      resolveOrgRegion: vi.fn().mockResolvedValue("us"),
+    }));
+    vi.doMock("../../../src/lib/api/projects.js", () => ({
+      findProjectByDsnKey: vi.fn().mockResolvedValue({
+        slug: "web",
+        organization: { slug: "acme" },
+      }),
+      getProjectKeys: vi.fn().mockResolvedValue([]),
+    }));
+    vi.doMock("../../../src/lib/api/issues.js", () => ({
+      listIssuesPaginated: vi.fn().mockResolvedValue({ data: [] }),
+    }));
+    vi.doMock("../../../src/lib/api/releases.js", () => ({
+      listProjectEnvironments: vi.fn().mockResolvedValue([]),
+      listReleasesForProject: vi.fn().mockResolvedValue([]),
+    }));
+
+    const { resolveServerFacts } = await import(
+      "../../../src/lib/doctor/resolve.js"
+    );
+    const facts = await resolveServerFacts(baseCapture);
+
+    expect(facts.hasUploadedArtifacts).toBe(true);
   });
 
   it("prefers a recent release that has events over a newer unused sibling", async () => {

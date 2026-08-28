@@ -118,7 +118,7 @@ export const INIT_MARKERS: readonly MarkerRule[] = [
     kind: "spring-config",
     file: /^application(?:-[\w-]+)?\.(?:properties|ya?ml)$/,
     marker: /^\s*sentry[.:]/m,
-    delims: "paren",
+    delims: "none",
     autoInit: true,
   },
   {
@@ -134,7 +134,7 @@ export const INIT_MARKERS: readonly MarkerRule[] = [
     kind: "laravel-config",
     file: /^sentry\.php$/,
     marker: /return\s*\[/,
-    delims: "paren",
+    delims: "none",
     autoInit: true,
   },
   {
@@ -167,7 +167,7 @@ export const BUILD_MARKERS: readonly MarkerRule[] = [
     kind: "fastlane",
     file: /^Fastfile$/,
     marker: /sentry_(?:upload_d?sym|upload_sourcemap|debug_files_upload)\b/,
-    delims: "ruby",
+    delims: "paren",
   },
 ];
 

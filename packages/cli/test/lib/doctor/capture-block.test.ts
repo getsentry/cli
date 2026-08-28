@@ -178,7 +178,7 @@ describe("extractKeys", () => {
       '{ "Sentry": { "Dsn": "https://k@h/1", "TracesSampleRate": 1.0 } }'
     );
     expect(json.TracesSampleRate).toEqual({ value: "1.0", dynamic: false });
-    expect(json.Dsn).toEqual({ value: "https://k@h/1", dynamic: false });
+    expect(json.dsn).toEqual({ value: "https://k@h/1", dynamic: false });
   });
 
   it("extracts hyphenated keys from sentry.properties", () => {
@@ -220,6 +220,24 @@ describe("extractKeys", () => {
     expect(keys.exception).toBeUndefined();
     expect(keys.user).toBeUndefined();
     expect(keys.sessionSampleRate).toEqual({ value: "1.0", dynamic: false });
+  });
+
+  it("stores Go/.NET capitalized option names in lowercase", () => {
+    const keys = extractKeys(
+      'sentry.Init(sentry.ClientOptions{\n  Dsn: "https://k@h/1",\n  Environment: "prod",\n  Debug: true,\n})'
+    );
+    expect(keys.dsn).toEqual({ value: "https://k@h/1", dynamic: false });
+    expect(keys.environment).toEqual({ value: "prod", dynamic: false });
+    expect(keys.debug).toEqual({ value: "true", dynamic: false });
+  });
+
+  it("extracts Java setDsn / setEnvironment / setDebug", () => {
+    const keys = extractKeys(
+      'SentryAndroid.init(this, options -> {\n  options.setDsn("https://k@h/1");\n  options.setEnvironment("debug");\n  options.setDebug(true);\n});'
+    );
+    expect(keys.dsn).toEqual({ value: "https://k@h/1", dynamic: false });
+    expect(keys.environment).toEqual({ value: "debug", dynamic: false });
+    expect(keys.debug).toEqual({ value: "true", dynamic: false });
   });
 
   it("extracts Java setter sample rates", () => {

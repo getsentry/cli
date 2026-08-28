@@ -88,7 +88,9 @@ const androidDoubleInit: Check = {
     const manifests = capture.initSites.filter(
       (b) => b.kind === "android-manifest"
     );
-    const code = capture.initSites.filter((b) => !AUTO_INIT_KINDS.has(b.kind));
+    const code = capture.initSites.filter(
+      (b) => b.kind === "init" && /\.(?:java|kt)$/.test(b.file)
+    );
     if (manifests.length === 0 || code.length === 0) {
       return {
         id: "android.double_init",

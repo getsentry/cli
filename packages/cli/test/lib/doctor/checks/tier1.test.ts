@@ -73,6 +73,61 @@ describe("tier 1", () => {
     expect(results.get("dsn.conflict")?.status).toBe("skip");
   });
 
+  it("skips dsn.present when the search was incomplete", () => {
+    const results = run(
+      makeCapture({ dsns: [], incomplete: "DSN detection failed" }),
+      { reachable: false }
+    );
+    expect(results.get("dsn.present")?.status).toBe("skip");
+    expect(results.get("dsn.present")?.detail).toContain("incomplete");
+  });
+
+  it("skips artifacts.uploaded when the project platform does not upload them", () => {
+    for (const projectPlatform of ["python", "java-spring-boot", "php-laravel"]) {
+      const results = run(makeCapture(), {
+        ...HEALTHY,
+        projectPlatform,
+        hasUploadedArtifacts: false,
+      });
+      expect(results.get("artifacts.uploaded")?.status, projectPlatform).toBe(
+        "skip"
+      );
+    }
+  });
+
+  it("fails artifacts.uploaded when a JS platform has no source maps", () => {
+    const results = run(makeCapture(), {
+      ...HEALTHY,
+      projectPlatform: "javascript-react",
+      hasUploadedArtifacts: false,
+    });
+    expect(results.get("artifacts.uploaded")?.status).toBe("fail");
+    expect(results.get("artifacts.uploaded")?.detail).toMatch(/source maps/i);
+  });
+
+  it("fails artifacts.uploaded when a debug-file platform has none", () => {
+    for (const projectPlatform of [
+      "apple-ios",
+      "android",
+      "kotlin",
+      "flutter",
+      "unity",
+      "unreal",
+      "godot",
+      "native",
+      "react-native",
+    ]) {
+      const results = run(makeCapture(), {
+        ...HEALTHY,
+        projectPlatform,
+        hasUploadedArtifacts: false,
+      });
+      expect(results.get("artifacts.uploaded")?.status, projectPlatform).toBe(
+        "fail"
+      );
+    }
+  });
+
   it("fails on a placeholder DSN copied from the docs", () => {
     const results = run(makeCapture({ dsns: [dsn("examplePublicKey", "0")] }), {
       reachable: false,

@@ -225,6 +225,26 @@ describe("tier 2", () => {
     );
   });
 
+  it("skips android.double_init when the other init is not Java/Kotlin", () => {
+    const results = run(
+      makeCapture({
+        ecosystems: ["java", "javascript"],
+        initSites: [
+          block({
+            kind: "android-manifest",
+            file: "app/src/main/AndroidManifest.xml",
+            keys: { dsn: { value: "x", dynamic: false } },
+          }),
+          block({
+            kind: "init",
+            file: "src/instrument.ts",
+          }),
+        ],
+      })
+    );
+    expect(results.get("android.double_init")?.status).toBe("skip");
+  });
+
   it("passes when auto-init is false next to a code init", () => {
     const results = run(
       makeCapture({

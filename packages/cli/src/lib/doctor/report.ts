@@ -55,11 +55,13 @@ async function sendSupportReport(
 }
 
 export async function offerSupportExport(
-  report: DoctorReport
+  report: DoctorReport,
+  json = false
 ): Promise<boolean> {
   // Nobody is here to consent, or the party present cannot consent
-  // on the user's behalf.
-  if (!isatty(0) || detectAgent() !== undefined) {
+  // on the user's behalf. `--json` is a machine path even when stdin
+  // is still a TTY (`sentry doctor --json > report.json`).
+  if (json || !isatty(0) || detectAgent() !== undefined) {
     return false;
   }
 

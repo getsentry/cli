@@ -48,6 +48,13 @@ const dsnPresent: Check = {
   run: ({ capture }) => {
     const first = capture.dsns[0];
     if (!first) {
+      if (capture.incomplete) {
+        return {
+          id: "dsn.present",
+          status: "skip",
+          detail: `Search was incomplete, so a missing DSN cannot be confirmed: ${capture.incomplete}`,
+        };
+      }
       return {
         id: "dsn.present",
         status: "fail",
@@ -337,6 +344,59 @@ const releaseAttribution: Check = {
   },
 };
 
+function platformInFamilies(
+  platform: string | undefined,
+  families: readonly string[]
+): boolean {
+  if (!platform) {
+    return false;
+  }
+  return families.some(
+    (family) => platform === family || platform.startsWith(`${family}-`)
+  );
+}
+
+/**
+ * `project.platform` families that symbolicate from `/files/dsyms/`
+ * (dSYM, ELF, PDB, Breakpad, ProGuard, Dart symbols).
+ */
+const DEBUG_FILE_FAMILIES = [
+  "apple",
+  "android",
+  "kotlin",
+  "flutter",
+  "dart",
+  "unity",
+  "unreal",
+  "godot",
+  "native",
+  "minidump",
+  "nintendo-switch",
+  "playstation",
+  "xbox",
+  "rust",
+  "react-native",
+  "electron",
+  "capacitor",
+  "cordova",
+  "ionic",
+  "dotnet-maui",
+  "dotnet-uwp",
+  "dotnet-winforms",
+  "dotnet-wpf",
+  "dotnet-xamarin",
+] as const;
+
+/** JS stacks that upload source maps (artifact bundles), not dSYMs. */
+const SOURCE_MAP_FAMILIES = ["javascript", "node", "bun", "deno"] as const;
+
+function projectNeedsArtifacts(platform: string | undefined): boolean {
+  return (
+    platformInFamilies(platform, DEBUG_FILE_FAMILIES) ||
+    platformInFamilies(platform, SOURCE_MAP_FAMILIES)
+  );
+}
+
 const artifactsUploaded: Check = {
   id: "artifacts.uploaded",
   run: (ctx) => {
@@ -344,24 +404,36 @@ const artifactsUploaded: Check = {
     if (skipped) {
       return skipped;
     }
-    const { hasUploadedArtifacts } = ctx.server;
+    const { hasUploadedArtifacts, projectPlatform } = ctx.server;
     if (hasUploadedArtifacts === undefined) {
       return missing("artifacts.uploaded", "debug-file data", ctx);
     }
-    return hasUploadedArtifacts
-      ? {
-          id: "artifacts.uploaded",
-          status: "pass",
-          detail: "Debug files have been uploaded for this project.",
-        }
-      : {
-          id: "artifacts.uploaded",
-          status: "fail",
-          detail:
-            "No source maps or debug files exist for this project; stack traces will stay unreadable.",
-          remediation:
-            "Enable upload in your build: the Sentry bundler plugin for JavaScript, `autoUploadProguardMapping` for Android, or `sentry_upload_dsym` for Apple. Then run a release build and confirm files appear under Settings → Debug Files.",
-        };
+    if (hasUploadedArtifacts) {
+      return {
+        id: "artifacts.uploaded",
+        status: "pass",
+        detail: "Debug files or source maps have been uploaded for this project.",
+      };
+    }
+    if (!projectNeedsArtifacts(projectPlatform)) {
+      return {
+        id: "artifacts.uploaded",
+        status: "skip",
+        detail:
+          "No debug files or source maps listed. That is expected on stacks that do not upload them.",
+      };
+    }
+    const js = platformInFamilies(projectPlatform, SOURCE_MAP_FAMILIES);
+    return {
+      id: "artifacts.uploaded",
+      status: "fail",
+      detail: js
+        ? "No source maps exist for this project; minified stack traces will stay unreadable."
+        : "No debug files exist for this project; native stack traces will stay unreadable.",
+      remediation: js
+        ? "Add the Sentry bundler plugin (or `sentry sourcemap upload`) to your production build, then confirm files appear under Settings → Source Maps."
+        : "Upload debug files in your release build: dSYMs for Apple, ELF/NDK or ProGuard for Android, Dart split-debug-info for Flutter, or `sentry-cli debug-files upload` for native/gaming. Then confirm they appear under Settings → Debug Files.",
+    };
   },
 };
 
