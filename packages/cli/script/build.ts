@@ -35,6 +35,7 @@ import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { build as esbuild } from "esbuild";
 import { uploadSourcemaps } from "../src/lib/api/sourcemaps.js";
+import { buildCarExtract } from "./build-car-extract.js";
 import { injectDebugId, PLACEHOLDER_DEBUG_ID } from "./debug-id.js";
 import { textImportPlugin } from "./text-import-plugin.js";
 
@@ -343,6 +344,21 @@ async function compileAllTargets(
   const DIF_WASM = `${BUILD_DIR}/symbolic_bg.wasm`;
   copyFileSync(DIF_WASM_SRC, DIF_WASM);
   assetArgs.push("--assets", DIF_WASM);
+
+  // Embed the CoreUI pixel-extraction helper for darwin-arm64 only. It is a
+  // macho binary compiled with swiftc (macOS build hosts only) and loaded at
+  // runtime via node:sea.getRawAsset(CAR_EXTRACT_ASSET_KEY) — the asset key
+  // MUST equal this path string (see src/lib/build/asset-catalog-extract.ts).
+  // Off macOS, or when swiftc is unavailable, the helper is omitted and the CLI
+  // falls back to the pure-TS size manifest.
+  if (targets.some((t) => t.os === "darwin" && t.arch === "arm64")) {
+    const carExtract = buildCarExtract();
+    if (carExtract) {
+      const CAR_EXTRACT = `${BUILD_DIR}/car-extract`;
+      copyFileSync(carExtract, CAR_EXTRACT);
+      assetArgs.push("--assets", CAR_EXTRACT);
+    }
+  }
 
   console.log(
     `  Step 2: Compiling ${platforms.length} target(s) (Node SEA via fossilize)...`

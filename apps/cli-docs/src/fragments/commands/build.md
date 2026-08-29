@@ -34,10 +34,13 @@ sentry build download 1234567890 --json
 - `build upload` supports **Android APK/AAB** and **iOS XCArchive/IPA**. An
   XCArchive is a directory; an IPA is converted to an XCArchive layout for
   upload. **Sentry SaaS only.**
-- iOS caveat: `Assets.car` asset catalogs are **not** parsed into per-asset
-  images (that required native macOS frameworks), so the server sees the raw
-  `.car` rather than a per-image breakdown. XCArchive symlinks and Unix file
-  permissions are preserved.
+- iOS `Assets.car` asset catalogs are parsed into a per-rendition size manifest
+  (`ParsedAssets/.../Assets.json`) so the server gets a per-asset breakdown; the
+  raw `.car` is still uploaded alongside it. On **macOS (Apple Silicon)** the
+  renditions are additionally decoded to PNGs under `ParsedAssets/.../images/`
+  via the native CoreUI framework; on other platforms the manifest carries
+  size/geometry only. XCArchive symlinks and Unix file permissions are
+  preserved.
 - Multiple paths may be uploaded at once; the command exits non-zero if any
   build fails to upload.
 - Git metadata (commit, branch, PR number, repo) is **auto-collected in CI**

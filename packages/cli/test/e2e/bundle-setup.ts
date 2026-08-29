@@ -80,7 +80,9 @@ async function runBundleBuild(): Promise<void> {
 }
 
 async function waitForBundle(): Promise<void> {
-  const deadline = Date.now() + 55_000;
+  // Must stay under the beforeAll hook timeout (120s) but above the builder's
+  // worst-case cold-runner bundle time (~65s: redundant codegen + esbuild).
+  const deadline = Date.now() + 110_000;
   while (Date.now() < deadline) {
     if (existsSync(BUNDLE_INDEX_PATH) && !existsSync(LOCK_DIR)) {
       return;
