@@ -13,6 +13,7 @@ import {
   type DashboardViewWidget,
   formatDashboardWithData,
 } from "../../../src/lib/formatters/dashboard.js";
+import { logger } from "../../../src/lib/logger.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for vi.spyOn mocking
 import * as sixelModule from "../../../src/lib/sixel.js";
 import type { TimeseriesResult } from "../../../src/types/dashboard.js";
@@ -75,6 +76,9 @@ describe("dashboard sixel integration", () => {
     process.env.SENTRY_PLAIN_OUTPUT = "0";
     process.stdout.columns = 40;
     vi.spyOn(sixelModule, "selectGraphicsFormat").mockReturnValue("sixel");
+    vi.spyOn(sixelModule, "detectSixelCaps").mockReturnValue({
+      supported: true,
+    });
     vi.spyOn(sixelModule, "graphicsCellSize").mockReturnValue({
       cellWidth: 8,
       cellHeight: 12,
@@ -110,8 +114,25 @@ describe("dashboard sixel integration", () => {
     expect(output).toContain('"1;1;320;144');
   });
 
+  test("logs the selected sixel graphics renderer and its detected capabilities", () => {
+    const debugSpy = vi.spyOn(logger, "debug");
+
+    formatDashboardWithData(makeDashboardData());
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Dashboard graphics renderer: sixel")
+    );
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("capabilities: kitty=no, sixel=yes")
+    );
+  });
+
   test("prefers kitty encoding when the terminal supports it", () => {
     vi.mocked(sixelModule.selectGraphicsFormat).mockReturnValue("kitty");
+    vi.mocked(sixelModule.detectSixelCaps).mockReturnValue({
+      supported: false,
+      kitty: true,
+    });
     const data = makeDashboardData({
       widgets: [
         makeWidget({
@@ -126,6 +147,24 @@ describe("dashboard sixel integration", () => {
     // Kitty graphics use the APC introducer ESC _ G, not the sixel DCS ESC P.
     expect(output).toContain(`${ESC}_G`);
     expect(output).not.toContain(`${ESC}P`);
+  });
+
+  test("logs kitty when it is the selected graphics renderer", () => {
+    vi.mocked(sixelModule.selectGraphicsFormat).mockReturnValue("kitty");
+    vi.mocked(sixelModule.detectSixelCaps).mockReturnValue({
+      supported: false,
+      kitty: true,
+    });
+    const debugSpy = vi.spyOn(logger, "debug");
+
+    formatDashboardWithData(makeDashboardData());
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Dashboard graphics renderer: kitty")
+    );
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("capabilities: kitty=yes, sixel=no")
+    );
   });
 
   test("renders scalar and timeseries widgets in the same sixel canvas", () => {
@@ -278,6 +317,9 @@ describe("dashboard sixel integration", () => {
 
   test("falls back to the complete character dashboard without a graphics format", () => {
     vi.mocked(sixelModule.selectGraphicsFormat).mockReturnValue(undefined);
+    vi.mocked(sixelModule.detectSixelCaps).mockReturnValue({
+      supported: false,
+    });
     vi.mocked(sixelModule.graphicsCellSize).mockReturnValue(undefined);
     const output = formatDashboardWithData(
       makeDashboardData({
@@ -293,6 +335,26 @@ describe("dashboard sixel integration", () => {
     expect(output).not.toContain(`${ESC}P`);
     expect(output).not.toContain(`${ESC}_G`);
     expect(output).toContain("Fallback Widget");
+  });
+
+  test("logs ASCII and the fallback reason when no graphics renderer is available", () => {
+    vi.mocked(sixelModule.selectGraphicsFormat).mockReturnValue(undefined);
+    vi.mocked(sixelModule.detectSixelCaps).mockReturnValue({
+      supported: false,
+    });
+    vi.mocked(sixelModule.graphicsCellSize).mockReturnValue(undefined);
+    const debugSpy = vi.spyOn(logger, "debug");
+
+    formatDashboardWithData(makeDashboardData());
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Dashboard graphics renderer: ascii")
+    );
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "reason: no compatible graphics protocol detected"
+      )
+    );
   });
 
   test("renders graphics on a kitty terminal that never reports cell geometry", () => {
