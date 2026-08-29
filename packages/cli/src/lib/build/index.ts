@@ -24,8 +24,18 @@
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { lstat, readdir, readFile, readlink } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  readlink,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { strToU8, unzipSync, type Zippable, zipSync } from "fflate";
 import { CLI_VERSION } from "../constants.js";
 import { ValidationError } from "../errors.js";
@@ -343,6 +353,252 @@ export async function normalizeBuildDirectory(
   return Buffer.from(zipSync(entries));
 }
 
+/** A dSYM file collected for inclusion under an XCArchive's `dSYMs/` tree. */
+export type DsymEntry = {
+  /** Path relative to the `dSYMs/` directory (e.g. `App.app.dSYM/Contents/…`). */
+  relPath: string;
+  /** File bytes. */
+  content: Uint8Array;
+};
+
+/** Whether a path/name ends in a case-insensitive `.dSYM` extension. */
+function hasDsymExtension(name: string): boolean {
+  return name.toLowerCase().endsWith(".dsym");
+}
+
+/** Whether a ZIP entry name is macOS archive cruft to ignore during discovery. */
+function isMacosMetadata(name: string): boolean {
+  return name
+    .split("/")
+    .some(
+      (part) =>
+        part === "__MACOSX" || part === ".DS_Store" || part.startsWith("._")
+    );
+}
+
+/**
+ * Recursively collect a single `.dSYM` bundle's files, keyed under its bundle
+ * name. Symlinks are rejected (a dSYM should be a plain file tree).
+ */
+async function collectDsymBundle(
+  bundlePath: string,
+  bundleName: string
+): Promise<DsymEntry[]> {
+  const out: DsymEntry[] = [];
+  const walk = async (dir: string, prefix: string): Promise<void> => {
+    for (const dirent of await readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, dirent.name);
+      const rel = prefix ? `${prefix}/${dirent.name}` : dirent.name;
+      if (dirent.isSymbolicLink()) {
+        throw new ValidationError(
+          `Symlinks are not supported in dSYM bundles: ${full}`,
+          "dsym"
+        );
+      }
+      if (dirent.isDirectory()) {
+        await walk(full, rel);
+      } else if (dirent.isFile()) {
+        out.push({ relPath: `${bundleName}/${rel}`, content: await readFile(full) });
+      }
+    }
+  };
+  await walk(bundlePath, "");
+  return out;
+}
+
+/**
+ * Find the `.dSYM` bundles under `dir`. If `dir` is itself a `.dSYM` bundle it
+ * is returned directly. When `allowWrapper` is set and no bundles are found but
+ * a single nested directory exists (e.g. a ZIP that wraps everything in a
+ * `dSYMs/` folder), discovery recurses once into it. Mirrors the legacy CLI's
+ * `discover_dsym_bundles`.
+ */
+async function discoverDsymBundles(
+  dir: string,
+  allowWrapper: boolean
+): Promise<string[]> {
+  if (hasDsymExtension(dir)) {
+    return [dir];
+  }
+  const bundles: string[] = [];
+  const directories: string[] = [];
+  for (const dirent of await readdir(dir, { withFileTypes: true })) {
+    const full = join(dir, dirent.name);
+    if (dirent.isSymbolicLink() && hasDsymExtension(dirent.name)) {
+      throw new ValidationError(
+        `dSYM paths cannot be symlinks: ${full}`,
+        "dsym"
+      );
+    }
+    if (dirent.isDirectory()) {
+      if (hasDsymExtension(dirent.name)) {
+        bundles.push(full);
+      } else {
+        directories.push(full);
+      }
+    }
+  }
+  const [onlyDir] = directories;
+  if (
+    bundles.length === 0 &&
+    allowWrapper &&
+    directories.length === 1 &&
+    onlyDir !== undefined
+  ) {
+    return discoverDsymBundles(onlyDir, false);
+  }
+  return bundles;
+}
+
+/**
+ * Names of ZIP entries stored as symlinks (Unix mode `S_IFLNK`).
+ *
+ * fflate's `unzipSync` drops file attributes, so a symlink entry would silently
+ * materialize as a regular file holding the link target. We parse the central
+ * directory ourselves to read the external-attributes field and reject any
+ * symlink up front, matching the reference implementation.
+ */
+function zipSymlinkNames(zipBytes: Uint8Array): Set<string> {
+  const symlinks = new Set<string>();
+  const view = new DataView(
+    zipBytes.buffer,
+    zipBytes.byteOffset,
+    zipBytes.byteLength
+  );
+  const decoder = new TextDecoder();
+  const CENTRAL_SIG = 0x02014b50;
+  const S_IFLNK = 0xa000;
+  for (let i = 0; i + 4 <= zipBytes.length; i++) {
+    if (view.getUint32(i, true) !== CENTRAL_SIG) {
+      continue;
+    }
+    const nameLen = view.getUint16(i + 28, true);
+    const extraLen = view.getUint16(i + 30, true);
+    const commentLen = view.getUint16(i + 32, true);
+    const externalAttrs = view.getUint32(i + 38, true);
+    const unixMode = externalAttrs >>> 16;
+    const nameStart = i + 46;
+    const name = decoder.decode(zipBytes.subarray(nameStart, nameStart + nameLen));
+    if ((unixMode & 0xf000) === S_IFLNK) {
+      symlinks.add(name);
+    }
+    i = nameStart + nameLen + extraLen + commentLen - 1;
+  }
+  return symlinks;
+}
+
+/** Extract a dSYM ZIP into `destDir`, skipping macOS metadata and unsafe paths.
+ * Rejects symlink entries and any path that would escape `destDir` (including
+ * Windows `..\\` segments).
+ */
+async function extractDsymZip(
+  zipBytes: Uint8Array,
+  destDir: string
+): Promise<void> {
+  const base = resolve(destDir);
+  const symlinks = zipSymlinkNames(zipBytes);
+
+  const safeJoin = (rel: string): string => {
+    const target = resolve(base, rel.replace(/\\/g, "/"));
+    const rel2 = relative(base, target);
+    if (rel2 === "" || rel2.startsWith("..") || isAbsolute(rel2)) {
+      throw new ValidationError(`Unsafe path in dSYM ZIP: ${rel}`, "dsym");
+    }
+    return target;
+  };
+
+  for (const [name, bytes] of Object.entries(unzipSync(zipBytes))) {
+    if (name.endsWith("/") || name.split(/[/\\]/).includes("..")) {
+      continue;
+    }
+    if (isMacosMetadata(name)) {
+      continue;
+    }
+    if (symlinks.has(name)) {
+      throw new ValidationError(
+        `Symlinks are not supported in dSYM ZIPs: ${name}`,
+        "dsym"
+      );
+    }
+    const target = safeJoin(name);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, bytes);
+  }
+}
+
+/**
+ * Resolve the `--dsym` inputs into a flat list of files to embed under an
+ * XCArchive's `dSYMs/` directory. Each input may be a `.dSYM` bundle, a
+ * directory containing bundles, or a ZIP of either. Mirrors the legacy CLI's
+ * `copy_dsyms`, but collects bytes in memory rather than copying onto disk.
+ *
+ * @throws {ValidationError} If an input is missing, a symlink, contains no
+ *   bundles, or two inputs contribute bundles with the same name.
+ */
+export async function collectDsymEntries(
+  dsymPaths: string[]
+): Promise<DsymEntry[]> {
+  const entries: DsymEntry[] = [];
+  const seenBundles = new Set<string>();
+
+  for (const input of dsymPaths) {
+    let stats: Awaited<ReturnType<typeof lstat>>;
+    try {
+      stats = await lstat(input);
+    } catch {
+      throw new ValidationError(`dSYM path does not exist: ${input}`, "dsym");
+    }
+    if (stats.isSymbolicLink()) {
+      throw new ValidationError(
+        `dSYM paths cannot be symlinks: ${input}`,
+        "dsym"
+      );
+    }
+
+    let root = input;
+    let allowWrapper = false;
+    let tempDir: string | null = null;
+    try {
+      if (stats.isFile()) {
+        tempDir = await mkdtemp(join(tmpdir(), "sentry-dsym-"));
+        await extractDsymZip(await readFile(input), tempDir);
+        root = tempDir;
+        allowWrapper = true;
+      } else if (!stats.isDirectory()) {
+        throw new ValidationError(
+          `dSYM path must be a .dSYM bundle, a directory containing dSYM bundles, or a ZIP archive: ${input}`,
+          "dsym"
+        );
+      }
+
+      const bundles = await discoverDsymBundles(root, allowWrapper);
+      if (bundles.length === 0) {
+        throw new ValidationError(
+          `No .dSYM bundles found in ${tempDir ? "ZIP archive" : "directory"}: ${input}`,
+          "dsym"
+        );
+      }
+      for (const bundle of bundles) {
+        const bundleName = basename(bundle);
+        if (seenBundles.has(bundleName)) {
+          throw new ValidationError(
+            `Cannot include multiple dSYM bundles named ${bundleName}`,
+            "dsym"
+          );
+        }
+        seenBundles.add(bundleName);
+        entries.push(...(await collectDsymBundle(bundle, bundleName)));
+      }
+    } finally {
+      if (tempDir) {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    }
+  }
+
+  return entries;
+}
+
 /** Regex matching an IPA's single `Payload/<name>.app/Info.plist` entry. */
 const IPA_APP_INFO_PLIST = /^Payload\/([^/]+)\.app\/Info\.plist$/;
 
@@ -392,14 +648,20 @@ function xcarchiveInfoPlist(appName: string): string {
  * alongside a root `.sentry-cli-metadata.txt`. Mirrors the legacy CLI's
  * `ipa_to_xcarchive` + `normalize_directory`.
  *
+ * Any `dsymEntries` (collected via {@link collectDsymEntries}) are embedded
+ * under `archive.xcarchive/dSYMs/…` so debug symbols missing from a thinned IPA
+ * travel with the upload.
+ *
  * @param content - The raw IPA bytes.
  * @param plugin - Optional plugin identity for the metadata file.
+ * @param dsymEntries - dSYM files to embed under `dSYMs/` (may be empty).
  * @returns The normalized ZIP bytes.
  * @throws {Error} If the IPA does not contain exactly one `.app`.
  */
 export function normalizeIpa(
   content: Uint8Array,
-  plugin: PipelinePlugin | null
+  plugin: PipelinePlugin | null,
+  dsymEntries: DsymEntry[] = []
 ): Buffer {
   const ipaEntries = unzipSync(content);
   const appName = extractIpaAppName(Object.keys(ipaEntries));
@@ -434,6 +696,15 @@ export function normalizeIpa(
     `${archiveDir}/Info.plist`,
     strToU8(xcarchiveInfoPlist(appName)),
   ]);
+  archiveEntries.push(
+    ...dsymEntries.map(
+      (entry) =>
+        [`${archiveDir}/dSYMs/${entry.relPath}`, entry.content] as [
+          string,
+          Uint8Array,
+        ]
+    )
+  );
   archiveEntries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 
   const entries: Zippable = {};

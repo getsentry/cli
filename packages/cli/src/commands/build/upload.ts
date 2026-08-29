@@ -16,6 +16,7 @@ import {
   uploadBuild,
 } from "../../lib/api/preprod-artifacts.js";
 import {
+  collectDsymEntries,
   detectBuildFormat,
   normalizeBuildDirectory,
   normalizeBuildFile,
@@ -58,6 +59,7 @@ type UploadFlags = {
   "build-configuration"?: string;
   "release-notes"?: string;
   "install-group"?: string[];
+  dsym?: string[];
 } & VcsFlags;
 
 /** Result for a single uploaded path. */
@@ -103,7 +105,8 @@ async function uploadOne(
   path: string,
   org: string,
   project: string,
-  metadata: BuildUploadMetadata
+  metadata: BuildUploadMetadata,
+  dsymPaths: string[]
 ): Promise<string> {
   let info: Awaited<ReturnType<typeof stat>>;
   try {
@@ -119,6 +122,12 @@ async function uploadOne(
   // validation refuses arbitrary directories so a stray `sentry build upload ./`
   // can't sweep up source, .git/, or secrets.
   if (info.isDirectory()) {
+    if (dsymPaths.length > 0) {
+      throw new ValidationError(
+        "--dsym can only be used with an IPA upload",
+        "dsym"
+      );
+    }
     validateXcarchiveDirectory(path);
     const normalized = await normalizeBuildDirectory(path, plugin);
     return await uploadBuild({ org, project, content: normalized, metadata });
@@ -135,8 +144,16 @@ async function uploadOne(
 
   let normalized: Buffer;
   if (format === "ipa") {
-    normalized = normalizeIpa(content, plugin);
+    const dsymEntries =
+      dsymPaths.length > 0 ? await collectDsymEntries(dsymPaths) : [];
+    normalized = normalizeIpa(content, plugin, dsymEntries);
   } else if (format === "apk" || format === "aab") {
+    if (dsymPaths.length > 0) {
+      throw new ValidationError(
+        "--dsym can only be used with an IPA upload",
+        "dsym"
+      );
+    }
     normalized = normalizeBuildFile(path, content, plugin);
   } else {
     throw new ValidationError(
@@ -161,6 +178,7 @@ export const uploadCommand = buildCommand({
       "  sentry build upload ./app-release.apk\n" +
       "  sentry build upload ./MyApp.xcarchive\n" +
       "  sentry build upload ./MyApp.ipa --build-configuration Release\n" +
+      "  sentry build upload ./MyApp.ipa --dsym ./MyApp.app.dSYM\n" +
       "  sentry build upload ./app.aab --install-group qa --install-group beta",
   },
   output: {
@@ -194,6 +212,14 @@ export const uploadCommand = buildCommand({
         parse: String,
         brief:
           "Install group(s) for this build (repeatable); builds sharing a group show updates for each other",
+        optional: true,
+        variadic: true,
+      },
+      dsym: {
+        kind: "parsed",
+        parse: String,
+        brief:
+          "Path to a dSYM bundle, a directory of dSYM bundles, or a ZIP of either to include with an IPA upload (repeatable)",
         optional: true,
         variadic: true,
       },
@@ -274,6 +300,16 @@ export const uploadCommand = buildCommand({
     }
     const { org, project } = resolved;
 
+    const dsymPaths = flags.dsym ?? [];
+    // dSYM inputs apply to the whole command, so their target would be
+    // ambiguous when a single invocation uploads more than one build.
+    if (dsymPaths.length > 0 && paths.length > 1) {
+      throw new ValidationError(
+        "--dsym can only be used when uploading exactly one IPA file",
+        "dsym"
+      );
+    }
+
     if (flags["force-git-metadata"] && flags["no-git-metadata"]) {
       throw new ValidationError(
         "--force-git-metadata and --no-git-metadata cannot be used together",
@@ -301,7 +337,14 @@ export const uploadCommand = buildCommand({
     const builds: BuildUploadEntry[] = [];
     for (const path of paths) {
       try {
-        const artifactUrl = await uploadOne(this, path, org, project, metadata);
+        const artifactUrl = await uploadOne(
+          this,
+          path,
+          org,
+          project,
+          metadata,
+          dsymPaths
+        );
         builds.push({ path, artifactUrl, error: null });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

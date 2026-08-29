@@ -11,7 +11,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "@stricli/core";
-import { strToU8, zipSync } from "fflate";
+import { strToU8, unzipSync, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { app } from "../../../src/app.js";
 import { uploadCommand } from "../../../src/commands/build/upload.js";
@@ -231,6 +231,71 @@ describe("build upload", () => {
 
     expect(uploadSpy).toHaveBeenCalledTimes(1);
     expect(harness.exitCode).toBeUndefined();
+  });
+
+  test("embeds --dsym bundles into an IPA upload", async () => {
+    const ipa = join(tmpDir, "MyApp.ipa");
+    await writeFile(
+      ipa,
+      zipSync({
+        "Payload/MyApp.app/Info.plist": strToU8("<app/>"),
+        "Payload/MyApp.app/MyApp": strToU8("binary"),
+      })
+    );
+    const dsym = join(tmpDir, "MyApp.app.dSYM");
+    await mkdir(join(dsym, "Contents", "Resources", "DWARF"), {
+      recursive: true,
+    });
+    await writeFile(join(dsym, "Contents", "Resources", "DWARF", "MyApp"), "d");
+    const harness = createContext();
+    const func = await uploadCommand.loader();
+
+    await func.call(harness.context, { dsym: [dsym] }, ipa);
+
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    const opts = uploadSpy.mock.calls[0]?.[0] as { content: Buffer };
+    const names = Object.keys(unzipSync(new Uint8Array(opts.content)));
+    expect(
+      names.includes(
+        "archive.xcarchive/dSYMs/MyApp.app.dSYM/Contents/Resources/DWARF/MyApp"
+      )
+    ).toBe(true);
+    expect(harness.exitCode).toBeUndefined();
+  });
+
+  test("rejects --dsym on a non-IPA build", async () => {
+    const apk = await writeApk();
+    const dsym = join(tmpDir, "MyApp.app.dSYM");
+    await mkdir(dsym, { recursive: true });
+    const harness = createContext();
+    const func = await uploadCommand.loader();
+
+    await func.call(harness.context, { dsym: [dsym] }, apk);
+
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(harness.exitCode).toBe(1);
+    // The per-path error is rendered into the results table (wrapping breaks a
+    // full-string match, so assert on a stable fragment).
+    expect(harness.output()).toContain("IPA");
+  });
+
+  test("rejects --dsym when uploading multiple builds", async () => {
+    const ipa = join(tmpDir, "MyApp.ipa");
+    await writeFile(
+      ipa,
+      zipSync({ "Payload/MyApp.app/Info.plist": strToU8("<app/>") })
+    );
+    const apk = await writeApk();
+    const dsym = join(tmpDir, "MyApp.app.dSYM");
+    await mkdir(dsym, { recursive: true });
+    const harness = createContext();
+    const func = await uploadCommand.loader();
+
+    // This is a whole-command validation, so it rejects before any upload.
+    await expect(
+      func.call(harness.context, { dsym: [dsym] }, ipa, apk)
+    ).rejects.toThrow("--dsym can only be used when uploading exactly one IPA file");
+    expect(uploadSpy).not.toHaveBeenCalled();
   });
 
   test("uploads the good build but exits non-zero when another fails", async () => {
