@@ -21,9 +21,7 @@ describe("SDK entry-point declarations", () => {
   test("declares every option the source type declares", () => {
     const declarations = buildCoreDeclarations(source);
 
-    const options = source
-      .slice(source.indexOf("export type SentryOptions = {"))
-      .split("\n};")[0] as string;
+    const options = extractSentryOptions(source);
     const optionNames = [...options.matchAll(/^ {2}(\w+)\??:/gm)].map(
       (match) => match[1]
     );
@@ -38,5 +36,15 @@ describe("SDK entry-point declarations", () => {
     expect(() => extractSentryOptions("export type Something = {};")).toThrow(
       SDK_TYPES_PATH
     );
+  });
+
+  test("captures the whole declaration when nested object literals are present", () => {
+    const fixture = `export type SentryOptions = {
+  token?: string;
+  nested?: {
+    inner: number;
+  };
+};`;
+    expect(extractSentryOptions(fixture)).toBe(fixture);
   });
 });

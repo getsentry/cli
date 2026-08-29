@@ -8,8 +8,8 @@
 /** Location of the module `SentryOptions` is lifted from, relative to `packages/cli`. */
 export const SDK_TYPES_PATH = "src/lib/sdk-types.ts";
 
-const SENTRY_OPTIONS_START = "export type SentryOptions = {";
-const SENTRY_OPTIONS_END = "\n};";
+const SENTRY_OPTIONS_START = /export type SentryOptions = \{/m;
+const SENTRY_OPTIONS_END = /^\}\s*;/;
 
 /**
  * Lifts the `SentryOptions` declaration verbatim out of `sdk-types.ts`.
@@ -19,15 +19,34 @@ const SENTRY_OPTIONS_END = "\n};";
  * error because the copy never learned about the option.
  */
 export function extractSentryOptions(sdkTypesSource: string): string {
-  const start = sdkTypesSource.indexOf(SENTRY_OPTIONS_START);
-  const end =
-    start === -1 ? -1 : sdkTypesSource.indexOf(SENTRY_OPTIONS_END, start);
-  if (start === -1 || end === -1) {
+  const startMatch = sdkTypesSource.match(SENTRY_OPTIONS_START);
+  if (!startMatch || startMatch.index === undefined) {
     throw new Error(
       `Could not find the \`SentryOptions\` declaration in ${SDK_TYPES_PATH}.`
     );
   }
-  return sdkTypesSource.slice(start, end + SENTRY_OPTIONS_END.length);
+
+  const start = startMatch.index;
+  let depth = 1;
+  let i = start + startMatch[0].length;
+  while (i < sdkTypesSource.length && depth > 0) {
+    const char = sdkTypesSource[i];
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+    }
+    i += 1;
+  }
+
+  const endMatch = sdkTypesSource.slice(i - 1).match(SENTRY_OPTIONS_END);
+  if (depth !== 0 || !endMatch) {
+    throw new Error(
+      `Could not find the \`SentryOptions\` declaration in ${SDK_TYPES_PATH}.`
+    );
+  }
+
+  return sdkTypesSource.slice(start, i - 1 + endMatch[0].length);
 }
 
 /** Assembles the entry-point declarations from the current `sdk-types.ts` source. */
