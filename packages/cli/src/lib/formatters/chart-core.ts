@@ -173,10 +173,7 @@ export function buildHeatmapModel(
     return;
   }
   const labels = data.series.map((s) => s.label);
-  const buckets = Math.max(
-    0,
-    ...data.series.map((s) => s.values.length)
-  );
+  const buckets = Math.max(0, ...data.series.map((s) => s.values.length));
   if (buckets === 0) {
     return;
   }
@@ -383,6 +380,19 @@ function drawCategoricalBars(
   }
 }
 
+/**
+ * Blue→red gradient for the 5 heatmap intensity buckets (matches the ASCII
+ * color ramp). Index 0 is the empty/zero cell.
+ */
+const HEATMAP_EMPTY_COLOR: [number, number, number] = [60, 60, 80];
+const HEATMAP_CELL_COLORS: [number, number, number][] = [
+  HEATMAP_EMPTY_COLOR,
+  [80, 120, 200],
+  [120, 180, 120],
+  [220, 160, 60],
+  [220, 60, 60],
+];
+
 /** Rasterize a heatmap grid into a pixel canvas (one colored cell per bucket). */
 export function rasterizeHeatmap(
   model: HeatmapModel,
@@ -402,38 +412,21 @@ export function rasterizeHeatmap(
 
   const rows = model.rows.length;
   const cols = model.buckets;
-  if (rows === 0 || cols === 0) {
-    return img;
-  }
-
   const cellW = Math.max(1, Math.floor(width / cols));
   const cellH = Math.max(1, Math.floor(height / rows));
 
   for (let r = 0; r < rows; r += 1) {
     const rowVals = model.rows[r] ?? [];
     for (let c = 0; c < cols; c += 1) {
-      const v = rowVals[c] ?? 0;
-      const norm = v / model.maxVal;
+      const norm = (rowVals[c] ?? 0) / model.maxVal;
       // reuse the same 5-bucket intensity mapping as the ASCII renderer
       const bucket = Math.min(4, Math.floor(norm * 5));
-      // simple blue→red gradient for non-zero cells (matches ASCII color ramp)
-      const color = bucket === 0
-        ? [60, 60, 80]
-        : bucket === 1
-          ? [80, 120, 200]
-          : bucket === 2
-            ? [120, 180, 120]
-            : bucket === 3
-              ? [220, 160, 60]
-              : [220, 60, 60];
-      const x = c * cellW;
-      const y = r * cellH;
       drawPixelRect(img, {
-        x,
-        y,
+        x: c * cellW,
+        y: r * cellH,
         width: cellW,
         height: cellH,
-        color: color as [number, number, number],
+        color: HEATMAP_CELL_COLORS[bucket] ?? HEATMAP_EMPTY_COLOR,
       });
     }
   }

@@ -292,6 +292,9 @@ function drawChartContent(
   const model = options.categorical
     ? buildCategoricalChartModel(options.data)
     : buildChartModel(options.data);
+  if (!model) {
+    return;
+  }
   const contentRows = Math.max(
     1,
     Math.floor(options.height / options.cellHeight)
