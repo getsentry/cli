@@ -111,8 +111,11 @@ describe("dashboard chart rendering", () => {
   test("uses compact aggregate names in the graphics legend", () => {
     expect(formatLegendLabel("p50(span.duration)")).toBe("p50 span.duration");
     expect(formatLegendLabel("p95(value,web.vital,distribution,none)")).toBe(
-      "p95 value"
+      "p95 web.vital"
     );
+    expect(
+      formatLegendLabel("p95(value,backend.duration,distribution,none)")
+    ).toBe("p95 backend.duration");
     expect(formatLegendLabel("GET /api/projects")).toBe("GET /api/projects");
   });
 

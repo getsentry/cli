@@ -48,8 +48,8 @@ const TERMINAL_ESCAPE_RE = new RegExp(
   "g"
 );
 
-/** Aggregate function and its first argument in a raw query expression. */
-const AGGREGATE_LABEL_RE = /^([a-z][a-z0-9_]*)\(([^,()]*)/i;
+/** Aggregate function and its simple arguments in a raw query expression. */
+const AGGREGATE_LABEL_RE = /^([a-z][a-z0-9_]*)\(([^()]*)\)/i;
 
 /** A widget layout used by the dashboard grid. */
 export type SixelWidgetLayout = {
@@ -526,8 +526,10 @@ export function formatLegendLabel(label: string): string {
   const aggregate = AGGREGATE_LABEL_RE.exec(label);
   if (aggregate) {
     const operation = aggregate[1] ?? label;
-    const firstArgument = aggregate[2]?.trim();
-    return firstArgument ? `${operation} ${firstArgument}` : operation;
+    const arguments_ =
+      aggregate[2]?.split(",").map((argument) => argument.trim()) ?? [];
+    const metric = arguments_[0] === "value" ? arguments_[1] : arguments_[0];
+    return metric ? `${operation} ${metric}` : operation;
   }
   if (label.startsWith("equation|")) {
     return "equation";

@@ -181,10 +181,13 @@ export function drawPixelText(
   const cellHeight = Math.max(1, Math.floor(options.cellHeight));
 
   let column = 0;
-  for (const rawChar of normalizeBitmapText(text)) {
-    if (column >= options.maxColumns) {
+  const characters = normalizeBitmapText(text)[Symbol.iterator]();
+  while (column < options.maxColumns) {
+    const character = characters.next();
+    if (character.done) {
       break;
     }
+    const rawChar = character.value;
     drawCozetteGlyph(image, getCozetteGlyph(rawChar), {
       x: options.x + column * cellWidth,
       y: options.y,
@@ -197,16 +200,15 @@ export function drawPixelText(
 }
 
 /** Convert common Unicode text into glyphs that the embedded font can draw. */
-function normalizeBitmapText(text: string): string {
-  let normalized = "";
+function* normalizeBitmapText(text: string): Iterable<string> {
   for (const character of text) {
     if (hasCozetteGlyph(character)) {
-      normalized += character;
+      yield character;
       continue;
     }
     const fallback = BITMAP_TEXT_FALLBACKS.get(character);
     if (fallback) {
-      normalized += fallback;
+      yield* fallback;
       continue;
     }
     const decomposed = character
@@ -216,12 +218,11 @@ function normalizeBitmapText(text: string): string {
       decomposed.length > 0 &&
       [...decomposed].every((candidate) => hasCozetteGlyph(candidate))
     ) {
-      normalized += decomposed;
+      yield* decomposed;
       continue;
     }
-    normalized += "?";
+    yield "?";
   }
-  return normalized;
 }
 
 type CozetteGlyphOptions = {

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { getCozetteGlyph } from "../../../src/lib/formatters/cozette-font.js";
 import {
   createPixelCanvas,
@@ -80,6 +80,26 @@ describe("drawPixelText", () => {
     const expected = renderText("Cafe - 50…");
 
     expect(rendered.data).toEqual(expected.data);
+  });
+
+  test("does not normalize text outside its visible width", () => {
+    const normalize = vi.spyOn(String.prototype, "normalize");
+    const image = createPixelCanvas({ width: 6, height: 13 });
+
+    try {
+      drawPixelText(image, `A${"é".repeat(100)}`, {
+        x: 0,
+        y: 0,
+        cellWidth: 6,
+        cellHeight: 13,
+        maxColumns: 1,
+        color: [255, 255, 255],
+      });
+
+      expect(normalize).not.toHaveBeenCalled();
+    } finally {
+      normalize.mockRestore();
+    }
   });
 
   test("fills non-integer terminal cells with proportional bitmap scaling", () => {
