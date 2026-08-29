@@ -1,6 +1,20 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.44.1
+
+### Bug Fixes 🐛
+
+- (sourcemap) Adopt a debug ID already present on the sourcemap by @msonnb in [#1496](https://github.com/getsentry/cli/pull/1496)
+
+### Documentation 📚
+
+- (cli) Drop hijacked consoledonottrack.com link by @sentry-junior in [#1504](https://github.com/getsentry/cli/pull/1504)
+
+### Internal Changes 🔧
+
+- Regenerate docs by @github-actions[bot] in [4892858f](https://github.com/getsentry/cli/commit/4892858f3be6abcfd5eb161e54af714c296e1d4e)
+
 ## 0.44.0
 
 ### New Features ✨
