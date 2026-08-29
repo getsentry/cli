@@ -357,6 +357,21 @@ describe("dashboard sixel integration", () => {
     );
   });
 
+  test("logs ASCII when the selected graphics renderer cannot create a canvas", () => {
+    const debugSpy = vi.spyOn(logger, "debug");
+
+    const output = formatDashboardWithData(makeDashboardData({ widgets: [] }));
+
+    expect(output).not.toContain(`${ESC}P`);
+    expect(output).not.toContain(`${ESC}_G`);
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Dashboard graphics renderer: ascii")
+    );
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("reason: graphics canvas could not be rendered")
+    );
+  });
+
   test("renders graphics on a kitty terminal that never reports cell geometry", () => {
     // Regression for #1506: kitty terminals frequently answer the graphics
     // query but never send `CSI 16 t`, so terminalPixelWidth is undefined.

@@ -2096,24 +2096,34 @@ function renderCompleteDashboardAsGraphics(
       pixelWidth,
     };
   }
+  const output = renderDashboardAsSixel(data, {
+    pixelWidth,
+    cellWidth,
+    cellHeight: cell.cellHeight,
+    renderTextContent(widget, innerWidth, contentHeight) {
+      return renderContentLines({
+        widget,
+        innerWidth,
+        contentHeight,
+      });
+    },
+    encodeImage:
+      format === "kitty"
+        ? (image) => encodeImageToKitty(image, image.width, true)
+        : undefined,
+  });
+  if (!output) {
+    return {
+      renderer: "ascii",
+      reason: "graphics canvas could not be rendered",
+      termWidth,
+      cell,
+      pixelWidth,
+    };
+  }
   return {
     renderer: format,
-    output: renderDashboardAsSixel(data, {
-      pixelWidth,
-      cellWidth,
-      cellHeight: cell.cellHeight,
-      renderTextContent(widget, innerWidth, contentHeight) {
-        return renderContentLines({
-          widget,
-          innerWidth,
-          contentHeight,
-        });
-      },
-      encodeImage:
-        format === "kitty"
-          ? (image) => encodeImageToKitty(image, image.width, true)
-          : undefined,
-    }),
+    output,
     termWidth,
     cell,
     pixelWidth,
