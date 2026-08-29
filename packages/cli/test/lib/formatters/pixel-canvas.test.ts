@@ -37,6 +37,22 @@ describe("drawPixelText", () => {
     expect(getCozetteGlyph("A")[2]).toBe(0b00_1110);
   });
 
+  test("includes the half-block and rule glyphs used by dashboard content", () => {
+    expect([...getCozetteGlyph("▀")]).toEqual([
+      63, 63, 63, 63, 63, 63, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+    expect([...getCozetteGlyph("▄")]).toEqual([
+      0, 0, 0, 0, 0, 0, 63, 63, 63, 63, 63, 63, 63,
+    ]);
+    expect([...getCozetteGlyph("─")]).toEqual([
+      0, 0, 0, 0, 0, 0, 63, 0, 0, 0, 0, 0, 0,
+    ]);
+  });
+
+  test("uses a question mark for unsupported text glyphs", () => {
+    expect([...getCozetteGlyph("\u6f22")]).toEqual([...getCozetteGlyph("?")]);
+  });
+
   test("fills non-integer terminal cells with proportional bitmap scaling", () => {
     const image = createPixelCanvas({ width: 9, height: 18 });
 

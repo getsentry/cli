@@ -34,12 +34,22 @@ const FIRST_ASCII_CODE_POINT = 32;
 const LAST_ASCII_CODE_POINT = 126;
 const FULL_BLOCK_CODE_POINT = 0x25_88;
 const BLACK_SQUARE_CODE_POINT = 0x25_a0;
+const UPPER_HALF_BLOCK_CODE_POINT = 0x25_80;
+const LOWER_HALF_BLOCK_CODE_POINT = 0x25_84;
+const HORIZONTAL_RULE_CODE_POINT = 0x25_00;
 const FULL_BLOCK_INDEX = LAST_ASCII_CODE_POINT - FIRST_ASCII_CODE_POINT + 1;
 const BLACK_SQUARE_INDEX = FULL_BLOCK_INDEX + 1;
+const QUESTION_MARK_INDEX = 0x3f - FIRST_ASCII_CODE_POINT;
 
-/** Visible fallback for a Unicode glyph outside the embedded Cozette subset. */
-const UNKNOWN_GLYPH = new Uint8Array([
-  63, 33, 45, 45, 45, 45, 45, 45, 45, 45, 33, 63, 0,
+/** Dashboard's compact number and table renderers use these block glyphs. */
+const UPPER_HALF_BLOCK_GLYPH = new Uint8Array([
+  63, 63, 63, 63, 63, 63, 0, 0, 0, 0, 0, 0, 0,
+]);
+const LOWER_HALF_BLOCK_GLYPH = new Uint8Array([
+  0, 0, 0, 0, 0, 0, 63, 63, 63, 63, 63, 63, 63,
+]);
+const HORIZONTAL_RULE_GLYPH = new Uint8Array([
+  0, 0, 0, 0, 0, 0, 63, 0, 0, 0, 0, 0, 0,
 ]);
 
 /**
@@ -58,12 +68,28 @@ const GLYPH_ROWS = Uint8Array.from(
 /** Look up a Cozette glyph by character without parsing or rasterizing a font. */
 export function getCozetteGlyph(character: string): Uint8Array {
   const codePoint = character.codePointAt(0);
-  const index = getGlyphIndex(codePoint);
-  if (index === undefined) {
-    return UNKNOWN_GLYPH;
+  const dashboardGlyph = getDashboardGlyph(codePoint);
+  if (dashboardGlyph) {
+    return dashboardGlyph;
   }
-  const start = index * COZETTE_CELL_HEIGHT;
+  const index = getGlyphIndex(codePoint);
+  const start = (index ?? QUESTION_MARK_INDEX) * COZETTE_CELL_HEIGHT;
   return GLYPH_ROWS.subarray(start, start + COZETTE_CELL_HEIGHT);
+}
+
+function getDashboardGlyph(
+  codePoint: number | undefined
+): Uint8Array | undefined {
+  if (codePoint === UPPER_HALF_BLOCK_CODE_POINT) {
+    return UPPER_HALF_BLOCK_GLYPH;
+  }
+  if (codePoint === LOWER_HALF_BLOCK_CODE_POINT) {
+    return LOWER_HALF_BLOCK_GLYPH;
+  }
+  if (codePoint === HORIZONTAL_RULE_CODE_POINT) {
+    return HORIZONTAL_RULE_GLYPH;
+  }
+  return;
 }
 
 function getGlyphIndex(codePoint: number | undefined): number | undefined {
