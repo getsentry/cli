@@ -24,6 +24,7 @@ import { logger } from "../logger.js";
 import {
   detectSixelCaps,
   type GraphicsFormat,
+  type GraphicsRendererPreference,
   graphicsCellSize,
   selectGraphicsFormat,
   terminalPixelWidth,
@@ -49,6 +50,8 @@ export type DashboardViewData = {
   url: string;
   dateCreated?: string;
   environment?: string[];
+  /** Renderer selected by --renderer; omitted for API/JSON output. */
+  rendererPreference?: GraphicsRendererPreference;
   widgets: DashboardViewWidget[];
 };
 
@@ -2020,6 +2023,7 @@ export function formatDashboardWithData(data: DashboardViewData): string {
  */
 type DashboardGraphicsRender = {
   renderer: GraphicsFormat | "ascii";
+  rendererPreference: GraphicsRendererPreference;
   output?: string;
   reason?: string;
   termWidth?: number;
@@ -2031,6 +2035,7 @@ type DashboardGraphicsRender = {
 function logDashboardGraphicsRenderer(render: DashboardGraphicsRender): void {
   const caps = detectSixelCaps();
   const details = [
+    `requested=${render.rendererPreference}`,
     `capabilities: kitty=${caps.kitty === true ? "yes" : "no"}, sixel=${caps.supported ? "yes" : "no"}`,
     `terminal: stdout TTY=${process.stdout.isTTY ? "yes" : "no"}, stdin TTY=${process.stdin.isTTY ? "yes" : "no"}`,
     `plain output=${isPlainOutput() ? "yes" : "no"}`,
@@ -2052,16 +2057,19 @@ function renderCompleteDashboardAsGraphics(
   data: DashboardViewData,
   termWidth: number | undefined
 ): DashboardGraphicsRender {
-  const format = selectGraphicsFormat();
+  const rendererPreference = data.rendererPreference ?? "auto";
+  const format = selectGraphicsFormat(rendererPreference);
   if (!termWidth) {
     return {
       renderer: "ascii",
+      rendererPreference,
       reason: "terminal width unavailable",
     };
   }
   if (isPlainOutput()) {
     return {
       renderer: "ascii",
+      rendererPreference,
       reason: "plain output requested",
       termWidth,
     };
@@ -2069,14 +2077,16 @@ function renderCompleteDashboardAsGraphics(
   if (!format) {
     return {
       renderer: "ascii",
+      rendererPreference,
       reason: "no compatible graphics protocol detected",
       termWidth,
     };
   }
-  const cell = graphicsCellSize();
+  const cell = graphicsCellSize(rendererPreference);
   if (!cell) {
     return {
       renderer: "ascii",
+      rendererPreference,
       reason: "graphics cell size unavailable",
       termWidth,
     };
@@ -2090,13 +2100,14 @@ function renderCompleteDashboardAsGraphics(
   if (cellWidth < 1) {
     return {
       renderer: "ascii",
+      rendererPreference,
       reason: "calculated graphics cell width is invalid",
       termWidth,
       cell,
       pixelWidth,
     };
   }
-  const output = renderDashboardAsSixel(data, {
+  const graphics = renderDashboardAsSixel(data, {
     pixelWidth,
     cellWidth,
     cellHeight: cell.cellHeight,
@@ -2112,10 +2123,11 @@ function renderCompleteDashboardAsGraphics(
         ? (image) => encodeImageToKitty(image, image.width, true)
         : undefined,
   });
-  if (!output) {
+  if (!("output" in graphics)) {
     return {
       renderer: "ascii",
-      reason: "graphics canvas could not be rendered",
+      rendererPreference,
+      reason: graphics.reason,
       termWidth,
       cell,
       pixelWidth,
@@ -2123,7 +2135,8 @@ function renderCompleteDashboardAsGraphics(
   }
   return {
     renderer: format,
-    output,
+    rendererPreference,
+    output: graphics.output,
     termWidth,
     cell,
     pixelWidth,

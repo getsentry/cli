@@ -105,14 +105,19 @@ type PositionedWidget = {
   layout: SixelWidgetLayout;
 };
 
+/** Result of composing the dashboard image, including a safe fallback reason. */
+export type RenderSixelDashboardResult =
+  | { output: string }
+  | { reason: string };
+
 /** Render every dashboard widget into one terminal-positioned sixel image. */
 export function renderDashboardAsSixel(
   data: SixelDashboardData,
   options: RenderSixelDashboardOptions
-): string | undefined {
+): RenderSixelDashboardResult {
   const widgets = positionWidgets(data.widgets);
   if (widgets.length === 0) {
-    return;
+    return { reason: "no dashboard widgets" };
   }
 
   const pixelWidth = Math.max(1, Math.floor(options.pixelWidth));
@@ -120,8 +125,14 @@ export function renderDashboardAsSixel(
     ...widgets.map((item) => item.layout.y + item.layout.h)
   );
   const pixelHeight = gridHeight * LINES_PER_GRID_UNIT * options.cellHeight;
-  if (pixelWidth * pixelHeight > MAX_CANVAS_PIXELS) {
-    return;
+  const canvasPixels = pixelWidth * pixelHeight;
+  if (canvasPixels > MAX_CANVAS_PIXELS) {
+    return {
+      reason:
+        `canvas ${pixelWidth}x${pixelHeight} ` +
+        `(${(canvasPixels / 1_000_000).toFixed(2)}M pixels) exceeds the ` +
+        `${MAX_CANVAS_PIXELS / 1_000_000}M pixel limit`,
+    };
   }
 
   const image = createPixelCanvas({ width: pixelWidth, height: pixelHeight });
@@ -132,7 +143,10 @@ export function renderDashboardAsSixel(
   // terminal width exactly to preserve the dashboard grid.
   const encode =
     options.encodeImage ?? ((img) => encodeImageToSixel(img, img.width, true));
-  return encode(image);
+  const output = encode(image);
+  return output
+    ? { output }
+    : { reason: "graphics encoder produced no output" };
 }
 
 /** Place layout-less widgets beneath the explicit dashboard grid. */

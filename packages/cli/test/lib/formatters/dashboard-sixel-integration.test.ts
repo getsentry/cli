@@ -149,6 +149,37 @@ describe("dashboard sixel integration", () => {
     expect(output).not.toContain(`${ESC}P`);
   });
 
+  test("uses a requested sixel renderer instead of an available kitty renderer", () => {
+    vi.mocked(sixelModule.selectGraphicsFormat).mockImplementation(
+      (renderer) => (renderer === "sixel" ? "sixel" : "kitty")
+    );
+
+    const output = formatDashboardWithData(
+      makeDashboardData({ rendererPreference: "sixel" })
+    );
+
+    expect(output).toContain(`${ESC}P`);
+    expect(output).not.toContain(`${ESC}_G`);
+  });
+
+  test("logs the requested renderer when auto fallback selects kitty", () => {
+    vi.mocked(sixelModule.selectGraphicsFormat).mockReturnValue("kitty");
+    vi.mocked(sixelModule.detectSixelCaps).mockReturnValue({
+      supported: false,
+      kitty: true,
+    });
+    const debugSpy = vi.spyOn(logger, "debug");
+
+    const output = formatDashboardWithData(
+      makeDashboardData({ rendererPreference: "sixel" })
+    );
+
+    expect(output).toContain(`${ESC}_G`);
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining("requested=sixel")
+    );
+  });
+
   test("logs kitty when it is the selected graphics renderer", () => {
     vi.mocked(sixelModule.selectGraphicsFormat).mockReturnValue("kitty");
     vi.mocked(sixelModule.detectSixelCaps).mockReturnValue({
@@ -368,7 +399,30 @@ describe("dashboard sixel integration", () => {
       expect.stringContaining("Dashboard graphics renderer: ascii")
     );
     expect(debugSpy).toHaveBeenCalledWith(
-      expect.stringContaining("reason: graphics canvas could not be rendered")
+      expect.stringContaining("reason: no dashboard widgets")
+    );
+  });
+
+  test("logs canvas dimensions when the dashboard exceeds the graphics safety cap", () => {
+    process.stdout.columns = 244;
+    vi.mocked(sixelModule.terminalPixelWidth).mockReturnValue(3416);
+    vi.mocked(sixelModule.graphicsCellSize).mockReturnValue({
+      cellWidth: 14,
+      cellHeight: 32,
+    });
+    const debugSpy = vi.spyOn(logger, "debug");
+
+    const output = formatDashboardWithData(
+      makeDashboardData({
+        widgets: [makeWidget({ layout: { x: 0, y: 12, w: 6, h: 1 } })],
+      })
+    );
+
+    expect(output).not.toContain(`${ESC}P`);
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "reason: canvas 3416x2496 (8.53M pixels) exceeds the 8M pixel limit"
+      )
     );
   });
 
