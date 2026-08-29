@@ -48,6 +48,9 @@ const TERMINAL_ESCAPE_RE = new RegExp(
   "g"
 );
 
+/** Aggregate function and its first argument in a raw query expression. */
+const AGGREGATE_LABEL_RE = /^([a-z][a-z0-9_]*)\(([^,()]*)/i;
+
 /** A widget layout used by the dashboard grid. */
 export type SixelWidgetLayout = {
   /** Left grid column. */
@@ -267,12 +270,25 @@ function tryRenderSpecialChart(
   options: Parameters<typeof drawChartContent>[1]
 ): boolean {
   if (options.data.series.length === 0) {
-    drawPixelText(image, "(NO DATA)", {
-      x: options.x,
-      y: options.y,
+    const label = "NO DATA";
+    const maxColumns = Math.max(
+      1,
+      Math.floor(options.width / options.cellWidth)
+    );
+    const labelColumns = Math.min(label.length, maxColumns);
+    drawPixelText(image, label, {
+      x:
+        options.x +
+        Math.max(
+          0,
+          Math.floor((options.width - labelColumns * options.cellWidth) / 2)
+        ),
+      y:
+        options.y +
+        Math.max(0, Math.floor((options.height - options.cellHeight) / 2)),
       cellWidth: options.cellWidth,
       cellHeight: options.cellHeight,
-      maxColumns: Math.max(1, Math.floor(options.width / options.cellWidth)),
+      maxColumns,
       color: FRAME_COLOR,
     });
     return true;
@@ -477,7 +493,11 @@ function drawLegend(
     if (!series || column >= maxColumns) {
       break;
     }
-    const label = series.label.slice(0, 12);
+    const availableColumns = maxColumns - column - 2;
+    const label = truncateLegendLabel(
+      formatLegendLabel(series.label),
+      Math.min(18, availableColumns)
+    );
     const requiredColumns = Math.min(maxColumns, label.length + 2);
     if (column + requiredColumns > maxColumns) {
       break;
@@ -499,6 +519,31 @@ function drawLegend(
     });
     column += requiredColumns;
   }
+}
+
+/** Turn raw aggregate expressions into concise, readable legend labels. */
+export function formatLegendLabel(label: string): string {
+  const aggregate = AGGREGATE_LABEL_RE.exec(label);
+  if (aggregate) {
+    const operation = aggregate[1] ?? label;
+    const firstArgument = aggregate[2]?.trim();
+    return firstArgument ? `${operation} ${firstArgument}` : operation;
+  }
+  if (label.startsWith("equation|")) {
+    return "equation";
+  }
+  return label;
+}
+
+/** Clip a legend label without leaving a partial aggregate expression. */
+function truncateLegendLabel(label: string, maxColumns: number): string {
+  if (label.length <= maxColumns) {
+    return label;
+  }
+  if (maxColumns <= 3) {
+    return label.slice(0, Math.max(0, maxColumns));
+  }
+  return `${label.slice(0, maxColumns - 3)}...`;
 }
 
 /** Format a number compactly enough for the chart-axis gutter. */

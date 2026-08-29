@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  formatLegendLabel,
   formatTimestamp,
   renderDashboardAsSixel,
 } from "../../../src/lib/formatters/sixel-dashboard.js";
@@ -106,4 +107,83 @@ describe("dashboard chart rendering", () => {
     expect(countPixels(line.image, heatmapCell)).toBe(0);
     expect(countPixels(heatmap.image, heatmapCell)).toBeGreaterThan(0);
   });
+
+  test("uses compact aggregate names in the graphics legend", () => {
+    expect(formatLegendLabel("p50(span.duration)")).toBe("p50 span.duration");
+    expect(formatLegendLabel("p95(value,web.vital,distribution,none)")).toBe(
+      "p95 value"
+    );
+    expect(formatLegendLabel("GET /api/projects")).toBe("GET /api/projects");
+  });
+
+  test("centers the no-data state inside a chart widget", () => {
+    let captured: DecodedImage | undefined;
+    const result = renderDashboardAsSixel(
+      {
+        widgets: [
+          {
+            title: "Cost by Agent",
+            displayType: "line",
+            layout: { x: 0, y: 0, w: 6, h: 3 },
+            data: { type: "timeseries", series: [] },
+          },
+        ],
+      },
+      {
+        pixelWidth: 180,
+        cellWidth: 10,
+        cellHeight: 20,
+        renderTextContent: () => [],
+        encodeImage(image) {
+          captured = image;
+          return "rendered";
+        },
+      }
+    );
+
+    if (!captured) {
+      throw new Error("Test encoder did not receive a dashboard image");
+    }
+
+    expect(result).toEqual({ output: "rendered" });
+    expect(
+      countPixelsInRegion(captured, [128, 128, 128], {
+        x: 10,
+        y: 20,
+        width: 70,
+        height: 20,
+      })
+    ).toBe(0);
+    expect(
+      countPixelsInRegion(captured, [128, 128, 128], {
+        x: 50,
+        y: 160,
+        width: 80,
+        height: 40,
+      })
+    ).toBeGreaterThan(0);
+  });
 });
+
+function countPixelsInRegion(
+  image: DecodedImage,
+  color: [number, number, number],
+  region: { x: number; y: number; width: number; height: number }
+): number {
+  let count = 0;
+  const endX = region.x + region.width;
+  const endY = region.y + region.height;
+  for (let y = region.y; y < endY; y += 1) {
+    for (let x = region.x; x < endX; x += 1) {
+      const offset = (y * image.width + x) * 4;
+      if (
+        image.data[offset] === color[0] &&
+        image.data[offset + 1] === color[1] &&
+        image.data[offset + 2] === color[2]
+      ) {
+        count += 1;
+      }
+    }
+  }
+  return count;
+}
