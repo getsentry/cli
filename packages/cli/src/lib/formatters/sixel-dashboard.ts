@@ -196,6 +196,7 @@ function drawWidget(
     drawChartContent(image, {
       data: widget.data,
       categorical: widget.displayType === "categorical_bar",
+      heatmap: widget.displayType === "heatmap",
       x: contentX,
       y: contentY,
       width: contentWidth,
@@ -276,7 +277,7 @@ function tryRenderSpecialChart(
     });
     return true;
   }
-  if (!options.categorical) {
+  if (options.heatmap) {
     const hm = buildHeatmapModel(options.data);
     if (hm) {
       const chart = rasterizeHeatmap(hm, {
@@ -299,6 +300,7 @@ function drawChartContent(
   options: {
     data: Extract<WidgetDataResult, { type: "timeseries" }>;
     categorical: boolean;
+    heatmap: boolean;
     x: number;
     y: number;
     width: number;
