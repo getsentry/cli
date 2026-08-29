@@ -53,6 +53,35 @@ describe("drawPixelText", () => {
     expect([...getCozetteGlyph("\u6f22")]).toEqual([...getCozetteGlyph("?")]);
   });
 
+  test("includes the dashboard axis, sparkline, and ellipsis glyphs", () => {
+    const questionMark = [...getCozetteGlyph("?")];
+    for (const character of [
+      "│",
+      "└",
+      "┤",
+      "┬",
+      "…",
+      "▁",
+      "▂",
+      "▃",
+      "▄",
+      "▅",
+      "▆",
+      "▇",
+      "░",
+      "▓",
+    ]) {
+      expect([...getCozetteGlyph(character)]).not.toEqual(questionMark);
+    }
+  });
+
+  test("renders accented labels and typographic punctuation legibly", () => {
+    const rendered = renderText("Café — 50…");
+    const expected = renderText("Cafe - 50…");
+
+    expect(rendered.data).toEqual(expected.data);
+  });
+
   test("fills non-integer terminal cells with proportional bitmap scaling", () => {
     const image = createPixelCanvas({ width: 9, height: 18 });
 
@@ -109,3 +138,16 @@ describe("drawPixelText", () => {
     }
   });
 });
+
+function renderText(text: string) {
+  const image = createPixelCanvas({ width: 120, height: 13 });
+  drawPixelText(image, text, {
+    x: 0,
+    y: 0,
+    cellWidth: 6,
+    cellHeight: 13,
+    maxColumns: 20,
+    color: [255, 255, 255],
+  });
+  return image;
+}
