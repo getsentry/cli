@@ -98,7 +98,7 @@ describe("alert metrics edit", () => {
       status: 1,
       query: "event.type:error environment:prod",
       aggregate: "count()",
-      dataset: "transactions",
+      dataset: "spans",
       timeWindow: 15,
       triggers: [{ alertThreshold: 200, actions: [{ id: "notify" }] }],
     });
@@ -114,7 +114,7 @@ describe("alert metrics edit", () => {
         status: "disabled",
         query: "event.type:error environment:prod",
         aggregate: "count()",
-        dataset: "transactions",
+        dataset: "spans",
         "time-window": 15,
         trigger: ['{"alertThreshold":200,"actions":[{"id":"notify"}]}'],
         json: true,
@@ -128,7 +128,7 @@ describe("alert metrics edit", () => {
       status: 1,
       query: "event.type:error environment:prod",
       aggregate: "count()",
-      dataset: "transactions",
+      dataset: "spans",
       timeWindow: 15,
       triggers: [{ alertThreshold: 200, actions: [{ id: "notify" }] }],
     });

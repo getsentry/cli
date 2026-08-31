@@ -7,7 +7,6 @@ import { ValidationError } from "../../lib/errors.js";
 const ISSUE_MATCH_MODES = new Set(["all", "any"]);
 const METRIC_DATASET_VALUES = new Set([
   "errors",
-  "transactions",
   "sessions",
   "events",
   "spans",
@@ -19,9 +18,9 @@ const METRIC_DATASET_VALUES = new Set([
  *
  * Only aliases that resolve to a value already accepted by the metric alert API
  * are listed here: the singular forms (`error` → `errors`) and the dashboard
- * terminology for the error/transaction datasets (`error-events` → `errors`,
- * `transaction-like` → `transactions`). This lets users copying from dashboard
- * docs avoid a validation error without changing which dataset is sent.
+ * terminology for the error dataset (`error-events` → `errors`). This lets
+ * users copying from dashboard docs avoid a validation error without
+ * changing which dataset is sent.
  *
  * Names that denote a *distinct* dataset in the metric alert path — e.g.
  * `tracemetrics`, `metricsenhanced`, `eap`, `events_analytics_platform` — are
@@ -33,12 +32,10 @@ const METRIC_DATASET_VALUES = new Set([
 const METRIC_DATASET_ALIASES: Record<string, string> = {
   // Singular forms
   error: "errors",
-  transaction: "transactions",
   session: "sessions",
   metric: "metrics",
-  // Dashboard terminology for the error/transaction datasets
+  // Dashboard terminology for the error dataset
   "error-events": "errors",
-  "transaction-like": "transactions",
 };
 const METRIC_TIME_WINDOWS = new Set([
   1, 5, 10, 15, 30, 60, 120, 240, 360, 720, 1440,
@@ -203,9 +200,9 @@ export function normalizeProjectList(
  * Normalise a user-provided `--dataset` value to the canonical metric alert
  * dataset name accepted by the Sentry API.
  *
- * Resolves known aliases (e.g. `error-events` → `errors`, `transaction` →
- * `transactions`) so that values copied from dashboard docs or using singular
- * forms work without manual translation.
+ * Resolves known aliases (e.g. `error-events` → `errors`) so that values copied
+ * from dashboard docs or using singular forms work without manual
+ * translation.
  */
 export function normalizeMetricDataset(dataset: string): string {
   const lower = dataset.trim().toLowerCase();

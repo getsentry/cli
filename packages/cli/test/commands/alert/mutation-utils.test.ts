@@ -212,23 +212,20 @@ describe("normalizeProjectList", () => {
 describe("normalizeMetricDataset", () => {
   test.each([
     ["error", "errors"],
-    ["transaction", "transactions"],
     ["session", "sessions"],
     ["metric", "metrics"],
     ["error-events", "errors"],
-    ["transaction-like", "transactions"],
   ])('maps alias "%s" to "%s"', (input, expected) => {
     expect(normalizeMetricDataset(input)).toBe(expected);
   });
 
   test("is case-insensitive and trims whitespace", () => {
     expect(normalizeMetricDataset("ERROR-EVENTS")).toBe("errors");
-    expect(normalizeMetricDataset("  Transaction-Like  ")).toBe("transactions");
+    expect(normalizeMetricDataset("  Error-Events  ")).toBe("errors");
   });
 
   test.each([
     "errors",
-    "transactions",
     "sessions",
     "events",
     "spans",
@@ -254,14 +251,7 @@ describe("normalizeMetricDataset", () => {
 });
 
 describe("validateMetricDataset", () => {
-  const valid = [
-    "errors",
-    "transactions",
-    "sessions",
-    "events",
-    "spans",
-    "metrics",
-  ];
+  const valid = ["errors", "sessions", "events", "spans", "metrics"];
 
   for (const dataset of valid) {
     test(`passes for "${dataset}"`, () => {
@@ -272,7 +262,6 @@ describe("validateMetricDataset", () => {
   test.each([
     "error",
     "error-events",
-    "transaction-like",
     "METRIC",
   ])('passes for alias "%s"', (dataset) => {
     expect(() => validateMetricDataset(dataset)).not.toThrow();
@@ -282,7 +271,9 @@ describe("validateMetricDataset", () => {
     "tracemetrics",
     "eap",
     "events_analytics_platform",
-  ])('throws for non-aliased dataset "%s"', (dataset) => {
+    "transactions",
+    "transaction-like",
+  ])('throws for obsolete or non-aliased dataset "%s"', (dataset) => {
     expect(() => validateMetricDataset(dataset)).toThrow(ValidationError);
   });
 

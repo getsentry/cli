@@ -166,7 +166,7 @@ export const editCommand = buildCommand({
       "Examples:\n" +
       "  sentry alert metrics edit my-org/9 --name 'Error budget'\n" +
       "  sentry alert metrics edit my-org/9 --status disabled\n" +
-      "  sentry alert metrics edit my-org/9 --time-window 15 --dataset transactions",
+      "  sentry alert metrics edit my-org/9 --time-window 15 --dataset spans",
   },
   output: {
     human: formatEdited,
@@ -213,7 +213,7 @@ export const editCommand = buildCommand({
         parse: String,
         optional: true,
         brief:
-          "Dataset: errors (error-events), transactions (transaction-like), sessions, events, spans, metrics",
+          "Dataset: errors (error-events), sessions, events, spans, metrics",
       },
       "time-window": {
         kind: "parsed",

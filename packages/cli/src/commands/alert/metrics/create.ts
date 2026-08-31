@@ -85,8 +85,8 @@ export const createCommand = buildCommand({
       "  --environment, --owner\n\n" +
       "Examples:\n" +
       "  sentry alert metrics create my-org --name 'P95 latency' \\\n" +
-      "    --query 'environment:prod' --aggregate 'p95(transaction.duration)' \\\n" +
-      "    --dataset transactions --time-window 5 \\\n" +
+      "    --query 'environment:prod' --aggregate 'p95(span.duration)' \\\n" +
+      "    --dataset spans --time-window 5 \\\n" +
       '    --trigger \'{"alertThreshold":500,"actions":[{"id":"sentry.mail.actions.NotifyEmailAction","targetType":"Team","targetIdentifier":1}]}\'\n\n' +
       "  sentry alert metrics create my-org --name 'Error volume' \\\n" +
       "    --query 'event.type:error' --aggregate 'count()' --dataset errors \\\n" +
@@ -122,14 +122,13 @@ export const createCommand = buildCommand({
       aggregate: {
         kind: "parsed",
         parse: String,
-        brief:
-          "Aggregate expression (for example count(), p95(transaction.duration))",
+        brief: "Aggregate expression (for example count(), p95(span.duration))",
       },
       dataset: {
         kind: "parsed",
         parse: String,
         brief:
-          "Dataset: errors (error-events), transactions (transaction-like), sessions, events, spans, metrics",
+          "Dataset: errors (error-events), sessions, events, spans, metrics",
       },
       "time-window": {
         kind: "parsed",
