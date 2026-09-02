@@ -564,8 +564,9 @@ function resolveDatasetConfig(params: {
     // Warn only when the user explicitly passed --sort on a dataset that
     // rejects it (metrics/logs). An auto-derived sort is silently dropped.
     if (rawSort && flags.sort) {
+      const displayDataset = API_TO_USER_DATASET.get(dataset) ?? dataset;
       log.warn(
-        `--sort is not supported on the ${dataset} dataset. Ignoring sort.`
+        `--sort is not supported on the ${displayDataset} dataset. Ignoring sort.`
       );
     }
     sort = undefined;
