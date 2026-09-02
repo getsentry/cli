@@ -427,6 +427,11 @@ describe("dashboard sixel integration", () => {
         "reason: canvas 3416x2496 (8.53M pixels) exceeds the 8M pixel limit"
       )
     );
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "native pixel width=3416; effective pixel width=3416; graphics cap=not applied"
+      )
+    );
   });
 
   test("caps a high-DPI canvas instead of falling back to ASCII", () => {
@@ -450,7 +455,7 @@ describe("dashboard sixel integration", () => {
     expect(output).toContain(`${ESC}P2548x2496${ESC}\\`);
     expect(debugSpy).toHaveBeenCalledWith(
       expect.stringContaining(
-        "native pixel width=3416; pixel width=2548; graphics cap=applied"
+        "native pixel width=3416; effective pixel width=2548; graphics cap=applied"
       )
     );
   });

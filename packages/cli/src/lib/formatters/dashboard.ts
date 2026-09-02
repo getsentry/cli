@@ -2055,7 +2055,7 @@ function logDashboardGraphicsRenderer(render: DashboardGraphicsRender): void {
     details.push(`native pixel width=${render.nativePixelWidth}`);
   }
   if (render.pixelWidth) {
-    details.push(`pixel width=${render.pixelWidth}`);
+    details.push(`effective pixel width=${render.pixelWidth}`);
   }
   details.push(
     `graphics cap=${render.graphicsCapApplied ? "applied" : "not applied"}`
