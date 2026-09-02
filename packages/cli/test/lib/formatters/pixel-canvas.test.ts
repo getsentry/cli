@@ -63,6 +63,7 @@ describe("drawPixelText", () => {
       "▇",
       "░",
       "▓",
+      "■",
     ]) {
       expect([...getSpleenGlyph(character)]).not.toEqual(questionMark);
     }

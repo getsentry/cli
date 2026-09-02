@@ -25,7 +25,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-import { Buffer } from "node:buffer";
+import { readFileSync } from "node:fs";
+import { getSeaRawAsset } from "../sea-assets.js";
 
 /** Spleen's native monospaced cell width. */
 export const SPLEEN_CELL_WIDTH = 8;
@@ -65,19 +66,28 @@ const DASHBOARD_GLYPH_INDEX = new Map<number, number>(
   ])
 );
 
+const SPLEEN_FONT_ASSET_KEY = "dist-build/spleen-8x16.bin";
+const SPLEEN_FONT_ASSET_URL = new URL(
+  "./assets/spleen-8x16.bin",
+  import.meta.url
+);
+const EXPECTED_GLYPH_ROWS =
+  (LAST_ASCII_CODE_POINT -
+    FIRST_ASCII_CODE_POINT +
+    1 +
+    DASHBOARD_CODE_POINTS.length) *
+  SPLEEN_CELL_HEIGHT;
+
 /**
  * Printable ASCII and glyphs needed by the dashboard's box, sparkline, and
- * text output, generated from Spleen 2.2.0's 8x16 BDF release. Each glyph has
- * 16 rows packed into a byte, with bit 7 as the leftmost pixel. Source commit:
- * 57f9219328c9f5873085320fe8bc8f7dd34b8791. Source BDF SHA-256:
- * b38b32a66920068965a3101f98071d310c5c74659fe86e55d346140770f8f6e8.
+ * text output, generated from Spleen 2.2.0's 8x16 BDF release. The binary
+ * stores one 8-bit row per glyph row, with bit 7 as the leftmost pixel. It is
+ * copied into `dist/assets` for npm packages and embedded in SEA builds.
+ *
+ * Source commit: 57f9219328c9f5873085320fe8bc8f7dd34b8791. Source BDF
+ * SHA-256: b38b32a66920068965a3101f98071d310c5c74659fe86e55d346140770f8f6e8.
  */
-const GLYPH_ROWS = Uint8Array.from(
-  Buffer.from(
-    "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",
-    "base64"
-  )
-);
+const GLYPH_ROWS = loadGlyphRows();
 
 /** Look up a Spleen glyph by character without parsing or rasterizing a font. */
 export function getSpleenGlyph(character: string): Uint8Array {
@@ -102,4 +112,16 @@ function getGlyphIndex(codePoint: number | undefined): number | undefined {
   return codePoint === undefined
     ? undefined
     : DASHBOARD_GLYPH_INDEX.get(codePoint);
+}
+
+function loadGlyphRows(): Uint8Array {
+  const glyphRows =
+    getSeaRawAsset(SPLEEN_FONT_ASSET_KEY) ??
+    new Uint8Array(readFileSync(SPLEEN_FONT_ASSET_URL));
+  if (glyphRows.length !== EXPECTED_GLYPH_ROWS) {
+    throw new Error(
+      `Invalid Spleen dashboard font asset: expected ${EXPECTED_GLYPH_ROWS} bytes, got ${glyphRows.length}`
+    );
+  }
+  return glyphRows;
 }
