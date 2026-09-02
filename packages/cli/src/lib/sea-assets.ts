@@ -1,6 +1,8 @@
 import { createRequire } from "node:module";
+import { logger } from "./logger.js";
 
 const _require = createRequire(import.meta.url);
+const log = logger.withTag("sea-assets");
 
 /**
  * Return bytes embedded in a Node single-executable application, if any.
@@ -9,16 +11,18 @@ const _require = createRequire(import.meta.url);
  * and let callers use their normal package/development fallback when absent.
  */
 export function getSeaRawAsset(key: string): Uint8Array | undefined {
+  let sea: {
+    isSea?: () => boolean;
+    getRawAsset?: (key: string) => ArrayBuffer;
+  };
   try {
-    const sea = _require("node:sea") as {
-      isSea?: () => boolean;
-      getRawAsset?: (key: string) => ArrayBuffer;
-    };
-    if (sea.isSea?.() && sea.getRawAsset) {
-      return new Uint8Array(sea.getRawAsset(key));
-    }
-  } catch {
-    // `node:sea` is unavailable outside a SEA executable.
+    sea = _require("node:sea") as typeof sea;
+  } catch (error) {
+    log.debug("node:sea unavailable; treating as non-SEA runtime", error);
+    return;
   }
-  return;
+  if (!(sea.isSea?.() && sea.getRawAsset)) {
+    return;
+  }
+  return new Uint8Array(sea.getRawAsset(key));
 }
