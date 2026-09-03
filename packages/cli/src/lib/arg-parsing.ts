@@ -1414,17 +1414,18 @@ export function buildProjectQuery(
 }
 
 /**
- * Split a single argument on newlines into individual entries.
+ * Split a single argument on whitespace into individual entries.
  *
- * Agents sometimes paste multiple IDs as a single newline-separated
- * argument. This utility trims each line and discards empty ones.
+ * Agents sometimes paste multiple IDs as a single whitespace-separated
+ * argument (newlines or spaces). This utility splits on any whitespace,
+ * trims each token, and discards empty ones.
  *
- * @param arg - Raw argument string, possibly containing newlines
- * @returns Non-empty trimmed lines
+ * @param arg - Raw argument string, possibly containing whitespace-separated IDs
+ * @returns Non-empty trimmed tokens
  */
 export function splitNewlineArg(arg: string): string[] {
   return arg
-    .split("\n")
+    .split(/\s+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
