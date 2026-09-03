@@ -188,7 +188,10 @@ async function tryProguard(
   try {
     uuid = computeProguardUuid(await readFile(path));
   } catch (error) {
-    logger.debug(`Skipping ProGuard candidate ${path}: read/hash failed`, error);
+    logger.debug(
+      `Skipping ProGuard candidate ${path}: read/hash failed`,
+      error
+    );
     return;
   }
   const matched = matchRemaining(state, uuid);
