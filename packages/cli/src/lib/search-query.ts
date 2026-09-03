@@ -491,7 +491,12 @@ export function unscopedCountFilterKeys(query: string | undefined): string[] {
   let nodes: SearchNode[];
   try {
     nodes = parse(normalizeQuery(query));
-  } catch {
+  } catch (error) {
+    // Unparseable query has no keys we can detect; the API will reject it with
+    // a proper 400. Nothing actionable here — just skip the count-scope check.
+    log.debug(
+      `Skipping count-scope check for unparseable query: ${String(error)}`
+    );
     return [];
   }
   const found = new Set<string>();
