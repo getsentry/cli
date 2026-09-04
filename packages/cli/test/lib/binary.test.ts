@@ -127,15 +127,15 @@ describe("determineInstallDir", () => {
     expect(result).toBe(homeBin);
   });
 
-  test("falls back to ~/.sentry/bin when no candidates are in PATH", () => {
+  test("falls back to ~/.local/bin when no candidates are in PATH", () => {
     const result = determineInstallDir(testDir, {
       PATH: "/usr/bin:/bin",
     });
 
-    expect(result).toBe(join(testDir, ".sentry", "bin"));
+    expect(result).toBe(join(testDir, ".local", "bin"));
   });
 
-  test("skips ~/.local/bin when it exists but is not in PATH", () => {
+  test("falls back to ~/.local/bin when it exists but is not in PATH", () => {
     const localBin = join(testDir, ".local", "bin");
     mkdirSync(localBin, { recursive: true });
 
@@ -143,8 +143,7 @@ describe("determineInstallDir", () => {
       PATH: "/usr/bin:/bin",
     });
 
-    // Should fall back to ~/.sentry/bin, not use ~/.local/bin
-    expect(result).toBe(join(testDir, ".sentry", "bin"));
+    expect(result).toBe(localBin);
   });
 
   test("handles empty PATH", () => {
@@ -152,13 +151,60 @@ describe("determineInstallDir", () => {
       PATH: "",
     });
 
-    expect(result).toBe(join(testDir, ".sentry", "bin"));
+    expect(result).toBe(join(testDir, ".local", "bin"));
   });
 
   test("handles undefined PATH", () => {
     const result = determineInstallDir(testDir, {});
 
-    expect(result).toBe(join(testDir, ".sentry", "bin"));
+    expect(result).toBe(join(testDir, ".local", "bin"));
+  });
+
+  test("uses XDG_BIN_HOME when set to an absolute path", () => {
+    const xdgBin = join(testDir, "xdg", "bin");
+
+    const result = determineInstallDir(testDir, {
+      XDG_BIN_HOME: xdgBin,
+      PATH: "/usr/bin",
+    });
+
+    expect(result).toBe(xdgBin);
+  });
+
+  test("ignores a non-absolute XDG_BIN_HOME per the XDG spec", () => {
+    const result = determineInstallDir(testDir, {
+      XDG_BIN_HOME: "relative/bin",
+      PATH: "/usr/bin",
+    });
+
+    expect(result).toBe(join(testDir, ".local", "bin"));
+  });
+
+  test("XDG_BIN_HOME takes priority over ~/.local/bin in PATH", () => {
+    const localBin = join(testDir, ".local", "bin");
+    mkdirSync(localBin, { recursive: true });
+    const xdgBin = join(testDir, "xdg", "bin");
+
+    const result = determineInstallDir(testDir, {
+      XDG_BIN_HOME: xdgBin,
+      PATH: `/usr/bin:${localBin}`,
+    });
+
+    expect(result).toBe(xdgBin);
+  });
+
+  test("SENTRY_INSTALL_DIR takes priority over XDG_BIN_HOME", () => {
+    const xdgBin = join(testDir, "xdg", "bin");
+    const customDir = join(testDir, "custom");
+    mkdirSync(customDir, { recursive: true });
+
+    const result = determineInstallDir(testDir, {
+      SENTRY_INSTALL_DIR: customDir,
+      XDG_BIN_HOME: xdgBin,
+      PATH: "/usr/bin",
+    });
+
+    expect(result).toBe(customDir);
   });
 
   test("SENTRY_INSTALL_DIR takes priority over ~/.local/bin", () => {

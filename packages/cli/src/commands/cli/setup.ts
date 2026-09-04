@@ -6,7 +6,13 @@
  * and the upgrade command for curl-based installs).
  */
 
-import { existsSync, unlinkSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  renameSync,
+  unlinkSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { captureException } from "@sentry/node-core/light";
 import type { SentryContext } from "../../context.js";
@@ -28,6 +34,7 @@ import {
   getAgentSkillsPreference,
   setAgentSkillsPreference,
 } from "../../lib/db/defaults.js";
+import { resolveXdgConfigDir } from "../../lib/db/index.js";
 import { setInstallInfo } from "../../lib/db/install-info.js";
 import {
   parseReleaseChannel,
@@ -78,6 +85,66 @@ type SetupResult = {
 /** Format setup result for human-readable output */
 function formatSetupResult(result: SetupResult): string {
   return result.messages.join("\n");
+}
+
+/**
+ * Migrate config data and the binary out of the legacy `~/.sentry` layout into
+ * the XDG-compliant locations.
+ *
+ * Runs before install/configuration so the rest of setup sees the new paths.
+ * Each part is independent and best-effort: a failure to move the binary must
+ * not prevent config migration, and vice versa.
+ */
+function migrateLegacyLayout(
+  homeDir: string,
+  env: NodeJS.ProcessEnv,
+  emit: Logger
+): void {
+  const legacyDir = join(homeDir, ".sentry");
+
+  // Config data: cli.db (+ sidecars) and the old config.json. Target the XDG
+  // location directly — resolveConfigDir keeps returning the legacy dir while
+  // it still holds cli.db, which would make migration a no-op.
+  const targetConfigDir = resolveXdgConfigDir(env, homeDir);
+  if (targetConfigDir !== legacyDir) {
+    const configFiles = ["cli.db", "cli.db-wal", "cli.db-shm", "config.json"];
+    const hasLegacyConfig = configFiles.some((name) =>
+      existsSync(join(legacyDir, name))
+    );
+    const primary = join(targetConfigDir, "cli.db");
+    if (hasLegacyConfig && !existsSync(primary)) {
+      mkdirSync(targetConfigDir, { recursive: true, mode: 0o700 });
+      for (const name of configFiles) {
+        const from = join(legacyDir, name);
+        if (existsSync(from)) {
+          renameSync(from, join(targetConfigDir, name));
+        }
+      }
+      emit(`Config: Migrated ${legacyDir} → ${targetConfigDir}`);
+    }
+  }
+
+  // Binary: ~/.sentry/bin/<binary> → XDG-aware install dir.
+  const filename = getBinaryFilename();
+  const legacyBin = join(legacyDir, "bin", filename);
+  const targetDir = determineInstallDir(homeDir, env);
+  const targetBin = join(targetDir, filename);
+  if (
+    existsSync(legacyBin) &&
+    !existsSync(targetBin) &&
+    targetDir !== join(legacyDir, "bin")
+  ) {
+    mkdirSync(targetDir, { recursive: true, mode: 0o755 });
+    copyFileSync(legacyBin, targetBin);
+    try {
+      unlinkSync(legacyBin);
+    } catch {
+      // Leave the old binary in place if it can't be removed — the new copy
+      // is authoritative and setInstallInfo points upgrades at it.
+    }
+    setInstallInfo({ method: "curl", path: targetBin, version: CLI_VERSION });
+    emit(`Binary: Migrated ${legacyBin} → ${targetBin}`);
+  }
 }
 
 /**
@@ -555,7 +622,15 @@ export const setupCommand = buildCommand({
     let binaryDir = dirname(binaryPath);
     let freshInstall = false;
 
-    // 0. Install binary from temp location (when --install is set)
+    // 0. Migrate any legacy ~/.sentry config/binary into XDG locations first,
+    // so the steps below operate on the new paths.
+    try {
+      migrateLegacyLayout(homeDir, process.env, emit);
+    } catch (error) {
+      warn("Legacy migration", error);
+    }
+
+    // 1. Install binary from temp location (when --install is set)
     if (flags.install) {
       const result = await handleInstall(
         process.execPath,

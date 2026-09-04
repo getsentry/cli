@@ -111,3 +111,14 @@ We store credentials and caches in a SQLite database (`cli.db`) inside the confi
 - Project aliases (for monorepo support)
 
 See [Credential Storage](./commands/auth/#credential-storage) in the auth command docs for more details.
+
+## Binary Install Location
+
+When installed via the install script, the CLI binary is placed in an XDG-aligned directory. `sentry cli setup` resolves the location in this order:
+
+1. `SENTRY_INSTALL_DIR` — explicit override
+2. `$XDG_BIN_HOME` — used when set to an absolute path, per the XDG spec
+3. `~/.local/bin` or `~/bin` — when either already exists and is on your `PATH`
+4. `~/.local/bin` — default fallback
+
+Older installs placed the binary in `~/.sentry/bin`. Running `sentry cli setup` (including via `sentry upgrade`) migrates an existing `~/.sentry/bin` binary and any legacy `~/.sentry` config data (`cli.db`, `config.json`) into the new XDG locations automatically. The migration is skipped when a binary or config already exists at the target.

@@ -1015,6 +1015,96 @@ describe("sentry cli setup", () => {
   });
 });
 
+describe("sentry cli setup — legacy migration", () => {
+  let testHome: string;
+  let restoreStderr: (() => void) | undefined;
+
+  beforeEach(() => {
+    testHome = join(
+      "/tmp",
+      `setup-mig-home-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(testHome, { recursive: true });
+  });
+
+  afterEach(() => {
+    restoreStderr?.();
+    restoreStderr = undefined;
+    rmSync(testHome, { recursive: true, force: true });
+  });
+
+  const setupArgs = [
+    "cli",
+    "setup",
+    "--quiet",
+    "--no-modify-path",
+    "--no-completions",
+    "--no-agent-skills",
+  ];
+
+  test("migrates legacy ~/.sentry config into the XDG config dir", async () => {
+    const configDir = join(testHome, "config", "sentry");
+    const legacyDir = join(testHome, ".sentry");
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(join(legacyDir, "cli.db"), "legacy-db");
+
+    const { context, restore } = createMockContext({
+      homeDir: testHome,
+      env: { SENTRY_CONFIG_DIR: configDir },
+    });
+    restoreStderr = restore;
+
+    await run(app, setupArgs, context);
+
+    const moved = join(configDir, "cli.db");
+    expect(existsSync(moved)).toBe(true);
+    expect(await readFile(moved, "utf8")).toBe("legacy-db");
+    expect(existsSync(join(legacyDir, "cli.db"))).toBe(false);
+  });
+
+  test("migrates a legacy ~/.sentry/bin binary to the install dir", async () => {
+    const installDir = join(testHome, "install", "bin");
+    const legacyBinDir = join(testHome, ".sentry", "bin");
+    mkdirSync(legacyBinDir, { recursive: true });
+    writeFileSync(join(legacyBinDir, "sentry"), "legacy-binary");
+
+    const { context, restore } = createMockContext({
+      homeDir: testHome,
+      env: { SENTRY_INSTALL_DIR: installDir },
+    });
+    restoreStderr = restore;
+
+    await run(app, setupArgs, context);
+
+    const moved = join(installDir, "sentry");
+    expect(existsSync(moved)).toBe(true);
+    expect(await readFile(moved, "utf8")).toBe("legacy-binary");
+    expect(existsSync(join(legacyBinDir, "sentry"))).toBe(false);
+  });
+
+  test("does not overwrite an existing binary at the target", async () => {
+    const installDir = join(testHome, "install", "bin");
+    mkdirSync(installDir, { recursive: true });
+    writeFileSync(join(installDir, "sentry"), "current-binary");
+
+    const legacyBinDir = join(testHome, ".sentry", "bin");
+    mkdirSync(legacyBinDir, { recursive: true });
+    writeFileSync(join(legacyBinDir, "sentry"), "legacy-binary");
+
+    const { context, restore } = createMockContext({
+      homeDir: testHome,
+      env: { SENTRY_INSTALL_DIR: installDir },
+    });
+    restoreStderr = restore;
+
+    await run(app, setupArgs, context);
+
+    expect(await readFile(join(installDir, "sentry"), "utf8")).toBe(
+      "current-binary"
+    );
+  });
+});
+
 describe("sentry cli setup — --channel flag", () => {
   useTestConfigDir("test-setup-channel-");
 

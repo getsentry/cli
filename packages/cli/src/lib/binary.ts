@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { chmod, copyFile, mkdir, realpath, unlink } from "node:fs/promises";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { compare as semverCompare } from "semver";
 import { getUserAgent } from "./constants.js";
 import {
@@ -226,10 +226,11 @@ export function getBinaryPaths(installPath: string): {
  * Determine the install directory for a curl-installed binary.
  *
  * Priority:
- * 1. $SENTRY_INSTALL_DIR environment variable (if set and writable)
- * 2. ~/.local/bin (if exists AND in $PATH)
- * 3. ~/bin (if exists AND in $PATH)
- * 4. ~/.sentry/bin (fallback; setup will handle PATH modification)
+ * 1. $SENTRY_INSTALL_DIR environment variable
+ * 2. $XDG_BIN_HOME (if set to an absolute path, per the XDG spec)
+ * 3. ~/.local/bin (if exists AND in $PATH)
+ * 4. ~/bin (if exists AND in $PATH)
+ * 5. ~/.local/bin (XDG-aligned fallback; setup handles PATH modification)
  *
  * @param homeDir - User's home directory
  * @param env - Process environment variables
@@ -246,7 +247,13 @@ export function determineInstallDir(
     return env.SENTRY_INSTALL_DIR;
   }
 
-  // 2-3. Check well-known directories that are already in PATH
+  // 2. XDG_BIN_HOME override — honored only when absolute, per the XDG spec
+  const xdgBinHome = env.XDG_BIN_HOME;
+  if (xdgBinHome && isAbsolute(xdgBinHome)) {
+    return xdgBinHome;
+  }
+
+  // 3-4. Check well-known directories that are already in PATH
   const candidates = [join(homeDir, ".local", "bin"), join(homeDir, "bin")];
 
   for (const dir of candidates) {
@@ -255,8 +262,8 @@ export function determineInstallDir(
     }
   }
 
-  // 4. Fallback — setup will handle adding this to PATH
-  return join(homeDir, ".sentry", "bin");
+  // 5. XDG-aligned fallback — setup will handle adding this to PATH
+  return join(homeDir, ".local", "bin");
 }
 
 /**

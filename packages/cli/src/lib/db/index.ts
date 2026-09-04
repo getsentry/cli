@@ -104,6 +104,25 @@ export function resolveConfigDir(env: NodeJS.ProcessEnv, home: string): string {
     return legacyDir;
   }
 
+  return resolveXdgConfigDir(env, home);
+}
+
+/**
+ * Resolve the XDG-compliant config directory, ignoring any legacy `~/.sentry`
+ * install. This is the migration *target*: `resolveConfigDir` keeps returning
+ * the legacy dir while it holds `cli.db`, so migration must compute the new
+ * location directly. Honors `SENTRY_CONFIG_DIR` and an absolute
+ * `XDG_CONFIG_HOME`, otherwise defaults to `~/.config/sentry`.
+ */
+export function resolveXdgConfigDir(
+  env: NodeJS.ProcessEnv,
+  home: string
+): string {
+  const override = env[CONFIG_DIR_ENV_VAR];
+  if (override) {
+    return override;
+  }
+
   const xdgConfigHome = env.XDG_CONFIG_HOME;
   const configHome =
     xdgConfigHome && isAbsolute(xdgConfigHome)
