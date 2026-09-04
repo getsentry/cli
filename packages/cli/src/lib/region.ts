@@ -10,8 +10,11 @@ import { getConfiguredSentryUrl } from "./constants.js";
 import { getOrgByNumericId, getOrgRegion, setOrgRegion } from "./db/regions.js";
 import { stripDsnOrgPrefix } from "./dsn/index.js";
 import { withAuthGuard } from "./errors.js";
+import { logger } from "./logger.js";
 import { getSdkConfig } from "./sentry-client.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
+
+const log = logger.withTag("region");
 
 /**
  * Promise cache for org region resolution, keyed by orgSlug.
@@ -181,9 +184,8 @@ export async function resolveEffectiveOrg(orgSlug: string): Promise<string> {
     try {
       await resolveOrgRegion(orgSlug);
       return orgSlug;
-    } catch {
-      // Org not found or auth error — fall through to return the original
-      // slug. The downstream API call will produce a relevant error.
+    } catch (error) {
+      log.debug(`resolveOrgRegion failed for '${orgSlug}', using raw slug`, error);
       return orgSlug;
     }
   }
@@ -193,7 +195,8 @@ export async function resolveEffectiveOrg(orgSlug: string): Promise<string> {
   try {
     const { listOrganizationsUncached } = await import("./api-client.js");
     await listOrganizationsUncached();
-  } catch {
+  } catch (error) {
+    log.debug(`Failed to refresh org list for numeric ID '${orgSlug}'`, error);
     return orgSlug;
   }
 

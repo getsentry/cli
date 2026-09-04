@@ -28,9 +28,12 @@ import {
 } from "../db/project-cache.js";
 import { getCachedOrganizations } from "../db/regions.js";
 import { type AuthGuardSuccess, withAuthGuard } from "../errors.js";
+import { logger } from "../logger.js";
 import { getApiBaseUrl } from "../sentry-client.js";
 import { buildProjectUrl } from "../sentry-urls.js";
 import { isAllDigits } from "../utils.js";
+
+const log = logger.withTag("api.projects");
 
 import {
   API_MAX_PER_PAGE,
@@ -77,8 +80,8 @@ export async function listProjects(orgSlug: string): Promise<SentryProject[]> {
     const orgs = getCachedOrganizations();
     const orgName = orgs.find((o) => o.slug === orgSlug)?.name ?? orgSlug;
     cacheProjectsForOrg(orgSlug, orgName, allResults);
-  } catch {
-    // Cache population is best-effort — never fail the command
+  } catch (error) {
+    log.debug(`Failed to cache projects for org '${orgSlug}'`, error);
   }
 
   return allResults;
@@ -178,8 +181,8 @@ function seedProjectCaches(
     cacheProjectsForOrg(orgSlug, orgName, [
       { id: project.id, slug: project.slug, name: project.name },
     ]);
-  } catch {
-    // Best-effort — don't let cache failures break project creation
+  } catch (error) {
+    log.debug(`Failed to seed project cache for '${project.slug}'`, error);
   }
   if (dsn) {
     try {
@@ -193,8 +196,8 @@ function seedProjectCaches(
           projectId: project.id,
         });
       }
-    } catch {
-      // Best-effort — don't let cache failures break project creation
+    } catch (error) {
+      log.debug(`Failed to seed DSN key cache for '${project.slug}'`, error);
     }
   }
 }
@@ -509,7 +512,8 @@ export async function findProjectByDsnKey(
             { params: { query: `dsn:${publicKey}` } }
           );
           return data;
-        } catch {
+        } catch (error) {
+          log.debug(`DSN key lookup failed in region '${region.url}'`, error);
           return [];
         }
       })
@@ -631,7 +635,8 @@ export async function tryGetPrimaryDsn(
     const keys = await getProjectKeys(orgSlug, projectSlug);
     const activeKey = keys.find((k) => k.isActive);
     return activeKey?.dsn.public ?? keys[0]?.dsn.public ?? null;
-  } catch {
+  } catch (error) {
+    log.debug(`Failed to fetch DSN for '${orgSlug}/${projectSlug}'`, error);
     return null;
   }
 }
