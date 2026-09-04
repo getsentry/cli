@@ -32,6 +32,7 @@ import { listCommand as issueListCommand } from "./commands/issue/list.js";
 import { localRoute } from "./commands/local/index.js";
 import { logRoute } from "./commands/log/index.js";
 import { listCommand as logListCommand } from "./commands/log/list.js";
+import { migrateCommand } from "./commands/migrate.js";
 import { monitorRoute } from "./commands/monitor/index.js";
 import { listCommand as monitorListCommand } from "./commands/monitor/list.js";
 import { orgRoute } from "./commands/org/index.js";
@@ -136,6 +137,7 @@ export const routes = buildRouteMap({
     explore: exploreCommand,
     feedback: feedbackRoute,
     log: logRoute,
+    migrate: migrateCommand,
     monitor: monitorRoute,
     snapshots: snapshotsRoute,
     sourcemap: sourcemapRoute,

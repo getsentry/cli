@@ -1,0 +1,194 @@
+/**
+ * What a migration and a task are.
+ *
+ * A migration is a named set of tasks. Each task decides for itself whether it
+ * applies, by parsing the project and looking for the thing it knows how to
+ * change. It mutates the workspace through the injected `TaskApi` rather than
+ * touching the filesystem, so a task is testable as "files in, files out".
+ *
+ * Small declared tasks rather than one procedure means a task can be skipped
+ * or run alone from the command line, a failing task cannot take the rest of
+ * the run down with it, and each one is short enough to read in full while
+ * deciding whether it is safe to trust.
+ *
+ * Nothing consults a catalog to decide whether a task is relevant. A task that
+ * finds nothing to change emits nothing, which is the answer a relevance check
+ * would have given anyway, reached by reading the project instead of by
+ * guessing from a dependency name.
+ */
+
+import type { TaskApi } from "./api.js";
+import type { Finding } from "./types.js";
+
+export type TaskRunOptions = {
+  api: TaskApi;
+  cwd: string;
+};
+
+export type MigrationTask = {
+  id: string;
+  /** One line. The user reads it as this task's heading in the report. */
+  description: string;
+  /**
+   * Link to the section of the upgrade guide this task covers.
+   *
+   * Written out by the task rather than looked up, so that no index has to be
+   * kept in step with a document in another repository. An index that drifts
+   * gives every entry a link that quietly 404s.
+   */
+  docs?: string;
+  /**
+   * What the reader has to decide, for a task that can only point at the work.
+   *
+   * Shown once above the locations in the report. Without it an entry says
+   * where to look and not what to do.
+   */
+  guidance?: string;
+  run: (options: TaskRunOptions) => void;
+};
+
+export type TaskOptions = {
+  /**
+   * Prerequisites run first. These are the changes without which the project
+   * will not install or build at all, such as dependency moves and version
+   * floors.
+   */
+  prerequisite: boolean;
+};
+
+export type TaskWithOptions = MigrationTask & TaskOptions;
+
+/**
+ * A cheap read-only view of a project, for deciding whether a migration
+ * applies to it.
+ *
+ * This runs before anything is read into a workspace, because which files are
+ * worth reading is itself a per-migration answer. A Python migration has no
+ * reason to walk every `.tsx` in the tree. Reads are by exact path and cached,
+ * so asking several migrations the same question costs one stat.
+ */
+export type ProjectProbe = {
+  cwd: string;
+  /** File contents, or `null` when the file is absent or unreadable. */
+  read: (relativePath: string) => Promise<string | null>;
+  /** Parsed JSON object, or `null` when absent, unreadable or malformed. */
+  json: (relativePath: string) => Promise<Record<string, unknown> | null>;
+  exists: (relativePath: string) => Promise<boolean>;
+};
+
+/**
+ * What a migration concludes about a project.
+ *
+ * Three outcomes rather than a boolean, because "wrong ecosystem" and "right
+ * ecosystem, no Sentry in it" need different answers. Collapsing them tells a
+ * Python user their manifest is missing and tells the user who actually has
+ * the right manifest nothing at all.
+ *
+ * This is the only inference the framework makes, and it decides one thing:
+ * which migration runs. What each task applies to is the task's own business.
+ */
+export type MigrationFit =
+  /** Not this migration's ecosystem. It has nothing to say about this project. */
+  | { fit: "no" }
+  /** This migration's ecosystem, and it can run. */
+  | { fit: "yes"; because: string }
+  /**
+   * This migration's ecosystem, but it cannot run. `because` and `hint` are
+   * user-facing: this is the most specific thing anyone can say about the
+   * project, so it is what the command shows.
+   */
+  | { fit: "blocked"; because: string; hint?: string };
+
+/** Which files a migration needs read into the workspace. */
+export type MigrationWorkspace = {
+  /**
+   * Whether a repo-relative path is worth reading.
+   *
+   * Deliberately broader than what the tasks rewrite, because a migration also
+   * reads manifests, deployment config, templates and CI. A file type a task
+   * looks for but this never admits is a task that can never fire.
+   */
+  wants: (relativePath: string) => boolean;
+};
+
+export type MigrationCollectOptions = {
+  tasks: { add: (task: MigrationTask, options: TaskOptions) => void };
+};
+
+/**
+ * The report a migration writes for the work it could not do itself.
+ *
+ * This lives on the migration rather than in the runner because the file name,
+ * the marker and the framing are all migration-specific. A runner that reached
+ * into one migration's report module would silently hand every future
+ * migration that migration's report, under its file name.
+ */
+export type MigrationReport = {
+  /** Path, relative to the project root, the report is written to. */
+  file: string;
+  /**
+   * Marks the file as generated by this tool. A report file without it was
+   * written by the user, and must not be overwritten.
+   */
+  marker: string;
+  /** Id of the task that owns reporting, so `--only`/`--skip` can reach it. */
+  taskId: string;
+  /**
+   * Build the report, or `null` when there is nothing left to say.
+   *
+   * `tasks` is the set that actually ran. The report groups findings by task
+   * and takes each entry's heading, guidance and link from the task that
+   * produced it, so it needs the declarations as well as the results.
+   */
+  build: (options: {
+    findings: Finding[];
+    tasks: TaskWithOptions[];
+  }) => string | null;
+};
+
+export type Migration = {
+  id: string;
+  description: string;
+  /**
+   * What this migration needs to find, in one line, for the user.
+   *
+   * Shown when nothing applies. This CLI runs in projects of every language
+   * Sentry ships an SDK for, so "no migration applies here" has to be
+   * answerable with what each one looks for. On its own it is a dead end.
+   */
+  requires: string;
+  /** Link to the human-facing upgrade guide. */
+  changelog?: string;
+  /**
+   * Whether this migration applies to the project at all. Asked before
+   * anything is read into memory.
+   */
+  detect: (probe: ProjectProbe) => Promise<MigrationFit>;
+  workspace: MigrationWorkspace;
+  collect: (options: MigrationCollectOptions) => void;
+  report?: MigrationReport;
+};
+
+export function defineMigration(migration: Migration): Migration {
+  return migration;
+}
+
+export function defineMigrationTask(task: MigrationTask): MigrationTask {
+  return task;
+}
+
+/** Resolve a migration's tasks, prerequisites first. */
+export function collectTasks(migration: Migration): TaskWithOptions[] {
+  const tasks: TaskWithOptions[] = [];
+  migration.collect({
+    tasks: {
+      add: (task, options) => {
+        tasks.push({ ...task, ...options });
+      },
+    },
+  });
+  return [
+    ...tasks.filter((task) => task.prerequisite),
+    ...tasks.filter((task) => !task.prerequisite),
+  ];
+}

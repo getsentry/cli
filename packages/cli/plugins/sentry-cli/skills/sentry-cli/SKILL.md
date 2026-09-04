@@ -579,6 +579,14 @@ View Sentry logs
 
 → Full flags and examples: `references/log.md`
 
+### Migrate
+
+Upgrade a project across a Sentry SDK major version
+
+- `sentry migrate` — Upgrade a project across a Sentry SDK major version
+
+→ Full flags and examples: `references/migrate.md`
+
 ### Monitor
 
 Work with Sentry cron monitors
