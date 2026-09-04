@@ -7,6 +7,7 @@
  */
 
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -154,11 +155,16 @@ function migrateLegacyBinary(
 
   mkdirSync(targetDir, { recursive: true, mode: 0o755 });
   copyFileSync(legacyBin, targetBin);
+  // copyFileSync already preserves the source mode, but assert the exec bit
+  // explicitly — mirrors installBinary — so the migrated binary is runnable
+  // even if the legacy copy's permissions were somehow stripped.
+  chmodSync(targetBin, 0o755);
   try {
     unlinkSync(legacyBin);
-  } catch {
+  } catch (error) {
     // Leave the old binary in place if it can't be removed — the new copy
     // is authoritative and setInstallInfo points upgrades at it.
+    logger.withTag("cli.setup").debug("Failed to remove legacy binary", error);
   }
   setInstallInfo({ method: "curl", path: targetBin, version: CLI_VERSION });
   emit(`Binary: Migrated ${legacyBin} → ${targetBin}`);

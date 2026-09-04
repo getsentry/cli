@@ -7,7 +7,14 @@
  * via a spy on process.stderr.write and assert on the collected output.
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { run } from "@stricli/core";
@@ -1084,6 +1091,10 @@ describe("sentry cli setup — legacy migration", () => {
     expect(existsSync(moved)).toBe(true);
     expect(await readFile(moved, "utf8")).toBe("legacy-binary");
     expect(existsSync(join(legacyBinDir, "sentry"))).toBe(false);
+    // The migrated binary must remain executable.
+    if (process.platform !== "win32") {
+      expect(() => accessSync(moved, constants.X_OK)).not.toThrow();
+    }
   });
 
   test("does not overwrite an existing binary at the target", async () => {
