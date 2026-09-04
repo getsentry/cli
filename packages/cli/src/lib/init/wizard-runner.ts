@@ -965,7 +965,9 @@ async function resumeWithRecovery(
 
 /** Run the wizard while negotiating v1 and echoing each suspended request ID. */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sequential wizard orchestration with error handling branches
-export async function runWizard(initialOptions: WizardOptions): Promise<void> {
+export async function runWizard(
+  initialOptions: WizardOptions
+): Promise<WorkflowRunResult | undefined> {
   // Note: a previous `forwardFreshTtyToStdin()` call lived here as a
   // macOS-only workaround for clack reading from a broken inherited
   // stdin fd (PRs #824/#831/#833/#835). It's gone now because:
@@ -1285,12 +1287,14 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
     ui.setStep?.(activeStepId, "completed");
   }
 
+  // A dry run promised no side effects; verification spawns the user's dev
+  // server, which is the largest side effect the wizard has.
   await handleFinalResult(
     result,
     spin,
     spinState,
     ui,
-    directory,
+    dryRun ? undefined : directory,
     sentryProjectRef.current
   );
   setTag("wizard.outcome", "completed");
@@ -1306,6 +1310,8 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
         : String(resultFeatures)
     );
   }
+
+  return result;
 }
 
 /**

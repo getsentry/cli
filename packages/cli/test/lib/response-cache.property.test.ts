@@ -217,6 +217,16 @@ describe("property: classifyUrl", () => {
     expect(classifyUrl(url)).toBe("volatile");
   });
 
+  test("org events search URLs are no-cache", () => {
+    const urls = [
+      "https://us.sentry.io/api/0/organizations/org/events/?dataset=errors&query=foo",
+      "https://sentry.io/api/0/organizations/sentry-sdks/events/?dataset=errors&field=title&query=project:web+drmt08n1fz2oq3",
+    ];
+    for (const url of urls) {
+      expect(classifyUrl(url)).toBe("no-cache");
+    }
+  });
+
   test("autofix URLs are no-cache", () => {
     const urls = [
       "https://us.sentry.io/api/0/organizations/org/issues/123/autofix/",

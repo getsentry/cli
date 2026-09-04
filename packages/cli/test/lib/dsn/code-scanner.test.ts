@@ -171,13 +171,17 @@ describe("Code Scanner", () => {
       expect(dsns).toEqual([]);
     });
 
-    test("only accepts *.sentry.io hosts for SaaS", () => {
+    test("only accepts *.sentry.io and *.sentry.gg hosts for SaaS", () => {
       const content = `
         const REAL = "https://abc@o123.ingest.sentry.io/456";
+        const GG = "https://abc@sandbox-mirror.sentry.gg/1";
         const FAKE = "https://abc@fake.example.com/456";
       `;
       const dsns = extractDsnsFromContent(content);
-      expect(dsns).toEqual(["https://abc@o123.ingest.sentry.io/456"]);
+      expect(dsns).toEqual([
+        "https://abc@o123.ingest.sentry.io/456",
+        "https://abc@sandbox-mirror.sentry.gg/1",
+      ]);
     });
 
     test("extracts DSN with secret key (legacy format)", () => {
