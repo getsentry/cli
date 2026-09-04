@@ -83,6 +83,7 @@ import {
 import {
   SEARCH_SYNTAX_REFERENCE,
   sanitizeQuery,
+  unscopedCountFilterKeys,
 } from "../../lib/search-query.js";
 import { isSaaS } from "../../lib/sentry-urls.js";
 import {
@@ -255,6 +256,95 @@ function buildListApiOptions(json: boolean, fields?: string[]): ListApiOptions {
     }),
     groupStatsPeriod: collapseStats ? undefined : "auto",
   };
+}
+
+/**
+ * Whether the seen-stats counts (`count`/`userCount`) are present in the output
+ * for the given flags. Human output always shows them; JSON only omits them
+ * when `--fields` collapses lifetime fields away.
+ */
+function countsShown(json: boolean, fields?: string[]): boolean {
+  return !(json && shouldCollapseForFields(fields, LIFETIME_FIELDS));
+}
+
+/**
+ * Build a warning describing that displayed counts are period-wide totals, not
+ * scoped to a count-unscoped query filter (e.g. `release:`). Returns undefined
+ * when no such filter is present or the counts aren't shown. See #1518.
+ */
+function buildCountScopeNote(
+  flags: Pick<ListFlags, "query" | "json" | "fields" | "sort">
+): { human: string; keys: string[] } | undefined {
+  if (!countsShown(flags.json, flags.fields)) {
+    return;
+  }
+  const keys = unscopedCountFilterKeys(flags.query);
+  if (keys.length === 0) {
+    return;
+  }
+  const filterList = keys.map((k) => `${k}:`).join(", ");
+  const sortNote =
+    flags.sort === "freq" || flags.sort === "user"
+      ? ` The --sort ${flags.sort} ordering follows these unscoped counts.`
+      : "";
+  return {
+    keys,
+    human:
+      `Note: EVENTS/USERS counts are period-wide totals and are NOT scoped to the ${filterList} filter — ` +
+      `the query restricts which issues appear, but their counts still span every ${keys.join("/")}.` +
+      `${sortNote} For counts matching the filter, query the events endpoint ` +
+      `(e.g. sentry api "/organizations/<org>/events/?field=count()&query=issue:<SHORT-ID> ${filterList}...").`,
+  };
+}
+
+/**
+ * Attach the count-scope warning to a result's JSON envelope when applicable,
+ * returning the note (or undefined) so the caller can also surface it in the
+ * human footer. Only applied when at least one issue is shown. See #1518.
+ */
+function applyCountScopeNote(
+  result: IssueListResult,
+  flags: Pick<ListFlags, "query" | "json" | "fields" | "sort">
+): { human: string; keys: string[] } | undefined {
+  const countScope = buildCountScopeNote(flags);
+  if (!countScope || result.items.length === 0) {
+    return;
+  }
+  result.jsonExtra = {
+    ...result.jsonExtra,
+    _countScope: {
+      _type: "unscoped_counts",
+      filters: countScope.keys,
+      fields: ["count", "userCount"],
+      message: countScope.human,
+    },
+  };
+  return countScope;
+}
+
+/**
+ * Combine the framework footer hint from a result's more/footer/count-scope
+ * parts. Only forwards a hint when items exist — empty results render their
+ * hint text inside {@link formatIssueListHuman}.
+ */
+function buildCombinedHint(
+  result: IssueListResult,
+  countScope: { human: string } | undefined
+): string | undefined {
+  if (result.items.length === 0) {
+    return;
+  }
+  const hintParts: string[] = [];
+  if (result.moreHint) {
+    hintParts.push(result.moreHint);
+  }
+  if (result.footer) {
+    hintParts.push(result.footer);
+  }
+  if (countScope) {
+    hintParts.push(countScope.human);
+  }
+  return hintParts.length > 0 ? hintParts.join("\n") : result.hint;
 }
 
 /**
@@ -1628,19 +1718,12 @@ export const listCommand = buildListCommand("issue", {
       },
     })) as IssueListResult;
 
-    // Only forward hints to the framework footer when items exist — empty
-    // results already render hint text inside formatIssueListHuman.
-    let combinedHint: string | undefined;
-    if (result.items.length > 0) {
-      const hintParts: string[] = [];
-      if (result.moreHint) {
-        hintParts.push(result.moreHint);
-      }
-      if (result.footer) {
-        hintParts.push(result.footer);
-      }
-      combinedHint = hintParts.length > 0 ? hintParts.join("\n") : result.hint;
-    }
+    // Warn when the query filters on a key the issues endpoint does not apply
+    // to its seen-stats (e.g. release:) — the displayed counts are period-wide
+    // totals, not scoped to the filter. See #1518.
+    const countScope = applyCountScopeNote(result, flags);
+
+    const combinedHint = buildCombinedHint(result, countScope);
 
     yield new CommandOutput(result);
     return { hint: combinedHint };
