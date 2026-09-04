@@ -20,6 +20,15 @@ View details of one or more events
 - `--spans <value> - Span tree depth limit (number, "all" for unlimited, "no" to disable) - (default: "3")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
+**Examples:**
+
+```bash
+sentry event view abc123def456abc123def456abc12345
+
+# Open in browser
+sentry event view abc123def456abc123def456abc12345 -w
+```
+
 ### `sentry event list <issue>`
 
 List events for an issue
@@ -52,6 +61,32 @@ List events for an issue
 | `crashFile` | string \| null | Crash file URL |
 | `metadata` | object | Event metadata |
 
+**Examples:**
+
+```bash
+# List events for an issue (using short ID)
+sentry event list PROJ-ABC
+
+# List events for an issue (using numeric ID)
+sentry event list 123456789
+
+# Filter by search query
+sentry event list PROJ-ABC --query "browser:Chrome"
+
+# Include full event bodies (stacktraces)
+sentry event list PROJ-ABC --full
+
+# Limit results and time range
+sentry event list PROJ-ABC --limit 50 --period 24h
+
+# Paginate through results
+sentry event list PROJ-ABC -c next
+sentry event list PROJ-ABC -c prev
+
+# Output as JSON
+sentry event list PROJ-ABC --json
+```
+
 ### `sentry event send <args...>`
 
 Send a Sentry event
@@ -74,5 +109,40 @@ Send a Sentry event
 - `--logfile <value> - Path to a log file — last 100 lines are attached as breadcrumbs`
 - `--with-categories - Parse 'CATEGORY: message' prefixes from logfile breadcrumbs`
 - `--raw - Send file contents as-is without parsing`
+
+**Examples:**
+
+```bash
+# Send an error event (default level)
+sentry event send -m "Something went wrong"
+
+# Specify level, release, and environment
+sentry event send -m "Deploy check" -l info -r 1.0.0 -E production
+
+# Add tags and extra data
+sentry event send -m "Payment failed" --tag env:prod --tag region:us-east --extra amount:99.99
+
+# Set user context
+sentry event send -m "Login error" --user id:42 --user email:alice@example.com
+
+# Custom fingerprint to group related events together
+sentry event send -m "DB timeout" --fingerprint db-timeout --fingerprint {{ default }}
+
+# Send a serialized Sentry Event object
+sentry event send ./crash.json
+
+# Send without re-parsing (raw mode — also supports pre-built envelopes)
+sentry event send --raw ./crash.json
+sentry event send --raw ./captured.envelope
+
+# Explicit DSN
+sentry event send -m "Test" --dsn "https://key@o123.ingest.us.sentry.io/456"
+
+# Via environment variable
+export SENTRY_DSN="https://key@o123.ingest.us.sentry.io/456"
+sentry event send -m "Test"
+
+sentry send-event    # same as: sentry event send
+```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

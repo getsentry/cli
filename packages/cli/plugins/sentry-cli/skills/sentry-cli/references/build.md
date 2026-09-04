@@ -37,4 +37,33 @@ Download a build artifact
 **Flags:**
 - `-o, --output <value> - Output path (default: preprod_artifact_<build-id>.<ext> in the current directory)`
 
+**Examples:**
+
+```bash
+# Upload an Android build (APK or AAB) for size analysis
+sentry build upload ./app-release.apk
+
+# Upload an iOS build (XCArchive directory or IPA)
+sentry build upload ./MyApp.xcarchive
+sentry build upload ./MyApp.ipa
+
+# Upload with a build configuration and release notes
+sentry build upload ./app.aab --build-configuration Release --release-notes "Nightly"
+
+# Tag a build with install groups (repeatable)
+sentry build upload ./app.aab --install-group qa --install-group beta
+
+# Attach explicit git metadata (otherwise auto-collected in CI)
+sentry build upload ./app.aab --head-sha "$GIT_SHA" --pr-number 42 --base-ref main
+
+# Download a build artifact by ID
+sentry build download 1234567890
+
+# Download to a specific path
+sentry build download 1234567890 --output ./app.ipa
+
+# Output the result as JSON
+sentry build download 1234567890 --json
+```
+
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
