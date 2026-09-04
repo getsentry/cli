@@ -20,10 +20,13 @@ import type {
   WidgetDataResult,
 } from "../../types/dashboard.js";
 import { encodeImageToKitty } from "../kitty-image.js";
+import { logger } from "../logger.js";
 import {
-  canRenderKitty,
-  canRenderSixel,
-  terminalPixelHeight,
+  detectSixelCaps,
+  type GraphicsFormat,
+  type GraphicsRendererPreference,
+  graphicsCellSize,
+  selectGraphicsFormat,
   terminalPixelWidth,
 } from "../sixel.js";
 import { SERIES_PALETTE } from "./chart-core.js";
@@ -47,6 +50,10 @@ export type DashboardViewData = {
   url: string;
   dateCreated?: string;
   environment?: string[];
+  /** Renderer selected by --renderer; omitted for API/JSON output. */
+  rendererPreference?: GraphicsRendererPreference;
+  /** Whether the default high-DPI graphics width cap should apply. */
+  graphicsCap?: boolean;
   widgets: DashboardViewWidget[];
 };
 
@@ -77,6 +84,9 @@ const MIN_TERM_WIDTH = 80;
 
 /** Fallback terminal width when stdout is not a TTY */
 const DEFAULT_TERM_WIDTH = 100;
+
+/** Default graphics canvas cap for high-DPI terminals. */
+const MAX_GRAPHICS_WIDTH = 2560;
 
 /**
  * Get the effective terminal width.
@@ -1528,6 +1538,138 @@ function renderPlaceholderContent(message: string): string[] {
   return [isPlainOutput() ? `(${message})` : muted(`(${message})`)];
 }
 
+// ---------------------------------------------------------------------------
+// Heatmap renderer
+// ---------------------------------------------------------------------------
+
+/**
+ * Intensity ramp for heatmap cells.
+ *
+ * Index 0 is empty (zero value); 1-4 map increasing intensity to shade
+ * blocks in plain mode and to a blue→red heat gradient in color mode.
+ */
+const HEATMAP_SHADES = [" ", "░", "▒", "▓", "█"] as const;
+const HEATMAP_COLORS = [
+  "#79B8FF", // low  — cyan/blue
+  "#FDB81B", // yellow
+  "#FF9838", // orange
+  "#fe4144", // high — red
+] as const;
+
+/** Map a normalized intensity (0-1) to a ramp bucket index (0-4). */
+function heatmapBucket(normalized: number): number {
+  if (normalized <= 0) {
+    return 0;
+  }
+  return Math.min(4, Math.max(1, Math.ceil(normalized * 4)));
+}
+
+/** Render a single heatmap cell for a normalized intensity. */
+function heatmapCell(normalized: number, plain: boolean): string {
+  const bucket = heatmapBucket(normalized);
+  if (plain) {
+    return HEATMAP_SHADES[bucket] ?? " ";
+  }
+  if (bucket === 0) {
+    return " ";
+  }
+  const color = HEATMAP_COLORS[bucket - 1] ?? COLORS.magenta;
+  return chalk.hex(color)("█");
+}
+
+/**
+ * Render heatmap content: one row per series (category), columns over time.
+ *
+ * Cell intensity encodes the value relative to the global maximum across all
+ * cells, so hot spots stand out. Falls back to a "no data" line when there
+ * are no series or values.
+ */
+function renderHeatmapContent(
+  data: TimeseriesResult,
+  opts: { innerWidth: number; contentHeight: number }
+): string[] {
+  const { innerWidth, contentHeight } = opts;
+  if (data.series.length === 0) {
+    return [noDataLine()];
+  }
+
+  const plain = isPlainOutput();
+
+  // Reserve rows for the bottom time axis (2 lines) and a legend (1 line).
+  const axisLines = 3;
+  const maxRows = Math.max(1, contentHeight - axisLines);
+  const series = data.series.slice(0, maxRows);
+
+  const maxLabelLen = Math.min(
+    20,
+    Math.max(4, ...series.map((s) => s.label.length))
+  );
+  const gutterW = maxLabelLen + 1; // label + space
+  const chartWidth = Math.max(1, innerWidth - gutterW);
+
+  // Determine the actual number of time buckets from the longest series.
+  const maxLen = Math.max(0, ...series.map((s) => s.values.length));
+  const bucketCount = Math.min(chartWidth, maxLen || chartWidth);
+
+  // Downsample every series to that bucket count; pad shorter series so every
+  // row has exactly `bucketCount` cells (downsample returns early for short input).
+  const rows = series.map((s) => {
+    const ds = downsample(
+      s.values.map((v) => v.value),
+      bucketCount
+    );
+    return ds.length < bucketCount
+      ? [...ds, ...new Array(bucketCount - ds.length).fill(0)]
+      : ds;
+  });
+  const globalMax = Math.max(1, ...rows.flat());
+
+  const lines: string[] = [];
+  for (let i = 0; i < series.length; i += 1) {
+    const s = series[i];
+    const values = rows[i] ?? [];
+    if (!s) {
+      continue;
+    }
+    const label =
+      s.label.length > maxLabelLen
+        ? `${s.label.slice(0, maxLabelLen - 1)}…`
+        : s.label.padEnd(maxLabelLen);
+    const cells = values.map((v) => heatmapCell(v / globalMax, plain)).join("");
+    const labelStr = plain ? label : chalk.hex(COLORS.cyan)(label);
+    lines.push(`${labelStr} ${cells}`);
+  }
+
+  // Bottom time axis, aligned to the chart area.
+  // Find the longest series so its timestamps match the bucketCount.
+  const longest = series.reduce(
+    (a, b) => (b.values.length > a.values.length ? b : a),
+    series[0] ?? { values: [] }
+  );
+  const axisTs = longest.values.map((v) => v.timestamp);
+  if (axisTs.length > 0) {
+    const dsTs = downsampleTimestamps(axisTs, bucketCount);
+    lines.push(
+      ...buildTimeAxis({
+        timestamps: dsTs,
+        chartWidth: bucketCount,
+        gutterWidth: gutterW,
+      })
+    );
+  }
+
+  // Intensity legend: low → high.
+  const gutter = " ".repeat(gutterW);
+  if (plain) {
+    lines.push(`${gutter}low ${HEATMAP_SHADES.slice(1).join("")} high`);
+  } else {
+    const ramp = HEATMAP_COLORS.map((c) => chalk.hex(c)("█")).join("");
+    lines.push(`${gutter}${muted("low")} ${ramp} ${muted("high")}`);
+  }
+
+  return lines;
+}
+
 /**
  * Dispatch to the appropriate content renderer based on data type.
  *
@@ -1546,6 +1688,9 @@ function renderContentLines(opts: {
 
   switch (data.type) {
     case "timeseries": {
+      if (widget.displayType === "heatmap") {
+        return renderHeatmapContent(data, { innerWidth, contentHeight });
+      }
       if (widget.displayType === "categorical_bar") {
         return renderVerticalBarsContent(data, { innerWidth, contentHeight });
       }
@@ -1858,9 +2003,10 @@ export function formatDashboardWithData(data: DashboardViewData): string {
   const lines: string[] = [];
   lines.push(...renderHeader(data, termWidth));
 
-  const sixel = renderCompleteDashboardAsSixel(data, getSixelTermWidth());
-  if (sixel) {
-    lines.push(sixel);
+  const graphics = renderCompleteDashboardAsGraphics(data, getSixelTermWidth());
+  logDashboardGraphicsRenderer(graphics);
+  if (graphics.output) {
+    lines.push(graphics.output);
   } else {
     lines.push(...renderGrid(data.widgets, termWidth));
   }
@@ -1870,32 +2016,133 @@ export function formatDashboardWithData(data: DashboardViewData): string {
 }
 
 /**
- * Render the complete dashboard as one graphics canvas (kitty when available,
- * otherwise sixel) when graphics are enabled and the terminal exposes both cell
- * dimensions. Never partially replaces the framebuffer: unavailable geometry
- * always returns the complete established character rendering.
+ * Render the complete dashboard as one graphics canvas, selecting the most
+ * capable terminal format available (kitty over sixel over ASCII). When the
+ * terminal advertises graphics but doesn't report its cell geometry — common
+ * for kitty terminals, which frequently answer the graphics query but never
+ * send `CSI 16 t` — default cell dimensions are used so the dashboard still
+ * renders as graphics rather than silently dropping to ASCII. Never partially
+ * replaces the framebuffer: when no graphics format is available it records
+ * the fallback reason so the caller can render the complete character view and
+ * emit a useful debug log.
  */
-function renderCompleteDashboardAsSixel(
+type DashboardGraphicsRender = {
+  renderer: GraphicsFormat | "ascii";
+  rendererPreference: GraphicsRendererPreference;
+  output?: string;
+  reason?: string;
+  termWidth?: number;
+  cell?: { cellWidth: number; cellHeight: number };
+  nativePixelWidth?: number;
+  pixelWidth?: number;
+  graphicsCapApplied?: boolean;
+};
+
+/** Log the terminal graphics decision without including dashboard data. */
+function logDashboardGraphicsRenderer(render: DashboardGraphicsRender): void {
+  const caps = detectSixelCaps();
+  const details = [
+    `requested=${render.rendererPreference}`,
+    `capabilities: kitty=${caps.kitty === true ? "yes" : "no"}, sixel=${caps.supported ? "yes" : "no"}`,
+    `terminal: stdout TTY=${process.stdout.isTTY ? "yes" : "no"}, stdin TTY=${process.stdin.isTTY ? "yes" : "no"}`,
+    `plain output=${isPlainOutput() ? "yes" : "no"}`,
+    `columns=${render.termWidth ?? "unavailable"}`,
+  ];
+  if (render.cell) {
+    details.push(`cell=${render.cell.cellWidth}x${render.cell.cellHeight}`);
+  }
+  if (render.nativePixelWidth) {
+    details.push(`native pixel width=${render.nativePixelWidth}`);
+  }
+  if (render.pixelWidth) {
+    details.push(`effective pixel width=${render.pixelWidth}`);
+  }
+  details.push(
+    `graphics cap=${render.graphicsCapApplied ? "applied" : "not applied"}`
+  );
+  const reason = render.reason ? ` (reason: ${render.reason})` : "";
+  logger.debug(
+    `Dashboard graphics renderer: ${render.renderer}${reason}; ${details.join("; ")}`
+  );
+}
+
+function renderCompleteDashboardAsGraphics(
   data: DashboardViewData,
   termWidth: number | undefined
-): string | undefined {
-  const canKitty = canRenderKitty();
-  if (!termWidth || isPlainOutput() || !(canKitty || canRenderSixel())) {
-    return;
+): DashboardGraphicsRender {
+  const rendererPreference = data.rendererPreference ?? "auto";
+  const format = selectGraphicsFormat(rendererPreference);
+  if (!termWidth) {
+    return {
+      renderer: "ascii",
+      rendererPreference,
+      reason: "terminal width unavailable",
+    };
   }
-  const pixelWidth = terminalPixelWidth(termWidth);
-  const cellHeight = terminalPixelHeight(1);
-  if (!(pixelWidth && cellHeight)) {
-    return;
+  if (isPlainOutput()) {
+    return {
+      renderer: "ascii",
+      rendererPreference,
+      reason: "plain output requested",
+      termWidth,
+    };
   }
-  const cellWidth = Math.floor(pixelWidth / termWidth);
+  if (!format) {
+    return {
+      renderer: "ascii",
+      rendererPreference,
+      reason: "no compatible graphics protocol detected",
+      termWidth,
+    };
+  }
+  const cell = graphicsCellSize(rendererPreference);
+  if (!cell) {
+    return {
+      renderer: "ascii",
+      rendererPreference,
+      reason: "graphics cell size unavailable",
+      termWidth,
+    };
+  }
+  // Preserve the terminal's reported pixel width when known; otherwise derive it
+  // from the (possibly defaulted) cell width so the canvas still matches the
+  // column count exactly.
+  const nativePixelWidth =
+    terminalPixelWidth(termWidth) ?? termWidth * cell.cellWidth;
+  const cellWidth = Math.floor(nativePixelWidth / termWidth);
   if (cellWidth < 1) {
-    return;
+    return {
+      renderer: "ascii",
+      rendererPreference,
+      reason: "calculated graphics cell width is invalid",
+      termWidth,
+      cell,
+      nativePixelWidth,
+    };
   }
-  return renderDashboardAsSixel(data, {
+  const graphicsCap = data.graphicsCap !== false;
+  const graphicsCapApplied =
+    graphicsCap && nativePixelWidth > MAX_GRAPHICS_WIDTH;
+  const graphicsColumns = graphicsCapApplied
+    ? Math.min(termWidth, Math.floor(MAX_GRAPHICS_WIDTH / cellWidth))
+    : termWidth;
+  if (graphicsColumns < 1) {
+    return {
+      renderer: "ascii",
+      rendererPreference,
+      reason: "graphics cap is smaller than one terminal cell",
+      termWidth,
+      cell,
+      nativePixelWidth,
+    };
+  }
+  const pixelWidth = graphicsCapApplied
+    ? graphicsColumns * cellWidth
+    : nativePixelWidth;
+  const graphics = renderDashboardAsSixel(data, {
     pixelWidth,
     cellWidth,
-    cellHeight,
+    cellHeight: cell.cellHeight,
     renderTextContent(widget, innerWidth, contentHeight) {
       return renderContentLines({
         widget,
@@ -1903,10 +2150,33 @@ function renderCompleteDashboardAsSixel(
         contentHeight,
       });
     },
-    encodeImage: canKitty
-      ? (image) => encodeImageToKitty(image, image.width, true)
-      : undefined,
+    encodeImage:
+      format === "kitty"
+        ? (image) => encodeImageToKitty(image, image.width, true)
+        : undefined,
   });
+  if (!("output" in graphics)) {
+    return {
+      renderer: "ascii",
+      rendererPreference,
+      reason: graphics.reason,
+      termWidth,
+      cell,
+      nativePixelWidth,
+      pixelWidth,
+      graphicsCapApplied,
+    };
+  }
+  return {
+    renderer: format,
+    rendererPreference,
+    output: graphics.output,
+    termWidth,
+    cell,
+    nativePixelWidth,
+    pixelWidth,
+    graphicsCapApplied,
+  };
 }
 
 // ---------------------------------------------------------------------------

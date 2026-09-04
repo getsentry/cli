@@ -22,9 +22,12 @@ import { BANNER_SIXEL } from "../../src/generated/banner-sixel.js";
 import {
   __resetSixelCache,
   detectSixelCaps,
+  graphicsCellSize,
   optedOut,
   parseSixelCaps,
   readReply,
+  selectGraphicsFormat,
+  selectGraphicsFormatFromAvailability,
   sixelBanner,
   sixelFits,
   terminalPixelWidth,
@@ -136,6 +139,40 @@ describe("terminalPixelWidth", () => {
     // unsupported and there's no cell width to derive a pixel budget from.
     __resetSixelCache();
     expect(terminalPixelWidth(80)).toBeUndefined();
+  });
+});
+
+describe("selectGraphicsFormat", () => {
+  afterEach(() => {
+    __resetSixelCache();
+  });
+
+  test("returns undefined in a non-interactive (test) environment", () => {
+    // Under vitest stdin/stdout are not TTYs, so neither kitty nor sixel is
+    // available and the caller falls back to ASCII.
+    __resetSixelCache();
+    expect(selectGraphicsFormat()).toBeUndefined();
+  });
+
+  test("falls back to the automatic renderer when the requested one is unavailable", () => {
+    expect(
+      selectGraphicsFormatFromAvailability("sixel", {
+        kitty: true,
+        sixel: false,
+      })
+    ).toBe("kitty");
+  });
+});
+
+describe("graphicsCellSize", () => {
+  afterEach(() => {
+    __resetSixelCache();
+  });
+
+  test("returns undefined when no graphics format is available", () => {
+    // No TTY in the test env means no graphics format, so no cell size either.
+    __resetSixelCache();
+    expect(graphicsCellSize()).toBeUndefined();
   });
 });
 

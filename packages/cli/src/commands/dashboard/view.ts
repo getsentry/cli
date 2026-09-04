@@ -22,6 +22,7 @@ import { logger } from "../../lib/logger.js";
 import { withProgress } from "../../lib/polling.js";
 import { resolveOrgRegion } from "../../lib/region.js";
 import { buildDashboardUrl } from "../../lib/sentry-urls.js";
+import type { GraphicsRendererPreference } from "../../lib/sixel.js";
 import {
   formatTimeRangeFlag,
   PERIOD_BRIEF,
@@ -52,6 +53,8 @@ type ViewFlags = {
   readonly fresh: boolean;
   readonly refresh?: number;
   readonly period?: TimeRange;
+  readonly renderer: GraphicsRendererPreference;
+  readonly "no-graphics-cap": boolean;
   readonly json: boolean;
   readonly fields?: string[];
 };
@@ -107,7 +110,12 @@ function buildViewData(
   },
   widgetResults: Map<number, WidgetDataResult>,
   widgets: DashboardWidget[],
-  opts: { period: string; url: string }
+  opts: {
+    period: string;
+    rendererPreference: GraphicsRendererPreference;
+    graphicsCap: boolean;
+    url: string;
+  }
 ): DashboardViewData {
   return {
     id: dashboard.id,
@@ -117,6 +125,8 @@ function buildViewData(
     url: opts.url,
     dateCreated: dashboard.dateCreated,
     environment: dashboard.environment,
+    rendererPreference: opts.rendererPreference,
+    graphicsCap: opts.graphicsCap,
     widgets: widgets.map((w, i) => ({
       title: w.title,
       displayType: w.displayType,
@@ -166,12 +176,14 @@ export const viewCommand = buildCommand({
       "  sentry dashboard view my-org/my-project 12345\n" +
       "  sentry dashboard view 12345 --json\n" +
       "  sentry dashboard view 12345 --period 7d\n" +
+      "  sentry dashboard view 12345 --renderer sixel\n" +
       "  sentry dashboard view 12345 -r\n" +
       "  sentry dashboard view 12345 -r 30\n" +
       "  sentry dashboard view 12345 --web",
   },
   output: {
     human: createDashboardViewRenderer,
+    jsonExclude: ["rendererPreference", "graphicsCap"],
   },
   parameters: {
     positional: {
@@ -201,6 +213,19 @@ export const viewCommand = buildCommand({
         parse: parsePeriod,
         brief: PERIOD_BRIEF,
         optional: true,
+      },
+      renderer: {
+        kind: "enum",
+        values: ["auto", "kitty", "sixel"],
+        brief:
+          "Graphics renderer (defaults to auto; falls back to auto when unavailable)",
+        default: "auto",
+      },
+      "no-graphics-cap": {
+        kind: "boolean",
+        brief:
+          "Use the terminal-native graphics width (may fall back to ASCII for very large dashboards)",
+        default: false,
       },
     },
     aliases: {
@@ -285,6 +310,8 @@ export const viewCommand = buildCommand({
           // Build output data before clearing so clear→render is instantaneous
           const viewData = buildViewData(dashboard, widgetData, widgets, {
             period: formatTimeRangeFlag(timeRange),
+            rendererPreference: flags.renderer,
+            graphicsCap: !flags["no-graphics-cap"],
             url,
           });
 
@@ -316,6 +343,8 @@ export const viewCommand = buildCommand({
     yield new CommandOutput(
       buildViewData(dashboard, widgetData, widgets, {
         period: formatTimeRangeFlag(timeRange),
+        rendererPreference: flags.renderer,
+        graphicsCap: !flags["no-graphics-cap"],
         url,
       })
     );

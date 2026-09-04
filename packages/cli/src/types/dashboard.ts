@@ -42,10 +42,8 @@ import { logger } from "../lib/logger.js";
  * Source: sentry/src/sentry/models/dashboard_widget.py DashboardWidgetTypes.TYPES
  */
 export const WIDGET_TYPES = [
-  "discover",
   "issue",
   "error-events",
-  "transaction-like",
   "spans",
   "logs",
   "tracemetrics",
@@ -72,6 +70,7 @@ export const DISPLAY_TYPES = [
   "top_n",
   "details",
   "categorical_bar",
+  "heatmap",
   "wheel",
   "rage_and_dead_clicks",
   "server_tree",
@@ -271,20 +270,13 @@ export const SPAN_AGGREGATE_FUNCTIONS = [
 export type SpanAggregateFunction = (typeof SPAN_AGGREGATE_FUNCTIONS)[number];
 
 /**
- * Additional aggregate functions from the discover dataset.
- * Available when widgetType is "discover" or "error-events".
+ * Additional aggregate functions for the error-events dataset.
+ * Available when widgetType is "error-events".
  *
  * Source: https://github.com/getsentry/sentry/blob/master/src/sentry/search/events/constants.py
- * Dataset: https://github.com/getsentry/sentry/blob/master/src/sentry/search/events/datasets/discover.py
  */
-export const DISCOVER_AGGREGATE_FUNCTIONS = [
+export const ERROR_AGGREGATE_FUNCTIONS = [
   ...SPAN_AGGREGATE_FUNCTIONS,
-  "failure_count",
-  "failure_rate",
-  "apdex",
-  "count_miserable",
-  "user_misery",
-  "count_web_vitals",
   "count_if",
   "count_at_least",
   "last_seen",
@@ -293,21 +285,15 @@ export const DISCOVER_AGGREGATE_FUNCTIONS = [
   "stddev",
   "cov",
   "corr",
-  "performance_score",
-  "opportunity_score",
-  "count_scores",
 ] as const;
 
-export type DiscoverAggregateFunction =
-  (typeof DISCOVER_AGGREGATE_FUNCTIONS)[number];
+export type ErrorAggregateFunction = (typeof ERROR_AGGREGATE_FUNCTIONS)[number];
 
 /** Valibot schema for validating a span aggregate function name */
 export const SpanAggregateFunctionSchema = picklist(SPAN_AGGREGATE_FUNCTIONS);
 
-/** Valibot schema for validating a discover aggregate function name */
-export const DiscoverAggregateFunctionSchema = picklist(
-  DISCOVER_AGGREGATE_FUNCTIONS
-);
+/** Valibot schema for validating an error-event aggregate function name */
+export const ErrorAggregateFunctionSchema = picklist(ERROR_AGGREGATE_FUNCTIONS);
 
 /**
  * Valid `is:` filter values for issue search conditions (--where flag).
@@ -449,8 +435,8 @@ export function validateAggregateNames(
   }
 
   const validFunctions: readonly string[] =
-    dataset === "discover" || dataset === "error-events"
-      ? DISCOVER_AGGREGATE_FUNCTIONS
+    dataset === "error-events"
+      ? ERROR_AGGREGATE_FUNCTIONS
       : SPAN_AGGREGATE_FUNCTIONS;
 
   for (const agg of aggregates) {
@@ -1012,9 +998,7 @@ export type WidgetDataResult =
  */
 const WIDGET_TYPE_TO_DATASET: Record<string, string> = {
   spans: "spans",
-  discover: "discover",
   "error-events": "errors",
-  "transaction-like": "transactions",
   logs: "logs",
   tracemetrics: "tracemetrics",
 };
@@ -1022,7 +1006,7 @@ const WIDGET_TYPE_TO_DATASET: Record<string, string> = {
 /**
  * Map a widget's `widgetType` to the API `dataset` parameter.
  *
- * @param widgetType - The widget's dataset type (e.g., "spans", "discover")
+ * @param widgetType - The widget's dataset type (e.g., "spans", "logs")
  * @returns The API dataset string, or null if the type isn't queryable
  */
 export function mapWidgetTypeToDataset(
@@ -1041,6 +1025,7 @@ export const TIMESERIES_DISPLAY_TYPES = new Set([
   "stacked_area",
   "bar",
   "categorical_bar",
+  "heatmap",
 ]);
 
 /** Display types that use tabular data (events endpoint) */

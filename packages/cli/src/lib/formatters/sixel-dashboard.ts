@@ -13,8 +13,10 @@ import { type DecodedImage, encodeImageToSixel } from "../sixel-image.js";
 import {
   buildCategoricalChartModel,
   buildChartModel,
+  buildHeatmapModel,
   hexToRgb,
   rasterizeChart,
+  rasterizeHeatmap,
   seriesColor,
 } from "./chart-core.js";
 import {
@@ -45,6 +47,9 @@ const TERMINAL_ESCAPE_RE = new RegExp(
   `${String.fromCharCode(27)}(?:\\[[0-?]*[ -/]*[@-~]|\\][\\s\\S]*?(?:${String.fromCharCode(7)}|${String.fromCharCode(27)}\\\\)|P[\\s\\S]*?${String.fromCharCode(27)}\\\\)`,
   "g"
 );
+
+/** Aggregate function and its simple arguments in a raw query expression. */
+const AGGREGATE_LABEL_RE = /^([a-z][a-z0-9_]*)\(([^()]*)\)/i;
 
 /** A widget layout used by the dashboard grid. */
 export type SixelWidgetLayout = {
@@ -103,14 +108,19 @@ type PositionedWidget = {
   layout: SixelWidgetLayout;
 };
 
+/** Result of composing the dashboard image, including a safe fallback reason. */
+export type RenderSixelDashboardResult =
+  | { output: string }
+  | { reason: string };
+
 /** Render every dashboard widget into one terminal-positioned sixel image. */
 export function renderDashboardAsSixel(
   data: SixelDashboardData,
   options: RenderSixelDashboardOptions
-): string | undefined {
+): RenderSixelDashboardResult {
   const widgets = positionWidgets(data.widgets);
   if (widgets.length === 0) {
-    return;
+    return { reason: "no dashboard widgets" };
   }
 
   const pixelWidth = Math.max(1, Math.floor(options.pixelWidth));
@@ -118,8 +128,14 @@ export function renderDashboardAsSixel(
     ...widgets.map((item) => item.layout.y + item.layout.h)
   );
   const pixelHeight = gridHeight * LINES_PER_GRID_UNIT * options.cellHeight;
-  if (pixelWidth * pixelHeight > MAX_CANVAS_PIXELS) {
-    return;
+  const canvasPixels = pixelWidth * pixelHeight;
+  if (canvasPixels > MAX_CANVAS_PIXELS) {
+    return {
+      reason:
+        `canvas ${pixelWidth}x${pixelHeight} ` +
+        `(${(canvasPixels / 1_000_000).toFixed(2)}M pixels) exceeds the ` +
+        `${MAX_CANVAS_PIXELS / 1_000_000}M pixel limit`,
+    };
   }
 
   const image = createPixelCanvas({ width: pixelWidth, height: pixelHeight });
@@ -130,7 +146,10 @@ export function renderDashboardAsSixel(
   // terminal width exactly to preserve the dashboard grid.
   const encode =
     options.encodeImage ?? ((img) => encodeImageToSixel(img, img.width, true));
-  return encode(image);
+  const output = encode(image);
+  return output
+    ? { output }
+    : { reason: "graphics encoder produced no output" };
 }
 
 /** Place layout-less widgets beneath the explicit dashboard grid. */
@@ -180,6 +199,7 @@ function drawWidget(
     drawChartContent(image, {
       data: widget.data,
       categorical: widget.displayType === "categorical_bar",
+      heatmap: widget.displayType === "heatmap",
       x: contentX,
       y: contentY,
       width: contentWidth,
@@ -244,12 +264,59 @@ function drawFrame(
   });
 }
 
+/** Early-out for empty data or heatmap (which has its own rasterizer). */
+function tryRenderSpecialChart(
+  image: ReturnType<typeof createPixelCanvas>,
+  options: Parameters<typeof drawChartContent>[1]
+): boolean {
+  if (options.data.series.length === 0) {
+    const label = "NO DATA";
+    const maxColumns = Math.max(
+      1,
+      Math.floor(options.width / options.cellWidth)
+    );
+    const labelColumns = Math.min(label.length, maxColumns);
+    drawPixelText(image, label, {
+      x:
+        options.x +
+        Math.max(
+          0,
+          Math.floor((options.width - labelColumns * options.cellWidth) / 2)
+        ),
+      y:
+        options.y +
+        Math.max(0, Math.floor((options.height - options.cellHeight) / 2)),
+      cellWidth: options.cellWidth,
+      cellHeight: options.cellHeight,
+      maxColumns,
+      color: FRAME_COLOR,
+    });
+    return true;
+  }
+  if (options.heatmap) {
+    const hm = buildHeatmapModel(options.data);
+    if (hm) {
+      const chart = rasterizeHeatmap(hm, {
+        width: options.width,
+        height: options.height,
+        backgroundTransparent: true,
+      });
+      if (chart) {
+        blitPixelImage(image, chart, options.x, options.y);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** Draw chart bars, axes, and a series legend into a widget's content region. */
 function drawChartContent(
   image: ReturnType<typeof createPixelCanvas>,
   options: {
     data: Extract<WidgetDataResult, { type: "timeseries" }>;
     categorical: boolean;
+    heatmap: boolean;
     x: number;
     y: number;
     width: number;
@@ -258,21 +325,15 @@ function drawChartContent(
     cellHeight: number;
   }
 ): void {
+  if (tryRenderSpecialChart(image, options)) {
+    return;
+  }
   const model = options.categorical
     ? buildCategoricalChartModel(options.data)
     : buildChartModel(options.data);
   if (!model) {
-    drawPixelText(image, "(NO DATA)", {
-      x: options.x,
-      y: options.y,
-      cellWidth: options.cellWidth,
-      cellHeight: options.cellHeight,
-      maxColumns: Math.max(1, Math.floor(options.width / options.cellWidth)),
-      color: FRAME_COLOR,
-    });
     return;
   }
-
   const contentRows = Math.max(
     1,
     Math.floor(options.height / options.cellHeight)
@@ -432,7 +493,11 @@ function drawLegend(
     if (!series || column >= maxColumns) {
       break;
     }
-    const label = series.label.slice(0, 12);
+    const availableColumns = maxColumns - column - 2;
+    const label = truncateLegendLabel(
+      formatLegendLabel(series.label),
+      Math.min(18, availableColumns)
+    );
     const requiredColumns = Math.min(maxColumns, label.length + 2);
     if (column + requiredColumns > maxColumns) {
       break;
@@ -454,6 +519,33 @@ function drawLegend(
     });
     column += requiredColumns;
   }
+}
+
+/** Turn raw aggregate expressions into concise, readable legend labels. */
+export function formatLegendLabel(label: string): string {
+  const aggregate = AGGREGATE_LABEL_RE.exec(label);
+  if (aggregate) {
+    const operation = aggregate[1] ?? label;
+    const arguments_ =
+      aggregate[2]?.split(",").map((argument) => argument.trim()) ?? [];
+    const metric = arguments_[0] === "value" ? arguments_[1] : arguments_[0];
+    return metric ? `${operation} ${metric}` : operation;
+  }
+  if (label.startsWith("equation|")) {
+    return "equation";
+  }
+  return label;
+}
+
+/** Clip a legend label without leaving a partial aggregate expression. */
+function truncateLegendLabel(label: string, maxColumns: number): string {
+  if (label.length <= maxColumns) {
+    return label;
+  }
+  if (maxColumns <= 3) {
+    return label.slice(0, Math.max(0, maxColumns));
+  }
+  return `${label.slice(0, maxColumns - 3)}...`;
 }
 
 /** Format a number compactly enough for the chart-axis gutter. */

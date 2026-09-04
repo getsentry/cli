@@ -836,6 +836,7 @@ async function tryRecoverCurrentRunState(
     if (timeoutMs <= 0) {
       return null;
     }
+    // biome-ignore lint/plugin: grandfathered silent catch — see #1531; drain by adding log.debug()/log.warn() or re-throwing.
     try {
       const raw = await withTimeout(
         workflow.runById(runId, {
@@ -984,6 +985,13 @@ export async function runWizard(initialOptions: WizardOptions): Promise<void> {
   // longer wired into the wizard.
 
   const { directory, yes, dryRun, features, forceLegacyUi } = initialOptions;
+
+  // Tag the whole run's telemetry with dry-run mode. Dry runs plan changes but
+  // apply and install nothing, so post-apply verification (both this CLI's
+  // `verify-setup` runtime check and the server's `verify-changes` step) sees an
+  // unmodified project and reports expected "issues". This tag lets that
+  // expected noise be filtered out (`wizard.dry_run:false` isolates real runs).
+  setTag("wizard.dry_run", dryRun === true);
 
   // Construct the UI once for the entire run; tear down on every exit
   // path via `await using`. The factory picks `InkUI` for interactive

@@ -438,6 +438,27 @@ function validateMetricsFields(fieldList: string[]): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * Datasets whose Events endpoint accepts a `sort` param. A deterministic sort
+ * is what makes offset-based cursor pagination stable — without it, multi-page
+ * grouped aggregate queries overlap and skip rows (#1519). `metrics`
+ * (`tracemetrics`) and `logs` reject `sort` with a 400, so they stay unsorted.
+ *
+ * This is a hand-curated contract, not a machine-readable capability lookup,
+ * because no canonical source for it exists today (#1523):
+ *   - The OpenAPI spec (`@sentry/api` `listOrganizationEvents`) models `sort`
+ *     as a flat query param whose only documented constraint is "must be in
+ *     the `field` list" — it does not encode which datasets accept it.
+ *   - There is no dataset-capability introspection endpoint in the spec.
+ *   - The spec's `dataset` enum is
+ *     `errors | logs | profile_functions | spans | tracemetrics |
+ *     uptime_results`; `discover` is a legacy virtual dataset that is not a
+ *     valid `--dataset` value here (see {@link DATASET_ALIASES}), so it is
+ *     intentionally omitted.
+ * Revisit if Sentry ever publishes a per-dataset capability contract.
+ */
+const SORTABLE_DATASETS = new Set(["spans", "errors"]);
+
+/**
  * Dataset-specific configuration resolved before the main query loop.
  *
  * Centralizes all replay vs. non-replay branching so the main `func` body
@@ -545,13 +566,20 @@ function resolveDatasetConfig(params: {
   const firstAgg = findFirstAggregate(fieldList);
   const rawSort = flags.sort ?? (firstAgg ? `-${firstAgg}` : undefined);
   let sort: string | undefined;
-  if (dataset === "spans") {
+  if (SORTABLE_DATASETS.has(dataset)) {
+    // A deterministic sort is required for correct cursor pagination: the
+    // events cursor is offset-based, so without a stable total order the
+    // separate page requests overlap and skip rows, producing duplicate and
+    // missing dimension tuples across the merged result (#1519). Defaulting
+    // to `-<firstAggregate>` gives grouped aggregate queries a stable order.
     sort = rawSort;
   } else {
-    // Warn only when user explicitly passed --sort on a non-spans dataset
+    // Warn only when the user explicitly passed --sort on a dataset that
+    // rejects it (metrics/logs). An auto-derived sort is silently dropped.
     if (rawSort && flags.sort) {
+      const displayDataset = API_TO_USER_DATASET.get(dataset) ?? dataset;
       log.warn(
-        `--sort is only supported on the spans dataset. Ignoring sort for ${dataset}.`
+        `--sort is not supported on the ${displayDataset} dataset. Ignoring sort.`
       );
     }
     sort = undefined;

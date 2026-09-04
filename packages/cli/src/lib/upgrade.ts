@@ -221,6 +221,7 @@ function runCommand(
  * @returns true if sentry is installed globally via this package manager
  */
 async function isInstalledWith(pm: PackageManager): Promise<boolean> {
+  // biome-ignore lint/plugin: grandfathered silent catch — see #1531; drain by adding log.debug()/log.warn() or re-throwing.
   try {
     const args =
       pm === "yarn"
@@ -247,6 +248,7 @@ async function isInstalledWith(pm: PackageManager): Promise<boolean> {
  */
 function isHomebrewInstall(): boolean {
   let execPath = process.execPath;
+  // biome-ignore lint/plugin: grandfathered silent catch — see #1531; drain by adding log.debug()/log.warn() or re-throwing.
   try {
     execPath = realpathSync(execPath);
   } catch {
@@ -757,6 +759,7 @@ async function downloadStableToPath(
   const headers = getGitHubHeaders();
 
   // Try gzip-compressed download first (~60% smaller)
+  // biome-ignore lint/plugin: grandfathered silent catch — see #1531; drain by adding log.debug()/log.warn() or re-throwing.
   try {
     const gzResponse = await fetchWithUpgradeError(
       `${url}.gz`,
@@ -900,6 +903,7 @@ export async function downloadBinaryToTemp(
 
   try {
     // Clean up any leftover temp file from interrupted download
+    // biome-ignore lint/plugin: grandfathered silent catch — see #1531; drain by adding log.debug()/log.warn() or re-throwing.
     try {
       unlinkSync(tempPath);
     } catch {
@@ -943,6 +947,7 @@ export async function downloadBinaryToTemp(
 
     // Clear consumed patch cache — patches for the old version are useless
     // after the binary has been updated (whether via delta or full download).
+    // biome-ignore lint/plugin: grandfathered silent catch — see #1531; drain by adding log.debug()/log.warn() or re-throwing.
     clearPatchCache().catch(() => {
       /* best-effort — don't fail the upgrade if cache cleanup fails */
     });
