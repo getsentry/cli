@@ -13,7 +13,8 @@
 import * as child_process from "node:child_process";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { run } from "@stricli/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -25,7 +26,10 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 import { app } from "../../../src/app.js";
-import { isEbusyError } from "../../../src/commands/cli/upgrade.js";
+import {
+  isEbusyError,
+  resolveUpgradeInstallDir,
+} from "../../../src/commands/cli/upgrade.js";
 import type { SentryContext } from "../../../src/context.js";
 import { CLI_VERSION } from "../../../src/lib/constants.js";
 import {
@@ -1127,5 +1131,57 @@ describe("isEbusyError", () => {
 
   test("returns false for Error without code", () => {
     expect(isEbusyError(new Error("some error"))).toBe(false);
+  });
+});
+
+describe("resolveUpgradeInstallDir", () => {
+  const home = homedir();
+  const legacyBinDir = join(home, ".sentry", "bin");
+  const xdgBinDir = join(home, ".local", "bin");
+  let savedInstallDir: string | undefined;
+  let savedXdgBinHome: string | undefined;
+
+  beforeEach(() => {
+    savedInstallDir = process.env.SENTRY_INSTALL_DIR;
+    savedXdgBinHome = process.env.XDG_BIN_HOME;
+    delete process.env.SENTRY_INSTALL_DIR;
+    delete process.env.XDG_BIN_HOME;
+  });
+
+  afterEach(() => {
+    if (savedInstallDir === undefined) {
+      delete process.env.SENTRY_INSTALL_DIR;
+    } else {
+      process.env.SENTRY_INSTALL_DIR = savedInstallDir;
+    }
+    if (savedXdgBinHome === undefined) {
+      delete process.env.XDG_BIN_HOME;
+    } else {
+      process.env.XDG_BIN_HOME = savedXdgBinHome;
+    }
+  });
+
+  test("keeps a non-legacy install dir unchanged", () => {
+    const current = join(home, "bin");
+    expect(
+      resolveUpgradeInstallDir(current, `${current}${delimiter}/usr/bin`)
+    ).toBe(current);
+  });
+
+  test("relocates a legacy ~/.sentry/bin install when the XDG dir is on PATH", () => {
+    const pathEnv = `${xdgBinDir}${delimiter}/usr/bin`;
+    expect(resolveUpgradeInstallDir(legacyBinDir, pathEnv)).toBe(xdgBinDir);
+  });
+
+  test("keeps the legacy dir when the XDG dir is not on PATH", () => {
+    expect(resolveUpgradeInstallDir(legacyBinDir, "/usr/bin:/bin")).toBe(
+      legacyBinDir
+    );
+  });
+
+  test("keeps the legacy dir when PATH is undefined", () => {
+    expect(resolveUpgradeInstallDir(legacyBinDir, undefined)).toBe(
+      legacyBinDir
+    );
   });
 });
