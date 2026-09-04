@@ -95,6 +95,9 @@ const ISSUE_SHORT_ID_MULTI_SEGMENT_PARTS = 3;
 /** Splits a string into lines on LF or CRLF boundaries. */
 const LINE_SPLIT_PATTERN = /\r?\n/;
 
+/** Splits a string on any run of whitespace. */
+const WHITESPACE_SPLIT_PATTERN = /\s+/;
+
 /**
  * Check if a string looks like a Sentry issue short ID.
  *
@@ -1425,7 +1428,7 @@ export function buildProjectQuery(
  */
 export function splitNewlineArg(arg: string): string[] {
   return arg
-    .split(/\s+/)
+    .split(WHITESPACE_SPLIT_PATTERN)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
