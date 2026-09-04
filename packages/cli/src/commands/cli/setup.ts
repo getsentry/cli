@@ -34,7 +34,7 @@ import {
   getAgentSkillsPreference,
   setAgentSkillsPreference,
 } from "../../lib/db/defaults.js";
-import { resolveXdgConfigDir } from "../../lib/db/index.js";
+import { closeDatabase, resolveXdgConfigDir } from "../../lib/db/index.js";
 import { setInstallInfo } from "../../lib/db/install-info.js";
 import {
   parseReleaseChannel,
@@ -88,63 +88,81 @@ function formatSetupResult(result: SetupResult): string {
 }
 
 /**
- * Migrate config data and the binary out of the legacy `~/.sentry` layout into
- * the XDG-compliant locations.
+ * Migrate `cli.db` (+ WAL sidecars) and the old `config.json` out of the legacy
+ * `~/.sentry` directory into the XDG config directory.
  *
- * Runs before install/configuration so the rest of setup sees the new paths.
- * Each part is independent and best-effort: a failure to move the binary must
- * not prevent config migration, and vice versa.
+ * The database is opened at CLI startup (cleanup-old-binary reads install
+ * info), so it must be closed before the files are moved — an open SQLite file
+ * cannot be renamed on Windows. Closing also invalidates the cached handle, so
+ * the next `getDatabase()` reopens at the new path.
  */
-function migrateLegacyLayout(
+function migrateLegacyConfig(
   homeDir: string,
   env: NodeJS.ProcessEnv,
   emit: Logger
 ): void {
   const legacyDir = join(homeDir, ".sentry");
-
-  // Config data: cli.db (+ sidecars) and the old config.json. Target the XDG
-  // location directly — resolveConfigDir keeps returning the legacy dir while
-  // it still holds cli.db, which would make migration a no-op.
+  // Target the XDG location directly — resolveConfigDir keeps returning the
+  // legacy dir while it still holds cli.db, which would make migration a no-op.
   const targetConfigDir = resolveXdgConfigDir(env, homeDir);
-  if (targetConfigDir !== legacyDir) {
-    const configFiles = ["cli.db", "cli.db-wal", "cli.db-shm", "config.json"];
-    const hasLegacyConfig = configFiles.some((name) =>
-      existsSync(join(legacyDir, name))
-    );
-    const primary = join(targetConfigDir, "cli.db");
-    if (hasLegacyConfig && !existsSync(primary)) {
-      mkdirSync(targetConfigDir, { recursive: true, mode: 0o700 });
-      for (const name of configFiles) {
-        const from = join(legacyDir, name);
-        if (existsSync(from)) {
-          renameSync(from, join(targetConfigDir, name));
-        }
-      }
-      emit(`Config: Migrated ${legacyDir} → ${targetConfigDir}`);
-    }
+  if (targetConfigDir === legacyDir) {
+    return;
   }
 
-  // Binary: ~/.sentry/bin/<binary> → XDG-aware install dir.
+  const configFiles = ["cli.db", "cli.db-wal", "cli.db-shm", "config.json"];
+  const hasLegacyConfig = configFiles.some((name) =>
+    existsSync(join(legacyDir, name))
+  );
+  if (!hasLegacyConfig || existsSync(join(targetConfigDir, "cli.db"))) {
+    return;
+  }
+
+  closeDatabase();
+  mkdirSync(targetConfigDir, { recursive: true, mode: 0o700 });
+  for (const name of configFiles) {
+    const from = join(legacyDir, name);
+    if (existsSync(from)) {
+      renameSync(from, join(targetConfigDir, name));
+    }
+  }
+  emit(`Config: Migrated ${legacyDir} → ${targetConfigDir}`);
+}
+
+/**
+ * Migrate the binary out of the legacy `~/.sentry/bin` into the XDG-aware
+ * install dir. Returns the new binary path when a move happened, so the caller
+ * can point PATH setup and recorded install info at the new location instead of
+ * the now-deleted legacy path.
+ */
+function migrateLegacyBinary(
+  homeDir: string,
+  env: NodeJS.ProcessEnv,
+  emit: Logger
+): string | undefined {
+  const legacyDir = join(homeDir, ".sentry");
   const filename = getBinaryFilename();
   const legacyBin = join(legacyDir, "bin", filename);
   const targetDir = determineInstallDir(homeDir, env);
   const targetBin = join(targetDir, filename);
   if (
-    existsSync(legacyBin) &&
-    !existsSync(targetBin) &&
-    targetDir !== join(legacyDir, "bin")
+    !existsSync(legacyBin) ||
+    existsSync(targetBin) ||
+    targetDir === join(legacyDir, "bin")
   ) {
-    mkdirSync(targetDir, { recursive: true, mode: 0o755 });
-    copyFileSync(legacyBin, targetBin);
-    try {
-      unlinkSync(legacyBin);
-    } catch {
-      // Leave the old binary in place if it can't be removed — the new copy
-      // is authoritative and setInstallInfo points upgrades at it.
-    }
-    setInstallInfo({ method: "curl", path: targetBin, version: CLI_VERSION });
-    emit(`Binary: Migrated ${legacyBin} → ${targetBin}`);
+    return;
   }
+
+  mkdirSync(targetDir, { recursive: true, mode: 0o755 });
+  copyFileSync(legacyBin, targetBin);
+  try {
+    unlinkSync(legacyBin);
+  } catch {
+    // Leave the old binary in place if it can't be removed — the new copy
+    // is authoritative and setInstallInfo points upgrades at it.
+  }
+  setInstallInfo({ method: "curl", path: targetBin, version: CLI_VERSION });
+  emit(`Binary: Migrated ${legacyBin} → ${targetBin}`);
+  return targetBin;
 }
 
 /**
@@ -623,11 +641,23 @@ export const setupCommand = buildCommand({
     let freshInstall = false;
 
     // 0. Migrate any legacy ~/.sentry config/binary into XDG locations first,
-    // so the steps below operate on the new paths.
+    // so the steps below operate on the new paths. Config and binary migrations
+    // are independent — a failure in one must not skip the other.
     try {
-      migrateLegacyLayout(homeDir, process.env, emit);
+      migrateLegacyConfig(homeDir, process.env, emit);
     } catch (error) {
-      warn("Legacy migration", error);
+      warn("Legacy config migration", error);
+    }
+    try {
+      const migratedBinary = migrateLegacyBinary(homeDir, process.env, emit);
+      // Adopt the new location so PATH setup and recorded install info point at
+      // the migrated binary rather than the deleted legacy path.
+      if (migratedBinary) {
+        binaryPath = migratedBinary;
+        binaryDir = dirname(migratedBinary);
+      }
+    } catch (error) {
+      warn("Legacy binary migration", error);
     }
 
     // 1. Install binary from temp location (when --install is set)

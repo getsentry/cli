@@ -33,6 +33,10 @@ import {
   getAgentSkillsPreference,
   setAgentSkillsPreference,
 } from "../../../src/lib/db/defaults.js";
+import {
+  clearInstallInfo,
+  getInstallInfo,
+} from "../../../src/lib/db/install-info.js";
 import { getReleaseChannel } from "../../../src/lib/db/release-channel.js";
 // biome-ignore lint/performance/noNamespaceImport: dynamic setup imports are mocked at the module boundary
 import * as interactiveLogin from "../../../src/lib/interactive-login.js";
@@ -1102,6 +1106,63 @@ describe("sentry cli setup — legacy migration", () => {
     expect(await readFile(join(installDir, "sentry"), "utf8")).toBe(
       "current-binary"
     );
+  });
+});
+
+describe("sentry cli setup — legacy migration records new path", () => {
+  // Isolate the DB so getInstallInfo() reflects this test's writes.
+  useTestConfigDir("test-setup-migration-info-");
+
+  let testHome: string;
+  let restoreStderr: (() => void) | undefined;
+
+  beforeEach(() => {
+    testHome = join(
+      "/tmp",
+      `setup-mig-info-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(testHome, { recursive: true });
+  });
+
+  afterEach(() => {
+    restoreStderr?.();
+    restoreStderr = undefined;
+    clearInstallInfo();
+    rmSync(testHome, { recursive: true, force: true });
+  });
+
+  test("records the migrated binary path, not the legacy location", async () => {
+    const installDir = join(testHome, "install", "bin");
+    const legacyBinDir = join(testHome, ".sentry", "bin");
+    mkdirSync(legacyBinDir, { recursive: true });
+    writeFileSync(join(legacyBinDir, "sentry"), "legacy-binary");
+
+    const { context, restore } = createMockContext({
+      homeDir: testHome,
+      env: {
+        SENTRY_INSTALL_DIR: installDir,
+        SENTRY_CONFIG_DIR: process.env.SENTRY_CONFIG_DIR,
+      },
+    });
+    restoreStderr = restore;
+
+    await run(
+      app,
+      [
+        "cli",
+        "setup",
+        "--quiet",
+        "--method",
+        "curl",
+        "--no-modify-path",
+        "--no-completions",
+        "--no-agent-skills",
+      ],
+      context
+    );
+
+    const recorded = getInstallInfo();
+    expect(recorded?.path).toBe(join(installDir, "sentry"));
   });
 });
 

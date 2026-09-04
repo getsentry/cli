@@ -121,4 +121,6 @@ When installed via the install script, the CLI binary is placed in an XDG-aligne
 3. `~/.local/bin` or `~/bin` — when either already exists and is on your `PATH`
 4. `~/.local/bin` — default fallback
 
-Older installs placed the binary in `~/.sentry/bin`. Running `sentry cli setup` (including via `sentry upgrade`) migrates an existing `~/.sentry/bin` binary and any legacy `~/.sentry` config data (`cli.db`, `config.json`) into the new XDG locations automatically. The migration is skipped when a binary or config already exists at the target.
+Older installs placed the binary in `~/.sentry/bin`. Running `sentry cli setup` moves an existing `~/.sentry/bin` binary into the resolved install directory (updating your `PATH` and recorded install metadata to match) and migrates any legacy `~/.sentry` config data (`cli.db`, `config.json`) into the XDG config directory. Both migrations are skipped when a binary or config already exists at the target.
+
+`sentry upgrade` keeps the binary where it currently lives — it pins `SENTRY_INSTALL_DIR` to the existing install directory so an in-place update never relocates a binary that is already on your `PATH`. Legacy config data is still migrated on upgrade; to move the binary itself to the XDG location, run `sentry cli setup` (optionally with `SENTRY_INSTALL_DIR` or `XDG_BIN_HOME` set).
