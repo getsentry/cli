@@ -281,6 +281,23 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
     example: "10",
     defaultValue: "50",
   },
+  {
+    name: "DO_NOT_TRACK",
+    description:
+      "Industry-standard telemetry opt-out ([consoledonottrack.com](https://consoledonottrack.com/)). When set to `1`, disables CLI telemetry. " +
+      "Equivalent to `SENTRY_CLI_NO_TELEMETRY=1` — either variable is sufficient.",
+    example: "1",
+  },
+  // -- Build plugins --
+  {
+    name: "SENTRY_PIPELINE",
+    description:
+      "Identifies the Sentry build plugin that invoked the CLI. Format: `<plugin-name>/<version>` " +
+      "(e.g., `sentry-gradle-plugin/4.12.0`). Currently recognized plugins: " +
+      "`sentry-gradle-plugin`, `sentry-fastlane-plugin`. " +
+      "Set automatically by the respective build plugins — you do not need to set this manually.",
+    example: "sentry-gradle-plugin/4.12.0",
+  },
   // -- Database --
   {
     name: "SENTRY_CLI_NO_AUTO_REPAIR",

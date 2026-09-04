@@ -123,7 +123,7 @@ sentry cli feedback i love this tool
 sentry cli feedback the issue view is confusing
 ```
 
-Feedback is sent via Sentry's telemetry system. If telemetry is disabled (`SENTRY_CLI_NO_TELEMETRY=1`), feedback cannot be sent.
+Feedback is sent via Sentry's telemetry system. If telemetry is disabled (`SENTRY_CLI_NO_TELEMETRY=1` or `DO_NOT_TRACK=1`), feedback cannot be sent.
 
 ### Fix configuration issues
 
