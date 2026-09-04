@@ -277,7 +277,7 @@ jobs:
       - name: Unit Tests
         run: pnpm run test:unit
       - name: Coverage Report
-        uses: getsentry/codecov-action@main
+        uses: getsentry/coverage-action@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: ./coverage/lcov.info
