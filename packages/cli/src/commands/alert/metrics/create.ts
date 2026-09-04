@@ -9,13 +9,14 @@ import { createMetricAlertRule } from "../../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { buildCommand, numberParser } from "../../../lib/command.js";
 import { ContextError, ValidationError } from "../../../lib/errors.js";
+import { warning } from "../../../lib/formatters/colors.js";
 import { CommandOutput } from "../../../lib/formatters/output.js";
 import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../../lib/mutate-command.js";
 import { resolveOrg } from "../../../lib/resolve-target.js";
 import {
-  normalizeMetricDataset,
   normalizeProjectList,
   parseJsonObjectList,
+  resolveMetricDataset,
   validateMetricDataset,
   validateMetricTimeWindow,
   validateMetricTriggers,
@@ -128,7 +129,7 @@ export const createCommand = buildCommand({
         kind: "parsed",
         parse: String,
         brief:
-          "Dataset: errors (error-events), sessions, events, spans, metrics",
+          "Dataset: errors (error-events), sessions, events, spans, metrics (transaction(s) routes to spans)",
       },
       "time-window": {
         kind: "parsed",
@@ -177,9 +178,16 @@ export const createCommand = buildCommand({
       throw new ValidationError("aggregate cannot be empty.", "aggregate");
     }
 
-    const dataset = normalizeMetricDataset(flags.dataset);
+    const {
+      dataset,
+      query,
+      notice: datasetNotice,
+    } = resolveMetricDataset(flags.dataset, flags.query);
     validateMetricDataset(dataset);
     validateMetricTimeWindow(flags["time-window"]);
+    if (datasetNotice) {
+      this.stderr.write(`${warning(`Tip: ${datasetNotice}`)}\n`);
+    }
 
     const triggers = parseJsonObjectList(flags.trigger, "trigger");
     validateMetricTriggers(triggers);
@@ -195,7 +203,7 @@ export const createCommand = buildCommand({
 
     const body: Record<string, unknown> = {
       name: flags.name,
-      query: flags.query,
+      query,
       aggregate: flags.aggregate,
       dataset,
       timeWindow: flags["time-window"],

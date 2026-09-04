@@ -6,6 +6,7 @@ import {
   parseJsonObjectList,
   parseMatchMode,
   parseStatusFlag,
+  resolveMetricDataset,
   statusToMetricValue,
   triggerLogicType,
   validateIssueRuleArrays,
@@ -214,6 +215,7 @@ describe("normalizeMetricDataset", () => {
     ["error", "errors"],
     ["session", "sessions"],
     ["metric", "metrics"],
+    ["span", "spans"],
     ["error-events", "errors"],
   ])('maps alias "%s" to "%s"', (input, expected) => {
     expect(normalizeMetricDataset(input)).toBe(expected);
@@ -250,6 +252,49 @@ describe("normalizeMetricDataset", () => {
   });
 });
 
+describe("resolveMetricDataset", () => {
+  test("passes canonical datasets through with the query untouched", () => {
+    expect(resolveMetricDataset("spans", "environment:prod")).toEqual({
+      dataset: "spans",
+      query: "environment:prod",
+    });
+  });
+
+  test("resolves aliases without a notice", () => {
+    expect(resolveMetricDataset("span", "environment:prod")).toEqual({
+      dataset: "spans",
+      query: "environment:prod",
+    });
+  });
+
+  test.each([
+    "transaction",
+    "transactions",
+    "Transactions",
+    "  TRANSACTION ",
+  ])('routes "%s" to spans and adds is_transaction:true with a notice', (input) => {
+    const result = resolveMetricDataset(input, "environment:prod");
+    expect(result.dataset).toBe("spans");
+    expect(result.query).toBe("environment:prod is_transaction:true");
+    expect(result.notice).toContain("spans");
+    expect(result.notice).toContain("is_transaction:true");
+  });
+
+  test("adds the filter to an empty query", () => {
+    const result = resolveMetricDataset("transactions", "");
+    expect(result.dataset).toBe("spans");
+    expect(result.query).toBe("is_transaction:true");
+  });
+
+  test("does not duplicate an existing is_transaction:true filter", () => {
+    const result = resolveMetricDataset(
+      "transactions",
+      "environment:prod is_transaction:true"
+    );
+    expect(result.query).toBe("environment:prod is_transaction:true");
+  });
+});
+
 describe("validateMetricDataset", () => {
   const valid = ["errors", "sessions", "events", "spans", "metrics"];
 
@@ -263,6 +308,7 @@ describe("validateMetricDataset", () => {
     "error",
     "error-events",
     "METRIC",
+    "span",
   ])('passes for alias "%s"', (dataset) => {
     expect(() => validateMetricDataset(dataset)).not.toThrow();
   });
