@@ -11,6 +11,9 @@
  */
 
 import { customFetch } from "../custom-ca.js";
+import { logger } from "../logger.js";
+
+const log = logger.withTag("status-page");
 
 /** Default Sentry status page base URL. */
 export const SENTRY_STATUS_PAGE_URL = "https://status.sentry.io";
@@ -121,7 +124,8 @@ async function tryFetchStatuspageSummary(
     response = await customFetch(endpoint, {
       signal: AbortSignal.timeout(STATUS_REQUEST_TIMEOUT_MS),
     });
-  } catch {
+  } catch (err) {
+    log.debug(`Statuspage summary fetch failed for ${endpoint}`, err);
     return;
   }
 
@@ -132,7 +136,8 @@ async function tryFetchStatuspageSummary(
   let summary: SummaryResponse;
   try {
     summary = (await response.json()) as SummaryResponse;
-  } catch {
+  } catch (err) {
+    log.debug(`Statuspage summary parse failed for ${endpoint}`, err);
     return;
   }
 
