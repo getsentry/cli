@@ -1184,4 +1184,19 @@ describe("resolveUpgradeInstallDir", () => {
       legacyBinDir
     );
   });
+
+  test("treats a differently-cased legacy dir as legacy on case-insensitive filesystems", () => {
+    // On Windows/macOS a stored install path can differ only in casing from
+    // the freshly computed legacy dir yet point at the same directory; it must
+    // still be recognized as the legacy install so relocation can trigger.
+    const mixedCaseLegacy = legacyBinDir.toUpperCase();
+    const pathEnv = `${xdgBinDir}${delimiter}/usr/bin`;
+    const result = resolveUpgradeInstallDir(mixedCaseLegacy, pathEnv);
+    if (process.platform === "win32" || process.platform === "darwin") {
+      expect(result).toBe(xdgBinDir);
+    } else {
+      // Case-sensitive filesystem: a different-cased path is a different dir.
+      expect(result).toBe(mixedCaseLegacy);
+    }
+  });
 });
