@@ -25,12 +25,14 @@ import {
   getBinaryDownloadUrl,
   getBinaryFilename,
   getBinaryPaths,
+  getKnownInstallDirs,
   getPlatformBinaryName,
   installBinary,
   isDowngrade,
   isMusl,
   releaseLock,
   replaceBinarySync,
+  samePath,
 } from "../../src/lib/binary.js";
 import { UpgradeError } from "../../src/lib/errors.js";
 
@@ -75,6 +77,40 @@ describe("getBinaryPaths", () => {
     expect(paths.tempPath).toBe("/usr/local/bin/sentry.download");
     expect(paths.oldPath).toBe("/usr/local/bin/sentry.old");
     expect(paths.lockPath).toBe("/usr/local/bin/sentry.lock");
+  });
+});
+
+describe("samePath", () => {
+  test("matches identical paths", () => {
+    expect(samePath("/home/user/.local/bin", "/home/user/.local/bin")).toBe(
+      true
+    );
+  });
+
+  test("distinguishes genuinely different paths", () => {
+    expect(samePath("/home/user/.local/bin", "/home/user/.sentry/bin")).toBe(
+      false
+    );
+  });
+
+  test("case sensitivity follows the platform", () => {
+    const result = samePath("/Home/User/bin", "/home/user/bin");
+    if (process.platform === "win32" || process.platform === "darwin") {
+      expect(result).toBe(true);
+    } else {
+      expect(result).toBe(false);
+    }
+  });
+});
+
+describe("getKnownInstallDirs", () => {
+  test("returns the known curl dirs resolved against home", () => {
+    const dirs = getKnownInstallDirs("/home/user");
+    expect(dirs).toEqual([
+      join("/home/user", ".local", "bin"),
+      join("/home/user", "bin"),
+      join("/home/user", ".sentry", "bin"),
+    ]);
   });
 });
 

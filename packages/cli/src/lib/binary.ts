@@ -30,6 +30,35 @@ import { isProcessRunning } from "./process-utils.js";
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
 
 /**
+ * Legacy install directory (relative to home) that predates the XDG layout.
+ * The curl installer used to drop the binary here; migration moves it out.
+ */
+export const LEGACY_INSTALL_SUBDIR = join(".sentry", "bin");
+
+/**
+ * Compare two filesystem paths for equality, case-insensitively on
+ * case-insensitive filesystems (Windows, macOS). A stored path can differ in
+ * casing from a freshly computed one (e.g. `C:\Users\User` vs `C:\Users\user`)
+ * yet point at the same location, so a strict `===` would wrongly differ.
+ */
+export function samePath(a: string, b: string): boolean {
+  if (process.platform === "win32" || process.platform === "darwin") {
+    return a.toLowerCase() === b.toLowerCase();
+  }
+  return a === b;
+}
+
+/**
+ * Candidate directories a previously-installed binary may live in, in priority
+ * order. Used by migration to find a binary to move into the resolved install
+ * directory. Derived from {@link KNOWN_CURL_DIRS} so setup and upgrade agree on
+ * what counts as a prior install location.
+ */
+export function getKnownInstallDirs(homeDir: string): string[] {
+  return KNOWN_CURL_DIRS.map((dir) => join(homeDir, dir));
+}
+
+/**
  * How the CLI was installed. Determines the upgrade strategy.
  *
  * Defined here (alongside other installation constants like

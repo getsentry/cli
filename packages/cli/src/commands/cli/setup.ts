@@ -6,14 +6,8 @@
  * and the upgrade command for curl-based installs).
  */
 
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  renameSync,
-  unlinkSync,
-} from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
+import { chmod, copyFile, mkdir, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { captureException } from "@sentry/node-core/light";
 import type { SentryContext } from "../../context.js";
@@ -21,9 +15,11 @@ import { installAgentSkills } from "../../lib/agent-skills.js";
 import {
   determineInstallDir,
   getBinaryFilename,
+  getKnownInstallDirs,
   type InstallationMethod,
   installBinary,
   parseInstallationMethod,
+  samePath,
 } from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
 import {
@@ -97,16 +93,16 @@ function formatSetupResult(result: SetupResult): string {
  * cannot be renamed on Windows. Closing also invalidates the cached handle, so
  * the next `getDatabase()` reopens at the new path.
  */
-function migrateLegacyConfig(
+async function migrateLegacyConfig(
   homeDir: string,
   env: NodeJS.ProcessEnv,
   emit: Logger
-): void {
+): Promise<void> {
   const legacyDir = join(homeDir, ".sentry");
   // Target the XDG location directly — resolveConfigDir keeps returning the
   // legacy dir while it still holds cli.db, which would make migration a no-op.
   const targetConfigDir = resolveXdgConfigDir(env, homeDir);
-  if (targetConfigDir === legacyDir) {
+  if (samePath(targetConfigDir, legacyDir)) {
     return;
   }
 
@@ -119,48 +115,70 @@ function migrateLegacyConfig(
   }
 
   closeDatabase();
-  mkdirSync(targetConfigDir, { recursive: true, mode: 0o700 });
+  await mkdir(targetConfigDir, { recursive: true, mode: 0o700 });
   for (const name of configFiles) {
     const from = join(legacyDir, name);
     if (existsSync(from)) {
-      renameSync(from, join(targetConfigDir, name));
+      await rename(from, join(targetConfigDir, name));
     }
   }
   emit(`Config: Migrated ${legacyDir} → ${targetConfigDir}`);
 }
 
 /**
- * Migrate the binary out of the legacy `~/.sentry/bin` into the XDG-aware
- * install dir. Returns the new binary path when a move happened, so the caller
- * can point PATH setup and recorded install info at the new location instead of
- * the now-deleted legacy path.
+ * Find a previously-installed binary in a known install directory other than
+ * the resolved target, so it can be migrated. The curl installer may have
+ * placed the binary in any of {@link getKnownInstallDirs} (e.g. `~/.sentry/bin`
+ * on older installs), so migration is not limited to `~/.sentry`.
  */
-function migrateLegacyBinary(
+function findMigratableBinary(
+  homeDir: string,
+  targetDir: string,
+  filename: string
+): string | undefined {
+  for (const dir of getKnownInstallDirs(homeDir)) {
+    if (samePath(dir, targetDir)) {
+      continue;
+    }
+    const candidate = join(dir, filename);
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return;
+}
+
+/**
+ * Migrate an existing binary out of a known legacy install directory into the
+ * XDG-aware install dir. Returns the new binary path when a move happened, so
+ * the caller can point PATH setup and recorded install info at the new location
+ * instead of the now-deleted legacy path.
+ */
+async function migrateLegacyBinary(
   homeDir: string,
   env: NodeJS.ProcessEnv,
   emit: Logger
-): string | undefined {
-  const legacyDir = join(homeDir, ".sentry");
+): Promise<string | undefined> {
   const filename = getBinaryFilename();
-  const legacyBin = join(legacyDir, "bin", filename);
   const targetDir = determineInstallDir(homeDir, env);
   const targetBin = join(targetDir, filename);
-  if (
-    !existsSync(legacyBin) ||
-    existsSync(targetBin) ||
-    targetDir === join(legacyDir, "bin")
-  ) {
+  if (existsSync(targetBin)) {
     return;
   }
 
-  mkdirSync(targetDir, { recursive: true, mode: 0o755 });
-  copyFileSync(legacyBin, targetBin);
-  // copyFileSync already preserves the source mode, but assert the exec bit
+  const legacyBin = findMigratableBinary(homeDir, targetDir, filename);
+  if (!legacyBin) {
+    return;
+  }
+
+  await mkdir(targetDir, { recursive: true, mode: 0o755 });
+  await copyFile(legacyBin, targetBin);
+  // copyFile already preserves the source mode, but assert the exec bit
   // explicitly — mirrors installBinary — so the migrated binary is runnable
   // even if the legacy copy's permissions were somehow stripped.
-  chmodSync(targetBin, 0o755);
+  await chmod(targetBin, 0o755);
   try {
-    unlinkSync(legacyBin);
+    await unlink(legacyBin);
   } catch (error) {
     // Leave the old binary in place if it can't be removed — the new copy
     // is authoritative and setInstallInfo points upgrades at it.
@@ -649,23 +667,31 @@ export const setupCommand = buildCommand({
 
     // 0. Migrate any legacy ~/.sentry config/binary into XDG locations first,
     // so the steps below operate on the new paths. Config and binary migrations
-    // are independent — a failure in one must not skip the other.
-    try {
-      migrateLegacyConfig(homeDir, process.env, emit);
-    } catch (error) {
-      warn("Legacy config migration", error);
-    }
-    try {
-      const migratedBinary = migrateLegacyBinary(homeDir, process.env, emit);
-      // Adopt the new location so PATH setup and recorded install info point at
-      // the migrated binary rather than the deleted legacy path.
-      if (migratedBinary) {
-        binaryPath = migratedBinary;
-        binaryDir = dirname(migratedBinary);
-      }
-    } catch (error) {
-      warn("Legacy binary migration", error);
-    }
+    // are independent — a failure in one must not skip the other, and both are
+    // best-effort: warnings surface to the user and errors are reported to
+    // Sentry, but a failure never aborts setup.
+    await bestEffort(
+      "Legacy config migration",
+      () => migrateLegacyConfig(homeDir, process.env, emit),
+      warn
+    );
+    await bestEffort(
+      "Legacy binary migration",
+      async () => {
+        const migratedBinary = await migrateLegacyBinary(
+          homeDir,
+          process.env,
+          emit
+        );
+        // Adopt the new location so PATH setup and recorded install info point
+        // at the migrated binary rather than the deleted legacy path.
+        if (migratedBinary) {
+          binaryPath = migratedBinary;
+          binaryDir = dirname(migratedBinary);
+        }
+      },
+      warn
+    );
 
     // 1. Install binary from temp location (when --install is set)
     if (flags.install) {

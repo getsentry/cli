@@ -22,7 +22,9 @@ import type { SentryContext } from "../../context.js";
 import {
   determineInstallDir,
   isDowngrade,
+  LEGACY_INSTALL_SUBDIR,
   releaseLock,
+  samePath,
 } from "../../lib/binary.js";
 import { buildCommand } from "../../lib/command.js";
 import { CLI_VERSION } from "../../lib/constants.js";
@@ -566,20 +568,6 @@ function resolveUpdatedCliPath(
 }
 
 /**
- * Compare two directory paths for equality, case-insensitively on
- * case-insensitive filesystems (Windows, macOS). A stored install path can
- * differ in casing from a freshly computed one (e.g. `C:\Users\User` vs
- * `C:\Users\user`) yet point at the same directory, so a strict `===` would
- * wrongly treat them as different.
- */
-function samePath(a: string, b: string): boolean {
-  if (process.platform === "win32" || process.platform === "darwin") {
-    return a.toLowerCase() === b.toLowerCase();
-  }
-  return a === b;
-}
-
-/**
  * Decide which directory a curl upgrade should install into.
  *
  * Normally the binary stays where it currently lives — pinning the install
@@ -597,7 +585,7 @@ export function resolveUpgradeInstallDir(
   currentInstallDir: string,
   pathEnv: string | undefined
 ): string {
-  const legacyBinDir = join(homedir(), ".sentry", "bin");
+  const legacyBinDir = join(homedir(), LEGACY_INSTALL_SUBDIR);
   if (!samePath(currentInstallDir, legacyBinDir)) {
     return currentInstallDir;
   }
