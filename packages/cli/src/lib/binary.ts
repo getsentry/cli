@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { chmod, copyFile, mkdir, realpath, unlink } from "node:fs/promises";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { compare as semverCompare } from "semver";
 import { getUserAgent } from "./constants.js";
 import {
@@ -28,6 +28,37 @@ import { logger } from "./logger.js";
 import { isProcessRunning } from "./process-utils.js";
 /** Known directories where the curl installer may place the binary */
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
+
+/**
+ * Legacy install directory (relative to home) that predates the XDG layout.
+ * The curl installer used to drop the binary here; migration moves it out.
+ */
+export const LEGACY_INSTALL_SUBDIR = join(".sentry", "bin");
+
+/**
+ * Compare two filesystem paths for equality, case-insensitively on
+ * case-insensitive filesystems (Windows, macOS). A stored path can differ in
+ * casing from a freshly computed one (e.g. `C:\Users\User` vs `C:\Users\user`)
+ * yet point at the same location, so a strict `===` would wrongly differ.
+ */
+export function samePath(a: string, b: string): boolean {
+  if (process.platform === "win32" || process.platform === "darwin") {
+    return a.toLowerCase() === b.toLowerCase();
+  }
+  return a === b;
+}
+
+/**
+ * Directories a *legacy* install may have placed the binary in and that
+ * migration is allowed to move it out of. This is deliberately limited to the
+ * pre-XDG `~/.sentry/bin` — `~/.local/bin` and `~/bin` (also in
+ * {@link KNOWN_CURL_DIRS}) are valid *current* XDG install targets, so treating
+ * them as migration sources would relocate a working binary out of an active
+ * directory. Kept as a list so genuinely-legacy locations can be added later.
+ */
+export function getLegacyInstallDirs(homeDir: string): string[] {
+  return [join(homeDir, LEGACY_INSTALL_SUBDIR)];
+}
 
 /**
  * How the CLI was installed. Determines the upgrade strategy.
@@ -226,10 +257,11 @@ export function getBinaryPaths(installPath: string): {
  * Determine the install directory for a curl-installed binary.
  *
  * Priority:
- * 1. $SENTRY_INSTALL_DIR environment variable (if set and writable)
- * 2. ~/.local/bin (if exists AND in $PATH)
- * 3. ~/bin (if exists AND in $PATH)
- * 4. ~/.sentry/bin (fallback; setup will handle PATH modification)
+ * 1. $SENTRY_INSTALL_DIR environment variable
+ * 2. $XDG_BIN_HOME (if set to an absolute path, per the XDG spec)
+ * 3. ~/.local/bin (if exists AND in $PATH)
+ * 4. ~/bin (if exists AND in $PATH)
+ * 5. ~/.local/bin (XDG-aligned fallback; setup handles PATH modification)
  *
  * @param homeDir - User's home directory
  * @param env - Process environment variables
@@ -246,7 +278,13 @@ export function determineInstallDir(
     return env.SENTRY_INSTALL_DIR;
   }
 
-  // 2-3. Check well-known directories that are already in PATH
+  // 2. XDG_BIN_HOME override — honored only when absolute, per the XDG spec
+  const xdgBinHome = env.XDG_BIN_HOME;
+  if (xdgBinHome && isAbsolute(xdgBinHome)) {
+    return xdgBinHome;
+  }
+
+  // 3-4. Check well-known directories that are already in PATH
   const candidates = [join(homeDir, ".local", "bin"), join(homeDir, "bin")];
 
   for (const dir of candidates) {
@@ -255,8 +293,8 @@ export function determineInstallDir(
     }
   }
 
-  // 4. Fallback — setup will handle adding this to PATH
-  return join(homeDir, ".sentry", "bin");
+  // 5. XDG-aligned fallback — setup will handle adding this to PATH
+  return join(homeDir, ".local", "bin");
 }
 
 /**
