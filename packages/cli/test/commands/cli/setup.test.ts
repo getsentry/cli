@@ -1118,6 +1118,48 @@ describe("sentry cli setup — legacy migration", () => {
       "current-binary"
     );
   });
+
+  test("does not migrate a binary out of ~/.local/bin (a valid target)", async () => {
+    // ~/.local/bin is a current XDG install target, not a legacy source: a
+    // binary there must never be relocated, even if it isn't the resolved dir.
+    const installDir = join(testHome, "install", "bin");
+    const localBin = join(testHome, ".local", "bin");
+    mkdirSync(localBin, { recursive: true });
+    writeFileSync(join(localBin, "sentry"), "local-binary");
+
+    const { context, restore } = createMockContext({
+      homeDir: testHome,
+      env: { SENTRY_INSTALL_DIR: installDir },
+    });
+    restoreStderr = restore;
+
+    await run(app, setupArgs, context);
+
+    // The ~/.local/bin binary stays put; nothing is copied to the target.
+    expect(existsSync(join(localBin, "sentry"))).toBe(true);
+    expect(await readFile(join(localBin, "sentry"), "utf8")).toBe(
+      "local-binary"
+    );
+    expect(existsSync(join(installDir, "sentry"))).toBe(false);
+  });
+
+  test("does not migrate a binary out of ~/bin (a valid target)", async () => {
+    const installDir = join(testHome, "install", "bin");
+    const homeBin = join(testHome, "bin");
+    mkdirSync(homeBin, { recursive: true });
+    writeFileSync(join(homeBin, "sentry"), "home-bin-binary");
+
+    const { context, restore } = createMockContext({
+      homeDir: testHome,
+      env: { SENTRY_INSTALL_DIR: installDir },
+    });
+    restoreStderr = restore;
+
+    await run(app, setupArgs, context);
+
+    expect(existsSync(join(homeBin, "sentry"))).toBe(true);
+    expect(existsSync(join(installDir, "sentry"))).toBe(false);
+  });
 });
 
 describe("sentry cli setup — legacy migration records new path", () => {

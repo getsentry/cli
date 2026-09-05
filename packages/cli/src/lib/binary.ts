@@ -49,13 +49,15 @@ export function samePath(a: string, b: string): boolean {
 }
 
 /**
- * Candidate directories a previously-installed binary may live in, in priority
- * order. Used by migration to find a binary to move into the resolved install
- * directory. Derived from {@link KNOWN_CURL_DIRS} so setup and upgrade agree on
- * what counts as a prior install location.
+ * Directories a *legacy* install may have placed the binary in and that
+ * migration is allowed to move it out of. This is deliberately limited to the
+ * pre-XDG `~/.sentry/bin` — `~/.local/bin` and `~/bin` (also in
+ * {@link KNOWN_CURL_DIRS}) are valid *current* XDG install targets, so treating
+ * them as migration sources would relocate a working binary out of an active
+ * directory. Kept as a list so genuinely-legacy locations can be added later.
  */
-export function getKnownInstallDirs(homeDir: string): string[] {
-  return KNOWN_CURL_DIRS.map((dir) => join(homeDir, dir));
+export function getLegacyInstallDirs(homeDir: string): string[] {
+  return [join(homeDir, LEGACY_INSTALL_SUBDIR)];
 }
 
 /**

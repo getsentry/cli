@@ -15,7 +15,7 @@ import { installAgentSkills } from "../../lib/agent-skills.js";
 import {
   determineInstallDir,
   getBinaryFilename,
-  getKnownInstallDirs,
+  getLegacyInstallDirs,
   type InstallationMethod,
   installBinary,
   parseInstallationMethod,
@@ -126,17 +126,18 @@ async function migrateLegacyConfig(
 }
 
 /**
- * Find a previously-installed binary in a known install directory other than
- * the resolved target, so it can be migrated. The curl installer may have
- * placed the binary in any of {@link getKnownInstallDirs} (e.g. `~/.sentry/bin`
- * on older installs), so migration is not limited to `~/.sentry`.
+ * Find a binary in a *legacy* install directory (see {@link getLegacyInstallDirs})
+ * that should be migrated into the resolved install target. Only genuinely
+ * pre-XDG locations are considered — `~/.local/bin` and `~/bin` are valid
+ * current targets and must never be treated as migration sources, or a working
+ * binary could be relocated out of an active directory.
  */
 function findMigratableBinary(
   homeDir: string,
   targetDir: string,
   filename: string
 ): string | undefined {
-  for (const dir of getKnownInstallDirs(homeDir)) {
+  for (const dir of getLegacyInstallDirs(homeDir)) {
     if (samePath(dir, targetDir)) {
       continue;
     }

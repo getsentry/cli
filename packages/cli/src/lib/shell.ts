@@ -172,6 +172,12 @@ export function isInPath(
     return false;
   }
   const paths = pathEnv.split(delimiter);
+  // Case-insensitive on case-insensitive filesystems (Windows, macOS): PATH
+  // entries can differ in casing from a computed directory yet be the same dir.
+  if (process.platform === "win32" || process.platform === "darwin") {
+    const target = directory.toLowerCase();
+    return paths.some((p) => p.toLowerCase() === target);
+  }
   return paths.includes(directory);
 }
 

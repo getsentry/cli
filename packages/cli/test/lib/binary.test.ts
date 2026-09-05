@@ -25,7 +25,7 @@ import {
   getBinaryDownloadUrl,
   getBinaryFilename,
   getBinaryPaths,
-  getKnownInstallDirs,
+  getLegacyInstallDirs,
   getPlatformBinaryName,
   installBinary,
   isDowngrade,
@@ -103,14 +103,13 @@ describe("samePath", () => {
   });
 });
 
-describe("getKnownInstallDirs", () => {
-  test("returns the known curl dirs resolved against home", () => {
-    const dirs = getKnownInstallDirs("/home/user");
-    expect(dirs).toEqual([
-      join("/home/user", ".local", "bin"),
-      join("/home/user", "bin"),
-      join("/home/user", ".sentry", "bin"),
-    ]);
+describe("getLegacyInstallDirs", () => {
+  test("returns only the pre-XDG ~/.sentry/bin, not current XDG targets", () => {
+    const dirs = getLegacyInstallDirs("/home/user");
+    expect(dirs).toEqual([join("/home/user", ".sentry", "bin")]);
+    // ~/.local/bin and ~/bin are valid current targets, never migration sources
+    expect(dirs).not.toContain(join("/home/user", ".local", "bin"));
+    expect(dirs).not.toContain(join("/home/user", "bin"));
   });
 });
 
