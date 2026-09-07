@@ -29,11 +29,27 @@ import { isProcessRunning } from "./process-utils.js";
 /** Known directories where the curl installer may place the binary */
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
 
+/** Platforms whose filesystems are case-insensitive by default. */
+const CASE_INSENSITIVE_PLATFORMS = new Set<NodeJS.Platform>([
+  "win32",
+  "darwin",
+]);
+
 /**
  * Legacy install directory (relative to home) that predates the XDG layout.
  * The curl installer used to drop the binary here; migration moves it out.
  */
 export const LEGACY_INSTALL_SUBDIR = join(".sentry", "bin");
+
+/**
+ * Legacy install sub-directories (relative to home) that predate the XDG
+ * layout and that migration is allowed to move a binary out of. Deliberately
+ * limited to the pre-XDG `~/.sentry/bin`: `~/.local/bin` and `~/bin` (also in
+ * {@link KNOWN_CURL_DIRS}) are valid *current* XDG install targets, so treating
+ * them as migration sources would relocate a working binary out of an active
+ * directory. An array so more legacy locations can be added if they ever exist.
+ */
+export const LEGACY_INSTALL_SUBDIRS = [LEGACY_INSTALL_SUBDIR];
 
 /**
  * Compare two filesystem paths for equality, case-insensitively on
@@ -42,22 +58,19 @@ export const LEGACY_INSTALL_SUBDIR = join(".sentry", "bin");
  * yet point at the same location, so a strict `===` would wrongly differ.
  */
 export function samePath(a: string, b: string): boolean {
-  if (process.platform === "win32" || process.platform === "darwin") {
-    return a.toLowerCase() === b.toLowerCase();
-  }
-  return a === b;
+  return (
+    a === b ||
+    (CASE_INSENSITIVE_PLATFORMS.has(process.platform) &&
+      a.toLowerCase() === b.toLowerCase())
+  );
 }
 
 /**
- * Directories a *legacy* install may have placed the binary in and that
- * migration is allowed to move it out of. This is deliberately limited to the
- * pre-XDG `~/.sentry/bin` — `~/.local/bin` and `~/bin` (also in
- * {@link KNOWN_CURL_DIRS}) are valid *current* XDG install targets, so treating
- * them as migration sources would relocate a working binary out of an active
- * directory. Kept as a list so genuinely-legacy locations can be added later.
+ * Absolute legacy install directories for the given home. See
+ * {@link LEGACY_INSTALL_SUBDIRS} for why this is scoped to pre-XDG locations.
  */
 export function getLegacyInstallDirs(homeDir: string): string[] {
-  return [join(homeDir, LEGACY_INSTALL_SUBDIR)];
+  return LEGACY_INSTALL_SUBDIRS.map((dir) => join(homeDir, dir));
 }
 
 /**
