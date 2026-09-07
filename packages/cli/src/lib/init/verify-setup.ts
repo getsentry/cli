@@ -324,10 +324,7 @@ async function cleanupProcessTree(child: ChildProcess): Promise<void> {
   }
 }
 
-type VerificationSkipReason =
-  | "no_dev_command"
-  | "server_bind"
-  | "spawn_failed";
+type VerificationSkipReason = "no_dev_command" | "server_bind" | "spawn_failed";
 
 /**
  * Expected verification skips are not failures. Emitting them with
