@@ -782,6 +782,27 @@ describe("formatItemJson", () => {
     expect(JSON.parse(lines[0]).schema_version).toBe(1);
   });
 
+  test("preserves event and envelope identities for agent correlation", () => {
+    const lines = formatItemJson(
+      "error",
+      {
+        event_id: "event-123",
+        timestamp: 1_700_000_000,
+        message: "boom",
+      },
+      {
+        ...serverHeader,
+        // Spotlight stores its internal envelope identity as a UUID object.
+        __spotlight_envelope_id: { toString: () => "envelope-123" },
+      }
+    );
+
+    expect(JSON.parse(lines[0])).toMatchObject({
+      event_id: "event-123",
+      envelope_id: "envelope-123",
+    });
+  });
+
   test("formats error without stack frame", () => {
     const event = {
       timestamp: 1_700_000_000,

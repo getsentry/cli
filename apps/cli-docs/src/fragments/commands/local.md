@@ -123,7 +123,9 @@ This is useful for AI coding agents and automation tools that need to consume Se
 
 In JSON mode, event records are versioned NDJSON on standard output. Startup,
 connection, and shutdown messages stay on standard error, so an agent can pipe
-the evidence stream without parsing terminal status text.
+the evidence stream without parsing terminal status text. Records include
+`schema_version`, `trace_id`, and, when supplied by the SDK, `event_id` and
+`envelope_id` for exact correlation.
 
 ## Agent-debugging fixture
 

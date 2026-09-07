@@ -723,10 +723,33 @@ function jsonSafe(value: unknown): string | undefined {
   return typeof value === "string" ? stripBidi(value) : undefined;
 }
 
+/** Normalize an SDK identity that may be represented by a UUID object. */
+function jsonSafeIdentifier(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return stripBidi(value);
+  }
+  if (value === null || typeof value !== "object") {
+    return undefined;
+  }
+
+  try {
+    const identifier = value.toString();
+    return identifier === "[object Object]" ? undefined : stripBidi(identifier);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Serialize one versioned local observation as an NDJSON record. */
-function formatJsonObservation(observation: Record<string, unknown>): string {
+function formatJsonObservation(
+  observation: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  header: Record<string, unknown>
+): string {
   return JSON.stringify({
     schema_version: LOCAL_EVENT_SCHEMA_VERSION,
+    envelope_id: jsonSafeIdentifier(header.__spotlight_envelope_id),
+    event_id: jsonSafe(payload.event_id) ?? jsonSafe(header.event_id),
     ...observation,
   });
 }
@@ -749,19 +772,23 @@ function formatErrorJson(
   const frame =
     first?.stacktrace?.frames?.find((f) => f.in_app) ??
     first?.stacktrace?.frames?.at(-1);
-  return formatJsonObservation({
-    type: "error",
-    timestamp: payload.timestamp,
-    trace_id: extractTraceId(payload),
-    error_type: jsonSafe(first?.type) ?? "Error",
-    message:
-      jsonSafe(first?.value) ?? jsonSafe(payload.message) ?? "Unknown error",
-    filename: jsonSafe(frame?.filename),
-    lineno: frame?.lineno,
-    colno: frame?.colno,
-    function: jsonSafe(frame?.function),
-    source: inferSourceName(header),
-  });
+  return formatJsonObservation(
+    {
+      type: "error",
+      timestamp: payload.timestamp,
+      trace_id: extractTraceId(payload),
+      error_type: jsonSafe(first?.type) ?? "Error",
+      message:
+        jsonSafe(first?.value) ?? jsonSafe(payload.message) ?? "Unknown error",
+      filename: jsonSafe(frame?.filename),
+      lineno: frame?.lineno,
+      colno: frame?.colno,
+      function: jsonSafe(frame?.function),
+      source: inferSourceName(header),
+    },
+    payload,
+    header
+  );
 }
 
 /**
@@ -812,22 +839,26 @@ function formatTransactionJson(
     start !== undefined && end !== undefined
       ? Math.round((end - start) * 1000)
       : undefined;
-  return formatJsonObservation({
-    type: "transaction",
-    timestamp: payload.timestamp,
-    trace_id: extractTraceId(payload),
-    op: inferSemanticOp(attrs) ?? trace?.op,
-    label: stripBidi(semantic.label),
-    metadata:
-      semantic.metadata.length > 0
-        ? semantic.metadata.map(stripBidi)
-        : undefined,
-    duration_ms: durationMs,
-    status: trace?.status,
-    span_count: (payload.spans as unknown[] | undefined)?.length,
-    attributes: includeAttributes ? buildJsonAttributes(payload) : undefined,
-    source: inferSourceName(header),
-  });
+  return formatJsonObservation(
+    {
+      type: "transaction",
+      timestamp: payload.timestamp,
+      trace_id: extractTraceId(payload),
+      op: inferSemanticOp(attrs) ?? trace?.op,
+      label: stripBidi(semantic.label),
+      metadata:
+        semantic.metadata.length > 0
+          ? semantic.metadata.map(stripBidi)
+          : undefined,
+      duration_ms: durationMs,
+      status: trace?.status,
+      span_count: (payload.spans as unknown[] | undefined)?.length,
+      attributes: includeAttributes ? buildJsonAttributes(payload) : undefined,
+      source: inferSourceName(header),
+    },
+    payload,
+    header
+  );
 }
 
 /** Format a log item as JSON objects (one per entry). */
@@ -841,29 +872,33 @@ function formatLogJson(
   }
   const source = inferSourceName(header);
   return items.map((entry) =>
-    formatJsonObservation({
-      type: "log",
-      timestamp: entry.timestamp,
-      trace_id: extractLogTraceId(entry),
-      level: entry.level ?? "log",
-      message: stripBidi(entry.body ?? ""),
-      attributes: entry.attributes
-        ? Object.fromEntries(
-            Object.entries(entry.attributes)
-              .filter(
-                ([k, v]) =>
-                  isUserLogAttribute(k) &&
-                  v?.value !== null &&
-                  v?.value !== undefined
-              )
-              .map(([k, v]) => [
-                stripBidi(k),
-                typeof v.value === "string" ? stripBidi(v.value) : v.value,
-              ])
-          )
-        : undefined,
-      source,
-    })
+    formatJsonObservation(
+      {
+        type: "log",
+        timestamp: entry.timestamp,
+        trace_id: extractLogTraceId(entry),
+        level: entry.level ?? "log",
+        message: stripBidi(entry.body ?? ""),
+        attributes: entry.attributes
+          ? Object.fromEntries(
+              Object.entries(entry.attributes)
+                .filter(
+                  ([k, v]) =>
+                    isUserLogAttribute(k) &&
+                    v?.value !== null &&
+                    v?.value !== undefined
+                )
+                .map(([k, v]) => [
+                  stripBidi(k),
+                  typeof v.value === "string" ? stripBidi(v.value) : v.value,
+                ])
+            )
+          : undefined,
+        source,
+      },
+      payload,
+      header
+    )
   );
 }
 
@@ -888,24 +923,28 @@ function formatSpanJson(
       span.start_timestamp !== undefined && span.end_timestamp !== undefined
         ? Math.round((span.end_timestamp - span.start_timestamp) * 1000)
         : undefined;
-    return formatJsonObservation({
-      type: "span",
-      timestamp: span.end_timestamp,
-      trace_id: span.trace_id,
-      span_id: span.span_id,
-      op: inferSemanticOp(flat) ?? flat["sentry.op"],
-      label: stripBidi(semantic.label),
-      metadata:
-        semantic.metadata.length > 0
-          ? semantic.metadata.map(stripBidi)
+    return formatJsonObservation(
+      {
+        type: "span",
+        timestamp: span.end_timestamp,
+        trace_id: span.trace_id,
+        span_id: span.span_id,
+        op: inferSemanticOp(flat) ?? flat["sentry.op"],
+        label: stripBidi(semantic.label),
+        metadata:
+          semantic.metadata.length > 0
+            ? semantic.metadata.map(stripBidi)
+            : undefined,
+        duration_ms: durationMs,
+        status: span.status,
+        attributes: includeAttributes
+          ? buildJsonAttributes({ contexts: { trace: { data: flat } } })
           : undefined,
-      duration_ms: durationMs,
-      status: span.status,
-      attributes: includeAttributes
-        ? buildJsonAttributes({ contexts: { trace: { data: flat } } })
-        : undefined,
-      source,
-    });
+        source,
+      },
+      payload,
+      header
+    );
   });
 }
 
@@ -942,10 +981,14 @@ export function formatItemJson(
     return formatLogJson(payload, header);
   }
   return [
-    formatJsonObservation({
-      type: itemType ?? "unknown",
-      timestamp: payload.timestamp,
-    }),
+    formatJsonObservation(
+      {
+        type: itemType ?? "unknown",
+        timestamp: payload.timestamp,
+      },
+      payload,
+      header
+    ),
   ];
 }
 
