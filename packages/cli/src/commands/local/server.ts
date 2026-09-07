@@ -66,7 +66,7 @@ const MAX_BODY_BYTES = 10 * 1024 * 1024;
  * Parse and validate a `--format` value.
  * Accepts: human, json.
  */
-function parseFormat(value: string): FormatValue {
+export function parseFormat(value: string): FormatValue {
   const lower = value.toLowerCase();
   if (!FORMAT_VALUES.includes(lower as FormatValue)) {
     throw new ValidationError(
@@ -81,7 +81,7 @@ function parseFormat(value: string): FormatValue {
  * Parse and validate a `--filter` value.
  * Accepts the canonical names: error, transaction, logger.
  */
-function parseFilter(value: string): FilterValue {
+export function parseFilter(value: string): FilterValue {
   const lower = value.toLowerCase();
   if (!FILTER_VALUES.includes(lower as FilterValue)) {
     throw new ValidationError(

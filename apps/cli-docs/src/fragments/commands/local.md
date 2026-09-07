@@ -113,6 +113,16 @@ Use `--format json` (or `-F json`) for machine-readable NDJSON output, one JSON 
 sentry local --format json
 ```
 
+`local run` supports the same JSON, attribute, and filter options while it
+starts your app and injects the receiver URL. For an agent-friendly stream
+without SDK housekeeping envelopes, use:
+
+```bash
+sentry local run --format json \
+  --filter error --filter transaction --filter log --filter ai \
+  -- npm run dev
+```
+
 ```json
 {"type":"transaction","timestamp":1700000001,"op":"gen_ai","label":"chat anthropic/claude-4-sonnet","duration_ms":1200,"span_count":5,"source":"server"}
 {"type":"error","timestamp":1700000002,"error_type":"RateLimitError","message":"API quota exceeded","source":"server"}
@@ -125,7 +135,9 @@ In JSON mode, event records are versioned NDJSON on standard output. Startup,
 connection, and shutdown messages stay on standard error, so an agent can pipe
 the evidence stream without parsing terminal status text. Records include
 `schema_version`, `trace_id`, and, when supplied by the SDK, `event_id` and
-`envelope_id` for exact correlation.
+`envelope_id` for exact correlation. In `local run --format json`, the wrapped
+app's standard output is also forwarded to standard error, leaving standard
+output exclusively for NDJSON observations.
 
 ## Agent-debugging fixture
 

@@ -106,7 +106,6 @@ function startServer(): void {
   init({
     dsn: process.env.SENTRY_DSN,
     enableLogs: true,
-    spotlight: process.env.SENTRY_SPOTLIGHT,
     tracesSampleRate: 1,
   });
 

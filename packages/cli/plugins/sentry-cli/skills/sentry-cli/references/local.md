@@ -30,8 +30,11 @@ Run a command with the local dev server enabled
 **Flags:**
 - `-p, --port <value> - Port for the local server (default 8969) - (default: "8969")`
 - `--host <value> - Hostname for the local server (default localhost) - (default: "localhost")`
+- `-f, --filter <value>... - Only show items of this type (repeatable: error, transaction, log, ai)`
 - `-V, --verify - Verify SDK sends events, then exit`
 - `-t, --timeout <value> - Kill the child after N seconds (0 = no timeout; defaults to 30 s in --verify mode) - (default: "0")`
+- `-F, --format <value> - Output format: human (default) or json (NDJSON on stdout) - (default: "human")`
+- `-a, --attributes - Include selected event attributes in output`
 
 **Examples:**
 
@@ -58,6 +61,10 @@ sentry local -f ai          # only AI/agent spans
 sentry local -f ai -f error # agent spans and errors
 
 sentry local --format json
+
+sentry local run --format json \
+  --filter error --filter transaction --filter log --filter ai \
+  -- npm run dev
 
 sentry local serve --format json --attributes
 
