@@ -90,26 +90,34 @@ export const VERSION_PREFIX_REGEX = /^v/;
 // Curl Binary Helpers
 
 /**
- * Known directories where the curl installer may place the binary.
- * Resolved at runtime against the user's home directory.
- * Used for legacy detection (when no install info is stored).
- * Trailing separator ensures startsWith matches a directory boundary
- * (e.g. ~/.local/bin/ won't match ~/.local/binaries/).
- *
- * Computed lazily (not at module load) to avoid TDZ issues from circular
- * imports — `KNOWN_CURL_DIRS` must be fully initialized before access.
+ * Build the list of known curl install directories the binary may live in,
+ * each with a trailing separator so `startsWith` matches a directory boundary
+ * (e.g. `~/.local/bin/` won't match `~/.local/binaries/`). Pure — takes home
+ * and env — so it can be unit-tested; `getKnownCurlPaths` memoizes the result.
+ */
+export function buildKnownCurlPaths(
+  homeDir: string,
+  env: NodeJS.ProcessEnv
+): string[] {
+  const paths = KNOWN_CURL_DIRS.map((dir) => join(homeDir, dir) + sep);
+  // Honor an absolute XDG_BIN_HOME, matching determineInstallDir's precedence.
+  const xdgBinHome = env.XDG_BIN_HOME;
+  if (xdgBinHome && isAbsolute(xdgBinHome)) {
+    // join(dir, ".") strips any trailing separator so we don't emit a double
+    // separator (e.g. `/custom/bin//`) that would break the startsWith checks.
+    paths.push(join(xdgBinHome, ".") + sep);
+  }
+  return paths;
+}
+
+/**
+ * Memoized known curl paths. Computed lazily (not at module load) to avoid TDZ
+ * issues from circular imports — `KNOWN_CURL_DIRS` must be fully initialized
+ * before access.
  */
 let _knownCurlPaths: string[] | undefined;
 function getKnownCurlPaths(): string[] {
-  if (_knownCurlPaths === undefined) {
-    const paths = KNOWN_CURL_DIRS.map((dir) => join(homedir(), dir) + sep);
-    // Honor an absolute XDG_BIN_HOME, matching determineInstallDir's precedence
-    const xdgBinHome = process.env.XDG_BIN_HOME;
-    if (xdgBinHome && isAbsolute(xdgBinHome)) {
-      paths.push(xdgBinHome + sep);
-    }
-    _knownCurlPaths = paths;
-  }
+  _knownCurlPaths ??= buildKnownCurlPaths(homedir(), process.env);
   return _knownCurlPaths;
 }
 
