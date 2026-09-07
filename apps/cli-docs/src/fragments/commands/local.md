@@ -120,3 +120,35 @@ sentry local --format json
 ```
 
 This is useful for AI coding agents and automation tools that need to consume Sentry events programmatically.
+
+## Agent-debugging fixture
+
+The repository includes a small Hono server that produces a normal database
+request, an agent/MCP trace, and an intentional failure. It sends only to the
+local server unless you explicitly set `SENTRY_DSN`.
+
+In one terminal, start the local receiver:
+
+```bash
+sentry local serve --format json --attributes
+```
+
+In another, run the fixture with Spotlight pointed at that receiver:
+
+```bash
+SENTRY_SPOTLIGHT=http://localhost:8969/stream \
+  pnpm --filter sentry exec tsx test/fixtures/local-agent-server.ts
+```
+
+Then exercise each telemetry shape:
+
+```bash
+curl http://127.0.0.1:3030/api/users/42
+curl -X POST http://127.0.0.1:3030/api/agent/run \
+  -H 'content-type: application/json' \
+  -d '{"prompt":"Where is the rate limit configured?"}'
+curl -i http://127.0.0.1:3030/api/broken
+```
+
+The final request intentionally returns HTTP 500. The fixture is for local
+experimentation only; do not run it with production credentials.

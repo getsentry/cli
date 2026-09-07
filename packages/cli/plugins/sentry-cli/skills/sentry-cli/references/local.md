@@ -58,6 +58,17 @@ sentry local -f ai          # only AI/agent spans
 sentry local -f ai -f error # agent spans and errors
 
 sentry local --format json
+
+sentry local serve --format json --attributes
+
+SENTRY_SPOTLIGHT=http://localhost:8969/stream \
+  pnpm --filter sentry exec tsx test/fixtures/local-agent-server.ts
+
+curl http://127.0.0.1:3030/api/users/42
+curl -X POST http://127.0.0.1:3030/api/agent/run \
+  -H 'content-type: application/json' \
+  -d '{"prompt":"Where is the rate limit configured?"}'
+curl -i http://127.0.0.1:3030/api/broken
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
