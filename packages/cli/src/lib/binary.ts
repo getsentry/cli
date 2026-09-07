@@ -297,11 +297,13 @@ export function determineInstallDir(
     return xdgBinHome;
   }
 
-  // 3-4. Check well-known directories that are already in PATH
+  // 3-4. Check well-known directories that are already in PATH. samePath keeps
+  // the membership check case-insensitive on Windows/macOS, where a PATH entry
+  // can differ in casing from the computed directory yet be the same dir.
   const candidates = [join(homeDir, ".local", "bin"), join(homeDir, "bin")];
 
   for (const dir of candidates) {
-    if (existsSync(dir) && pathDirs.includes(dir)) {
+    if (existsSync(dir) && pathDirs.some((p) => samePath(p, dir))) {
       return dir;
     }
   }

@@ -151,6 +151,24 @@ describe("determineInstallDir", () => {
     expect(result).toBe(localBin);
   });
 
+  test("matches a PATH entry case-insensitively on Windows/macOS", () => {
+    // Use ~/bin so the result is distinguishable from the ~/.local/bin fallback.
+    const homeBin = join(testDir, "bin");
+    mkdirSync(homeBin, { recursive: true });
+
+    const result = determineInstallDir(testDir, {
+      PATH: `/usr/bin:${homeBin.toUpperCase()}`,
+    });
+
+    if (process.platform === "win32" || process.platform === "darwin") {
+      // Case-insensitive FS: the upper-cased PATH entry still matches ~/bin.
+      expect(result).toBe(homeBin);
+    } else {
+      // Case-sensitive FS: no match, so it falls back to the XDG default.
+      expect(result).toBe(join(testDir, ".local", "bin"));
+    }
+  });
+
   test("uses ~/bin when it exists and is in PATH but ~/.local/bin is not", () => {
     const homeBin = join(testDir, "bin");
     mkdirSync(homeBin, { recursive: true });
