@@ -68,16 +68,14 @@ function stripTrailingSep(p: string): string {
  * one (e.g. `C:\Users\User` vs `C:\Users\user`) yet point at the same location,
  * so a strict `===` would wrongly differ.
  *
- * The case-folding step is chosen once at module load from
+ * The implementation is chosen once at module load from
  * {@link IS_CASE_INSENSITIVE_FS} so there is no per-call platform check.
  */
-const foldCase: (p: string) => string = IS_CASE_INSENSITIVE_FS
-  ? (p) => p.toLowerCase()
-  : (p) => p;
-
-export function samePath(a: string, b: string): boolean {
-  return foldCase(stripTrailingSep(a)) === foldCase(stripTrailingSep(b));
-}
+export const samePath: (a: string, b: string) => boolean =
+  IS_CASE_INSENSITIVE_FS
+    ? (a, b) =>
+        stripTrailingSep(a).toLowerCase() === stripTrailingSep(b).toLowerCase()
+    : (a, b) => stripTrailingSep(a) === stripTrailingSep(b);
 
 /**
  * Absolute legacy install directories for the given home. See

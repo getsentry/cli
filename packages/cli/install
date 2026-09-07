@@ -338,9 +338,13 @@ trap - EXIT
 if [[ "${SENTRY_INIT:-}" == "1" ]]; then
   sentry_bin=""
   # Only honor XDG_BIN_HOME when absolute, per the XDG spec (matches the Node
-  # determineInstallDir logic); a relative value is ignored.
+  # determineInstallDir logic); a relative value is ignored. Accept both POSIX
+  # (/…) and Windows drive-letter (C:\… or C:/…) absolute paths so a Windows
+  # XDG_BIN_HOME isn't dropped while Node still installs there.
   xdg_bin_home="${XDG_BIN_HOME:-}"
-  [[ "$xdg_bin_home" != /* ]] && xdg_bin_home=""
+  if [[ "$xdg_bin_home" != /* && ! "$xdg_bin_home" =~ ^[A-Za-z]:[\\/] ]]; then
+    xdg_bin_home=""
+  fi
   for dir in "${SENTRY_INSTALL_DIR:-}" "$xdg_bin_home" "$HOME/.local/bin" "$HOME/bin" "$HOME/.sentry/bin"; do
     [[ -z "$dir" ]] && continue
     if [[ -x "${dir}/sentry" ]]; then
