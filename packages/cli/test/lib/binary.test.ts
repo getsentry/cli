@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   acquireLock,
@@ -100,6 +100,19 @@ describe("samePath", () => {
     } else {
       expect(result).toBe(false);
     }
+  });
+
+  test("tolerates a trailing separator on either side", () => {
+    const dir = join("/home/user", ".local", "bin");
+    expect(samePath(dir + sep, dir)).toBe(true);
+    expect(samePath(dir, dir + sep)).toBe(true);
+    expect(samePath(dir + sep, dir + sep)).toBe(true);
+  });
+
+  test("does not treat root as equal to empty after stripping", () => {
+    // A bare root separator must not be stripped to "".
+    expect(samePath(sep, sep)).toBe(true);
+    expect(samePath(sep, "")).toBe(false);
   });
 });
 

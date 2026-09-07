@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { chmod, copyFile, mkdir, realpath, unlink } from "node:fs/promises";
-import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { compare as semverCompare } from "semver";
 import { getUserAgent } from "./constants.js";
 import {
@@ -29,11 +29,13 @@ import { isProcessRunning } from "./process-utils.js";
 /** Known directories where the curl installer may place the binary */
 export const KNOWN_CURL_DIRS = [".local/bin", "bin", ".sentry/bin"];
 
-/** Platforms whose filesystems are case-insensitive by default. */
-const CASE_INSENSITIVE_PLATFORMS = new Set<NodeJS.Platform>([
-  "win32",
-  "darwin",
-]);
+/**
+ * Whether the current platform's filesystem is case-insensitive by default
+ * (Windows, macOS). Resolved once at module load — `process.platform` never
+ * changes at runtime.
+ */
+const IS_CASE_INSENSITIVE_FS =
+  process.platform === "win32" || process.platform === "darwin";
 
 /**
  * Legacy install directory (relative to home) that predates the XDG layout.
@@ -52,17 +54,29 @@ export const LEGACY_INSTALL_SUBDIR = join(".sentry", "bin");
 export const LEGACY_INSTALL_SUBDIRS = [LEGACY_INSTALL_SUBDIR];
 
 /**
- * Compare two filesystem paths for equality, case-insensitively on
- * case-insensitive filesystems (Windows, macOS). A stored path can differ in
- * casing from a freshly computed one (e.g. `C:\Users\User` vs `C:\Users\user`)
- * yet point at the same location, so a strict `===` would wrongly differ.
+ * Strip a trailing path separator (but never from a bare root like `/`) so a
+ * PATH entry such as `~/.local/bin/` compares equal to `~/.local/bin`.
  */
+function stripTrailingSep(p: string): string {
+  return p.length > 1 && p.endsWith(sep) ? p.slice(0, -1) : p;
+}
+
+/**
+ * Compare two filesystem paths for equality. Tolerates a trailing separator on
+ * either side, and is case-insensitive on case-insensitive filesystems
+ * (Windows, macOS) — a stored path can differ in casing from a freshly computed
+ * one (e.g. `C:\Users\User` vs `C:\Users\user`) yet point at the same location,
+ * so a strict `===` would wrongly differ.
+ *
+ * The case-folding step is chosen once at module load from
+ * {@link IS_CASE_INSENSITIVE_FS} so there is no per-call platform check.
+ */
+const foldCase: (p: string) => string = IS_CASE_INSENSITIVE_FS
+  ? (p) => p.toLowerCase()
+  : (p) => p;
+
 export function samePath(a: string, b: string): boolean {
-  return (
-    a === b ||
-    (CASE_INSENSITIVE_PLATFORMS.has(process.platform) &&
-      a.toLowerCase() === b.toLowerCase())
-  );
+  return foldCase(stripTrailingSep(a)) === foldCase(stripTrailingSep(b));
 }
 
 /**
