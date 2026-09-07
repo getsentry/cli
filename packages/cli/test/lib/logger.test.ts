@@ -243,7 +243,9 @@ describe("printLine", () => {
 
 describe("printJsonLine", () => {
   test("writes an NDJSON record only to stdout", async () => {
-    const loggerModule = (await import("../../src/lib/logger.js")) as typeof import("../../src/lib/logger.js") & {
+    const loggerModule = (await import(
+      "../../src/lib/logger.js"
+    )) as typeof import("../../src/lib/logger.js") & {
       printJsonLine?: (line: string) => void;
     };
     const stdout = vi

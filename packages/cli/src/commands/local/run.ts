@@ -122,6 +122,14 @@ type EventTail = {
   cleanup: () => Promise<void>;
 };
 
+type EventTailOptions = {
+  port: number;
+  host: string;
+  activeFilters: ReadonlySet<FilterValue>;
+  useJson: boolean;
+  showAttributes: boolean;
+};
+
 /** Keep stdout exclusively for NDJSON when an agent requests JSON output. */
 function childStdio(useJson: boolean): StdioOptions {
   return useJson ? ["inherit", "pipe", "pipe"] : "inherit";
@@ -179,13 +187,13 @@ function attachToExistingServer(
  * Start a background dev server and subscribe to its buffer so incoming
  * envelopes are printed inline, matching the behavior of `sentry local serve`.
  */
-async function startBackgroundServer(
-  port: number,
-  host: string,
-  activeFilters: ReadonlySet<FilterValue>,
-  useJson: boolean,
-  showAttributes: boolean
-): Promise<EventTail> {
+async function startBackgroundServer({
+  port,
+  host,
+  activeFilters,
+  useJson,
+  showAttributes,
+}: EventTailOptions): Promise<EventTail> {
   const buffer = createSpotlightBuffer(BUFFER_SIZE);
   const app = buildApp(buffer);
   const { server, port: boundPort } = await tryListen(app, port, host);
@@ -227,13 +235,13 @@ async function startBackgroundServer(
  * with it, and falls back to attaching if the bind loses a race. `run` wraps
  * the user's dev command, so a busy port must never be fatal here.
  */
-async function openEventTail(
-  port: number,
-  host: string,
-  activeFilters: ReadonlySet<FilterValue>,
-  useJson: boolean,
-  showAttributes: boolean
-): Promise<EventTail> {
+async function openEventTail({
+  port,
+  host,
+  activeFilters,
+  useJson,
+  showAttributes,
+}: EventTailOptions): Promise<EventTail> {
   const url = `http://${host}:${port}`;
 
   if (await isServerRunning(url)) {
@@ -243,13 +251,13 @@ async function openEventTail(
 
   logger.info("No server detected, starting one in the background...");
   try {
-    const bg = await startBackgroundServer(
+    const bg = await startBackgroundServer({
       port,
       host,
       activeFilters,
       useJson,
-      showAttributes
-    );
+      showAttributes,
+    });
     logger.info(`Background server listening on ${bold(bg.url)}`);
     return bg;
   } catch (err) {
@@ -423,13 +431,13 @@ export const runCommand = buildCommand({
 
     const useJson = flags.format === "json";
     const activeFilters = new Set(flags.filter);
-    const tail = await openEventTail(
-      flags.port,
-      flags.host,
+    const tail = await openEventTail({
+      port: flags.port,
+      host: flags.host,
       activeFilters,
       useJson,
-      flags.attributes
-    );
+      showAttributes: flags.attributes,
+    });
     url = tail.url;
 
     const spotlightUrl = `${url}/stream`;

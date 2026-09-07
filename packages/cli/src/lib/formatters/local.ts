@@ -729,14 +729,17 @@ function jsonSafeIdentifier(value: unknown): string | undefined {
     return stripBidi(value);
   }
   if (value === null || typeof value !== "object") {
-    return undefined;
+    return;
   }
 
   try {
     const identifier = value.toString();
-    return identifier === "[object Object]" ? undefined : stripBidi(identifier);
+    if (identifier === "[object Object]") {
+      return;
+    }
+    return stripBidi(identifier);
   } catch {
-    return undefined;
+    log.debug("Could not serialize local envelope identity");
   }
 }
 
