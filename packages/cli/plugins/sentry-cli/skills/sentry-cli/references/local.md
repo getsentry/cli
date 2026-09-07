@@ -20,7 +20,7 @@ Start the local dev server and tail events
 - `-H, --host <value> - Hostname to bind to (default localhost) - (default: "localhost")`
 - `-q, --quiet - Suppress per-envelope tail output`
 - `-f, --filter <value>... - Only show items of this type (repeatable: error, transaction, log, ai)`
-- `-F, --format <value> - Output format: human (default) or json (NDJSON) - (default: "human")`
+- `-F, --format <value> - Output format: human (default) or json (NDJSON on stdout) - (default: "human")`
 - `-a, --attributes - Show a grouped attribute table (user vs SDK) under each transaction`
 
 ### `sentry local run <command...>`

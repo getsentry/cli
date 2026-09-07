@@ -59,6 +59,9 @@ export const SENTRY_CONTENT_TYPE = "application/x-sentry-envelope";
 export const FORMAT_VALUES = ["human", "json"] as const;
 export type FormatValue = (typeof FORMAT_VALUES)[number];
 
+/** Version of the stable, machine-readable local observation record. */
+export const LOCAL_EVENT_SCHEMA_VERSION = 1;
+
 /** Envelope item categories that can be filtered via `--filter`. */
 export const FILTER_VALUES = ["error", "transaction", "log", "ai"] as const;
 export type FilterValue = (typeof FILTER_VALUES)[number];
@@ -720,6 +723,14 @@ function jsonSafe(value: unknown): string | undefined {
   return typeof value === "string" ? stripBidi(value) : undefined;
 }
 
+/** Serialize one versioned local observation as an NDJSON record. */
+function formatJsonObservation(observation: Record<string, unknown>): string {
+  return JSON.stringify({
+    schema_version: LOCAL_EVENT_SCHEMA_VERSION,
+    ...observation,
+  });
+}
+
 /** Format an error item as a JSON object, including the best stack frame. */
 function formatErrorJson(
   payload: Record<string, unknown>,
@@ -738,7 +749,7 @@ function formatErrorJson(
   const frame =
     first?.stacktrace?.frames?.find((f) => f.in_app) ??
     first?.stacktrace?.frames?.at(-1);
-  return JSON.stringify({
+  return formatJsonObservation({
     type: "error",
     timestamp: payload.timestamp,
     trace_id: extractTraceId(payload),
@@ -801,7 +812,7 @@ function formatTransactionJson(
     start !== undefined && end !== undefined
       ? Math.round((end - start) * 1000)
       : undefined;
-  return JSON.stringify({
+  return formatJsonObservation({
     type: "transaction",
     timestamp: payload.timestamp,
     trace_id: extractTraceId(payload),
@@ -830,7 +841,7 @@ function formatLogJson(
   }
   const source = inferSourceName(header);
   return items.map((entry) =>
-    JSON.stringify({
+    formatJsonObservation({
       type: "log",
       timestamp: entry.timestamp,
       trace_id: extractLogTraceId(entry),
@@ -877,7 +888,7 @@ function formatSpanJson(
       span.start_timestamp !== undefined && span.end_timestamp !== undefined
         ? Math.round((span.end_timestamp - span.start_timestamp) * 1000)
         : undefined;
-    return JSON.stringify({
+    return formatJsonObservation({
       type: "span",
       timestamp: span.end_timestamp,
       trace_id: span.trace_id,
@@ -931,7 +942,7 @@ export function formatItemJson(
     return formatLogJson(payload, header);
   }
   return [
-    JSON.stringify({
+    formatJsonObservation({
       type: itemType ?? "unknown",
       timestamp: payload.timestamp,
     }),

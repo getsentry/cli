@@ -772,6 +772,16 @@ describe("formatItemJson", () => {
     expect(parsed.source).toBe("server");
   });
 
+  test("adds the versioned observation schema to JSON records", () => {
+    const lines = formatItemJson(
+      "error",
+      { timestamp: 1_700_000_000, message: "boom" },
+      serverHeader
+    );
+
+    expect(JSON.parse(lines[0]).schema_version).toBe(1);
+  });
+
   test("formats error without stack frame", () => {
     const event = {
       timestamp: 1_700_000_000,

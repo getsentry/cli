@@ -121,6 +121,10 @@ sentry local --format json
 
 This is useful for AI coding agents and automation tools that need to consume Sentry events programmatically.
 
+In JSON mode, event records are versioned NDJSON on standard output. Startup,
+connection, and shutdown messages stay on standard error, so an agent can pipe
+the evidence stream without parsing terminal status text.
+
 ## Agent-debugging fixture
 
 The repository includes a small Hono server that produces a normal database
