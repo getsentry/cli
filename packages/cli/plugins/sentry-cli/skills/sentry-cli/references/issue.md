@@ -353,4 +353,46 @@ sentry issue merge cli-k9 cli-15h --into cli-k9    # alias form
 # Non-error issue types (performance, info, etc.) cannot be merged
 ```
 
+### `sentry issue link <issue>`
+
+Link an existing external issue
+
+**Flags:**
+- `--external-issue <value> - URL of an existing external issue to link or unlink`
+- `--integration <value> - Native integration ID, when multiple installations match`
+- `--app <value> - Sentry App slug (automatically detected for Linear URLs)`
+- `-n, --dry-run - Show what would happen without making changes`
+- `--field <value>... - Additional Sentry App link form field (name=value, repeatable)`
+
+**Examples:**
+
+```bash
+sentry issue link FRONT-123 --external-issue https://github.com/example/app/issues/42
+sentry issue link FRONT-123 --external-issue https://example.atlassian.net/browse/APP-42
+sentry issue link FRONT-123 --external-issue https://linear.app/example/issue/APP-42/fix-error
+
+sentry issue link my-org/FRONT-123 --external-issue https://github.com/example/app/issues/42 --dry-run
+sentry issue link my-org/FRONT-123 --external-issue https://github.com/example/app/issues/42 --json
+```
+
+### `sentry issue unlink <issue>`
+
+Unlink an external issue
+
+**Flags:**
+- `--external-issue <value> - URL of an existing external issue to link or unlink`
+- `--integration <value> - Native integration ID, when multiple installations match`
+- `--app <value> - Sentry App slug (automatically detected for Linear URLs)`
+- `-y, --yes - Skip confirmation prompt`
+- `-f, --force - Force the operation without confirmation`
+- `-n, --dry-run - Show what would happen without making changes`
+
+**Examples:**
+
+```bash
+sentry issue unlink FRONT-123 --external-issue https://github.com/example/app/issues/42
+sentry issue unlink my-org/FRONT-123 --external-issue https://example.atlassian.net/browse/APP-42 --yes
+sentry issue unlink FRONT-123 --external-issue https://linear.app/example/issue/APP-42/fix-error --dry-run
+```
+
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

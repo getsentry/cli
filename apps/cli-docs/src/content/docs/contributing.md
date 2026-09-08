@@ -64,7 +64,7 @@ cli/
 │   │   ├── docs/        # list, query
 │   │   ├── event/       # list, send, view
 │   │   ├── feedback/    # list, view
-│   │   ├── issue/       # archive, events, explain, list, merge, plan, resolve, unresolve, view
+│   │   ├── issue/       # archive, events, explain, link, list, merge, plan, resolve, unlink, unresolve, view
 │   │   ├── local/       # run, serve
 │   │   ├── log/         # list, view
 │   │   ├── monitor/     # list, run

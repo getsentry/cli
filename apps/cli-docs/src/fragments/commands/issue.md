@@ -297,3 +297,74 @@ sentry issue ignore CLI-G5 --until auto
 | `10users/2hours` | 10 users within 2 hours |
 | *(omitted)* | Archive forever |
 :::
+
+### Link an external issue
+
+Link an existing tracker issue to a Sentry issue:
+
+```bash
+sentry issue link FRONT-123 --external-issue https://github.com/example/app/issues/42
+sentry issue link FRONT-123 --external-issue https://example.atlassian.net/browse/APP-42
+sentry issue link FRONT-123 --external-issue https://linear.app/example/issue/APP-42/fix-error
+```
+
+The matching integration must already be installed in the Sentry organization.
+Native integrations include GitHub, GitHub Enterprise, Jira, Jira Server,
+GitLab, Bitbucket, and Azure DevOps. Linear uses its installed Sentry App.
+Use `--integration <id>` if more than one native integration matches the URL.
+Other Sentry Apps require `--app <slug>` and must expose an issue-link form;
+additional required form values can be supplied with `--field name=value`.
+
+```bash
+sentry issue link my-org/FRONT-123 --external-issue https://github.com/example/app/issues/42 --dry-run
+sentry issue link my-org/FRONT-123 --external-issue https://github.com/example/app/issues/42 --json
+```
+
+`--dry-run` discovers the integration and prepares the link without submitting a
+write. The provider validates the remote issue when the link is submitted.
+An existing matching link succeeds with `changed: false`. A Sentry App that
+already links this issue to a different resource must be unlinked first.
+
+This command creates an association only. It does not create a tracker issue,
+resolve the Sentry issue, or link a commit or pull request. Existing integration
+status-sync settings continue to apply after linking.
+
+#### Link permissions
+
+Linking requires `event:write` and access to the Sentry project. The CLI requests
+`event:write` and `event:admin` during OAuth login. If an older OAuth session lacks
+the requested scopes, the CLI offers reauthorization after a permission error.
+In non-interactive mode, follow the `sentry auth refresh` command shown in the
+error. Environment tokens must be updated separately.
+
+### Unlink an external issue
+
+Remove an association without deleting either issue:
+
+```bash
+sentry issue unlink FRONT-123 --external-issue https://github.com/example/app/issues/42
+sentry issue unlink my-org/FRONT-123 --external-issue https://example.atlassian.net/browse/APP-42 --yes
+sentry issue unlink FRONT-123 --external-issue https://linear.app/example/issue/APP-42/fix-error --dry-run
+```
+
+Use `--yes` for non-interactive execution. `--dry-run` shows whether the link
+exists without removing it. If the association is already absent, the command
+succeeds with `changed: false`.
+
+Unlink matches the URL against stored associations and sends Sentry's internal
+link ID to the existing DELETE endpoint. It does not require fetching the ticket
+from the remote tracker, so a deleted remote ticket can still be unlinked.
+For a custom Sentry App, select it with `--app <slug>`; unlink does not require
+the app to expose a link form. Use `--integration <id>` to disambiguate native
+integration links.
+
+#### Unlink permissions
+
+Unlink requires **`event:admin` in both the token and your effective project
+permissions**. Being a project member does not automatically grant it. The
+organization's “Let Members Delete Events” setting and team roles affect whether
+you have this permission.
+
+New OAuth sessions request this scope. For an older session, follow the
+reauthorization guidance shown by the CLI. Granting a token more scopes does not
+override the organization's project-access policy.
