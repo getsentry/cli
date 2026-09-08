@@ -1,5 +1,5 @@
 import { Terminal } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, useEffect, useRef, useState } from 'react'
 import { JsonView } from '@/components/json-view.tsx'
 import { ThemeToggle } from '@/components/theme-toggle.tsx'
 import { Badge } from '@/components/ui/badge.tsx'
@@ -29,6 +29,28 @@ type EventEntryProps = {
   item: LocalFeedItem
   isSelected: boolean
   onSelect: (id: string) => void
+}
+
+type EventFilter = 'all' | 'errors' | 'transactions' | 'logs'
+
+const eventFilters: { id: EventFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'errors', label: 'Errors' },
+  { id: 'transactions', label: 'Transactions' },
+  { id: 'logs', label: 'Logs' },
+]
+
+function matchesEventFilter(item: LocalFeedItem, filter: EventFilter): boolean {
+  if (filter === 'all') {
+    return true
+  }
+
+  if (filter === 'errors') {
+    const { level, statusCode } = getMetadata(item)
+    return level === 'error' || level === 'fatal' || (statusCode !== undefined && statusCode >= 500)
+  }
+
+  return item.type === (filter === 'transactions' ? 'transaction' : 'log')
 }
 
 function formatTimestamp(timestamp: LocalFeedItem['timestamp']): string {
@@ -121,11 +143,26 @@ function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
 
 type EventDetailProps = {
   item: LocalFeedItem
+  relatedItems: LocalFeedItem[]
+  onSelect: (id: string) => void
 }
+
+type DetailTab = 'overview' | 'json'
+
+const detailTabs: DetailTab[] = ['overview', 'json']
 
 type DetailField = {
   label: string
   value: string
+}
+
+function SummaryMetric({ label, value, tone }: DetailField & { tone?: string }) {
+  return (
+    <div className="min-w-0 px-3 py-2">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={`mt-1 truncate font-mono text-sm ${tone ?? 'text-foreground'}`}>{value}</dd>
+    </div>
+  )
 }
 
 function DetailSection({ title, fields }: { title: string; fields: DetailField[] }) {
@@ -150,8 +187,8 @@ function DetailSection({ title, fields }: { title: string; fields: DetailField[]
   )
 }
 
-function EventDetail({ item }: EventDetailProps) {
-  const [tab, setTab] = useState<'overview' | 'json'>('overview')
+function EventDetail({ item, relatedItems, onSelect }: EventDetailProps) {
+  const [tab, setTab] = useState<DetailTab>('overview')
   const metadata = getMetadata(item)
   const duration = formatDuration(metadata.durationMs)
   const eventFields: DetailField[] = [
@@ -172,6 +209,47 @@ function EventDetail({ item }: EventDetailProps) {
     ...(metadata.operation ? [{ label: 'Operation', value: metadata.operation }] : []),
     ...(metadata.origin ? [{ label: 'Origin', value: metadata.origin }] : []),
   ]
+  const summaryFields = [
+    ...(metadata.statusCode !== undefined
+      ? [
+          {
+            label: 'Status',
+            value: String(metadata.statusCode),
+            tone: getStatusClass(metadata.statusCode),
+          },
+        ]
+      : []),
+    ...(duration ? [{ label: 'Duration', value: duration }] : []),
+    ...(metadata.operation ? [{ label: 'Operation', value: metadata.operation }] : []),
+    ...(metadata.traceId
+      ? [{ label: 'Trace', value: metadata.traceId.slice(0, 8) }]
+      : []),
+  ]
+
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const currentIndex = detailTabs.indexOf(tab)
+    const nextIndex =
+      event.key === 'ArrowRight'
+        ? (currentIndex + 1) % detailTabs.length
+        : event.key === 'ArrowLeft'
+          ? (currentIndex - 1 + detailTabs.length) % detailTabs.length
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? detailTabs.length - 1
+              : undefined
+
+    if (nextIndex === undefined) {
+      return
+    }
+
+    event.preventDefault()
+    const nextTab = detailTabs[nextIndex]!
+    setTab(nextTab)
+    requestAnimationFrame(() => {
+      document.getElementById(`event-detail-tab-${nextTab}`)?.focus()
+    })
+  }
 
   return (
     <section
@@ -187,20 +265,28 @@ function EventDetail({ item }: EventDetailProps) {
         <div className="flex h-full shrink-0 items-center gap-3">
           <div role="tablist" aria-label="Event detail view" className="flex h-full">
             <button
+              id="event-detail-tab-overview"
               type="button"
               role="tab"
               aria-selected={tab === 'overview'}
-              className={`px-2 text-sm ${tab === 'overview' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              aria-controls="event-detail-panel"
+              tabIndex={tab === 'overview' ? 0 : -1}
+              className={`px-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${tab === 'overview' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
               onClick={() => setTab('overview')}
+              onKeyDown={handleTabKeyDown}
             >
               Overview
             </button>
             <button
+              id="event-detail-tab-json"
               type="button"
               role="tab"
               aria-selected={tab === 'json'}
-              className={`px-2 text-sm ${tab === 'json' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              aria-controls="event-detail-panel"
+              tabIndex={tab === 'json' ? 0 : -1}
+              className={`px-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${tab === 'json' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
               onClick={() => setTab('json')}
+              onKeyDown={handleTabKeyDown}
             >
               JSON
             </button>
@@ -209,17 +295,64 @@ function EventDetail({ item }: EventDetailProps) {
         </div>
       </div>
       {tab === 'overview' ? (
-        <div className="min-h-0 flex-1 overflow-auto p-4">
+        <div id="event-detail-panel" role="tabpanel" className="min-h-0 flex-1 overflow-auto p-4">
+          {summaryFields.length > 0 ? (
+            <dl
+              aria-label="Event summary"
+              className="mb-6 grid divide-y divide-border border-y border-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4"
+            >
+              {summaryFields.map((field) => (
+                <SummaryMetric key={field.label} {...field} />
+              ))}
+            </dl>
+          ) : null}
           <div className="grid gap-6 xl:grid-cols-2">
             <DetailSection title="Event" fields={eventFields} />
             <DetailSection title="Request" fields={requestFields} />
             <div className="xl:col-span-2">
               <DetailSection title="Trace" fields={traceFields} />
             </div>
+            {relatedItems.length > 0 ? (
+              <section className="xl:col-span-2">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    Related trace items
+                  </h2>
+                  <span className="text-xs text-muted-foreground">
+                    {relatedItems.length} related event{relatedItems.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <ol className="border-y border-border">
+                  {relatedItems.map((relatedItem) => {
+                    const relatedMetadata = getMetadata(relatedItem)
+                    return (
+                      <li key={relatedItem.id}>
+                        <button
+                          type="button"
+                          aria-label={`View related ${relatedMetadata.title}`}
+                          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                          onClick={() => onSelect(relatedItem.id)}
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Badge>{relatedMetadata.method ?? relatedItem.type}</Badge>
+                            <span className="truncate font-mono text-sm">
+                              {relatedMetadata.route ?? relatedMetadata.title}
+                            </span>
+                          </div>
+                          <time className="shrink-0 text-sm tabular-nums text-muted-foreground">
+                            {formatTimestamp(relatedItem.timestamp)}
+                          </time>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ol>
+              </section>
+            ) : null}
           </div>
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div id="event-detail-panel" role="tabpanel" className="min-h-0 flex-1 overflow-auto">
           <JsonView code={item.text} />
         </div>
       )}
@@ -236,10 +369,49 @@ export default function App() {
   )
   const [items, setItems] = useState<LocalFeedItem[]>([])
   const [selectedItemId, setSelectedItemId] = useState<string>()
+  const [lastViewedItemId, setLastViewedItemId] = useState<string>()
+  const [filter, setFilter] = useState<EventFilter>('all')
   const [message, setMessage] = useState<string | undefined>()
   const fallbackEventId = useRef(0)
   const presentation = getConnectionPresentation(connection)
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? items[0]
+  const visibleItems = items.filter((item) => matchesEventFilter(item, filter))
+  const relatedItems = selectedItem?.metadata?.traceId
+    ? items.filter(
+        (item) =>
+          item.id !== selectedItem.id &&
+          item.metadata?.traceId === selectedItem.metadata?.traceId
+      )
+    : []
+  const lastViewedIndex = lastViewedItemId
+    ? items.findIndex((item) => item.id === lastViewedItemId)
+    : -1
+  const unseenItems =
+    lastViewedItemId === undefined
+      ? []
+      : lastViewedIndex === -1
+        ? items
+        : items.slice(lastViewedIndex + 1)
+  const newItems = unseenItems.filter((item) => matchesEventFilter(item, filter))
+  const newItemCount = newItems.length
+
+  const markItemsSeen = () => {
+    setLastViewedItemId(items.at(-1)?.id)
+  }
+
+  const selectItem = (id: string) => {
+    setSelectedItemId(id)
+    markItemsSeen()
+  }
+
+  const selectFilter = (nextFilter: EventFilter) => {
+    setFilter(nextFilter)
+    const nextSelectedItem = items.find((item) => matchesEventFilter(item, nextFilter))
+    if (nextSelectedItem) {
+      setSelectedItemId(nextSelectedItem.id)
+    }
+    markItemsSeen()
+  }
 
   useEffect(() => {
     const fragmentStreamUrl = getStreamUrlFromHash(window.location.hash)
@@ -293,8 +465,20 @@ export default function App() {
       >
         <header className="flex h-11 shrink-0 items-center justify-between gap-3 px-3 sm:px-4">
           <div className="flex items-center" aria-label="Sentry CLI">
-            <img className="h-5 w-auto dark:hidden" src="/sentry-cli-light.svg" alt="Sentry CLI" />
-            <img className="hidden h-5 w-auto dark:block" src="/sentry-cli.svg" alt="" />
+            <img
+              className="h-5 w-auto dark:hidden"
+              src="/sentry-cli-light.svg"
+              alt="Sentry CLI"
+              width="117"
+              height="20"
+            />
+            <img
+              className="hidden h-5 w-auto dark:block"
+              src="/sentry-cli.svg"
+              alt=""
+              width="117"
+              height="20"
+            />
           </div>
           <div className="flex items-center gap-2">
             <span role="status" aria-label={presentation.label} title={presentation.label}>
@@ -349,24 +533,73 @@ export default function App() {
                   aria-labelledby="event-list-heading"
                   className="flex min-h-0 w-80 shrink-0 flex-col border-r border-border bg-muted/30"
                 >
-                  <div className="flex h-11 shrink-0 items-center border-b border-border px-3">
-                    <h1 id="event-list-heading" className="text-sm font-semibold">Events</h1>
+                  <div className="shrink-0 border-b border-border px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <h1 id="event-list-heading" className="text-sm font-semibold">Events</h1>
+                      <span className="text-xs tabular-nums text-muted-foreground">
+                        {items.length} / 500
+                      </span>
+                    </div>
+                    <div className="mt-2 flex gap-1" aria-label="Filter events">
+                      {eventFilters.map((eventFilter) => {
+                        const count = items.filter((item) =>
+                          matchesEventFilter(item, eventFilter.id)
+                        ).length
+
+                        return (
+                          <button
+                            key={eventFilter.id}
+                            type="button"
+                            aria-pressed={filter === eventFilter.id}
+                            className={`px-1.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
+                              filter === eventFilter.id
+                                ? 'bg-muted font-medium text-foreground'
+                                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                            }`}
+                            onClick={() => selectFilter(eventFilter.id)}
+                          >
+                            {eventFilter.label} ({count})
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {newItemCount > 0 ? (
+                      <button
+                        type="button"
+                        className="mt-2 w-full border-t border-border pt-2 text-left text-xs font-medium text-primary transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                        onClick={() => {
+                          const latestItem = newItems.at(-1)
+                          if (latestItem) {
+                            selectItem(latestItem.id)
+                          }
+                        }}
+                      >
+                        View {newItemCount} new event{newItemCount === 1 ? '' : 's'}
+                      </button>
+                    ) : null}
                   </div>
                   <ol
                     data-testid="event-list"
-                    className="min-h-0 flex-1 space-y-px overflow-y-auto p-1"
+                    className="min-h-0 flex-1 space-y-px overflow-y-auto"
                   >
-                    {items.map((item) => (
+                    {visibleItems.map((item) => (
                       <EventEntry
                         key={item.id}
                         item={item}
                         isSelected={item.id === selectedItem?.id}
-                        onSelect={setSelectedItemId}
+                        onSelect={selectItem}
                       />
                     ))}
                   </ol>
                 </aside>
-                {selectedItem ? <EventDetail key={selectedItem.id} item={selectedItem} /> : null}
+                {selectedItem ? (
+                  <EventDetail
+                    key={selectedItem.id}
+                    item={selectedItem}
+                    relatedItems={relatedItems}
+                    onSelect={selectItem}
+                  />
+                ) : null}
               </div>
             )}
           </section>

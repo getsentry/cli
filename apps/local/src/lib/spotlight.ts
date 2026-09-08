@@ -12,6 +12,7 @@ export type LocalFeedItem = {
 
 export type EventMetadata = {
   title: string
+  level?: string
   method?: string
   route?: string
   statusCode?: number
@@ -67,6 +68,7 @@ function getEventMetadata(payload: unknown, type: string): EventMetadata {
 
   return {
     title: transaction ?? route ?? type,
+    level: getString(event.level),
     method,
     route,
     statusCode:
