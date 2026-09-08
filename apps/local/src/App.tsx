@@ -1,4 +1,4 @@
-import { ChevronDown, Terminal } from 'lucide-react'
+import { Terminal } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { JsonView } from '@/components/json-view.tsx'
 import { ThemeToggle } from '@/components/theme-toggle.tsx'
@@ -26,6 +26,8 @@ import {
 
 type EventEntryProps = {
   item: LocalFeedItem
+  isSelected: boolean
+  onSelect: (id: string) => void
 }
 
 function formatTimestamp(timestamp: LocalFeedItem['timestamp']): string {
@@ -56,35 +58,44 @@ function saveStreamUrl(streamUrl: string): void {
   }
 }
 
-function EventEntry({ item }: EventEntryProps) {
-  const [isOpen, setIsOpen] = useState(false)
-
+function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
   return (
     <li>
-      <details
-        className="group rounded-lg border border-border bg-card transition-colors open:bg-muted/25"
-        onToggle={(event) => setIsOpen(event.currentTarget.open)}
+      <button
+        type="button"
+        aria-label={`View ${item.type} event`}
+        aria-current={isSelected ? 'true' : undefined}
+        className={`flex w-full cursor-pointer items-center justify-between gap-4 rounded-md px-3 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
+          isSelected ? 'bg-muted text-foreground' : 'hover:bg-muted/60'
+        }`}
+        onClick={() => onSelect(item.id)}
       >
-        <summary
-          aria-label={`View ${item.type} event`}
-          className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 outline-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-        >
+        <div className="min-w-0">
           <Badge>{item.type}</Badge>
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            <time>{formatTimestamp(item.timestamp)}</time>
-            <ChevronDown
-              className="size-4 transition-transform group-open:rotate-180"
-              aria-hidden="true"
-            />
-          </div>
-        </summary>
-        {isOpen ? (
-          <div className="border-t border-border">
-            <JsonView code={item.text} />
-          </div>
-        ) : null}
-      </details>
+        </div>
+        <time className="shrink-0 text-sm text-muted-foreground">
+          {formatTimestamp(item.timestamp)}
+        </time>
+      </button>
     </li>
+  )
+}
+
+type EventDetailProps = {
+  item: LocalFeedItem
+}
+
+function EventDetail({ item }: EventDetailProps) {
+  return (
+    <section data-testid="event-detail" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-5 py-4">
+        <Badge>{item.type}</Badge>
+        <time className="text-sm text-muted-foreground">{formatTimestamp(item.timestamp)}</time>
+      </header>
+      <div className="min-h-0 flex-1 overflow-auto">
+        <JsonView code={item.text} />
+      </div>
+    </section>
   )
 }
 
@@ -96,9 +107,11 @@ export default function App() {
     streamUrl ? 'connecting' : 'missing'
   )
   const [items, setItems] = useState<LocalFeedItem[]>([])
+  const [selectedItemId, setSelectedItemId] = useState<string>()
   const [message, setMessage] = useState<string | undefined>()
   const fallbackEventId = useRef(0)
   const presentation = getConnectionPresentation(connection)
+  const selectedItem = items.find((item) => item.id === selectedItemId) ?? items[0]
 
   useEffect(() => {
     const fragmentStreamUrl = getStreamUrlFromHash(window.location.hash)
@@ -146,7 +159,7 @@ export default function App() {
 
   return (
     <main className="h-dvh overflow-hidden bg-background">
-      <div className="mx-auto flex h-full w-full max-w-4xl flex-col px-5 py-5 sm:px-8 sm:py-8">
+      <div className="mx-auto flex h-full w-full max-w-none flex-col px-5 py-5 sm:px-8 sm:py-8">
         <header className="shrink-0 flex items-center justify-between gap-4 border-b border-border pb-5">
           <div className="flex items-center" aria-label="Sentry CLI">
             <img className="h-5 w-auto dark:hidden" src="/sentry-cli-light.svg" alt="Sentry CLI" />
@@ -169,9 +182,8 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col py-10">
+        <div className="flex min-h-0 flex-1 flex-col py-6">
           <section className="flex min-h-0 flex-1 flex-col gap-5" aria-label="Local Sentry events">
-            <h1 className="shrink-0 text-xl font-semibold tracking-tight">Events</h1>
 
             {connection === 'missing' ? (
               <Card className="shrink-0">
@@ -201,11 +213,27 @@ export default function App() {
                 <p className="font-medium">Waiting for events</p>
               </div>
             ) : (
-              <ol data-testid="event-list" className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                {items.map((item) => (
-                  <EventEntry key={item.id} item={item} />
-                ))}
-              </ol>
+              <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-card">
+                <aside className="flex min-h-0 w-72 shrink-0 flex-col border-r border-border bg-muted/30">
+                  <div className="shrink-0 border-b border-border px-4 py-4">
+                    <h1 className="text-sm font-semibold">Events</h1>
+                  </div>
+                  <ol
+                    data-testid="event-list"
+                    className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2"
+                  >
+                    {items.map((item) => (
+                      <EventEntry
+                        key={item.id}
+                        item={item}
+                        isSelected={item.id === selectedItem?.id}
+                        onSelect={setSelectedItemId}
+                      />
+                    ))}
+                  </ol>
+                </aside>
+                {selectedItem ? <EventDetail item={selectedItem} /> : null}
+              </div>
             )}
           </section>
         </div>

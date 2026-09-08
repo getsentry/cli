@@ -76,7 +76,7 @@ describe('local receiver to viewer integration', () => {
     window.history.replaceState(null, '', '/')
   })
 
-  test('renders live transactions as collapsed, expandable JSON entries', async () => {
+  test('keeps the selected live transaction open in the detail pane', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -93,14 +93,18 @@ describe('local receiver to viewer integration', () => {
       const eventList = screen.getByTestId('event-list')
       expect(eventList.className).toContain('flex-1')
       expect(eventList.className).not.toContain('max-h-[42rem]')
-      const disclosures = screen.getAllByLabelText('View transaction event')
-      expect(disclosures[0]?.closest('details')?.open).toBe(false)
+      const detail = screen.getByTestId('event-detail')
+      expect(detail.textContent).toContain('GET /live')
+      expect(detail.textContent).not.toContain('GET /live-2')
 
-      fireEvent.click(disclosures[0]!)
+      const events = screen.getAllByLabelText('View transaction event')
+      fireEvent.click(events[1]!)
 
-      expect(disclosures[0]?.closest('details')?.open).toBe(true)
-      const code = await screen.findByTestId('highlighted-json')
-      expect(code.textContent).toContain('GET /live')
+      await waitFor(() => {
+        expect(screen.getByTestId('event-detail').textContent).toContain('GET /live-2')
+      })
+      const code = screen.getByTestId('highlighted-json')
+      expect(code.textContent).toContain('GET /live-2')
       await waitFor(() => {
         expect(screen.getByTestId('highlighted-json').querySelector('.shiki')).not.toBeNull()
       })
@@ -118,9 +122,7 @@ describe('local receiver to viewer integration', () => {
       renderViewer(port)
 
       await screen.findByText('Connected to local receiver')
-      const disclosure = await screen.findByLabelText('View transaction event')
-      fireEvent.click(disclosure)
-      expect((await screen.findByTestId('highlighted-json')).textContent).toContain(
+      expect((await screen.findByTestId('event-detail')).textContent).toContain(
         'GET /buffered'
       )
     } finally {
