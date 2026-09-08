@@ -287,8 +287,11 @@ export default function App() {
 
   return (
     <main className="h-dvh overflow-hidden bg-background">
-      <div className="mx-auto flex h-full w-full max-w-none flex-col px-3 py-3 sm:px-4 sm:py-4">
-        <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border">
+      <div
+        data-testid="app-shell"
+        className="mx-auto flex h-full w-full max-w-none flex-col"
+      >
+        <header className="flex h-11 shrink-0 items-center justify-between gap-3 px-3 sm:px-4">
           <div className="flex items-center" aria-label="Sentry CLI">
             <img className="h-5 w-auto dark:hidden" src="/sentry-cli-light.svg" alt="Sentry CLI" />
             <img className="hidden h-5 w-auto dark:block" src="/sentry-cli.svg" alt="" />
@@ -310,8 +313,8 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col py-3">
-          <section className="flex min-h-0 flex-1 flex-col gap-3" aria-label="Local Sentry events">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <section className="flex min-h-0 flex-1 flex-col" aria-label="Local Sentry events">
 
             {connection === 'missing' ? (
               <Card className="shrink-0">

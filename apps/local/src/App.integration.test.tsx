@@ -83,6 +83,11 @@ describe('local receiver to viewer integration', () => {
       renderViewer(port)
       await screen.findByText('Connected to local receiver')
 
+      const shell = screen.getByTestId('app-shell')
+      expect(shell.className).not.toContain('px-')
+      expect(shell.className).not.toContain('py-')
+      expect(screen.getByRole('banner').className).not.toContain('border-b')
+
       await sendEnvelope(port, 'GET /live')
       await screen.findByLabelText('View transaction event')
       await sendEnvelope(port, 'GET /live-2')
