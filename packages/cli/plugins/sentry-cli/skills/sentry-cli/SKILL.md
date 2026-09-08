@@ -482,6 +482,14 @@ Work with debug information files
 
 → Full flags and examples: `references/debug-files.md`
 
+### Doctor
+
+Check whether Sentry is correctly set up and actually working
+
+- `sentry doctor` — Check whether Sentry is correctly set up and actually working
+
+→ Full flags and examples: `references/doctor.md`
+
 ### Dashboard
 
 Manage Sentry dashboards

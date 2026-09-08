@@ -450,6 +450,20 @@ describe("no-cache tier", () => {
     const cached = await getCachedResponse(TEST_METHOD, rootCauseUrl, {});
     expect(cached).toBeUndefined();
   });
+
+  test("org events search URLs are not cached", async () => {
+    const eventsSearchUrl =
+      "https://us.sentry.io/api/0/organizations/sentry-sdks/events/?dataset=errors&query=project:web+abc";
+    await storeCachedResponse(
+      TEST_METHOD,
+      eventsSearchUrl,
+      {},
+      mockResponse({ data: [] })
+    );
+
+    const cached = await getCachedResponse(TEST_METHOD, eventsSearchUrl, {});
+    expect(cached).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

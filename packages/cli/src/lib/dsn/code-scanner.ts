@@ -215,7 +215,7 @@ function isCommentedLine(trimmedLine: string): boolean {
  * Get the expected Sentry host for DSN validation.
  *
  * Self-hosted (SENTRY_URL set): only DSNs matching the configured
- * host are valid. SaaS: only `*.sentry.io` DSNs are valid.
+ * host are valid. SaaS: `*.sentry.io` and `*.sentry.gg` DSNs are valid.
  *
  * @throws {ConfigError} If SENTRY_URL is set but not a valid URL.
  */
@@ -242,15 +242,20 @@ function getExpectedHost(): string {
  * match or any subdomain. Prevents SaaS DSNs from being detected on
  * self-hosted instances (and vice versa).
  */
+function isSaasHost(host: string, expectedHost: string): boolean {
+  const allowed =
+    expectedHost === DEFAULT_SENTRY_HOST
+      ? [DEFAULT_SENTRY_HOST, "sentry.gg"]
+      : [expectedHost];
+  return allowed.some((h) => host === h || host.endsWith(`.${h}`));
+}
+
 function isValidDsnHost(dsn: string): boolean {
   const parsed = parseDsn(dsn);
   if (!parsed) {
     return false;
   }
-  const expectedHost = getExpectedHost();
-  return (
-    parsed.host === expectedHost || parsed.host.endsWith(`.${expectedHost}`)
-  );
+  return isSaasHost(parsed.host, getExpectedHost());
 }
 
 /**

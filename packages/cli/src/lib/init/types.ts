@@ -304,6 +304,7 @@ export type WizardOutput = {
   projectId?: string;
   message?: string;
   featureBlurbs?: Array<{ feature: string; blurb: string }>;
+  codemodPlan?: Array<{ description?: string; riskLevel?: string }>;
 };
 
 /**

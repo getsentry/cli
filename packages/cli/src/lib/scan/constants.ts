@@ -122,10 +122,11 @@ export const DEFAULT_SKIP_DIRS: readonly string[] = [
   "CMakeFiles",
   "cmake-build-debug",
   "cmake-build-release",
-  // Go / Ruby / Gradle
+  // Go / Ruby / Gradle / Android NDK
   "vendor",
   ".gradle",
   ".bundle",
+  ".cxx",
   // Coverage + caches
   "coverage",
   "htmlcov",
