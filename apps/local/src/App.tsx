@@ -21,6 +21,7 @@ import {
   getStreamUrlFromHash,
   SENTRY_ENVELOPE_EVENT,
   STREAM_STORAGE_KEY,
+  type EventMetadata,
   type LocalFeedItem,
 } from '@/lib/spotlight.ts'
 
@@ -42,6 +43,30 @@ function formatTimestamp(timestamp: LocalFeedItem['timestamp']): string {
   return Number.isNaN(date.getTime()) ? String(timestamp) : date.toLocaleTimeString()
 }
 
+function formatDuration(durationMs: number | undefined): string | undefined {
+  if (durationMs === undefined) {
+    return undefined
+  }
+  return `${durationMs.toFixed(durationMs < 10 ? 2 : 0)}ms`
+}
+
+function getMetadata(item: LocalFeedItem): EventMetadata {
+  return item.metadata ?? { title: item.type }
+}
+
+function getStatusClass(statusCode: number | undefined): string {
+  if (statusCode === undefined) {
+    return 'text-muted-foreground'
+  }
+  if (statusCode >= 500) {
+    return 'text-red-500 dark:text-red-400'
+  }
+  if (statusCode >= 400) {
+    return 'text-amber-600 dark:text-amber-400'
+  }
+  return 'text-emerald-600 dark:text-emerald-400'
+}
+
 function getSavedStream(): string | null {
   try {
     return window.localStorage.getItem(STREAM_STORAGE_KEY)
@@ -59,6 +84,9 @@ function saveStreamUrl(streamUrl: string): void {
 }
 
 function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
+  const metadata = getMetadata(item)
+  const duration = formatDuration(metadata.durationMs)
+
   return (
     <li>
       <button
@@ -70,8 +98,18 @@ function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
         }`}
         onClick={() => onSelect(item.id)}
       >
-        <div className="min-w-0">
-          <Badge>{item.type}</Badge>
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <Badge>{metadata.method ?? item.type}</Badge>
+            <span className="truncate font-mono text-sm">{metadata.route ?? metadata.title}</span>
+          </div>
+          <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+            {metadata.statusCode !== undefined ? (
+              <span className={getStatusClass(metadata.statusCode)}>{metadata.statusCode}</span>
+            ) : null}
+            {duration ? <span>{duration}</span> : null}
+            {metadata.traceId ? <span className="truncate">{metadata.traceId.slice(0, 8)}</span> : null}
+          </div>
         </div>
         <time className="shrink-0 text-sm text-muted-foreground">
           {formatTimestamp(item.timestamp)}
@@ -85,16 +123,106 @@ type EventDetailProps = {
   item: LocalFeedItem
 }
 
-function EventDetail({ item }: EventDetailProps) {
+type DetailField = {
+  label: string
+  value: string
+}
+
+function DetailSection({ title, fields }: { title: string; fields: DetailField[] }) {
+  if (fields.length === 0) {
+    return null
+  }
+
   return (
-    <section data-testid="event-detail" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border px-3">
-        <Badge>{item.type}</Badge>
-        <time className="text-sm text-muted-foreground">{formatTimestamp(item.timestamp)}</time>
-      </header>
-      <div className="min-h-0 flex-1 overflow-auto">
-        <JsonView code={item.text} />
+    <section>
+      <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        {title}
+      </h2>
+      <dl className="border-y border-border text-sm">
+        {fields.map((field) => (
+          <div key={field.label} className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 border-b border-border px-3 py-2 last:border-b-0">
+            <dt className="text-muted-foreground">{field.label}</dt>
+            <dd className="break-all font-mono text-foreground">{field.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
+function EventDetail({ item }: EventDetailProps) {
+  const [tab, setTab] = useState<'overview' | 'json'>('overview')
+  const metadata = getMetadata(item)
+  const duration = formatDuration(metadata.durationMs)
+  const eventFields: DetailField[] = [
+    { label: 'Transaction', value: metadata.title },
+    { label: 'Received', value: formatTimestamp(item.timestamp) },
+  ]
+  const requestFields: DetailField[] = [
+    ...(metadata.method ? [{ label: 'Method', value: metadata.method }] : []),
+    ...(metadata.route ? [{ label: 'Route', value: metadata.route }] : []),
+    ...(metadata.statusCode !== undefined
+      ? [{ label: 'Status', value: String(metadata.statusCode) }]
+      : []),
+    ...(duration ? [{ label: 'Duration', value: duration }] : []),
+  ]
+  const traceFields: DetailField[] = [
+    ...(metadata.traceId ? [{ label: 'Trace ID', value: metadata.traceId }] : []),
+    ...(metadata.spanId ? [{ label: 'Span ID', value: metadata.spanId }] : []),
+    ...(metadata.operation ? [{ label: 'Operation', value: metadata.operation }] : []),
+    ...(metadata.origin ? [{ label: 'Origin', value: metadata.origin }] : []),
+  ]
+
+  return (
+    <section
+      data-testid="event-detail"
+      aria-label="Event detail"
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
+    >
+      <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border px-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Badge>{metadata.method ?? item.type}</Badge>
+          <span className="truncate font-mono text-sm">{metadata.route ?? metadata.title}</span>
+        </div>
+        <div className="flex h-full shrink-0 items-center gap-3">
+          <div role="tablist" aria-label="Event detail view" className="flex h-full">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'overview'}
+              className={`px-2 text-sm ${tab === 'overview' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              onClick={() => setTab('overview')}
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'json'}
+              className={`px-2 text-sm ${tab === 'json' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              onClick={() => setTab('json')}
+            >
+              JSON
+            </button>
+          </div>
+          <time className="text-sm text-muted-foreground">{formatTimestamp(item.timestamp)}</time>
+        </div>
       </div>
+      {tab === 'overview' ? (
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          <div className="grid gap-6 xl:grid-cols-2">
+            <DetailSection title="Event" fields={eventFields} />
+            <DetailSection title="Request" fields={requestFields} />
+            <div className="xl:col-span-2">
+              <DetailSection title="Trace" fields={traceFields} />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-auto">
+          <JsonView code={item.text} />
+        </div>
+      )}
     </section>
   )
 }
@@ -235,7 +363,7 @@ export default function App() {
                     ))}
                   </ol>
                 </aside>
-                {selectedItem ? <EventDetail item={selectedItem} /> : null}
+                {selectedItem ? <EventDetail key={selectedItem.id} item={selectedItem} /> : null}
               </div>
             )}
           </section>

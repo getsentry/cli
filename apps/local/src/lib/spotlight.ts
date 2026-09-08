@@ -7,10 +7,76 @@ export type LocalFeedItem = {
   type: string
   timestamp?: number | string
   text: string
+  metadata?: EventMetadata
+}
+
+export type EventMetadata = {
+  title: string
+  method?: string
+  route?: string
+  statusCode?: number
+  durationMs?: number
+  traceId?: string
+  spanId?: string
+  operation?: string
+  origin?: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function getString(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined
+}
+
+function getNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function getRoute(url: string | undefined): string | undefined {
+  if (!url) {
+    return undefined
+  }
+  try {
+    const parsed = new URL(url)
+    return `${parsed.pathname}${parsed.search}`
+  } catch {
+    return url.startsWith("/") ? url : undefined
+  }
+}
+
+function getEventMetadata(payload: unknown, type: string): EventMetadata {
+  const event = isRecord(payload) ? payload : {}
+  const transaction = getString(event.transaction)
+  const transactionMatch = transaction?.match(/^([A-Z]+)\s+(.+)$/)
+  const contexts = isRecord(event.contexts) ? event.contexts : {}
+  const trace = isRecord(contexts.trace) ? contexts.trace : {}
+  const data = isRecord(trace.data) ? trace.data : {}
+  const request = isRecord(event.request) ? event.request : {}
+  const method =
+    getString(request.method) ?? getString(data["http.method"]) ?? transactionMatch?.[1]
+  const url = getString(request.url) ?? getString(data["http.url"])
+  const route = getRoute(url) ?? transactionMatch?.[2]
+  const startTimestamp = getNumber(event.start_timestamp)
+  const timestamp = getNumber(event.timestamp)
+  const durationMs =
+    startTimestamp !== undefined && timestamp !== undefined
+      ? Math.round((timestamp - startTimestamp) * 100_000) / 100
+      : undefined
+
+  return {
+    title: transaction ?? route ?? type,
+    method,
+    route,
+    statusCode:
+      getNumber(request.status_code) ?? getNumber(data["http.response.status_code"]),
+    durationMs,
+    traceId: getString(trace.trace_id) ?? getString(event.trace_id),
+    spanId: getString(trace.span_id) ?? getString(event.span_id),
+    operation: getString(trace.op) ?? getString(event.transaction_op),
+    origin: getString(data["sentry.origin"]),
+  }
 }
 
 function isLoopbackHost(hostname: string): boolean {
@@ -81,15 +147,17 @@ export function decodeEnvelope(data: string, eventId: string): LocalFeedItem[] {
     const header = item[0]
     const payload = item[1]
     const timestamp = isRecord(payload) ? payload.timestamp : undefined
+    const type = typeof header.type === "string" ? header.type : "unknown"
     return [
       {
         id: `${eventId}:${index}`,
-        type: typeof header.type === "string" ? header.type : "unknown",
+        type,
         timestamp:
           typeof timestamp === "number" || typeof timestamp === "string"
             ? timestamp
             : undefined,
         text: JSON.stringify(payload, null, 2) ?? String(payload),
+        metadata: getEventMetadata(payload, type),
       },
     ]
   })

@@ -46,15 +46,26 @@ describe("decodeEnvelope", () => {
   test("turns envelope items into displayable feed entries", () => {
     expect(
       decodeEnvelope(
-        '[{"sdk":{"name":"sentry.node"}},[[{"type":"transaction"},{"transaction":"GET /users","timestamp":1}]]]',
+        '[{"sdk":{"name":"sentry.node"}},[[{"type":"transaction"},{"transaction":"GET /api/users/42","start_timestamp":1700000000,"timestamp":1700000000.00668,"contexts":{"trace":{"trace_id":"trace-123","span_id":"span-456","op":"http.server","data":{"http.method":"GET","http.url":"http://127.0.0.1:3030/api/users/42","http.response.status_code":200,"sentry.origin":"auto.http.otel.http"}}}}]]]',
         "event-1"
       )
     ).toEqual([
       {
         id: "event-1:0",
         type: "transaction",
-        timestamp: 1,
-        text: '{\n  "transaction": "GET /users",\n  "timestamp": 1\n}',
+        timestamp: 1700000000.00668,
+        metadata: {
+          title: "GET /api/users/42",
+          method: "GET",
+          route: "/api/users/42",
+          statusCode: 200,
+          durationMs: 6.68,
+          traceId: "trace-123",
+          spanId: "span-456",
+          operation: "http.server",
+          origin: "auto.http.otel.http",
+        },
+        text: '{\n  "transaction": "GET /api/users/42",\n  "start_timestamp": 1700000000,\n  "timestamp": 1700000000.00668,\n  "contexts": {\n    "trace": {\n      "trace_id": "trace-123",\n      "span_id": "span-456",\n      "op": "http.server",\n      "data": {\n        "http.method": "GET",\n        "http.url": "http://127.0.0.1:3030/api/users/42",\n        "http.response.status_code": 200,\n        "sentry.origin": "auto.http.otel.http"\n      }\n    }\n  }\n}',
       },
     ]);
   });

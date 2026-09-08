@@ -104,6 +104,8 @@ describe('local receiver to viewer integration', () => {
       await waitFor(() => {
         expect(screen.getByTestId('event-detail').textContent).toContain('GET /live-2')
       })
+      expect(screen.getByRole('tab', { name: 'Overview' })).not.toBeNull()
+      fireEvent.click(screen.getByRole('tab', { name: 'JSON' }))
       const code = screen.getByTestId('highlighted-json')
       expect(code.textContent).toContain('GET /live-2')
       await waitFor(() => {
