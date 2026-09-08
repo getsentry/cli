@@ -358,7 +358,7 @@ sentry issue merge cli-k9 cli-15h --into cli-k9    # alias form
 Link an existing external issue
 
 **Flags:**
-- `--external-issue <value> - URL of an existing external issue to link or unlink`
+- `--external-issue <value> - URL of an existing tracker issue or GitHub pull request`
 - `--integration <value> - Native integration ID, when multiple installations match`
 - `--app <value> - Sentry App slug (automatically detected for Linear URLs)`
 - `-n, --dry-run - Show what would happen without making changes`
@@ -368,6 +368,7 @@ Link an existing external issue
 
 ```bash
 sentry issue link FRONT-123 --external-issue https://github.com/example/app/issues/42
+sentry issue link FRONT-123 --external-issue https://github.com/example/app/pull/43
 sentry issue link FRONT-123 --external-issue https://example.atlassian.net/browse/APP-42
 sentry issue link FRONT-123 --external-issue https://linear.app/example/issue/APP-42/fix-error
 
@@ -380,7 +381,7 @@ sentry issue link my-org/FRONT-123 --external-issue https://github.com/example/a
 Unlink an external issue
 
 **Flags:**
-- `--external-issue <value> - URL of an existing external issue to link or unlink`
+- `--external-issue <value> - URL of an existing tracker issue or GitHub pull request`
 - `--integration <value> - Native integration ID, when multiple installations match`
 - `--app <value> - Sentry App slug (automatically detected for Linear URLs)`
 - `-y, --yes - Skip confirmation prompt`
@@ -391,6 +392,7 @@ Unlink an external issue
 
 ```bash
 sentry issue unlink FRONT-123 --external-issue https://github.com/example/app/issues/42
+sentry issue unlink FRONT-123 --external-issue https://github.com/example/app/pull/43 --yes
 sentry issue unlink my-org/FRONT-123 --external-issue https://example.atlassian.net/browse/APP-42 --yes
 sentry issue unlink FRONT-123 --external-issue https://linear.app/example/issue/APP-42/fix-error --dry-run
 ```

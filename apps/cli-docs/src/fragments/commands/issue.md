@@ -300,10 +300,11 @@ sentry issue ignore CLI-G5 --until auto
 
 ### Link an external issue
 
-Link an existing tracker issue to a Sentry issue:
+Link an existing tracker issue or GitHub pull request to a Sentry issue:
 
 ```bash
 sentry issue link FRONT-123 --external-issue https://github.com/example/app/issues/42
+sentry issue link FRONT-123 --external-issue https://github.com/example/app/pull/43
 sentry issue link FRONT-123 --external-issue https://example.atlassian.net/browse/APP-42
 sentry issue link FRONT-123 --external-issue https://linear.app/example/issue/APP-42/fix-error
 ```
@@ -325,9 +326,13 @@ write. The provider validates the remote issue when the link is submitted.
 An existing matching link succeeds with `changed: false`. A Sentry App that
 already links this issue to a different resource must be unlinked first.
 
-This command creates an association only. It does not create a tracker issue,
-resolve the Sentry issue, or link a commit or pull request. Existing integration
-status-sync settings continue to apply after linking.
+GitHub and GitHub Enterprise pull requests are stored as external references.
+Their `/pull/NUMBER` and `/issues/NUMBER` URLs identify the same resource for
+duplicate detection and unlinking. Linking a PR does not mark it as a fix or
+resolve the Sentry issue.
+
+This command does not create a tracker issue or link a commit. Existing
+integration status-sync settings continue to apply after linking.
 
 #### Link permissions
 
@@ -343,6 +348,7 @@ Remove an association without deleting either issue:
 
 ```bash
 sentry issue unlink FRONT-123 --external-issue https://github.com/example/app/issues/42
+sentry issue unlink FRONT-123 --external-issue https://github.com/example/app/pull/43 --yes
 sentry issue unlink my-org/FRONT-123 --external-issue https://example.atlassian.net/browse/APP-42 --yes
 sentry issue unlink FRONT-123 --external-issue https://linear.app/example/issue/APP-42/fix-error --dry-run
 ```

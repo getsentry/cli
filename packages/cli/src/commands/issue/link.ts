@@ -22,12 +22,13 @@ export const linkCommand = buildCommand({
   docs: {
     brief: "Link an existing external issue",
     fullDescription:
-      "Link an existing GitHub, Jira, Linear, or other supported tracker issue.\n" +
+      "Link an existing tracker issue or GitHub pull request as an external reference.\n" +
       "The integration must be installed in your Sentry organization.\n" +
       "This does not create a remote issue or resolve the Sentry issue.\n\n" +
       "Requires event:write and access to the Sentry project.\n\n" +
       "Examples:\n" +
       "  sentry issue link FRONT-123 --external-issue https://github.com/example/app/issues/42\n" +
+      "  sentry issue link FRONT-123 --external-issue https://github.com/example/app/pull/43\n" +
       "  sentry issue link my-org/FRONT-123 --external-issue https://example.atlassian.net/browse/APP-42\n" +
       "  sentry issue link FRONT-123 --external-issue https://linear.app/example/issue/APP-42/fix-error\n" +
       "  sentry issue link FRONT-123 --external-issue https://github.com/example/app/issues/42 --dry-run",

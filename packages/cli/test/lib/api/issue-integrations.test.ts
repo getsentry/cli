@@ -10,6 +10,10 @@ import {
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
 import { ApiError } from "../../../src/lib/errors.js";
+import {
+  linkExternalIssue,
+  unlinkExternalIssue,
+} from "../../../src/lib/issue-links.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 const REGION = "https://eu.sentry.io";
@@ -168,11 +172,18 @@ describe("native tracker issue links", () => {
   });
 
   test.each([
-    { provider: "github", host: "github.com" },
-    { provider: "github_enterprise", host: "github.example.com" },
-  ])("matches the registered $provider installation and spelling", async ({
+    { provider: "github", host: "github.com", path: "issues" },
+    {
+      provider: "github_enterprise",
+      host: "github.example.com",
+      path: "issues",
+    },
+    { provider: "github", host: "github.com", path: "pull" },
+    { provider: "github_enterprise", host: "github.example.com", path: "pull" },
+  ])("prepares $provider /$path with the registered repository spelling", async ({
     provider,
     host,
+    path,
   }) => {
     const requests = mockApi((request) => {
       const { pathname } = new URL(request.url);
@@ -189,15 +200,123 @@ describe("native tracker issue links", () => {
 
     const prepared = await resolveNativeIssueLink({
       ...SOURCE,
-      url: `https://${host}/OWNER/repo/issues/7`,
+      url: `https://${host}/OWNER/repo/${path}/7`,
     });
 
     expect(prepared).toMatchObject({
       integrationId: "20",
       body: { repo: "Owner/Repo", externalIssue: "7" },
-      url: `https://${host}/Owner/Repo/issues/7`,
+      url: `https://${host}/Owner/Repo/${path}/7`,
     });
     expect(requests).toHaveLength(2);
+  });
+
+  test.each([
+    { provider: "github", host: "github.com" },
+    { provider: "github_enterprise", host: "github.example.com" },
+  ])("links, recognizes and unlinks a $provider PR across both URL forms", async ({
+    provider,
+    host,
+  }) => {
+    const pullUrl = `https://${host}/Owner/Repo/pull/7`;
+    const issueUrl = `https://${host}/Owner/Repo/issues/7`;
+    const storedLink = {
+      ...LINK,
+      provider,
+      key: "Owner/Repo#7",
+      displayName: "Owner/Repo#7",
+      url: issueUrl,
+    };
+    let linked = false;
+    const requests = mockApi(async (request) => {
+      const url = new URL(request.url);
+      expect(url.origin).toBe(REGION);
+      if (request.method === "PUT") {
+        expect(url.pathname).toBe(`${INTEGRATIONS}10/`);
+        expect(await request.json()).toEqual({
+          repo: "Owner/Repo",
+          externalIssue: "7",
+        });
+        linked = true;
+        // The mutation uses GitHub's html_url; listing reconstructs /issues/N.
+        return json({
+          ...storedLink,
+          id: 1234,
+          integrationId: 10,
+          url: pullUrl,
+        });
+      }
+      if (request.method === "DELETE") {
+        expect(url.pathname).toBe(`${INTEGRATIONS}10/`);
+        expect(url.searchParams.get("externalIssue")).toBe("1234");
+        linked = false;
+        return new Response(null, { status: 204 });
+      }
+      expect(request.method).toBe("GET");
+      if (url.pathname === INTEGRATIONS) {
+        return json([
+          integration(
+            provider,
+            `${host}/owner`,
+            "10",
+            linked ? [storedLink] : []
+          ),
+        ]);
+      }
+      expect(url.pathname).toBe(REPOSITORIES);
+      return json([repository("Owner/Repo", "10")]);
+    });
+
+    const options = {
+      ...SOURCE,
+      url: `https://${host}/OWNER/repo/pull/7/files?source=cli#diff`,
+    };
+    expect(await linkExternalIssue(options)).toMatchObject({
+      linked: true,
+      changed: true,
+      externalIssue: { id: "1234", identifier: "Owner/Repo#7", url: pullUrl },
+    });
+    for (const url of [pullUrl, issueUrl]) {
+      expect(await linkExternalIssue({ ...SOURCE, url })).toMatchObject({
+        linked: true,
+        changed: false,
+        externalIssue: { id: "1234" },
+      });
+    }
+    expect(
+      await unlinkExternalIssue({ ...options, dryRun: true })
+    ).toMatchObject({
+      linked: true,
+      changed: false,
+      dryRun: true,
+    });
+    expect(await unlinkExternalIssue(options)).toMatchObject({
+      linked: false,
+      changed: true,
+      externalIssue: { id: "1234" },
+    });
+    expect(await unlinkExternalIssue(options)).toMatchObject({
+      linked: false,
+      changed: false,
+    });
+    expect(
+      requests
+        .filter((request) => request.method !== "GET")
+        .map((request) => request.method)
+    ).toEqual(["PUT", "DELETE"]);
+  });
+
+  test("does not treat a Bitbucket pull request as an issue", async () => {
+    const requests = mockApi(() =>
+      json([integration("bitbucket", "bitbucket.org/owner")])
+    );
+    await expect(
+      resolveNativeIssueLink({
+        ...SOURCE,
+        url: "https://bitbucket.org/owner/repo/pull/7",
+      })
+    ).rejects.toThrow("No installed native");
+    expect(requests.every((request) => request.method === "GET")).toBe(true);
   });
 
   test("does not select GitHub repositories absent from the installation", async () => {
@@ -511,7 +630,8 @@ describe("native tracker issue links", () => {
   });
 
   test.each([
-    "https://github.com/owner/repo/pull/7",
+    "https://github.com/owner/repo/pulls/7",
+    "https://bitbucket.org/owner/repo/pull-requests/7",
     "https://gitlab.com/owner/repo/-/merge_requests/7",
     "https://github.com/owner/repo/commit/abcdef",
     "https://username:secret@tracker.example.com/browse/PROJ-7",
@@ -568,7 +688,7 @@ describe("findNativeIssueLink", () => {
     expect(findNativeIssueLink([LINK, second], JIRA_URL, "20")).toBe(second);
   });
 
-  test("never equates invalid URLs just because both lack a parsed issue key", () => {
+  test("distinguishes GitHub PR numbers, repositories and hosts", () => {
     const link = {
       ...LINK,
       provider: "github",
@@ -576,6 +696,23 @@ describe("findNativeIssueLink", () => {
     };
     expect(
       findNativeIssueLink([link], "https://github.com/owner/repo/pull/8")
+    ).toBeUndefined();
+    expect(
+      findNativeIssueLink([link], "https://github.com/owner/other/pull/7")
+    ).toBeUndefined();
+    expect(
+      findNativeIssueLink([link], "https://other.example.com/owner/repo/pull/7")
+    ).toBeUndefined();
+  });
+
+  test("never equates invalid URLs just because both lack a parsed issue key", () => {
+    const link = {
+      ...LINK,
+      provider: "github",
+      url: "https://github.com/owner/repo/commit/abc",
+    };
+    expect(
+      findNativeIssueLink([link], "https://github.com/owner/repo/commit/def")
     ).toBeUndefined();
     expect(
       findNativeIssueLink([LINK], "https://other.example.com/browse/PROJ-7")

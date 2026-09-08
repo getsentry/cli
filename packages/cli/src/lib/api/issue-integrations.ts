@@ -101,6 +101,7 @@ type ParsedTarget = Pick<PreparedNativeIssueLink, "url" | "key" | "body">;
 
 const TRAILING_SLASH = /\/+$/;
 const REPOSITORY_ISSUE = /^\/([^/]+\/[^/]+)\/issues\/(\d+)(?:\/[^/]+)?$/;
+const GITHUB_PULL_REQUEST = /^\/([^/]+\/[^/]+)\/pull\/(\d+)(?:\/[^/]+)?$/;
 const GITLAB_ISSUE = /^\/(.+?)(?:\/-)?\/issues\/(\d+)$/;
 const JIRA_ISSUE = /^(.*?)\/browse\/([A-Z][A-Z0-9_]*-\d+)$/i;
 const WORK_ITEM = /^(.*?)\/_workitems\/edit\/(\d+)$/;
@@ -147,15 +148,22 @@ function integrationUrl(integration: NativeIntegration): URL | undefined {
   return parseUrl(domain.includes("://") ? domain : `https://${domain}`);
 }
 
-function parseRepositoryIssue(url: URL): ParsedTarget | undefined {
-  const match = REPOSITORY_ISSUE.exec(url.pathname);
+function parseRepositoryIssue(
+  url: URL,
+  provider: string
+): ParsedTarget | undefined {
+  // GitHub exposes PRs through its issue API; both URL forms share repo#number.
+  const pullRequest = ["github", "github_enterprise"].includes(provider)
+    ? GITHUB_PULL_REQUEST.exec(url.pathname)
+    : null;
+  const match = pullRequest ?? REPOSITORY_ISSUE.exec(url.pathname);
   if (!(match?.[1] && match[2])) {
     return;
   }
   const repo = match[1];
   const number = match[2];
   return {
-    url: `${url.origin}/${repo}/issues/${number}`,
+    url: `${url.origin}/${repo}/${pullRequest ? "pull" : "issues"}/${number}`,
     key: `${repo}#${number}`,
     body: { repo, externalIssue: number },
   };
@@ -242,7 +250,7 @@ function parseTarget(
     return;
   }
   if (["github", "github_enterprise", "bitbucket"].includes(provider)) {
-    const target = parseRepositoryIssue(url);
+    const target = parseRepositoryIssue(url, provider);
     const account = domain.pathname.split("/").find(Boolean);
     if (
       account &&
@@ -388,9 +396,11 @@ function matchesNativeUrl(link: NativeIssueLink, target: URL): boolean {
     );
   }
   if (["github", "github_enterprise", "bitbucket"].includes(link.provider)) {
-    const key = parseRepositoryIssue(target)?.key.toLowerCase();
+    // Sentry's list response can reconstruct /issues/N for a linked /pull/N.
+    const key = parseRepositoryIssue(target, link.provider)?.key.toLowerCase();
     return Boolean(
-      key && key === parseRepositoryIssue(existing)?.key.toLowerCase()
+      key &&
+        key === parseRepositoryIssue(existing, link.provider)?.key.toLowerCase()
     );
   }
   if (["jira", "jira_server"].includes(link.provider)) {
@@ -428,9 +438,12 @@ export async function resolveNativeIssueLink(options: {
   integrationId?: string;
 }): Promise<PreparedNativeIssueLink> {
   const url = parseUrl(options.url);
-  if (SCM_CHANGE.test(url.pathname)) {
+  if (
+    SCM_CHANGE.test(url.pathname) &&
+    !GITHUB_PULL_REQUEST.test(url.pathname)
+  ) {
     throw new ValidationError(
-      "External issue linking accepts tracker issues, not commits or pull requests."
+      "External issue linking supports tracker issues and GitHub pull requests."
     );
   }
   const integrations = await listIntegrations(options.orgSlug, options.issueId);
@@ -471,7 +484,10 @@ export async function resolveNativeIssueLink(options: {
             ...target,
             body: { ...target.body, repo: repository.name },
             key: `${repository.name}#${target.body.externalIssue}`,
-            url: `${url.origin}/${repository.name}/issues/${target.body.externalIssue}`,
+            url: target.url.replace(
+              `/${target.body.repo}/`,
+              `/${repository.name}/`
+            ),
           },
         },
       ];

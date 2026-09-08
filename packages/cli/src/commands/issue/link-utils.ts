@@ -7,7 +7,7 @@ export const EXTERNAL_ISSUE_FLAGS = {
   "external-issue": {
     kind: "parsed",
     parse: String,
-    brief: "URL of an existing external issue to link or unlink",
+    brief: "URL of an existing tracker issue or GitHub pull request",
   },
   integration: {
     kind: "parsed",
