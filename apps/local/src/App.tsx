@@ -1,5 +1,6 @@
-import { Eye, Radio, ShieldCheck, Terminal } from 'lucide-react'
+import { ChevronDown, Terminal } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { JsonView } from '@/components/json-view.tsx'
 import { ThemeToggle } from '@/components/theme-toggle.tsx'
 import { Badge } from '@/components/ui/badge.tsx'
 import {
@@ -22,6 +23,10 @@ import {
   STREAM_STORAGE_KEY,
   type LocalFeedItem,
 } from '@/lib/spotlight.ts'
+
+type EventEntryProps = {
+  item: LocalFeedItem
+}
 
 function formatTimestamp(timestamp: LocalFeedItem['timestamp']): string {
   if (timestamp === undefined) {
@@ -51,6 +56,38 @@ function saveStreamUrl(streamUrl: string): void {
   }
 }
 
+function EventEntry({ item }: EventEntryProps) {
+  const [isOpen, setIsOpen] = useState(false)
+
+  return (
+    <li>
+      <details
+        className="group rounded-lg border border-border bg-card transition-colors open:bg-muted/25"
+        onToggle={(event) => setIsOpen(event.currentTarget.open)}
+      >
+        <summary
+          aria-label={`View ${item.type} event`}
+          className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 outline-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        >
+          <Badge>{item.type}</Badge>
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <time>{formatTimestamp(item.timestamp)}</time>
+            <ChevronDown
+              className="size-4 transition-transform group-open:rotate-180"
+              aria-hidden="true"
+            />
+          </div>
+        </summary>
+        {isOpen ? (
+          <div className="border-t border-border">
+            <JsonView code={item.text} />
+          </div>
+        ) : null}
+      </details>
+    </li>
+  )
+}
+
 export default function App() {
   const [streamUrl] = useState(() =>
     getPreferredStreamUrl(window.location.hash, getSavedStream())
@@ -62,7 +99,6 @@ export default function App() {
   const [message, setMessage] = useState<string | undefined>()
   const fallbackEventId = useRef(0)
   const presentation = getConnectionPresentation(connection)
-  const badgeVariant = presentation.tone === 'neutral' ? 'default' : presentation.tone
 
   useEffect(() => {
     const fragmentStreamUrl = getStreamUrlFromHash(window.location.hash)
@@ -110,45 +146,32 @@ export default function App() {
 
   return (
     <main className="min-h-screen bg-background">
-      <div className="mx-auto w-full max-w-6xl px-5 py-5 sm:px-8 sm:py-8">
+      <div className="mx-auto w-full max-w-4xl px-5 py-5 sm:px-8 sm:py-8">
         <header className="flex items-center justify-between gap-4 border-b border-border pb-5">
           <div className="flex items-center" aria-label="Sentry CLI">
             <img className="h-5 w-auto dark:hidden" src="/sentry-cli-light.svg" alt="Sentry CLI" />
             <img className="hidden h-5 w-auto dark:block" src="/sentry-cli.svg" alt="" />
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant={badgeVariant} role="status">
+            <span role="status" aria-label={presentation.label} title={presentation.label}>
               <span
                 className={
                   presentation.tone === 'success'
-                    ? 'size-1.5 rounded-full bg-emerald-500'
+                    ? 'block size-2 rounded-full bg-emerald-500 shadow-[0_0_10px_oklch(0.72_0.19_160)]'
                     : presentation.tone === 'warning'
-                      ? 'size-1.5 rounded-full bg-amber-500'
-                      : 'size-1.5 rounded-full bg-muted-foreground'
+                      ? 'block size-2 rounded-full bg-amber-500'
+                      : 'block size-2 rounded-full bg-muted-foreground'
                 }
-                aria-hidden="true"
               />
-              {presentation.label}
-            </Badge>
+              <span className="sr-only">{presentation.label}</span>
+            </span>
             <ThemeToggle />
           </div>
         </header>
 
-        <div className="grid gap-5 py-8 lg:grid-cols-[minmax(0,1fr)_15rem]">
-          <div className="min-w-0 space-y-5">
-            <section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-              <div>
-                <p className="mb-2 text-sm font-medium text-primary">Live local telemetry</p>
-                <h1 className="text-3xl font-semibold tracking-tight">Event stream</h1>
-                <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-                  A read-only view of envelopes received by Sentry Local on this machine.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Radio className="size-4 text-primary" aria-hidden="true" />
-                <span>{items.length} of 500 retained</span>
-              </div>
-            </section>
+        <div className="py-10">
+          <section className="min-w-0 space-y-5" aria-label="Local Sentry events">
+            <h1 className="text-xl font-semibold tracking-tight">Events</h1>
 
             {connection === 'missing' ? (
               <Card>
@@ -172,53 +195,19 @@ export default function App() {
               </div>
             ) : null}
 
-            <Card aria-label="Local Sentry events">
-              <CardHeader className="flex-row items-center justify-between gap-4">
-                <div>
-                  <CardTitle>Incoming events</CardTitle>
-                  <CardDescription>Transactions, errors, logs, and other envelope items.</CardDescription>
-                </div>
-                <Eye className="size-5 text-muted-foreground" aria-hidden="true" />
-              </CardHeader>
-              <CardContent>
-                {items.length === 0 ? (
-                  <div className="flex min-h-56 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/40 px-6 text-center">
-                    <Terminal className="mb-3 size-5 text-primary" aria-hidden="true" />
-                    <p className="font-medium">Waiting for local telemetry</p>
-                    <p className="mt-1 max-w-sm text-sm leading-6 text-muted-foreground">
-                      Send a trace, error, or log from your app and it will appear here.
-                    </p>
-                  </div>
-                ) : (
-                  <ol className="max-h-[36rem] space-y-3 overflow-y-auto pr-1">
-                    {items.map((item) => (
-                      <li key={item.id} className="rounded-lg border border-border bg-muted/25 p-4">
-                        <div className="mb-3 flex items-center justify-between gap-4 text-sm">
-                          <Badge>{item.type}</Badge>
-                          <time className="shrink-0 text-muted-foreground">
-                            {formatTimestamp(item.timestamp)}
-                          </time>
-                        </div>
-                        <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-foreground/85">
-                          {item.text}
-                        </pre>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <aside className="space-y-3 lg:pt-16">
-            <div className="rounded-xl border border-border bg-muted/35 p-4">
-              <ShieldCheck className="mb-3 size-5 text-primary" aria-hidden="true" />
-              <p className="text-sm font-medium">Local by design</p>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                This viewer only reads the stream selected by the CLI. It does not send telemetry.
-              </p>
-            </div>
-          </aside>
+            {items.length === 0 ? (
+              <div className="flex min-h-56 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/40 px-6 text-center">
+                <Terminal className="mb-3 size-5 text-primary" aria-hidden="true" />
+                <p className="font-medium">Waiting for events</p>
+              </div>
+            ) : (
+              <ol className="max-h-[42rem] space-y-2 overflow-y-auto pr-1">
+                {items.map((item) => (
+                  <EventEntry key={item.id} item={item} />
+                ))}
+              </ol>
+            )}
+          </section>
         </div>
       </div>
     </main>

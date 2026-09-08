@@ -1,7 +1,7 @@
 import { createSpotlightBuffer } from '@spotlightjs/spotlight/sdk'
 import { EventSource as NodeEventSource } from 'eventsource'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ThemeProvider } from '@/components/theme-provider.tsx'
 import App from './App.tsx'
 import {
@@ -76,7 +76,7 @@ describe('local receiver to viewer integration', () => {
     window.history.replaceState(null, '', '/')
   })
 
-  test('renders a transaction sent after the viewer connects', async () => {
+  test('renders live transactions as collapsed, expandable JSON entries', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -84,9 +84,23 @@ describe('local receiver to viewer integration', () => {
       await screen.findByText('Connected to local receiver')
 
       await sendEnvelope(port, 'GET /live')
+      await screen.findByLabelText('View transaction event')
+      await sendEnvelope(port, 'GET /live-2')
 
-      await screen.findByText('transaction')
-      await screen.findByText(/GET \/live/)
+      await waitFor(() => {
+        expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
+      })
+      const disclosures = screen.getAllByLabelText('View transaction event')
+      expect(disclosures[0]?.closest('details')?.open).toBe(false)
+
+      fireEvent.click(disclosures[0]!)
+
+      expect(disclosures[0]?.closest('details')?.open).toBe(true)
+      const code = await screen.findByTestId('highlighted-json')
+      expect(code.textContent).toContain('GET /live')
+      await waitFor(() => {
+        expect(screen.getByTestId('highlighted-json').querySelector('.shiki')).not.toBeNull()
+      })
     } finally {
       cleanup()
       await stopReceiver(server)
@@ -101,7 +115,11 @@ describe('local receiver to viewer integration', () => {
       renderViewer(port)
 
       await screen.findByText('Connected to local receiver')
-      await screen.findByText(/GET \/buffered/)
+      const disclosure = await screen.findByLabelText('View transaction event')
+      fireEvent.click(disclosure)
+      expect((await screen.findByTestId('highlighted-json')).textContent).toContain(
+        'GET /buffered'
+      )
     } finally {
       cleanup()
       await stopReceiver(server)
