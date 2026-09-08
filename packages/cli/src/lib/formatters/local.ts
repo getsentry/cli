@@ -743,18 +743,45 @@ function jsonSafeIdentifier(value: unknown): string | undefined {
   }
 }
 
+/**
+ * Remove terminal-affecting characters from every string in an observation.
+ *
+ * Envelope payloads are untrusted, and `JSON.stringify()` does not escape C1
+ * controls or BiDi overrides. Normalizing the final record in one place keeps
+ * new JSON fields from accidentally bypassing the terminal-safety contract.
+ */
+function sanitizeJsonValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return stripBidi(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(sanitizeJsonValue);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nestedValue]) => [
+        stripBidi(key),
+        sanitizeJsonValue(nestedValue),
+      ])
+    );
+  }
+  return value;
+}
+
 /** Serialize one versioned local observation as an NDJSON record. */
 function formatJsonObservation(
   observation: Record<string, unknown>,
   payload: Record<string, unknown>,
   header: Record<string, unknown>
 ): string {
-  return JSON.stringify({
-    schema_version: LOCAL_EVENT_SCHEMA_VERSION,
-    envelope_id: jsonSafeIdentifier(header.__spotlight_envelope_id),
-    event_id: jsonSafe(payload.event_id) ?? jsonSafe(header.event_id),
-    ...observation,
-  });
+  return JSON.stringify(
+    sanitizeJsonValue({
+      schema_version: LOCAL_EVENT_SCHEMA_VERSION,
+      envelope_id: jsonSafeIdentifier(header.__spotlight_envelope_id),
+      event_id: jsonSafe(payload.event_id) ?? jsonSafe(header.event_id),
+      ...observation,
+    })
+  );
 }
 
 /** Format an error item as a JSON object, including the best stack frame. */

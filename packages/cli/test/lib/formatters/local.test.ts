@@ -951,6 +951,39 @@ describe("formatItemJson", () => {
     expect(parsed.type).toBe("attachment");
   });
 
+  test("strips terminal controls from every JSON observation field", () => {
+    const lines = formatItemJson(
+      "attachment\u202e",
+      { timestamp: "2026-09-08\u009b", event_id: "event\u202e-123" },
+      serverHeader
+    );
+    const parsed = JSON.parse(lines[0]);
+
+    expect(parsed).toMatchObject({
+      type: "attachment",
+      timestamp: "2026-09-08",
+      event_id: "event-123",
+    });
+
+    const logLines = formatItemJson(
+      "log",
+      {
+        items: [
+          {
+            body: "safe",
+            attributes: {
+              nested: { value: { child: "unsafe\u202evalue" } },
+            },
+          },
+        ],
+      },
+      serverHeader
+    );
+    expect(JSON.parse(logLines[0]).attributes).toEqual({
+      nested: { child: "unsafevalue" },
+    });
+  });
+
   test("detects browser source in JSON", () => {
     const event = { timestamp: 1_700_000_000, message: "error" };
     const lines = formatItemJson("error", event, browserHeader);
