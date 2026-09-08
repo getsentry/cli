@@ -145,9 +145,9 @@ export default function App() {
   }, [streamUrl])
 
   return (
-    <main className="min-h-screen bg-background">
-      <div className="mx-auto w-full max-w-4xl px-5 py-5 sm:px-8 sm:py-8">
-        <header className="flex items-center justify-between gap-4 border-b border-border pb-5">
+    <main className="h-dvh overflow-hidden bg-background">
+      <div className="mx-auto flex h-full w-full max-w-4xl flex-col px-5 py-5 sm:px-8 sm:py-8">
+        <header className="shrink-0 flex items-center justify-between gap-4 border-b border-border pb-5">
           <div className="flex items-center" aria-label="Sentry CLI">
             <img className="h-5 w-auto dark:hidden" src="/sentry-cli-light.svg" alt="Sentry CLI" />
             <img className="hidden h-5 w-auto dark:block" src="/sentry-cli.svg" alt="" />
@@ -169,12 +169,12 @@ export default function App() {
           </div>
         </header>
 
-        <div className="py-10">
-          <section className="min-w-0 space-y-5" aria-label="Local Sentry events">
-            <h1 className="text-xl font-semibold tracking-tight">Events</h1>
+        <div className="flex min-h-0 flex-1 flex-col py-10">
+          <section className="flex min-h-0 flex-1 flex-col gap-5" aria-label="Local Sentry events">
+            <h1 className="shrink-0 text-xl font-semibold tracking-tight">Events</h1>
 
             {connection === 'missing' ? (
-              <Card>
+              <Card className="shrink-0">
                 <CardHeader>
                   <CardTitle>Connect a local receiver</CardTitle>
                   <CardDescription>
@@ -190,18 +190,18 @@ export default function App() {
             ) : null}
 
             {message ? (
-              <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+              <div className="shrink-0 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
                 {message}
               </div>
             ) : null}
 
             {items.length === 0 ? (
-              <div className="flex min-h-56 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/40 px-6 text-center">
+              <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/40 px-6 text-center">
                 <Terminal className="mb-3 size-5 text-primary" aria-hidden="true" />
                 <p className="font-medium">Waiting for events</p>
               </div>
             ) : (
-              <ol className="max-h-[42rem] space-y-2 overflow-y-auto pr-1">
+              <ol data-testid="event-list" className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {items.map((item) => (
                   <EventEntry key={item.id} item={item} />
                 ))}

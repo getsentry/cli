@@ -90,6 +90,9 @@ describe('local receiver to viewer integration', () => {
       await waitFor(() => {
         expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
       })
+      const eventList = screen.getByTestId('event-list')
+      expect(eventList.className).toContain('flex-1')
+      expect(eventList.className).not.toContain('max-h-[42rem]')
       const disclosures = screen.getAllByLabelText('View transaction event')
       expect(disclosures[0]?.closest('details')?.open).toBe(false)
 
