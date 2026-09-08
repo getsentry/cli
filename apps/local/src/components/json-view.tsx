@@ -49,7 +49,7 @@ export function JsonView({ code }: JsonViewProps) {
 
   if (!html) {
     return (
-      <pre data-testid="highlighted-json" className="json-view overflow-x-auto p-4 text-xs leading-6">
+      <pre data-testid="highlighted-json" className="json-view overflow-x-auto p-3 text-xs leading-6">
         {code}
       </pre>
     )
@@ -58,7 +58,7 @@ export function JsonView({ code }: JsonViewProps) {
   return (
     <div
       data-testid="highlighted-json"
-      className="json-view overflow-x-auto p-4 text-xs leading-6"
+      className="json-view overflow-x-auto p-3 text-xs leading-6"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   )

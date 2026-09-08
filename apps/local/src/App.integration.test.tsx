@@ -93,6 +93,7 @@ describe('local receiver to viewer integration', () => {
       const eventList = screen.getByTestId('event-list')
       expect(eventList.className).toContain('flex-1')
       expect(eventList.className).not.toContain('max-h-[42rem]')
+      expect(screen.getByRole('complementary', { name: 'Events' })).not.toBeNull()
       const detail = screen.getByTestId('event-detail')
       expect(detail.textContent).toContain('GET /live')
       expect(detail.textContent).not.toContain('GET /live-2')

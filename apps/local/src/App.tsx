@@ -65,7 +65,7 @@ function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
         type="button"
         aria-label={`View ${item.type} event`}
         aria-current={isSelected ? 'true' : undefined}
-        className={`flex w-full cursor-pointer items-center justify-between gap-4 rounded-md px-3 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
+        className={`flex w-full cursor-pointer items-center justify-between gap-3 px-2 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
           isSelected ? 'bg-muted text-foreground' : 'hover:bg-muted/60'
         }`}
         onClick={() => onSelect(item.id)}
@@ -88,7 +88,7 @@ type EventDetailProps = {
 function EventDetail({ item }: EventDetailProps) {
   return (
     <section data-testid="event-detail" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-5 py-4">
+      <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border px-3">
         <Badge>{item.type}</Badge>
         <time className="text-sm text-muted-foreground">{formatTimestamp(item.timestamp)}</time>
       </header>
@@ -159,8 +159,8 @@ export default function App() {
 
   return (
     <main className="h-dvh overflow-hidden bg-background">
-      <div className="mx-auto flex h-full w-full max-w-none flex-col px-5 py-5 sm:px-8 sm:py-8">
-        <header className="shrink-0 flex items-center justify-between gap-4 border-b border-border pb-5">
+      <div className="mx-auto flex h-full w-full max-w-none flex-col px-3 py-3 sm:px-4 sm:py-4">
+        <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border">
           <div className="flex items-center" aria-label="Sentry CLI">
             <img className="h-5 w-auto dark:hidden" src="/sentry-cli-light.svg" alt="Sentry CLI" />
             <img className="hidden h-5 w-auto dark:block" src="/sentry-cli.svg" alt="" />
@@ -182,8 +182,8 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col py-6">
-          <section className="flex min-h-0 flex-1 flex-col gap-5" aria-label="Local Sentry events">
+        <div className="flex min-h-0 flex-1 flex-col py-3">
+          <section className="flex min-h-0 flex-1 flex-col gap-3" aria-label="Local Sentry events">
 
             {connection === 'missing' ? (
               <Card className="shrink-0">
@@ -208,19 +208,22 @@ export default function App() {
             ) : null}
 
             {items.length === 0 ? (
-              <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/40 px-6 text-center">
+              <div className="flex flex-1 flex-col items-center justify-center border border-dashed border-border bg-muted/40 px-4 text-center">
                 <Terminal className="mb-3 size-5 text-primary" aria-hidden="true" />
                 <p className="font-medium">Waiting for events</p>
               </div>
             ) : (
-              <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-card">
-                <aside className="flex min-h-0 w-72 shrink-0 flex-col border-r border-border bg-muted/30">
-                  <div className="shrink-0 border-b border-border px-4 py-4">
-                    <h1 className="text-sm font-semibold">Events</h1>
+              <div className="flex min-h-0 flex-1 overflow-hidden bg-card">
+                <aside
+                  aria-labelledby="event-list-heading"
+                  className="flex min-h-0 w-80 shrink-0 flex-col border-r border-border bg-muted/30"
+                >
+                  <div className="flex h-11 shrink-0 items-center border-b border-border px-3">
+                    <h1 id="event-list-heading" className="text-sm font-semibold">Events</h1>
                   </div>
                   <ol
                     data-testid="event-list"
-                    className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2"
+                    className="min-h-0 flex-1 space-y-px overflow-y-auto p-1"
                   >
                     {items.map((item) => (
                       <EventEntry
