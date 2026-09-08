@@ -185,6 +185,7 @@ export function findAppIssueLink(
   return matches[0];
 }
 
+/** Fetch a complete, validated collection; partial results cannot safely authorize a link mutation. */
 async function listAll<T>(
   fetchPage: (
     cursor: string | undefined
@@ -268,6 +269,7 @@ export async function listAppIssueLinks(
   );
 }
 
+/** Preserve the app's single association per Sentry issue; replacing a target requires explicit unlink. */
 function checkExisting(
   links: AppIssueLink[],
   url: string,
@@ -368,23 +370,20 @@ async function getLinkForm(
       item.type === "issue-link" &&
       item.sentryApp.uuid === installation.app.uuid
   );
-  if (matches.length !== 1 || !matches[0]?.schema.link) {
+  const component = matches[0];
+  const form = component?.schema.link;
+  if (matches.length !== 1 || !component || !form) {
     throw new ValidationError(
       `App ${installation.app.slug} does not expose an unambiguous issue-link form`,
       "app"
     );
   }
-  const component = matches[0];
   if (component.error) {
     throw new ApiError(
       `App ${installation.app.slug} could not prepare its issue-link form`,
       0,
       JSON.stringify(component.error)
     );
-  }
-  const form = component.schema.link;
-  if (!form) {
-    throw new ValidationError("App has no link form", "app");
   }
   validateUri(form.uri);
   return form;
@@ -434,9 +433,6 @@ async function getChoices({
       schema: ChoicesResponseSchema,
     }
   );
-  if (!Array.isArray(data.choices)) {
-    throw new ApiError("App search returned an invalid choices response", 0);
-  }
   return data.choices;
 }
 
@@ -467,6 +463,7 @@ function selectChoice(
   return choice[0];
 }
 
+/** Resolve form dependencies while keeping the target field bound to the requested issue URL. */
 async function resolveFields(
   options: ResolveAppIssueLinkOptions,
   form: LinkForm,

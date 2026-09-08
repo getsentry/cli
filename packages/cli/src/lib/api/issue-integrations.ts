@@ -2,14 +2,27 @@
 import {
   deleteOrganizationIssueIntegration,
   type ExternalIssueLinkResponse,
-  type IntegrationIssueConfigResponse,
   type LinkExternalIssueRequest,
   type ListOrganizationReposResponse,
   listOrganizationRepos,
   updateOrganizationIssueIntegration,
 } from "@sentry/api";
-
-import { ValidationError } from "../errors.js";
+import {
+  vExternalIssueLinkResponse,
+  vIntegrationIssueConfigResponse,
+  vListOrganizationReposResponse,
+} from "@sentry/api/valibot";
+import {
+  array,
+  type InferOutput,
+  nullish,
+  object,
+  optional,
+  pick,
+  safeParse,
+  string,
+} from "valibot";
+import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import { getSdkConfig } from "../sentry-client.js";
 import {
@@ -37,12 +50,30 @@ export type NativeIssueLink = Pick<
   title?: string;
 };
 
-type NativeIntegration = Pick<
-  IntegrationIssueConfigResponse,
-  "id" | "name" | "domainName" | "status" | "provider"
-> & {
-  externalIssues: Omit<NativeIssueLink, "integrationId" | "provider">[];
-};
+// The private list serializes link IDs as strings; the SDK mutation uses numbers.
+const NativeIntegrationSchema = object({
+  ...pick(vIntegrationIssueConfigResponse, [
+    "id",
+    "name",
+    "domainName",
+    "status",
+    "provider",
+  ]).entries,
+  externalIssues: array(
+    object({
+      ...pick(vExternalIssueLinkResponse, ["key", "url", "displayName"])
+        .entries,
+      id: string(),
+      title: nullish(string()),
+    })
+  ),
+});
+const NativeIntegrationsSchema = array(NativeIntegrationSchema);
+const NativeIssueMutationSchema = object({
+  ...vExternalIssueLinkResponse.entries,
+  title: optional(string()),
+});
+type NativeIntegration = InferOutput<typeof NativeIntegrationSchema>;
 
 /** Read-only resolution result used for previews and a subsequent link mutation. */
 export type PreparedNativeIssueLink = {
@@ -233,6 +264,11 @@ function parseTarget(
   }
 }
 
+/**
+ * Retrieve every page before choosing an integration or checking existing links.
+ * Partial results could miss a duplicate or hide an ambiguous match, so reaching
+ * the safety limit must fail instead of returning the partial list from autoPaginate.
+ */
 async function listFreshPages<T>(
   fetchPage: (cursor?: string) => Promise<PaginatedResponse<T[]>>
 ): Promise<T[]> {
@@ -264,6 +300,7 @@ async function listIntegrations(
       {
         params: { cursor, per_page: API_MAX_PER_PAGE },
         cache: "no-store",
+        schema: NativeIntegrationsSchema,
       }
     );
     return {
@@ -287,10 +324,18 @@ async function listFreshRepositories(
       path: { organization_id_or_slug: orgSlug },
       query,
     });
-    return unwrapPaginatedResult<ListOrganizationReposResponse>(
+    const page = unwrapPaginatedResult<unknown>(
       result,
       "Failed to list repositories"
     );
+    const parsed = safeParse(vListOrganizationReposResponse, page.data);
+    if (!parsed.success) {
+      throw new ApiError(
+        "Unexpected response format when listing repositories",
+        0
+      );
+    }
+    return { ...page, data: parsed.output };
   });
 }
 
@@ -299,6 +344,7 @@ function flattenLinks(integrations: NativeIntegration[]): NativeIssueLink[] {
     integration.externalIssues.map((link) => ({
       ...link,
       id: String(link.id),
+      title: link.title ?? undefined,
       integrationId: integration.id,
       provider: integration.provider.key,
       url:
@@ -479,10 +525,17 @@ export async function linkNativeIssue(
     },
     body: prepared.body,
   });
-  const data = unwrapResult<ExternalIssueLinkResponse>(
-    result,
-    "Failed to link external issue"
+  const parsed = safeParse(
+    NativeIssueMutationSchema,
+    unwrapResult<unknown>(result, "Failed to link external issue")
   );
+  if (!parsed.success) {
+    throw new ApiError(
+      "Unexpected response format after linking; inspect the current links before retrying",
+      0
+    );
+  }
+  const data = parsed.output;
   return {
     link: {
       ...data,

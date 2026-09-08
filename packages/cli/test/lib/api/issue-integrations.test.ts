@@ -9,6 +9,7 @@ import {
 } from "../../../src/lib/api/issue-integrations.js";
 import { setAuthToken } from "../../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../../src/lib/db/regions.js";
+import { ApiError } from "../../../src/lib/errors.js";
 import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 const REGION = "https://eu.sentry.io";
@@ -36,9 +37,27 @@ function integration(
     id,
     name: `Example ${provider}`,
     domainName,
-    provider: { key: provider },
+    provider: {
+      key: provider,
+      slug: provider,
+      name: `Example ${provider}`,
+      canAdd: true,
+      canDisable: false,
+      features: ["issue-basic"],
+      aspects: {},
+    },
     status: "active",
     externalIssues,
+  };
+}
+
+function repository(name: string, integrationId: string) {
+  return {
+    id: "100",
+    name,
+    integrationId,
+    status: "active",
+    dateCreated: "2026-01-01T00:00:00Z",
   };
 }
 
@@ -165,9 +184,7 @@ describe("native tracker issue links", () => {
         ]);
       }
       expect(pathname).toBe(REPOSITORIES);
-      return json([
-        { name: "Owner/Repo", integrationId: "20", status: "active" },
-      ]);
+      return json([repository("Owner/Repo", "20")]);
     });
 
     const prepared = await resolveNativeIssueLink({
@@ -188,7 +205,7 @@ describe("native tracker issue links", () => {
       json(
         new URL(request.url).pathname === INTEGRATIONS
           ? [integration("github", "github.com/owner")]
-          : [{ name: "owner/repo", integrationId: "20", status: "active" }]
+          : [repository("owner/repo", "20")]
       )
     );
     await expect(
@@ -197,6 +214,48 @@ describe("native tracker issue links", () => {
         url: "https://github.com/owner/repo/issues/7",
       })
     ).rejects.toThrow("No installed native");
+  });
+
+  test.each([
+    { name: "non-array page", data: {} },
+    {
+      name: "missing link array",
+      data: [{ ...integration(), externalIssues: undefined }],
+    },
+    {
+      name: "invalid link record",
+      data: [{ ...integration(), externalIssues: [{}] }],
+    },
+  ])("rejects an invalid integration response: $name", async ({ data }) => {
+    const requests = mockApi(() => json(data));
+    await expect(
+      resolveNativeIssueLink({ ...SOURCE, url: JIRA_URL }).then(linkNativeIssue)
+    ).rejects.toBeInstanceOf(ApiError);
+    expect(requests.map((request) => request.method)).toEqual(["GET"]);
+  });
+
+  test.each([
+    { name: "empty 204", response: () => new Response(null, { status: 204 }) },
+    { name: "non-array page", response: () => json({}) },
+    {
+      name: "invalid repository",
+      response: () => json([{ ...repository("owner/repo", "10"), name: 42 }]),
+    },
+  ])("rejects an invalid SDK repository response: $name", async ({
+    response,
+  }) => {
+    const requests = mockApi((request) =>
+      new URL(request.url).pathname === INTEGRATIONS
+        ? json([integration("github", "github.com/owner")])
+        : response()
+    );
+    await expect(
+      resolveNativeIssueLink({
+        ...SOURCE,
+        url: "https://github.com/owner/repo/issues/7",
+      }).then(linkNativeIssue)
+    ).rejects.toBeInstanceOf(ApiError);
+    expect(requests.map((request) => request.method)).toEqual(["GET", "GET"]);
   });
 
   test("preserves repository pagination and provider body fields through the SDK", async () => {
@@ -216,7 +275,7 @@ describe("native tracker issue links", () => {
           repo: "owner/repo",
           externalIssue: "7",
         });
-        return json(githubLink);
+        return json({ ...githubLink, id: 1234, integrationId: 10 });
       }
       expect(request.method).toBe("GET");
       if (url.pathname === INTEGRATIONS) {
@@ -230,9 +289,7 @@ describe("native tracker issue links", () => {
         });
       }
       expect(url.searchParams.get("cursor")).toBe("second");
-      return json([
-        { name: "owner/repo", integrationId: "10", status: "active" },
-      ]);
+      return json([repository("owner/repo", "10")]);
     });
 
     const prepared = await resolveNativeIssueLink({
@@ -311,6 +368,25 @@ describe("native tracker issue links", () => {
   });
 
   test.each([
+    { name: "empty 204", response: () => new Response(null, { status: 204 }) },
+    { name: "empty object", response: () => json({}) },
+    { name: "invalid numeric IDs", response: () => json(LINK) },
+  ])("does not report success for an invalid SDK mutation response: $name", async ({
+    response,
+  }) => {
+    const requests = mockApi((request) =>
+      request.method === "GET" ? json([integration()]) : response()
+    );
+    const prepared = await resolveNativeIssueLink({ ...SOURCE, url: JIRA_URL });
+    const mutation = linkNativeIssue(prepared);
+    await expect(mutation).rejects.toBeInstanceOf(ApiError);
+    await expect(mutation).rejects.toThrow(
+      "inspect the current links before retrying"
+    );
+    expect(requests.map((request) => request.method)).toEqual(["GET", "PUT"]);
+  });
+
+  test.each([
     "PUT",
     "DELETE",
   ])("does not retry failed %s mutations", async (method) => {
@@ -346,6 +422,34 @@ describe("native tracker issue links", () => {
     });
     await unlinkNativeIssueLink(SOURCE.orgSlug, SOURCE.issueId, LINK);
     expect(requests).toHaveLength(1);
+  });
+
+  test("lists and unlinks an existing issue whose title is null", async () => {
+    const requests = mockApi((request) => {
+      if (request.method === "GET") {
+        return json([
+          { ...integration(), externalIssues: [{ ...LINK, title: null }] },
+        ]);
+      }
+      expect(request.method).toBe("DELETE");
+      expect(new URL(request.url).searchParams.get("externalIssue")).toBe(
+        "1234"
+      );
+      return new Response(null, { status: 204 });
+    });
+    const link = findNativeIssueLink(
+      await listNativeIssueLinks(SOURCE.orgSlug, SOURCE.issueId),
+      JIRA_URL
+    );
+    expect(link).toEqual({ ...LINK, title: undefined });
+    if (!link) {
+      throw new Error("Expected the existing external issue link");
+    }
+    await unlinkNativeIssueLink(SOURCE.orgSlug, SOURCE.issueId, link);
+    expect(requests.map((request) => request.method)).toEqual([
+      "GET",
+      "DELETE",
+    ]);
   });
 
   test("rejects an unlink ID that the SDK numeric query cannot represent exactly", async () => {

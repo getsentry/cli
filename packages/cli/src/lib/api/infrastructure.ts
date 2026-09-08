@@ -21,7 +21,6 @@ import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import {
   getApiBaseUrl,
-  getDefaultSdkConfig,
   getSdkConfig,
   type SentryRequestOptions,
 } from "../sentry-client.js";
@@ -764,7 +763,7 @@ export async function rawApiRequest(
 }> {
   const { method = "GET", body, params, headers: customHeaders = {} } = options;
 
-  const config = getDefaultSdkConfig();
+  const config = getSdkConfig(getApiBaseUrl(), options);
 
   const searchParams = buildSearchParams(params);
   const normalizedEndpoint = endpoint.startsWith("/")

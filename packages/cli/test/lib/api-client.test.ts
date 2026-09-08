@@ -326,6 +326,25 @@ describe("buildSearchParams", () => {
 });
 
 describe("rawApiRequest", () => {
+  test("honors per-request retry and cache controls", async () => {
+    const requests: Request[] = [];
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(new Request(input, init));
+      return Response.json({ detail: "Service unavailable" }, { status: 503 });
+    };
+
+    const result = await rawApiRequest("test/", {
+      method: "POST",
+      body: { action: "link" },
+      retry: false,
+      cache: "no-store",
+    });
+
+    expect(result.status).toBe(503);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.cache).toBe("no-store");
+  });
+
   test("sends GET request without body", async () => {
     const requests: Request[] = [];
 
