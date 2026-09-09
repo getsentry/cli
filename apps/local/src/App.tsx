@@ -463,9 +463,11 @@ export default function App() {
   const connectToDraft = () => {
     const endpoint = parseStreamEndpoint(draftEndpoint)
     if (!endpoint) {
-      setIsConnectionEnabled(false)
       setConnectionError('Enter a loopback stream or an HTTPS remote stream ending in /stream.')
-      setConnection('failed')
+      if (connection !== 'connected') {
+        setIsConnectionEnabled(false)
+        setConnection('failed')
+      }
       return
     }
     setDraftEndpoint(endpoint.url)

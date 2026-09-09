@@ -116,13 +116,16 @@ class ControllableEventSource extends EventTarget {
   static instances: ControllableEventSource[] = []
   onopen: ((event: Event) => void) | null = null
   onerror: ((event: Event) => void) | null = null
+  closed = false
 
   constructor(_url: string) {
     super()
     ControllableEventSource.instances.push(this)
   }
 
-  close() {}
+  close() {
+    this.closed = true
+  }
 }
 
 describe('local receiver to viewer integration', () => {
@@ -298,6 +301,25 @@ describe('local receiver to viewer integration', () => {
     })
 
     expect(screen.getByLabelText('Receiver endpoint')).not.toBeNull()
+  })
+
+  test('keeps a healthy receiver open after an invalid replacement endpoint', async () => {
+    ControllableEventSource.instances = []
+    vi.stubGlobal('EventSource', ControllableEventSource)
+    renderBareViewer()
+
+    const source = ControllableEventSource.instances[0]
+    expect(source).toBeDefined()
+    await act(async () => source?.onopen?.(new Event('open')))
+    await screen.findByText('Connected to local receiver')
+    fireEvent.click(screen.getByRole('button', { name: 'Change receiver' }))
+    fireEvent.change(screen.getByLabelText('Receiver endpoint'), {
+      target: { value: 'http://receiver.example/stream' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+    expect(source?.closed).toBe(false)
+    expect(screen.getByRole('status', { name: 'Connected to local receiver' })).not.toBeNull()
   })
 
   test('replays an envelope buffered before the viewer opens', async () => {
