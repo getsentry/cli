@@ -15,4 +15,11 @@ describe('getConnectionPresentation', () => {
       tone: 'neutral',
     })
   })
+
+  test('makes a failed receiver visible in the status control', () => {
+    expect(getConnectionPresentation('failed')).toEqual({
+      label: 'Receiver unavailable',
+      tone: 'warning',
+    })
+  })
 })

@@ -5,6 +5,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { ThemeProvider } from '@/components/theme-provider.tsx'
 import App from './App.tsx'
 import {
+  REMOTE_STREAM_STORAGE_KEY,
+  STREAM_STORAGE_KEY,
+} from './lib/spotlight.ts'
+import {
   buildApp,
   tryListen,
 } from '../../../packages/cli/src/commands/local/server.ts'
@@ -87,9 +91,31 @@ function renderViewer(port: number) {
   )
 }
 
+function renderBareViewer() {
+  window.history.replaceState(null, '', '/')
+  return render(
+    <ThemeProvider attribute="class" defaultTheme="light">
+      <App />
+    </ThemeProvider>
+  )
+}
+
+class OpeningEventSource extends EventTarget {
+  onopen: ((event: Event) => void) | null = null
+  onerror: ((event: Event) => void) | null = null
+
+  constructor(_url: string) {
+    super()
+    queueMicrotask(() => this.onopen?.(new Event('open')))
+  }
+
+  close() {}
+}
+
 describe('local receiver to viewer integration', () => {
   beforeEach(() => {
     window.localStorage.clear()
+    window.sessionStorage.clear()
     vi.stubGlobal('EventSource', NodeEventSource)
     vi.stubGlobal('matchMedia', () => ({
       matches: false,
@@ -159,6 +185,57 @@ describe('local receiver to viewer integration', () => {
       cleanup()
       await stopReceiver(server)
     }
+  })
+
+  test('offers a useful connection landing for a bare viewer visit', () => {
+    renderBareViewer()
+
+    expect(screen.getByText('Looking for Sentry Local')).not.toBeNull()
+    const endpoint = screen.getByLabelText('Receiver endpoint') as HTMLInputElement
+    expect(endpoint.value).toBe('http://localhost:8969/stream')
+    expect(screen.getByRole('button', { name: 'Connect' })).not.toBeNull()
+    expect(screen.getByText('Advanced connection')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy local serve command' })).not.toBeNull()
+  })
+
+  test('connects a bare viewer to a custom loopback receiver and saves it after opening', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderBareViewer()
+      fireEvent.change(screen.getByLabelText('Receiver endpoint'), {
+        target: { value: `http://127.0.0.1:${port}/stream` },
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+      await screen.findByText('Connected to local receiver')
+      expect(window.localStorage.getItem('sentry.local.stream-url')).toBe(
+        `http://127.0.0.1:${port}/stream`
+      )
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('keeps a successfully opened remote receiver only for this browser session', async () => {
+    vi.stubGlobal('EventSource', OpeningEventSource)
+    renderBareViewer()
+    await screen.findByText('Connected to local receiver')
+    window.localStorage.clear()
+    fireEvent.click(screen.getByRole('button', { name: 'Change receiver' }))
+
+    fireEvent.change(screen.getByLabelText('Receiver endpoint'), {
+      target: { value: 'https://receiver.example/stream?token=abc' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+    await waitFor(() => {
+      expect(window.sessionStorage.getItem(REMOTE_STREAM_STORAGE_KEY)).toBe(
+        'https://receiver.example/stream?token=abc'
+      )
+    })
+    expect(window.localStorage.getItem(STREAM_STORAGE_KEY)).toBeNull()
   })
 
   test('replays an envelope buffered before the viewer opens', async () => {

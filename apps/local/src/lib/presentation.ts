@@ -1,4 +1,4 @@
-export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'missing'
+export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'missing' | 'failed'
 
 export type ConnectionPresentation = {
   label: string
@@ -17,5 +17,7 @@ export function getConnectionPresentation(
       return { label: 'Reconnecting to local receiver', tone: 'warning' }
     case 'missing':
       return { label: 'Waiting for a local stream', tone: 'neutral' }
+    case 'failed':
+      return { label: 'Receiver unavailable', tone: 'warning' }
   }
 }

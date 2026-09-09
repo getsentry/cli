@@ -1,16 +1,10 @@
 import { Check, Copy, Search, Terminal } from 'lucide-react'
 import { Fragment, type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { JsonView } from '@/components/json-view.tsx'
+import { ConnectionLanding } from '@/components/connection-landing.tsx'
 import { ReceiverControls } from '@/components/receiver-controls.tsx'
 import { TraceWaterfall } from '@/components/trace-waterfall.tsx'
 import { Badge } from '@/components/ui/badge.tsx'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card.tsx'
 import {
   getConnectionPresentation,
   type ConnectionState,
@@ -18,9 +12,11 @@ import {
 import { copyText } from '@/lib/clipboard.ts'
 import {
   appendBounded,
+  DEFAULT_STREAM_URL,
   decodeEnvelope,
-  getPreferredStreamUrl,
-  getStreamUrlFromHash,
+  parseStreamEndpoint,
+  REMOTE_STREAM_STORAGE_KEY,
+  resolveInitialStreamUrl,
   SENTRY_ENVELOPE_EVENT,
   STREAM_STORAGE_KEY,
   type EventMetadata,
@@ -125,11 +121,27 @@ function getSavedStream(): string | null {
   }
 }
 
+function getSavedRemoteStream(): string | null {
+  try {
+    return window.sessionStorage.getItem(REMOTE_STREAM_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
 function saveStreamUrl(streamUrl: string): void {
   try {
     window.localStorage.setItem(STREAM_STORAGE_KEY, streamUrl)
   } catch {
     // Private browsing or browser policy can disable storage; the current tab still works.
+  }
+}
+
+function saveRemoteStreamUrl(streamUrl: string): void {
+  try {
+    window.sessionStorage.setItem(REMOTE_STREAM_STORAGE_KEY, streamUrl)
+  } catch {
+    // Browser policies can disable storage; the active tab still works.
   }
 }
 
@@ -377,12 +389,13 @@ function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
 }
 
 export default function App() {
-  const [streamUrl] = useState(() =>
-    getPreferredStreamUrl(window.location.hash, getSavedStream())
+  const [streamUrl, setStreamUrl] = useState(() =>
+    resolveInitialStreamUrl(window.location.hash, getSavedStream(), getSavedRemoteStream())
   )
-  const [connection, setConnection] = useState<ConnectionState>(
-    streamUrl ? 'connecting' : 'missing'
-  )
+  const [connection, setConnection] = useState<ConnectionState>('connecting')
+  const [draftEndpoint, setDraftEndpoint] = useState(streamUrl)
+  const [isEditingReceiver, setIsEditingReceiver] = useState(false)
+  const [connectionError, setConnectionError] = useState<string>()
   const [items, setItems] = useState<LocalFeedItem[]>([])
   const [selectedItemId, setSelectedItemId] = useState<string>()
   const [lastViewedItemId, setLastViewedItemId] = useState<string>()
@@ -446,21 +459,27 @@ export default function App() {
     setSearchQuery('')
   }
 
-  useEffect(() => {
-    const fragmentStreamUrl = getStreamUrlFromHash(window.location.hash)
-    if (fragmentStreamUrl) {
-      saveStreamUrl(fragmentStreamUrl)
+  const connectToDraft = () => {
+    const endpoint = parseStreamEndpoint(draftEndpoint)
+    if (!endpoint) {
+      setConnectionError('Enter a loopback stream or an HTTPS remote stream ending in /stream.')
+      setConnection('failed')
+      return
     }
+    setDraftEndpoint(endpoint.url)
+    setStreamUrl(endpoint.url)
+    setConnection('connecting')
+    setConnectionError(undefined)
+    setIsEditingReceiver(false)
+  }
+
+  useEffect(() => {
     if (window.location.hash) {
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
     }
   }, [])
 
   useEffect(() => {
-    if (!streamUrl) {
-      return
-    }
-
     const source = new EventSource(streamUrl)
     const onEnvelope = (event: Event) => {
       try {
@@ -476,12 +495,23 @@ export default function App() {
 
     source.addEventListener(SENTRY_ENVELOPE_EVENT, onEnvelope)
     source.onopen = () => {
+      const endpoint = parseStreamEndpoint(streamUrl)
+      if (endpoint?.kind === 'loopback') {
+        saveStreamUrl(endpoint.url)
+      } else if (endpoint?.kind === 'remote') {
+        saveRemoteStreamUrl(endpoint.url)
+      }
       setConnection('connected')
+      setConnectionError(undefined)
       setMessage(undefined)
     }
     source.onerror = () => {
-      setConnection('reconnecting')
-      setMessage('Could not reach the local receiver. Retrying…')
+      setConnection('failed')
+      setConnectionError(
+        streamUrl === DEFAULT_STREAM_URL
+          ? 'Could not connect to the default receiver. Start it with the command below or enter another endpoint.'
+          : 'Could not connect to this receiver. Check the endpoint and try again.'
+      )
     }
 
     return () => {
@@ -532,32 +562,37 @@ export default function App() {
         <div className="flex min-h-0 flex-1 flex-col">
           <section className="flex min-h-0 flex-1 flex-col" aria-label="Local Sentry events">
 
-            {connection === 'missing' ? (
-              <Card className="shrink-0">
-                <CardHeader>
-                  <CardTitle>Connect a local receiver</CardTitle>
-                  <CardDescription>
-                    Start the receiver from your project, then this page will receive its stream.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <code className="block overflow-x-auto rounded-md border border-border bg-muted px-3 py-2 text-sm text-foreground">
-                    sentry local serve --open
-                  </code>
-                </CardContent>
-              </Card>
+            {connectionError && connection === 'failed' && items.length > 0 ? (
+              <div role="alert" className="shrink-0 border-b border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                {connectionError}
+              </div>
             ) : null}
-
             {message ? (
-              <div className="shrink-0 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+              <div role="alert" className="shrink-0 border-b border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
                 {message}
               </div>
             ) : null}
 
-            {items.length === 0 ? (
+            {items.length === 0 && (connection === 'connecting' || connection === 'failed' || isEditingReceiver) ? (
+              <ConnectionLanding
+                phase={connection === 'connecting' ? 'probing' : connection === 'failed' ? 'failed' : 'editing'}
+                endpoint={draftEndpoint}
+                error={connectionError}
+                onEndpointChange={setDraftEndpoint}
+                onConnect={connectToDraft}
+                onCopyCommand={() => copyText('sentry local serve --open')}
+              />
+            ) : items.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center border border-dashed border-border bg-muted/40 px-4 text-center">
                 <Terminal className="mb-3 size-5 text-primary" aria-hidden="true" />
                 <p className="font-medium">Waiting for events</p>
+                <button
+                  type="button"
+                  className="mt-3 text-sm font-medium text-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => setIsEditingReceiver(true)}
+                >
+                  Change receiver
+                </button>
               </div>
             ) : (
               <div className="flex min-h-0 flex-1 overflow-hidden bg-card">
