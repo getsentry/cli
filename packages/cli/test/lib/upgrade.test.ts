@@ -197,6 +197,7 @@ describe("fetchLatestFromGitHub", () => {
       return new Response(
         JSON.stringify([
           { tag_name: "mcp@9.0.0" },
+          { tag_name: "cli@not-a-version" },
           { tag_name: "cli@1.2.3" },
           { tag_name: "cli@1.3.0" },
         ]),
@@ -204,7 +205,7 @@ describe("fetchLatestFromGitHub", () => {
       );
     });
 
-    await expect(fetchLatestFromGitHub()).resolves.toBe("1.2.3");
+    await expect(fetchLatestFromGitHub()).resolves.toBe("1.3.0");
     expect(requests).toEqual([
       "https://api.github.com/repos/getsentry/toolkit/releases?per_page=100",
     ]);
@@ -230,16 +231,20 @@ describe("fetchLatestFromGitHub", () => {
   });
 
   test("does not use an MCP release as the latest CLI release", async () => {
-    mockFetch(
-      async () =>
-        new Response(JSON.stringify([{ tag_name: "mcp@9.0.0" }]), {
-          status: 200,
-        })
-    );
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      requests.push(String(url));
+      return new Response(JSON.stringify([{ tag_name: "mcp@9.0.0" }]), {
+        status: 200,
+      });
+    });
 
     await expect(fetchLatestFromGitHub()).rejects.toThrow(
       "No version found in GitHub release"
     );
+    expect(requests).toEqual([
+      "https://api.github.com/repos/getsentry/toolkit/releases?per_page=100",
+    ]);
   });
 
   test("returns version from GitHub API", async () => {
@@ -826,6 +831,24 @@ describe("versionExists", () => {
     await expect(
       versionExists("curl", "0.14.0-dev.1772661724")
     ).rejects.toThrow(UpgradeError);
+  });
+
+  test("does not classify GHCR HTTP 403 as a missing nightly version", async () => {
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      const urlString = String(url);
+      requests.push(urlString);
+      if (urlString.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      return new Response(null, { status: 403 });
+    });
+
+    await expect(
+      versionExists("curl", "0.14.0-dev.1772661724", UPGRADE_SOURCES[0])
+    ).rejects.toThrow("HTTP 403");
+    expect(requests).toHaveLength(2);
+    expect(requests.some((url) => url.includes("getsentry/cli"))).toBe(false);
   });
 });
 

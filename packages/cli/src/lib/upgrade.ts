@@ -21,9 +21,11 @@ import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, sep } from "node:path";
 import { setTimeout } from "node:timers/promises";
+import { valid as semverValid } from "semver";
 import {
   acquireLock,
   cleanupOldBinary,
+  compareVersions,
   determineInstallDir,
   fetchWithUpgradeError,
   getBinaryDownloadUrl,
@@ -106,21 +108,22 @@ export type ResolvedUpgradeVersion = {
 
 function extractReleaseVersions(
   data:
-    | { tag_name?: string }
+    | { tag_name?: string; draft?: boolean; prerelease?: boolean }
     | Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean }>,
   source: UpgradeSource
 ): string[] {
-  if (!Array.isArray(data)) {
-    return data.tag_name ? [data.tag_name] : [];
-  }
-  return data
+  const releases = Array.isArray(data) ? data : [data];
+  return releases
     .filter((release) => !(release.draft || release.prerelease))
     .map((release) => release.tag_name)
     .filter(
       (tag): tag is string =>
         typeof tag === "string" && tag.startsWith(source.tagPrefix)
     )
-    .map((tag) => tag.slice(source.tagPrefix.length));
+    .map((tag) => tag.slice(source.tagPrefix.length))
+    .map((tag) => tag.replace(VERSION_PREFIX_REGEX, ""))
+    .filter((tag) => semverValid(tag) !== null)
+    .sort((a, b) => compareVersions(b, a));
 }
 
 // Curl Binary Helpers
@@ -445,7 +448,7 @@ export async function fetchLatestFromGitHubWithSource(
     | { tag_name?: string }
     | Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean }>;
   const tags = extractReleaseVersions(data, source);
-  const version = tags[0]?.replace(VERSION_PREFIX_REGEX, "");
+  const version = tags[0];
   if (!version) {
     throw new UpgradeError(
       "network_error",
@@ -631,8 +634,8 @@ export async function resolveExistingUpgradeVersion(
  *
  * Nightly builds are published to GHCR with tags like `nightly-0.14.0-dev.1772661724`.
  * This performs an anonymous token exchange + manifest fetch (2 HTTP requests).
- * Returns false only for 404/403 (tag not found); network errors propagate as
- * UpgradeError to match stable version check behavior.
+ * Returns false only for HTTP 404 (tag not found). Every other HTTP or network
+ * failure propagates as UpgradeError to match stable version check behavior.
  *
  * @param version - Nightly version string (e.g., "0.14.0-dev.1772661724")
  * @returns true if the nightly tag exists in GHCR, false if not found
