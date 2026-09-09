@@ -282,6 +282,17 @@ export type ResolvedUpgradeSource = {
   readonly response: Response;
 };
 
+/** All configured upgrade sources returned an HTTP 404 response. */
+export class UpgradeSourceNotFoundError extends UpgradeError {
+  constructor() {
+    super(
+      "network_error",
+      "No CLI upgrade source was found: every source returned HTTP 404"
+    );
+    this.name = "UpgradeSourceNotFoundError";
+  }
+}
+
 /** Configuration for selecting the first available upgrade source. */
 export type ResolveUpgradeSourceOptions = {
   /** Build the source-specific URL whose response proves source availability. */
@@ -340,10 +351,7 @@ export async function resolveUpgradeSource(
     }
   }
 
-  throw new UpgradeError(
-    "network_error",
-    "No CLI upgrade source was found: every source returned HTTP 404"
-  );
+  throw new UpgradeSourceNotFoundError();
 }
 
 /**

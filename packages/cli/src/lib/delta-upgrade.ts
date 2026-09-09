@@ -125,13 +125,57 @@ function getPatchCache(): PatchCache {
 }
 
 function stableSource(source: UpgradeSource): SourceStrategy {
+  const releasesUrl = getGitHubReleasesUrl(source);
+  const sourceFetch: typeof customFetch = async (input, init) => {
+    const response = await customFetch(input, init);
+    if (
+      !(
+        response.ok &&
+        source.tagPrefix &&
+        String(input).startsWith(`${releasesUrl}?`)
+      )
+    ) {
+      return response;
+    }
+    const data: unknown = await response.json();
+    if (!Array.isArray(data)) {
+      return new Response(JSON.stringify(data), response);
+    }
+    const releases = data
+      .filter(isGitHubRelease)
+      .filter(
+        (release) =>
+          !(release.draft || release.prerelease) &&
+          release.tag_name.startsWith(source.tagPrefix)
+      )
+      .map((release) => ({
+        ...release,
+        tag_name: release.tag_name.slice(source.tagPrefix.length),
+      }));
+    return new Response(JSON.stringify(releases), response);
+  };
+
   return githubReleaseSource({
-    releasesUrl: getGitHubReleasesUrl(source),
+    releasesUrl,
     binaryName: getPlatformBinaryName(),
     userAgent: `sentry-cli/${CLI_VERSION}`,
-    fetch: customFetch,
+    fetch: sourceFetch,
     instrument,
   });
+}
+
+function isGitHubRelease(value: unknown): value is GitHubRelease & {
+  draft?: boolean;
+  prerelease?: boolean;
+} {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "tag_name" in value &&
+    typeof value.tag_name === "string" &&
+    "assets" in value &&
+    Array.isArray(value.assets)
+  );
 }
 
 function nightlySource(source: UpgradeSource): SourceStrategy {
@@ -180,7 +224,17 @@ export async function fetchRecentReleases(
       log.debug("GitHub releases response is not an array", typeof data);
       return [];
     }
-    return data as GitHubRelease[];
+    return data
+      .filter(isGitHubRelease)
+      .filter(
+        (release) =>
+          !(release.draft || release.prerelease) &&
+          release.tag_name.startsWith(source.tagPrefix)
+      )
+      .map((release) => ({
+        ...release,
+        tag_name: release.tag_name.slice(source.tagPrefix.length),
+      }));
   } catch (error) {
     log.debug("Failed to fetch recent releases from GitHub", error);
     return [];

@@ -36,6 +36,7 @@ import {
   resolveUpgradeSource,
   samePath,
   UPGRADE_SOURCES,
+  UpgradeSourceNotFoundError,
 } from "../../src/lib/binary.js";
 import { UpgradeError } from "../../src/lib/errors.js";
 
@@ -168,15 +169,16 @@ describe("resolveUpgradeSource", () => {
   test("fails after every source returns 404", async () => {
     const requests: string[] = [];
 
-    await expect(
-      resolveUpgradeSource({
-        getProbeUrl: (source) => getGitHubReleaseByTagUrl("0.45.0", source),
-        fetch: async (url) => {
-          requests.push(String(url));
-          return new Response("Not Found", { status: 404 });
-        },
-      })
-    ).rejects.toThrow("No CLI upgrade source was found");
+    const error = await resolveUpgradeSource({
+      getProbeUrl: (source) => getGitHubReleaseByTagUrl("0.45.0", source),
+      fetch: async (url) => {
+        requests.push(String(url));
+        return new Response("Not Found", { status: 404 });
+      },
+    }).catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(UpgradeSourceNotFoundError);
+    expect(error).toMatchObject({ name: "UpgradeSourceNotFoundError" });
 
     expect(requests).toEqual([
       "https://api.github.com/repos/getsentry/toolkit/releases/tags/cli%400.45.0",

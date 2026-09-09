@@ -828,8 +828,9 @@ afterEach(() => {
 describe("fetchRecentReleases", () => {
   test("returns releases from GitHub API", async () => {
     const releases: GitHubRelease[] = [
-      makeRelease("0.14.0", [makeAsset({ name: "sentry-linux-x64" })]),
-      makeRelease("0.13.0", [makeAsset({ name: "sentry-linux-x64" })]),
+      makeRelease("cli@0.14.0", [makeAsset({ name: "sentry-linux-x64" })]),
+      makeRelease("cli@0.13.0", [makeAsset({ name: "sentry-linux-x64" })]),
+      makeRelease("mcp@9.0.0", [makeAsset({ name: "sentry-linux-x64" })]),
     ];
 
     mockFetch(async (url) => {
@@ -944,13 +945,14 @@ describe("resolveStableChain", () => {
     });
   }
 
-  test("resolves single-hop chain with mocked fetch", async () => {
+  test("resolves prefixed Toolkit CLI releases and ignores other products", async () => {
     const binaryName = getPlatformBinaryName();
     const patchBytes = new Uint8Array([10, 20, 30]);
-    const patchUrl = `https://github.com/getsentry/cli/releases/download/0.14.0/${binaryName}.patch`;
+    const patchUrl = `https://github.com/getsentry/toolkit/releases/download/cli@0.14.0/${binaryName}.patch`;
 
     const releases: GitHubRelease[] = [
-      makeRelease("0.14.0", [
+      makeRelease("mcp@9.0.0", [makeAsset({ name: binaryName })]),
+      makeRelease("cli@0.14.0", [
         makeAsset({
           name: binaryName,
           digest: `sha256:${versionHex("0.14.0")}`,
@@ -962,7 +964,7 @@ describe("resolveStableChain", () => {
         }),
         makeAsset({ name: `${binaryName}.gz`, size: 100_000 }),
       ]),
-      makeRelease("0.13.0", [makeAsset({ name: binaryName })]),
+      makeRelease("cli@0.13.0", [makeAsset({ name: binaryName })]),
     ];
 
     setupStableMocks(releases, new Map([[patchUrl, patchBytes]]));
@@ -1001,7 +1003,7 @@ describe("resolveStableChain", () => {
     const urlB = "https://example.com/0.15.0.patch";
 
     const releases: GitHubRelease[] = [
-      makeRelease("0.15.0", [
+      makeRelease("cli@0.15.0", [
         makeAsset({
           name: binaryName,
           digest: `sha256:${versionHex("0.15.0")}`,
@@ -1013,7 +1015,7 @@ describe("resolveStableChain", () => {
         }),
         makeAsset({ name: `${binaryName}.gz`, size: 100_000 }),
       ]),
-      makeRelease("0.14.0", [
+      makeRelease("cli@0.14.0", [
         makeAsset({
           name: binaryName,
           digest: `sha256:${versionHex("0.14.0")}`,
@@ -1025,7 +1027,7 @@ describe("resolveStableChain", () => {
         }),
         makeAsset({ name: `${binaryName}.gz`, size: 100_000 }),
       ]),
-      makeRelease("0.13.0", [makeAsset({ name: binaryName })]),
+      makeRelease("cli@0.13.0", [makeAsset({ name: binaryName })]),
     ];
 
     setupStableMocks(
@@ -1050,7 +1052,7 @@ describe("resolveStableChain", () => {
 
   test("returns null when target not in releases", async () => {
     const releases: GitHubRelease[] = [
-      makeRelease("0.13.0", [makeAsset({ name: "sentry-linux-x64" })]),
+      makeRelease("cli@0.13.0", [makeAsset({ name: "sentry-linux-x64" })]),
     ];
     setupStableMocks(releases, new Map());
 
@@ -1068,7 +1070,7 @@ describe("resolveStableChain", () => {
   test("returns null when a patch download fails", async () => {
     const binaryName = getPlatformBinaryName();
     const releases: GitHubRelease[] = [
-      makeRelease("0.14.0", [
+      makeRelease("cli@0.14.0", [
         makeAsset({
           name: binaryName,
           digest: `sha256:${versionHex("0.14.0")}`,
@@ -1080,7 +1082,7 @@ describe("resolveStableChain", () => {
         }),
         makeAsset({ name: `${binaryName}.gz`, size: 100_000 }),
       ]),
-      makeRelease("0.13.0", [makeAsset({ name: binaryName })]),
+      makeRelease("cli@0.13.0", [makeAsset({ name: binaryName })]),
     ];
 
     // Only mock releases API, no patch data available
@@ -1096,7 +1098,7 @@ describe("resolveStableChain", () => {
     const versions = Array.from({ length: 15 }, (_, i) => `0.${i + 1}.0`);
     versions.reverse(); // newest first
     const releases = versions.map((v) =>
-      makeRelease(v, [
+      makeRelease(`cli@${v}`, [
         makeAsset({ name: binaryName, digest: `sha256:${versionHex(v)}` }),
         makeAsset({
           name: `${binaryName}.patch`,

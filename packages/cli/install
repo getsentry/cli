@@ -12,9 +12,6 @@ SENTRY_DSN_KEY="1188a86f3f8168f089450587b00bca66"
 SENTRY_INGEST="https://o1.ingest.us.sentry.io"
 SENTRY_PROJECT_ID="4510776311808000"
 
-# UPGRADE_SOURCES_SYNC: keep these github|ghcr|tag-prefix entries in sync with src/lib/binary.ts.
-UPGRADE_SOURCES=('getsentry/toolkit|getsentry/toolkit|cli@' 'getsentry/cli|getsentry/cli|')
-
 # Generate a UUID for the event. Tries /proc, uuidgen, then awk fallback.
 gen_uuid() {
   if [[ -r /proc/sys/kernel/random/uuid ]]; then
@@ -70,6 +67,7 @@ report_error() {
 die() {
   echo -e "${RED}$1${NC}" >&2
   report_error "$1" "${2:-unknown}"
+  wait 2>/dev/null || true  # Let the background curl finish; ignore its exit status
   exit 1
 }
 
@@ -207,151 +205,10 @@ fi
 # Download binary to a temp location
 tmpdir="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
 tmp_binary="${tmpdir}/sentry-install-$$${suffix}"
-github_response="${tmpdir}/sentry-install-github-response-$$"
-nightly_manifest_file="${tmpdir}/sentry-install-nightly-manifest-$$"
 version=""
 
 # Clean up temp binary on failure (setup handles cleanup on success)
-trap 'rm -f "$tmp_binary" "$github_response" "$nightly_manifest_file"' EXIT
-
-# Fetch a GitHub API endpoint without collapsing HTTP failures into one curl
-# error. The caller may fall through on a genuine 404; every transport failure
-# and every other HTTP status stops source selection.
-github_get() {
-  local url="$1"
-  if ! http_status=$(curl -sS -L -o "$github_response" -w '%{http_code}' "$url"); then
-    die "Failed to connect to GitHub while fetching ${url}" "gh-fetch"
-  fi
-}
-
-source_tag_prefix() {
-  printf '%s' "$1" | cut -d'|' -f3
-}
-
-source_github_repo() {
-  printf '%s' "$1" | cut -d'|' -f1
-}
-
-source_ghcr_repo() {
-  printf '%s' "$1" | cut -d'|' -f2
-}
-
-# Select the first source whose GitHub probe succeeds. A 404 alone advances to
-# the next source. The successful source remains fixed for all later requests.
-select_nightly_source() {
-  local source
-  local manifest_status
-  local github_repo
-  local ghcr_repo
-  local url
-  for source in "${UPGRADE_SOURCES[@]}"; do
-    github_repo=$(source_github_repo "$source")
-    ghcr_repo=$(source_ghcr_repo "$source")
-    url="https://api.github.com/repos/${github_repo}"
-    github_get "$url"
-    if [[ "$http_status" == "404" ]]; then
-      continue
-    fi
-    if [[ ! "$http_status" =~ ^2[0-9][0-9]$ ]]; then
-      die "Failed to fetch ${url}: HTTP ${http_status}" "gh-source"
-    fi
-    if ! GHCR_TOKEN=$(curl -sf \
-      "https://ghcr.io/token?scope=repository:${ghcr_repo}:pull" \
-      | awk -F'"' '{for(i=1;i<=NF;i++) if($i=="token"){print $(i+2);exit}}'); then
-      die "Failed to get GHCR token" "ghcr-token"
-    fi
-    if [[ -z "$GHCR_TOKEN" ]]; then
-      die "Failed to get GHCR token" "ghcr-token"
-    fi
-    if ! manifest_status=$(curl -sS -o "$nightly_manifest_file" -w '%{http_code}' \
-      -H "Authorization: Bearer $GHCR_TOKEN" \
-      -H "Accept: application/vnd.oci.image.manifest.v1+json" \
-      "https://ghcr.io/v2/${ghcr_repo}/manifests/nightly"); then
-      die "Failed to connect to GHCR while fetching the nightly manifest" "ghcr-manifest"
-    fi
-    if [[ "$manifest_status" == "404" ]]; then
-      continue
-    fi
-    if [[ ! "$manifest_status" =~ ^2[0-9][0-9]$ ]]; then
-      die "Failed to fetch nightly manifest from GHCR: HTTP ${manifest_status}" "ghcr-manifest"
-    fi
-    MANIFEST=$(<"$nightly_manifest_file")
-    if [[ -z "$MANIFEST" ]]; then
-      die "Failed to fetch nightly manifest from GHCR" "ghcr-manifest"
-    fi
-    selected_source="$github_repo"
-    selected_ghcr_source="$ghcr_repo"
-    rm -f "$nightly_manifest_file"
-    return 0
-  done
-  rm -f "$nightly_manifest_file"
-  die "No CLI upgrade source was found: every source returned HTTP 404" "gh-source"
-}
-
-select_stable_source() {
-  local source
-  local tag
-  local tag_path
-  local tag_prefix
-  local github_repo
-  local url
-
-  for source in "${UPGRADE_SOURCES[@]}"; do
-    github_repo=$(source_github_repo "$source")
-    tag_prefix=$(source_tag_prefix "$source")
-    if [[ -z "$requested_version" ]]; then
-      if [[ -n "$tag_prefix" ]]; then
-        url="https://api.github.com/repos/${github_repo}/releases?per_page=100"
-      else
-        url="https://api.github.com/repos/${github_repo}/releases/latest"
-      fi
-    else
-      tag="${tag_prefix}${version}"
-      tag_path="${tag//@/%40}"
-      url="https://api.github.com/repos/${github_repo}/releases/tags/${tag_path}"
-    fi
-
-    github_get "$url"
-    if [[ "$http_status" == "404" ]]; then
-      continue
-    fi
-    if [[ ! "$http_status" =~ ^2[0-9][0-9]$ ]]; then
-      die "Failed to fetch ${url}: HTTP ${http_status}" "gh-version"
-    fi
-
-    selected_source="$github_repo"
-    selected_tag_prefix="$tag_prefix"
-    if [[ -z "$requested_version" ]]; then
-      if [[ -n "$tag_prefix" ]]; then
-        version=$(awk -F'"' '{
-          for (i = 1; i <= NF; i++) {
-            if ($i == "tag_name" && $(i + 2) ~ /^cli@v?[0-9]+\.[0-9]+\.[0-9]+(\+[0-9A-Za-z.-]+)?$/) {
-              sub(/^cli@/, "", $(i + 2))
-              print $(i + 2)
-              exit
-            }
-          }
-        }' "$github_response")
-      else
-        version=$(awk -F'"' '{
-          for (i = 1; i <= NF; i++) {
-            if ($i == "tag_name") {
-              print $(i + 2)
-              exit
-            }
-          }
-        }' "$github_response")
-      fi
-      if [[ -z "$version" ]]; then
-        die "Failed to find a CLI release in ${github_repo}" "gh-version"
-      fi
-      version="${version#v}"
-    fi
-    return 0
-  done
-
-  die "No CLI release was found: every source returned HTTP 404" "gh-version"
-}
+trap 'rm -f "$tmp_binary"' EXIT
 
 if [[ "$requested_version" == "nightly" ]]; then
   # Nightly build: download from GHCR via OCI blob protocol.
@@ -362,13 +219,24 @@ if [[ "$requested_version" == "nightly" ]]; then
 
   echo -e "${MUTED}Fetching nightly build from GHCR...${NC}"
 
-  # Probe GitHub first because it provides an unambiguous 404. GHCR token
-  # failures may be 401 or 403 for both missing and inaccessible packages.
-  selected_source=""
-  selected_ghcr_source=""
-  select_nightly_source
+  # Step 1: Get anonymous pull token
+  GHCR_TOKEN=$(curl -sf \
+    "https://ghcr.io/token?scope=repository:getsentry/cli:pull" \
+    | awk -F'"' '{for(i=1;i<=NF;i++) if($i=="token"){print $(i+2);exit}}')
+  if [[ -z "$GHCR_TOKEN" ]]; then
+    die "Failed to get GHCR token" "ghcr-token"
+  fi
 
-  # Extract version from the selected source's manifest.
+  # Step 2: Fetch the OCI manifest for the :nightly tag
+  MANIFEST=$(curl -sf \
+    -H "Authorization: Bearer $GHCR_TOKEN" \
+    -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+    "https://ghcr.io/v2/getsentry/cli/manifests/nightly")
+  if [[ -z "$MANIFEST" ]]; then
+    die "Failed to fetch nightly manifest from GHCR" "ghcr-manifest"
+  fi
+
+  # Step 3: Extract version from manifest annotation
   version=$(echo "$MANIFEST" \
     | awk -F'"' '{for(i=1;i<=NF;i++) if($i=="version"){print $(i+2);exit}}')
   if [[ -z "$version" ]]; then
@@ -397,7 +265,7 @@ if [[ "$requested_version" == "nightly" ]]; then
   # header must NOT be forwarded to the Azure Blob Storage redirect target)
   redir_url=$(curl -s -w '\n%{redirect_url}' -o /dev/null \
     -H "Authorization: Bearer $GHCR_TOKEN" \
-    "https://ghcr.io/v2/${selected_ghcr_source}/blobs/${digest}" | tail -1)
+    "https://ghcr.io/v2/getsentry/cli/blobs/${digest}" | tail -1)
   if [[ -z "$redir_url" ]]; then
     die "Failed to get blob redirect URL from GHCR" "ghcr-redirect"
   fi
@@ -407,14 +275,21 @@ if [[ "$requested_version" == "nightly" ]]; then
 
 else
   # Stable build: resolve version and download from GitHub Releases.
-  version="${requested_version#v}"
-  selected_source=""
-  selected_tag_prefix=""
-  select_stable_source
 
+  if [[ -z "$requested_version" ]]; then
+    version=$(curl -fsSL https://api.github.com/repos/getsentry/cli/releases/latest \
+      | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+    if [[ -z "$version" ]]; then
+      die "Failed to fetch latest version" "gh-version"
+    fi
+  else
+    version="$requested_version"
+  fi
+
+  # Strip leading 'v' if present (releases use version without 'v' prefix)
+  version="${version#v}"
   filename="sentry-${os}-${arch}${libc_suffix}${suffix}"
-  tag="${selected_tag_prefix}${version}"
-  url="https://github.com/${selected_source}/releases/download/${tag}/${filename}"
+  url="https://github.com/getsentry/cli/releases/download/${version}/${filename}"
 
   echo -e "${MUTED}Downloading sentry v${version}...${NC}"
 
@@ -452,7 +327,6 @@ if [[ "$no_agent_skills" == "true" ]]; then
 fi
 
 # Remove trap — setup will handle temp cleanup on success
-rm -f "$github_response"
 trap - EXIT
 
 # shellcheck disable=SC2086

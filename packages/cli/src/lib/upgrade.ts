@@ -42,6 +42,7 @@ import {
   resolveUpgradeSource,
   UPGRADE_SOURCES,
   type UpgradeSource,
+  UpgradeSourceNotFoundError,
 } from "./binary.js";
 import { CLI_VERSION, NODE_MODULES_DIRNAME } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
@@ -54,6 +55,7 @@ import {
   fetchManifest,
   fetchNightlyManifest,
   findLayerByFilename,
+  GhcrManifestHttpError,
   getAnonymousToken,
   getNightlyVersion,
   type OciManifest,
@@ -533,7 +535,7 @@ async function resolveNightlyManifest(
         sources: [source],
       });
     } catch (error) {
-      if (isUpgradeSourceNotFound(error)) {
+      if (error instanceof UpgradeSourceNotFoundError) {
         continue;
       }
       throw error;
@@ -543,26 +545,13 @@ async function resolveNightlyManifest(
       const manifest = await fetchManifest(token, tag, signal, source);
       return { source, manifest };
     } catch (error) {
-      if (
-        error instanceof UpgradeError &&
-        error.message.includes(`tag "${tag}": HTTP 404`)
-      ) {
+      if (error instanceof GhcrManifestHttpError && error.status === 404) {
         continue;
       }
       throw error;
     }
   }
-  throw new UpgradeError(
-    "network_error",
-    "No CLI upgrade source was found: every source returned HTTP 404"
-  );
-}
-
-function isUpgradeSourceNotFound(error: unknown): boolean {
-  return (
-    error instanceof UpgradeError &&
-    error.message.includes("every source returned HTTP 404")
-  );
+  throw new UpgradeSourceNotFoundError();
 }
 
 /** Fetch the latest nightly version from the ordered release sources. */
@@ -630,7 +619,7 @@ export async function resolveExistingUpgradeVersion(
     });
     return { version, source: selected.source };
   } catch (error) {
-    if (isUpgradeSourceNotFound(error)) {
+    if (error instanceof UpgradeSourceNotFoundError) {
       return null;
     }
     throw error;
@@ -658,7 +647,7 @@ async function nightlyVersionExists(
     await fetchManifest(token, `nightly-${version}`, undefined, source);
     return true;
   } catch (error) {
-    if (error instanceof UpgradeError && error.message.includes("HTTP 404")) {
+    if (error instanceof GhcrManifestHttpError && error.status === 404) {
       return false;
     }
     throw error;

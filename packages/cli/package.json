@@ -83,8 +83,7 @@
     "check:patches": "pnpm tsx script/check-patches.ts",
     "check:docs-sections": "pnpm tsx script/generate-docs-sections.ts --check",
     "check:env-coverage": "pnpm tsx script/check-env-coverage.ts",
-    "check:stale-refs": "pnpm tsx script/check-stale-references.ts",
-    "check:upgrade-sources": "vitest run test/lib/install-script.test.ts -t 'embeds the shared ordered upgrade source list'"
+    "check:stale-refs": "pnpm tsx script/check-stale-references.ts"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

@@ -143,6 +143,21 @@ const GHCR_REGISTRY = "https://ghcr.io";
 /** OCI manifest media type */
 const OCI_MANIFEST_TYPE = "application/vnd.oci.image.manifest.v1+json";
 
+/** An OCI manifest request received a non-successful HTTP response. */
+export class GhcrManifestHttpError extends UpgradeError {
+  /** HTTP status returned by GHCR. */
+  readonly status: number;
+
+  constructor(tag: string, status: number) {
+    super(
+      "network_error",
+      `Failed to fetch manifest for tag "${tag}": HTTP ${status}`
+    );
+    this.name = "GhcrManifestHttpError";
+    this.status = status;
+  }
+}
+
 /**
  * A single layer entry from an OCI manifest.
  *
@@ -252,10 +267,7 @@ export async function fetchManifest(
   );
 
   if (!response.ok) {
-    throw new UpgradeError(
-      "network_error",
-      `Failed to fetch manifest for tag "${tag}": HTTP ${response.status}`
-    );
+    throw new GhcrManifestHttpError(tag, response.status);
   }
 
   return (await response.json()) as OciManifest;

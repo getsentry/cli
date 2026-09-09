@@ -16,6 +16,7 @@ import {
   findLayerByFilename,
   GHCR_REPO,
   GHCR_TAG,
+  GhcrManifestHttpError,
   getAnonymousToken,
   getNightlyVersion,
   listTags,
@@ -413,12 +414,15 @@ describe("fetchManifest", () => {
   test("throws UpgradeError on HTTP 404", async () => {
     mockFetch(async () => new Response("Not Found", { status: 404 }));
 
-    await expect(fetchManifest("token", "patch-0.13.0")).rejects.toThrow(
-      UpgradeError
+    const error = await fetchManifest("token", "patch-0.13.0").catch(
+      (reason: unknown) => reason
     );
-    await expect(fetchManifest("token", "patch-0.13.0")).rejects.toThrow(
-      'Failed to fetch manifest for tag "patch-0.13.0": HTTP 404'
-    );
+    expect(error).toBeInstanceOf(GhcrManifestHttpError);
+    expect(error).toMatchObject({
+      name: "GhcrManifestHttpError",
+      status: 404,
+      message: 'Failed to fetch manifest for tag "patch-0.13.0": HTTP 404',
+    });
   });
 
   test("throws UpgradeError on network failure", async () => {

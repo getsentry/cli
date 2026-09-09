@@ -141,6 +141,7 @@ const {
   fetchLatestVersion,
   getCurlInstallPaths,
   parseInstallationMethod,
+  resolveExistingUpgradeVersion,
   startCleanupOldBinary,
   versionExists,
 } = await import("../../src/lib/upgrade.js");
@@ -620,6 +621,18 @@ describe("versionExists", () => {
     ]);
   });
 
+  test("does not classify transport error text as missing sources", async () => {
+    mockFetch(async () => {
+      throw new Error(
+        "No CLI upgrade source was found: every source returned HTTP 404"
+      );
+    });
+
+    await expect(resolveExistingUpgradeVersion("1.0.0")).rejects.toThrow(
+      "Failed to connect to GitHub"
+    );
+  });
+
   test("does not fall back from an explicit selected source", async () => {
     const requests: string[] = [];
     mockFetch(async (url) => {
@@ -786,6 +799,19 @@ describe("versionExists", () => {
     await expect(
       versionExists("curl", "0.14.0-dev.1772661724")
     ).rejects.toThrow(UpgradeError);
+  });
+
+  test("does not classify nightly transport error text as not found", async () => {
+    mockFetch(async (url) => {
+      if (String(url).includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      throw new Error("HTTP 404");
+    });
+
+    await expect(
+      versionExists("curl", "0.14.0-dev.1772661724", UPGRADE_SOURCES[0])
+    ).rejects.toThrow("HTTP 404");
   });
 
   test("throws on GHCR server error for nightly version", async () => {
@@ -1673,6 +1699,31 @@ describe("fetchLatestNightlyVersion", () => {
     });
 
     await expect(fetchLatestNightlyVersion()).rejects.toThrow("HTTP 403");
+    expect(requests).not.toContain(
+      "https://api.github.com/repos/getsentry/cli"
+    );
+  });
+
+  test("does not fall back when nightly transport error text says HTTP 404", async () => {
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      const request = String(url);
+      requests.push(request);
+      if (request === "https://api.github.com/repos/getsentry/toolkit") {
+        return new Response(null, { status: 200 });
+      }
+      if (request.includes("scope=repository:getsentry/toolkit:pull")) {
+        return new Response(JSON.stringify({ token: "toolkit-token" }), {
+          status: 200,
+        });
+      }
+      if (request.includes("/v2/getsentry/toolkit/manifests/nightly")) {
+        throw new Error("HTTP 404");
+      }
+      return new Response("Unexpected", { status: 500 });
+    });
+
+    await expect(fetchLatestNightlyVersion()).rejects.toThrow("HTTP 404");
     expect(requests).not.toContain(
       "https://api.github.com/repos/getsentry/cli"
     );
