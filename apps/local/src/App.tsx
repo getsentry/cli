@@ -591,7 +591,7 @@ export default function App() {
               </div>
             ) : null}
 
-            {items.length === 0 && (connection === 'connecting' || connection === 'failed' || isEditingReceiver) ? (
+            {isEditingReceiver || (items.length === 0 && (connection === 'connecting' || connection === 'failed')) ? (
               <ConnectionLanding
                 phase={connection === 'connecting' ? 'probing' : connection === 'failed' ? 'failed' : 'editing'}
                 endpoint={draftEndpoint}

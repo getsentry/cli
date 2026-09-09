@@ -275,6 +275,31 @@ describe('local receiver to viewer integration', () => {
     )
   })
 
+  test('keeps receiver selection open when an event arrives during editing', async () => {
+    ControllableEventSource.instances = []
+    vi.stubGlobal('EventSource', ControllableEventSource)
+    renderBareViewer()
+
+    const source = ControllableEventSource.instances[0]
+    expect(source).toBeDefined()
+    await act(async () => source?.onopen?.(new Event('open')))
+    await screen.findByText('Connected to local receiver')
+    fireEvent.click(screen.getByRole('button', { name: 'Change receiver' }))
+
+    await act(async () => {
+      source?.dispatchEvent(
+        new MessageEvent(SENTRY_CONTENT_TYPE, {
+          data: JSON.stringify([
+            {},
+            [[{ type: 'transaction' }, { transaction: 'GET /arrived-while-editing' }]],
+          ]),
+        })
+      )
+    })
+
+    expect(screen.getByLabelText('Receiver endpoint')).not.toBeNull()
+  })
+
   test('replays an envelope buffered before the viewer opens', async () => {
     const { server, port } = await startReceiver()
 
