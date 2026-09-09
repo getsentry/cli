@@ -1,13 +1,42 @@
 import { describe, expect, test } from "vitest";
 import {
   appendBounded,
+  DEFAULT_STREAM_URL,
   decodeEnvelope,
+  parseStreamEndpoint,
   getPreferredStreamUrl,
+  resolveInitialStreamUrl,
   getStreamUrlFromHash,
   getStreamUrlFromStorage,
 } from "./spotlight.js";
 
 describe("getStreamUrlFromHash", () => {
+  test("classifies the default stream as loopback", () => {
+    expect(DEFAULT_STREAM_URL).toBe("http://localhost:8969/stream");
+    expect(parseStreamEndpoint(DEFAULT_STREAM_URL)).toEqual({
+      url: DEFAULT_STREAM_URL,
+      kind: "loopback",
+    });
+  });
+
+  test("accepts an HTTPS remote stream with a query token", () => {
+    expect(
+      parseStreamEndpoint("https://receiver.example/stream?token=abc")
+    ).toEqual({
+      url: "https://receiver.example/stream?token=abc",
+      kind: "remote",
+    });
+  });
+
+  test.each([
+    "http://receiver.example/stream",
+    "https://user:pass@receiver.example/stream",
+    "https://receiver.example/other",
+    "https://receiver.example/stream#fragment",
+  ])("rejects unsafe custom endpoint %s", (url) => {
+    expect(parseStreamEndpoint(url)).toBeUndefined();
+  });
+
   test("accepts a loopback stream URL", () => {
     expect(
       getStreamUrlFromHash(
@@ -39,6 +68,20 @@ describe("getStreamUrlFromHash", () => {
         "http://127.0.0.1:8969/stream"
       )
     ).toBe("http://localhost:9000/stream");
+  });
+
+  test("uses CLI pairing, saved endpoints, then the default in priority order", () => {
+    expect(
+      resolveInitialStreamUrl(
+        "#stream=http%3A%2F%2Flocalhost%3A9000%2Fstream",
+        null,
+        null
+      )
+    ).toBe("http://localhost:9000/stream");
+    expect(
+      resolveInitialStreamUrl("", "http://127.0.0.1:8970/stream", null)
+    ).toBe("http://127.0.0.1:8970/stream");
+    expect(resolveInitialStreamUrl("", null, null)).toBe(DEFAULT_STREAM_URL);
   });
 });
 

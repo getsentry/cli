@@ -1,6 +1,15 @@
 export const SENTRY_ENVELOPE_EVENT = "application/x-sentry-envelope"
 export const STREAM_STORAGE_KEY = "sentry.local.stream-url"
+export const REMOTE_STREAM_STORAGE_KEY = "sentry.local.remote-stream-url"
+export const DEFAULT_STREAM_URL = "http://localhost:8969/stream"
 const MAX_FEED_ITEMS = 500
+
+export type StreamEndpointKind = "loopback" | "remote"
+
+export type StreamEndpoint = {
+  url: string
+  kind: StreamEndpointKind
+}
 
 export type LocalFeedItem = {
   id: string
@@ -121,39 +130,63 @@ function isLoopbackHost(hostname: string): boolean {
   return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1"
 }
 
-function normalizeStreamUrl(stream: string | null): string | undefined {
+/** Normalize an explicit connection target and classify its persistence policy. */
+export function parseStreamEndpoint(stream: string | null): StreamEndpoint | undefined {
   if (!stream) {
     return undefined
   }
   try {
     const url = new URL(stream)
     if (
-      url.protocol !== "http:" ||
-      !isLoopbackHost(url.hostname) ||
       url.pathname !== "/stream" ||
       url.username ||
       url.password ||
-      url.search ||
       url.hash
     ) {
       return undefined
     }
-    return url.toString()
+    if (isLoopbackHost(url.hostname)) {
+      if ((url.protocol !== "http:" && url.protocol !== "https:") || url.search) {
+        return undefined
+      }
+      return { url: url.toString(), kind: "loopback" }
+    }
+    if (url.protocol === "https:") {
+      return { url: url.toString(), kind: "remote" }
+    }
+    return undefined
   } catch {
     return undefined
   }
 }
 
+function normalizeLoopbackStreamUrl(stream: string | null): string | undefined {
+  const endpoint = parseStreamEndpoint(stream)
+  return endpoint?.kind === "loopback" ? endpoint.url : undefined
+}
+
+function normalizeRemoteStreamUrl(stream: string | null): string | undefined {
+  const endpoint = parseStreamEndpoint(stream)
+  return endpoint?.kind === "remote" ? endpoint.url : undefined
+}
+
 /** Read the CLI-provided stream endpoint without allowing arbitrary targets. */
 export function getStreamUrlFromHash(hash: string): string | undefined {
-  return normalizeStreamUrl(
+  return normalizeLoopbackStreamUrl(
     new URLSearchParams(hash.replace(/^#/, "")).get("stream")
   )
 }
 
 /** Validate a stream endpoint saved by an earlier CLI-launched tab. */
 export function getStreamUrlFromStorage(stream: string | null): string | undefined {
-  return normalizeStreamUrl(stream)
+  return normalizeLoopbackStreamUrl(stream)
+}
+
+/** Validate an explicit remote stream saved for the current browser session. */
+export function getRemoteStreamUrlFromStorage(
+  stream: string | null
+): string | undefined {
+  return normalizeRemoteStreamUrl(stream)
 }
 
 /** Prefer a newly supplied CLI endpoint over a previously saved one. */
@@ -162,6 +195,20 @@ export function getPreferredStreamUrl(
   savedStream: string | null
 ): string | undefined {
   return getStreamUrlFromHash(hash) ?? getStreamUrlFromStorage(savedStream)
+}
+
+/** Resolve the bare viewer's receiver in the same safe order as the UI. */
+export function resolveInitialStreamUrl(
+  hash: string,
+  savedLoopbackStream: string | null,
+  savedRemoteStream: string | null
+): string {
+  return (
+    getStreamUrlFromHash(hash) ??
+    getStreamUrlFromStorage(savedLoopbackStream) ??
+    getRemoteStreamUrlFromStorage(savedRemoteStream) ??
+    DEFAULT_STREAM_URL
+  )
 }
 
 /** Decode the event payload emitted by the local receiver's SSE endpoint. */
