@@ -6,6 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { UPGRADE_SOURCES } from "../../src/lib/binary.js";
 import { UpgradeError } from "../../src/lib/errors.js";
 import {
   downloadLayerBlob,
@@ -91,6 +92,19 @@ describe("getAnonymousToken", () => {
     expect(token).toBe("test-token-abc");
   });
 
+  test("uses the selected source's GHCR repository", async () => {
+    mockFetch(async (url) => {
+      expect(String(url)).toContain("scope=repository:getsentry/toolkit:pull");
+      return new Response(JSON.stringify({ token: "toolkit-token" }), {
+        status: 200,
+      });
+    });
+
+    await expect(getAnonymousToken(UPGRADE_SOURCES[0])).resolves.toBe(
+      "toolkit-token"
+    );
+  });
+
   test("throws UpgradeError on HTTP error", async () => {
     mockFetch(async () => new Response("Unauthorized", { status: 401 }));
 
@@ -151,6 +165,18 @@ describe("fetchNightlyManifest", () => {
     expect(capturedHeaders.accept).toBe(
       "application/vnd.oci.image.manifest.v1+json"
     );
+  });
+
+  test("uses the selected source's GHCR repository", async () => {
+    const manifest = makeManifest();
+    mockFetch(async (url) => {
+      expect(String(url)).toContain("/v2/getsentry/toolkit/manifests/nightly");
+      return new Response(JSON.stringify(manifest), { status: 200 });
+    });
+
+    await expect(
+      fetchNightlyManifest("token", undefined, UPGRADE_SOURCES[0])
+    ).resolves.toEqual(manifest);
   });
 
   test("throws UpgradeError on HTTP error", async () => {

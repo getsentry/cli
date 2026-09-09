@@ -32,16 +32,17 @@ import {
 } from "binpatch";
 import {
   compareVersions,
-  GITHUB_RELEASES_URL,
+  getGitHubReleasesUrl,
   getPlatformBinaryName,
   isDowngrade,
   isNightlyVersion,
+  PRIMARY_UPGRADE_SOURCE,
+  type UpgradeSource,
 } from "./binary.js";
 import { CLI_VERSION } from "./constants.js";
 import { customFetch } from "./custom-ca.js";
 import { getConfigDir } from "./db/index.js";
 import { formatBytes } from "./formatters/numbers.js";
-import { GHCR_REPO } from "./ghcr.js";
 import { logger } from "./logger.js";
 import { makeByteProgress, type SetMessage } from "./progress.js";
 import { withTracing, withTracingSpan } from "./telemetry.js";
@@ -68,10 +69,14 @@ export type DeltaResult = {
   chainLength: number;
 };
 
-// GHCR publishes nightlies to ghcr.io/getsentry/cli (see src/lib/ghcr.ts
-// GHCR_REPO). Importing as a named import keeps a single source of truth and
-// avoids the silent 404 introduced when this was a string literal.
 const log = logger.withTag("delta-upgrade");
+
+function getPrimaryUpgradeSource(): UpgradeSource {
+  if (!PRIMARY_UPGRADE_SOURCE) {
+    throw new Error("No primary upgrade source is configured");
+  }
+  return PRIMARY_UPGRADE_SOURCE;
+}
 
 const instrument: InstrumentHook = (name, fn) =>
   withTracing(name, "http.client", fn);
@@ -119,9 +124,9 @@ function getPatchCache(): PatchCache {
   return instrumentCache(makeCache(join(getConfigDir(), "patch-cache")));
 }
 
-function stableSource(): SourceStrategy {
+function stableSource(source: UpgradeSource): SourceStrategy {
   return githubReleaseSource({
-    releasesUrl: GITHUB_RELEASES_URL,
+    releasesUrl: getGitHubReleasesUrl(source),
     binaryName: getPlatformBinaryName(),
     userAgent: `sentry-cli/${CLI_VERSION}`,
     fetch: customFetch,
@@ -129,10 +134,10 @@ function stableSource(): SourceStrategy {
   });
 }
 
-function nightlySource(): SourceStrategy {
+function nightlySource(source: UpgradeSource): SourceStrategy {
   return ghcrSource({
     registry: "https://ghcr.io",
-    repo: GHCR_REPO,
+    repo: source.ghcrRepo,
     binaryName: getPlatformBinaryName(),
     targetTag: (version) => `nightly-${version}`,
     compareVersions,
@@ -153,16 +158,20 @@ export function canAttemptDelta(targetVersion: string): boolean {
 }
 
 export async function fetchRecentReleases(
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  source: UpgradeSource = getPrimaryUpgradeSource()
 ): Promise<GitHubRelease[]> {
   try {
-    const response = await customFetch(`${GITHUB_RELEASES_URL}?per_page=12`, {
-      headers: {
-        Accept: "application/vnd.github.v3+json",
-        "User-Agent": `sentry-cli/${CLI_VERSION}`,
-      },
-      signal,
-    });
+    const response = await customFetch(
+      `${getGitHubReleasesUrl(source)}?per_page=12`,
+      {
+        headers: {
+          Accept: "application/vnd.github.v3+json",
+          "User-Agent": `sentry-cli/${CLI_VERSION}`,
+        },
+        signal,
+      }
+    );
     if (!response.ok) {
       return [];
     }
@@ -270,9 +279,14 @@ export function validateChainStep(
 export function resolveStableChain(
   currentVersion: string,
   targetVersion: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  source: UpgradeSource = getPrimaryUpgradeSource()
 ): Promise<PatchChain | null> {
-  return stableSource().resolveChain(currentVersion, targetVersion, signal);
+  return stableSource(source).resolveChain(
+    currentVersion,
+    targetVersion,
+    signal
+  );
 }
 
 export async function resolveNightlyChain(opts: {
@@ -282,10 +296,12 @@ export async function resolveNightlyChain(opts: {
   fullGzSize: number;
   preloadedTags?: string[];
   signal?: AbortSignal;
+  source?: UpgradeSource;
 }): Promise<PatchChain | null> {
+  const { source = getPrimaryUpgradeSource() } = opts;
   const client = new OciClient({
     registry: "https://ghcr.io",
-    repo: GHCR_REPO,
+    repo: source.ghcrRepo,
     userAgent: `sentry-cli/${CLI_VERSION}`,
     fetch: customFetch,
   });
@@ -489,10 +505,11 @@ export function resolveStableDelta(
   oldBinaryPath: string,
   destPath: string,
   offline?: boolean,
-  setMessage?: SetMessage
+  setMessage?: SetMessage,
+  source: UpgradeSource = getPrimaryUpgradeSource()
 ): Promise<DeltaResult | null> {
   return resolveDelta(
-    stableSource(),
+    stableSource(source),
     targetVersion,
     oldBinaryPath,
     destPath,
@@ -507,10 +524,11 @@ export function resolveNightlyDelta(
   oldBinaryPath: string,
   destPath: string,
   offline?: boolean,
-  setMessage?: SetMessage
+  setMessage?: SetMessage,
+  source: UpgradeSource = getPrimaryUpgradeSource()
 ): Promise<DeltaResult | null> {
   return resolveDelta(
-    nightlySource(),
+    nightlySource(source),
     targetVersion,
     oldBinaryPath,
     destPath,
@@ -525,7 +543,8 @@ export function attemptDeltaUpgrade(
   oldBinaryPath: string,
   destPath: string,
   offline?: boolean,
-  setMessage?: SetMessage
+  setMessage?: SetMessage,
+  source: UpgradeSource = getPrimaryUpgradeSource()
 ): Promise<DeltaResult | null> {
   if (!canAttemptDelta(targetVersion)) {
     return Promise.resolve(null);
@@ -540,7 +559,7 @@ export function attemptDeltaUpgrade(
       let chainSource: string | undefined;
       try {
         const resolved = await resolveDelta(
-          channel === "nightly" ? nightlySource() : stableSource(),
+          channel === "nightly" ? nightlySource(source) : stableSource(source),
           targetVersion,
           oldBinaryPath,
           destPath,
@@ -614,14 +633,16 @@ async function prefetch(
 
 export function prefetchNightlyPatches(
   targetVersion: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  source: UpgradeSource = getPrimaryUpgradeSource()
 ): Promise<void> {
-  return prefetch(nightlySource(), targetVersion, signal);
+  return prefetch(nightlySource(source), targetVersion, signal);
 }
 
 export function prefetchStablePatches(
   targetVersion: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  source: UpgradeSource = getPrimaryUpgradeSource()
 ): Promise<void> {
-  return prefetch(stableSource(), targetVersion, signal);
+  return prefetch(stableSource(source), targetVersion, signal);
 }

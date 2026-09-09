@@ -172,6 +172,10 @@ function mockGhcrNightlyVersion(version: string): void {
   mockFetch(async (url) => {
     const urlStr = String(url);
 
+    if (urlStr === "https://api.github.com/repos/getsentry/toolkit") {
+      return new Response(null, { status: 200 });
+    }
+
     // GHCR anonymous token exchange
     if (urlStr.includes("ghcr.io/token")) {
       return new Response(JSON.stringify({ token: "test-token" }), {
@@ -209,19 +213,17 @@ function mockGitHubVersion(version: string): void {
   mockFetch(async (url) => {
     const urlStr = String(url);
 
-    // GitHub latest release endpoint — returns JSON with tag_name
-    if (urlStr.includes("releases/latest")) {
-      return new Response(JSON.stringify({ tag_name: version }), {
+    if (urlStr.includes("getsentry/toolkit/releases?per_page=100")) {
+      return new Response(JSON.stringify([{ tag_name: `cli@${version}` }]), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
     }
 
-    // GitHub tag check (for versionExists) — this repo uses un-prefixed tags
     if (urlStr.includes("/releases/tags/")) {
       const requested = urlStr.split("/releases/tags/")[1];
-      if (requested === version) {
-        return new Response(JSON.stringify({ tag_name: version }), {
+      if (requested === `cli%40${version}`) {
+        return new Response(JSON.stringify({ tag_name: `cli@${version}` }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -251,6 +253,9 @@ function mockGitHubVersion(version: string): void {
 function mockNightlyVersion(version: string): void {
   mockFetch(async (url) => {
     const urlStr = String(url);
+    if (urlStr === "https://api.github.com/repos/getsentry/toolkit") {
+      return new Response(null, { status: 200 });
+    }
     if (urlStr.includes("ghcr.io/token")) {
       return new Response(JSON.stringify({ token: "test-token" }), {
         status: 200,
@@ -403,6 +408,42 @@ describe("sentry cli upgrade", () => {
       expect(combined).toContain("99.99.99");
       expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
+
+    test("uses the selected legacy source for the check-mode changelog", async () => {
+      const requests: string[] = [];
+      mockFetch(async (url) => {
+        const request = String(url);
+        requests.push(request);
+        if (request.includes("getsentry/toolkit/releases?per_page=100")) {
+          return new Response("Not Found", { status: 404 });
+        }
+        if (request.includes("getsentry/cli/releases/latest")) {
+          return new Response(JSON.stringify({ tag_name: "99.99.99" }), {
+            status: 200,
+          });
+        }
+        if (request.includes("getsentry/cli/releases?per_page=30")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        return new Response("Unexpected", { status: 500 });
+      });
+
+      const { context, restore } = createMockContext({ homeDir: testDir });
+      restoreStderr = restore;
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "brew"],
+        context
+      );
+
+      expect(requests).toContain(
+        "https://api.github.com/repos/getsentry/cli/releases?per_page=30"
+      );
+      expect(requests).not.toContain(
+        "https://api.github.com/repos/getsentry/toolkit/releases?per_page=30"
+      );
+    });
   });
 
   describe("version validation", () => {
@@ -410,8 +451,8 @@ describe("sentry cli upgrade", () => {
       // Mock: latest is 99.99.99, but 0.0.1 doesn't exist
       mockFetch(async (url) => {
         const urlStr = String(url);
-        if (urlStr.includes("releases/latest")) {
-          return new Response(JSON.stringify({ tag_name: "v99.99.99" }), {
+        if (urlStr.includes("getsentry/toolkit/releases?per_page=100")) {
+          return new Response(JSON.stringify([{ tag_name: "cli@99.99.99" }]), {
             status: 200,
             headers: { "content-type": "application/json" },
           });
@@ -746,8 +787,8 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     const gzipped = gzipSync(fakeContent);
     mockFetch(async (url) => {
       const urlStr = String(url);
-      if (urlStr.includes("releases/latest")) {
-        return new Response(JSON.stringify({ tag_name: version }), {
+      if (urlStr.includes("getsentry/toolkit/releases?per_page=100")) {
+        return new Response(JSON.stringify([{ tag_name: `cli@${version}` }]), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -872,8 +913,8 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     const gzipped = gzipSync(fakeContent);
     mockFetch(async (url) => {
       const urlStr = String(url);
-      if (urlStr.includes("releases/latest")) {
-        return new Response(JSON.stringify({ tag_name: "99.99.99" }), {
+      if (urlStr.includes("getsentry/toolkit/releases?per_page=100")) {
+        return new Response(JSON.stringify([{ tag_name: "cli@99.99.99" }]), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -903,6 +944,9 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     mockFetch(async (url) => {
       const urlStr = String(url);
       capturedUrls.push(urlStr);
+      if (urlStr === "https://api.github.com/repos/getsentry/toolkit") {
+        return new Response(null, { status: 200 });
+      }
       if (urlStr.includes("ghcr.io/token")) {
         return new Response(JSON.stringify({ token: "test-token" }), {
           status: 200,
@@ -1037,6 +1081,9 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
     // Nightly is now distributed via GHCR (token → manifest → blob)
     mockFetch(async (url) => {
       const urlStr = String(url);
+      if (urlStr === "https://api.github.com/repos/getsentry/toolkit") {
+        return new Response(null, { status: 200 });
+      }
       if (urlStr.includes("ghcr.io/token")) {
         return new Response(JSON.stringify({ token: "test-token" }), {
           status: 200,

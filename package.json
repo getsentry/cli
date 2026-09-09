@@ -40,7 +40,8 @@
     "check:errors": "pnpm --filter sentry run check:errors",
     "check:patches": "pnpm --filter sentry run check:patches",
     "check:docs-sections": "pnpm --filter sentry run check:docs-sections",
-    "check:stale-refs": "pnpm --filter sentry run check:stale-refs"
+    "check:stale-refs": "pnpm --filter sentry run check:stale-refs",
+    "check:upgrade-sources": "pnpm --filter sentry run check:upgrade-sources"
   },
   "pnpm": {
     "patchedDependencies": {

@@ -26,16 +26,22 @@ import {
   cleanupOldBinary,
   determineInstallDir,
   fetchWithUpgradeError,
-  GITHUB_RELEASES_URL,
   getBinaryDownloadUrl,
   getBinaryFilename,
   getBinaryPaths,
   getGitHubHeaders,
+  getGitHubLatestReleaseUrl,
+  getGitHubReleaseByTagUrl,
+  getGitHubRepositoryUrl,
   getPlatformBinaryName,
   type InstallationMethod,
   isNightlyVersion,
   KNOWN_CURL_DIRS,
+  PRIMARY_UPGRADE_SOURCE,
   releaseLock,
+  resolveUpgradeSource,
+  UPGRADE_SOURCES,
+  type UpgradeSource,
 } from "./binary.js";
 import { CLI_VERSION, NODE_MODULES_DIRNAME } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
@@ -50,6 +56,7 @@ import {
   findLayerByFilename,
   getAnonymousToken,
   getNightlyVersion,
+  type OciManifest,
 } from "./ghcr.js";
 import { logger } from "./logger.js";
 import { clearPatchCache } from "./patch-cache.js";
@@ -86,6 +93,33 @@ const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
 
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
+
+/** A resolved standalone-binary version and the source that must serve it. */
+export type ResolvedUpgradeVersion = {
+  /** Version without a source-specific tag prefix. */
+  readonly version: string;
+  /** Source selected for every later lookup and download in this operation. */
+  readonly source: UpgradeSource;
+};
+
+function extractReleaseVersions(
+  data:
+    | { tag_name?: string }
+    | Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean }>,
+  source: UpgradeSource
+): string[] {
+  if (!Array.isArray(data)) {
+    return data.tag_name ? [data.tag_name] : [];
+  }
+  return data
+    .filter((release) => !(release.draft || release.prerelease))
+    .map((release) => release.tag_name)
+    .filter(
+      (tag): tag is string =>
+        typeof tag === "string" && tag.startsWith(source.tagPrefix)
+    )
+    .map((tag) => tag.slice(source.tagPrefix.length));
+}
 
 // Curl Binary Helpers
 
@@ -396,32 +430,40 @@ export async function detectInstallationMethod(): Promise<InstallationMethod> {
  * @throws {UpgradeError} When fetch fails or response is invalid
  * @throws {Error} AbortError if signal is aborted
  */
-export async function fetchLatestFromGitHub(
-  signal?: AbortSignal
-): Promise<string> {
-  const response = await fetchWithUpgradeError(
-    `${GITHUB_RELEASES_URL}/latest`,
-    { headers: getGitHubHeaders(), signal },
-    "GitHub"
-  );
-
-  if (!response.ok) {
-    throw new UpgradeError(
-      "network_error",
-      `Failed to fetch from GitHub: ${response.status}`
-    );
-  }
-
-  const data = (await response.json()) as { tag_name?: string };
-
-  if (!data.tag_name) {
+export async function fetchLatestFromGitHubWithSource(
+  signal?: AbortSignal,
+  sources: readonly UpgradeSource[] = UPGRADE_SOURCES
+): Promise<ResolvedUpgradeVersion> {
+  const { source, response } = await resolveUpgradeSource({
+    getProbeUrl: getGitHubLatestReleaseUrl,
+    signal,
+    sources,
+  });
+  const data = (await response.json()) as
+    | { tag_name?: string }
+    | Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean }>;
+  const tags = extractReleaseVersions(data, source);
+  const version = tags[0]?.replace(VERSION_PREFIX_REGEX, "");
+  if (!version) {
     throw new UpgradeError(
       "network_error",
       "No version found in GitHub release"
     );
   }
+  return { version, source };
+}
 
-  return data.tag_name.replace(VERSION_PREFIX_REGEX, "");
+/** Fetch the latest standalone CLI version from the ordered GitHub sources. */
+export async function fetchLatestFromGitHub(
+  signal?: AbortSignal,
+  source?: UpgradeSource
+): Promise<string> {
+  return (
+    await fetchLatestFromGitHubWithSource(
+      signal,
+      source ? [source] : UPGRADE_SOURCES
+    )
+  ).version;
 }
 
 /**
@@ -464,23 +506,76 @@ export async function fetchLatestFromNpm(): Promise<string> {
  * @returns Latest nightly version string (e.g., "0.13.0-dev.1740000000")
  * @throws {UpgradeError} When fetch fails or the version annotation is missing
  */
+export async function fetchLatestNightlyVersionWithSource(
+  signal?: AbortSignal,
+  sources: readonly UpgradeSource[] = UPGRADE_SOURCES
+): Promise<ResolvedUpgradeVersion> {
+  if (signal?.aborted) {
+    throw new AbortError();
+  }
+  const resolved = await resolveNightlyManifest("nightly", signal, sources);
+  return {
+    version: getNightlyVersion(resolved.manifest),
+    source: resolved.source,
+  };
+}
+
+async function resolveNightlyManifest(
+  tag: string,
+  signal: AbortSignal | undefined,
+  sources: readonly UpgradeSource[]
+): Promise<{ source: UpgradeSource; manifest: OciManifest }> {
+  for (const source of sources) {
+    try {
+      await resolveUpgradeSource({
+        getProbeUrl: getGitHubRepositoryUrl,
+        signal,
+        sources: [source],
+      });
+    } catch (error) {
+      if (isUpgradeSourceNotFound(error)) {
+        continue;
+      }
+      throw error;
+    }
+    try {
+      const token = await getAnonymousToken(source, signal);
+      const manifest = await fetchManifest(token, tag, signal, source);
+      return { source, manifest };
+    } catch (error) {
+      if (
+        error instanceof UpgradeError &&
+        error.message.includes(`tag "${tag}": HTTP 404`)
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new UpgradeError(
+    "network_error",
+    "No CLI upgrade source was found: every source returned HTTP 404"
+  );
+}
+
+function isUpgradeSourceNotFound(error: unknown): boolean {
+  return (
+    error instanceof UpgradeError &&
+    error.message.includes("every source returned HTTP 404")
+  );
+}
+
+/** Fetch the latest nightly version from the ordered release sources. */
 export async function fetchLatestNightlyVersion(
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  source?: UpgradeSource
 ): Promise<string> {
-  // AbortSignal is not threaded through ghcr helpers, but checking it before
-  // each network call ensures we bail out promptly when the process exits.
-  if (signal?.aborted) {
-    throw new AbortError();
-  }
-
-  const token = await getAnonymousToken();
-
-  if (signal?.aborted) {
-    throw new AbortError();
-  }
-
-  const manifest = await fetchNightlyManifest(token);
-  return getNightlyVersion(manifest);
+  return (
+    await fetchLatestNightlyVersionWithSource(
+      signal,
+      source ? [source] : UPGRADE_SOURCES
+    )
+  ).version;
 }
 
 /**
@@ -507,6 +602,41 @@ export function fetchLatestVersion(
     : fetchLatestFromNpm();
 }
 
+/** Resolve the latest version and selected source for a standalone upgrade. */
+export function resolveLatestUpgradeVersion(
+  channel: ReleaseChannel,
+  signal?: AbortSignal
+): Promise<ResolvedUpgradeVersion> {
+  return channel === "nightly"
+    ? fetchLatestNightlyVersionWithSource(signal)
+    : fetchLatestFromGitHubWithSource(signal);
+}
+
+/** Resolve and validate a pinned standalone version against ordered sources. */
+export async function resolveExistingUpgradeVersion(
+  version: string
+): Promise<ResolvedUpgradeVersion | null> {
+  try {
+    if (isNightlyVersion(version)) {
+      const resolved = await resolveNightlyManifest(
+        `nightly-${version}`,
+        undefined,
+        UPGRADE_SOURCES
+      );
+      return { version, source: resolved.source };
+    }
+    const selected = await resolveUpgradeSource({
+      getProbeUrl: (source) => getGitHubReleaseByTagUrl(version, source),
+    });
+    return { version, source: selected.source };
+  } catch (error) {
+    if (isUpgradeSourceNotFound(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 /**
  * Check if a versioned nightly tag exists in GHCR.
  *
@@ -519,21 +649,40 @@ export function fetchLatestVersion(
  * @returns true if the nightly tag exists in GHCR, false if not found
  * @throws {UpgradeError} On network failure or GHCR unavailability
  */
-async function nightlyVersionExists(version: string): Promise<boolean> {
-  const token = await getAnonymousToken();
+async function nightlyVersionExists(
+  version: string,
+  source: UpgradeSource
+): Promise<boolean> {
+  const token = await getAnonymousToken(source);
   try {
-    await fetchManifest(token, `nightly-${version}`);
+    await fetchManifest(token, `nightly-${version}`, undefined, source);
     return true;
   } catch (error) {
-    // 404 = tag doesn't exist; 403 = token lacks access to non-existent tag
-    if (
-      error instanceof UpgradeError &&
-      (error.message.includes("HTTP 404") || error.message.includes("HTTP 403"))
-    ) {
+    if (error instanceof UpgradeError && error.message.includes("HTTP 404")) {
       return false;
     }
     throw error;
   }
+}
+
+async function standaloneVersionExists(
+  version: string,
+  source?: UpgradeSource
+): Promise<boolean> {
+  if (source) {
+    if (isNightlyVersion(version)) {
+      return nightlyVersionExists(version, source);
+    }
+    return (
+      await fetchWithUpgradeError(
+        getGitHubReleaseByTagUrl(version, source),
+        { headers: getGitHubHeaders() },
+        "GitHub"
+      )
+    ).ok;
+  }
+  const resolved = await resolveExistingUpgradeVersion(version);
+  return resolved !== null;
 }
 
 /**
@@ -550,20 +699,11 @@ async function nightlyVersionExists(version: string): Promise<boolean> {
  */
 export async function versionExists(
   method: InstallationMethod,
-  version: string
+  version: string,
+  source?: UpgradeSource
 ): Promise<boolean> {
-  // Nightly versions are published to GHCR, not GitHub Releases or npm
-  if (isNightlyVersion(version)) {
-    return nightlyVersionExists(version);
-  }
-
-  if (method === "curl" || method === "brew") {
-    const response = await fetchWithUpgradeError(
-      `${GITHUB_RELEASES_URL}/tags/${version}`,
-      { method: "HEAD", headers: getGitHubHeaders() },
-      "GitHub"
-    );
-    return response.ok;
+  if (isNightlyVersion(version) || method === "curl" || method === "brew") {
+    return standaloneVersionExists(version, source);
   }
 
   const response = await fetchWithUpgradeError(
@@ -728,15 +868,21 @@ function getNightlyGzFilename(): string {
 async function downloadNightlyToPath(
   destPath: string,
   version?: string,
-  setMessage?: SetMessage
+  setMessage?: SetMessage,
+  source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<void> {
-  const token = await getAnonymousToken();
+  const token = await getAnonymousToken(source);
   const manifest = version
-    ? await fetchManifest(token, `nightly-${version}`)
-    : await fetchNightlyManifest(token);
+    ? await fetchManifest(token, `nightly-${version}`, undefined, source)
+    : await fetchNightlyManifest(token, undefined, source);
   const filename = getNightlyGzFilename();
   const layer = findLayerByFilename(manifest, filename);
-  const response = await downloadNightlyBlob(token, layer.digest);
+  const response = await downloadNightlyBlob(
+    token,
+    layer.digest,
+    undefined,
+    source
+  );
 
   if (!response.body) {
     throw new UpgradeError(
@@ -761,9 +907,10 @@ async function downloadNightlyToPath(
 async function downloadStableToPath(
   version: string,
   destPath: string,
-  setMessage?: SetMessage
+  setMessage?: SetMessage,
+  source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<void> {
-  const url = getBinaryDownloadUrl(version);
+  const url = getBinaryDownloadUrl(version, source);
   const headers = getGitHubHeaders();
 
   // Try gzip-compressed download first (~60% smaller)
@@ -899,11 +1046,13 @@ async function waitForBinaryVisible(path: string): Promise<number> {
  * @returns The downloaded binary path and lock path to release
  * @throws {UpgradeError} When download fails
  */
+// biome-ignore lint/nursery/useMaxParams: compatibility API; source preserves one selected repository across the download.
 export async function downloadBinaryToTemp(
   version: string,
   downloadTag?: string,
   offline?: OfflineMode,
-  setMessage?: SetMessage
+  setMessage?: SetMessage,
+  source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<DownloadResult> {
   const { tempPath, lockPath } = getCurlInstallPaths();
 
@@ -924,7 +1073,8 @@ export async function downloadBinaryToTemp(
       version,
       tempPath,
       !!offline,
-      setMessage
+      setMessage,
+      source
     );
     let patchBytes: number | undefined;
     if (deltaResult) {
@@ -940,7 +1090,13 @@ export async function downloadBinaryToTemp(
       );
     } else {
       log.debug("Downloading full binary");
-      await downloadFullBinary(version, downloadTag, tempPath, setMessage);
+      await downloadFullBinary(
+        version,
+        downloadTag,
+        tempPath,
+        setMessage,
+        source
+      );
     }
 
     // Verify the download produced a real, non-empty file before the caller
@@ -982,18 +1138,21 @@ export async function downloadBinaryToTemp(
  * @param destPath - Path to write the patched binary
  * @returns Delta result with SHA-256 and size info, or null if delta is unavailable
  */
+// biome-ignore lint/nursery/useMaxParams: mirrors the established download helper while forwarding source affinity.
 async function tryDeltaUpgrade(
   version: string,
   destPath: string,
   offline?: boolean,
-  setMessage?: SetMessage
+  setMessage?: SetMessage,
+  source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<DeltaResult | null> {
   return await attemptDeltaUpgrade(
     version,
     process.execPath,
     destPath,
     offline,
-    setMessage
+    setMessage,
+    source
   );
 }
 
@@ -1004,16 +1163,23 @@ async function tryDeltaUpgrade(
  * @param downloadTag - Git tag override for the download URL
  * @param destPath - Path to write the binary
  */
+// biome-ignore lint/nursery/useMaxParams: internal dispatch retains the established download arguments plus source affinity.
 async function downloadFullBinary(
   version: string,
   downloadTag: string | undefined,
   destPath: string,
-  setMessage?: SetMessage
+  setMessage?: SetMessage,
+  source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<void> {
   if (isNightlyVersion(version)) {
-    await downloadNightlyToPath(destPath, version, setMessage);
+    await downloadNightlyToPath(destPath, version, setMessage, source);
   } else {
-    await downloadStableToPath(downloadTag ?? version, destPath, setMessage);
+    await downloadStableToPath(
+      downloadTag ?? version,
+      destPath,
+      setMessage,
+      source
+    );
   }
 }
 
@@ -1124,11 +1290,18 @@ export async function executeUpgrade(
   version: string,
   downloadTag?: string,
   offline?: OfflineMode,
-  setMessage?: SetMessage
+  setMessage?: SetMessage,
+  source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<DownloadResult | null> {
   switch (method) {
     case "curl":
-      return downloadBinaryToTemp(version, downloadTag, offline, setMessage);
+      return downloadBinaryToTemp(
+        version,
+        downloadTag,
+        offline,
+        setMessage,
+        source
+      );
     case "brew":
       await executeUpgradeHomebrew();
       return null;

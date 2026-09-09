@@ -17,6 +17,7 @@
  *   without the auth header.
  */
 
+import { PRIMARY_UPGRADE_SOURCE, type UpgradeSource } from "./binary.js";
 import { getUserAgent } from "./constants.js";
 import { customFetch } from "./custom-ca.js";
 import { UpgradeError } from "./errors.js";
@@ -130,8 +131,8 @@ async function fetchWithRetry(
   );
 }
 
-/** GHCR repository for CLI distribution */
-export const GHCR_REPO = "getsentry/cli";
+/** Default GHCR repository for CLI distribution. */
+export const GHCR_REPO = PRIMARY_UPGRADE_SOURCE.ghcrRepo;
 
 /** OCI tag for nightly builds */
 export const GHCR_TAG = "nightly";
@@ -189,13 +190,19 @@ export type OciManifest = {
  * @returns Bearer token string
  * @throws {UpgradeError} On network failure or malformed response
  */
-export async function getAnonymousToken(signal?: AbortSignal): Promise<string> {
-  const url = `${GHCR_REGISTRY}/token?scope=repository:${GHCR_REPO}:pull`;
+export async function getAnonymousToken(
+  sourceOrSignal: UpgradeSource | AbortSignal = PRIMARY_UPGRADE_SOURCE,
+  signal?: AbortSignal
+): Promise<string> {
+  const source =
+    "ghcrRepo" in sourceOrSignal ? sourceOrSignal : PRIMARY_UPGRADE_SOURCE;
+  const externalSignal = "ghcrRepo" in sourceOrSignal ? signal : sourceOrSignal;
+  const url = `${GHCR_REGISTRY}/token?scope=repository:${source.ghcrRepo}:pull`;
   const response = await fetchWithRetry(
     url,
     { headers: { "User-Agent": getUserAgent() } },
     "Failed to connect to GHCR",
-    { signal }
+    { signal: externalSignal }
   );
 
   if (!response.ok) {
@@ -227,9 +234,10 @@ export async function getAnonymousToken(signal?: AbortSignal): Promise<string> {
 export async function fetchManifest(
   token: string,
   tag: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<OciManifest> {
-  const url = `${GHCR_REGISTRY}/v2/${GHCR_REPO}/manifests/${tag}`;
+  const url = `${GHCR_REGISTRY}/v2/${source.ghcrRepo}/manifests/${tag}`;
   const response = await fetchWithRetry(
     url,
     {
@@ -263,9 +271,11 @@ export async function fetchManifest(
  * @throws {UpgradeError} On network failure or non-200 response
  */
 export async function fetchNightlyManifest(
-  token: string
+  token: string,
+  signal?: AbortSignal,
+  source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<OciManifest> {
-  return await fetchManifest(token, GHCR_TAG);
+  return await fetchManifest(token, GHCR_TAG, signal, source);
 }
 
 /**
@@ -332,9 +342,10 @@ export function findLayerByFilename(
 export async function downloadNightlyBlob(
   token: string,
   digest: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<Response> {
-  const blobUrl = `${GHCR_REGISTRY}/v2/${GHCR_REPO}/blobs/${digest}`;
+  const blobUrl = `${GHCR_REGISTRY}/v2/${source.ghcrRepo}/blobs/${digest}`;
 
   // Step 1: GET blob URL with auth, but do NOT follow redirects.
   // ghcr.io returns 307 → Azure Blob Storage signed URL.
@@ -427,9 +438,10 @@ const TAGS_PAGE_SIZE = 100;
 async function fetchTagPage(
   token: string,
   lastTag?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<string[]> {
-  let url = `${GHCR_REGISTRY}/v2/${GHCR_REPO}/tags/list?n=${TAGS_PAGE_SIZE}`;
+  let url = `${GHCR_REGISTRY}/v2/${source.ghcrRepo}/tags/list?n=${TAGS_PAGE_SIZE}`;
   if (lastTag) {
     url += `&last=${encodeURIComponent(lastTag)}`;
   }
@@ -471,13 +483,14 @@ async function fetchTagPage(
 export async function listTags(
   token: string,
   prefix?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<string[]> {
   const allTags: string[] = [];
   let lastTag: string | undefined;
 
   for (;;) {
-    const tags = await fetchTagPage(token, lastTag, signal);
+    const tags = await fetchTagPage(token, lastTag, signal, source);
     if (tags.length === 0) {
       break;
     }
@@ -513,8 +526,9 @@ export async function listTags(
 export async function downloadLayerBlob(
   token: string,
   digest: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<ArrayBuffer> {
-  const response = await downloadNightlyBlob(token, digest, signal);
+  const response = await downloadNightlyBlob(token, digest, signal, source);
   return response.arrayBuffer();
 }
