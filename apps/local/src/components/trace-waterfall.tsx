@@ -7,6 +7,7 @@ type TraceWaterfallProps = {
 type PositionedSpan = {
   span: TraceSpan
   depth: number
+  isLastChild: boolean
 }
 
 function formatDuration(durationMs: number | undefined): string {
@@ -38,8 +39,8 @@ function getSpanPosition(
 }
 
 function flattenSpans(spans: TraceSpan[], depth = 0): PositionedSpan[] {
-  return spans.flatMap((span) => [
-    { span, depth },
+  return spans.flatMap((span, index) => [
+    { span, depth, isLastChild: index === spans.length - 1 },
     ...flattenSpans(span.children, depth + 1),
   ])
 }
@@ -58,22 +59,29 @@ function SpanRow({
   trace: TraceGroup
   index: number
 }) {
-  const { span, depth } = positionedSpan
+  const { span, depth, isLastChild } = positionedSpan
   const position = getSpanPosition(span, trace)
   const failed = isFailingSpan(span)
 
   return (
     <div
       role="row"
-      className={`group grid min-w-[44rem] grid-cols-[minmax(18rem,42%)_minmax(22rem,1fr)] border-b border-border transition-colors hover:bg-muted/45 ${index % 2 === 1 ? 'bg-muted/15' : ''}`}
+      className={`group grid min-w-[48rem] grid-cols-[minmax(18rem,38%)_minmax(18rem,1fr)_6.5rem] border-b border-border transition-colors hover:bg-muted/45 ${index % 2 === 1 ? 'bg-muted/15' : ''}`}
     >
       <div role="cell" className="relative flex min-w-0 items-center gap-2 border-r border-border px-3 py-2">
         {depth > 0 ? (
-          <span
-            aria-hidden="true"
-            className="absolute inset-y-0 border-l border-dashed border-border/80"
-            style={{ left: `${0.95 + (depth - 1) * 1.05}rem` }}
-          />
+          <>
+            <span
+              aria-hidden="true"
+              className={`absolute border-l border-border/70 ${isLastChild ? 'top-0 h-1/2' : 'inset-y-0'}`}
+              style={{ left: `${0.95 + (depth - 1) * 1.05}rem` }}
+            />
+            <span
+              aria-hidden="true"
+              className="absolute top-1/2 h-px w-[0.85rem] -translate-y-1/2 bg-border/70"
+              style={{ left: `${0.95 + (depth - 1) * 1.05}rem` }}
+            />
+          </>
         ) : null}
         <span
           aria-hidden="true"
@@ -91,8 +99,8 @@ function SpanRow({
       </div>
       <div
         role="cell"
-        aria-label={`${span.description} duration ${formatDuration(span.durationMs)}`}
-        className="relative min-w-0 overflow-hidden px-3 py-1.5"
+        aria-label={`${span.description} timeline`}
+        className="relative min-w-0 overflow-hidden border-r border-border px-3 py-1.5"
       >
         <div
           aria-hidden="true"
@@ -105,14 +113,18 @@ function SpanRow({
         {position ? (
           <div
             data-testid={`waterfall-bar-${span.id}`}
-            className={`absolute top-1/2 h-3 min-w-1 -translate-y-1/2 rounded-[2px] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_65%,transparent)] ${failed ? 'bg-red-500/80 shadow-[inset_0_0_0_1px_color-mix(in_oklab,#ef4444_65%,transparent)]' : 'bg-primary/75'}`}
+            className={`absolute top-1/2 h-3 min-w-1 -translate-y-1/2 shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_65%,transparent)] ${failed ? 'bg-red-500/80 shadow-[inset_0_0_0_1px_color-mix(in_oklab,#ef4444_65%,transparent)]' : 'bg-primary/75'}`}
             style={position}
             title={formatDuration(span.durationMs)}
           />
         ) : null}
-        <span aria-hidden="true" className="relative z-10 ml-auto block w-fit px-1 font-mono text-[11px] leading-5 tabular-nums text-muted-foreground/90">
-          {formatDuration(span.durationMs)}
-        </span>
+      </div>
+      <div
+        role="cell"
+        aria-label={`Duration ${formatDuration(span.durationMs)}`}
+        className="flex items-center justify-end px-3 py-2 font-mono text-xs font-medium tabular-nums text-foreground"
+      >
+        {formatDuration(span.durationMs)}
       </div>
     </div>
   )
@@ -148,20 +160,23 @@ export function TraceWaterfall({ trace }: TraceWaterfallProps) {
         </div>
       </header>
       <div role="table" aria-label="Trace spans" className="min-w-max">
-        <div role="row" className="grid min-w-[44rem] grid-cols-[minmax(18rem,42%)_minmax(22rem,1fr)] border-b border-border bg-muted/40 text-xs font-medium text-muted-foreground">
+        <div role="row" className="grid min-w-[48rem] grid-cols-[minmax(18rem,38%)_minmax(18rem,1fr)_6.5rem] border-b border-border bg-muted/40 text-xs font-medium text-muted-foreground">
           <div role="columnheader" aria-label="Span" className="border-r border-border px-3 py-2">
             Span
           </div>
           <div
             role="columnheader"
             aria-label={`Timeline from 0ms to ${formatDuration(trace.durationMs)}`}
-            className="px-3 py-1.5"
+            className="border-r border-border px-3 py-1.5"
           >
             <span className="block text-[10px] font-semibold tracking-wide uppercase">Timeline</span>
             <span aria-hidden="true" className="mt-0.5 flex justify-between font-mono text-[10px] font-normal tabular-nums text-muted-foreground/75">
               <span>0</span>
               <span>{formatDuration(trace.durationMs)}</span>
             </span>
+          </div>
+          <div role="columnheader" aria-label="Duration" className="px-3 py-2 text-right">
+            Duration
           </div>
         </div>
         {spans.map((positionedSpan, index) => (

@@ -147,6 +147,8 @@ describe('local receiver to viewer integration', () => {
       fireEvent.click(screen.getByRole('tab', { name: 'JSON' }))
       const code = screen.getByTestId('highlighted-json')
       expect(code.textContent).toContain('GET /live-2')
+      fireEvent.click(screen.getByRole('button', { name: 'Copy JSON' }))
+      expect(screen.getByRole('status', { name: 'JSON copied' })).not.toBeNull()
       await waitFor(() => {
         expect(screen.getByTestId('highlighted-json').querySelector('.shiki')).not.toBeNull()
       })
@@ -416,10 +418,11 @@ describe('local receiver to viewer integration', () => {
       expect(
         screen.getByRole('columnheader', { name: 'Timeline from 0ms to 12ms' })
       ).not.toBeNull()
+      expect(screen.getByRole('columnheader', { name: 'Duration' })).not.toBeNull()
       expect(screen.getByLabelText('Trace summary').textContent).toContain('3 spans')
       expect(screen.getByText('db.query')).not.toBeNull()
       expect(screen.getByText('http.client')).not.toBeNull()
-      expect(screen.getByLabelText('SELECT * FROM orders duration 4.00ms')).not.toBeNull()
+      expect(screen.getByRole('cell', { name: 'Duration 4.00ms' })).not.toBeNull()
       expect(screen.getByTestId('waterfall-bar-db-span')).not.toBeNull()
     } finally {
       cleanup()
