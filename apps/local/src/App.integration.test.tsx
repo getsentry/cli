@@ -1,7 +1,7 @@
 import { createSpotlightBuffer } from '@spotlightjs/spotlight/sdk'
 import { EventSource as NodeEventSource } from 'eventsource'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ThemeProvider } from '@/components/theme-provider.tsx'
 import App from './App.tsx'
 import {
@@ -107,6 +107,19 @@ class OpeningEventSource extends EventTarget {
   constructor(_url: string) {
     super()
     queueMicrotask(() => this.onopen?.(new Event('open')))
+  }
+
+  close() {}
+}
+
+class ControllableEventSource extends EventTarget {
+  static instances: ControllableEventSource[] = []
+  onopen: ((event: Event) => void) | null = null
+  onerror: ((event: Event) => void) | null = null
+
+  constructor(_url: string) {
+    super()
+    ControllableEventSource.instances.push(this)
   }
 
   close() {}
@@ -236,6 +249,30 @@ describe('local receiver to viewer integration', () => {
       )
     })
     expect(window.localStorage.getItem(STREAM_STORAGE_KEY)).toBeNull()
+  })
+
+  test('keeps endpoint validation visible after a failed receiver has been stopped', async () => {
+    ControllableEventSource.instances = []
+    vi.stubGlobal('EventSource', ControllableEventSource)
+    renderBareViewer()
+
+    const source = ControllableEventSource.instances[0]
+    expect(source).toBeDefined()
+    await act(async () => source?.onerror?.(new Event('error')))
+    await screen.findByRole('alert', { name: 'Receiver connection error' })
+
+    fireEvent.change(screen.getByLabelText('Receiver endpoint'), {
+      target: { value: 'http://receiver.example/stream' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(screen.getByRole('alert').textContent).toContain(
+      'Enter a loopback stream or an HTTPS remote stream'
+    )
+
+    await act(async () => source?.onerror?.(new Event('error')))
+    expect(screen.getByRole('alert').textContent).toContain(
+      'Enter a loopback stream or an HTTPS remote stream'
+    )
   })
 
   test('replays an envelope buffered before the viewer opens', async () => {

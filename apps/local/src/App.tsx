@@ -395,6 +395,7 @@ export default function App() {
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [draftEndpoint, setDraftEndpoint] = useState(streamUrl)
   const [isEditingReceiver, setIsEditingReceiver] = useState(false)
+  const [isConnectionEnabled, setIsConnectionEnabled] = useState(true)
   const [connectionError, setConnectionError] = useState<string>()
   const [items, setItems] = useState<LocalFeedItem[]>([])
   const [selectedItemId, setSelectedItemId] = useState<string>()
@@ -462,12 +463,14 @@ export default function App() {
   const connectToDraft = () => {
     const endpoint = parseStreamEndpoint(draftEndpoint)
     if (!endpoint) {
+      setIsConnectionEnabled(false)
       setConnectionError('Enter a loopback stream or an HTTPS remote stream ending in /stream.')
       setConnection('failed')
       return
     }
     setDraftEndpoint(endpoint.url)
     setStreamUrl(endpoint.url)
+    setIsConnectionEnabled(true)
     setConnection('connecting')
     setConnectionError(undefined)
     setIsEditingReceiver(false)
@@ -480,8 +483,16 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (!isConnectionEnabled) {
+      return
+    }
+
+    let isCurrent = true
     const source = new EventSource(streamUrl)
     const onEnvelope = (event: Event) => {
+      if (!isCurrent) {
+        return
+      }
       try {
         const messageEvent = event as MessageEvent<string>
         const eventId = messageEvent.lastEventId || `event-${fallbackEventId.current++}`
@@ -495,6 +506,9 @@ export default function App() {
 
     source.addEventListener(SENTRY_ENVELOPE_EVENT, onEnvelope)
     source.onopen = () => {
+      if (!isCurrent) {
+        return
+      }
       const endpoint = parseStreamEndpoint(streamUrl)
       if (endpoint?.kind === 'loopback') {
         saveStreamUrl(endpoint.url)
@@ -506,6 +520,9 @@ export default function App() {
       setMessage(undefined)
     }
     source.onerror = () => {
+      if (!isCurrent) {
+        return
+      }
       setConnection('failed')
       setConnectionError(
         streamUrl === DEFAULT_STREAM_URL
@@ -515,10 +532,11 @@ export default function App() {
     }
 
     return () => {
+      isCurrent = false
       source.removeEventListener(SENTRY_ENVELOPE_EVENT, onEnvelope)
       source.close()
     }
-  }, [streamUrl])
+  }, [isConnectionEnabled, streamUrl])
 
   return (
     <main className="h-dvh overflow-hidden bg-background">
