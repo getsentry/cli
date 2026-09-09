@@ -141,7 +141,7 @@
     "ultracite": "6.3.10",
     "uuidv7": "^1.2.1",
     "valibot": "^1.4.2",
-    "vitest": "^4.1.9",
+    "vitest": "^5.0.0",
     "wrap-ansi": "^10.0.0"
   }
 }
