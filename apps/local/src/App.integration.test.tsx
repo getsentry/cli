@@ -14,6 +14,8 @@ const SENTRY_CONTENT_TYPE = 'application/x-sentry-envelope'
 type EnvelopeOptions = {
   level?: string
   operation?: string
+  spanId?: string
+  spans?: unknown[]
   statusCode?: number
   startTimestamp?: number
   traceId?: string
@@ -34,12 +36,14 @@ function envelope(transaction: string, options: EnvelopeOptions = {}): string {
             contexts: {
               trace: {
                 ...(options.traceId ? { trace_id: options.traceId } : {}),
+                ...(options.spanId ? { span_id: options.spanId } : {}),
                 ...(options.operation ? { op: options.operation } : {}),
               },
             },
           }
         : {}),
       ...(options.statusCode ? { request: { status_code: options.statusCode } } : {}),
+      ...(options.spans ? { spans: options.spans } : {}),
     }),
     '',
   ].join('\n')
@@ -131,6 +135,7 @@ describe('local receiver to viewer integration', () => {
       const detail = screen.getByTestId('event-detail')
       expect(detail.textContent).toContain('GET /live')
       expect(detail.textContent).not.toContain('GET /live-2')
+      expect(detail.textContent).not.toContain('GETGET /live')
 
       const events = screen.getAllByLabelText('View transaction event')
       fireEvent.click(events[1]!)
@@ -210,7 +215,67 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
-  test('shows other retained events from the selected trace', async () => {
+  test('marks an error entry in the mixed event feed', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
+
+      expect((await screen.findByLabelText('View event event')).textContent).toContain('Error')
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('filters retained events from the top navigation search', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /customers/42')
+      await sendEnvelope(port, 'POST /orders')
+
+      await waitFor(() => {
+        expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
+      })
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Search events' }), {
+        target: { value: 'customers' },
+      })
+
+      expect(screen.getAllByLabelText('View transaction event')).toHaveLength(1)
+      expect(screen.getByTestId('event-list').textContent).toContain('/customers/42')
+      expect(screen.getByTestId('event-list').textContent).not.toContain('/orders')
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('clears the local viewer feed from receiver options', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /clear-me')
+      await screen.findByLabelText('View transaction event')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Receiver options' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Clear all events' }))
+
+      expect(screen.queryByLabelText('View transaction event')).toBeNull()
+      expect(screen.getByText('Waiting for events')).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('summarizes other retained events in the selected trace overview', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -223,9 +288,9 @@ describe('local receiver to viewer integration', () => {
         expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
       })
 
-      expect(screen.getByRole('heading', { name: 'Related trace items' })).not.toBeNull()
-      expect(screen.getByText('1 related event')).not.toBeNull()
-      expect(screen.getByRole('button', { name: 'View related GET /trace/second' })).not.toBeNull()
+      const details = screen.getByRole('table', { name: 'Event details' })
+      expect(details.textContent).toContain('Related events')
+      expect(details.textContent).toContain('1')
     } finally {
       cleanup()
       await stopReceiver(server)
@@ -285,7 +350,7 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
-  test('summarizes the selected HTTP event before its fields', async () => {
+  test('shows a copyable, grouped inspector table in the selected event overview', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -298,10 +363,61 @@ describe('local receiver to viewer integration', () => {
         traceId: 'summary-trace',
       })
 
-      const summary = await screen.findByLabelText('Event summary')
-      expect(summary.textContent).toContain('201')
-      expect(summary.textContent).toContain('6.17ms')
-      expect(summary.textContent).toContain('http.server')
+      const details = await screen.findByRole('table', { name: 'Event details' })
+      expect(details.textContent).toContain('201')
+      expect(details.textContent).toContain('6.17ms')
+      expect(details.textContent).toContain('http.server')
+      expect(screen.getByRole('rowheader', { name: 'Method' })).not.toBeNull()
+      expect(screen.getByRole('rowheader', { name: 'Trace ID' })).not.toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy Route' }))
+      expect(screen.getByRole('status', { name: 'Route copied' })).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('shows a trace waterfall for a transaction with child spans', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /waterfall', {
+        operation: 'http.server',
+        spanId: 'root-span',
+        traceId: 'waterfall-trace',
+        startTimestamp: 1_699_999_999.988,
+        spans: [
+          {
+            span_id: 'db-span',
+            parent_span_id: 'root-span',
+            op: 'db.query',
+            description: 'SELECT * FROM orders',
+            start_timestamp: 1_699_999_999.99,
+            timestamp: 1_699_999_999.994,
+          },
+          {
+            span_id: 'http-span',
+            parent_span_id: 'root-span',
+            op: 'http.client',
+            description: 'GET https://inventory.test/items/42',
+            start_timestamp: 1_699_999_999.995,
+            timestamp: 1_699_999_999.998,
+          },
+        ],
+      })
+
+      fireEvent.click(await screen.findByRole('tab', { name: 'Trace' }))
+
+      expect(screen.getByRole('region', { name: 'Trace waterfall' })).not.toBeNull()
+      expect(screen.getByRole('columnheader', { name: 'Span' })).not.toBeNull()
+      expect(screen.getByRole('columnheader', { name: 'Timeline' })).not.toBeNull()
+      expect(screen.getByLabelText('Trace summary').textContent).toContain('3 spans')
+      expect(screen.getByText('db.query')).not.toBeNull()
+      expect(screen.getByText('http.client')).not.toBeNull()
+      expect(screen.getByTestId('waterfall-bar-db-span')).not.toBeNull()
     } finally {
       cleanup()
       await stopReceiver(server)

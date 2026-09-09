@@ -1,7 +1,8 @@
-import { Terminal } from 'lucide-react'
-import { type KeyboardEvent, useEffect, useRef, useState } from 'react'
+import { Check, Copy, Search, Terminal } from 'lucide-react'
+import { Fragment, type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { JsonView } from '@/components/json-view.tsx'
-import { ThemeToggle } from '@/components/theme-toggle.tsx'
+import { ReceiverControls } from '@/components/receiver-controls.tsx'
+import { TraceWaterfall } from '@/components/trace-waterfall.tsx'
 import { Badge } from '@/components/ui/badge.tsx'
 import {
   Card,
@@ -24,6 +25,7 @@ import {
   type EventMetadata,
   type LocalFeedItem,
 } from '@/lib/spotlight.ts'
+import { buildTraceGroups, type TraceGroup } from '@/lib/trace-model.ts'
 
 type EventEntryProps = {
   item: LocalFeedItem
@@ -46,11 +48,36 @@ function matchesEventFilter(item: LocalFeedItem, filter: EventFilter): boolean {
   }
 
   if (filter === 'errors') {
-    const { level, statusCode } = getMetadata(item)
-    return level === 'error' || level === 'fatal' || (statusCode !== undefined && statusCode >= 500)
+    return isErrorEvent(item)
   }
 
   return item.type === (filter === 'transactions' ? 'transaction' : 'log')
+}
+
+function isErrorEvent(item: LocalFeedItem): boolean {
+  const { level, statusCode } = getMetadata(item)
+  return level === 'error' || level === 'fatal' || (statusCode !== undefined && statusCode >= 500)
+}
+
+function matchesSearch(item: LocalFeedItem, query: string): boolean {
+  const normalizedQuery = query.trim().toLowerCase()
+  if (!normalizedQuery) {
+    return true
+  }
+
+  const metadata = getMetadata(item)
+  return [
+    item.type,
+    item.text,
+    metadata.title,
+    metadata.level,
+    metadata.method,
+    metadata.route,
+    metadata.traceId,
+    metadata.spanId,
+    metadata.operation,
+    metadata.origin,
+  ].some((value) => value?.toLowerCase().includes(normalizedQuery))
 }
 
 function formatTimestamp(timestamp: LocalFeedItem['timestamp']): string {
@@ -108,6 +135,7 @@ function saveStreamUrl(streamUrl: string): void {
 function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
   const metadata = getMetadata(item)
   const duration = formatDuration(metadata.durationMs)
+  const isError = isErrorEvent(item)
 
   return (
     <li>
@@ -122,7 +150,9 @@ function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
       >
         <div className="min-w-0 space-y-1">
           <div className="flex min-w-0 items-center gap-2">
-            <Badge>{metadata.method ?? item.type}</Badge>
+            <Badge variant={isError ? 'destructive' : 'default'}>
+              {isError ? 'Error' : metadata.method ?? metadata.operation ?? item.type}
+            </Badge>
             <span className="truncate font-mono text-sm">{metadata.route ?? metadata.title}</span>
           </div>
           <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
@@ -143,88 +173,80 @@ function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
 
 type EventDetailProps = {
   item: LocalFeedItem
+  trace?: TraceGroup
   relatedItems: LocalFeedItem[]
-  onSelect: (id: string) => void
 }
 
-type DetailTab = 'overview' | 'json'
-
-const detailTabs: DetailTab[] = ['overview', 'json']
+type DetailTab = 'overview' | 'trace' | 'json'
 
 type DetailField = {
   label: string
   value: string
 }
 
-function SummaryMetric({ label, value, tone }: DetailField & { tone?: string }) {
-  return (
-    <div className="min-w-0 px-3 py-2">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={`mt-1 truncate font-mono text-sm ${tone ?? 'text-foreground'}`}>{value}</dd>
-    </div>
-  )
+type DetailGroup = {
+  label: string
+  fields: DetailField[]
 }
 
-function DetailSection({ title, fields }: { title: string; fields: DetailField[] }) {
-  if (fields.length === 0) {
-    return null
+function copyText(value: string): void {
+  const fallbackCopy = () => {
+    const input = document.createElement('textarea')
+    input.value = value
+    input.setAttribute('readonly', '')
+    input.style.position = 'fixed'
+    input.style.opacity = '0'
+    document.body.appendChild(input)
+    input.select()
+    document.execCommand?.('copy')
+    input.remove()
   }
 
-  return (
-    <section>
-      <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-        {title}
-      </h2>
-      <dl className="border-y border-border text-sm">
-        {fields.map((field) => (
-          <div key={field.label} className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 border-b border-border px-3 py-2 last:border-b-0">
-            <dt className="text-muted-foreground">{field.label}</dt>
-            <dd className="break-all font-mono text-foreground">{field.value}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
-  )
+  if (navigator.clipboard?.writeText) {
+    void navigator.clipboard.writeText(value).catch(fallbackCopy)
+    return
+  }
+
+  fallbackCopy()
 }
 
-function EventDetail({ item, relatedItems, onSelect }: EventDetailProps) {
+function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
   const [tab, setTab] = useState<DetailTab>('overview')
+  const [copiedField, setCopiedField] = useState<string>()
+  const detailTabs: DetailTab[] = trace?.spans.length ? ['overview', 'trace', 'json'] : ['overview', 'json']
   const metadata = getMetadata(item)
   const duration = formatDuration(metadata.durationMs)
-  const eventFields: DetailField[] = [
-    { label: 'Transaction', value: metadata.title },
-    { label: 'Received', value: formatTimestamp(item.timestamp) },
+  const detailGroups: DetailGroup[] = [
+    {
+      label: 'Request',
+      fields: [
+        ...(metadata.method ? [{ label: 'Method', value: metadata.method }] : []),
+        ...(metadata.route ? [{ label: 'Route', value: metadata.route }] : []),
+        ...(metadata.statusCode !== undefined
+          ? [{ label: 'Status', value: String(metadata.statusCode) }]
+          : []),
+        ...(duration ? [{ label: 'Duration', value: duration }] : []),
+      ],
+    },
+    {
+      label: 'Trace context',
+      fields: [
+        ...(metadata.traceId ? [{ label: 'Trace ID', value: metadata.traceId }] : []),
+        ...(metadata.spanId ? [{ label: 'Span ID', value: metadata.spanId }] : []),
+        ...(metadata.operation ? [{ label: 'Operation', value: metadata.operation }] : []),
+        ...(metadata.origin ? [{ label: 'Origin', value: metadata.origin }] : []),
+        ...(relatedItems.length > 0
+          ? [
+              {
+                label: 'Related events',
+                value: `${relatedItems.length} other event${relatedItems.length === 1 ? '' : 's'} in this trace`,
+              },
+            ]
+          : []),
+      ],
+    },
   ]
-  const requestFields: DetailField[] = [
-    ...(metadata.method ? [{ label: 'Method', value: metadata.method }] : []),
-    ...(metadata.route ? [{ label: 'Route', value: metadata.route }] : []),
-    ...(metadata.statusCode !== undefined
-      ? [{ label: 'Status', value: String(metadata.statusCode) }]
-      : []),
-    ...(duration ? [{ label: 'Duration', value: duration }] : []),
-  ]
-  const traceFields: DetailField[] = [
-    ...(metadata.traceId ? [{ label: 'Trace ID', value: metadata.traceId }] : []),
-    ...(metadata.spanId ? [{ label: 'Span ID', value: metadata.spanId }] : []),
-    ...(metadata.operation ? [{ label: 'Operation', value: metadata.operation }] : []),
-    ...(metadata.origin ? [{ label: 'Origin', value: metadata.origin }] : []),
-  ]
-  const summaryFields = [
-    ...(metadata.statusCode !== undefined
-      ? [
-          {
-            label: 'Status',
-            value: String(metadata.statusCode),
-            tone: getStatusClass(metadata.statusCode),
-          },
-        ]
-      : []),
-    ...(duration ? [{ label: 'Duration', value: duration }] : []),
-    ...(metadata.operation ? [{ label: 'Operation', value: metadata.operation }] : []),
-    ...(metadata.traceId
-      ? [{ label: 'Trace', value: metadata.traceId.slice(0, 8) }]
-      : []),
-  ]
+  const hasDetailFields = detailGroups.some((group) => group.fields.length > 0)
 
   const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     const currentIndex = detailTabs.indexOf(tab)
@@ -259,8 +281,8 @@ function EventDetail({ item, relatedItems, onSelect }: EventDetailProps) {
     >
       <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border px-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Badge>{metadata.method ?? item.type}</Badge>
-          <span className="truncate font-mono text-sm">{metadata.route ?? metadata.title}</span>
+          <Badge>{metadata.operation ?? item.type}</Badge>
+          <span className="truncate font-mono text-sm">{metadata.title}</span>
         </div>
         <div className="flex h-full shrink-0 items-center gap-3">
           <div role="tablist" aria-label="Event detail view" className="flex h-full">
@@ -277,6 +299,21 @@ function EventDetail({ item, relatedItems, onSelect }: EventDetailProps) {
             >
               Overview
             </button>
+            {trace?.spans.length ? (
+              <button
+                id="event-detail-tab-trace"
+                type="button"
+                role="tab"
+                aria-selected={tab === 'trace'}
+                aria-controls="event-detail-panel"
+                tabIndex={tab === 'trace' ? 0 : -1}
+                className={`px-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${tab === 'trace' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                onClick={() => setTab('trace')}
+                onKeyDown={handleTabKeyDown}
+              >
+                Trace
+              </button>
+            ) : null}
             <button
               id="event-detail-tab-json"
               type="button"
@@ -295,61 +332,60 @@ function EventDetail({ item, relatedItems, onSelect }: EventDetailProps) {
         </div>
       </div>
       {tab === 'overview' ? (
-        <div id="event-detail-panel" role="tabpanel" className="min-h-0 flex-1 overflow-auto p-4">
-          {summaryFields.length > 0 ? (
-            <dl
-              aria-label="Event summary"
-              className="mb-6 grid divide-y divide-border border-y border-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4"
-            >
-              {summaryFields.map((field) => (
-                <SummaryMetric key={field.label} {...field} />
-              ))}
-            </dl>
-          ) : null}
-          <div className="grid gap-6 xl:grid-cols-2">
-            <DetailSection title="Event" fields={eventFields} />
-            <DetailSection title="Request" fields={requestFields} />
-            <div className="xl:col-span-2">
-              <DetailSection title="Trace" fields={traceFields} />
-            </div>
-            {relatedItems.length > 0 ? (
-              <section className="xl:col-span-2">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                    Related trace items
-                  </h2>
-                  <span className="text-xs text-muted-foreground">
-                    {relatedItems.length} related event{relatedItems.length === 1 ? '' : 's'}
-                  </span>
-                </div>
-                <ol className="border-y border-border">
-                  {relatedItems.map((relatedItem) => {
-                    const relatedMetadata = getMetadata(relatedItem)
-                    return (
-                      <li key={relatedItem.id}>
-                        <button
-                          type="button"
-                          aria-label={`View related ${relatedMetadata.title}`}
-                          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                          onClick={() => onSelect(relatedItem.id)}
-                        >
-                          <div className="flex min-w-0 items-center gap-2">
-                            <Badge>{relatedMetadata.method ?? relatedItem.type}</Badge>
-                            <span className="truncate font-mono text-sm">
-                              {relatedMetadata.route ?? relatedMetadata.title}
-                            </span>
-                          </div>
-                          <time className="shrink-0 text-sm tabular-nums text-muted-foreground">
-                            {formatTimestamp(relatedItem.timestamp)}
-                          </time>
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ol>
-              </section>
-            ) : null}
+        <div id="event-detail-panel" role="tabpanel" className="min-h-0 flex-1 overflow-auto p-3 sm:p-4">
+          <div className="w-full">
+            {hasDetailFields ? (
+              <table aria-label="Event details" className="w-full border border-border text-left text-sm">
+                <caption className="sr-only">Captured event details</caption>
+                <tbody>
+                  {detailGroups.map((group) =>
+                    group.fields.length > 0 ? (
+                      <Fragment key={group.label}>
+                        <tr className="border-b border-border bg-muted/40">
+                          <th colSpan={2} scope="rowgroup" className="px-3 py-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                            {group.label}
+                          </th>
+                        </tr>
+                        {group.fields.map((field) => {
+                          const copied = copiedField === field.label
+                          return (
+                            <tr key={field.label} className="border-b border-border last:border-b-0">
+                              <th scope="row" className="w-36 border-r border-border bg-muted/65 px-3 py-2 align-top font-medium text-muted-foreground sm:w-44">
+                                {field.label}
+                              </th>
+                              <td className="group px-3 py-2">
+                                <div className="flex min-w-0 items-start gap-2">
+                                  <code className="min-w-0 flex-1 break-all font-mono text-foreground">{field.value}</code>
+                                  <button
+                                    type="button"
+                                    aria-label={`Copy ${field.label}`}
+                                    className="shrink-0 text-muted-foreground opacity-100 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                                    onClick={() => {
+                                      copyText(field.value)
+                                      setCopiedField(field.label)
+                                    }}
+                                  >
+                                    {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </Fragment>
+                    ) : null
+                  )}
+                </tbody>
+              </table>
+            ) : (
+              <p className="text-sm text-muted-foreground">No additional event details.</p>
+            )}
+            {copiedField ? <span role="status" aria-label={`${copiedField} copied`} className="sr-only">{copiedField} copied</span> : null}
           </div>
+        </div>
+      ) : tab === 'trace' && trace ? (
+        <div id="event-detail-panel" role="tabpanel" className="min-h-0 flex-1 overflow-auto">
+          <TraceWaterfall trace={trace} />
         </div>
       ) : (
         <div id="event-detail-panel" role="tabpanel" className="min-h-0 flex-1 overflow-auto">
@@ -371,11 +407,17 @@ export default function App() {
   const [selectedItemId, setSelectedItemId] = useState<string>()
   const [lastViewedItemId, setLastViewedItemId] = useState<string>()
   const [filter, setFilter] = useState<EventFilter>('all')
+  const [searchQuery, setSearchQuery] = useState('')
   const [message, setMessage] = useState<string | undefined>()
   const fallbackEventId = useRef(0)
   const presentation = getConnectionPresentation(connection)
+  const traces = useMemo(() => buildTraceGroups(items), [items])
   const selectedItem = items.find((item) => item.id === selectedItemId) ?? items[0]
+  const selectedTrace = selectedItem?.metadata?.traceId
+    ? traces.find((trace) => trace.id === selectedItem.metadata?.traceId)
+    : undefined
   const visibleItems = items.filter((item) => matchesEventFilter(item, filter))
+  const searchedItems = visibleItems.filter((item) => matchesSearch(item, searchQuery))
   const relatedItems = selectedItem?.metadata?.traceId
     ? items.filter(
         (item) =>
@@ -392,7 +434,9 @@ export default function App() {
       : lastViewedIndex === -1
         ? items
         : items.slice(lastViewedIndex + 1)
-  const newItems = unseenItems.filter((item) => matchesEventFilter(item, filter))
+  const newItems = unseenItems.filter(
+    (item) => matchesEventFilter(item, filter) && matchesSearch(item, searchQuery)
+  )
   const newItemCount = newItems.length
 
   const markItemsSeen = () => {
@@ -406,11 +450,20 @@ export default function App() {
 
   const selectFilter = (nextFilter: EventFilter) => {
     setFilter(nextFilter)
-    const nextSelectedItem = items.find((item) => matchesEventFilter(item, nextFilter))
+    const nextSelectedItem = items.find(
+      (item) => matchesEventFilter(item, nextFilter) && matchesSearch(item, searchQuery)
+    )
     if (nextSelectedItem) {
       setSelectedItemId(nextSelectedItem.id)
     }
     markItemsSeen()
+  }
+
+  const clearItems = () => {
+    setItems([])
+    setSelectedItemId(undefined)
+    setLastViewedItemId(undefined)
+    setSearchQuery('')
   }
 
   useEffect(() => {
@@ -480,20 +533,19 @@ export default function App() {
               height="20"
             />
           </div>
-          <div className="flex items-center gap-2">
-            <span role="status" aria-label={presentation.label} title={presentation.label}>
-              <span
-                className={
-                  presentation.tone === 'success'
-                    ? 'block size-2 rounded-full bg-emerald-500 shadow-[0_0_10px_oklch(0.72_0.19_160)]'
-                    : presentation.tone === 'warning'
-                      ? 'block size-2 rounded-full bg-amber-500'
-                      : 'block size-2 rounded-full bg-muted-foreground'
-                }
-              />
-              <span className="sr-only">{presentation.label}</span>
-            </span>
-            <ThemeToggle />
+          <label className="relative mx-auto min-w-0 max-w-lg flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <input
+              type="search"
+              aria-label="Search events"
+              placeholder="Search events"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              className="h-8 w-full border border-border bg-muted/30 pr-3 pl-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
+          </label>
+          <div className="flex items-center">
+            <ReceiverControls connection={presentation} eventCount={items.length} onClear={clearItems} />
           </div>
         </header>
 
@@ -582,7 +634,7 @@ export default function App() {
                     data-testid="event-list"
                     className="min-h-0 flex-1 space-y-px overflow-y-auto"
                   >
-                    {visibleItems.map((item) => (
+                    {searchedItems.map((item) => (
                       <EventEntry
                         key={item.id}
                         item={item}
@@ -590,14 +642,17 @@ export default function App() {
                         onSelect={selectItem}
                       />
                     ))}
+                    {searchedItems.length === 0 ? (
+                      <li className="px-3 py-4 text-sm text-muted-foreground">No matching events.</li>
+                    ) : null}
                   </ol>
                 </aside>
                 {selectedItem ? (
                   <EventDetail
                     key={selectedItem.id}
                     item={selectedItem}
+                    trace={selectedTrace}
                     relatedItems={relatedItems}
-                    onSelect={selectItem}
                   />
                 ) : null}
               </div>

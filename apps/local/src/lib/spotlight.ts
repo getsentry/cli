@@ -7,6 +7,7 @@ export type LocalFeedItem = {
   type: string
   timestamp?: number | string
   text: string
+  payload: unknown
   metadata?: EventMetadata
 }
 
@@ -35,6 +36,11 @@ function getNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
+function getAttributeString(attributes: Record<string, unknown>, key: string): string | undefined {
+  const attribute = attributes[key]
+  return isRecord(attribute) ? getString(attribute.value) : getString(attribute)
+}
+
 function getRoute(url: string | undefined): string | undefined {
   if (!url) {
     return undefined
@@ -50,24 +56,31 @@ function getRoute(url: string | undefined): string | undefined {
 function getEventMetadata(payload: unknown, type: string): EventMetadata {
   const event = isRecord(payload) ? payload : {}
   const transaction = getString(event.transaction)
+  const description = getString(event.description)
+  const message = getString(event.message) ?? getString(event.body) ?? getString(event.name)
   const transactionMatch = transaction?.match(/^([A-Z]+)\s+(.+)$/)
   const contexts = isRecord(event.contexts) ? event.contexts : {}
-  const trace = isRecord(contexts.trace) ? contexts.trace : {}
-  const data = isRecord(trace.data) ? trace.data : {}
+  const trace = isRecord(contexts.trace) ? contexts.trace : event
+  const data = isRecord(trace.data)
+    ? trace.data
+    : isRecord(event.data)
+      ? event.data
+      : {}
+  const attributes = isRecord(event.attributes) ? event.attributes : {}
   const request = isRecord(event.request) ? event.request : {}
   const method =
     getString(request.method) ?? getString(data["http.method"]) ?? transactionMatch?.[1]
   const url = getString(request.url) ?? getString(data["http.url"])
   const route = getRoute(url) ?? transactionMatch?.[2]
   const startTimestamp = getNumber(event.start_timestamp)
-  const timestamp = getNumber(event.timestamp)
+  const timestamp = getNumber(event.timestamp) ?? getNumber(event.end_timestamp)
   const durationMs =
     startTimestamp !== undefined && timestamp !== undefined
       ? Math.round((timestamp - startTimestamp) * 100_000) / 100
       : undefined
 
   return {
-    title: transaction ?? route ?? type,
+    title: transaction ?? description ?? message ?? route ?? type,
     level: getString(event.level),
     method,
     route,
@@ -76,9 +89,31 @@ function getEventMetadata(payload: unknown, type: string): EventMetadata {
     durationMs,
     traceId: getString(trace.trace_id) ?? getString(event.trace_id),
     spanId: getString(trace.span_id) ?? getString(event.span_id),
-    operation: getString(trace.op) ?? getString(event.transaction_op),
-    origin: getString(data["sentry.origin"]),
+    operation:
+      getString(trace.op) ??
+      getString(event.op) ??
+      getString(event.transaction_op) ??
+      getAttributeString(attributes, "sentry.op"),
+    origin:
+      getString(data["sentry.origin"]) ??
+      getString(event.origin) ??
+      getAttributeString(attributes, "sentry.origin"),
   }
+}
+
+function getBatchedPayloadItems(payload: unknown, type: string): unknown[] {
+  if ((type !== "span" && type !== "log") || !isRecord(payload) || !Array.isArray(payload.items)) {
+    return [payload]
+  }
+  return payload.items.filter(isRecord)
+}
+
+function getItemTimestamp(payload: unknown): number | string | undefined {
+  if (!isRecord(payload)) {
+    return undefined
+  }
+  const timestamp = payload.timestamp ?? payload.end_timestamp
+  return typeof timestamp === "number" || typeof timestamp === "string" ? timestamp : undefined
 }
 
 function isLoopbackHost(hostname: string): boolean {
@@ -147,21 +182,19 @@ export function decodeEnvelope(data: string, eventId: string): LocalFeedItem[] {
       return []
     }
     const header = item[0]
-    const payload = item[1]
-    const timestamp = isRecord(payload) ? payload.timestamp : undefined
     const type = typeof header.type === "string" ? header.type : "unknown"
-    return [
-      {
-        id: `${eventId}:${index}`,
-        type,
-        timestamp:
-          typeof timestamp === "number" || typeof timestamp === "string"
-            ? timestamp
-            : undefined,
-        text: JSON.stringify(payload, null, 2) ?? String(payload),
-        metadata: getEventMetadata(payload, type),
-      },
-    ]
+    const payloads = getBatchedPayloadItems(item[1], type)
+    return payloads.map((payload, payloadIndex) => ({
+      id:
+        payloads.length === 1
+          ? `${eventId}:${index}`
+          : `${eventId}:${index}:${payloadIndex}`,
+      type,
+      timestamp: getItemTimestamp(payload),
+      text: JSON.stringify(payload, null, 2) ?? String(payload),
+      payload,
+      metadata: getEventMetadata(payload, type),
+    }))
   })
 }
 
