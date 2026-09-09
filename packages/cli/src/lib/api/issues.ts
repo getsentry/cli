@@ -17,6 +17,7 @@ import {
 } from "../custom-ca.js";
 import { applyCustomHeaders } from "../custom-headers.js";
 import { ApiError, ValidationError } from "../errors.js";
+import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import { invalidateCachedResponsesMatching } from "../response-cache.js";
 import { getApiBaseUrl } from "../sentry-client.js";
@@ -30,6 +31,8 @@ import {
   type PaginatedResponse,
   unwrapPaginatedResult,
 } from "./infrastructure.js";
+
+const log = logger.withTag("api.issues");
 
 const TRAILING_SLASH_RE = /\/$/;
 
@@ -745,5 +748,28 @@ export async function getSharedIssue(
     );
   }
 
-  return (await response.json()) as { groupID: string };
+  let json: unknown;
+  try {
+    json = await response.json();
+  } catch (err) {
+    log.debug("Failed to parse shared issue JSON", err);
+    throw new ApiError(
+      "Share link returned invalid JSON",
+      response.status,
+      undefined,
+      `shared/issues/${shareId}`
+    );
+  }
+
+  const result = json as Record<string, unknown>;
+  if (typeof result?.groupID !== "string" || !result.groupID) {
+    throw new ApiError(
+      "Share link response missing groupID",
+      response.status,
+      "The share link returned an unexpected response shape.",
+      `shared/issues/${shareId}`
+    );
+  }
+
+  return { groupID: result.groupID };
 }

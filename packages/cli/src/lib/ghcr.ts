@@ -20,6 +20,9 @@
 import { getUserAgent } from "./constants.js";
 import { customFetch } from "./custom-ca.js";
 import { UpgradeError } from "./errors.js";
+import { logger } from "./logger.js";
+
+const log = logger.withTag("ghcr");
 
 /** Default timeout for GHCR HTTP requests (10 seconds) */
 const GHCR_REQUEST_TIMEOUT = 10_000;
@@ -250,7 +253,26 @@ export async function fetchManifest(
     );
   }
 
-  return (await response.json()) as OciManifest;
+  let json: unknown;
+  try {
+    json = await response.json();
+  } catch (err) {
+    log.debug("Failed to parse manifest JSON", err);
+    throw new UpgradeError(
+      "network_error",
+      `Manifest for tag "${tag}" returned invalid JSON`
+    );
+  }
+
+  const manifest = json as OciManifest;
+  if (!Array.isArray(manifest?.layers)) {
+    throw new UpgradeError(
+      "network_error",
+      `Manifest for tag "${tag}" has no layers array`
+    );
+  }
+
+  return manifest;
 }
 
 /**
