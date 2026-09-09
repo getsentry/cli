@@ -47,7 +47,6 @@ vi.mock("../../../src/lib/mutate-command.js", async (importOriginal) => ({
 
 const externalUrl = "https://github.com/example/app/issues/42";
 const defaultFlags = {
-  "external-issue": externalUrl,
   "dry-run": false,
   yes: false,
   force: false,
@@ -111,7 +110,8 @@ describe("issue unlink", () => {
     await func.call(
       context,
       { ...defaultFlags, ...selector, yes: true },
-      "test-org/APP-42"
+      "test-org/APP-42",
+      externalUrl
     );
 
     expect(resolveOrgAndIssueId).toHaveBeenCalledExactlyOnceWith({
@@ -136,9 +136,9 @@ describe("issue unlink", () => {
     const { context, output } = createMockContext();
     const func = await unlinkCommand.loader();
 
-    await expect(func.call(context, defaultFlags, "APP-42")).rejects.toThrow(
-      "Use --yes or --force to confirm."
-    );
+    await expect(
+      func.call(context, defaultFlags, "APP-42", externalUrl)
+    ).rejects.toThrow("Use --yes or --force to confirm.");
 
     expect(resolveOrgAndIssueId).not.toHaveBeenCalled();
     expect(confirmByTyping).not.toHaveBeenCalled();
@@ -152,7 +152,12 @@ describe("issue unlink", () => {
   ] as const)("allows non-interactive --%s without prompting", async (flag) => {
     const { context } = createMockContext();
     const func = await unlinkCommand.loader();
-    await func.call(context, { ...defaultFlags, [flag]: true }, "APP-42");
+    await func.call(
+      context,
+      { ...defaultFlags, [flag]: true },
+      "APP-42",
+      externalUrl
+    );
 
     expect(confirmByTyping).not.toHaveBeenCalled();
     expect(unlinkExternalIssue).toHaveBeenCalledExactlyOnceWith({
@@ -169,7 +174,7 @@ describe("issue unlink", () => {
     mockIsatty.mockReturnValue(true);
     const { context } = createMockContext();
     const func = await unlinkCommand.loader();
-    await func.call(context, defaultFlags, "test-org/APP-42");
+    await func.call(context, defaultFlags, "test-org/APP-42", externalUrl);
 
     expect(confirmByTyping).toHaveBeenCalledExactlyOnceWith(
       "test-org/APP-42",
@@ -186,7 +191,7 @@ describe("issue unlink", () => {
     vi.mocked(confirmByTyping).mockResolvedValue(false);
     const { context, output } = createMockContext();
     const func = await unlinkCommand.loader();
-    await func.call(context, defaultFlags, "APP-42");
+    await func.call(context, defaultFlags, "APP-42", externalUrl);
 
     expect(confirmByTyping).toHaveBeenCalledOnce();
     expect(unlinkExternalIssue).not.toHaveBeenCalled();
@@ -207,7 +212,8 @@ describe("issue unlink", () => {
     await func.call(
       context,
       { ...defaultFlags, "dry-run": true, json: true },
-      "APP-42"
+      "APP-42",
+      externalUrl
     );
 
     expect(confirmByTyping).not.toHaveBeenCalled();
@@ -229,7 +235,8 @@ describe("issue unlink", () => {
     await func.call(
       context,
       { ...defaultFlags, yes: true, json: true },
-      "APP-42"
+      "APP-42",
+      externalUrl
     );
 
     expect(JSON.parse(output())).toEqual(result);
@@ -243,7 +250,12 @@ describe("issue unlink", () => {
     const func = await unlinkCommand.loader();
 
     await expect(
-      func.call(context, { ...defaultFlags, yes: true, json: true }, "APP-42")
+      func.call(
+        context,
+        { ...defaultFlags, yes: true, json: true },
+        "APP-42",
+        externalUrl
+      )
     ).rejects.toBe(error);
     expect(output()).toBe("");
   });

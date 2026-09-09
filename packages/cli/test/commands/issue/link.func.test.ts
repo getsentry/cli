@@ -33,7 +33,6 @@ vi.mock("../../../src/lib/issue-links.js", () => ({
 
 const externalUrl = "https://github.com/example/app/issues/42";
 const defaultFlags = {
-  "external-issue": externalUrl,
   "dry-run": false,
   json: false,
 };
@@ -92,7 +91,8 @@ describe("issue link", () => {
     await func.call(
       context,
       { ...defaultFlags, integration: "99" },
-      "test-org/APP-42"
+      "test-org/APP-42",
+      externalUrl
     );
 
     expect(resolveIssue).toHaveBeenCalledExactlyOnceWith({
@@ -123,11 +123,11 @@ describe("issue link", () => {
       context,
       {
         ...defaultFlags,
-        "external-issue": "https://tracker.example/issues/42",
         app: "custom-tracker",
         field: ["team=team-1", "query=key=value", "optional="],
       },
-      "APP-42"
+      "APP-42",
+      "https://tracker.example/issues/42"
     );
 
     expect(linkExternalIssue).toHaveBeenCalledExactlyOnceWith({
@@ -158,7 +158,8 @@ describe("issue link", () => {
       func.call(
         context,
         { ...defaultFlags, app: "custom-tracker", field: fields },
-        "APP-42"
+        "APP-42",
+        externalUrl
       )
     ).rejects.toBeInstanceOf(ValidationError);
 
@@ -173,7 +174,7 @@ describe("issue link", () => {
     const func = await linkCommand.loader();
 
     await expect(
-      func.call(context, defaultFlags, "123456789")
+      func.call(context, defaultFlags, "123456789", externalUrl)
     ).rejects.toBeInstanceOf(ContextError);
     expect(linkExternalIssue).not.toHaveBeenCalled();
   });
@@ -187,7 +188,12 @@ describe("issue link", () => {
     });
     const { context, output } = createMockContext();
     const func = await linkCommand.loader();
-    await func.call(context, { ...defaultFlags, "dry-run": true }, "APP-42");
+    await func.call(
+      context,
+      { ...defaultFlags, "dry-run": true },
+      "APP-42",
+      externalUrl
+    );
 
     expect(linkExternalIssue).toHaveBeenCalledWith(
       expect.objectContaining({ dryRun: true })
@@ -205,7 +211,12 @@ describe("issue link", () => {
     vi.mocked(linkExternalIssue).mockResolvedValue(result);
     const { context, output } = createMockContext();
     const func = await linkCommand.loader();
-    await func.call(context, { ...defaultFlags, json: true }, "APP-42");
+    await func.call(
+      context,
+      { ...defaultFlags, json: true },
+      "APP-42",
+      externalUrl
+    );
 
     expect(JSON.parse(output())).toEqual(result);
     expect(updateIssueStatus).not.toHaveBeenCalled();
@@ -218,7 +229,7 @@ describe("issue link", () => {
     const func = await linkCommand.loader();
 
     await expect(
-      func.call(context, { ...defaultFlags, json: true }, "APP-42")
+      func.call(context, { ...defaultFlags, json: true }, "APP-42", externalUrl)
     ).rejects.toBe(error);
     expect(output()).toBe("");
   });

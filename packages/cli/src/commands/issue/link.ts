@@ -7,11 +7,14 @@ import { formatIssueLinkResult } from "../../lib/formatters/issue-links.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { linkExternalIssue } from "../../lib/issue-links.js";
 import { DRY_RUN_ALIASES, DRY_RUN_FLAG } from "../../lib/mutate-command.js";
-import { EXTERNAL_ISSUE_FLAGS, parseIssueLinkFields } from "./link-utils.js";
-import { issueIdPositional, resolveIssue } from "./utils.js";
+import {
+  EXTERNAL_ISSUE_FLAGS,
+  EXTERNAL_ISSUE_POSITIONALS,
+  parseIssueLinkFields,
+} from "./link-utils.js";
+import { resolveIssue } from "./utils.js";
 
 type LinkFlags = {
-  readonly "external-issue": string;
   readonly integration?: string;
   readonly app?: string;
   readonly field?: string[];
@@ -27,15 +30,15 @@ export const linkCommand = buildCommand({
       "This does not create a remote issue or resolve the Sentry issue.\n\n" +
       "Requires event:write and access to the Sentry project.\n\n" +
       "Examples:\n" +
-      "  sentry issue link FRONT-123 --external-issue https://github.com/example/app/issues/42\n" +
-      "  sentry issue link FRONT-123 --external-issue https://github.com/example/app/pull/43\n" +
-      "  sentry issue link my-org/FRONT-123 --external-issue https://example.atlassian.net/browse/APP-42\n" +
-      "  sentry issue link FRONT-123 --external-issue https://linear.app/example/issue/APP-42/fix-error\n" +
-      "  sentry issue link FRONT-123 --external-issue https://github.com/example/app/issues/42 --dry-run",
+      "  sentry issue link FRONT-123 https://github.com/example/app/issues/42\n" +
+      "  sentry issue link FRONT-123 https://github.com/example/app/pull/43\n" +
+      "  sentry issue link my-org/FRONT-123 https://example.atlassian.net/browse/APP-42\n" +
+      "  sentry issue link FRONT-123 https://linear.app/example/issue/APP-42/fix-error\n" +
+      "  sentry issue link FRONT-123 https://github.com/example/app/issues/42 --dry-run",
   },
   output: { human: formatIssueLinkResult },
   parameters: {
-    positional: issueIdPositional,
+    positional: EXTERNAL_ISSUE_POSITIONALS,
     flags: {
       ...EXTERNAL_ISSUE_FLAGS,
       "dry-run": DRY_RUN_FLAG,
@@ -49,7 +52,12 @@ export const linkCommand = buildCommand({
     },
     aliases: DRY_RUN_ALIASES,
   },
-  async *func(this: SentryContext, flags: LinkFlags, issueArg: string) {
+  async *func(
+    this: SentryContext,
+    flags: LinkFlags,
+    issueArg: string,
+    url: string
+  ) {
     const fields = parseIssueLinkFields(flags.field);
     const { org, issue } = await resolveIssue({
       issueArg,
@@ -59,14 +67,14 @@ export const linkCommand = buildCommand({
     if (!org) {
       throw new ContextError(
         "Organization",
-        "sentry issue link <org>/ISSUE --external-issue <url>"
+        "sentry issue link <org>/ISSUE <url>"
       );
     }
     const result = await linkExternalIssue({
       orgSlug: org,
       issueId: issue.id,
       projectId: issue.project?.id,
-      url: flags["external-issue"],
+      url,
       integrationId: flags.integration,
       appSlug: flags.app,
       fields,

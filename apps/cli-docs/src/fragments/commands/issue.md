@@ -303,10 +303,10 @@ sentry issue ignore CLI-G5 --until auto
 Link an existing tracker issue or GitHub pull request to a Sentry issue:
 
 ```bash
-sentry issue link FRONT-123 --external-issue https://github.com/example/app/issues/42
-sentry issue link FRONT-123 --external-issue https://github.com/example/app/pull/43
-sentry issue link FRONT-123 --external-issue https://example.atlassian.net/browse/APP-42
-sentry issue link FRONT-123 --external-issue https://linear.app/example/issue/APP-42/fix-error
+sentry issue link FRONT-123 https://github.com/example/app/issues/42
+sentry issue link FRONT-123 https://github.com/example/app/pull/43
+sentry issue link FRONT-123 https://example.atlassian.net/browse/APP-42
+sentry issue link FRONT-123 https://linear.app/example/issue/APP-42/fix-error
 ```
 
 The matching integration must already be installed in the Sentry organization.
@@ -317,8 +317,8 @@ Other Sentry Apps require `--app <slug>` and must expose an issue-link form;
 additional required form values can be supplied with `--field name=value`.
 
 ```bash
-sentry issue link my-org/FRONT-123 --external-issue https://github.com/example/app/issues/42 --dry-run
-sentry issue link my-org/FRONT-123 --external-issue https://github.com/example/app/issues/42 --json
+sentry issue link my-org/FRONT-123 https://github.com/example/app/issues/42 --dry-run
+sentry issue link my-org/FRONT-123 https://github.com/example/app/issues/42 --json
 ```
 
 `--dry-run` discovers the integration and prepares the link without submitting a
@@ -347,10 +347,10 @@ error. Environment tokens must be updated separately.
 Remove an association without deleting either issue:
 
 ```bash
-sentry issue unlink FRONT-123 --external-issue https://github.com/example/app/issues/42
-sentry issue unlink FRONT-123 --external-issue https://github.com/example/app/pull/43 --yes
-sentry issue unlink my-org/FRONT-123 --external-issue https://example.atlassian.net/browse/APP-42 --yes
-sentry issue unlink FRONT-123 --external-issue https://linear.app/example/issue/APP-42/fix-error --dry-run
+sentry issue unlink FRONT-123 https://github.com/example/app/issues/42
+sentry issue unlink FRONT-123 https://github.com/example/app/pull/43 --yes
+sentry issue unlink my-org/FRONT-123 https://example.atlassian.net/browse/APP-42 --yes
+sentry issue unlink FRONT-123 https://linear.app/example/issue/APP-42/fix-error --dry-run
 ```
 
 Use `--yes` for non-interactive execution. `--dry-run` shows whether the link

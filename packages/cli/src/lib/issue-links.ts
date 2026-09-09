@@ -75,7 +75,7 @@ function usesSentryApp(options: ExternalIssueLinkOptions): boolean {
   try {
     url = new URL(options.url);
   } catch {
-    throw new ValidationError("--external-issue must be a complete issue URL.");
+    throw new ValidationError("URL must be a complete external issue URL.");
   }
   if (
     !["https:", "http:"].includes(url.protocol) ||
@@ -83,7 +83,7 @@ function usesSentryApp(options: ExternalIssueLinkOptions): boolean {
     url.password
   ) {
     throw new ValidationError(
-      "--external-issue must be an HTTP(S) URL without embedded credentials."
+      "URL must use HTTP(S) without embedded credentials."
     );
   }
   const app = Boolean(options.appSlug) || url.hostname === "linear.app";

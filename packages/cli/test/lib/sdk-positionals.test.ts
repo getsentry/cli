@@ -33,14 +33,33 @@ describe("generated SDK positional arguments", () => {
     const { calls, sdk } = createRecordingSDK();
     await sdk.issue.link({
       issue: "example/APP-42",
-      externalIssue: "https://linear.app/example/issue/APP-42/title",
+      url: "https://linear.app/example/issue/APP-42/title",
       field: ["team=engineering", "label=bug"],
     });
     expect(calls[0]).toMatchObject({
       path: ["issue", "link"],
-      positional: ["example/APP-42"],
+      positional: [
+        "example/APP-42",
+        "https://linear.app/example/issue/APP-42/title",
+      ],
       flags: { field: ["team=engineering", "label=bug"] },
     });
+    expect(calls[0]?.flags).not.toHaveProperty("external-issue");
+  });
+
+  test("issue unlink forwards the issue and URL as separate positionals", async () => {
+    const { calls, sdk } = createRecordingSDK();
+    await sdk.issue.unlink({
+      issue: "example/APP-42",
+      url: "https://github.com/example/app/pull/123",
+      yes: true,
+    });
+    expect(calls[0]).toMatchObject({
+      path: ["issue", "unlink"],
+      positional: ["example/APP-42", "https://github.com/example/app/pull/123"],
+      flags: { yes: true },
+    });
+    expect(calls[0]?.flags).not.toHaveProperty("external-issue");
   });
 
   test("release deploy passes version, environment and name as separate tokens", async () => {

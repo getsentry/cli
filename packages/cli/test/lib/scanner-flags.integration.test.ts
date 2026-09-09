@@ -78,7 +78,11 @@ async function runApp(
   };
 
   const exitCode = await run(app, args, context);
-  return { stdout, stderr, exitCode: exitCode ?? 0 };
+  return {
+    stdout,
+    stderr,
+    exitCode: Number(context.process.exitCode ?? exitCode ?? 0),
+  };
 }
 
 /**
@@ -86,6 +90,34 @@ async function runApp(
  * subcommand — the failure mode the patch fixes for global flags at depth.
  */
 const NO_COMMAND_REGISTERED = "No command registered";
+
+describe("issue link and unlink URL arguments", () => {
+  test.each([
+    "link",
+    "unlink",
+  ])("issue %s requires the URL positional", async (command) => {
+    const result = await runApp(["issue", command, "APP-42"]);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("Expected argument for url");
+  });
+
+  test.each([
+    "link",
+    "unlink",
+  ])("issue %s rejects the removed external-issue flag", async (command) => {
+    const url = "https://github.com/example/app/pull/123";
+    const result = await runApp([
+      "issue",
+      command,
+      "APP-42",
+      url,
+      "--external-issue",
+      url,
+    ]);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("external-issue");
+  });
+});
 
 describe("top-level flags on a leaf command (bash-hook, no auth)", () => {
   // bash-hook runs without auth and emits its script to stdout, so a successful
