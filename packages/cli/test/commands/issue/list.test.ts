@@ -729,6 +729,94 @@ describe("issue list: server sort order preservation", () => {
   });
 });
 
+describe("issue list: unscoped-count warning (#1518)", () => {
+  function mockSingleIssue() {
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input, init);
+      const projectResp = mockDefaultProject(req.url);
+      if (projectResp) return projectResp;
+      if (req.url.includes("/issues/")) {
+        return new Response(JSON.stringify([mockIssue()]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+  }
+
+  test("JSON output includes _countScope when query filters on release", async () => {
+    mockSingleIssue();
+    const { context, stdout } = createContext();
+
+    await func.call(context, {
+      limit: 10,
+      sort: "date",
+      period: parsePeriod("90d"),
+      json: true,
+      query: 'release:"1.0.0"',
+    });
+
+    const output = JSON.parse(stdout.output);
+    expect(output._countScope).toMatchObject({
+      _type: "unscoped_counts",
+      filters: ["release"],
+      fields: ["count", "userCount"],
+    });
+    expect(output._countScope.message).toContain("release:");
+  });
+
+  test("JSON output omits _countScope when no unscoped filter is present", async () => {
+    mockSingleIssue();
+    const { context, stdout } = createContext();
+
+    await func.call(context, {
+      limit: 10,
+      sort: "date",
+      period: parsePeriod("90d"),
+      json: true,
+      query: "is:unresolved",
+    });
+
+    const output = JSON.parse(stdout.output);
+    expect(output._countScope).toBeUndefined();
+  });
+
+  test("human output appends the count-scope note when filtering on release", async () => {
+    mockSingleIssue();
+    const { context, stdout } = createContext();
+
+    await func.call(context, {
+      limit: 10,
+      sort: "freq",
+      period: parsePeriod("90d"),
+      json: false,
+      query: 'release:"1.0.0"',
+    });
+
+    expect(stdout.output).toContain("period-wide totals");
+    expect(stdout.output).toContain("--sort freq");
+  });
+
+  test("human output omits the note when no unscoped filter is present", async () => {
+    mockSingleIssue();
+    const { context, stdout } = createContext();
+
+    await func.call(context, {
+      limit: 10,
+      sort: "date",
+      period: parsePeriod("90d"),
+      json: false,
+      query: "is:unresolved",
+    });
+
+    expect(stdout.output).not.toContain("period-wide totals");
+  });
+});
+
 /** Shared mock references — vi.mocked() returns the same mock object each time */
 const listIssuesPaginatedMock = vi.mocked(issuesApi.listIssuesPaginated);
 const listIssuesAllPagesMock = vi.mocked(issuesApi.listIssuesAllPages);
