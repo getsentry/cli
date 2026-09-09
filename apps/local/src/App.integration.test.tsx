@@ -413,10 +413,13 @@ describe('local receiver to viewer integration', () => {
 
       expect(screen.getByRole('region', { name: 'Trace waterfall' })).not.toBeNull()
       expect(screen.getByRole('columnheader', { name: 'Span' })).not.toBeNull()
-      expect(screen.getByRole('columnheader', { name: 'Timeline' })).not.toBeNull()
+      expect(
+        screen.getByRole('columnheader', { name: 'Timeline from 0ms to 12ms' })
+      ).not.toBeNull()
       expect(screen.getByLabelText('Trace summary').textContent).toContain('3 spans')
       expect(screen.getByText('db.query')).not.toBeNull()
       expect(screen.getByText('http.client')).not.toBeNull()
+      expect(screen.getByLabelText('SELECT * FROM orders duration 4.00ms')).not.toBeNull()
       expect(screen.getByTestId('waterfall-bar-db-span')).not.toBeNull()
     } finally {
       cleanup()

@@ -89,7 +89,11 @@ function SpanRow({
           </span>
         </div>
       </div>
-      <div role="cell" className="relative min-w-0 overflow-hidden px-3 py-2">
+      <div
+        role="cell"
+        aria-label={`${span.description} duration ${formatDuration(span.durationMs)}`}
+        className="relative min-w-0 overflow-hidden px-3 py-1.5"
+      >
         <div
           aria-hidden="true"
           className="absolute inset-y-0 left-3 right-3 opacity-55"
@@ -101,12 +105,12 @@ function SpanRow({
         {position ? (
           <div
             data-testid={`waterfall-bar-${span.id}`}
-            className={`absolute top-1/2 h-3.5 min-w-1 -translate-y-1/2 shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_65%,transparent)] ${failed ? 'bg-red-500/80 shadow-[inset_0_0_0_1px_color-mix(in_oklab,#ef4444_65%,transparent)]' : 'bg-primary/75'}`}
+            className={`absolute top-1/2 h-3 min-w-1 -translate-y-1/2 rounded-[2px] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_65%,transparent)] ${failed ? 'bg-red-500/80 shadow-[inset_0_0_0_1px_color-mix(in_oklab,#ef4444_65%,transparent)]' : 'bg-primary/75'}`}
             style={position}
             title={formatDuration(span.durationMs)}
           />
         ) : null}
-        <span className="relative z-10 ml-auto block w-fit bg-card/85 px-1 font-mono text-xs tabular-nums text-muted-foreground group-hover:bg-muted/85">
+        <span aria-hidden="true" className="relative z-10 ml-auto block w-fit px-1 font-mono text-[11px] leading-5 tabular-nums text-muted-foreground/90">
           {formatDuration(span.durationMs)}
         </span>
       </div>
@@ -148,9 +152,16 @@ export function TraceWaterfall({ trace }: TraceWaterfallProps) {
           <div role="columnheader" aria-label="Span" className="border-r border-border px-3 py-2">
             Span
           </div>
-          <div role="columnheader" aria-label="Timeline" className="flex items-center justify-between px-3 py-2">
-            <span>Timeline</span>
-            <span aria-hidden="true" className="font-mono tabular-nums">0ms — {formatDuration(trace.durationMs)}</span>
+          <div
+            role="columnheader"
+            aria-label={`Timeline from 0ms to ${formatDuration(trace.durationMs)}`}
+            className="px-3 py-1.5"
+          >
+            <span className="block text-[10px] font-semibold tracking-wide uppercase">Timeline</span>
+            <span aria-hidden="true" className="mt-0.5 flex justify-between font-mono text-[10px] font-normal tabular-nums text-muted-foreground/75">
+              <span>0</span>
+              <span>{formatDuration(trace.durationMs)}</span>
+            </span>
           </div>
         </div>
         {spans.map((positionedSpan, index) => (
