@@ -24,7 +24,6 @@ export function JsonView({ code }: JsonViewProps) {
 
   useEffect(() => {
     let disposed = false
-    setCopied(false)
 
     void highlighter
       .then((instance) =>
