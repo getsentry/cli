@@ -124,7 +124,7 @@ describe("upgradeCommand.func", () => {
 
   test("shows installation info with specified method", async () => {
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ tag_name: "v0.0.0-dev" }), {
+      new Response(JSON.stringify([{ tag_name: "cli@0.0.0-dev" }]), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })) as typeof fetch;
@@ -144,9 +144,9 @@ describe("upgradeCommand.func", () => {
   });
 
   test("check mode shows update available", async () => {
-    // curl uses GitHub API which returns { tag_name: "vX.X.X" }
+    // Curl uses the Toolkit GitHub release list with product-prefixed tags.
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ tag_name: "v99.0.0" }), {
+      new Response(JSON.stringify([{ tag_name: "cli@99.0.0" }]), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })) as typeof fetch;
@@ -164,11 +164,15 @@ describe("upgradeCommand.func", () => {
   });
 
   test("check mode with version shows versioned command", async () => {
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ tag_name: "v99.0.0" }), {
+    globalThis.fetch = (async (url) => {
+      const response = String(url).includes("/releases/tags/cli%402.0.0")
+        ? { tag_name: "cli@2.0.0" }
+        : [{ tag_name: "cli@99.0.0" }];
+      return new Response(JSON.stringify(response), {
         status: 200,
         headers: { "Content-Type": "application/json" },
-      })) as typeof fetch;
+      });
+    }) as typeof fetch;
 
     const func = await upgradeCommand.loader();
     const { context, getStdout, restore } = createMockContext();
@@ -189,7 +193,7 @@ describe("upgradeCommand.func", () => {
 
   test("check mode shows already on target when versions match", async () => {
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ tag_name: "v0.0.0-dev" }), {
+      new Response(JSON.stringify([{ tag_name: "cli@0.0.0-dev" }]), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })) as typeof fetch;
@@ -208,14 +212,13 @@ describe("upgradeCommand.func", () => {
   });
 
   test("throws UpgradeError when specified version does not exist", async () => {
-    // First call: fetch latest (returns 99.0.0)
-    // Second call: check if version exists (returns 404)
+    // First call fetches latest; both exact-tag probes return 404.
     let callCount = 0;
     globalThis.fetch = (async () => {
       callCount += 1;
       if (callCount === 1) {
         // Latest version check
-        return new Response(JSON.stringify({ tag_name: "v99.0.0" }), {
+        return new Response(JSON.stringify([{ tag_name: "cli@99.0.0" }]), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
