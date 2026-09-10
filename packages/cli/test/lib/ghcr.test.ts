@@ -185,6 +185,14 @@ describe("getAnonymousToken", () => {
     );
   });
 
+  test.each([" ", "\ttoken"])("rejects malformed token %j", async (token) => {
+    mockFetch(async () => Response.json({ token }));
+
+    await expect(getAnonymousToken()).rejects.toThrow(
+      "GHCR token exchange returned no token"
+    );
+  });
+
   test("preserves cancellation during token body consumption", async () => {
     const controller = new AbortController();
     const reason = { kind: "cancelled" };
@@ -524,6 +532,18 @@ describe("fetchManifest", () => {
     {},
     { schemaVersion: 2 },
     { schemaVersion: 2, layers: {} },
+    { schemaVersion: 2, layers: [], annotations: ["value"] },
+    {
+      schemaVersion: 2,
+      layers: [
+        {
+          digest: `sha256:${"a".repeat(64)}`,
+          mediaType: "application/octet-stream",
+          size: 1,
+          annotations: ["value"],
+        },
+      ],
+    },
   ])("rejects invalid OCI manifest %#", async (manifest) => {
     mockFetch(async () => Response.json(manifest));
 
@@ -594,6 +614,19 @@ describe("fetchManifest", () => {
 // listTags
 
 describe("listTags", () => {
+  test("rejects a repeated pagination cursor", async () => {
+    const tags = Array.from({ length: 100 }, (_, index) => `tag-${index}`);
+    let requests = 0;
+    mockFetch(async () => {
+      requests += 1;
+      return Response.json({ tags });
+    });
+
+    await expect(listTags("token")).rejects.toThrow(
+      "GHCR tag pagination returned a repeated cursor"
+    );
+    expect(requests).toBe(2);
+  });
   test("returns all tags when no prefix filter", async () => {
     mockFetch(async (url) => {
       expect(String(url)).toContain(`/v2/${GHCR_REPO}/tags/list`);

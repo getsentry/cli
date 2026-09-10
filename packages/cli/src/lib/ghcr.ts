@@ -209,6 +209,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
   return (
     typeof value === "object" &&
     value !== null &&
+    !Array.isArray(value) &&
     Object.values(value).every((item) => typeof item === "string")
   );
 }
@@ -286,7 +287,8 @@ export async function getAnonymousToken(
     data === null ||
     !("token" in data) ||
     typeof data.token !== "string" ||
-    data.token.length === 0
+    data.token.length === 0 ||
+    data.token.trim() !== data.token
   ) {
     throw new UpgradeError(
       "network_error",
@@ -601,6 +603,7 @@ export async function listTags(
   source: UpgradeSource = PRIMARY_UPGRADE_SOURCE
 ): Promise<string[]> {
   const allTags: string[] = [];
+  const visitedCursors = new Set<string>();
   let lastTag: string | undefined;
 
   for (;;) {
@@ -619,7 +622,15 @@ export async function listTags(
       break;
     }
 
-    lastTag = tags.at(-1);
+    const nextTag = tags.at(-1);
+    if (!nextTag || visitedCursors.has(nextTag)) {
+      throw new UpgradeError(
+        "network_error",
+        "GHCR tag pagination returned a repeated cursor"
+      );
+    }
+    visitedCursors.add(nextTag);
+    lastTag = nextTag;
   }
 
   return allTags;

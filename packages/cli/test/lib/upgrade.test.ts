@@ -396,7 +396,7 @@ describe("fetchLatestFromGitHub", () => {
     ]);
   });
 
-  test("returns version from GitHub API", async () => {
+  test("rejects a v-prefixed Toolkit product version", async () => {
     mockFetch(
       async () =>
         new Response(JSON.stringify([{ tag_name: "cli@v1.2.3" }]), {
@@ -405,18 +405,19 @@ describe("fetchLatestFromGitHub", () => {
         })
     );
 
-    const version = await fetchLatestFromGitHub();
-    expect(version).toBe("1.2.3");
+    await expect(fetchLatestFromGitHub()).rejects.toThrow(
+      "No version found in GitHub release"
+    );
   });
 
-  test("strips v prefix from version", async () => {
-    mockFetch(
-      async () =>
-        new Response(JSON.stringify([{ tag_name: "cli@v0.5.0" }]), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
-    );
+  test("strips v prefix from a legacy version", async () => {
+    let requests = 0;
+    mockFetch(async () => {
+      requests += 1;
+      return requests === 1
+        ? new Response(null, { status: 404 })
+        : Response.json({ tag_name: "v0.5.0" });
+    });
 
     const version = await fetchLatestFromGitHub();
     expect(version).toBe("0.5.0");
@@ -529,12 +530,13 @@ describe("fetchLatestFromNpm", () => {
     );
 
     await expect(fetchLatestFromNpm()).rejects.toThrow(
-      "No version found in npm registry"
+      "npm registry returned invalid metadata"
     );
   });
 
   test.each([
     "not-semver",
+    "v1.2.3",
     "1.2.3-dev.123",
     "1.2.3-beta.1",
     "1.2.3-rc.1",
@@ -550,6 +552,22 @@ describe("fetchLatestFromNpm", () => {
     await expect(fetchLatestFromNpm()).rejects.toThrow(
       "npm registry returned an invalid stable version"
     );
+  });
+
+  test.each([
+    null,
+    [],
+    42,
+    "version",
+    { version: 42 },
+    { version: "" },
+  ])("rejects malformed npm metadata %#", async (data) => {
+    mockFetch(async () => Response.json(data));
+
+    await expect(fetchLatestFromNpm()).rejects.toMatchObject({
+      name: "UpgradeError",
+      reason: "network_error",
+    });
   });
 });
 
@@ -610,7 +628,7 @@ describe("fetchLatestVersion", () => {
   test("uses GitHub for curl method", async () => {
     mockFetch(
       async () =>
-        new Response(JSON.stringify([{ tag_name: "cli@v2.0.0" }]), {
+        new Response(JSON.stringify([{ tag_name: "cli@2.0.0" }]), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         })
@@ -675,7 +693,7 @@ describe("fetchLatestVersion", () => {
   test("uses GitHub for brew method", async () => {
     mockFetch(
       async () =>
-        new Response(JSON.stringify([{ tag_name: "cli@v2.0.0" }]), {
+        new Response(JSON.stringify([{ tag_name: "cli@2.0.0" }]), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         })
@@ -755,7 +773,7 @@ describe("fetchLatestVersion", () => {
   test("defaults to stable channel (uses GitHub) when channel omitted", async () => {
     mockFetch(
       async () =>
-        new Response(JSON.stringify([{ tag_name: "cli@v3.0.0" }]), {
+        new Response(JSON.stringify([{ tag_name: "cli@3.0.0" }]), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         })
@@ -767,6 +785,64 @@ describe("fetchLatestVersion", () => {
 });
 
 describe("versionExists", () => {
+  test.each([
+    401, 403, 429, 500,
+  ])("does not classify npm HTTP %i as a missing version", async (status) => {
+    mockFetch(async () => new Response(null, { status }));
+
+    await expect(versionExists("npm", "1.0.0")).rejects.toMatchObject({
+      reason: "network_error",
+    });
+  });
+
+  test.each([
+    "not-semver",
+    "v1.2.3",
+    "1.2.3-beta.1",
+    "mcp@1.0.0",
+  ])("rejects invalid standalone stable version %s before network access", async (version) => {
+    let requests = 0;
+    mockFetch(async () => {
+      requests += 1;
+      return new Response(null, { status: 200 });
+    });
+
+    await expect(resolveExistingUpgradeVersion(version)).rejects.toMatchObject({
+      reason: "network_error",
+    });
+    expect(requests).toBe(0);
+  });
+
+  test.each([
+    "not-semver",
+    "v1.2.3",
+    "1.2.3-beta.1",
+    "mcp@1.0.0",
+  ])("rejects explicit-source standalone version %s before network access", async (version) => {
+    let requests = 0;
+    mockFetch(async () => {
+      requests += 1;
+      return new Response(null, { status: 200 });
+    });
+
+    await expect(
+      versionExists("curl", version, UPGRADE_SOURCES[0])
+    ).rejects.toMatchObject({ reason: "network_error" });
+    expect(requests).toBe(0);
+  });
+
+  test.each([
+    "draft",
+    "prerelease",
+  ])("rejects a pinned stable release marked %s", async (flag) => {
+    mockFetch(async () =>
+      Response.json({ tag_name: "cli@1.2.3", [flag]: true })
+    );
+
+    await expect(resolveExistingUpgradeVersion("1.2.3")).rejects.toMatchObject({
+      reason: "network_error",
+    });
+  });
   test.each([
     "npm",
     "pnpm",

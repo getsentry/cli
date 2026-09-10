@@ -139,10 +139,10 @@ function extractReleaseVersions(
         typeof tag === "string" && tag.startsWith(source.tagPrefix)
     )
     .map((tag) => tag.slice(source.tagPrefix.length))
-    .map((tag) => tag.replace(VERSION_PREFIX_REGEX, ""))
-    .filter(
-      (tag) => semverValid(tag) !== null && semverPrerelease(tag) === null
+    .map((tag) =>
+      source.tagPrefix ? tag : tag.replace(VERSION_PREFIX_REGEX, "")
     )
+    .filter((tag) => semverValid(tag) === tag && semverPrerelease(tag) === null)
     .sort((a, b) => compareVersions(b, a));
 }
 
@@ -578,11 +578,23 @@ export async function fetchLatestFromNpm(): Promise<string> {
     );
   }
 
-  const data = (await parseUpgradeJson(
+  const data = await parseUpgradeJson(
     response,
     undefined,
     "npm registry returned invalid metadata"
-  )) as { version?: string };
+  );
+  if (
+    typeof data !== "object" ||
+    data === null ||
+    Array.isArray(data) ||
+    !("version" in data) ||
+    typeof data.version !== "string"
+  ) {
+    throw new UpgradeError(
+      "network_error",
+      "npm registry returned invalid metadata"
+    );
+  }
 
   return validateStableVersion(data.version, "npm registry");
 }
@@ -594,7 +606,7 @@ function validateStableVersion(
   if (!version) {
     throw new UpgradeError("network_error", `No version found in ${source}`);
   }
-  if (semverValid(version) === null || semverPrerelease(version) !== null) {
+  if (semverValid(version) !== version || semverPrerelease(version) !== null) {
     throw new UpgradeError(
       "network_error",
       `${source} returned an invalid stable version`
@@ -735,7 +747,9 @@ async function validatePinnedGitHubRelease(
     typeof release !== "object" ||
     release === null ||
     !("tag_name" in release) ||
-    release.tag_name !== expectedTag
+    release.tag_name !== expectedTag ||
+    ("draft" in release && release.draft === true) ||
+    ("prerelease" in release && release.prerelease === true)
   ) {
     throw new UpgradeError(
       "network_error",
@@ -758,6 +772,7 @@ export async function resolveExistingUpgradeVersion(
       validateNightlyManifestVersion(resolved.manifest, version);
       return { version, source: resolved.source };
     }
+    validateStableVersion(version, "Requested standalone version");
     const selected = await resolveUpgradeSource({
       getProbeUrl: (source) => getGitHubReleaseByTagUrl(version, source),
     });
@@ -813,6 +828,9 @@ async function standaloneVersionExists(
   version: string,
   source?: UpgradeSource
 ): Promise<boolean> {
+  if (!isNightlyVersion(version)) {
+    validateStableVersion(version, "Requested standalone version");
+  }
   if (source) {
     if (isNightlyVersion(version)) {
       return nightlyVersionExists(version, source);
@@ -866,7 +884,16 @@ export async function versionExists(
     { method: "HEAD" },
     "npm registry"
   );
-  return response.ok;
+  if (response.ok) {
+    return true;
+  }
+  if (response.status === 404) {
+    return false;
+  }
+  throw new UpgradeError(
+    "network_error",
+    `Failed to fetch from npm: ${response.status}`
+  );
 }
 
 // Upgrade Execution

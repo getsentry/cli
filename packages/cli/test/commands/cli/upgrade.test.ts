@@ -1019,6 +1019,82 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     expect(setupCall?.args).toContain("--ensure-auth-scopes");
   });
 
+  test.each([
+    "npm",
+    "pnpm",
+    "bun",
+    "yarn",
+  ] as const)("classifies a missing pinned %s version without running the package manager", async (method) => {
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      requests.push(String(url));
+      return new Response(null, { status: 404 });
+    });
+    const { context, errors, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
+
+    await run(app, ["cli", "upgrade", "--method", method, "1.2.3"], context);
+
+    expect(errors.join("\n")).toContain("Version 1.2.3 not found");
+    expect(requests).toEqual(["https://registry.npmjs.org/sentry/1.2.3"]);
+    expect(spawnedArgs).toEqual([]);
+  });
+
+  test.each([
+    "npm",
+    "pnpm",
+    "bun",
+    "yarn",
+  ] as const)("preserves non-404 HTTP failures for a pinned %s version", async (method) => {
+    for (const status of [401, 403, 429, 500]) {
+      const requests: string[] = [];
+      mockFetch(async (url) => {
+        requests.push(String(url));
+        return new Response(null, { status });
+      });
+      const { context, errors, restore } = createMockContext({
+        homeDir: testDir,
+      });
+
+      await run(app, ["cli", "upgrade", "--method", method, "1.2.3"], context);
+
+      restore();
+      expect(errors.join("\n")).toContain(
+        `Failed to fetch from npm: ${status}`
+      );
+      expect(errors.join("\n")).not.toContain("Version 1.2.3 not found");
+      expect(requests).toEqual(["https://registry.npmjs.org/sentry/1.2.3"]);
+      expect(spawnedArgs).toEqual([]);
+    }
+  });
+
+  test.each([
+    "npm",
+    "pnpm",
+    "bun",
+    "yarn",
+  ] as const)("rejects malformed latest metadata for %s without running the package manager", async (method) => {
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      requests.push(String(url));
+      return Response.json(null);
+    });
+    const { context, errors, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
+
+    await run(app, ["cli", "upgrade", "--method", method], context);
+
+    expect(errors.join("\n")).toContain(
+      "npm registry returned invalid metadata"
+    );
+    expect(requests).toEqual(["https://registry.npmjs.org/sentry/latest"]);
+    expect(spawnedArgs).toEqual([]);
+  });
+
   test("runs the new Homebrew binary and keeps JSON upgrades non-interactive", async () => {
     mockGitHubVersion("99.99.99");
     const binaryPath = join(testDir, "sentry");
@@ -1070,6 +1146,7 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     const capturedUrls: string[] = [];
     const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
     const gzipped = gzipSync(fakeContent);
+    const digest = `sha256:${"a".repeat(64)}`;
 
     // GHCR flow: token exchange → manifest → blob redirect → blob download
     mockFetch(async (url) => {
@@ -1093,10 +1170,13 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
         }
         return new Response(
           JSON.stringify({
+            schemaVersion: 2,
             annotations: { version: "0.99.0-dev.1234567890" },
             layers: [
               {
-                digest: "sha256:abc123",
+                digest,
+                mediaType: "application/gzip",
+                size: gzipped.byteLength,
                 annotations: {
                   "org.opencontainers.image.title": filename,
                 },
@@ -1111,7 +1191,7 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
           }
         );
       }
-      if (urlStr.includes("/blobs/sha256:abc123")) {
+      if (urlStr.includes(`/v2/getsentry/toolkit/blobs/${digest}`)) {
         // Redirect to blob storage (GHCR blob endpoint returns 307)
         return Response.redirect("https://blob.example.com/file.gz", 307);
       }
@@ -1122,7 +1202,9 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     });
 
     // "nightly" positional switches channel to nightly
-    const { context, restore } = createMockContext({ homeDir: testDir });
+    const { context, getOutput, restore } = createMockContext({
+      homeDir: testDir,
+    });
     restoreStderr = restore;
 
     await run(app, ["cli", "upgrade", "--method", "curl", "nightly"], context);
@@ -1132,6 +1214,19 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     expect(capturedUrls.some((u) => u.includes("/manifests/nightly"))).toBe(
       true
     );
+    expect(
+      capturedUrls.some((url) =>
+        url.includes(`/v2/getsentry/toolkit/blobs/${digest}`)
+      )
+    ).toBe(true);
+    expect(capturedUrls.some((url) => url.includes("/v2/getsentry/cli/"))).toBe(
+      false
+    );
+    expect(spawnedArgs.some((entry) => entry.args.includes("setup"))).toBe(
+      true
+    );
+    expect(getOutput()).toContain("Upgraded to");
+    expect(getOutput()).toContain("0.99.0-dev.1234567890");
   });
 
   test("--force proceeds to download the resolved target", async () => {
