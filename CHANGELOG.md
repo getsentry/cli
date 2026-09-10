@@ -1,6 +1,90 @@
 # Changelog
 
 <!-- Craft will auto-populate this file -->
+## 0.45.0
+
+### New Features ✨
+
+#### Dashboard
+
+- Render graphics with Spleen by @MathurAditya724 in [#1521](https://github.com/getsentry/cli/pull/1521)
+- Add heatmap display type by @jared-outpost in [#1395](https://github.com/getsentry/cli/pull/1395)
+
+#### Local
+
+- Add Vercel Analytics by @MathurAditya724 in [#1563](https://github.com/getsentry/cli/pull/1563)
+- Add browser viewer for local telemetry by @MathurAditya724 in [#1560](https://github.com/getsentry/cli/pull/1560)
+- Add agent debugging stream by @MathurAditya724 in [#1538](https://github.com/getsentry/cli/pull/1538)
+
+#### Status
+
+- Probe Statuspage summary directly instead of host heuristic by @jared-outpost in [#1510](https://github.com/getsentry/cli/pull/1510)
+- Add `sentry status` command group by @jared-outpost in [#1494](https://github.com/getsentry/cli/pull/1494)
+
+#### Other
+
+- (cli) Add toolkit upgrade bridge by @BYK in [#1569](https://github.com/getsentry/cli/pull/1569)
+- (config) Follow XDG Base Directory spec for config location by @jared-outpost in [#1503](https://github.com/getsentry/cli/pull/1503)
+- (errors) Wire up no-silent-catch lint rule, drop ratchet baseline by @jared-outpost in [#1532](https://github.com/getsentry/cli/pull/1532)
+- (init) Track completion-screen actions in run telemetry by @betegon in [#1534](https://github.com/getsentry/cli/pull/1534)
+- (telemetry) Refresh coding agent detection by @betegon in [#1571](https://github.com/getsentry/cli/pull/1571)
+
+### Bug Fixes 🐛
+
+#### Cli
+
+- Log UID resolution failures in sentry cli fix by @cursor in [#1541](https://github.com/getsentry/cli/pull/1541)
+- Handle empty regionUrl from self-hosted Sentry by @sentry in [#1522](https://github.com/getsentry/cli/pull/1522)
+
+#### Dashboard
+
+- Use revision restore endpoint by @skaasten in [#1529](https://github.com/getsentry/cli/pull/1529)
+- Cap high-DPI graphics canvases by @MathurAditya724 in [#1527](https://github.com/getsentry/cli/pull/1527)
+- Log graphics renderer selection by @MathurAditya724 in [#1508](https://github.com/getsentry/cli/pull/1508)
+- Render graphics on kitty terminals without cell geometry by @jared-outpost in [#1507](https://github.com/getsentry/cli/pull/1507)
+
+#### Init
+
+- Stop recording skipped verification as an error by @betegon in [#1544](https://github.com/getsentry/cli/pull/1544)
+- Gate unsupported --features and tag dry-run runs by @betegon in [#1535](https://github.com/getsentry/cli/pull/1535)
+
+#### Telemetry
+
+- Log process-tree walk failures in agent detection by @cursor in [#1542](https://github.com/getsentry/cli/pull/1542)
+- Silence CliError for process exit code 1 by @sentry in [#1449](https://github.com/getsentry/cli/pull/1449)
+
+#### Other
+
+- (alerts) Remove deprecated transactions dataset by @mjq in [#1516](https://github.com/getsentry/cli/pull/1516)
+- (arg-parsing) Handle space-separated event IDs from agents by @sentry in [#1530](https://github.com/getsentry/cli/pull/1530)
+- (dashboards) Remove references to removed datasets by @mjq in [#1515](https://github.com/getsentry/cli/pull/1515)
+- (dif) Log errors in tryProguard and tryObject catch blocks by @cursor in [#1513](https://github.com/getsentry/cli/pull/1513)
+- (docs) Explain regional model unavailability by @MathurAditya724 in [#1537](https://github.com/getsentry/cli/pull/1537)
+- (event) Prevent immediate retry of rate-limited org in event view fallback by @sentry in [#1566](https://github.com/getsentry/cli/pull/1566)
+- (explore) Send a stable sort on errors/discover so cursor pagination is deterministic by @jared-outpost in [#1520](https://github.com/getsentry/cli/pull/1520)
+- (lint) Force-ignore output.ts from Biome type analysis (200k limit) by @betegon in [#1536](https://github.com/getsentry/cli/pull/1536)
+- (org) Log region URL parse failures in org list by @cursor in [#1539](https://github.com/getsentry/cli/pull/1539)
+- (scope-recovery) Log error in hasActiveOAuthGrant catch block by @cursor in [#1511](https://github.com/getsentry/cli/pull/1511)
+- (sdk) Derive the published SentryOptions type from its source by @JPeer264 in [#1500](https://github.com/getsentry/cli/pull/1500)
+- (sourcemap) Let `inject` run without authentication by @Gyeonghun-Park in [#1526](https://github.com/getsentry/cli/pull/1526)
+- (version-check) Log errors in maybePrefetchPatches catch blocks by @cursor in [#1512](https://github.com/getsentry/cli/pull/1512)
+
+### Documentation 📚
+
+- Weekly documentation audit — add sentry docs/status coverage, install flags, plugin syntax by @cursor in [#1514](https://github.com/getsentry/cli/pull/1514)
+
+### Internal Changes 🔧
+
+- (build) Stream normalization + ZIP emission for uploads by @jared-outpost in [#1498](https://github.com/getsentry/cli/pull/1498)
+- Remove PR risk experiment workflow by @betegon in [#1570](https://github.com/getsentry/cli/pull/1570)
+- Reference renamed coverage action by @MathurAditya724 in [#1533](https://github.com/getsentry/cli/pull/1533)
+- Regenerate docs by @github-actions[bot] in [398ae52a](https://github.com/getsentry/cli/commit/398ae52a740cedc89add2567eb6e36821ee6ca40)
+- Regenerate docs by @github-actions[bot] in [d2894a18](https://github.com/getsentry/cli/commit/d2894a187c484f995ff07903f65c54628e7fc1ae)
+
+### Other
+
+- explore: document sortable-dataset contract, drop dead discover entry by @jared-outpost in [#1524](https://github.com/getsentry/cli/pull/1524)
+
 ## 0.44.1
 
 ### Bug Fixes 🐛
