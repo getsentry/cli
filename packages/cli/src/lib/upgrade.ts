@@ -678,6 +678,19 @@ export function resolveLatestUpgradeVersion(
     : fetchLatestFromGitHubWithSource(signal);
 }
 
+function validateNightlyManifestVersion(
+  manifest: OciManifest,
+  expectedVersion: string
+): void {
+  const manifestVersion = getNightlyVersion(manifest);
+  if (manifestVersion !== expectedVersion) {
+    throw new UpgradeError(
+      "network_error",
+      `Nightly manifest version ${manifestVersion} does not match requested version ${expectedVersion}`
+    );
+  }
+}
+
 /** Resolve and validate a pinned standalone version against ordered sources. */
 export async function resolveExistingUpgradeVersion(
   version: string
@@ -689,6 +702,7 @@ export async function resolveExistingUpgradeVersion(
         undefined,
         UPGRADE_SOURCES
       );
+      validateNightlyManifestVersion(resolved.manifest, version);
       return { version, source: resolved.source };
     }
     const selected = await resolveUpgradeSource({
@@ -949,6 +963,9 @@ async function downloadNightlyToPath(
   const manifest = version
     ? await fetchManifest(token, `nightly-${version}`, undefined, source)
     : await fetchNightlyManifest(token, undefined, source);
+  if (version) {
+    validateNightlyManifestVersion(manifest, version);
+  }
   const filename = getNightlyGzFilename();
   const layer = findLayerByFilename(manifest, filename);
   const response = await downloadNightlyBlob(

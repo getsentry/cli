@@ -742,6 +742,41 @@ describe("versionExists", () => {
     );
   });
 
+  test.each([
+    undefined,
+    "not-semver",
+    "0.14.0-dev.124",
+  ])("rejects pinned nightly manifest annotation %s without legacy fallback", async (annotation) => {
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      const request = String(url);
+      requests.push(request);
+      if (request === "https://api.github.com/repos/getsentry/toolkit") {
+        return new Response(null, { status: 200 });
+      }
+      if (request.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      if (request.includes("/manifests/nightly-0.14.0-dev.123")) {
+        return new Response(
+          JSON.stringify({
+            annotations:
+              annotation === undefined ? {} : { version: annotation },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response("Unexpected", { status: 500 });
+    });
+
+    await expect(
+      resolveExistingUpgradeVersion("0.14.0-dev.123")
+    ).rejects.toMatchObject({ reason: "network_error" });
+    expect(requests.some((request) => request.includes("getsentry/cli"))).toBe(
+      false
+    );
+  });
+
   test("does not fall back from an explicit selected source", async () => {
     const requests: string[] = [];
     mockFetch(async (url) => {
@@ -853,7 +888,11 @@ describe("versionExists", () => {
   });
 
   test("checks GHCR for nightly version - version exists", async () => {
-    const manifest = { schemaVersion: 2, layers: [], annotations: {} };
+    const manifest = {
+      schemaVersion: 2,
+      layers: [],
+      annotations: { version: "0.14.0-dev.1772661724" },
+    };
     mockFetch(async (url) => {
       const u = String(url);
       if (u === "https://api.github.com/repos/getsentry/toolkit") {
@@ -892,7 +931,11 @@ describe("versionExists", () => {
   });
 
   test("checks GHCR for nightly version regardless of install method", async () => {
-    const manifest = { schemaVersion: 2, layers: [], annotations: {} };
+    const manifest = {
+      schemaVersion: 2,
+      layers: [],
+      annotations: { version: "0.14.0-dev.1772661724" },
+    };
     mockFetch(async (url) => {
       const u = String(url);
       if (u === "https://api.github.com/repos/getsentry/toolkit") {
@@ -2035,6 +2078,39 @@ describe("executeUpgrade with curl method (nightly)", () => {
     // Verify decompressed content matches original
     const content = await readFile(result!.tempBinaryPath);
     expect(new Uint8Array(content)).toEqual(mockBinaryContent);
+  });
+
+  test("rejects a mismatched versioned manifest before downloading its blob", async () => {
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      const request = String(url);
+      requests.push(request);
+      if (request.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      if (request.includes("/manifests/nightly-0.14.0-dev.123")) {
+        return new Response(
+          JSON.stringify({
+            layers: [],
+            annotations: { version: "0.14.0-dev.124" },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response("Unexpected", { status: 500 });
+    });
+
+    await expect(
+      executeUpgrade(
+        "curl",
+        "0.14.0-dev.123",
+        undefined,
+        false,
+        undefined,
+        UPGRADE_SOURCES[0]
+      )
+    ).rejects.toMatchObject({ reason: "network_error" });
+    expect(requests.some((request) => request.includes("/blobs/"))).toBe(false);
   });
 });
 
