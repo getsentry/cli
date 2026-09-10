@@ -126,6 +126,27 @@ describe("getAnonymousToken", () => {
     );
   });
 
+  test("propagates caller cancellation without retrying", async () => {
+    const controller = new AbortController();
+    let requests = 0;
+    mockFetch(async (_url, init) => {
+      requests += 1;
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("aborted", "AbortError")),
+          { once: true }
+        );
+      });
+    });
+
+    const request = getAnonymousToken(undefined, controller.signal);
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    expect(requests).toBe(1);
+  });
+
   test("throws UpgradeError when response has no token field", async () => {
     mockFetch(
       async () =>

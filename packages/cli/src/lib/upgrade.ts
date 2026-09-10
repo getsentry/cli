@@ -98,6 +98,9 @@ const NPM_REGISTRY_URL = "https://registry.npmjs.org/sentry";
 /** Regex to strip 'v' prefix from version strings */
 export const VERSION_PREFIX_REGEX = /^v/;
 
+/** GitHub pagination link for the next page. */
+const NEXT_PAGE_LINK_REGEX = /<([^>]+)>;\s*rel="next"/;
+
 /** A resolved standalone-binary version and the source that must serve it. */
 export type ResolvedUpgradeVersion = {
   /** Version without a source-specific tag prefix. */
@@ -124,6 +127,29 @@ function extractReleaseVersions(
     .map((tag) => tag.replace(VERSION_PREFIX_REGEX, ""))
     .filter((tag) => semverValid(tag) !== null)
     .sort((a, b) => compareVersions(b, a));
+}
+
+function getNextGitHubReleasePage(
+  response: Response,
+  source: UpgradeSource
+): string | undefined {
+  const link = response.headers.get("link");
+  const match = link?.match(NEXT_PAGE_LINK_REGEX);
+  if (!match?.[1]) {
+    return;
+  }
+  const url = new URL(match[1]);
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !== "api.github.com" ||
+    url.pathname !== `/repos/${source.githubRepo}/releases`
+  ) {
+    throw new UpgradeError(
+      "network_error",
+      "GitHub returned an invalid release pagination URL"
+    );
+  }
+  return url.href;
 }
 
 // Curl Binary Helpers
@@ -439,23 +465,47 @@ export async function fetchLatestFromGitHubWithSource(
   signal?: AbortSignal,
   sources: readonly UpgradeSource[] = UPGRADE_SOURCES
 ): Promise<ResolvedUpgradeVersion> {
-  const { source, response } = await resolveUpgradeSource({
+  const resolved = await resolveUpgradeSource({
     getProbeUrl: getGitHubLatestReleaseUrl,
     signal,
     sources,
   });
-  const data = (await response.json()) as
-    | { tag_name?: string }
-    | Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean }>;
-  const tags = extractReleaseVersions(data, source);
-  const version = tags[0];
-  if (!version) {
-    throw new UpgradeError(
-      "network_error",
-      "No version found in GitHub release"
+  let response = resolved.response;
+  const visitedPages = new Set([getGitHubLatestReleaseUrl(resolved.source)]);
+  while (true) {
+    const data = (await response.json()) as
+      | { tag_name?: string }
+      | Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean }>;
+    const version = extractReleaseVersions(data, resolved.source)[0];
+    if (version) {
+      return { version, source: resolved.source };
+    }
+    const nextPage = getNextGitHubReleasePage(response, resolved.source);
+    if (!nextPage) {
+      throw new UpgradeError(
+        "network_error",
+        "No version found in GitHub release"
+      );
+    }
+    if (visitedPages.has(nextPage)) {
+      throw new UpgradeError(
+        "network_error",
+        "GitHub returned cyclic release pagination"
+      );
+    }
+    visitedPages.add(nextPage);
+    response = await fetchWithUpgradeError(
+      nextPage,
+      { headers: getGitHubHeaders(), signal },
+      "GitHub"
     );
+    if (!response.ok) {
+      throw new UpgradeError(
+        "network_error",
+        `Failed to fetch from GitHub: HTTP ${response.status}`
+      );
+    }
   }
-  return { version, source };
 }
 
 /** Fetch the latest standalone CLI version from the ordered GitHub sources. */
@@ -665,13 +715,21 @@ async function standaloneVersionExists(
     if (isNightlyVersion(version)) {
       return nightlyVersionExists(version, source);
     }
-    return (
-      await fetchWithUpgradeError(
-        getGitHubReleaseByTagUrl(version, source),
-        { headers: getGitHubHeaders() },
-        "GitHub"
-      )
-    ).ok;
+    const response = await fetchWithUpgradeError(
+      getGitHubReleaseByTagUrl(version, source),
+      { headers: getGitHubHeaders() },
+      "GitHub"
+    );
+    if (response.ok) {
+      return true;
+    }
+    if (response.status === 404) {
+      return false;
+    }
+    throw new UpgradeError(
+      "network_error",
+      `Failed to fetch from GitHub: HTTP ${response.status}`
+    );
   }
   const resolved = await resolveExistingUpgradeVersion(version);
   return resolved !== null;

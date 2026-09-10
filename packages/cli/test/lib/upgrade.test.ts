@@ -211,6 +211,73 @@ describe("fetchLatestFromGitHub", () => {
     ]);
   });
 
+  test("follows Toolkit release pagination to find the latest CLI release", async () => {
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      requests.push(String(url));
+      if (requests.length === 1) {
+        return new Response(
+          JSON.stringify(
+            Array.from({ length: 100 }, (_, index) => ({
+              tag_name: `mcp@9.0.${index}`,
+            }))
+          ),
+          {
+            status: 200,
+            headers: {
+              Link: '<https://api.github.com/repos/getsentry/toolkit/releases?per_page=100&page=2>; rel="next"',
+            },
+          }
+        );
+      }
+      return new Response(JSON.stringify([{ tag_name: "cli@1.2.3" }]), {
+        status: 200,
+      });
+    });
+
+    await expect(fetchLatestFromGitHub()).resolves.toBe("1.2.3");
+    expect(requests).toEqual([
+      "https://api.github.com/repos/getsentry/toolkit/releases?per_page=100",
+      "https://api.github.com/repos/getsentry/toolkit/releases?per_page=100&page=2",
+    ]);
+  });
+
+  test("rejects GitHub release pagination outside the selected source", async () => {
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      requests.push(String(url));
+      return new Response(JSON.stringify([{ tag_name: "mcp@9.0.0" }]), {
+        status: 200,
+        headers: {
+          Link: '<https://example.com/releases?page=2>; rel="next"',
+        },
+      });
+    });
+
+    await expect(fetchLatestFromGitHub()).rejects.toThrow(
+      "GitHub returned an invalid release pagination URL"
+    );
+    expect(requests).toHaveLength(1);
+  });
+
+  test("rejects cyclic GitHub release pagination", async () => {
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      requests.push(String(url));
+      return new Response(JSON.stringify([{ tag_name: "mcp@9.0.0" }]), {
+        status: 200,
+        headers: {
+          Link: `<${String(url)}>; rel="next"`,
+        },
+      });
+    });
+
+    await expect(fetchLatestFromGitHub()).rejects.toThrow(
+      "GitHub returned cyclic release pagination"
+    );
+    expect(requests).toHaveLength(1);
+  });
+
   test("falls back to the legacy latest release only on Toolkit HTTP 404", async () => {
     const requests: string[] = [];
     mockFetch(async (url) => {
@@ -651,6 +718,16 @@ describe("versionExists", () => {
     expect(requests).toEqual([
       "https://api.github.com/repos/getsentry/toolkit/releases/tags/cli%401.0.0",
     ]);
+  });
+
+  test.each([
+    401, 403, 429, 500,
+  ])("does not classify explicit source HTTP %i as a missing version", async (status) => {
+    mockFetch(async () => new Response(null, { status }));
+
+    await expect(
+      versionExists("curl", "1.0.0", UPGRADE_SOURCES[0])
+    ).rejects.toThrow(`HTTP ${status}`);
   });
 
   test("checks GitHub for curl method - version exists", async () => {

@@ -116,7 +116,7 @@ async function fetchWithRetry(
       lastError = error instanceof Error ? error : new Error(String(error));
       // Propagate external abort immediately — don't retry caller cancellation
       if (isExternalAbort(lastError, externalSignal)) {
-        break;
+        throw lastError;
       }
       // Only retry on timeout or network errors — not HTTP errors
       if (attempt >= GHCR_MAX_RETRIES || !isRetryableError(lastError)) {
