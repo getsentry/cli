@@ -49,7 +49,45 @@ sentry debug-files upload ./build --il2cpp-mapping --include-sources
 
 # Preview what would be uploaded without uploading (no credentials needed)
 sentry debug-files upload ./build --no-upload
+
+# Split WebAssembly debug info and upload it (scans directories recursively)
+sentry debug-files prepare ./dist
+
+# Preview the split without writing or uploading anything
+sentry debug-files prepare ./dist --dry-run
+
+# Split only, keeping the companions local
+sentry debug-files prepare ./dist --no-upload
+
+# Write companions elsewhere; modules are still stripped in place
+sentry debug-files prepare ./dist --out-dir ./symbols
+
+# Fail the build if any module was compiled without DWARF
+sentry debug-files prepare ./dist --require-dwarf
 ```
+
+## Notes on `prepare`
+
+- `debug-files prepare` replaces the two-step `wasm-split` + `debug-files
+  upload` workflow for WebAssembly. Its output is byte-identical to
+  `wasm-split`, so companions from either tool behave the same in Sentry.
+- For each module carrying inline DWARF it injects a `build_id` (if absent),
+  writes a `*.debug.wasm` companion retaining the Code section and DWARF,
+  strips the `.debug_*` sections from the deployable module **in place**, and
+  points it at the companion via `external_debug_info`. Your build artifact
+  keeps its path; only the companion is new.
+- The companion must keep the Code section — DWARF addresses are relative to it,
+  so a companion without it cannot be symbolicated.
+- Modules without DWARF are still stamped with a `build_id` and reported with a
+  warning rather than failing the run. Sentry matches a frame to its debug file
+  by `build_id`, so stamping now keeps symbolication possible later.
+- Name/symtab-only modules are not uploaded: the `name` section stays in the
+  deployable module and runtimes read function names from it directly, so a
+  debug file built from one adds nothing to the stack trace.
+- Running the command twice is safe. A module whose companion already exists
+  with a matching `build_id` is reported as already prepared and left alone.
+- `--require-dwarf` exits non-zero when any scanned module lacks DWARF, which is
+  the flag to use in CI.
 
 ## Notes on `find`
 
