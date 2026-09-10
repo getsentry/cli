@@ -1290,9 +1290,11 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
     );
 
     expect(requests).toContain("https://registry.npmjs.org/sentry/1.2.3");
-    expect(requests.some((request) => request.includes("api.github.com"))).toBe(
-      false
-    );
+    expect(
+      requests.some(
+        (request) => new URL(request).origin === "https://api.github.com"
+      )
+    ).toBe(false);
   });
 });
 
