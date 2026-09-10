@@ -119,6 +119,7 @@ describe("adapter query params", () => {
     expect(queryUrl).toContain("dataset=errors");
     expect(queryUrl).toContain("field=id");
     expect(queryUrl).toContain("project%3Atest-project"); // project:test-project URL-encoded
+    expect(queryUrl).toContain("sort=-timestamp");
     expect(queryUrl).toContain("statsPeriod=90d");
     expect(ids).toEqual([
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

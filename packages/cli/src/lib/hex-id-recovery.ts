@@ -457,6 +457,7 @@ const eventAdapter: FuzzyLookupAdapter = async (ctx) => {
     fields: ["id"],
     query: `project:${ctx.project}`,
     limit: SCAN_LIMIT,
+    sort: "-timestamp",
     statsPeriod: ctx.period ?? SCAN_PERIODS.event,
   });
   return data.data.map((row) => String(row.id ?? "")).filter(Boolean);
