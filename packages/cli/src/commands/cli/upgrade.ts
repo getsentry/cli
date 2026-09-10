@@ -22,6 +22,7 @@ import type { SentryContext } from "../../context.js";
 import {
   determineInstallDir,
   isDowngrade,
+  isNightlyVersion,
   LEGACY_INSTALL_SUBDIR,
   releaseLock,
   samePath,
@@ -1063,7 +1064,7 @@ export const upgradeCommand = buildCommand({
 
     // Perform the actual upgrade
     let warnings: string[] | undefined;
-    if (channel === "nightly" && method !== "curl") {
+    if (isNightlyVersion(target) && method !== "curl") {
       // Nightly is GitHub-only. If the current install method is not curl,
       // migrate to a standalone binary — the migration handles setup internally.
       warnings = await migrateToStandaloneForNightly({

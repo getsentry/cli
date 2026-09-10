@@ -21,7 +21,7 @@ import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, sep } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { valid as semverValid } from "semver";
+import { prerelease as semverPrerelease, valid as semverValid } from "semver";
 import {
   acquireLock,
   cleanupOldBinary,
@@ -131,7 +131,9 @@ function extractReleaseVersions(
     )
     .map((tag) => tag.slice(source.tagPrefix.length))
     .map((tag) => tag.replace(VERSION_PREFIX_REGEX, ""))
-    .filter((tag) => semverValid(tag) !== null)
+    .filter(
+      (tag) => semverValid(tag) !== null && semverPrerelease(tag) === null
+    )
     .sort((a, b) => compareVersions(b, a));
 }
 
@@ -708,6 +710,27 @@ export async function resolveExistingUpgradeVersion(
     const selected = await resolveUpgradeSource({
       getProbeUrl: (source) => getGitHubReleaseByTagUrl(version, source),
     });
+    let release: unknown;
+    try {
+      release = await selected.response.json();
+    } catch (error) {
+      throw new UpgradeError(
+        "network_error",
+        `GitHub returned invalid metadata for version ${version}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    const expectedTag = `${selected.source.tagPrefix}${version}`;
+    if (
+      typeof release !== "object" ||
+      release === null ||
+      !("tag_name" in release) ||
+      release.tag_name !== expectedTag
+    ) {
+      throw new UpgradeError(
+        "network_error",
+        `GitHub returned invalid metadata for version ${version}`
+      );
+    }
     return { version, source: selected.source };
   } catch (error) {
     if (error instanceof UpgradeSourceNotFoundError) {
@@ -735,7 +758,13 @@ async function nightlyVersionExists(
 ): Promise<boolean> {
   const token = await getAnonymousToken(source);
   try {
-    await fetchManifest(token, `nightly-${version}`, undefined, source);
+    const manifest = await fetchManifest(
+      token,
+      `nightly-${version}`,
+      undefined,
+      source
+    );
+    validateNightlyManifestVersion(manifest, version);
     return true;
   } catch (error) {
     if (error instanceof GhcrManifestHttpError && error.status === 404) {

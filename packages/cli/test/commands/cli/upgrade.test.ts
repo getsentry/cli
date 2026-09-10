@@ -295,8 +295,8 @@ describe("sentry cli upgrade", () => {
   });
 
   describe("--check mode", () => {
-    test("shows 'already on the target version' when current equals latest", async () => {
-      mockGitHubVersion(CLI_VERSION);
+    test("shows the current and latest stable versions", async () => {
+      mockGitHubVersion("1.0.0");
 
       const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
@@ -311,8 +311,8 @@ describe("sentry cli upgrade", () => {
 
       const combined = getOutput();
       expect(combined).toContain("Method: curl");
-      expect(combined).toContain(CLI_VERSION);
-      expect(combined).toContain("You are already on the target version");
+      expect(combined).toContain("1.0.0");
+      expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
 
     test("shows upgrade command hint when newer version available", async () => {
@@ -403,20 +403,24 @@ describe("sentry cli upgrade", () => {
     });
   });
 
-  describe("already up to date", () => {
-    test("reports already up to date when current equals target", async () => {
-      mockGitHubVersion(CLI_VERSION);
+  describe("stable target", () => {
+    test("reports the resolved stable target in check mode", async () => {
+      mockGitHubVersion("1.0.0");
 
       const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
       });
       restoreStderr = restore;
 
-      await run(app, ["cli", "upgrade", "--method", "curl"], context);
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl"],
+        context
+      );
 
       const combined = getOutput();
-      expect(combined).toContain("Already up to date");
-      expect(combined).not.toContain("Upgrading to");
+      expect(combined).toContain("Latest:");
+      expect(combined).toContain("1.0.0");
     });
   });
 
@@ -521,23 +525,23 @@ describe("sentry cli upgrade", () => {
     });
 
     test("strips v prefix from user-specified version", async () => {
-      mockGitHubVersion(CLI_VERSION);
+      mockGitHubVersion("1.0.0");
 
       const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
       });
       restoreStderr = restore;
 
-      // Pass "v<current>" — should strip prefix and match current
+      // Pass a prefixed stable version and verify the normalized target.
       await run(
         app,
-        ["cli", "upgrade", "--method", "curl", `v${CLI_VERSION}`],
+        ["cli", "upgrade", "--check", "--method", "curl", "v1.0.0"],
         context
       );
 
       const combined = getOutput();
-      // Should match current version (after stripping v prefix) and report up to date
-      expect(combined).toContain("Already up to date");
+      expect(combined).toContain("1.0.0");
+      expect(combined).toContain("Run 'sentry cli upgrade 1.0.0' to update.");
     });
   });
 
@@ -628,7 +632,7 @@ describe("sentry cli upgrade — nightly channel", () => {
     });
 
     test("'stable' positional sets channel to stable", async () => {
-      mockGitHubVersion(CLI_VERSION);
+      mockGitHubVersion("1.0.0");
       setReleaseChannel("nightly");
 
       const { context, getOutput, restore } = createMockContext({
@@ -1050,8 +1054,8 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     );
   });
 
-  test("--force bypasses 'already up to date' and proceeds to download", async () => {
-    mockBinaryDownloadWithVersion(CLI_VERSION); // Same version — would normally short-circuit
+  test("--force proceeds to download the resolved target", async () => {
+    mockBinaryDownloadWithVersion("1.0.0");
 
     const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
@@ -1064,9 +1068,9 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     // With --force, should NOT show "Already up to date"
     expect(combined).not.toContain("Already up to date");
     // Should proceed to download and succeed (spinner messages on stdout)
-    expect(combined).toContain(`Downloading ${CLI_VERSION}`);
+    expect(combined).toContain("Downloading 1.0.0");
     expect(combined).toContain("Upgraded to");
-    expect(combined).toContain(CLI_VERSION);
+    expect(combined).toContain("1.0.0");
   });
 });
 
@@ -1121,7 +1125,7 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
     clearInstallInfo();
   });
 
-  test("migrates npm install to standalone binary for nightly channel", async () => {
+  test("migrates npm install to standalone binary for a pinned nightly", async () => {
     const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
     const gzipped = gzipSync(fakeContent);
 
@@ -1173,15 +1177,16 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
       return new Response("Not Found", { status: 404 });
     });
 
-    // Switch to nightly and use npm method → triggers migration
-    setReleaseChannel("nightly");
-
     const { context, getOutput, restore } = createMockContext({
       homeDir: testDir,
     });
     restoreStderr = restore;
 
-    await run(app, ["cli", "upgrade", "--method", "npm", "nightly"], context);
+    await run(
+      app,
+      ["cli", "upgrade", "--method", "npm", "0.99.0-dev.1234567890"],
+      context
+    );
 
     const combined = getOutput();
     expect(combined).toContain(

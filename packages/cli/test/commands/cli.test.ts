@@ -124,7 +124,7 @@ describe("upgradeCommand.func", () => {
 
   test("shows installation info with specified method", async () => {
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify([{ tag_name: "cli@0.0.0-dev" }]), {
+      new Response(JSON.stringify([{ tag_name: "cli@1.0.0" }]), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })) as typeof fetch;
@@ -135,11 +135,11 @@ describe("upgradeCommand.func", () => {
 
     // Use method flag to bypass detection (curl uses GitHub).
     // Pass json: true so the output config renders structured JSON to stdout.
-    await func.call(context, { check: false, method: "curl", json: true });
+    await func.call(context, { check: true, method: "curl", json: true });
 
     // Final result is rendered as JSON to stdout by the output system
     const data = JSON.parse(getStdout()) as UpgradeResult;
-    expect(data.action).toBe("up-to-date");
+    expect(data.action).toBe("checked");
     expect(data.method).toBe("curl");
   });
 
@@ -191,9 +191,9 @@ describe("upgradeCommand.func", () => {
     );
   });
 
-  test("check mode shows already on target when versions match", async () => {
+  test("check mode compares the current version with a stable target", async () => {
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify([{ tag_name: "cli@0.0.0-dev" }]), {
+      new Response(JSON.stringify([{ tag_name: "cli@1.0.0" }]), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })) as typeof fetch;
@@ -206,9 +206,8 @@ describe("upgradeCommand.func", () => {
 
     const data = JSON.parse(getStdout()) as UpgradeResult;
     expect(data.action).toBe("checked");
-    expect(data.currentVersion).toBe(data.targetVersion);
-    // No warnings when already on target
-    expect(data.warnings).toBeUndefined();
+    expect(data.currentVersion).toBe("0.0.0-dev");
+    expect(data.targetVersion).toBe("1.0.0");
   });
 
   test("throws UpgradeError when specified version does not exist", async () => {

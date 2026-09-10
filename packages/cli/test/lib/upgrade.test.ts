@@ -198,6 +198,7 @@ describe("fetchLatestFromGitHub", () => {
         JSON.stringify([
           { tag_name: "mcp@9.0.0" },
           { tag_name: "cli@not-a-version" },
+          { tag_name: "cli@99.0.0-dev.1", prerelease: false },
           { tag_name: "cli@1.2.3" },
           { tag_name: "cli@1.3.0" },
         ]),
@@ -743,6 +744,26 @@ describe("versionExists", () => {
   });
 
   test.each([
+    ["empty body", ""],
+    ["invalid JSON", "{"],
+    ["missing tag", JSON.stringify({})],
+    ["mismatched tag", JSON.stringify({ tag_name: "mcp@1.0.0" })],
+  ])("rejects pinned Toolkit %s without legacy fallback", async (_name, body) => {
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      requests.push(String(url));
+      return new Response(body, { status: 200 });
+    });
+
+    await expect(resolveExistingUpgradeVersion("1.0.0")).rejects.toMatchObject({
+      reason: "network_error",
+    });
+    expect(requests).toEqual([
+      "https://api.github.com/repos/getsentry/toolkit/releases/tags/cli%401.0.0",
+    ]);
+  });
+
+  test.each([
     undefined,
     "not-semver",
     "0.14.0-dev.124",
@@ -803,7 +824,10 @@ describe("versionExists", () => {
   });
 
   test("checks GitHub for curl method - version exists", async () => {
-    mockFetch(async () => new Response(null, { status: 200 }));
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ tag_name: "cli@1.0.0" }), { status: 200 })
+    );
 
     const exists = await versionExists("curl", "1.0.0");
     expect(exists).toBe(true);
@@ -845,7 +869,10 @@ describe("versionExists", () => {
   });
 
   test("checks GitHub for brew method - version exists", async () => {
-    mockFetch(async () => new Response(null, { status: 200 }));
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ tag_name: "cli@1.0.0" }), { status: 200 })
+    );
 
     const exists = await versionExists("brew", "1.0.0");
     expect(exists).toBe(true);
@@ -952,6 +979,30 @@ describe("versionExists", () => {
 
     const exists = await versionExists("npm", "0.14.0-dev.1772661724");
     expect(exists).toBe(true);
+  });
+
+  test("rejects a mismatched nightly annotation for an explicit source", async () => {
+    mockFetch(async (url) => {
+      const request = String(url);
+      if (request.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "tok" }), { status: 200 });
+      }
+      if (request.includes("/manifests/nightly-0.14.0-dev.123")) {
+        return new Response(
+          JSON.stringify({
+            annotations: { version: "0.14.0-dev.124" },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response("Unexpected", { status: 500 });
+    });
+
+    await expect(
+      versionExists("curl", "0.14.0-dev.123", UPGRADE_SOURCES[0])
+    ).rejects.toThrow(
+      "Nightly manifest version 0.14.0-dev.124 does not match requested version 0.14.0-dev.123"
+    );
   });
 
   test("throws on network failure for nightly version", async () => {
