@@ -98,6 +98,7 @@ function jsonTransform(
 export const listCommand = buildListCommand("agent-conversation", {
   docs: {
     brief: "List recent agent conversations",
+    customUsage: ["[<org>]"],
     fullDescription:
       "List recent agent conversations from a Sentry organization.\n\n" +
       "Examples:\n" +

@@ -11,7 +11,7 @@ requires:
 
 List and view agent conversations
 
-### `sentry agent-conversation list <org>`
+### `sentry agent-conversation list [<org>]`
 
 List recent agent conversations
 
@@ -63,7 +63,7 @@ sentry agent-conversation list -q "has:errors"
 sentry agent-conversation list my-org -c next
 ```
 
-### `sentry agent-conversation view <org/conversation-id>`
+### `sentry agent-conversation view [<org>/]<conversation-id>`
 
 View an agent conversation transcript
 
@@ -73,11 +73,14 @@ View an agent conversation transcript
 **Examples:**
 
 ```bash
-# View full transcript
-sentry agent-conversation view my-org conv-123
+# View full transcript (organization auto-detected)
+sentry agent-conversation view conv-123
+
+# Explicit organization
+sentry agent-conversation view my-org/conv-123
 
 # JSON output
-sentry agent-conversation view my-org conv-123 --json
+sentry agent-conversation view my-org/conv-123 --json
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.
