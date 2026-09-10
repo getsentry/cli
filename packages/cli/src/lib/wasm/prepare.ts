@@ -121,6 +121,8 @@ export type PrepareResult = {
   companion?: string;
   /** Why the module was skipped, when it was. */
   warning?: string;
+  /** What to try next, when the skip looks like a build configuration issue. */
+  recommendation?: string;
 };
 
 /** Options controlling preparation of one file. */
@@ -172,11 +174,13 @@ export function debugIdFromBuildId(buildId: string): string | undefined {
 }
 
 /**
- * Whether a quality means the module's DWARF is accounted for.
+ * Whether a quality means the module was built with DWARF.
  *
  * Mirrors `DebugQuality::has_dwarf`: a module pointing at an external companion
- * counts even when that companion was not found locally, because the debug info
- * exists somewhere and the module was not built without it.
+ * counts, because the debug info exists somewhere even when it was not found
+ * locally. This is a statement about the build, not about whether Sentry can
+ * reach the debug info — callers that need the latter must also check that the
+ * companion resolved.
  */
 export function hasDwarfQuality(quality: DebugQuality): boolean {
   return quality === "dwarf" || quality === "external-debug-info";
@@ -433,6 +437,24 @@ function skipWarning(
 }
 
 /**
+ * Suggest a next step for a skip the build can actually fix.
+ *
+ * Only missing or insufficient debug info points at the build: a module the
+ * compiler never emitted DWARF for, or one carrying names alone. An already
+ * stripped module and a dangling companion pointer are pipeline problems, so
+ * they get no suggestion here.
+ */
+function skipRecommendation(
+  quality: DebugQuality,
+  hasBuildId: boolean
+): string | null {
+  if (quality === "symtab" || (quality === "none" && !hasBuildId)) {
+    return "verify build flags emit DWARF";
+  }
+  return null;
+}
+
+/**
  * Resolve an `external_debug_info` URL to a local path.
  *
  * Remote URLs have no local companion to check, so they resolve to nothing.
@@ -549,7 +571,8 @@ export async function prepareWasmFile(
     }
   }
 
-  const warning = skipWarning(inspection.quality, Boolean(inspection.buildId));
+  const hadBuildId = Boolean(inspection.buildId);
+  const warning = skipWarning(inspection.quality, hadBuildId);
   if (warning) {
     const buildId = await ensureBuildId(
       path,
@@ -557,12 +580,16 @@ export async function prepareWasmFile(
       inspection.buildId,
       options
     );
+    // Classify against the build id found on disk: stamping happens above, and
+    // a freshly stamped module is not an already stripped one.
+    const recommendation = skipRecommendation(inspection.quality, hadBuildId);
     return {
       path,
       action: "skipped",
       quality: inspection.quality,
       ...(buildId ? { buildId: formatBuildId(buildId) } : {}),
       warning,
+      ...(recommendation ? { recommendation } : {}),
     };
   }
 

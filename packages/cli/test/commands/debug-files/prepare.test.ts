@@ -9,11 +9,14 @@
  * emits no stray tag markup.
  */
 
+import chalk from "chalk";
 import { describe, expect, test } from "vitest";
 import {
   formatPrepareModuleBlock,
   formatPrepareResult,
+  lacksDwarf,
 } from "../../../src/commands/debug-files/prepare.js";
+import { COLORS } from "../../../src/lib/formatters/colors.js";
 import type { PrepareResult } from "../../../src/lib/wasm/prepare.js";
 
 /** Indent the formatter applies to detail lines. */
@@ -58,6 +61,34 @@ describe("formatPrepareModuleBlock", () => {
       `${INDENT}Build ID: 00000000000040008000000000000000`,
       `${INDENT}Warning: already stripped (build_id present, no debug sections)`,
     ]);
+  });
+
+  test("appends a Recommendation line when one is present", () => {
+    const block = formatPrepareModuleBlock({
+      path: "app.wasm",
+      action: "skipped",
+      quality: "symtab",
+      warning: "no line-level symbolication (name/symtab only)",
+      recommendation: "verify build flags emit DWARF",
+    });
+
+    expect(block.split("\n").at(-1)).toBe(
+      `${INDENT}Recommendation: verify build flags emit DWARF`
+    );
+  });
+
+  test("colors the skip verb red in terminal output", () => {
+    process.env.SENTRY_PLAIN_OUTPUT = "0";
+    const level = chalk.level;
+    chalk.level = 3;
+    try {
+      const header = formatPrepareModuleBlock(skippedModule).split("\n")[0];
+
+      expect(header).toContain(chalk.hex(COLORS.red)("Skipping"));
+    } finally {
+      chalk.level = level;
+      delete process.env.SENTRY_PLAIN_OUTPUT;
+    }
   });
 
   test("uses the legacy verb for each action", () => {
@@ -186,5 +217,36 @@ describe("formatPrepareResult", () => {
     });
 
     expect(output).not.toMatch(/<\/?(muted|yellow)>/);
+  });
+});
+
+describe("lacksDwarf", () => {
+  const skipped = (quality: PrepareResult["quality"]): PrepareResult => ({
+    path: "app.wasm",
+    action: "skipped",
+    quality,
+  });
+
+  test("fails a dangling external_debug_info pointer", () => {
+    // The companion could not be resolved — a resolved one would have been
+    // reported as already-prepared — so nothing reachable was uploaded.
+    expect(lacksDwarf(skipped("external-debug-info"))).toBe(true);
+  });
+
+  test("fails a module with no usable debug info", () => {
+    expect(lacksDwarf(skipped("symtab"))).toBe(true);
+    expect(lacksDwarf(skipped("none"))).toBe(true);
+  });
+
+  test("passes a companion named directly on the command line", () => {
+    expect(lacksDwarf(skipped("dwarf"))).toBe(false);
+  });
+
+  test("passes every module that produced a debug file", () => {
+    expect(lacksDwarf(splitModule)).toBe(false);
+    expect(lacksDwarf({ ...splitModule, action: "already-prepared" })).toBe(
+      false
+    );
+    expect(lacksDwarf({ ...splitModule, action: "would-split" })).toBe(false);
   });
 });

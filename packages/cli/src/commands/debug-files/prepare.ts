@@ -91,12 +91,17 @@ type PrepareFlags = {
   "wait-for"?: number;
 };
 
-/** Header verb for each action, matching the legacy CLI's `print_result`. */
+/**
+ * Header verb for each action, matching the legacy CLI's `print_result`.
+ *
+ * A skip is red so it stands out while scrolling a build log; the tag is
+ * stripped in plain mode, leaving the legacy wording intact.
+ */
 const ACTION_HEADERS: Record<PrepareAction, string> = {
   split: "Split",
   "would-split": "Would split",
   "already-prepared": "Already prepared",
-  skipped: "Skipping",
+  skipped: colorTag("red", "Skipping"),
 };
 
 /**
@@ -165,6 +170,14 @@ export function formatPrepareModuleBlock(module: PrepareResult): string {
     lines.push(
       renderLine(
         `${colorTag("yellow", "Warning")}: ${escapeMarkdownInline(module.warning)}`,
+        DETAIL_INDENT
+      )
+    );
+  }
+  if (module.recommendation) {
+    lines.push(
+      renderLine(
+        `${colorTag("cyan", "Recommendation")}: ${escapeMarkdownInline(module.recommendation)}`,
         DETAIL_INDENT
       )
     );
@@ -257,13 +270,21 @@ function resolveBuildId(value: string | undefined): Uint8Array | undefined {
  * Whether a module fails the `--require-dwarf` gate.
  *
  * Only skipped modules can fail: a split or already-prepared module reached the
- * end state the flag is checking for. A skipped module still counts as having
- * DWARF when it points at an external companion, so a dangling
- * `external_debug_info` pointer does not fail a build over missing debug info
- * it was, in fact, built with.
+ * end state the flag is checking for.
+ *
+ * A skipped `external_debug_info` module is a dangling pointer by
+ * construction — had its companion been found with a matching build id, it
+ * would have been reported as already-prepared. The DWARF exists somewhere,
+ * but nothing reachable was uploaded, so the build symbolicates no better than
+ * one compiled without debug info and the gate has to catch it.
  */
-function lacksDwarf(result: PrepareResult): boolean {
-  return result.action === "skipped" && !hasDwarfQuality(result.quality);
+export function lacksDwarf(result: PrepareResult): boolean {
+  if (result.action !== "skipped") {
+    return false;
+  }
+  return (
+    result.quality === "external-debug-info" || !hasDwarfQuality(result.quality)
+  );
 }
 
 /** Yield a result that uploaded nothing, then close with the given hint. */
@@ -510,8 +531,9 @@ export const prepareCommand = buildCommand({
       "an already-prepared module is detected and left alone.\n\n" +
       "Org/project are auto-detected from DSN, env vars, or config defaults.\n\n" +
       "--require-dwarf is checked before anything is uploaded, so a build " +
-      "missing debug info fails without pushing files first. A module that " +
-      "points at an external companion still counts as having DWARF.\n\n" +
+      "missing debug info fails without pushing files first. A module whose " +
+      "external_debug_info points at a companion that cannot be found fails " +
+      "too: its debug info is unreachable.\n\n" +
       "Usage:\n" +
       "  sentry debug-files prepare ./dist\n" +
       "  sentry debug-files prepare ./app.wasm --no-upload\n" +
@@ -657,7 +679,7 @@ export const prepareCommand = buildCommand({
       setExitCode(1);
       return yield* reportWithoutUpload({
         results,
-        hint: `${missingDwarf.length} module(s) lack DWARF debug info (--require-dwarf).`,
+        hint: `${missingDwarf.length} module(s) have no reachable DWARF debug info (--require-dwarf).`,
       });
     }
 

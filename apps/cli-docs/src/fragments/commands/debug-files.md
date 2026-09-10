@@ -87,7 +87,8 @@ sentry debug-files prepare ./dist --require-dwarf
 - Running the command twice is safe. A module whose companion already exists
   with a matching `build_id` is reported as already prepared and left alone.
 - `--require-dwarf` exits non-zero when any scanned module lacks DWARF, which is
-  the flag to use in CI.
+  the flag to use in CI. A module whose `external_debug_info` names a companion
+  that cannot be found fails the gate too, since its debug info is unreachable.
 
 ## Notes on `find`
 

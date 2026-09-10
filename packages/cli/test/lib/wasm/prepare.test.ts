@@ -214,9 +214,9 @@ function toHex(bytes: Uint8Array): string {
 
 describe("hasDwarfQuality", () => {
   test("counts an external companion pointer as having DWARF", () => {
-    // Mirrors DebugQuality::has_dwarf in the Rust CLI: a module that points at
-    // a companion was built with debug info, so --require-dwarf must not fail
-    // merely because the companion is not on this machine.
+    // Mirrors DebugQuality::has_dwarf in the Rust CLI: this describes how the
+    // module was built, not whether its debug info can be reached. The
+    // --require-dwarf gate applies the reachability check on top.
     expect(hasDwarfQuality("dwarf")).toBe(true);
     expect(hasDwarfQuality("external-debug-info")).toBe(true);
     expect(hasDwarfQuality("symtab")).toBe(false);
@@ -303,6 +303,26 @@ describe("prepareWasmFile", () => {
     expect(result.action).toBe("skipped");
     expect(result.warning).toContain("already stripped");
     expect(existsSync(companionPath(path))).toBe(false);
+  });
+
+  test("recommends checking build flags when debug info is missing", async () => {
+    const missing = await prepareWasmFile(
+      await writeModule("empty.wasm", emptyModule())
+    );
+    const names = await prepareWasmFile(
+      await writeModule("names.wasm", nameOnlyModule())
+    );
+
+    expect(missing.recommendation).toBe("verify build flags emit DWARF");
+    expect(names.recommendation).toBe("verify build flags emit DWARF");
+  });
+
+  test("does not blame build flags for an already stripped module", async () => {
+    const result = await prepareWasmFile(
+      await writeModule("app.wasm", strippedModule())
+    );
+
+    expect(result.recommendation).toBeUndefined();
   });
 
   test("detects an already-prepared pair on a second run", async () => {
