@@ -9,6 +9,7 @@ import { bundleJvmCommand } from "./bundle-jvm.js";
 import { bundleSourcesCommand } from "./bundle-sources.js";
 import { checkCommand } from "./check.js";
 import { findCommand } from "./find.js";
+import { prepareCommand } from "./prepare.js";
 import { printSourcesCommand } from "./print-sources.js";
 import { uploadCommand } from "./upload.js";
 
@@ -16,6 +17,7 @@ export const debugFilesRoute = buildRouteMap({
   routes: {
     check: checkCommand,
     find: findCommand,
+    prepare: prepareCommand,
     upload: uploadCommand,
     "print-sources": printSourcesCommand,
     "bundle-sources": bundleSourcesCommand,
