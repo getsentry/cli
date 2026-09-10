@@ -1868,6 +1868,15 @@ describe("isNightlyVersion", () => {
 });
 
 describe("fetchLatestNightlyVersion", () => {
+  test("preserves an already-aborted signal reason", async () => {
+    const controller = new AbortController();
+    const reason = { kind: "cancelled" };
+    controller.abort(reason);
+
+    await expect(fetchLatestNightlyVersion(controller.signal)).rejects.toBe(
+      reason
+    );
+  });
   test("falls back to legacy when the Toolkit nightly manifest returns 404", async () => {
     const requests: string[] = [];
     mockFetch(async (url) => {

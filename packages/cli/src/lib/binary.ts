@@ -315,6 +315,9 @@ async function fetchUpgradeProbe(
       signal: options.signal,
     });
   } catch (error) {
+    if (options.signal?.aborted) {
+      throw options.signal.reason;
+    }
     if (error instanceof Error && error.name === "AbortError") {
       throw error;
     }

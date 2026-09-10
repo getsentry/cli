@@ -50,7 +50,7 @@ import { CLI_VERSION, NODE_MODULES_DIRNAME } from "./constants.js";
 import { getInstallInfo, setInstallInfo } from "./db/install-info.js";
 import type { ReleaseChannel } from "./db/release-channel.js";
 import { attemptDeltaUpgrade, type DeltaResult } from "./delta-upgrade.js";
-import { AbortError, UpgradeError } from "./errors.js";
+import { UpgradeError } from "./errors.js";
 import { formatBytes } from "./formatters/numbers.js";
 import {
   downloadNightlyBlob,
@@ -592,7 +592,7 @@ export async function fetchLatestNightlyVersionWithSource(
   sources: readonly UpgradeSource[] = UPGRADE_SOURCES
 ): Promise<ResolvedUpgradeVersion> {
   if (signal?.aborted) {
-    throw new AbortError();
+    throw signal.reason;
   }
   const resolved = await resolveNightlyManifest("nightly", signal, sources);
   return {

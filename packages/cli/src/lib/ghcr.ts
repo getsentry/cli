@@ -133,11 +133,11 @@ async function fetchWithRetry(
       });
       return response;
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
       // Propagate external abort immediately — don't retry caller cancellation
-      if (isExternalAbort(lastError, externalSignal)) {
-        throw lastError;
+      if (externalSignal?.aborted) {
+        throw externalSignal.reason;
       }
+      lastError = error instanceof Error ? error : new Error(String(error));
       // Only retry on timeout or network errors — not HTTP errors
       if (attempt >= GHCR_MAX_RETRIES || !isRetryableError(lastError)) {
         break;

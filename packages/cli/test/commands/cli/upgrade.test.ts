@@ -1276,7 +1276,9 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
     const requests: string[] = [];
     mockFetch(async (url) => {
       requests.push(String(url));
-      return new Response(null, { status: 200 });
+      return String(url).includes("api.github.com")
+        ? new Response(JSON.stringify([]), { status: 200 })
+        : new Response(null, { status: 200 });
     });
     setReleaseChannel("nightly");
 
@@ -1290,10 +1292,14 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
     );
 
     expect(requests).toContain("https://registry.npmjs.org/sentry/1.2.3");
+    expect(requests).toContain(
+      "https://api.github.com/repos/getsentry/toolkit/releases?per_page=30"
+    );
+    expect(requests.some((request) => request.includes("/commits?"))).toBe(
+      false
+    );
     expect(
-      requests.some(
-        (request) => new URL(request).origin === "https://api.github.com"
-      )
+      requests.some((request) => request.includes("/releases/tags/"))
     ).toBe(false);
   });
 });

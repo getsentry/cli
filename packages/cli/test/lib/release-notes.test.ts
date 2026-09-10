@@ -387,7 +387,20 @@ describe("fetchChangelog source affinity", () => {
     );
   });
 
-  test("normalizes raw prefetched Toolkit releases without fetching", async () => {
+  test("rejects normalized releases from another source", async () => {
+    const releases = await fetchRecentReleases(undefined, toolkitSource);
+    const changelog = await fetchChangelog({
+      channel: "stable",
+      fromVersion: "0.20.0",
+      toVersion: "0.21.0",
+      source: UPGRADE_SOURCES[1],
+      prefetchedReleases: releases,
+    });
+
+    expect(changelog).toBeNull();
+  });
+
+  test("rejects raw prefetched Toolkit releases without fetching", async () => {
     const requestedUrls: string[] = [];
     globalThis.fetch = mockFetch(async (input) => {
       requestedUrls.push(String(input));
@@ -405,16 +418,10 @@ describe("fetchChangelog source affinity", () => {
           "cli@0.21.0",
           "### Bug Fixes 🐛\n\n- Raw prefetched release"
         ),
-      ],
+      ] as never,
     });
 
-    expect(changelog?.totalItems).toBe(1);
-    expect(changelog?.sections[0]?.markdown).toContain(
-      "Raw prefetched release"
-    );
-    expect(changelog?.sections[0]?.markdown).not.toContain(
-      "Unrelated MCP release"
-    );
+    expect(changelog).toBeNull();
     expect(requestedUrls).toEqual([]);
   });
 
@@ -426,7 +433,7 @@ describe("fetchChangelog source affinity", () => {
       source: toolkitSource,
       prefetchedReleases: [
         makeRelease("0.21.0", "### Bug Fixes 🐛\n\n- Legacy release"),
-      ],
+      ] as never,
     });
 
     expect(changelog).toBeNull();
@@ -441,13 +448,10 @@ describe("fetchChangelog source affinity", () => {
       prefetchedReleases: [
         makeRelease("cli@0.21.0-dev.1", "- Development release"),
         makeRelease("cli@0.21.0", "### Bug Fixes 🐛\n\n- Stable release"),
-      ],
+      ] as never,
     });
 
-    expect(changelog?.sections[0]?.markdown).toContain("Stable release");
-    expect(changelog?.sections[0]?.markdown).not.toContain(
-      "Development release"
-    );
+    expect(changelog).toBeNull();
   });
 
   test("fetches stable releases only from the explicitly selected legacy source", async () => {

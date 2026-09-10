@@ -454,6 +454,21 @@ describe("fetchWithUpgradeError", () => {
     }
   });
 
+  test("preserves an arbitrary external abort reason", async () => {
+    const controller = new AbortController();
+    const reason = { kind: "cancelled" };
+    const request = resolveUpgradeSource({
+      getProbeUrl: () => "https://example.com",
+      signal: controller.signal,
+      fetch: async () => {
+        controller.abort(reason);
+        throw reason;
+      },
+    });
+
+    await expect(request).rejects.toBe(reason);
+  });
+
   test("wraps network errors as UpgradeError", async () => {
     globalThis.fetch = (async () => {
       throw new Error("ECONNREFUSED");

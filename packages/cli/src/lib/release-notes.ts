@@ -24,6 +24,7 @@ import { customFetch } from "./custom-ca.js";
 import {
   type GitHubRelease,
   isNormalizedForSource,
+  type NormalizedGitHubReleases,
   normalizeStableReleases,
 } from "./delta-upgrade.js";
 import { logger } from "./logger.js";
@@ -429,13 +430,12 @@ type ChangelogBuildOptions = {
 
 function normalizeChangelogReleases(
   releases: GitHubRelease[],
-  source: UpgradeSource,
-  allowNormalized: boolean
+  source: UpgradeSource
 ): GitHubRelease[] {
-  if (allowNormalized && isNormalizedForSource(releases, source)) {
+  if (isNormalizedForSource(releases, source)) {
     return releases;
   }
-  return normalizeStableReleases(releases, source);
+  return [];
 }
 
 /** Build a changelog summary while filtering source-specific release tags. */
@@ -618,7 +618,7 @@ async function fetchReleasesForChangelog(
     log.debug("GitHub releases response is not an array", typeof data);
     return [];
   }
-  return normalizeChangelogReleases(data as GitHubRelease[], source, false);
+  return normalizeStableReleases(data as GitHubRelease[], source);
 }
 
 /**
@@ -638,7 +638,7 @@ async function fetchStableChangelog(
   const { fromVersion, toVersion, maxItems, prefetchedReleases, source } =
     options;
   const releases = prefetchedReleases
-    ? normalizeChangelogReleases(prefetchedReleases, source, true)
+    ? normalizeChangelogReleases(prefetchedReleases, source)
     : await fetchReleasesForChangelog(source);
   if (releases.length === 0) {
     return null;
@@ -743,7 +743,7 @@ export type FetchChangelogOptions = {
   /** Maximum list items to include */
   maxItems?: number;
   /** Pre-fetched releases to avoid redundant API call (stable channel only) */
-  prefetchedReleases?: GitHubRelease[];
+  prefetchedReleases?: NormalizedGitHubReleases;
   /** Release source selected during version discovery; defaults to the primary source */
   source?: UpgradeSource;
 };

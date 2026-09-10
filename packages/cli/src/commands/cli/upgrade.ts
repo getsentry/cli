@@ -273,11 +273,8 @@ function validateMethod(
   }
 }
 
-function getArtifactChannel(
-  target: string,
-  trackingChannel: ReleaseChannel
-): ReleaseChannel {
-  return isNightlyVersion(target) ? "nightly" : trackingChannel;
+function getArtifactChannel(target: string): ReleaseChannel {
+  return isNightlyVersion(target) ? "nightly" : "stable";
 }
 
 type ResolveTargetOptions = {
@@ -1021,7 +1018,7 @@ export const upgradeCommand = buildCommand({
         result.currentVersion !== result.targetVersion
       ) {
         result.changelog = await startChangelogFetch({
-          channel: getArtifactChannel(result.targetVersion, channel),
+          channel: getArtifactChannel(result.targetVersion),
           currentVersion: CLI_VERSION,
           targetVersion: result.targetVersion,
           offline: false,
@@ -1035,7 +1032,7 @@ export const upgradeCommand = buildCommand({
 
     // Start changelog fetch early — it runs in parallel with the download.
     const changelogPromise = startChangelogFetch({
-      channel: getArtifactChannel(target, channel),
+      channel: getArtifactChannel(target),
       currentVersion: CLI_VERSION,
       targetVersion: target,
       offline,

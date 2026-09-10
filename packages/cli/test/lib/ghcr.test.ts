@@ -147,6 +147,21 @@ describe("getAnonymousToken", () => {
     expect(requests).toBe(1);
   });
 
+  test("preserves a primitive caller cancellation reason without retrying", async () => {
+    const controller = new AbortController();
+    let requests = 0;
+    mockFetch(async () => {
+      requests += 1;
+      controller.abort("cancelled");
+      throw controller.signal.reason;
+    });
+
+    await expect(getAnonymousToken(undefined, controller.signal)).rejects.toBe(
+      "cancelled"
+    );
+    expect(requests).toBe(1);
+  });
+
   test("throws UpgradeError when response has no token field", async () => {
     mockFetch(
       async () =>
