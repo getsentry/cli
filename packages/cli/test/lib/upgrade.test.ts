@@ -225,7 +225,7 @@ describe("fetchLatestFromGitHub", () => {
           {
             status: 200,
             headers: {
-              Link: '<https://api.github.com/repos/getsentry/toolkit/releases?per_page=100&page=2>; rel="next"',
+              Link: '<https://api.github.com/repositories/1114546946/releases?per_page=100&page=2>; rel="next"',
             },
           }
         );
@@ -260,6 +260,23 @@ describe("fetchLatestFromGitHub", () => {
     expect(requests).toHaveLength(1);
   });
 
+  test("classifies malformed GitHub release pagination as a network error", async () => {
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify([{ tag_name: "mcp@9.0.0" }]), {
+          status: 200,
+          headers: {
+            Link: '<https://[invalid>; rel="next"',
+          },
+        })
+    );
+
+    await expect(fetchLatestFromGitHub()).rejects.toMatchObject({
+      reason: "network_error",
+      message: "GitHub returned an invalid release pagination URL",
+    });
+  });
+
   test("rejects cyclic GitHub release pagination", async () => {
     const requests: string[] = [];
     mockFetch(async (url) => {
@@ -267,7 +284,7 @@ describe("fetchLatestFromGitHub", () => {
       return new Response(JSON.stringify([{ tag_name: "mcp@9.0.0" }]), {
         status: 200,
         headers: {
-          Link: `<${String(url)}>; rel="next"`,
+          Link: '<https://api.github.com/repositories/1114546946/releases?per_page=100&page=2>; rel="next"',
         },
       });
     });
@@ -275,7 +292,7 @@ describe("fetchLatestFromGitHub", () => {
     await expect(fetchLatestFromGitHub()).rejects.toThrow(
       "GitHub returned cyclic release pagination"
     );
-    expect(requests).toHaveLength(1);
+    expect(requests).toHaveLength(2);
   });
 
   test("falls back to the legacy latest release only on Toolkit HTTP 404", async () => {

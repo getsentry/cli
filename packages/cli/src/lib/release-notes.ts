@@ -13,6 +13,7 @@
  */
 
 import { marked, type Token, type Tokens } from "marked";
+import { valid as semverValid } from "semver";
 import {
   compareVersions,
   getGitHubHeaders,
@@ -434,10 +435,11 @@ function buildChangelogSummaryForSource(
   const inRange = releases.filter((release) => {
     let tagName = release.tag_name;
     if (source?.tagPrefix) {
-      if (!tagName.startsWith(source.tagPrefix)) {
+      if (tagName.startsWith(source.tagPrefix)) {
+        tagName = tagName.slice(source.tagPrefix.length);
+      } else if (semverValid(tagName.replace(VERSION_PREFIX_RE, "")) === null) {
         return false;
       }
-      tagName = tagName.slice(source.tagPrefix.length);
     }
     const version = tagName.replace(VERSION_PREFIX_RE, "");
     return (

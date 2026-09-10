@@ -11,7 +11,10 @@
 import { marked } from "marked";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { UPGRADE_SOURCES } from "../../src/lib/binary.js";
-import type { GitHubRelease } from "../../src/lib/delta-upgrade.js";
+import {
+  fetchRecentReleases,
+  type GitHubRelease,
+} from "../../src/lib/delta-upgrade.js";
 import {
   buildChangelogSummary,
   type ChangeCategory,
@@ -345,6 +348,35 @@ describe("fetchChangelog source affinity", () => {
     ]);
     expect(requestedUrls.some((url) => url.includes("getsentry/cli"))).toBe(
       false
+    );
+  });
+
+  test("builds a Toolkit changelog from normalized prefetched releases", async () => {
+    globalThis.fetch = mockFetch(
+      async () =>
+        new Response(
+          JSON.stringify([
+            makeRelease(
+              "cli@0.21.0",
+              "### Bug Fixes 🐛\n\n- Reuse prefetched releases"
+            ),
+          ]),
+          { status: 200 }
+        )
+    );
+
+    const releases = await fetchRecentReleases(undefined, toolkitSource);
+    const changelog = await fetchChangelog({
+      channel: "stable",
+      fromVersion: "0.20.0",
+      toVersion: "0.21.0",
+      source: toolkitSource,
+      prefetchedReleases: releases,
+    });
+
+    expect(changelog?.totalItems).toBe(1);
+    expect(changelog?.sections[0]?.markdown).toContain(
+      "Reuse prefetched releases"
     );
   });
 

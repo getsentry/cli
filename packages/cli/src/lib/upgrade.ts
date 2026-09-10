@@ -101,6 +101,12 @@ export const VERSION_PREFIX_REGEX = /^v/;
 /** GitHub pagination link for the next page. */
 const NEXT_PAGE_LINK_REGEX = /<([^>]+)>;\s*rel="next"/;
 
+/** Canonical GitHub REST repository release-list path. */
+const CANONICAL_RELEASES_PATH_REGEX = /^\/repositories\/\d+\/releases$/;
+
+/** Positive GitHub pagination page number. */
+const PAGE_NUMBER_REGEX = /^[1-9]\d*$/;
+
 /** A resolved standalone-binary version and the source that must serve it. */
 export type ResolvedUpgradeVersion = {
   /** Version without a source-specific tag prefix. */
@@ -138,18 +144,34 @@ function getNextGitHubReleasePage(
   if (!match?.[1]) {
     return;
   }
+  if (!URL.canParse(match[1])) {
+    throw new UpgradeError(
+      "network_error",
+      "GitHub returned an invalid release pagination URL"
+    );
+  }
   const url = new URL(match[1]);
+  const isSelectedSourcePath =
+    url.pathname === `/repos/${source.githubRepo}/releases`;
+  const isCanonicalRepositoryPath = CANONICAL_RELEASES_PATH_REGEX.test(
+    url.pathname
+  );
+  const page = url.searchParams.get("page");
   if (
     url.protocol !== "https:" ||
     url.hostname !== "api.github.com" ||
-    url.pathname !== `/repos/${source.githubRepo}/releases`
+    !(isSelectedSourcePath || isCanonicalRepositoryPath) ||
+    page === null ||
+    !PAGE_NUMBER_REGEX.test(page)
   ) {
     throw new UpgradeError(
       "network_error",
       "GitHub returned an invalid release pagination URL"
     );
   }
-  return url.href;
+  const nextPage = new URL(getGitHubLatestReleaseUrl(source));
+  nextPage.searchParams.set("page", page);
+  return nextPage.href;
 }
 
 // Curl Binary Helpers
