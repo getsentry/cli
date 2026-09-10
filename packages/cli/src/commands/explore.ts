@@ -64,7 +64,7 @@ const log = logger.withTag("explore");
 /** Default fields when none specified — top errors view */
 const DEFAULT_FIELDS = ["title", "count()"];
 const DEFAULT_TRANSACTION_FIELDS = ["transaction", "count()"];
-const TRANSACTION_DATASET = "transactions";
+const LEGACY_TRANSACTION_DATASETS = new Set(["transaction", "transactions"]);
 const IS_TRANSACTION_FILTER = "is_transaction:true";
 const IS_TRANSACTION_FILTER_PATTERN = /(?:^|\s)is_transaction:true(?:\s|$)/;
 
@@ -89,8 +89,6 @@ const DATASET_ALIASES: Record<string, string> = {
   error: "errors",
   spans: "spans",
   span: "spans",
-  transactions: TRANSACTION_DATASET,
-  transaction: TRANSACTION_DATASET,
   metrics: "tracemetrics",
   logs: "logs",
   log: "logs",
@@ -168,13 +166,13 @@ type ExploreData = {
 function parseDataset(value: string): string {
   const lower = value.toLowerCase();
   const resolved = DATASET_ALIASES[lower];
-  if (!resolved) {
-    throw new ValidationError(
-      `Invalid dataset "${value}". Must be one of: ${[...VALID_DATASETS].join(", ")}`,
-      "dataset"
-    );
+  if (resolved || LEGACY_TRANSACTION_DATASETS.has(lower)) {
+    return resolved ?? lower;
   }
-  return resolved;
+  throw new ValidationError(
+    `Invalid dataset "${value}". Must be one of: ${[...VALID_DATASETS].join(", ")}`,
+    "dataset"
+  );
 }
 
 /**
@@ -310,7 +308,7 @@ function defaultFieldsForDataset(dataset: string): readonly string[] {
   if (dataset === "replays") {
     return DEFAULT_REPLAY_EXPLORE_FIELDS;
   }
-  if (dataset === TRANSACTION_DATASET) {
+  if (LEGACY_TRANSACTION_DATASETS.has(dataset)) {
     return DEFAULT_TRANSACTION_FIELDS;
   }
   return DEFAULT_FIELDS;
@@ -510,7 +508,7 @@ function buildEnvironmentQuery(
 }
 
 function resolveEventsDataset(dataset: string, query: string | undefined) {
-  if (dataset !== TRANSACTION_DATASET) {
+  if (!LEGACY_TRANSACTION_DATASETS.has(dataset)) {
     return { dataset, query };
   }
   if (IS_TRANSACTION_FILTER_PATTERN.test(query ?? "")) {

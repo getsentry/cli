@@ -196,8 +196,8 @@ describe("sentry explore", () => {
     test.each([
       "transaction",
       "transactions",
-    ])("accepts %s as the transactions view", (dataset) => {
-      expect(parseExploreDataset(dataset)).toBe("transactions");
+    ])("accepts %s as the legacy transactions view", (dataset) => {
+      expect(parseExploreDataset(dataset)).toBe(dataset);
     });
   });
 
