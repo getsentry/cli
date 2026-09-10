@@ -39,13 +39,13 @@ function makeManifest(overrides: Partial<OciManifest> = {}): OciManifest {
     schemaVersion: 2,
     mediaType: "application/vnd.oci.image.manifest.v1+json",
     config: {
-      digest: "sha256:config",
+      digest: `sha256:${"0".repeat(64)}`,
       mediaType: "application/vnd.oci.empty.v1+json",
       size: 2,
     },
     layers: [
       {
-        digest: "sha256:abc123",
+        digest: `sha256:${"a".repeat(64)}`,
         mediaType: "application/octet-stream",
         size: 1000,
         annotations: {
@@ -53,7 +53,7 @@ function makeManifest(overrides: Partial<OciManifest> = {}): OciManifest {
         },
       },
       {
-        digest: "sha256:def456",
+        digest: `sha256:${"d".repeat(64)}`,
         mediaType: "application/octet-stream",
         size: 1200,
         annotations: {
@@ -176,6 +176,31 @@ describe("getAnonymousToken", () => {
       "GHCR token exchange returned no token"
     );
   });
+
+  test("rejects a non-string token", async () => {
+    mockFetch(async () => Response.json({ token: {} }));
+
+    await expect(getAnonymousToken()).rejects.toThrow(
+      "GHCR token exchange returned no token"
+    );
+  });
+
+  test("preserves cancellation during token body consumption", async () => {
+    const controller = new AbortController();
+    const reason = { kind: "cancelled" };
+    mockFetch(async () => {
+      const response = Response.json({ token: "unused" });
+      response.json = async () => {
+        controller.abort(reason);
+        throw new DOMException("aborted", "AbortError");
+      };
+      return response;
+    });
+
+    await expect(getAnonymousToken(undefined, controller.signal)).rejects.toBe(
+      reason
+    );
+  });
 });
 
 describe("fetchNightlyManifest", () => {
@@ -273,13 +298,13 @@ describe("findLayerByFilename", () => {
   test("finds layer by filename annotation", () => {
     const manifest = makeManifest();
     const layer = findLayerByFilename(manifest, "sentry-linux-x64.gz");
-    expect(layer.digest).toBe("sha256:abc123");
+    expect(layer.digest).toBe(`sha256:${"a".repeat(64)}`);
   });
 
   test("finds darwin layer", () => {
     const manifest = makeManifest();
     const layer = findLayerByFilename(manifest, "sentry-darwin-arm64.gz");
-    expect(layer.digest).toBe("sha256:def456");
+    expect(layer.digest).toBe(`sha256:${"d".repeat(64)}`);
   });
 
   test("throws UpgradeError when filename not found", () => {
@@ -493,6 +518,34 @@ describe("downloadNightlyBlob", () => {
 // fetchManifest (generic tag variant)
 
 describe("fetchManifest", () => {
+  test.each([
+    null,
+    [],
+    {},
+    { schemaVersion: 2 },
+    { schemaVersion: 2, layers: {} },
+  ])("rejects invalid OCI manifest %#", async (manifest) => {
+    mockFetch(async () => Response.json(manifest));
+
+    await expect(fetchManifest("token", "nightly")).rejects.toThrow(
+      'Manifest for tag "nightly" returned invalid metadata'
+    );
+  });
+
+  test("classifies manifest body termination as transport failure", async () => {
+    mockFetch(async () => {
+      const response = Response.json(makeManifest());
+      response.json = async () => {
+        throw new TypeError("terminated");
+      };
+      return response;
+    });
+
+    await expect(fetchManifest("token", "nightly")).rejects.toMatchObject({
+      name: "UpgradeTransportError",
+      reason: "network_error",
+    });
+  });
   test("fetches manifest for an arbitrary tag", async () => {
     const manifest = makeManifest();
 

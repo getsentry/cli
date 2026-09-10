@@ -711,6 +711,8 @@ describe("fetchLatestVersion", () => {
       if (urlStr.includes("/manifests/nightly")) {
         return new Response(
           JSON.stringify({
+            schemaVersion: 2,
+            layers: [],
             annotations: { version: "0.0.0-dev.1740393600" },
           }),
           { status: 200 }
@@ -736,6 +738,8 @@ describe("fetchLatestVersion", () => {
       if (urlStr.includes("/manifests/nightly")) {
         return new Response(
           JSON.stringify({
+            schemaVersion: 2,
+            layers: [],
             annotations: { version: "0.0.0-dev.1740393600" },
           }),
           { status: 200 }
@@ -1075,6 +1079,8 @@ describe("versionExists", () => {
       if (request.includes("/manifests/nightly-0.14.0-dev.123")) {
         return new Response(
           JSON.stringify({
+            schemaVersion: 2,
+            layers: [],
             annotations: { version: "0.14.0-dev.124" },
           }),
           { status: 200 }
@@ -2197,7 +2203,7 @@ describe("executeUpgrade with curl method (nightly)", () => {
             schemaVersion: 2,
             layers: [
               {
-                digest: "sha256:blobdigest",
+                digest: `sha256:${"b".repeat(64)}`,
                 mediaType: "application/octet-stream",
                 size: gzipped.byteLength,
                 annotations: { "org.opencontainers.image.title": title },

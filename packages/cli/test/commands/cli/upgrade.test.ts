@@ -264,12 +264,19 @@ function mockNightlyVersion(version: string): void {
       });
     }
     if (urlStr.includes("/manifests/nightly")) {
-      return new Response(JSON.stringify({ annotations: { version } }), {
-        status: 200,
-        headers: {
-          "content-type": "application/vnd.oci.image.manifest.v1+json",
-        },
-      });
+      return new Response(
+        JSON.stringify({
+          schemaVersion: 2,
+          layers: [],
+          annotations: { version },
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/vnd.oci.image.manifest.v1+json",
+          },
+        }
+      );
     }
     return new Response("Not Found", { status: 404 });
   });
@@ -407,6 +414,29 @@ describe("sentry cli upgrade", () => {
       setVersionCheckInfo("88.88.88");
       mockFetch(async () => {
         throw new TypeError("fetch failed");
+      });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl"],
+        context
+      );
+
+      expect(getOutput()).toContain("Using cached target: 88.88.88");
+    });
+
+    test("uses the cached target after response body transport failure", async () => {
+      setVersionCheckInfo("88.88.88");
+      mockFetch(async () => {
+        const response = Response.json([]);
+        response.json = async () => {
+          throw new TypeError("terminated");
+        };
+        return response;
       });
       const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
@@ -1200,10 +1230,13 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
         }
         return new Response(
           JSON.stringify({
+            schemaVersion: 2,
             annotations: { version: "0.99.0-dev.1234567890" },
             layers: [
               {
-                digest: "sha256:abc456",
+                digest: `sha256:${"a".repeat(64)}`,
+                mediaType: "application/gzip",
+                size: gzipped.byteLength,
                 annotations: {
                   "org.opencontainers.image.title": filename,
                 },
@@ -1218,7 +1251,7 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
           }
         );
       }
-      if (urlStr.includes("/blobs/sha256:abc456")) {
+      if (urlStr.includes(`/blobs/sha256:${"a".repeat(64)}`)) {
         return Response.redirect("https://blob.example.com/nightly.gz", 307);
       }
       if (urlStr.includes("blob.example.com")) {
@@ -1270,6 +1303,8 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
       if (request.includes("/manifests/nightly-0.99.0-dev.1234567890")) {
         return new Response(
           JSON.stringify({
+            schemaVersion: 2,
+            layers: [],
             annotations: { version: "0.99.0-dev.1234567890" },
           }),
           { status: 200 }

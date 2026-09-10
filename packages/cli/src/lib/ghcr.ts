@@ -18,7 +18,11 @@
  */
 
 import { valid as semverValid } from "semver";
-import { PRIMARY_UPGRADE_SOURCE, type UpgradeSource } from "./binary.js";
+import {
+  PRIMARY_UPGRADE_SOURCE,
+  parseUpgradeJson,
+  type UpgradeSource,
+} from "./binary.js";
 import { getUserAgent } from "./constants.js";
 import { customFetch } from "./custom-ca.js";
 import { UpgradeError, UpgradeTransportError } from "./errors.js";
@@ -199,6 +203,47 @@ export type OciManifest = {
   annotations?: Record<string, string>;
 };
 
+const SHA256_DIGEST_REGEX = /^sha256:[0-9a-f]{64}$/;
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Object.values(value).every((item) => typeof item === "string")
+  );
+}
+
+function isOciLayer(value: unknown): value is OciLayer {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const layer = value as Partial<OciLayer>;
+  return (
+    typeof layer.digest === "string" &&
+    SHA256_DIGEST_REGEX.test(layer.digest) &&
+    typeof layer.mediaType === "string" &&
+    Number.isSafeInteger(layer.size) &&
+    (layer.size ?? -1) >= 0 &&
+    (layer.annotations === undefined || isStringRecord(layer.annotations))
+  );
+}
+
+function isOciManifest(value: unknown): value is OciManifest {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const manifest = value as Partial<OciManifest>;
+  return (
+    manifest.schemaVersion === 2 &&
+    Array.isArray(manifest.layers) &&
+    manifest.layers.every(isOciLayer) &&
+    (manifest.mediaType === undefined ||
+      typeof manifest.mediaType === "string") &&
+    (manifest.config === undefined || isOciLayer(manifest.config)) &&
+    (manifest.annotations === undefined || isStringRecord(manifest.annotations))
+  );
+}
+
 /**
  * Fetch a short-lived anonymous bearer token for read-only access to the
  * public `ghcr.io/getsentry/cli` package.
@@ -231,8 +276,18 @@ export async function getAnonymousToken(
     );
   }
 
-  const data = (await response.json()) as { token?: string };
-  if (!data.token) {
+  const data = await parseUpgradeJson(
+    response,
+    externalSignal,
+    "GHCR token exchange returned invalid metadata"
+  );
+  if (
+    typeof data !== "object" ||
+    data === null ||
+    !("token" in data) ||
+    typeof data.token !== "string" ||
+    data.token.length === 0
+  ) {
     throw new UpgradeError(
       "network_error",
       "GHCR token exchange returned no token"
@@ -274,7 +329,18 @@ export async function fetchManifest(
     throw new GhcrManifestHttpError(tag, response.status);
   }
 
-  return (await response.json()) as OciManifest;
+  const data = await parseUpgradeJson(
+    response,
+    signal,
+    `Manifest for tag "${tag}" returned invalid metadata`
+  );
+  if (!isOciManifest(data)) {
+    throw new UpgradeError(
+      "network_error",
+      `Manifest for tag "${tag}" returned invalid metadata`
+    );
+  }
+  return data;
 }
 
 /**
@@ -489,8 +555,32 @@ async function fetchTagPage(
     );
   }
 
-  const data = (await response.json()) as { tags?: string[] };
-  return data.tags ?? [];
+  const data = await parseUpgradeJson(
+    response,
+    signal,
+    "GHCR tag list returned invalid metadata"
+  );
+  if (typeof data !== "object" || data === null) {
+    throw new UpgradeError(
+      "network_error",
+      "GHCR tag list returned invalid metadata"
+    );
+  }
+  if (!("tags" in data)) {
+    return [];
+  }
+  if (
+    !(
+      Array.isArray(data.tags) &&
+      data.tags.every((tag) => typeof tag === "string")
+    )
+  ) {
+    throw new UpgradeError(
+      "network_error",
+      "GHCR tag list returned invalid metadata"
+    );
+  }
+  return data.tags;
 }
 
 /**

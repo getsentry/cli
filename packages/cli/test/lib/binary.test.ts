@@ -31,6 +31,7 @@ import {
   installBinary,
   isDowngrade,
   isMusl,
+  parseUpgradeJson,
   releaseLock,
   replaceBinarySync,
   resolveUpgradeSource,
@@ -497,6 +498,48 @@ describe("fetchWithUpgradeError", () => {
       expect(error).toBeInstanceOf(UpgradeError);
       expect((error as UpgradeError).message).toContain("ECONNRESET");
     }
+  });
+});
+
+describe("parseUpgradeJson", () => {
+  test("preserves cancellation during body consumption", async () => {
+    const controller = new AbortController();
+    const reason = { kind: "cancelled" };
+    const response = Response.json({});
+    response.json = async () => {
+      controller.abort(reason);
+      throw new DOMException("aborted", "AbortError");
+    };
+
+    await expect(
+      parseUpgradeJson(response, controller.signal, "invalid metadata")
+    ).rejects.toBe(reason);
+  });
+
+  test("classifies body termination as transport failure", async () => {
+    const response = Response.json({});
+    response.json = async () => {
+      throw new TypeError("terminated");
+    };
+
+    await expect(
+      parseUpgradeJson(response, undefined, "invalid metadata")
+    ).rejects.toMatchObject({
+      name: "UpgradeTransportError",
+      reason: "network_error",
+    });
+  });
+
+  test("classifies completed malformed JSON as metadata failure", async () => {
+    const response = new Response("not json");
+
+    await expect(
+      parseUpgradeJson(response, undefined, "invalid metadata")
+    ).rejects.toMatchObject({
+      name: "UpgradeError",
+      reason: "network_error",
+      message: "invalid metadata",
+    });
   });
 });
 

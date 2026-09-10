@@ -518,6 +518,27 @@ export async function fetchWithUpgradeError(
   }
 }
 
+/** Parse an upgrade response while preserving cancellation and transport failures. */
+export async function parseUpgradeJson(
+  response: Response,
+  signal: AbortSignal | undefined,
+  invalidMessage: string
+): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason;
+    }
+    if (error instanceof SyntaxError) {
+      throw new UpgradeError("network_error", invalidMessage);
+    }
+    throw new UpgradeTransportError(
+      `${invalidMessage}: ${stringifyUnknown(error)}`
+    );
+  }
+}
+
 /**
  * Replace the binary at the install path, handling platform differences.
  *

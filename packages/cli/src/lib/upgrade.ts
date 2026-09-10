@@ -40,6 +40,7 @@ import {
   isNightlyVersion,
   KNOWN_CURL_DIRS,
   PRIMARY_UPGRADE_SOURCE,
+  parseUpgradeJson,
   releaseLock,
   resolveUpgradeSource,
   UPGRADE_SOURCES,
@@ -506,9 +507,11 @@ export async function fetchLatestFromGitHubWithSource(
   const visitedPages = new Set([getGitHubLatestReleaseUrl(resolved.source)]);
   const versions: string[] = [];
   while (true) {
-    const data = (await response.json()) as
-      | { tag_name?: string }
-      | Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean }>;
+    const data = await parseUpgradeJson(
+      response,
+      signal,
+      "GitHub returned invalid release metadata"
+    );
     versions.push(...extractReleaseVersions(data, resolved.source));
     const nextPage = getNextGitHubReleasePage(response, resolved.source);
     if (!nextPage) {
@@ -575,7 +578,11 @@ export async function fetchLatestFromNpm(): Promise<string> {
     );
   }
 
-  const data = (await response.json()) as { version?: string };
+  const data = (await parseUpgradeJson(
+    response,
+    undefined,
+    "npm registry returned invalid metadata"
+  )) as { version?: string };
 
   return validateStableVersion(data.version, "npm registry");
 }
@@ -718,15 +725,11 @@ async function validatePinnedGitHubRelease(
   version: string,
   source: UpgradeSource
 ): Promise<void> {
-  let release: unknown;
-  try {
-    release = await response.json();
-  } catch (error) {
-    throw new UpgradeError(
-      "network_error",
-      `GitHub returned invalid metadata for version ${version}: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
+  const release = await parseUpgradeJson(
+    response,
+    undefined,
+    `GitHub returned invalid metadata for version ${version}`
+  );
   const expectedTag = `${source.tagPrefix}${version}`;
   if (
     typeof release !== "object" ||
