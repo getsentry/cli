@@ -427,12 +427,7 @@ function skipWarning(
     case "symtab":
       return "no line-level symbolication (name/symtab only)";
     default:
-      // A build id with no debug sections means the module was already
-      // stripped; re-splitting would overwrite a good companion with an empty
-      // one. Without a build id it was simply built without debug info.
-      return hasBuildId
-        ? "already stripped (build_id present, no debug sections); splitting would produce a useless companion"
-        : "no debug information; rebuild with DWARF (Emscripten -g, wasm-pack dwarf-debug-info)";
+      return "no debug information; rebuild with DWARF (Emscripten -g, wasm-pack dwarf-debug-info)";
   }
 }
 
@@ -448,7 +443,7 @@ function skipRecommendation(
   quality: DebugQuality,
   hasBuildId: boolean
 ): string | null {
-  if (quality === "symtab" || (quality === "none" && !hasBuildId)) {
+  if (quality === "symtab" || (quality === "none")) {
     return "verify build flags emit DWARF";
   }
   return null;
