@@ -336,11 +336,17 @@ async function resolveTargetVersion(
     log.debug(`Target version: ${target}`);
   }
 
+  // Validate a pinned target before every return path, including --check.
+  if (versionArg && !CHANNEL_VERSIONS.has(versionArg)) {
+    const lookupMethod = channel === "nightly" ? "curl" : method;
+    source = (await resolvePinnedVersion(lookupMethod, target)) ?? source;
+  }
+
   if (flags.check) {
     return {
       kind: "done",
       result: buildCheckResult({ target, versionArg, method, channel, flags }),
-      source: latestResolution?.source,
+      source,
     };
   }
 
@@ -357,14 +363,6 @@ async function resolveTargetVersion(
         forced: false,
       },
     };
-  }
-
-  // Validate that a specific pinned version actually exists.
-  // Nightly builds are GitHub-only, so always use curl (GitHub) lookup for
-  // nightly channel regardless of the current install method.
-  if (versionArg && !CHANNEL_VERSIONS.has(versionArg)) {
-    const lookupMethod = channel === "nightly" ? "curl" : method;
-    source = (await resolvePinnedVersion(lookupMethod, target)) ?? source;
   }
 
   return { kind: "target", target, source };

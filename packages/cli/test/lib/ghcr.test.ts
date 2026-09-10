@@ -240,6 +240,18 @@ describe("getNightlyVersion", () => {
     const manifest = makeManifest({ annotations: undefined });
     expect(() => getNightlyVersion(manifest)).toThrow(UpgradeError);
   });
+
+  test.each([
+    "not-semver",
+    "1.2.3",
+    "1.2.3-dev.foo",
+  ])("rejects invalid nightly version annotation %s", (version) => {
+    const manifest = makeManifest({ annotations: { version } });
+
+    expect(() => getNightlyVersion(manifest)).toThrow(
+      "Nightly manifest has invalid version annotation"
+    );
+  });
 });
 
 describe("findLayerByFilename", () => {

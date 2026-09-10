@@ -324,6 +324,10 @@ describe("fetchChangelog source affinity", () => {
             "### New Features ✨\n\n- Unrelated Toolkit package release"
           ),
           makeRelease(
+            "0.21.0",
+            "### Bug Fixes 🐛\n\n- Unprefixed Toolkit release"
+          ),
+          makeRelease(
             "cli@0.21.0",
             "### Bug Fixes 🐛\n\n- Keep release stages source-affine"
           ),
@@ -342,6 +346,9 @@ describe("fetchChangelog source affinity", () => {
     expect(changelog?.totalItems).toBe(1);
     expect(changelog?.sections[0]?.markdown).not.toContain(
       "Unrelated Toolkit package release"
+    );
+    expect(changelog?.sections[0]?.markdown).not.toContain(
+      "Unprefixed Toolkit release"
     );
     expect(requestedUrls).toEqual([
       "https://api.github.com/repos/getsentry/toolkit/releases?per_page=30",

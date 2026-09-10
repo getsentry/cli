@@ -17,6 +17,7 @@
  *   without the auth header.
  */
 
+import { valid as semverValid } from "semver";
 import { PRIMARY_UPGRADE_SOURCE, type UpgradeSource } from "./binary.js";
 import { getUserAgent } from "./constants.js";
 import { customFetch } from "./custom-ca.js";
@@ -27,6 +28,9 @@ const GHCR_REQUEST_TIMEOUT = 10_000;
 
 /** Maximum number of retry attempts for transient failures */
 const GHCR_MAX_RETRIES = 1;
+
+/** Nightly versions use a numeric build timestamp as the prerelease value. */
+const NIGHTLY_VERSION_REGEX = /^\d+\.\d+\.\d+-dev\.\d+$/;
 
 /** Timeout for large blob downloads (30 seconds) */
 const GHCR_BLOB_TIMEOUT = 30_000;
@@ -305,6 +309,12 @@ export function getNightlyVersion(manifest: OciManifest): string {
     throw new UpgradeError(
       "network_error",
       "Nightly manifest has no version annotation"
+    );
+  }
+  if (semverValid(version) === null || !NIGHTLY_VERSION_REGEX.test(version)) {
+    throw new UpgradeError(
+      "network_error",
+      "Nightly manifest has invalid version annotation"
     );
   }
   return version;

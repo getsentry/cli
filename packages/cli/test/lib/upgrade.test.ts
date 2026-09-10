@@ -242,6 +242,26 @@ describe("fetchLatestFromGitHub", () => {
     ]);
   });
 
+  test("selects the highest CLI SemVer across Toolkit release pages", async () => {
+    let requests = 0;
+    mockFetch(async () => {
+      requests += 1;
+      return requests === 1
+        ? new Response(JSON.stringify([{ tag_name: "cli@1.2.1" }]), {
+            status: 200,
+            headers: {
+              Link: '<https://api.github.com/repositories/1114546946/releases?per_page=100&page=2>; rel="next"',
+            },
+          })
+        : new Response(JSON.stringify([{ tag_name: "cli@1.3.0" }]), {
+            status: 200,
+          });
+    });
+
+    await expect(fetchLatestFromGitHub()).resolves.toBe("1.3.0");
+    expect(requests).toBe(2);
+  });
+
   test("rejects GitHub release pagination outside the selected source", async () => {
     const requests: string[] = [];
     mockFetch(async (url) => {

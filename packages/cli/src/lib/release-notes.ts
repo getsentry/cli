@@ -13,7 +13,6 @@
  */
 
 import { marked, type Token, type Tokens } from "marked";
-import { valid as semverValid } from "semver";
 import {
   compareVersions,
   getGitHubHeaders,
@@ -431,17 +430,9 @@ function buildChangelogSummaryForSource(
   toVersion: string,
   options: ChangelogBuildOptions
 ): ChangelogSummary | null {
-  const { maxItems, source } = options;
+  const { maxItems } = options;
   const inRange = releases.filter((release) => {
-    let tagName = release.tag_name;
-    if (source?.tagPrefix) {
-      if (tagName.startsWith(source.tagPrefix)) {
-        tagName = tagName.slice(source.tagPrefix.length);
-      } else if (semverValid(tagName.replace(VERSION_PREFIX_RE, "")) === null) {
-        return false;
-      }
-    }
-    const version = tagName.replace(VERSION_PREFIX_RE, "");
+    const version = release.tag_name.replace(VERSION_PREFIX_RE, "");
     return (
       compareVersions(version, fromVersion) === 1 &&
       compareVersions(version, toVersion) <= 0
@@ -612,7 +603,12 @@ async function fetchReleasesForChangelog(
     log.debug("GitHub releases response is not an array", typeof data);
     return [];
   }
-  return data as GitHubRelease[];
+  return (data as GitHubRelease[])
+    .filter((release) => release.tag_name.startsWith(source.tagPrefix))
+    .map((release) => ({
+      ...release,
+      tag_name: release.tag_name.slice(source.tagPrefix.length),
+    }));
 }
 
 /**

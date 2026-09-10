@@ -494,20 +494,22 @@ export async function fetchLatestFromGitHubWithSource(
   });
   let response = resolved.response;
   const visitedPages = new Set([getGitHubLatestReleaseUrl(resolved.source)]);
+  const versions: string[] = [];
   while (true) {
     const data = (await response.json()) as
       | { tag_name?: string }
       | Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean }>;
-    const version = extractReleaseVersions(data, resolved.source)[0];
-    if (version) {
-      return { version, source: resolved.source };
-    }
+    versions.push(...extractReleaseVersions(data, resolved.source));
     const nextPage = getNextGitHubReleasePage(response, resolved.source);
     if (!nextPage) {
-      throw new UpgradeError(
-        "network_error",
-        "No version found in GitHub release"
-      );
+      const version = versions.sort((a, b) => compareVersions(b, a))[0];
+      if (!version) {
+        throw new UpgradeError(
+          "network_error",
+          "No version found in GitHub release"
+        );
+      }
+      return { version, source: resolved.source };
     }
     if (visitedPages.has(nextPage)) {
       throw new UpgradeError(

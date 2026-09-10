@@ -335,7 +335,7 @@ describe("sentry cli upgrade", () => {
     });
 
     test("shows version-specific upgrade hint when user-specified version", async () => {
-      mockGitHubVersion("99.99.99");
+      mockGitHubVersion("88.88.88");
 
       const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
@@ -352,6 +352,55 @@ describe("sentry cli upgrade", () => {
       expect(combined).toContain("88.88.88");
       expect(combined).toContain(
         "Run 'sentry cli upgrade 88.88.88' to update."
+      );
+    });
+
+    test("resolves a pinned check target from its exact source", async () => {
+      const requests: string[] = [];
+      mockFetch(async (url) => {
+        const request = String(url);
+        requests.push(request);
+        if (request.includes("getsentry/toolkit/releases?per_page=100")) {
+          return new Response(JSON.stringify([{ tag_name: "cli@99.99.99" }]), {
+            status: 200,
+          });
+        }
+        if (
+          request.includes("getsentry/toolkit/releases/tags/cli%4088.88.88")
+        ) {
+          return new Response("Not Found", { status: 404 });
+        }
+        if (request.includes("getsentry/cli/releases/tags/88.88.88")) {
+          return new Response(JSON.stringify({ tag_name: "88.88.88" }), {
+            status: 200,
+          });
+        }
+        if (request.includes("getsentry/cli/releases?per_page=30")) {
+          return new Response(JSON.stringify([]), { status: 200 });
+        }
+        return new Response("Unexpected", { status: 500 });
+      });
+
+      const { context, restore } = createMockContext({ homeDir: testDir });
+      restoreStderr = restore;
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl", "88.88.88"],
+        context
+      );
+
+      expect(requests).toContain(
+        "https://api.github.com/repos/getsentry/toolkit/releases/tags/cli%4088.88.88"
+      );
+      expect(requests).toContain(
+        "https://api.github.com/repos/getsentry/cli/releases/tags/88.88.88"
+      );
+      expect(requests).toContain(
+        "https://api.github.com/repos/getsentry/cli/releases?per_page=30"
+      );
+      expect(requests).not.toContain(
+        "https://api.github.com/repos/getsentry/toolkit/releases?per_page=30"
       );
     });
   });
@@ -563,7 +612,7 @@ describe("sentry cli upgrade — nightly channel", () => {
 
   describe("resolveChannelAndVersion", () => {
     test("'nightly' positional sets channel to nightly", async () => {
-      mockNightlyVersion(CLI_VERSION);
+      mockNightlyVersion("0.0.0-dev.1");
 
       const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
@@ -601,7 +650,7 @@ describe("sentry cli upgrade — nightly channel", () => {
 
     test("without positional, uses persisted channel", async () => {
       setReleaseChannel("nightly");
-      mockNightlyVersion(CLI_VERSION);
+      mockNightlyVersion("0.0.0-dev.1");
 
       const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
@@ -621,7 +670,7 @@ describe("sentry cli upgrade — nightly channel", () => {
 
   describe("channel persistence", () => {
     test("persists nightly channel when 'nightly' positional is passed", async () => {
-      mockNightlyVersion(CLI_VERSION);
+      mockNightlyVersion("0.0.0-dev.1");
 
       const { context, restore } = createMockContext({ homeDir: testDir });
       restoreStderr = restore;
@@ -655,8 +704,8 @@ describe("sentry cli upgrade — nightly channel", () => {
   });
 
   describe("nightly --check mode", () => {
-    test("shows 'already on target' when current matches nightly latest", async () => {
-      mockNightlyVersion(CLI_VERSION);
+    test("shows the valid nightly target", async () => {
+      mockNightlyVersion("0.0.0-dev.1");
 
       const { context, getOutput, restore } = createMockContext({
         homeDir: testDir,
@@ -671,8 +720,8 @@ describe("sentry cli upgrade — nightly channel", () => {
 
       const combined = getOutput();
       expect(combined).toContain("Channel: nightly");
-      expect(combined).toContain(CLI_VERSION);
-      expect(combined).toContain("You are already on the target version");
+      expect(combined).toContain("0.0.0-dev.1");
+      expect(combined).toContain("Run 'sentry cli upgrade' to update.");
     });
 
     test("shows upgrade hint when newer nightly available", async () => {
