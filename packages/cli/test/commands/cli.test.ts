@@ -212,18 +212,9 @@ describe("upgradeCommand.func", () => {
   });
 
   test("throws UpgradeError when specified version does not exist", async () => {
-    // First call fetches latest; both exact-tag probes return 404.
     let callCount = 0;
     globalThis.fetch = (async () => {
       callCount += 1;
-      if (callCount === 1) {
-        // Latest version check
-        return new Response(JSON.stringify([{ tag_name: "cli@99.0.0" }]), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      // Version exists check - return 404
       return new Response("Not Found", { status: 404 });
     }) as typeof fetch;
 
@@ -235,5 +226,6 @@ describe("upgradeCommand.func", () => {
     await expect(
       func.call(context, { check: false, method: "curl" }, "999.0.0")
     ).rejects.toThrow("Version 999.0.0 not found");
+    expect(callCount).toBe(2);
   });
 });
