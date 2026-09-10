@@ -116,13 +116,21 @@ export type ResolvedUpgradeVersion = {
 };
 
 function extractReleaseVersions(
-  data:
-    | { tag_name?: string; draft?: boolean; prerelease?: boolean }
-    | Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean }>,
+  data: unknown,
   source: UpgradeSource
 ): string[] {
+  if (source.tagPrefix ? !Array.isArray(data) : Array.isArray(data)) {
+    throw new UpgradeError(
+      "network_error",
+      "GitHub returned invalid release metadata"
+    );
+  }
   const releases = Array.isArray(data) ? data : [data];
   return releases
+    .filter(
+      (release): release is Record<string, unknown> =>
+        typeof release === "object" && release !== null
+    )
     .filter((release) => !(release.draft || release.prerelease))
     .map((release) => release.tag_name)
     .filter(
@@ -705,6 +713,34 @@ function validateNightlyManifestVersion(
   }
 }
 
+async function validatePinnedGitHubRelease(
+  response: Response,
+  version: string,
+  source: UpgradeSource
+): Promise<void> {
+  let release: unknown;
+  try {
+    release = await response.json();
+  } catch (error) {
+    throw new UpgradeError(
+      "network_error",
+      `GitHub returned invalid metadata for version ${version}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  const expectedTag = `${source.tagPrefix}${version}`;
+  if (
+    typeof release !== "object" ||
+    release === null ||
+    !("tag_name" in release) ||
+    release.tag_name !== expectedTag
+  ) {
+    throw new UpgradeError(
+      "network_error",
+      `GitHub returned invalid metadata for version ${version}`
+    );
+  }
+}
+
 /** Resolve and validate a pinned standalone version against ordered sources. */
 export async function resolveExistingUpgradeVersion(
   version: string
@@ -722,27 +758,11 @@ export async function resolveExistingUpgradeVersion(
     const selected = await resolveUpgradeSource({
       getProbeUrl: (source) => getGitHubReleaseByTagUrl(version, source),
     });
-    let release: unknown;
-    try {
-      release = await selected.response.json();
-    } catch (error) {
-      throw new UpgradeError(
-        "network_error",
-        `GitHub returned invalid metadata for version ${version}: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-    const expectedTag = `${selected.source.tagPrefix}${version}`;
-    if (
-      typeof release !== "object" ||
-      release === null ||
-      !("tag_name" in release) ||
-      release.tag_name !== expectedTag
-    ) {
-      throw new UpgradeError(
-        "network_error",
-        `GitHub returned invalid metadata for version ${version}`
-      );
-    }
+    await validatePinnedGitHubRelease(
+      selected.response,
+      version,
+      selected.source
+    );
     return { version, source: selected.source };
   } catch (error) {
     if (error instanceof UpgradeSourceNotFoundError) {
@@ -800,6 +820,7 @@ async function standaloneVersionExists(
       "GitHub"
     );
     if (response.ok) {
+      await validatePinnedGitHubRelease(response, version, source);
       return true;
     }
     if (response.status === 404) {

@@ -460,7 +460,7 @@ describe("downloadNightlyBlob", () => {
     mockFetch(async () => {
       requestCount += 1;
       controller.abort(reason);
-      throw new DOMException("aborted", "AbortError");
+      throw new TypeError("invalid_argument");
     });
 
     await expect(
@@ -479,7 +479,7 @@ describe("downloadNightlyBlob", () => {
         return Response.redirect("https://blob.storage.azure.com/file", 307);
       }
       controller.abort(reason);
-      throw new DOMException("aborted", "AbortError");
+      throw new TypeError("invalid_argument");
     });
 
     await expect(

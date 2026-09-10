@@ -356,6 +356,29 @@ describe("fetchLatestFromGitHub", () => {
     ]);
   });
 
+  test("rejects an object from the Toolkit release-list endpoint", async () => {
+    mockFetch(async () => Response.json({ tag_name: "cli@9.9.9" }));
+
+    await expect(fetchLatestFromGitHub()).rejects.toThrow(
+      "GitHub returned invalid release metadata"
+    );
+  });
+
+  test("rejects an array from the legacy latest-release endpoint", async () => {
+    let requests = 0;
+    mockFetch(async () => {
+      requests += 1;
+      return requests === 1
+        ? new Response(null, { status: 404 })
+        : Response.json([{ tag_name: "9.9.9" }]);
+    });
+
+    await expect(fetchLatestFromGitHub()).rejects.toThrow(
+      "GitHub returned invalid release metadata"
+    );
+    expect(requests).toBe(2);
+  });
+
   test("does not use an MCP release as the latest CLI release", async () => {
     const requests: string[] = [];
     mockFetch(async (url) => {
@@ -865,6 +888,14 @@ describe("versionExists", () => {
     expect(requests).toEqual([
       "https://api.github.com/repos/getsentry/toolkit/releases/tags/cli%401.0.0",
     ]);
+  });
+
+  test("rejects empty successful metadata from an explicit source", async () => {
+    mockFetch(async () => new Response(null, { status: 200 }));
+
+    await expect(
+      versionExists("curl", "1.0.0", UPGRADE_SOURCES[0])
+    ).rejects.toThrow("GitHub returned invalid metadata for version 1.0.0");
   });
 
   test.each([
