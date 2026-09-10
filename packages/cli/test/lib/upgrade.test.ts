@@ -243,6 +243,27 @@ describe("fetchLatestFromGitHub", () => {
     ]);
   });
 
+  test("preserves an arbitrary abort reason during pagination", async () => {
+    const controller = new AbortController();
+    const reason = { kind: "cancelled" };
+    let requests = 0;
+    mockFetch(async () => {
+      requests += 1;
+      if (requests === 1) {
+        return new Response(JSON.stringify([{ tag_name: "mcp@9.0.0" }]), {
+          headers: {
+            Link: '<https://api.github.com/repositories/1114546946/releases?per_page=100&page=2>; rel="next"',
+          },
+        });
+      }
+      controller.abort(reason);
+      throw reason;
+    });
+
+    await expect(fetchLatestFromGitHub(controller.signal)).rejects.toBe(reason);
+    expect(requests).toBe(2);
+  });
+
   test("selects the highest CLI SemVer across Toolkit release pages", async () => {
     let requests = 0;
     mockFetch(async () => {

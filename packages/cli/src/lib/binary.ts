@@ -501,6 +501,9 @@ export async function fetchWithUpgradeError(
   try {
     return await customFetch(url, init);
   } catch (error) {
+    if (init.signal?.aborted) {
+      throw init.signal.reason;
+    }
     // Re-throw AbortError as-is so callers can handle it specifically
     if (error instanceof Error && error.name === "AbortError") {
       throw error;
