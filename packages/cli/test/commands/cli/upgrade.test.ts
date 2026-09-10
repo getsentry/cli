@@ -40,6 +40,7 @@ import {
   getReleaseChannel,
   setReleaseChannel,
 } from "../../../src/lib/db/release-channel.js";
+import { setVersionCheckInfo } from "../../../src/lib/db/version-check.js";
 import { TEST_TMP_DIR, useTestConfigDir } from "../../helpers.js";
 
 /** Store original fetch for restoration */
@@ -400,6 +401,55 @@ describe("sentry cli upgrade", () => {
       expect(
         requests.every((request) => !request.includes("per_page=100"))
       ).toBe(true);
+    });
+
+    test("uses the cached target only after a transport failure", async () => {
+      setVersionCheckInfo("88.88.88");
+      mockFetch(async () => {
+        throw new TypeError("fetch failed");
+      });
+      const { context, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl"],
+        context
+      );
+
+      expect(getOutput()).toContain("Using cached target: 88.88.88");
+    });
+
+    test.each([
+      ["HTTP 403", async () => new Response("Forbidden", { status: 403 })],
+      [
+        "malformed HTTP 200",
+        async () => Response.json([{ tag_name: "mcp@1.0.0" }]),
+      ],
+    ])("never uses the cached target after %s", async (_name, response) => {
+      const requests: string[] = [];
+      setVersionCheckInfo("88.88.88");
+      mockFetch(async (url) => {
+        requests.push(String(url));
+        return response();
+      });
+      const { context, errors, getOutput, restore } = createMockContext({
+        homeDir: testDir,
+      });
+      restoreStderr = restore;
+
+      await run(
+        app,
+        ["cli", "upgrade", "--check", "--method", "curl"],
+        context
+      );
+
+      expect(getOutput()).not.toContain("Using cached target");
+      expect(errors).not.toEqual([]);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toContain("getsentry/toolkit");
     });
   });
 
@@ -1275,8 +1325,9 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
   test("validates an npm stable pin through npm while tracking nightly", async () => {
     const requests: string[] = [];
     mockFetch(async (url) => {
-      requests.push(String(url));
-      return String(url).includes("api.github.com")
+      const requestUrl = new URL(String(url));
+      requests.push(requestUrl.href);
+      return requestUrl.origin === "https://api.github.com"
         ? new Response(JSON.stringify([]), { status: 200 })
         : new Response(null, { status: 200 });
     });

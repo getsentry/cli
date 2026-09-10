@@ -460,7 +460,7 @@ describe("downloadNightlyBlob", () => {
     mockFetch(async () => {
       requestCount += 1;
       controller.abort(reason);
-      throw controller.signal.reason;
+      throw new DOMException("aborted", "AbortError");
     });
 
     await expect(
@@ -471,19 +471,20 @@ describe("downloadNightlyBlob", () => {
 
   test("preserves external cancellation during the redirect request", async () => {
     const controller = new AbortController();
+    const reason = { kind: "cancelled" };
     const headers: Headers[] = [];
     mockFetch(async (_url, init) => {
       headers.push(new Headers(init?.headers));
       if (headers.length === 1) {
         return Response.redirect("https://blob.storage.azure.com/file", 307);
       }
-      controller.abort();
+      controller.abort(reason);
       throw new DOMException("aborted", "AbortError");
     });
 
     await expect(
       downloadNightlyBlob("token", "sha256:abc", controller.signal)
-    ).rejects.toMatchObject({ name: "AbortError" });
+    ).rejects.toBe(reason);
     expect(headers).toHaveLength(2);
     expect(headers[1]?.has("authorization")).toBe(false);
   });

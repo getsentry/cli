@@ -36,7 +36,7 @@ import {
   setReleaseChannel,
 } from "../../lib/db/release-channel.js";
 import { getVersionCheckInfo } from "../../lib/db/version-check.js";
-import { UpgradeError } from "../../lib/errors.js";
+import { UpgradeError, UpgradeTransportError } from "../../lib/errors.js";
 import { formatUpgradeResult } from "../../lib/formatters/human.js";
 import { formatBytes } from "../../lib/formatters/numbers.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
@@ -222,10 +222,7 @@ async function resolveTargetWithFallback(opts: {
     // Automatic offline fallback: only for curl-installed binaries (package
     // managers need the network for the actual install, not just version
     // discovery), and only for network errors (not version_not_found etc.)
-    if (
-      method !== "curl" ||
-      !(error instanceof UpgradeError && error.reason === "network_error")
-    ) {
+    if (method !== "curl" || !(error instanceof UpgradeTransportError)) {
       throw error;
     }
     try {

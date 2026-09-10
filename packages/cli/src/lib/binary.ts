@@ -23,7 +23,11 @@ import {
   customFetch,
   isTlsCertError,
 } from "./custom-ca.js";
-import { stringifyUnknown, UpgradeError } from "./errors.js";
+import {
+  stringifyUnknown,
+  UpgradeError,
+  UpgradeTransportError,
+} from "./errors.js";
 import { logger } from "./logger.js";
 import { isProcessRunning } from "./process-utils.js";
 /** Known directories where the curl installer may place the binary */
@@ -322,10 +326,9 @@ async function fetchUpgradeProbe(
       throw error;
     }
     if (error instanceof Error && isTlsCertError(error)) {
-      throw new UpgradeError("network_error", buildTlsErrorDetail(error));
+      throw new UpgradeTransportError(buildTlsErrorDetail(error));
     }
-    throw new UpgradeError(
-      "network_error",
+    throw new UpgradeTransportError(
       `Failed to connect to GitHub: ${stringifyUnknown(error)}`
     );
   }
@@ -503,11 +506,10 @@ export async function fetchWithUpgradeError(
       throw error;
     }
     if (error instanceof Error && isTlsCertError(error)) {
-      throw new UpgradeError("network_error", buildTlsErrorDetail(error));
+      throw new UpgradeTransportError(buildTlsErrorDetail(error));
     }
     const msg = stringifyUnknown(error);
-    throw new UpgradeError(
-      "network_error",
+    throw new UpgradeTransportError(
       `Failed to connect to ${serviceName}: ${msg}`
     );
   }

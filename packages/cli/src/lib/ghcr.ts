@@ -21,7 +21,7 @@ import { valid as semverValid } from "semver";
 import { PRIMARY_UPGRADE_SOURCE, type UpgradeSource } from "./binary.js";
 import { getUserAgent } from "./constants.js";
 import { customFetch } from "./custom-ca.js";
-import { UpgradeError } from "./errors.js";
+import { UpgradeError, UpgradeTransportError } from "./errors.js";
 
 /** Default timeout for GHCR HTTP requests (10 seconds) */
 const GHCR_REQUEST_TIMEOUT = 10_000;
@@ -92,7 +92,7 @@ function rethrowExternalAbort(
   externalSignal?: AbortSignal
 ): void {
   if (isExternalAbort(error, externalSignal)) {
-    throw error;
+    throw externalSignal?.reason;
   }
 }
 
@@ -145,8 +145,7 @@ async function fetchWithRetry(
     }
   }
 
-  throw new UpgradeError(
-    "network_error",
+  throw new UpgradeTransportError(
     `${context}: ${lastError?.message ?? "unknown error"}`
   );
 }

@@ -488,6 +488,25 @@ describe("fetchLatestFromNpm", () => {
       "No version found in npm registry"
     );
   });
+
+  test.each([
+    "not-semver",
+    "1.2.3-dev.123",
+    "1.2.3-beta.1",
+    "1.2.3-rc.1",
+  ])("rejects non-stable npm latest version %s", async (version) => {
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ version }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    );
+
+    await expect(fetchLatestFromNpm()).rejects.toThrow(
+      "npm registry returned an invalid stable version"
+    );
+  });
 });
 
 // fetchLatestNightlyVersion tests are in the dedicated describe block
@@ -700,6 +719,20 @@ describe("fetchLatestVersion", () => {
 });
 
 describe("versionExists", () => {
+  test.each([
+    "npm",
+    "pnpm",
+    "bun",
+    "yarn",
+  ] as const)("rejects a prerelease pinned through %s before network access", async (method) => {
+    mockFetch(async () => {
+      throw new Error("fetch should not be called");
+    });
+
+    await expect(versionExists(method, "1.2.3-beta.1")).rejects.toThrow(
+      "Requested package version returned an invalid stable version"
+    );
+  });
   test("probes prefixed Toolkit tags and retains the selected source", async () => {
     const requests: string[] = [];
     mockFetch(async (url) => {

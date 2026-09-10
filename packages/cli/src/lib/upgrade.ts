@@ -569,11 +569,23 @@ export async function fetchLatestFromNpm(): Promise<string> {
 
   const data = (await response.json()) as { version?: string };
 
-  if (!data.version) {
-    throw new UpgradeError("network_error", "No version found in npm registry");
-  }
+  return validateStableVersion(data.version, "npm registry");
+}
 
-  return data.version;
+function validateStableVersion(
+  version: string | undefined,
+  source: string
+): string {
+  if (!version) {
+    throw new UpgradeError("network_error", `No version found in ${source}`);
+  }
+  if (semverValid(version) === null || semverPrerelease(version) !== null) {
+    throw new UpgradeError(
+      "network_error",
+      `${source} returned an invalid stable version`
+    );
+  }
+  return version;
 }
 
 /**
@@ -822,6 +834,8 @@ export async function versionExists(
   if (isNightlyVersion(version) || method === "curl" || method === "brew") {
     return standaloneVersionExists(version, source);
   }
+
+  validateStableVersion(version, "Requested package version");
 
   const response = await fetchWithUpgradeError(
     `${NPM_REGISTRY_URL}/${version}`,
