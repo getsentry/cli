@@ -30,6 +30,7 @@ import {
   type SourceStrategy,
   type StableChainInfo,
 } from "binpatch";
+import { prerelease as semverPrerelease, valid as semverValid } from "semver";
 import {
   compareVersions,
   getGitHubReleasesUrl,
@@ -70,6 +71,54 @@ export type DeltaResult = {
 };
 
 const log = logger.withTag("delta-upgrade");
+
+const NORMALIZED_RELEASE_SOURCE = Symbol("normalizedReleaseSource");
+
+/** Stable GitHub releases normalized for one explicit upgrade source. */
+export type NormalizedGitHubReleases = GitHubRelease[] & {
+  /** Stable key for the source that produced these normalized tags. */
+  readonly [NORMALIZED_RELEASE_SOURCE]: string;
+};
+
+function upgradeSourceKey(source: UpgradeSource): string {
+  return `${source.githubRepo}\0${source.ghcrRepo}\0${source.tagPrefix}`;
+}
+
+/** Return whether a normalized release list belongs to the selected source. */
+export function isNormalizedForSource(
+  releases: GitHubRelease[],
+  source: UpgradeSource
+): boolean {
+  return (
+    (releases as Partial<NormalizedGitHubReleases>)[
+      NORMALIZED_RELEASE_SOURCE
+    ] === upgradeSourceKey(source)
+  );
+}
+
+/** Filter and normalize raw stable GitHub releases for one upgrade source. */
+export function normalizeStableReleases(
+  releases: unknown[],
+  source: UpgradeSource
+): NormalizedGitHubReleases {
+  const normalized = releases
+    .filter(isGitHubRelease)
+    .filter((release) => !(release.draft || release.prerelease))
+    .filter((release) => release.tag_name.startsWith(source.tagPrefix))
+    .map((release) => ({
+      ...release,
+      tag_name: release.tag_name.slice(source.tagPrefix.length),
+    }))
+    .filter(
+      (release) =>
+        semverValid(release.tag_name) !== null &&
+        semverPrerelease(release.tag_name) === null
+    ) as NormalizedGitHubReleases;
+  Object.defineProperty(normalized, NORMALIZED_RELEASE_SOURCE, {
+    value: upgradeSourceKey(source),
+  });
+  return normalized;
+}
 
 function getPrimaryUpgradeSource(): UpgradeSource {
   if (!PRIMARY_UPGRADE_SOURCE) {
@@ -128,30 +177,14 @@ function stableSource(source: UpgradeSource): SourceStrategy {
   const releasesUrl = getGitHubReleasesUrl(source);
   const sourceFetch: typeof customFetch = async (input, init) => {
     const response = await customFetch(input, init);
-    if (
-      !(
-        response.ok &&
-        source.tagPrefix &&
-        String(input).startsWith(`${releasesUrl}?`)
-      )
-    ) {
+    if (!(response.ok && String(input).startsWith(`${releasesUrl}?`))) {
       return response;
     }
     const data: unknown = await response.json();
     if (!Array.isArray(data)) {
       return new Response(JSON.stringify(data), response);
     }
-    const releases = data
-      .filter(isGitHubRelease)
-      .filter(
-        (release) =>
-          !(release.draft || release.prerelease) &&
-          release.tag_name.startsWith(source.tagPrefix)
-      )
-      .map((release) => ({
-        ...release,
-        tag_name: release.tag_name.slice(source.tagPrefix.length),
-      }));
+    const releases = normalizeStableReleases(data, source);
     return new Response(JSON.stringify(releases), response);
   };
 
@@ -204,7 +237,7 @@ export function canAttemptDelta(targetVersion: string): boolean {
 export async function fetchRecentReleases(
   signal?: AbortSignal,
   source: UpgradeSource = getPrimaryUpgradeSource()
-): Promise<GitHubRelease[]> {
+): Promise<NormalizedGitHubReleases> {
   try {
     const response = await customFetch(
       `${getGitHubReleasesUrl(source)}?per_page=12`,
@@ -217,27 +250,17 @@ export async function fetchRecentReleases(
       }
     );
     if (!response.ok) {
-      return [];
+      return normalizeStableReleases([], source);
     }
     const data = await response.json();
     if (!Array.isArray(data)) {
       log.debug("GitHub releases response is not an array", typeof data);
-      return [];
+      return normalizeStableReleases([], source);
     }
-    return data
-      .filter(isGitHubRelease)
-      .filter(
-        (release) =>
-          !(release.draft || release.prerelease) &&
-          release.tag_name.startsWith(source.tagPrefix)
-      )
-      .map((release) => ({
-        ...release,
-        tag_name: release.tag_name.slice(source.tagPrefix.length),
-      }));
+    return normalizeStableReleases(data, source);
   } catch (error) {
     log.debug("Failed to fetch recent releases from GitHub", error);
-    return [];
+    return normalizeStableReleases([], source);
   }
 }
 

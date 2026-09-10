@@ -247,7 +247,6 @@ async function resolveTargetWithFallback(opts: {
 function validateMethod(
   method: InstallationMethod,
   versionArg: string | undefined,
-  channel: ReleaseChannel,
   offline: boolean
 ): void {
   if (method === "unknown") {
@@ -255,7 +254,10 @@ function validateMethod(
   }
   // Homebrew manages versioning through the formula — pinning a specific
   // stable version is not supported via this command.
-  if (method === "brew" && versionArg && channel === "stable") {
+  const pinnedVersion = CHANNEL_VERSIONS.has(versionArg ?? "")
+    ? undefined
+    : versionArg?.replace(VERSION_PREFIX_REGEX, "");
+  if (method === "brew" && pinnedVersion && !isNightlyVersion(pinnedVersion)) {
     throw new UpgradeError(
       "unsupported_operation",
       "Homebrew does not support installing a specific version. Run 'brew upgrade getsentry/tools/sentry' to upgrade to the latest formula version."
@@ -269,6 +271,13 @@ function validateMethod(
       "Offline upgrade is only supported for curl-installed binaries."
     );
   }
+}
+
+function getArtifactChannel(
+  target: string,
+  trackingChannel: ReleaseChannel
+): ReleaseChannel {
+  return isNightlyVersion(target) ? "nightly" : trackingChannel;
 }
 
 type ResolveTargetOptions = {
@@ -329,7 +338,7 @@ async function resolveTargetVersion(
   let source: UpgradeSource | undefined;
 
   if (pinnedTarget) {
-    const lookupMethod = channel === "nightly" ? "curl" : method;
+    const lookupMethod = isNightlyVersion(pinnedTarget) ? "curl" : method;
     source = await resolvePinnedVersion(lookupMethod, pinnedTarget);
   }
 
@@ -764,8 +773,10 @@ async function migrateToStandaloneForNightly(opts: {
   noAgentSkills: boolean;
   json?: boolean;
   source?: UpgradeSource;
+  channel: ReleaseChannel;
 }): Promise<string[]> {
-  const { method, target, versionArg, noAgentSkills, json, source } = opts;
+  const { method, target, versionArg, noAgentSkills, json, source, channel } =
+    opts;
   log.info("Nightly builds are only available as standalone binaries.");
   log.info("Migrating to standalone installation...");
 
@@ -797,7 +808,7 @@ async function migrateToStandaloneForNightly(opts: {
     await runSetupOnNewBinary({
       binaryPath: downloadResult.tempBinaryPath,
       method: "curl",
-      channel: "nightly",
+      channel,
       install: true,
       installDir,
       ensureAuthScopes: !json,
@@ -847,7 +858,7 @@ async function resolveContext(
   const channelChanged = channel !== currentChannel;
 
   const method = flags.method ?? (await detectInstallationMethod());
-  validateMethod(method, versionArg, channel, flags.offline);
+  validateMethod(method, versionArg, flags.offline);
   return { channel, versionArg, channelChanged, method };
 }
 
@@ -1010,7 +1021,7 @@ export const upgradeCommand = buildCommand({
         result.currentVersion !== result.targetVersion
       ) {
         result.changelog = await startChangelogFetch({
-          channel,
+          channel: getArtifactChannel(result.targetVersion, channel),
           currentVersion: CLI_VERSION,
           targetVersion: result.targetVersion,
           offline: false,
@@ -1024,7 +1035,7 @@ export const upgradeCommand = buildCommand({
 
     // Start changelog fetch early — it runs in parallel with the download.
     const changelogPromise = startChangelogFetch({
-      channel,
+      channel: getArtifactChannel(target, channel),
       currentVersion: CLI_VERSION,
       targetVersion: target,
       offline,
@@ -1074,6 +1085,7 @@ export const upgradeCommand = buildCommand({
         noAgentSkills: flags["no-agent-skills"],
         json: flags.json,
         source,
+        channel,
       });
     } else {
       await executeStandardUpgrade({

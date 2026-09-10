@@ -1199,6 +1199,100 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
       "npm-installed sentry may still appear earlier in PATH"
     );
     expect(combined).toContain("npm uninstall -g sentry");
+    expect(getReleaseChannel()).toBe("stable");
+    expect(migrateSpawnSpy).toHaveBeenCalledTimes(1);
+    expect(migrateSpawnSpy.mock.calls[0]?.[1]).toEqual(
+      expect.arrayContaining(["--channel", "stable"])
+    );
+  });
+
+  test("allows a pinned nightly for a Homebrew installation", async () => {
+    mockFetch(async (url) => {
+      const request = String(url);
+      if (request === "https://api.github.com/repos/getsentry/toolkit") {
+        return new Response(null, { status: 200 });
+      }
+      if (request.includes("ghcr.io/token")) {
+        return new Response(JSON.stringify({ token: "test-token" }), {
+          status: 200,
+        });
+      }
+      if (request.includes("/manifests/nightly-0.99.0-dev.1234567890")) {
+        return new Response(
+          JSON.stringify({
+            annotations: { version: "0.99.0-dev.1234567890" },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response("Unexpected", { status: 500 });
+    });
+
+    const { context, getOutput, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
+
+    await run(
+      app,
+      [
+        "cli",
+        "upgrade",
+        "--check",
+        "--method",
+        "brew",
+        "0.99.0-dev.1234567890",
+      ],
+      context
+    );
+
+    expect(getOutput()).toContain("0.99.0-dev.1234567890");
+    expect(migrateSpawnSpy).not.toHaveBeenCalled();
+  });
+
+  test("rejects a pinned stable for Homebrew before network access", async () => {
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      requests.push(String(url));
+      return new Response("Unexpected", { status: 500 });
+    });
+    setReleaseChannel("nightly");
+
+    const { context, errors, restore } = createMockContext({
+      homeDir: testDir,
+    });
+    restoreStderr = restore;
+
+    await run(app, ["cli", "upgrade", "--method", "brew", "1.2.3"], context);
+
+    expect(errors.join("\n")).toContain(
+      "Homebrew does not support installing a specific version"
+    );
+    expect(requests).toEqual([]);
+    expect(migrateSpawnSpy).not.toHaveBeenCalled();
+  });
+
+  test("validates an npm stable pin through npm while tracking nightly", async () => {
+    const requests: string[] = [];
+    mockFetch(async (url) => {
+      requests.push(String(url));
+      return new Response(null, { status: 200 });
+    });
+    setReleaseChannel("nightly");
+
+    const { context, restore } = createMockContext({ homeDir: testDir });
+    restoreStderr = restore;
+
+    await run(
+      app,
+      ["cli", "upgrade", "--check", "--method", "npm", "1.2.3"],
+      context
+    );
+
+    expect(requests).toContain("https://registry.npmjs.org/sentry/1.2.3");
+    expect(requests.some((request) => request.includes("api.github.com"))).toBe(
+      false
+    );
   });
 });
 

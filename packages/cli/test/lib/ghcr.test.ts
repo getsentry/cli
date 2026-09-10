@@ -438,6 +438,22 @@ describe("downloadNightlyBlob", () => {
     expect(requestCount).toBe(1);
   });
 
+  test("preserves an arbitrary external cancellation reason", async () => {
+    const controller = new AbortController();
+    const reason = new Error("cancelled");
+    let requestCount = 0;
+    mockFetch(async () => {
+      requestCount += 1;
+      controller.abort(reason);
+      throw controller.signal.reason;
+    });
+
+    await expect(
+      downloadNightlyBlob("token", "sha256:abc", controller.signal)
+    ).rejects.toBe(reason);
+    expect(requestCount).toBe(1);
+  });
+
   test("preserves external cancellation during the redirect request", async () => {
     const controller = new AbortController();
     const headers: Headers[] = [];

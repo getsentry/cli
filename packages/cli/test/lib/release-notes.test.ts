@@ -377,7 +377,7 @@ describe("fetchChangelog source affinity", () => {
       channel: "stable",
       fromVersion: "0.20.0",
       toVersion: "0.21.0",
-      source: toolkitSource,
+      source: { ...toolkitSource },
       prefetchedReleases: releases,
     });
 
@@ -416,6 +416,38 @@ describe("fetchChangelog source affinity", () => {
       "Unrelated MCP release"
     );
     expect(requestedUrls).toEqual([]);
+  });
+
+  test("rejects unprefixed raw prefetched releases for Toolkit", async () => {
+    const changelog = await fetchChangelog({
+      channel: "stable",
+      fromVersion: "0.20.0",
+      toVersion: "0.21.0",
+      source: toolkitSource,
+      prefetchedReleases: [
+        makeRelease("0.21.0", "### Bug Fixes 🐛\n\n- Legacy release"),
+      ],
+    });
+
+    expect(changelog).toBeNull();
+  });
+
+  test("excludes semantic prereleases from stable changelogs", async () => {
+    const changelog = await fetchChangelog({
+      channel: "stable",
+      fromVersion: "0.20.0",
+      toVersion: "0.21.0",
+      source: toolkitSource,
+      prefetchedReleases: [
+        makeRelease("cli@0.21.0-dev.1", "- Development release"),
+        makeRelease("cli@0.21.0", "### Bug Fixes 🐛\n\n- Stable release"),
+      ],
+    });
+
+    expect(changelog?.sections[0]?.markdown).toContain("Stable release");
+    expect(changelog?.sections[0]?.markdown).not.toContain(
+      "Development release"
+    );
   });
 
   test("fetches stable releases only from the explicitly selected legacy source", async () => {

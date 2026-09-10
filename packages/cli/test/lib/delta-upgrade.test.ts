@@ -846,6 +846,25 @@ describe("fetchRecentReleases", () => {
     expect(result[0]?.tag_name).toBe("0.14.0");
   });
 
+  test.each([
+    ["Toolkit", undefined, "cli@0.14.0-dev.1", "cli@0.14.0"],
+    ["legacy", LEGACY_UPGRADE_SOURCE, "0.14.0-dev.1", "0.14.0"],
+  ])("excludes semantic prereleases from the %s stable source", async (_name, source, prereleaseTag, stableTag) => {
+    mockFetch(
+      async () =>
+        new Response(
+          JSON.stringify([
+            { ...makeRelease(prereleaseTag, []), prerelease: false },
+            makeRelease(stableTag, []),
+          ]),
+          { status: 200 }
+        )
+    );
+
+    const result = await fetchRecentReleases(undefined, source);
+    expect(result.map((release) => release.tag_name)).toEqual(["0.14.0"]);
+  });
+
   test("uses the selected legacy GitHub repository", async () => {
     const urls: string[] = [];
     mockFetch(async (url) => {

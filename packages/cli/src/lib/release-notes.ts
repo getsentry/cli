@@ -13,7 +13,6 @@
  */
 
 import { marked, type Token, type Tokens } from "marked";
-import { valid as semverValid } from "semver";
 import {
   compareVersions,
   getGitHubHeaders,
@@ -22,7 +21,11 @@ import {
   type UpgradeSource,
 } from "./binary.js";
 import { customFetch } from "./custom-ca.js";
-import type { GitHubRelease } from "./delta-upgrade.js";
+import {
+  type GitHubRelease,
+  isNormalizedForSource,
+  normalizeStableReleases,
+} from "./delta-upgrade.js";
 import { logger } from "./logger.js";
 
 const log = logger.withTag("release-notes");
@@ -429,23 +432,10 @@ function normalizeChangelogReleases(
   source: UpgradeSource,
   allowNormalized: boolean
 ): GitHubRelease[] {
-  return releases.flatMap((release) => {
-    if (release.tag_name.startsWith(source.tagPrefix)) {
-      return [
-        {
-          ...release,
-          tag_name: release.tag_name.slice(source.tagPrefix.length),
-        },
-      ];
-    }
-    if (
-      allowNormalized &&
-      semverValid(release.tag_name.replace(VERSION_PREFIX_RE, "")) !== null
-    ) {
-      return [release];
-    }
-    return [];
-  });
+  if (allowNormalized && isNormalizedForSource(releases, source)) {
+    return releases;
+  }
+  return normalizeStableReleases(releases, source);
 }
 
 /** Build a changelog summary while filtering source-specific release tags. */

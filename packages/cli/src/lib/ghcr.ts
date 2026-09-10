@@ -76,15 +76,22 @@ function buildSignal(
  * Returns true when the given error was triggered by the external
  * (caller-provided) abort signal rather than by our timeout.
  */
-function isExternalAbort(error: Error, externalSignal?: AbortSignal): boolean {
-  return Boolean(externalSignal?.aborted && error.name === "AbortError");
+function isExternalAbort(
+  error: unknown,
+  externalSignal?: AbortSignal
+): boolean {
+  return Boolean(
+    externalSignal?.aborted &&
+      (error === externalSignal.reason ||
+        (error instanceof Error && error.name === "AbortError"))
+  );
 }
 
 function rethrowExternalAbort(
   error: unknown,
   externalSignal?: AbortSignal
 ): void {
-  if (error instanceof Error && isExternalAbort(error, externalSignal)) {
+  if (isExternalAbort(error, externalSignal)) {
     throw error;
   }
 }
