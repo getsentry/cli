@@ -321,43 +321,56 @@ async function resolveTargetVersion(
   const { method, channel, versionArg, channelChanged, flags } = opts;
   const standalone =
     channel === "nightly" || method === "curl" || method === "brew";
-  const latestResolution = standalone
-    ? await resolveLatestUpgradeVersion(channel)
-    : undefined;
-  const latest = latestResolution
-    ? latestResolution.version
-    : await fetchLatestVersion(method, channel);
-  const target = versionArg?.replace(VERSION_PREFIX_REGEX, "") ?? latest;
-  let source = latestResolution?.source;
+  const pinnedTarget =
+    versionArg && !CHANNEL_VERSIONS.has(versionArg)
+      ? versionArg.replace(VERSION_PREFIX_REGEX, "")
+      : undefined;
+  let source: UpgradeSource | undefined;
+
+  if (pinnedTarget) {
+    const lookupMethod = channel === "nightly" ? "curl" : method;
+    source = await resolvePinnedVersion(lookupMethod, pinnedTarget);
+  }
+
+  const latestResolution =
+    pinnedTarget === undefined && standalone
+      ? await resolveLatestUpgradeVersion(channel)
+      : undefined;
+  const latest =
+    pinnedTarget ??
+    latestResolution?.version ??
+    (await fetchLatestVersion(method, channel));
+  const resolvedTarget = pinnedTarget ?? latest;
+  source ??= latestResolution?.source;
 
   log.debug(`Channel: ${channel}`);
   log.debug(`Latest version: ${latest}`);
   if (versionArg) {
-    log.debug(`Target version: ${target}`);
-  }
-
-  // Validate a pinned target before every return path, including --check.
-  if (versionArg && !CHANNEL_VERSIONS.has(versionArg)) {
-    const lookupMethod = channel === "nightly" ? "curl" : method;
-    source = (await resolvePinnedVersion(lookupMethod, target)) ?? source;
+    log.debug(`Target version: ${resolvedTarget}`);
   }
 
   if (flags.check) {
     return {
       kind: "done",
-      result: buildCheckResult({ target, versionArg, method, channel, flags }),
+      result: buildCheckResult({
+        target: resolvedTarget,
+        versionArg,
+        method,
+        channel,
+        flags,
+      }),
       source,
     };
   }
 
   // Skip if already on target — unless forced or switching channels
-  if (CLI_VERSION === target && !flags.force && !channelChanged) {
+  if (CLI_VERSION === resolvedTarget && !flags.force && !channelChanged) {
     return {
       kind: "done",
       result: {
         action: "up-to-date",
         currentVersion: CLI_VERSION,
-        targetVersion: target,
+        targetVersion: resolvedTarget,
         channel,
         method,
         forced: false,
@@ -365,7 +378,7 @@ async function resolveTargetVersion(
     };
   }
 
-  return { kind: "target", target, source };
+  return { kind: "target", target: resolvedTarget, source };
 }
 
 /**

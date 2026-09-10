@@ -80,6 +80,15 @@ function isExternalAbort(error: Error, externalSignal?: AbortSignal): boolean {
   return Boolean(externalSignal?.aborted && error.name === "AbortError");
 }
 
+function rethrowExternalAbort(
+  error: unknown,
+  externalSignal?: AbortSignal
+): void {
+  if (error instanceof Error && isExternalAbort(error, externalSignal)) {
+    throw error;
+  }
+}
+
 type RetryOptions = {
   timeout?: number;
   signal?: AbortSignal;
@@ -382,6 +391,7 @@ export async function downloadNightlyBlob(
       signal: buildSignal(GHCR_BLOB_TIMEOUT, signal),
     });
   } catch (error) {
+    rethrowExternalAbort(error, signal);
     const msg = error instanceof Error ? error.message : String(error);
     throw new UpgradeError(
       "network_error",
@@ -423,6 +433,7 @@ export async function downloadNightlyBlob(
         signal,
       });
     } catch (error) {
+      rethrowExternalAbort(error, signal);
       const msg = error instanceof Error ? error.message : String(error);
       throw new UpgradeError(
         "network_error",

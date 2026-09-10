@@ -387,6 +387,37 @@ describe("fetchChangelog source affinity", () => {
     );
   });
 
+  test("normalizes raw prefetched Toolkit releases without fetching", async () => {
+    const requestedUrls: string[] = [];
+    globalThis.fetch = mockFetch(async (input) => {
+      requestedUrls.push(String(input));
+      return new Response("Unexpected", { status: 500 });
+    });
+
+    const changelog = await fetchChangelog({
+      channel: "stable",
+      fromVersion: "0.20.0",
+      toVersion: "0.21.0",
+      source: toolkitSource,
+      prefetchedReleases: [
+        makeRelease("mcp@0.21.0", "- Unrelated MCP release"),
+        makeRelease(
+          "cli@0.21.0",
+          "### Bug Fixes 🐛\n\n- Raw prefetched release"
+        ),
+      ],
+    });
+
+    expect(changelog?.totalItems).toBe(1);
+    expect(changelog?.sections[0]?.markdown).toContain(
+      "Raw prefetched release"
+    );
+    expect(changelog?.sections[0]?.markdown).not.toContain(
+      "Unrelated MCP release"
+    );
+    expect(requestedUrls).toEqual([]);
+  });
+
   test("fetches stable releases only from the explicitly selected legacy source", async () => {
     const requestedUrls: string[] = [];
     globalThis.fetch = mockFetch(async (input) => {

@@ -360,11 +360,6 @@ describe("sentry cli upgrade", () => {
       mockFetch(async (url) => {
         const request = String(url);
         requests.push(request);
-        if (request.includes("getsentry/toolkit/releases?per_page=100")) {
-          return new Response(JSON.stringify([{ tag_name: "cli@99.99.99" }]), {
-            status: 200,
-          });
-        }
         if (
           request.includes("getsentry/toolkit/releases/tags/cli%4088.88.88")
         ) {
@@ -402,6 +397,9 @@ describe("sentry cli upgrade", () => {
       expect(requests).not.toContain(
         "https://api.github.com/repos/getsentry/toolkit/releases?per_page=30"
       );
+      expect(
+        requests.every((request) => !request.includes("per_page=100"))
+      ).toBe(true);
     });
   });
 

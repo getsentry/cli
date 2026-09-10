@@ -422,6 +422,40 @@ describe("downloadNightlyBlob", () => {
       "Failed to download from blob storage: fetch failed"
     );
   });
+
+  test("preserves external cancellation during the GHCR blob request", async () => {
+    const controller = new AbortController();
+    let requestCount = 0;
+    mockFetch(async () => {
+      requestCount += 1;
+      controller.abort();
+      throw new DOMException("aborted", "AbortError");
+    });
+
+    await expect(
+      downloadNightlyBlob("token", "sha256:abc", controller.signal)
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(requestCount).toBe(1);
+  });
+
+  test("preserves external cancellation during the redirect request", async () => {
+    const controller = new AbortController();
+    const headers: Headers[] = [];
+    mockFetch(async (_url, init) => {
+      headers.push(new Headers(init?.headers));
+      if (headers.length === 1) {
+        return Response.redirect("https://blob.storage.azure.com/file", 307);
+      }
+      controller.abort();
+      throw new DOMException("aborted", "AbortError");
+    });
+
+    await expect(
+      downloadNightlyBlob("token", "sha256:abc", controller.signal)
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(headers).toHaveLength(2);
+    expect(headers[1]?.has("authorization")).toBe(false);
+  });
 });
 
 // fetchManifest (generic tag variant)

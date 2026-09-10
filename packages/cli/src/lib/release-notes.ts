@@ -13,6 +13,7 @@
  */
 
 import { marked, type Token, type Tokens } from "marked";
+import { valid as semverValid } from "semver";
 import {
   compareVersions,
   getGitHubHeaders,
@@ -423,6 +424,30 @@ type ChangelogBuildOptions = {
   source?: UpgradeSource;
 };
 
+function normalizeChangelogReleases(
+  releases: GitHubRelease[],
+  source: UpgradeSource,
+  allowNormalized: boolean
+): GitHubRelease[] {
+  return releases.flatMap((release) => {
+    if (release.tag_name.startsWith(source.tagPrefix)) {
+      return [
+        {
+          ...release,
+          tag_name: release.tag_name.slice(source.tagPrefix.length),
+        },
+      ];
+    }
+    if (
+      allowNormalized &&
+      semverValid(release.tag_name.replace(VERSION_PREFIX_RE, "")) !== null
+    ) {
+      return [release];
+    }
+    return [];
+  });
+}
+
 /** Build a changelog summary while filtering source-specific release tags. */
 function buildChangelogSummaryForSource(
   releases: GitHubRelease[],
@@ -603,12 +628,7 @@ async function fetchReleasesForChangelog(
     log.debug("GitHub releases response is not an array", typeof data);
     return [];
   }
-  return (data as GitHubRelease[])
-    .filter((release) => release.tag_name.startsWith(source.tagPrefix))
-    .map((release) => ({
-      ...release,
-      tag_name: release.tag_name.slice(source.tagPrefix.length),
-    }));
+  return normalizeChangelogReleases(data as GitHubRelease[], source, false);
 }
 
 /**
@@ -627,8 +647,9 @@ async function fetchStableChangelog(
 ): Promise<ChangelogSummary | null> {
   const { fromVersion, toVersion, maxItems, prefetchedReleases, source } =
     options;
-  const releases =
-    prefetchedReleases ?? (await fetchReleasesForChangelog(source));
+  const releases = prefetchedReleases
+    ? normalizeChangelogReleases(prefetchedReleases, source, true)
+    : await fetchReleasesForChangelog(source);
   if (releases.length === 0) {
     return null;
   }
