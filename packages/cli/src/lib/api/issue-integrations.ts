@@ -73,6 +73,11 @@ const NativeIssueMutationSchema = object({
   ...vExternalIssueLinkResponse.entries,
   title: optional(string()),
 });
+const GitlabRepositoriesSchema = object({
+  repos: array(
+    object({ identifier: string(), name: string(), url: nullish(string()) })
+  ),
+});
 type NativeIntegration = InferOutput<typeof NativeIntegrationSchema>;
 
 /** Read-only resolution result used for previews and a subsequent link mutation. */
@@ -219,19 +224,45 @@ function parseAzureIssue(url: URL, domain: URL): ParsedTarget | undefined {
   };
 }
 
-function parseScopedGitlabIssue(
+/**
+ * Match GitLab's actual project URL to keep deployment prefixes out of project IDs.
+ * The private picker has no SDK operation and includes unregistered repositories;
+ * public integration metadata omits the deployment prefix.
+ */
+async function resolveGitlabIssue(
+  orgSlug: string,
   url: URL,
-  domain: URL,
-  domainName: string
-): ParsedTarget | undefined {
-  const target = parseGitlabIssue(url);
-  const group = domain.pathname.replace(TRAILING_SLASH, "");
-  if (group && !url.pathname.startsWith(`${group}/`)) {
+  integration: NativeIntegration
+): Promise<ParsedTarget | undefined> {
+  const match = GITLAB_ISSUE.exec(url.pathname);
+  if (
+    integrationUrl(integration)?.host !== url.host ||
+    !match?.[1] ||
+    !match[2]
+  ) {
     return;
   }
-  return target
-    ? { ...target, key: `${domainName}:${target.body.externalIssue}` }
-    : undefined;
+  const projectUrl = `${url.origin}/${match[1]}`;
+  const { data } = await apiRequestToRegion(
+    await resolveOrgRegion(orgSlug),
+    `/organizations/${encodeURIComponent(orgSlug)}/integrations/${encodeURIComponent(integration.id)}/repos/`,
+    {
+      params: { search: match[1].split("/").at(-1) },
+      cache: "no-store",
+      schema: GitlabRepositoriesSchema,
+    }
+  );
+  const repository = data.repos.find(
+    (repo) => repo.url && parseUrl(repo.url).href === projectUrl
+  );
+  if (!repository) {
+    return;
+  }
+  return {
+    url: `${projectUrl}/-/issues/${match[2]}`,
+    key: `${repository.name}#${match[2]}`,
+    body: { externalIssue: `${repository.identifier}#${match[2]}` },
+  };
 }
 
 function parseTarget(
@@ -261,7 +292,7 @@ function parseTarget(
     return target;
   }
   if (provider === "gitlab") {
-    return parseScopedGitlabIssue(url, domain, integration.domainName);
+    return parseGitlabIssue(url);
   }
   if (provider === "jira" || provider === "jira_server") {
     const prefix = domain.pathname.replace(TRAILING_SLASH, "");
@@ -440,23 +471,31 @@ export async function resolveNativeIssueLink(options: {
   const url = parseUrl(options.url);
   if (
     SCM_CHANGE.test(url.pathname) &&
-    !GITHUB_PULL_REQUEST.test(url.pathname)
+    !GITHUB_PULL_REQUEST.test(url.pathname) &&
+    !GITLAB_ISSUE.test(url.pathname)
   ) {
     throw new ValidationError(
       "External issue linking supports tracker issues and GitHub pull requests."
     );
   }
   const integrations = await listIntegrations(options.orgSlug, options.issueId);
-  let candidates = integrations.flatMap((integration) => {
-    if (
-      integration.status !== "active" ||
-      (options.integrationId && options.integrationId !== integration.id)
-    ) {
-      return [];
-    }
-    const target = parseTarget(url, integration);
-    return target ? [{ integration, target }] : [];
-  });
+  let candidates = (
+    await Promise.all(
+      integrations.map(async (integration) => {
+        if (
+          integration.status !== "active" ||
+          (options.integrationId && options.integrationId !== integration.id)
+        ) {
+          return [];
+        }
+        const target =
+          integration.provider.key === "gitlab"
+            ? await resolveGitlabIssue(options.orgSlug, url, integration)
+            : parseTarget(url, integration);
+        return target ? [{ integration, target }] : [];
+      })
+    )
+  ).flat();
   if (
     candidates.some(({ integration }) =>
       ["github", "github_enterprise"].includes(integration.provider.key)

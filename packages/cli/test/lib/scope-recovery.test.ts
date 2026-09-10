@@ -65,7 +65,7 @@ describe("runWithScopeRecovery", () => {
       getAuthScopes: vi
         .fn()
         .mockResolvedValue([
-          ...OAUTH_SCOPES.filter((scope) => scope !== "event:admin"),
+          ...OAUTH_SCOPES.filter((scope) => scope !== "event:write"),
           "org:write",
         ]),
     });
@@ -82,7 +82,7 @@ describe("runWithScopeRecovery", () => {
     });
     expect(proceed).toHaveBeenCalledTimes(2);
     expect(testRuntime.write).toHaveBeenCalledWith(
-      expect.stringContaining("missing event:admin")
+      expect.stringContaining("missing event:write")
     );
   });
 
@@ -190,7 +190,7 @@ describe("runWithScopeRecovery", () => {
     const getAuthScopes = vi
       .fn()
       .mockResolvedValue([
-        ...OAUTH_SCOPES.filter((scope) => scope !== "event:admin"),
+        ...OAUTH_SCOPES.filter((scope) => scope !== "event:write"),
         "org:write",
       ]);
     const login = vi.fn();
@@ -208,7 +208,7 @@ describe("runWithScopeRecovery", () => {
     expect(getAuthScopes).toHaveBeenCalledOnce();
     expect(login).not.toHaveBeenCalled();
     expect(testRuntime.write).toHaveBeenCalledWith(
-      "Your CLI authorization is missing event:admin.\n" +
+      "Your CLI authorization is missing event:write.\n" +
         `Re-authenticate with: sentry auth refresh ${[...OAUTH_SCOPES, "org:write"].map((scope) => `--scope ${scope}`).join(" ")}\n`
     );
   });

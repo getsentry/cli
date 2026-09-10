@@ -29,8 +29,8 @@ export const unlinkCommand = buildDeleteCommand({
     fullDescription:
       "Remove an external tracker issue or GitHub pull request reference from a Sentry issue.\n" +
       "This does not delete the external issue or change the Sentry issue's status.\n\n" +
-      "Requires event:admin and access to the Sentry project.\n" +
-      "Your token must include event:admin even if your project role grants it.\n\n" +
+      "Requires event:write and access to the Sentry project.\n" +
+      "Older Sentry versions may still require event:admin.\n\n" +
       "Examples:\n" +
       "  sentry issue unlink FRONT-123 https://github.com/example/app/issues/42\n" +
       "  sentry issue unlink FRONT-123 https://github.com/example/app/pull/43 --yes\n" +

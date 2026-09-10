@@ -30,7 +30,7 @@ describe("resolveOAuthScopeString", () => {
   test("default scopes allow linking and unlinking external issues", () => {
     const scopes = resolveOAuthScopeString().split(" ");
     expect(scopes).toContain("event:write");
-    expect(scopes).toContain("event:admin");
+    expect(scopes).not.toContain("event:admin");
   });
 
   test("default (no selection) returns the full OAUTH_SCOPES set", () => {

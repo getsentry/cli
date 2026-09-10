@@ -28,7 +28,8 @@ export const linkCommand = buildCommand({
       "Link an existing tracker issue or GitHub pull request as an external reference.\n" +
       "The integration must be installed in your Sentry organization.\n" +
       "This does not create a remote issue or resolve the Sentry issue.\n\n" +
-      "Requires event:write and access to the Sentry project.\n\n" +
+      "Requires event:write and access to the Sentry project.\n" +
+      "GitHub, GitLab and Sentry Apps also require org:read for discovery.\n\n" +
       "Examples:\n" +
       "  sentry issue link FRONT-123 https://github.com/example/app/issues/42\n" +
       "  sentry issue link FRONT-123 https://github.com/example/app/pull/43\n" +

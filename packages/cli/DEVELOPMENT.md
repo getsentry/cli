@@ -67,7 +67,7 @@ When creating your Sentry OAuth application:
 <!-- GENERATED:START oauth-scopes -->
   - `project:read`, `project:write`, `project:admin`
   - `org:read`
-  - `event:read`, `event:write`, `event:admin`
+  - `event:read`, `event:write`
   - `member:read`
   - `team:read`, `team:write`, `team:admin`
   - `alerts:read`, `alerts:write`

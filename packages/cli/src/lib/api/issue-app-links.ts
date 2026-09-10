@@ -586,7 +586,13 @@ async function resolveFieldValue({
   installationUuid: string;
 }): Promise<string | number> {
   const target = parseTarget(options.url);
-  const query = target.key ?? options.url;
+  // Generic selects can use provider IDs that cannot be inferred from the URL.
+  const query =
+    target.key ??
+    (field === targetField && field.type === "select"
+      ? options.fields?.[field.name]
+      : undefined) ??
+    options.url;
   const input = field === targetField ? query : String(values[field.name]);
   let value: string | number = input;
   if (field.type === "select") {
@@ -715,7 +721,7 @@ export async function linkAppIssue(
   return { link, changed: true };
 }
 
-/** Remove only the selected local app association; this existing endpoint requires event:admin. */
+/** Remove only the selected local app association, using event:write or event:admin. */
 export async function unlinkAppIssueLink(
   orgSlug: string,
   issueId: string,

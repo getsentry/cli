@@ -312,9 +312,14 @@ sentry issue link FRONT-123 https://linear.app/example/issue/APP-42/fix-error
 The matching integration must already be installed in the Sentry organization.
 Native integrations include GitHub, GitHub Enterprise, Jira, Jira Server,
 GitLab, Bitbucket, and Azure DevOps. Linear uses its installed Sentry App.
+GitLab resolves the repository through the integration's repository search;
+it must be visible to that installation.
 Use `--integration <id>` if more than one native integration matches the URL.
 Other Sentry Apps require `--app <slug>` and must expose an issue-link form;
 additional required form values can be supplied with `--field name=value`.
+For other Apps, an issue select can be supplied by exact ID or label with
+`--field`, for example `--app custom --field task_id=123`. The CLI checks
+that the app's link response identifies the requested URL before reporting success.
 
 ```bash
 sentry issue link my-org/FRONT-123 https://github.com/example/app/issues/42 --dry-run
@@ -336,9 +341,10 @@ integration status-sync settings continue to apply after linking.
 
 #### Link permissions
 
-Linking requires `event:write` and access to the Sentry project. The CLI requests
-`event:write` and `event:admin` during OAuth login. If an older OAuth session lacks
-the requested scopes, the CLI offers reauthorization after a permission error.
+Linking requires `event:write` and access to the Sentry project. Discovering
+GitHub/GitLab repositories and Sentry Apps also requires `org:read`. Both scopes
+are included in the default OAuth login. If an older OAuth session lacks the
+requested scopes, the CLI offers reauthorization after a permission error.
 In non-interactive mode, follow the `sentry auth refresh` command shown in the
 error. Environment tokens must be updated separately.
 
@@ -366,11 +372,11 @@ integration links.
 
 #### Unlink permissions
 
-Unlink requires **`event:admin` in both the token and your effective project
-permissions**. Being a project member does not automatically grant it. The
-organization's “Let Members Delete Events” setting and team roles affect whether
-you have this permission.
+Unlink requires **`event:write` and access to the Sentry project**; `event:admin`
+is also accepted. The organization's “Let Members Delete Events” setting does
+not restrict unlinking on updated Sentry versions.
 
-New OAuth sessions request this scope. For an older session, follow the
-reauthorization guidance shown by the CLI. Granting a token more scopes does not
-override the organization's project-access policy.
+Older Sentry versions still require `event:admin` in the token and your effective
+project permissions. For those installations, request it explicitly alongside
+your existing scopes with `sentry auth refresh --scope ...`. Granting a token
+more scopes does not override the organization's project-access policy.

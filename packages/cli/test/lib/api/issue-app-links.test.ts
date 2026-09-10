@@ -201,6 +201,44 @@ describe("app issue-link action", () => {
     expect(writes()).toHaveLength(1);
   });
 
+  test.each([
+    "static",
+    "search",
+  ])("links an explicit generic issue ID from %s choices", async (source) => {
+    const url = "https://tracker.example/tasks/123";
+    installation = {
+      ...INSTALLATION,
+      app: { ...INSTALLATION.app, slug: "custom" },
+    };
+    choices = [["123", "An Issue"]];
+    form = {
+      uri: "/sentry/tasks/link",
+      required_fields: [
+        {
+          name: "task_id",
+          type: "select",
+          ...(source === "static"
+            ? { options: choices }
+            : { uri: "/sentry/tasks" }),
+        },
+      ],
+    };
+    const prepared = await resolveAppIssueLink({
+      ...OPTIONS,
+      url,
+      appSlug: "custom",
+      fields: { task_id: "123" },
+    });
+    expect(prepared.fields).toEqual({ task_id: "123" });
+    actionLink = { ...LINK, serviceType: "custom", webUrl: url };
+    expect(await linkAppIssue(prepared)).toEqual({
+      changed: true,
+      link: actionLink,
+    });
+    expect(await writes()[0]?.json()).toMatchObject({ task_id: "123" });
+    expect(writes()).toHaveLength(1);
+  });
+
   test("reports a different returned target without retrying or deleting it", async () => {
     const prepared = await resolveAppIssueLink(OPTIONS);
     actionLink = {
