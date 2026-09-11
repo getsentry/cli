@@ -10,8 +10,8 @@ import { getConfiguredSentryUrl } from "./constants.js";
 import { getOrgByNumericId, getOrgRegion, setOrgRegion } from "./db/regions.js";
 import { stripDsnOrgPrefix } from "./dsn/index.js";
 import { withAuthGuard } from "./errors.js";
-import { getSdkConfig } from "./sentry-client.js";
-import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
+import { getApiBaseUrl, getSdkConfig } from "./sentry-client.js";
+import { isSentrySaasUrl } from "./sentry-urls.js";
 
 /**
  * Promise cache for org region resolution, keyed by orgSlug.
@@ -69,8 +69,11 @@ async function resolveOrgRegionUncached(orgSlug: string): Promise<string> {
     return cached;
   }
 
-  // 2. Fetch org details via SDK to discover the region URL
-  const baseUrl = getSentryBaseUrl();
+  // 2. Fetch org details via SDK to discover the region URL.
+  // getApiBaseUrl() (not getSentryBaseUrl) so a bare sntrys_ token routes to
+  // its embedded claim host instead of defaulting to SaaS and tripping the
+  // host-scoping guard (see #1568).
+  const baseUrl = getApiBaseUrl();
   const config = getSdkConfig(baseUrl);
 
   const result = await withAuthGuard(async () => {
