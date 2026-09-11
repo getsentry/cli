@@ -15,6 +15,7 @@ import {
   encodeModule,
   makeBuildIdSection,
   makeCustomSection,
+  makeExternalDebugInfoSection,
   parseSections,
   type WasmSection,
   writeVarUint32,
@@ -22,6 +23,7 @@ import {
 import {
   companionPath,
   debugIdFromBuildId,
+  formatBuildId,
   hasDwarfQuality,
   inspectWasm,
   prepareWasmFile,
@@ -416,5 +418,126 @@ describe("prepareWasmFile", () => {
 
     expect(result.action).toBe("skipped");
     expect(result.warning).toContain("not a valid WASM module");
+  });
+});
+
+describe("prepareWasmFile: pairs split by another tool", () => {
+  /** Deployable left by a tool that stripped DWARF without stamping a build id. */
+  function unstampedModule(companionName: string): Uint8Array {
+    return encodeModule([
+      codeSection(),
+      makeExternalDebugInfoSection(companionName),
+    ]);
+  }
+
+  /** Companion carrying DWARF, optionally already stamped. */
+  function companionModule(buildId?: Uint8Array): Uint8Array {
+    const sections = [codeSection(), dwarfSection()];
+    if (buildId) {
+      sections.push(makeBuildIdSection(buildId));
+    }
+    return encodeModule(sections);
+  }
+
+  /** Write an unstamped module and its companion; return both paths. */
+  async function writePair(
+    companionBuildId?: Uint8Array
+  ): Promise<{ module: string; companion: string }> {
+    return {
+      module: await writeModule("app.wasm", unstampedModule("app.dbg.wasm")),
+      companion: await writeModule(
+        "app.dbg.wasm",
+        companionModule(companionBuildId)
+      ),
+    };
+  }
+
+  test("adopts the build id the companion already carries", async () => {
+    const expected = uuidToBytes(FIXED_UUID) as Uint8Array;
+    const { module, companion } = await writePair(expected);
+    const before = await readFile(companion);
+
+    const result = await prepareWasmFile(module);
+
+    expect(result.action).toBe("already-prepared");
+    expect(result.buildId).toBe(formatBuildId(expected));
+    expect(result.companion).toBe(companion);
+    expect(result.warning).toBe("reconciled build_id with companion");
+    // The module gains the companion's id; the companion is left untouched.
+    const stamped = inspectWasm(await readFile(module)).buildId as Uint8Array;
+    expect(Uint8Array.from(stamped)).toEqual(expected);
+    expect(await readFile(companion)).toEqual(before);
+  });
+
+  test("stamps one shared id when neither file has one", async () => {
+    const { module, companion } = await writePair();
+
+    const result = await prepareWasmFile(module);
+
+    expect(result.action).toBe("already-prepared");
+    expect(result.warning).toContain("stamped both files");
+
+    const moduleId = inspectWasm(await readFile(module)).buildId;
+    const companionId = inspectWasm(await readFile(companion)).buildId;
+    expect(moduleId).not.toBeNull();
+    expect(companionId).toEqual(moduleId);
+    expect(result.buildId).toBe(formatBuildId(moduleId as Uint8Array));
+  });
+
+  test("uploads the repaired companion", async () => {
+    const { module, companion } = await writePair();
+
+    expect(uploadPath(await prepareWasmFile(module))).toBe(companion);
+  });
+
+  test("writes nothing on a dry run", async () => {
+    const { module, companion } = await writePair();
+    const moduleBefore = await readFile(module);
+    const companionBefore = await readFile(companion);
+
+    const result = await prepareWasmFile(module, { dryRun: true });
+
+    expect(result.warning).toBe("would reconcile build_id with companion");
+    expect(await readFile(module)).toEqual(moduleBefore);
+    expect(await readFile(companion)).toEqual(companionBefore);
+  });
+
+  test("splits rather than reconciles when DWARF is still inline", async () => {
+    // A pointer left by a tool that never stripped the module: the DWARF is
+    // right here, so producing a real companion beats adopting a foreign id.
+    const module = await writeModule(
+      "app.wasm",
+      encodeModule([
+        codeSection(),
+        dwarfSection(),
+        makeExternalDebugInfoSection("app.dbg.wasm"),
+      ])
+    );
+    await writeModule("app.dbg.wasm", companionModule());
+
+    const result = await prepareWasmFile(module);
+
+    expect(result.action).toBe("split");
+    expect(hasSection(await readFile(module), ".debug_info")).toBe(false);
+  });
+
+  test("skips when the companion is missing", async () => {
+    const module = await writeModule("app.wasm", unstampedModule("gone.wasm"));
+
+    const result = await prepareWasmFile(module);
+
+    expect(result.action).toBe("skipped");
+    expect(result.quality).toBe("external-debug-info");
+  });
+
+  test("skips when the companion carries no DWARF", async () => {
+    const module = await writeModule("app.wasm", unstampedModule("bare.wasm"));
+    await writeModule("bare.wasm", emptyModule());
+
+    const result = await prepareWasmFile(module);
+
+    // Pairing with it would claim an id for a file holding no debug info.
+    expect(result.action).toBe("skipped");
+    expect(result.quality).toBe("external-debug-info");
   });
 });

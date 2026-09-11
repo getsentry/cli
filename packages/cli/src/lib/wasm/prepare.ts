@@ -503,6 +503,128 @@ async function findExistingCompanion(
 }
 
 /**
+ * Stamp a module that cannot be split, and report why it was left alone.
+ *
+ * @returns The skip, carrying the build id the module ends up with unless a
+ *   dry run left it unstamped, or `null` when the module is splittable.
+ */
+async function reportSkip(
+  path: string,
+  sections: WasmSection[],
+  inspection: WasmInspection,
+  options: PrepareOptions
+): Promise<PrepareResult | null> {
+  const warning = skipWarning(inspection.quality);
+  if (!warning) {
+    return null;
+  }
+  const buildId = await ensureBuildId(
+    path,
+    sections,
+    inspection.buildId,
+    options
+  );
+  const recommendation = skipRecommendation(inspection.quality);
+  return {
+    path,
+    action: "skipped",
+    quality: inspection.quality,
+    ...(buildId ? { buildId: formatBuildId(buildId) } : {}),
+    warning,
+    ...(recommendation ? { recommendation } : {}),
+  };
+}
+
+/**
+ * Give a module and the companion it names a shared build id.
+ *
+ * A module carrying `external_debug_info` but no build id was split by a tool
+ * that never stamped it. The pair is intact apart from the id Sentry matches
+ * on, so it is repairable — and stamping the module alone would make it
+ * unrepairable, since a random id can never be reconciled with the companion.
+ *
+ * The companion is written first. A crash between the two writes then leaves
+ * the module unstamped, which the next run repairs; the reverse order would
+ * leave a stamped module pointing at an unstamped companion, which reads as a
+ * dangling pointer forever after.
+ *
+ * @returns The repaired pair, or `null` when there is nothing to repair and
+ *   the caller should fall through to the normal skip path.
+ */
+async function repairUnpairedCompanion(
+  wasmPath: string,
+  sections: WasmSection[],
+  inspection: WasmInspection,
+  options: PrepareOptions
+): Promise<PrepareResult | null> {
+  if (!inspection.externalDebugInfo) {
+    return null;
+  }
+  const companion = resolveExternalDebugPath(
+    wasmPath,
+    inspection.externalDebugInfo
+  );
+  // A remote URL names no file this run can stamp.
+  if (!companion) {
+    return null;
+  }
+
+  let companionSections: WasmSection[];
+  let companionInspection: WasmInspection;
+  try {
+    const companionBytes = await readFile(companion);
+    companionSections = parseSections(companionBytes);
+    companionInspection = inspectWasm(companionBytes);
+  } catch (error) {
+    log.debug(`No usable companion at ${companion}`, error);
+    return null;
+  }
+
+  // Without DWARF the companion is not a debug file, so pairing with it would
+  // upload nothing useful under an id the module now claims.
+  if (companionInspection.quality !== "dwarf") {
+    return null;
+  }
+
+  const adopted = companionInspection.buildId;
+  const buildId = adopted ?? options.buildId ?? randomBuildId();
+
+  if (options.dryRun) {
+    return {
+      path: wasmPath,
+      action: "already-prepared",
+      quality: "external-debug-info",
+      // A generated id does not exist yet; only report one already on disk.
+      ...(adopted ? { buildId: formatBuildId(adopted) } : {}),
+      companion,
+      warning: "would reconcile build_id with companion",
+    };
+  }
+
+  if (!adopted) {
+    await writeFile(
+      companion,
+      encodeModule([...companionSections, makeBuildIdSection(buildId)])
+    );
+  }
+  await writeFile(
+    wasmPath,
+    encodeModule([...sections, makeBuildIdSection(buildId)])
+  );
+
+  return {
+    path: wasmPath,
+    action: "already-prepared",
+    quality: "external-debug-info",
+    buildId: formatBuildId(buildId),
+    companion,
+    warning: adopted
+      ? "reconciled build_id with companion"
+      : "reconciled build_id with companion (stamped both files)",
+  };
+}
+
+/**
  * Classify and, where possible, split a single `.wasm` file.
  *
  * Modules that cannot be split are stamped with a build id and reported with a
@@ -560,23 +682,23 @@ export async function prepareWasmFile(
     }
   }
 
-  const warning = skipWarning(inspection.quality);
-  if (warning) {
-    const buildId = await ensureBuildId(
+  // Repair before skipping: an unstamped module with a companion is a pair a
+  // previous tool left half-finished, not a module that cannot be prepared.
+  if (!inspection.buildId && inspection.quality === "external-debug-info") {
+    const repaired = await repairUnpairedCompanion(
       path,
       sections,
-      inspection.buildId,
+      inspection,
       options
     );
-    const recommendation = skipRecommendation(inspection.quality);
-    return {
-      path,
-      action: "skipped",
-      quality: inspection.quality,
-      ...(buildId ? { buildId: formatBuildId(buildId) } : {}),
-      warning,
-      ...(recommendation ? { recommendation } : {}),
-    };
+    if (repaired) {
+      return repaired;
+    }
+  }
+
+  const skipped = await reportSkip(path, sections, inspection, options);
+  if (skipped) {
+    return skipped;
   }
 
   if (options.dryRun) {
