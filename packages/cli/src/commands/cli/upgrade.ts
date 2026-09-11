@@ -14,10 +14,8 @@
  * so that subsequent bare `sentry cli upgrade` calls use the same channel.
  */
 
-import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { setTimeout } from "node:timers/promises";
 import type { SentryContext } from "../../context.js";
 import {
   determineInstallDir,
@@ -47,6 +45,7 @@ import {
   fetchChangelog,
 } from "../../lib/release-notes.js";
 import { isInPath } from "../../lib/shell.js";
+import { spawnWithRetry } from "../../lib/spawn.js";
 import {
   detectInstallationMethod,
   executeUpgrade,
@@ -418,30 +417,6 @@ function buildCheckResult(opts: {
 }
 
 /**
- * Maximum number of spawn attempts for the new binary.
- *
- * On Windows, Defender/SmartScreen may lock a newly-written executable for
- * antivirus scanning after the file handle is closed. This causes EBUSY from
- * uv_spawn. Retrying with backoff lets the scan complete without a fixed sleep.
- */
-const SPAWN_MAX_ATTEMPTS = 5;
-
-/** Base delay (ms) between spawn retry attempts. Delay = attempt * base. */
-const SPAWN_RETRY_BASE_MS = 500;
-
-/**
- * Check whether an error is an EBUSY system error from spawn.
- *
- * On Windows, Defender/SmartScreen locks newly-written executables for
- * scanning. libuv's uv_spawn fails with EBUSY until the lock is released.
- */
-export function isEbusyError(error: unknown): boolean {
-  return (
-    error instanceof Error && (error as NodeJS.ErrnoException).code === "EBUSY"
-  );
-}
-
-/**
  * Check whether an error indicates the spawn target was not found.
  *
  * Bun surfaces a missing executable as `Executable not found in $PATH: "..."`
@@ -456,85 +431,6 @@ export function isEnoentSpawnError(error: unknown): boolean {
     return true;
   }
   return error.message.includes("Executable not found in $PATH");
-}
-
-/**
- * Spawn a binary with retry on EBUSY errors.
- *
- * On Windows, Defender/SmartScreen asynchronously scans newly-written
- * executables after the file handle is closed. If the CLI spawns the
- * binary before the scan completes, uv_spawn fails with EBUSY.
- * This function retries with backoff to let the scan finish.
- *
- * On non-Windows platforms (or when Defender isn't active), the first
- * attempt succeeds immediately with zero overhead.
- *
- * @returns Process exit code from the successful spawn
- * @throws {UpgradeError} Reason `execution_failed` when the binary path
- *   doesn't exist (Bun "Executable not found" or ENOENT), with an
- *   actionable message instructing the user to rerun the upgrade.
- * @throws The last EBUSY error if all attempts are exhausted
- * @throws Immediately on other non-EBUSY errors (EACCES, etc.)
- */
-async function spawnWithRetry(
-  binaryPath: string,
-  args: string[],
-  env: NodeJS.ProcessEnv | undefined
-): Promise<number> {
-  for (let attempt = 1; attempt <= SPAWN_MAX_ATTEMPTS; attempt++) {
-    try {
-      const proc = spawn(binaryPath, args, {
-        stdio: "inherit",
-        env,
-      });
-      return await new Promise<number>((resolve, reject) => {
-        proc.on("close", (code, signal) => {
-          // SIGKILL on macOS typically means AMFI killed the binary due to
-          // an invalid code signature (the downloaded binary has quarantine
-          // xattr). Surface this clearly instead of an opaque exit code.
-          if (signal === "SIGKILL") {
-            reject(
-              new UpgradeError(
-                "execution_failed",
-                "Downloaded binary was killed by the operating system (SIGKILL). " +
-                  "This usually means the binary has an invalid code signature. " +
-                  "Try reinstalling: curl -sL https://sentry.io/get-cli/ | bash"
-              )
-            );
-            return;
-          }
-          resolve(code ?? 1);
-        });
-        proc.on("error", (err) => reject(err));
-      });
-    } catch (error) {
-      // Translate the opaque Bun "Executable not found" error into an
-      // actionable UpgradeError. This path triggers when the binary at
-      // `binaryPath` doesn't exist on disk when spawn is attempted (see
-      // CLI-1D3). `downloadBinaryToTemp`'s visibility-race retry loop
-      // normally catches this earlier, but this is a safety net for the
-      // `.download` file being removed between verification and spawn
-      // (e.g. manual cleanup by the user) or for future callers that
-      // pass a path not backed by the download pipeline.
-      if (isEnoentSpawnError(error)) {
-        throw new UpgradeError(
-          "execution_failed",
-          `Downloaded binary not found at ${binaryPath}. ` +
-            "The download may have been interrupted — rerun `sentry cli upgrade`."
-        );
-      }
-      if (!isEbusyError(error) || attempt === SPAWN_MAX_ATTEMPTS) {
-        throw error;
-      }
-      const delay = attempt * SPAWN_RETRY_BASE_MS;
-      log.warn(
-        `Binary is locked (antivirus scan?), retrying in ${delay}ms... (attempt ${attempt}/${SPAWN_MAX_ATTEMPTS})`
-      );
-      await setTimeout(delay);
-    }
-  }
-  // Unreachable — the loop either returns or throws
-  throw new UpgradeError("execution_failed", "Spawn retry loop exhausted");
 }
 
 /**
@@ -601,7 +497,32 @@ async function runSetupOnNewBinary(opts: SetupOptions): Promise<void> {
     ? { ...process.env, SENTRY_INSTALL_DIR: installDir }
     : undefined;
 
-  const exitCode = await spawnWithRetry(binaryPath, args, env);
+  const { code, signal } = await spawnWithRetry(
+    binaryPath,
+    args,
+    env,
+    log
+  ).catch((error: unknown) => {
+    // The downloaded binary can disappear between verification and launch.
+    if (isEnoentSpawnError(error)) {
+      throw new UpgradeError(
+        "execution_failed",
+        `Downloaded binary not found at ${binaryPath}. ` +
+          "The download may have been interrupted — rerun `sentry cli upgrade`."
+      );
+    }
+    throw error;
+  });
+  // SIGKILL on macOS typically means AMFI rejected the binary's signature.
+  if (signal === "SIGKILL") {
+    throw new UpgradeError(
+      "execution_failed",
+      "Downloaded binary was killed by the operating system (SIGKILL). " +
+        "This usually means the binary has an invalid code signature. " +
+        "Try reinstalling: curl -sL https://sentry.io/get-cli/ | bash"
+    );
+  }
+  const exitCode = code ?? 1;
   if (exitCode !== 0) {
     throw new UpgradeError(
       "execution_failed",

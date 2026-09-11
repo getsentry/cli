@@ -7,6 +7,8 @@
  * via a spy on process.stderr.write and assert on the collected output.
  */
 
+// biome-ignore lint/performance/noNamespaceImport: needed for spawn fault injection
+import * as child_process from "node:child_process";
 import {
   accessSync,
   constants,
@@ -21,6 +23,10 @@ import { join } from "node:path";
 import { isatty } from "node:tty";
 import { run } from "@stricli/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
+}));
 
 vi.mock("../../../src/lib/interactive-login.js", async (importOriginal) => ({
   ...(await importOriginal<
@@ -778,6 +784,7 @@ describe("sentry cli setup", () => {
         flags?: string[];
         existingBinary?: boolean;
         loginExitCode?: number;
+        loginSignal?: "TERM";
       } = {}
     ) {
       const sourcePath = join(testDir, "sentry-download");
@@ -785,7 +792,7 @@ describe("sentry cli setup", () => {
       const loginArgsFile = join(testDir, "login-args");
       const binary = `#!/bin/sh
 printf '%s\\n' "$@" > "$SENTRY_SETUP_TEST_LOGIN_ARGS"
-exit ${options.loginExitCode ?? 0}
+${options.loginSignal ? 'kill -TERM "$$"' : `exit ${options.loginExitCode ?? 0}`}
 `;
       writeFileSync(sourcePath, binary);
       const { chmodSync } = await import("node:fs");
@@ -842,6 +849,77 @@ exit ${options.loginExitCode ?? 0}
       expect(output).not.toContain("Authentication failed");
     });
 
+    test.each([
+      "throw",
+      "event",
+    ])("retries a transient EBUSY %s and starts login", async (failure) => {
+      const error = Object.assign(new Error("spawn EBUSY"), { code: "EBUSY" });
+      const originalSpawn = child_process.spawn;
+      let locked = true;
+      let unlockTimer: ReturnType<typeof setTimeout> | undefined;
+      const spawnSpy = vi
+        .spyOn(child_process, "spawn")
+        .mockImplementation((...args) => {
+          if (!locked) {
+            return originalSpawn(...args);
+          }
+          // Immediate retries must still encounter the simulated executable lock.
+          unlockTimer ??= setTimeout(() => {
+            locked = false;
+          }, 500);
+          if (failure === "throw") {
+            throw error;
+          }
+          const child = new child_process.ChildProcess();
+          queueMicrotask(() => {
+            child.emit("error", error);
+            child.emit("close", -16, null);
+          });
+          return child;
+        });
+
+      const { output, exitCode, installed, loginArgs } =
+        await install().finally(() => clearTimeout(unlockTimer));
+      expect(spawnSpy).toHaveBeenCalledTimes(2);
+      expect(loginArgs).toEqual(["auth", "login"]);
+      expect(installed).toBe(true);
+      expect(exitCode).toBe(0);
+      expect(output).not.toContain("Authentication failed");
+    });
+
+    test("stops after five EBUSY attempts without failing installation", async () => {
+      const spawnSpy = vi
+        .spyOn(child_process, "spawn")
+        .mockImplementation(() => {
+          throw Object.assign(new Error("spawn EBUSY"), { code: "EBUSY" });
+        });
+
+      const { output, exitCode, installed, loginArgs } = await install();
+      expect(spawnSpy).toHaveBeenCalledTimes(5);
+      expect(loginArgs).toEqual([]);
+      expect(installed).toBe(true);
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Authentication failed: spawn EBUSY");
+    });
+
+    test.each([
+      "EACCES",
+      "ENOENT",
+    ])("does not retry a %s launch failure", async (code) => {
+      const spawnSpy = vi
+        .spyOn(child_process, "spawn")
+        .mockImplementation(() => {
+          throw Object.assign(new Error(`spawn ${code}`), { code });
+        });
+
+      const { output, exitCode, installed, loginArgs } = await install();
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+      expect(loginArgs).toEqual([]);
+      expect(installed).toBe(true);
+      expect(exitCode).toBe(0);
+      expect(output).toContain(`Authentication failed: spawn ${code}`);
+    });
+
     test.each([0, 1])("skips login when fd %i is not a TTY", async (fd) => {
       vi.mocked(isatty).mockImplementation((candidate) => candidate !== fd);
       expect((await install()).loginArgs).toEqual([]);
@@ -886,11 +964,13 @@ exit ${options.loginExitCode ?? 0}
     });
 
     test.each([
-      1, 130,
-    ])("keeps installation successful when login exits with %i", async (loginExitCode) => {
-      const { output, exitCode, installed, loginArgs } = await install({
-        loginExitCode,
-      });
+      { loginExitCode: 1 },
+      { loginExitCode: 130 },
+      { loginSignal: "TERM" as const },
+    ])("keeps installation successful without retrying a failed or cancelled login: %j", async (options) => {
+      const spawnSpy = vi.spyOn(child_process, "spawn");
+      const { output, exitCode, installed, loginArgs } = await install(options);
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
       expect(loginArgs).toEqual(["auth", "login"]);
       expect(output).toContain(
         "Run 'sentry auth login' to authenticate later."

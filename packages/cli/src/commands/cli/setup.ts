@@ -6,7 +6,6 @@
  * and the upgrade command for curl-based installs).
  */
 
-import { spawn } from "node:child_process";
 import { existsSync, unlinkSync } from "node:fs";
 import { chmod, copyFile, mkdir, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -60,6 +59,7 @@ import {
   isInPath,
   type ShellInfo,
 } from "../../lib/shell.js";
+import { spawnWithRetry } from "../../lib/spawn.js";
 
 type SetupFlags = {
   readonly install: boolean;
@@ -780,22 +780,15 @@ export const setupCommand = buildCommand({
           assertAutoLoginHostTrusted();
           // Login handles Ctrl+C with process.exit; isolate the child so its
           // exit status cannot fail an installation that already completed.
-          await new Promise<void>((resolve, reject) => {
-            const child = spawn(binaryPath, ["auth", "login"], {
-              stdio: "inherit",
-              env: process.env,
-            });
-            child.on("error", reject);
-            child.on("close", (code) => {
-              if (code === 0) {
-                resolve();
-              } else {
-                reject(
-                  new Error("Run 'sentry auth login' to authenticate later.")
-                );
-              }
-            });
-          });
+          const { code } = await spawnWithRetry(
+            binaryPath,
+            ["auth", "login"],
+            process.env,
+            log
+          );
+          if (code !== 0) {
+            throw new Error("Run 'sentry auth login' to authenticate later.");
+          }
         },
         warn
       );
