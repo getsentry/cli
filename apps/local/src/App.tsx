@@ -1,5 +1,30 @@
-import { Check, Copy, Search, Terminal } from 'lucide-react'
-import { Fragment, type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Activity,
+  Bot,
+  Boxes,
+  Bug,
+  ChevronLeft,
+  ChevronRight,
+  FileArchive,
+  Gauge,
+  ListTree,
+  Menu,
+  MessageSquareText,
+  Search,
+  Terminal,
+  type LucideIcon,
+  Check,
+  Copy,
+} from 'lucide-react'
+import {
+  Fragment,
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { JsonView } from '@/components/json-view.tsx'
 import { ConnectionLanding } from '@/components/connection-landing.tsx'
 import { ReceiverControls } from '@/components/receiver-controls.tsx'
@@ -11,7 +36,6 @@ import {
 } from '@/lib/presentation.ts'
 import { copyText } from '@/lib/clipboard.ts'
 import {
-  appendBounded,
   DEFAULT_STREAM_URL,
   decodeEnvelope,
   parseStreamEndpoint,
@@ -22,6 +46,10 @@ import {
   type EventMetadata,
   type LocalFeedItem,
 } from '@/lib/spotlight.ts'
+import {
+  createLocalTelemetryStore,
+  type LocalTelemetrySnapshot,
+} from '@/lib/telemetry-store.ts'
 import { buildTraceGroups, type TraceGroup } from '@/lib/trace-model.ts'
 
 type EventEntryProps = {
@@ -31,6 +59,36 @@ type EventEntryProps = {
 }
 
 type EventFilter = 'all' | 'errors' | 'transactions' | 'logs'
+
+type WorkspaceView =
+  | 'live'
+  | 'errors'
+  | 'traces'
+  | 'logs'
+  | 'feedback'
+  | 'envelopes'
+  | 'profiles'
+  | 'sdks'
+  | 'ai'
+
+type WorkspaceNavigationItem = {
+  id: WorkspaceView
+  label: string
+  icon: LucideIcon
+  getItems: (snapshot: LocalTelemetrySnapshot) => LocalFeedItem[]
+}
+
+const workspaceNavigation: WorkspaceNavigationItem[] = [
+  { id: 'live', label: 'Live Activity', icon: Activity, getItems: (snapshot) => snapshot.items },
+  { id: 'errors', label: 'Errors', icon: Bug, getItems: (snapshot) => snapshot.errors },
+  { id: 'traces', label: 'Traces', icon: ListTree, getItems: (snapshot) => snapshot.traces },
+  { id: 'logs', label: 'Logs', icon: Terminal, getItems: (snapshot) => snapshot.logs },
+  { id: 'feedback', label: 'Feedback', icon: MessageSquareText, getItems: (snapshot) => snapshot.feedback },
+  { id: 'envelopes', label: 'Envelopes', icon: FileArchive, getItems: (snapshot) => snapshot.envelopes },
+  { id: 'profiles', label: 'Profiles', icon: Gauge, getItems: (snapshot) => snapshot.profiles },
+  { id: 'sdks', label: 'SDKs', icon: Boxes, getItems: (snapshot) => snapshot.sdks },
+  { id: 'ai', label: 'AI', icon: Bot, getItems: (snapshot) => snapshot.ai },
+]
 
 const eventFilters: { id: EventFilter; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -388,6 +446,78 @@ function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
   )
 }
 
+type WorkspaceSidebarProps = {
+  activeView: WorkspaceView
+  collapsed: boolean
+  snapshot: LocalTelemetrySnapshot
+  onSelect: (view: WorkspaceView) => void
+  onToggle: () => void
+}
+
+function WorkspaceSidebar({
+  activeView,
+  collapsed,
+  snapshot,
+  onSelect,
+  onToggle,
+}: WorkspaceSidebarProps) {
+  return (
+    <aside
+      aria-label="Workspace navigation"
+      className={`hidden shrink-0 border-r border-border bg-muted/20 transition-[width] duration-200 md:flex md:flex-col ${
+        collapsed ? 'w-14' : 'w-52'
+      }`}
+    >
+      <div className="flex h-11 items-center border-b border-border px-2">
+        <button
+          type="button"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={onToggle}
+        >
+          {collapsed ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
+        </button>
+        {!collapsed ? <span className="ml-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Explore</span> : null}
+      </div>
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
+        {workspaceNavigation.map((entry) => {
+          const Icon = entry.icon
+          const count = entry.getItems(snapshot).length
+          const active = activeView === entry.id
+          return (
+            <button
+              key={entry.id}
+              type="button"
+              aria-label={`Open ${entry.label.toLowerCase()} view`}
+              aria-current={active ? 'page' : undefined}
+              title={collapsed ? entry.label : undefined}
+              className={`flex h-8 items-center gap-2 rounded-md px-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                active
+                  ? 'bg-primary/10 font-medium text-primary'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+              onClick={() => onSelect(entry.id)}
+            >
+              <Icon className="size-4 shrink-0" aria-hidden="true" />
+              {!collapsed ? (
+                <>
+                  <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+                  {count > 0 ? <span className="text-xs tabular-nums text-muted-foreground">{count}</span> : null}
+                </>
+              ) : null}
+            </button>
+          )
+        })}
+      </nav>
+      {!collapsed ? (
+        <p className="border-t border-border px-3 py-2 text-xs leading-4 text-muted-foreground">
+          Session-only telemetry. Nothing is stored after the receiver stops.
+        </p>
+      ) : null}
+    </aside>
+  )
+}
+
 export default function App() {
   const [streamUrl, setStreamUrl] = useState(() =>
     resolveInitialStreamUrl(window.location.hash, getSavedStream(), getSavedRemoteStream())
@@ -397,9 +527,18 @@ export default function App() {
   const [isEditingReceiver, setIsEditingReceiver] = useState(false)
   const [isConnectionEnabled, setIsConnectionEnabled] = useState(true)
   const [connectionError, setConnectionError] = useState<string>()
-  const [items, setItems] = useState<LocalFeedItem[]>([])
+  const [telemetryStore] = useState(() => createLocalTelemetryStore())
+  const telemetry = useSyncExternalStore(
+    telemetryStore.subscribe,
+    telemetryStore.getSnapshot,
+    telemetryStore.getSnapshot
+  )
+  const items = telemetry.items
   const [selectedItemId, setSelectedItemId] = useState<string>()
   const [lastViewedItemId, setLastViewedItemId] = useState<string>()
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('live')
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
+  const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false)
   const [filter, setFilter] = useState<EventFilter>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [message, setMessage] = useState<string | undefined>()
@@ -410,7 +549,12 @@ export default function App() {
   const selectedTrace = selectedItem?.metadata?.traceId
     ? traces.find((trace) => trace.id === selectedItem.metadata?.traceId)
     : undefined
-  const visibleItems = items.filter((item) => matchesEventFilter(item, filter))
+  const activeWorkspace = workspaceNavigation.find((entry) => entry.id === workspaceView)!
+  const workspaceItems = activeWorkspace.getItems(telemetry)
+  const visibleItems =
+    workspaceView === 'live'
+      ? workspaceItems.filter((item) => matchesEventFilter(item, filter))
+      : workspaceItems
   const searchedItems = visibleItems.filter((item) => matchesSearch(item, searchQuery))
   const relatedItems = selectedItem?.metadata?.traceId
     ? items.filter(
@@ -453,11 +597,30 @@ export default function App() {
     markItemsSeen()
   }
 
+  const selectWorkspace = (nextWorkspace: WorkspaceView) => {
+    setWorkspaceView(nextWorkspace)
+    setFilter('all')
+    setSelectedItemId(undefined)
+    setIsMobileNavigationOpen(false)
+    markItemsSeen()
+  }
+
   const clearItems = () => {
-    setItems([])
+    telemetryStore.clear()
     setSelectedItemId(undefined)
     setLastViewedItemId(undefined)
     setSearchQuery('')
+
+    const endpoint = parseStreamEndpoint(streamUrl)
+    if (endpoint?.kind !== 'loopback') {
+      return
+    }
+    const clearUrl = new URL(endpoint.url)
+    clearUrl.pathname = '/clear'
+    clearUrl.search = ''
+    void fetch(clearUrl, { method: 'DELETE' }).catch(() => {
+      setMessage('Cleared this viewer, but the receiver could not clear its retained session.')
+    })
   }
 
   const connectToDraft = () => {
@@ -498,8 +661,16 @@ export default function App() {
       try {
         const messageEvent = event as MessageEvent<string>
         const eventId = messageEvent.lastEventId || `event-${fallbackEventId.current++}`
+        telemetryStore.recordEnvelope({
+          id: eventId,
+          type: 'envelope',
+          timestamp: Date.now(),
+          text: messageEvent.data,
+          payload: messageEvent.data,
+          metadata: { title: `Envelope ${eventId.slice(0, 8)}` },
+        })
         const decoded = decodeEnvelope(messageEvent.data, eventId)
-        setItems((current) => appendBounded(current, decoded))
+        telemetryStore.append(decoded)
         setMessage(undefined)
       } catch {
         setMessage('Received an event that could not be decoded.')
@@ -538,7 +709,7 @@ export default function App() {
       source.removeEventListener(SENTRY_ENVELOPE_EVENT, onEnvelope)
       source.close()
     }
-  }, [isConnectionEnabled, streamUrl])
+  }, [isConnectionEnabled, streamUrl, telemetryStore])
 
   return (
     <main className="h-dvh overflow-hidden bg-background">
@@ -546,7 +717,16 @@ export default function App() {
         data-testid="app-shell"
         className="mx-auto flex h-full w-full max-w-none flex-col"
       >
-        <header className="flex h-11 shrink-0 items-center justify-between gap-3 px-3 sm:px-4">
+        <header className="relative flex h-11 shrink-0 items-center justify-between gap-3 px-3 sm:px-4">
+          <button
+            type="button"
+            aria-label="Open navigation"
+            aria-expanded={isMobileNavigationOpen}
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+            onClick={() => setIsMobileNavigationOpen((open) => !open)}
+          >
+            <Menu className="size-4" />
+          </button>
           <div className="flex items-center" aria-label="Sentry CLI">
             <img
               className="h-5 w-auto dark:hidden"
@@ -579,7 +759,40 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col">
+        {isMobileNavigationOpen ? (
+          <div className="absolute top-11 z-20 w-full border-b border-border bg-background p-2 shadow-lg md:hidden">
+            <nav aria-label="Workspace navigation" className="grid grid-cols-2 gap-1">
+              {workspaceNavigation.map((entry) => {
+                const Icon = entry.icon
+                const active = workspaceView === entry.id
+                return (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    aria-label={`Open ${entry.label.toLowerCase()} view`}
+                    aria-current={active ? 'page' : undefined}
+                    className={`flex h-9 items-center gap-2 rounded-md px-2 text-left text-sm ${
+                      active ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    }`}
+                    onClick={() => selectWorkspace(entry.id)}
+                  >
+                    <Icon className="size-4" />
+                    {entry.label}
+                  </button>
+                )
+              })}
+            </nav>
+          </div>
+        ) : null}
+
+        <div className="flex min-h-0 flex-1">
+          <WorkspaceSidebar
+            activeView={workspaceView}
+            collapsed={isSidebarCollapsed}
+            snapshot={telemetry}
+            onSelect={selectWorkspace}
+            onToggle={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+          />
           <section className="flex min-h-0 flex-1 flex-col" aria-label="Local Sentry events">
 
             {connectionError && connection === 'failed' && items.length > 0 ? (
@@ -627,7 +840,7 @@ export default function App() {
                         {items.length} / 500
                       </span>
                     </div>
-                    <div className="mt-2 flex gap-1" aria-label="Filter events">
+                    {workspaceView === 'live' ? <div className="mt-2 flex gap-1" aria-label="Filter events">
                       {eventFilters.map((eventFilter) => {
                         const count = items.filter((item) =>
                           matchesEventFilter(item, eventFilter.id)
@@ -649,7 +862,7 @@ export default function App() {
                           </button>
                         )
                       })}
-                    </div>
+                    </div> : null}
                     {newItemCount > 0 ? (
                       <button
                         type="button"

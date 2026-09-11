@@ -381,6 +381,50 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
+  test('uses the collapsible workspace sidebar to focus an observability view', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /healthy')
+      await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
+
+      await screen.findByLabelText('View event event')
+      expect(screen.getByRole('button', { name: 'Open live activity view' })).not.toBeNull()
+      expect(screen.getByRole('button', { name: 'Open errors view' }).textContent).toContain('1')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open errors view' }))
+      expect(screen.getByRole('button', { name: 'Open errors view' }).getAttribute('aria-current')).toBe('page')
+      expect(screen.getAllByLabelText(/View .* event/)).toHaveLength(1)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+      expect(screen.getByRole('button', { name: 'Expand sidebar' })).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('keeps raw received envelopes available outside the live event feed', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /raw-envelope')
+      await screen.findByLabelText('View transaction event')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open envelopes view' }))
+
+      expect(screen.getByRole('button', { name: 'Open envelopes view' }).textContent).toContain('1')
+      expect(screen.getByLabelText('View envelope event')).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
   test('marks an error entry in the mixed event feed', async () => {
     const { server, port } = await startReceiver()
 

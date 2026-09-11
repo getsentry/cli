@@ -129,6 +129,20 @@ const LOCALHOST_ORIGIN_RE =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const LOCAL_UI_ORIGIN = "https://local.sentry.dev";
 
+export function isLoopbackHost(host: string): boolean {
+  const normalized = host.replace(/^\[|\]$/g, "").toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1"
+  );
+}
+
+type LocalReceiverOptions = {
+  /** Enables stateful UI routes only when the receiver itself is loopback-bound. */
+  uiActions?: boolean;
+};
+
 function isHostedUiStreamRequest(request: {
   method: string;
   path: string;
@@ -210,7 +224,8 @@ function buildSSEHandler(
 }
 
 export function buildApp(
-  spotlightBuffer: ReturnType<typeof createSpotlightBuffer>
+  spotlightBuffer: ReturnType<typeof createSpotlightBuffer>,
+  { uiActions = false }: LocalReceiverOptions = {}
 ): Hono {
   const app = new Hono();
 
@@ -221,7 +236,7 @@ export function buildApp(
 
   const localhostCors = cors({
     origin: (origin) => (LOCALHOST_ORIGIN_RE.test(origin) ? origin : null),
-    allowMethods: ["GET", "POST", "OPTIONS"],
+    allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
     allowHeaders: [
       "Content-Type",
       "Content-Encoding",
@@ -275,6 +290,48 @@ export function buildApp(
   });
 
   app.get("/health", (c) => c.text("OK"));
+
+  // These endpoints deliberately describe and manage only the in-memory
+  // receiver session. They remain unavailable to the hosted UI origin; the
+  // CORS guard above limits them to a loopback-served Local UI.
+  app.get("/capabilities", (c) =>
+    uiActions
+      ? c.json({
+          actions: { clear: true, envelope: true },
+          retention: "session",
+        })
+      : c.body(null, 403)
+  );
+
+  app.delete("/clear", (c) => {
+    if (!uiActions) {
+      return c.body(null, 403);
+    }
+    spotlightBuffer.clear();
+    return c.body(null, 204);
+  });
+
+  app.get("/envelope/:id", (c) => {
+    if (!uiActions) {
+      return c.body(null, 403);
+    }
+    try {
+      const container = spotlightBuffer.read({
+        envelopeId: c.req.param("id"),
+      })[0];
+      if (!container) {
+        return c.body(null, 404);
+      }
+      return new Response(new Uint8Array(container.getData()), {
+        headers: { "Content-Type": container.getContentType() },
+      });
+    } catch (err) {
+      logger.debug(
+        `Envelope lookup failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return c.body(null, 404);
+    }
+  });
 
   const ingest = async (c: {
     req: {
@@ -912,7 +969,7 @@ export const serverCommand = buildCommand({
       });
     }
 
-    const app = buildApp(buffer);
+    const app = buildApp(buffer, { uiActions: isLoopbackHost(flags.host) });
 
     const { server, port: boundPort } = await tryListen(
       app,
