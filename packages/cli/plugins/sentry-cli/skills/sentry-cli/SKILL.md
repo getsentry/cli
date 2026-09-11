@@ -479,6 +479,7 @@ Work with debug information files
 
 - `sentry debug-files check <path>` — Inspect a debug information file
 - `sentry debug-files find <id...>` — Locate debug files for given debug identifiers
+- `sentry debug-files prepare <path...>` — Split WebAssembly debug info and upload it to Sentry
 - `sentry debug-files upload <path...>` — Upload debug information files to Sentry
 - `sentry debug-files print-sources <path>` — List the source files a debug file references
 - `sentry debug-files bundle-sources <path>` — Bundle a debug file's source files for source context
