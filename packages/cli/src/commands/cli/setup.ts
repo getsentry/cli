@@ -6,12 +6,15 @@
  * and the upgrade command for curl-based installs).
  */
 
+import { spawn } from "node:child_process";
 import { existsSync, unlinkSync } from "node:fs";
 import { chmod, copyFile, mkdir, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { isatty } from "node:tty";
 import { captureException } from "@sentry/node-core/light";
 import type { SentryContext } from "../../context.js";
 import { installAgentSkills } from "../../lib/agent-skills.js";
+import { assertAutoLoginHostTrusted } from "../../lib/auto-auth.js";
 import {
   determineInstallDir,
   getBinaryFilename,
@@ -27,6 +30,7 @@ import {
   installCompletions,
 } from "../../lib/completions.js";
 import { CLI_VERSION } from "../../lib/constants.js";
+import { getAuthConfig } from "../../lib/db/auth.js";
 import {
   getAgentSkillsPreference,
   setAgentSkillsPreference,
@@ -38,7 +42,12 @@ import {
   type ReleaseChannel,
   setReleaseChannel,
 } from "../../lib/db/release-channel.js";
+import {
+  detectAgent,
+  detectAgentFromProcessTree,
+} from "../../lib/detect-agent.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
+import { interactivePromptsAllowed } from "../../lib/interactive-prompts.js";
 import { logger } from "../../lib/logger.js";
 import {
   addToFpath,
@@ -739,12 +748,57 @@ export const setupCommand = buildCommand({
       printWelcomeMessage(emit, CLI_VERSION, binaryPath);
     }
 
-    return yield new CommandOutput<SetupResult>({
+    yield new CommandOutput<SetupResult>({
       messages,
       warnings,
       freshInstall,
       binaryPath,
       version: CLI_VERSION,
     });
+
+    // Offer first-time login after displaying a fresh installation's result.
+    // The init wizard handles its own authentication.
+    if (
+      freshInstall &&
+      !flags.quiet &&
+      process.env.SENTRY_INIT !== "1" &&
+      interactivePromptsAllowed() &&
+      isatty(0) &&
+      isatty(1)
+    ) {
+      await bestEffort(
+        "Authentication",
+        async () => {
+          if (
+            getAuthConfig() ||
+            detectAgent() ||
+            (await detectAgentFromProcessTree())
+          ) {
+            return;
+          }
+
+          assertAutoLoginHostTrusted();
+          // Login handles Ctrl+C with process.exit; isolate the child so its
+          // exit status cannot fail an installation that already completed.
+          await new Promise<void>((resolve, reject) => {
+            const child = spawn(binaryPath, ["auth", "login"], {
+              stdio: "inherit",
+              env: process.env,
+            });
+            child.on("error", reject);
+            child.on("close", (code) => {
+              if (code === 0) {
+                resolve();
+              } else {
+                reject(
+                  new Error("Run 'sentry auth login' to authenticate later.")
+                );
+              }
+            });
+          });
+        },
+        warn
+      );
+    }
   },
 });

@@ -329,8 +329,17 @@ fi
 # Remove trap — setup will handle temp cleanup on success
 trap - EXIT
 
-# shellcheck disable=SC2086
-"$tmp_binary" cli setup $setup_args
+# curl | bash leaves stdin on the script pipe. Reconnect it only when output
+# is interactive and a controlling terminal can actually be opened. The binary
+# also checks for agents before starting login.
+if [[ -t 1 && -t 2 ]] && { exec 3</dev/tty; } 2>/dev/null; then
+  # shellcheck disable=SC2086
+  "$tmp_binary" cli setup $setup_args <&3 3<&-
+  exec 3<&-
+else
+  # shellcheck disable=SC2086
+  "$tmp_binary" cli setup $setup_args
+fi
 
 # Optionally launch the setup wizard after install.
 # Reconnect stdin to the real terminal so the wizard can prompt
