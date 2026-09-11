@@ -28,15 +28,15 @@ export function ConnectionLanding({
   }
 
   return (
-    <section aria-labelledby="connection-title" className="flex min-h-0 flex-1 items-center justify-center px-4 py-8 sm:p-8">
-      <div className="w-full max-w-xl border border-border bg-card p-5 shadow-sm sm:p-6">
+    <section aria-labelledby="connection-title" className="flex min-h-0 flex-1 items-start justify-start bg-muted/10 px-4 py-8 sm:px-8 sm:py-10 lg:px-12">
+      <div className="w-full max-w-2xl border border-border bg-card p-5 shadow-sm sm:p-6">
         <div className="flex items-start gap-3">
           <Radio className={`mt-0.5 size-5 ${isProbing ? 'animate-pulse text-primary' : 'text-muted-foreground'}`} aria-hidden="true" />
           <div>
             <p className="text-xs font-semibold tracking-wide text-primary uppercase">Sentry Local</p>
-            <h1 id="connection-title" className="mt-1 text-xl font-semibold">
+            <h2 id="connection-title" className="mt-1 text-xl font-semibold">
               {isProbing ? 'Looking for Sentry Local' : 'Connect a receiver'}
-            </h1>
+            </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {isProbing
                 ? 'Checking the default receiver on localhost:8969.'

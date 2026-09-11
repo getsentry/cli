@@ -206,6 +206,8 @@ describe('local receiver to viewer integration', () => {
   test('offers a useful connection landing for a bare viewer visit', () => {
     renderBareViewer()
 
+    expect(screen.getByRole('banner').textContent).toContain('Receiver setup')
+    expect(screen.queryByRole('searchbox', { name: 'Search events' })).toBeNull()
     expect(screen.getByText('Looking for Sentry Local')).not.toBeNull()
     const endpoint = screen.getByLabelText('Receiver endpoint') as HTMLInputElement
     expect(endpoint.value).toBe('http://localhost:8969/stream')

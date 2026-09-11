@@ -468,17 +468,37 @@ function WorkspaceSidebar({
         collapsed ? 'w-14' : 'w-52'
       }`}
     >
-      <div className="flex h-11 items-center border-b border-border px-2">
+      <div className="flex h-11 items-center border-b border-border px-3">
+        {!collapsed ? (
+          <>
+            <img
+              className="h-5 w-auto dark:hidden"
+              src="/sentry-cli-light.svg"
+              alt="Sentry CLI"
+              width="117"
+              height="20"
+            />
+            <img
+              className="hidden h-5 w-auto dark:block"
+              src="/sentry-cli.svg"
+              alt=""
+              width="117"
+              height="20"
+            />
+          </>
+        ) : null}
         <button
           type="button"
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={`flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            collapsed ? 'mx-auto' : 'ml-auto'
+          }`}
           onClick={onToggle}
         >
           {collapsed ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
         </button>
-        {!collapsed ? <span className="ml-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Explore</span> : null}
       </div>
+      {!collapsed ? <p className="px-3 pb-2 pt-4 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Explore</p> : null}
       <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
         {workspaceNavigation.map((entry) => {
           const Icon = entry.icon
@@ -711,55 +731,58 @@ export default function App() {
     }
   }, [isConnectionEnabled, streamUrl, telemetryStore])
 
+  const showConnectionLanding =
+    isEditingReceiver ||
+    (items.length === 0 && (connection === 'connecting' || connection === 'failed'))
+  const canSearch = connection === 'connected' && items.length > 0 && !isEditingReceiver
+
   return (
     <main className="h-dvh overflow-hidden bg-background">
       <div
         data-testid="app-shell"
-        className="mx-auto flex h-full w-full max-w-none flex-col"
+        className="mx-auto flex h-full w-full max-w-none"
       >
-        <header className="relative flex h-11 shrink-0 items-center justify-between gap-3 px-3 sm:px-4">
-          <button
-            type="button"
-            aria-label="Open navigation"
-            aria-expanded={isMobileNavigationOpen}
-            className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
-            onClick={() => setIsMobileNavigationOpen((open) => !open)}
-          >
-            <Menu className="size-4" />
-          </button>
-          <div className="flex items-center" aria-label="Sentry CLI">
-            <img
-              className="h-5 w-auto dark:hidden"
-              src="/sentry-cli-light.svg"
-              alt="Sentry CLI"
-              width="117"
-              height="20"
-            />
-            <img
-              className="hidden h-5 w-auto dark:block"
-              src="/sentry-cli.svg"
-              alt=""
-              width="117"
-              height="20"
-            />
-          </div>
-          <label className="relative mx-auto min-w-0 max-w-lg flex-1">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <input
-              type="search"
-              aria-label="Search events"
-              placeholder="Search events"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              className="h-8 w-full border border-border bg-muted/30 pr-3 pl-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-            />
-          </label>
-          <div className="flex items-center">
+        <WorkspaceSidebar
+          activeView={workspaceView}
+          collapsed={isSidebarCollapsed}
+          snapshot={telemetry}
+          onSelect={selectWorkspace}
+          onToggle={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+        />
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <header className="flex h-11 shrink-0 items-center gap-3 px-3 sm:px-4">
+            <button
+              type="button"
+              aria-label="Open navigation"
+              aria-expanded={isMobileNavigationOpen}
+              className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+              onClick={() => setIsMobileNavigationOpen((open) => !open)}
+            >
+              <Menu className="size-4" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium text-muted-foreground">Sentry Local</p>
+              <h1 className="truncate text-sm font-semibold">
+                {showConnectionLanding ? 'Receiver setup' : activeWorkspace.label}
+              </h1>
+            </div>
+            {canSearch ? (
+              <label className="relative min-w-0 max-w-lg flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                <input
+                  type="search"
+                  aria-label="Search events"
+                  placeholder="Search events"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  className="h-8 w-full border border-border bg-muted/30 pl-8 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                />
+              </label>
+            ) : null}
             <ReceiverControls connection={presentation} eventCount={items.length} onClear={clearItems} />
-          </div>
-        </header>
+          </header>
 
-        {isMobileNavigationOpen ? (
+          {isMobileNavigationOpen ? (
           <div className="absolute top-11 z-20 w-full border-b border-border bg-background p-2 shadow-lg md:hidden">
             <nav aria-label="Workspace navigation" className="grid grid-cols-2 gap-1">
               {workspaceNavigation.map((entry) => {
@@ -783,16 +806,9 @@ export default function App() {
               })}
             </nav>
           </div>
-        ) : null}
+          ) : null}
 
         <div className="flex min-h-0 flex-1">
-          <WorkspaceSidebar
-            activeView={workspaceView}
-            collapsed={isSidebarCollapsed}
-            snapshot={telemetry}
-            onSelect={selectWorkspace}
-            onToggle={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
-          />
           <section className="flex min-h-0 flex-1 flex-col" aria-label="Local Sentry events">
 
             {connectionError && connection === 'failed' && items.length > 0 ? (
@@ -806,7 +822,7 @@ export default function App() {
               </div>
             ) : null}
 
-            {isEditingReceiver || (items.length === 0 && (connection === 'connecting' || connection === 'failed')) ? (
+            {showConnectionLanding ? (
               <ConnectionLanding
                 phase={connection === 'connecting' ? 'probing' : connection === 'failed' ? 'failed' : 'editing'}
                 endpoint={draftEndpoint}
@@ -906,6 +922,7 @@ export default function App() {
               </div>
             )}
           </section>
+        </div>
         </div>
       </div>
     </main>
