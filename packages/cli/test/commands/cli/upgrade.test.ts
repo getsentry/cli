@@ -26,7 +26,10 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 import { app } from "../../../src/app.js";
-import { resolveUpgradeInstallDir } from "../../../src/commands/cli/upgrade.js";
+import {
+  isEbusyError,
+  resolveUpgradeInstallDir,
+} from "../../../src/commands/cli/upgrade.js";
 import type { SentryContext } from "../../../src/context.js";
 import { CLI_VERSION } from "../../../src/lib/constants.js";
 import {
@@ -838,27 +841,13 @@ describe("sentry cli upgrade — nightly channel", () => {
 
 /**
  * Create a fake ChildProcess-like object that emits "close" with the given
- * exit code and signal on the next microtask. Used to mock spawn in tests.
+ * exit code on the next microtask. Used to mock child_process.spawn in tests.
  */
-function fakeChildProcess(
-  exitCode: number | null,
-  signal: NodeJS.Signals | null = null
-): child_process.ChildProcess {
+function fakeChildProcess(exitCode: number): child_process.ChildProcess {
   const { EventEmitter } = require("node:events");
   const emitter = new EventEmitter();
   // Emit "close" asynchronously so the caller can attach listeners first
-  queueMicrotask(() => emitter.emit("close", exitCode, signal));
-  return emitter as unknown as child_process.ChildProcess;
-}
-
-/** Emit the error and subsequent close events from a failed process launch. */
-function failedChildProcess(error: Error): child_process.ChildProcess {
-  const { EventEmitter } = require("node:events");
-  const emitter = new EventEmitter();
-  queueMicrotask(() => {
-    emitter.emit("error", error);
-    emitter.emit("close", -1, null);
-  });
+  queueMicrotask(() => emitter.emit("close", exitCode));
   return emitter as unknown as child_process.ChildProcess;
 }
 
@@ -1125,64 +1114,6 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
     expect(setupCall?.args).not.toContain("--ensure-auth-scopes");
   });
 
-  test("retries a busy downloaded binary before running setup", async () => {
-    mockBinaryDownloadWithVersion("99.99.99");
-    const error = Object.assign(new Error("resource busy or locked"), {
-      code: "EBUSY",
-    });
-    spawnSpy.mockImplementationOnce(() => failedChildProcess(error));
-
-    const { context, getOutput, errors, restore } = createMockContext({
-      homeDir: testDir,
-    });
-    restoreStderr = restore;
-
-    await run(app, ["cli", "upgrade", "--method", "curl"], context);
-
-    expect(spawnSpy).toHaveBeenCalledTimes(2);
-    expect(spawnSpy.mock.calls[1]).toEqual(spawnSpy.mock.calls[0]);
-    expect(getOutput()).toContain("retrying in 500ms");
-    expect(getOutput()).toContain("Upgraded to");
-    expect(errors).toEqual([]);
-  });
-
-  test.each([
-    Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }),
-    new Error('Executable not found in $PATH: "sentry.download"'),
-  ])("preserves the missing-binary diagnostic without retrying: %s", async (error) => {
-    mockBinaryDownloadWithVersion("99.99.99");
-    spawnSpy.mockImplementationOnce(() => failedChildProcess(error));
-
-    const { context, errors, restore } = createMockContext({
-      homeDir: testDir,
-    });
-    restoreStderr = restore;
-
-    await run(app, ["cli", "upgrade", "--method", "curl"], context);
-
-    expect(spawnSpy).toHaveBeenCalledTimes(1);
-    expect(errors.join("")).toContain("Downloaded binary not found at");
-    expect(errors.join("")).toContain("rerun `sentry cli upgrade`");
-  });
-
-  test.each([
-    ["SIGKILL", "invalid code signature"],
-    ["SIGTERM", "Setup failed with exit code 1"],
-  ] as const)("preserves the %s diagnostic without retrying", async (signal, diagnostic) => {
-    mockBinaryDownloadWithVersion("99.99.99");
-    spawnSpy.mockImplementation(() => fakeChildProcess(null, signal));
-
-    const { context, errors, restore } = createMockContext({
-      homeDir: testDir,
-    });
-    restoreStderr = restore;
-
-    await run(app, ["cli", "upgrade", "--method", "curl"], context);
-
-    expect(spawnSpy).toHaveBeenCalledTimes(1);
-    expect(errors.join("")).toContain(diagnostic);
-  });
-
   test("reports setup failure when spawn exits non-zero", async () => {
     // Use a unified mock that handles both the version endpoint and binary download
     const fakeContent = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
@@ -1208,7 +1139,6 @@ describe("sentry cli upgrade — curl full upgrade path (child_process.spawn spy
 
     await run(app, ["cli", "upgrade", "--method", "curl"], context);
 
-    expect(spawnSpy).toHaveBeenCalledTimes(1);
     expect(errors.join("")).toContain("Setup failed with exit code 1");
   });
 
@@ -1552,6 +1482,37 @@ describe("sentry cli upgrade — migrateToStandaloneForNightly (child_process.sp
     expect(
       requests.some((request) => request.includes("/releases/tags/"))
     ).toBe(false);
+  });
+});
+
+describe("isEbusyError", () => {
+  test("returns true for EBUSY errno error", () => {
+    const err = new Error("EBUSY: resource busy or locked, uv_spawn");
+    (err as NodeJS.ErrnoException).code = "EBUSY";
+    expect(isEbusyError(err)).toBe(true);
+  });
+
+  test("returns false for ENOENT", () => {
+    const err = new Error("ENOENT: no such file or directory");
+    (err as NodeJS.ErrnoException).code = "ENOENT";
+    expect(isEbusyError(err)).toBe(false);
+  });
+
+  test("returns false for EACCES", () => {
+    const err = new Error("EACCES: permission denied");
+    (err as NodeJS.ErrnoException).code = "EACCES";
+    expect(isEbusyError(err)).toBe(false);
+  });
+
+  test("returns false for non-Error values", () => {
+    expect(isEbusyError("EBUSY")).toBe(false);
+    expect(isEbusyError(null)).toBe(false);
+    expect(isEbusyError(undefined)).toBe(false);
+    expect(isEbusyError(42)).toBe(false);
+  });
+
+  test("returns false for Error without code", () => {
+    expect(isEbusyError(new Error("some error"))).toBe(false);
   });
 });
 

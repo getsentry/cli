@@ -2545,7 +2545,7 @@ describe("downloadBinaryToTemp verifies download integrity (CLI-1D3)", () => {
 
 // CLI-1D3 tail: even if the verification in downloadBinaryToTemp is
 // somehow bypassed (e.g. manual `rm` of .download between verification
-// and spawn), `runSetupOnNewBinary` translates the opaque "Executable not
+// and spawn), `spawnWithRetry` translates the opaque "Executable not
 // found in $PATH" into an actionable UpgradeError.
 describe("isEnoentSpawnError", () => {
   test("detects Bun's 'Executable not found in $PATH' error", () => {

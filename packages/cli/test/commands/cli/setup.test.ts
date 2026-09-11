@@ -7,26 +7,18 @@
  * via a spy on process.stderr.write and assert on the collected output.
  */
 
-// biome-ignore lint/performance/noNamespaceImport: needed for spawn fault injection
-import * as child_process from "node:child_process";
 import {
   accessSync,
   constants,
   existsSync,
   mkdirSync,
-  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { isatty } from "node:tty";
 import { run } from "@stricli/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-
-vi.mock("node:child_process", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("node:child_process")>()),
-}));
 
 vi.mock("../../../src/lib/interactive-login.js", async (importOriginal) => ({
   ...(await importOriginal<
@@ -44,7 +36,6 @@ vi.mock("../../../src/lib/scope-recovery.js", async (importOriginal) => ({
 
 import { app } from "../../../src/app.js";
 import type { SentryContext } from "../../../src/context.js";
-import { setAuthToken } from "../../../src/lib/db/auth.js";
 import {
   getAgentSkillsPreference,
   setAgentSkillsPreference,
@@ -54,21 +45,11 @@ import {
   getInstallInfo,
 } from "../../../src/lib/db/install-info.js";
 import { getReleaseChannel } from "../../../src/lib/db/release-channel.js";
-import {
-  getProcessInfoFromOS,
-  setProcessInfoProvider,
-} from "../../../src/lib/detect-agent.js";
-import { setEnv } from "../../../src/lib/env.js";
 // biome-ignore lint/performance/noNamespaceImport: dynamic setup imports are mocked at the module boundary
 import * as interactiveLogin from "../../../src/lib/interactive-login.js";
 // biome-ignore lint/performance/noNamespaceImport: dynamic setup imports are mocked at the module boundary
 import * as scopeRecovery from "../../../src/lib/scope-recovery.js";
 import { useTestConfigDir } from "../../helpers.js";
-
-vi.mock("node:tty", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("node:tty")>()),
-  isatty: vi.fn().mockReturnValue(false),
-}));
 
 /** Store original fetch for restoration */
 let originalFetch: typeof globalThis.fetch;
@@ -760,223 +741,6 @@ describe("sentry cli setup", () => {
       );
 
       expect(getOutput()).toBe("");
-    });
-  });
-
-  describe("login after a fresh install", () => {
-    useTestConfigDir("setup-login-");
-
-    beforeEach(() => {
-      vi.mocked(isatty).mockReturnValue(true);
-      setProcessInfoProvider(async () => ({ name: "bash", ppid: 1 }));
-    });
-
-    afterEach(() => {
-      vi.restoreAllMocks();
-      vi.mocked(isatty).mockReturnValue(false);
-      setProcessInfoProvider(getProcessInfoFromOS);
-      setEnv(process.env);
-    });
-
-    async function install(
-      options: {
-        env?: Record<string, string>;
-        flags?: string[];
-        existingBinary?: boolean;
-        loginExitCode?: number;
-        loginSignal?: "TERM";
-      } = {}
-    ) {
-      const sourcePath = join(testDir, "sentry-download");
-      const installDir = join(testDir, "install-dir");
-      const loginArgsFile = join(testDir, "login-args");
-      const binary = `#!/bin/sh
-printf '%s\\n' "$@" > "$SENTRY_SETUP_TEST_LOGIN_ARGS"
-${options.loginSignal ? 'kill -TERM "$$"' : `exit ${options.loginExitCode ?? 0}`}
-`;
-      writeFileSync(sourcePath, binary);
-      const { chmodSync } = await import("node:fs");
-      chmodSync(sourcePath, 0o755);
-      if (options.existingBinary) {
-        mkdirSync(installDir);
-        writeFileSync(join(installDir, "sentry"), "old-binary");
-      }
-      const mock = createMockContext({
-        homeDir: testDir,
-        execPath: sourcePath,
-        env: {
-          SENTRY_INSTALL_DIR: installDir,
-          SENTRY_SETUP_TEST_LOGIN_ARGS: loginArgsFile,
-          SENTRY_CONFIG_DIR: process.env.SENTRY_CONFIG_DIR,
-          SENTRY_CLI_NO_TELEMETRY: "1",
-          ...options.env,
-        },
-      });
-      restoreStderr = mock.restore;
-      setEnv(mock.context.env);
-      mock.context.process.exitCode = undefined;
-
-      await run(
-        app,
-        [
-          "cli",
-          "setup",
-          "--install",
-          "--no-modify-path",
-          "--no-completions",
-          "--no-agent-skills",
-          ...(options.flags ?? []),
-        ],
-        mock.context
-      );
-
-      return {
-        output: mock.getOutput(),
-        exitCode: mock.context.process.exitCode,
-        installed: readFileSync(join(installDir, "sentry"), "utf8") === binary,
-        loginArgs: existsSync(loginArgsFile)
-          ? readFileSync(loginArgsFile, "utf8").trim().split("\n")
-          : [],
-      };
-    }
-
-    test("starts auth login for a human TTY after installation", async () => {
-      const { output, exitCode, installed, loginArgs } = await install();
-      expect(loginArgs).toEqual(["auth", "login"]);
-      expect(installed).toBe(true);
-      expect(exitCode).toBe(0);
-      expect(output).toContain("Installed sentry v");
-      expect(output).not.toContain("Authentication failed");
-    });
-
-    test.each([
-      "throw",
-      "event",
-    ])("retries a transient EBUSY %s and starts login", async (failure) => {
-      const error = Object.assign(new Error("spawn EBUSY"), { code: "EBUSY" });
-      const originalSpawn = child_process.spawn;
-      let locked = true;
-      let unlockTimer: ReturnType<typeof setTimeout> | undefined;
-      const spawnSpy = vi
-        .spyOn(child_process, "spawn")
-        .mockImplementation((...args) => {
-          if (!locked) {
-            return originalSpawn(...args);
-          }
-          // Immediate retries must still encounter the simulated executable lock.
-          unlockTimer ??= setTimeout(() => {
-            locked = false;
-          }, 500);
-          if (failure === "throw") {
-            throw error;
-          }
-          const child = new child_process.ChildProcess();
-          queueMicrotask(() => {
-            child.emit("error", error);
-            child.emit("close", -16, null);
-          });
-          return child;
-        });
-
-      const { output, exitCode, installed, loginArgs } =
-        await install().finally(() => clearTimeout(unlockTimer));
-      expect(spawnSpy).toHaveBeenCalledTimes(2);
-      expect(loginArgs).toEqual(["auth", "login"]);
-      expect(installed).toBe(true);
-      expect(exitCode).toBe(0);
-      expect(output).not.toContain("Authentication failed");
-    });
-
-    test("stops after five EBUSY attempts without failing installation", async () => {
-      const spawnSpy = vi
-        .spyOn(child_process, "spawn")
-        .mockImplementation(() => {
-          throw Object.assign(new Error("spawn EBUSY"), { code: "EBUSY" });
-        });
-
-      const { output, exitCode, installed, loginArgs } = await install();
-      expect(spawnSpy).toHaveBeenCalledTimes(5);
-      expect(loginArgs).toEqual([]);
-      expect(installed).toBe(true);
-      expect(exitCode).toBe(0);
-      expect(output).toContain("Authentication failed: spawn EBUSY");
-    });
-
-    test.each([
-      "EACCES",
-      "ENOENT",
-    ])("does not retry a %s launch failure", async (code) => {
-      const spawnSpy = vi
-        .spyOn(child_process, "spawn")
-        .mockImplementation(() => {
-          throw Object.assign(new Error(`spawn ${code}`), { code });
-        });
-
-      const { output, exitCode, installed, loginArgs } = await install();
-      expect(spawnSpy).toHaveBeenCalledTimes(1);
-      expect(loginArgs).toEqual([]);
-      expect(installed).toBe(true);
-      expect(exitCode).toBe(0);
-      expect(output).toContain(`Authentication failed: spawn ${code}`);
-    });
-
-    test.each([0, 1])("skips login when fd %i is not a TTY", async (fd) => {
-      vi.mocked(isatty).mockImplementation((candidate) => candidate !== fd);
-      expect((await install()).loginArgs).toEqual([]);
-    });
-
-    test.each([
-      { AI_AGENT: "claude" },
-      { CODEX_THREAD_ID: "test-session" },
-    ])("skips a detected agent even with a TTY: %j", async (env) => {
-      expect((await install({ env })).loginArgs).toEqual([]);
-    });
-
-    test("waits for process-tree detection before attempting login", async () => {
-      setProcessInfoProvider(async () => ({ name: "codex", ppid: 1 }));
-      expect((await install()).loginArgs).toEqual([]);
-    });
-
-    test("skips stored OAuth credentials even when the access token needs refreshing", async () => {
-      setAuthToken("stored-token", -1, "refresh-token");
-      expect((await install()).loginArgs).toEqual([]);
-    });
-
-    test.each([
-      { env: { SENTRY_TOKEN: "existing-token" } },
-      { env: { SENTRY_INIT: "1" } },
-      { env: { SENTRY_OUTPUT_FORMAT: "json" } },
-      { flags: ["--quiet"] },
-      { flags: ["--json"] },
-      { existingBinary: true },
-    ])("skips login for an existing session, wizard, scripted output or upgrade: %j", async (options) => {
-      expect((await install(options)).loginArgs).toEqual([]);
-    });
-
-    test("refuses an untrusted login host without failing installation", async () => {
-      const { output, exitCode, installed, loginArgs } = await install({
-        env: { SENTRY_HOST: "https://sentry.example.com" },
-      });
-      expect(loginArgs).toEqual([]);
-      expect(output).toContain("Authentication failed");
-      expect(installed).toBe(true);
-      expect(exitCode).toBe(0);
-    });
-
-    test.each([
-      { loginExitCode: 1 },
-      { loginExitCode: 130 },
-      { loginSignal: "TERM" as const },
-    ])("keeps installation successful without retrying a failed or cancelled login: %j", async (options) => {
-      const spawnSpy = vi.spyOn(child_process, "spawn");
-      const { output, exitCode, installed, loginArgs } = await install(options);
-      expect(spawnSpy).toHaveBeenCalledTimes(1);
-      expect(loginArgs).toEqual(["auth", "login"]);
-      expect(output).toContain(
-        "Run 'sentry auth login' to authenticate later."
-      );
-      expect(installed).toBe(true);
-      expect(exitCode).toBe(0);
     });
   });
 

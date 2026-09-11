@@ -5,11 +5,13 @@ import {
   getUserRegions,
   listOrganizationsUncached,
 } from "../../lib/api-client.js";
+import { assertAutoLoginHostTrusted } from "../../lib/auto-auth.js";
 import { buildCommand, numberParser } from "../../lib/command.js";
 import { normalizeUrl } from "../../lib/constants.js";
 import {
   clearAuth,
   getActiveEnvVarName,
+  getAuthConfig,
   hasStoredAuthCredentials,
   isAuthenticated,
   isEnvTokenActive,
@@ -18,6 +20,10 @@ import {
 import { setDefaultUrl } from "../../lib/db/defaults.js";
 import { getDbPath } from "../../lib/db/index.js";
 import { getUserInfo, setUserInfo } from "../../lib/db/user.js";
+import {
+  detectAgent,
+  detectAgentFromProcessTree,
+} from "../../lib/detect-agent.js";
 import { getEnv } from "../../lib/env.js";
 import {
   ApiError,
@@ -36,6 +42,7 @@ import {
   runInteractiveLogin,
   toLoginUser,
 } from "../../lib/interactive-login.js";
+import { interactivePromptsAllowed } from "../../lib/interactive-prompts.js";
 import { logger } from "../../lib/logger.js";
 import {
   buildHostRefusalMessage,
@@ -82,6 +89,7 @@ export function formatLoginResult(result: LoginResult): string {
 }
 
 type LoginFlags = {
+  readonly automatic: boolean;
   readonly token?: string;
   readonly timeout: number;
   readonly force: boolean;
@@ -392,6 +400,20 @@ async function handleTokenValidationError(error: unknown): Promise<never> {
   throw error;
 }
 
+/** Gate installer-initiated login before any re-authentication or OAuth work. */
+async function canStartAutomaticLogin(): Promise<boolean> {
+  if (
+    !(interactivePromptsAllowed() && isatty(0) && isatty(1)) ||
+    getAuthConfig() ||
+    detectAgent() ||
+    (await detectAgentFromProcessTree())
+  ) {
+    return false;
+  }
+  assertAutoLoginHostTrusted();
+  return true;
+}
+
 export const loginCommand = buildCommand({
   auth: false,
   skipRcUrlCheck: true,
@@ -408,6 +430,12 @@ export const loginCommand = buildCommand({
   },
   parameters: {
     flags: {
+      automatic: {
+        kind: "boolean",
+        brief: "Start first-time login only for an interactive human",
+        default: false,
+        hidden: true as const,
+      },
       token: {
         kind: "parsed",
         parse: String,
@@ -455,6 +483,11 @@ export const loginCommand = buildCommand({
   },
   output: { human: formatLoginResult },
   async *func(this: SentryContext, flags: LoginFlags) {
+    // Installers may offer login without explicit user intent to re-authenticate.
+    if (flags.automatic && !(await canStartAutomaticLogin())) {
+      return;
+    }
+
     // Resolve OAuth scopes up front so conflicting flag combinations
     // (--token + --read-only/--scope, --read-only + --scope) and invalid
     // scope values fail fast before any network or DB work.
