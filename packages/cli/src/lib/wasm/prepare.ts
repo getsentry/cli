@@ -415,10 +415,7 @@ function buildIdsMatch(a: Uint8Array | null, b: Uint8Array | null): boolean {
 }
 
 /** Explain why a module of the given quality cannot be split. */
-function skipWarning(
-  quality: DebugQuality,
-  hasBuildId: boolean
-): string | null {
+function skipWarning(quality: DebugQuality): string | null {
   switch (quality) {
     case "dwarf":
       return null;
@@ -439,11 +436,8 @@ function skipWarning(
  * stripped module and a dangling companion pointer are pipeline problems, so
  * they get no suggestion here.
  */
-function skipRecommendation(
-  quality: DebugQuality,
-  hasBuildId: boolean
-): string | null {
-  if (quality === "symtab" || (quality === "none")) {
+function skipRecommendation(quality: DebugQuality): string | null {
+  if (quality === "symtab" || quality === "none") {
     return "verify build flags emit DWARF";
   }
   return null;
@@ -566,8 +560,7 @@ export async function prepareWasmFile(
     }
   }
 
-  const hadBuildId = Boolean(inspection.buildId);
-  const warning = skipWarning(inspection.quality, hadBuildId);
+  const warning = skipWarning(inspection.quality);
   if (warning) {
     const buildId = await ensureBuildId(
       path,
@@ -575,9 +568,7 @@ export async function prepareWasmFile(
       inspection.buildId,
       options
     );
-    // Classify against the build id found on disk: stamping happens above, and
-    // a freshly stamped module is not an already stripped one.
-    const recommendation = skipRecommendation(inspection.quality, hadBuildId);
+    const recommendation = skipRecommendation(inspection.quality);
     return {
       path,
       action: "skipped",

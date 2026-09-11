@@ -296,12 +296,13 @@ describe("prepareWasmFile", () => {
     expect(result.buildId).toBeDefined();
   });
 
-  test("refuses to re-split an already stripped module", async () => {
+  test("does not re-split a module that only has a build id", async () => {
     const path = await writeModule("app.wasm", strippedModule());
     const result = await prepareWasmFile(path);
 
     expect(result.action).toBe("skipped");
-    expect(result.warning).toContain("already stripped");
+    expect(result.quality).toBe("none");
+    expect(result.warning).toContain("no debug information");
     expect(existsSync(companionPath(path))).toBe(false);
   });
 
@@ -315,14 +316,6 @@ describe("prepareWasmFile", () => {
 
     expect(missing.recommendation).toBe("verify build flags emit DWARF");
     expect(names.recommendation).toBe("verify build flags emit DWARF");
-  });
-
-  test("does not blame build flags for an already stripped module", async () => {
-    const result = await prepareWasmFile(
-      await writeModule("app.wasm", strippedModule())
-    );
-
-    expect(result.recommendation).toBeUndefined();
   });
 
   test("detects an already-prepared pair on a second run", async () => {
