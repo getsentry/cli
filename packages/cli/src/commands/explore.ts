@@ -170,7 +170,7 @@ function parseDataset(value: string): string {
     return resolved ?? lower;
   }
   throw new ValidationError(
-    `Invalid dataset "${value}". Must be one of: ${[...VALID_DATASETS].join(", ")}`,
+    `Invalid dataset "${value}". Must be one of: ${Array.from(VALID_DATASETS).join(", ")}`,
     "dataset"
   );
 }
