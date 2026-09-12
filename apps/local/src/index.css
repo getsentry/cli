@@ -79,7 +79,7 @@
 
 @layer components {
   .json-view pre {
-    @apply m-0 bg-transparent p-0 font-mono text-inherit;
+    @apply m-0 break-words bg-transparent p-0 font-mono text-inherit whitespace-pre-wrap;
   }
 
   .json-view .shiki {
