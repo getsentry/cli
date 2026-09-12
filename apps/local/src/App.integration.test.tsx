@@ -455,7 +455,7 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
-  test('filters the feed by event class', async () => {
+  test('keeps Live Activity unfiltered and uses the sidebar for event classes', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -467,12 +467,21 @@ describe('local receiver to viewer integration', () => {
       await screen.findByLabelText('View transaction event')
       await screen.findByLabelText('View event event')
 
-      fireEvent.click(screen.getByRole('button', { name: 'Errors (1)' }))
-
-      expect(screen.queryByLabelText('View transaction event')).toBeNull()
+      expect(screen.queryByLabelText('Filter events')).toBeNull()
+      expect(screen.getByLabelText('View transaction event').textContent).toContain('/healthy')
       expect(screen.getByLabelText('View event event').textContent).toContain(
         '/broken'
       )
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open errors view' }))
+      expect(screen.queryByLabelText('View transaction event')).toBeNull()
+      expect(screen.getByLabelText('View event event').textContent).toContain('/broken')
+
+      await sendEnvelope(port, 'GET /another-healthy')
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Open live activity view' }).textContent).toContain('3')
+      })
+      expect(screen.queryByRole('button', { name: /View 1 new event/ })).toBeNull()
     } finally {
       cleanup()
       await stopReceiver(server)
@@ -783,33 +792,6 @@ describe('local receiver to viewer integration', () => {
 
       expect(screen.getByTestId('event-detail').textContent).toContain('GET /new')
       expect(screen.queryByRole('button', { name: 'View 1 new event' })).toBeNull()
-    } finally {
-      cleanup()
-      await stopReceiver(server)
-    }
-  })
-
-  test('only offers new events that match the active filter', async () => {
-    const { server, port } = await startReceiver()
-
-    try {
-      renderViewer(port)
-      await screen.findByText('Connected to local receiver')
-      await sendEnvelope(port, 'GET /first-error', { type: 'event', level: 'error' })
-      await screen.findByLabelText('View event event')
-      fireEvent.click(screen.getByRole('button', { name: 'Errors (1)' }))
-      await sendEnvelope(port, 'GET /healthy')
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'All (2)' })).not.toBeNull()
-      })
-      expect(screen.queryByRole('button', { name: /View 1 new event/ })).toBeNull()
-
-      await sendEnvelope(port, 'GET /second-error', { type: 'event', level: 'error' })
-
-      const newEvents = await screen.findByRole('button', { name: 'View 1 new event' })
-      fireEvent.click(newEvents)
-      expect(screen.getByTestId('event-detail').textContent).toContain('GET /second-error')
     } finally {
       cleanup()
       await stopReceiver(server)

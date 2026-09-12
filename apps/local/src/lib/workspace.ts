@@ -18,17 +18,6 @@ export const workspaceViews = [
 
 export type WorkspaceView = (typeof workspaceViews)[number]
 
-export type EventFilter = 'all' | 'errors' | 'transactions' | 'logs'
-
-export const eventFilterValues: EventFilter[] = ['all', 'errors', 'transactions', 'logs']
-
-export const eventFilters: { id: EventFilter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'errors', label: 'Errors' },
-  { id: 'transactions', label: 'Transactions' },
-  { id: 'logs', label: 'Logs' },
-]
-
 export function workspacePath(view: WorkspaceView) {
   return view === 'live' ? '/live' : `/${view}`
 }
@@ -80,16 +69,6 @@ export function workspaceForItem(item: LocalFeedItem): WorkspaceView {
     return 'sdks'
   }
   return 'live'
-}
-
-export function matchesEventFilter(item: LocalFeedItem, filter: EventFilter) {
-  if (filter === 'all') {
-    return true
-  }
-  if (filter === 'errors') {
-    return isErrorEvent(item)
-  }
-  return item.type === (filter === 'transactions' ? 'transaction' : 'log')
 }
 
 export function matchesSearch(item: LocalFeedItem, query: string) {

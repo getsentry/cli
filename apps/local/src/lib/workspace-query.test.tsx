@@ -10,24 +10,22 @@ describe('useWorkspaceQueryState', () => {
       wrapper: withNuqsTestingAdapter({
         hasMemory: true,
         onUrlUpdate,
-        searchParams: '?event=event-1&trace=trace-1&filter=errors&q=checkout',
+        searchParams: '?event=event-1&trace=trace-1&q=checkout',
       }),
     })
 
     expect(result.current).toMatchObject({
       eventId: 'event-1',
-      filter: 'errors',
       query: 'checkout',
       traceId: 'trace-1',
     })
 
     await act(() => result.current.setSearchQuery('orders'))
-    await act(() => result.current.setLiveFilter('logs'))
 
     expect(onUrlUpdate).toHaveBeenLastCalledWith(
       expect.objectContaining({
         options: expect.objectContaining({ history: 'replace' }),
-        queryString: '?filter=logs&q=orders',
+        queryString: '?event=event-1&trace=trace-1&q=orders',
       })
     )
   })

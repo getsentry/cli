@@ -41,11 +41,8 @@ import {
 import { buildTraceGroups, traceIdForItem, type TraceGroup } from '@/lib/trace-model.ts'
 import { workspaceNavigation } from '@/lib/workspace-navigation.ts'
 import {
-  eventFilters,
   isErrorEvent,
-  matchesEventFilter,
   matchesSearch,
-  type EventFilter,
   type WorkspaceView,
   workspaceForItem,
 } from '@/lib/workspace.ts'
@@ -513,15 +510,10 @@ export default function App() {
   const commandTriggerRef = useRef<HTMLButtonElement>(null)
   const presentation = getConnectionPresentation(connection)
   const traces = useMemo(() => buildTraceGroups(items), [items])
-  const filter = workspaceQuery.filter
   const searchQuery = workspaceQuery.query
   const activeWorkspace = workspaceNavigation.find((entry) => entry.id === workspaceView)!
   const workspaceItems = activeWorkspace.getItems(telemetry)
-  const visibleItems =
-    workspaceView === 'live'
-      ? workspaceItems.filter((item) => matchesEventFilter(item, filter))
-      : workspaceItems
-  const searchedItems = visibleItems.filter((item) => matchesSearch(item, searchQuery))
+  const searchedItems = workspaceItems.filter((item) => matchesSearch(item, searchQuery))
   const workspaceEmptyState = searchQuery.trim()
     ? {
         title: `No matching ${activeWorkspace.singularLabel}s`,
@@ -542,7 +534,9 @@ export default function App() {
         ? items
         : items.slice(lastViewedIndex + 1)
   const newItems = unseenItems.filter(
-    (item) => matchesEventFilter(item, filter) && matchesSearch(item, searchQuery)
+    (item) =>
+      workspaceItems.some((workspaceItem) => workspaceItem.id === item.id) &&
+      matchesSearch(item, searchQuery)
   )
   const newItemCount = newItems.length
 
@@ -552,11 +546,6 @@ export default function App() {
 
   const selectItem = (id: string) => {
     void workspaceQuery.selectEvent(id)
-    markItemsSeen()
-  }
-
-  const selectFilter = (nextFilter: EventFilter) => {
-    void workspaceQuery.setLiveFilter(nextFilter)
     markItemsSeen()
   }
 
@@ -870,29 +859,6 @@ export default function App() {
                         {searchedItems.length} {activeWorkspace.singularLabel}{searchedItems.length === 1 ? '' : 's'}
                       </span>
                     </div>
-                    {workspaceView === 'live' ? <div className="mt-2 flex gap-1" aria-label="Filter events">
-                      {eventFilters.map((eventFilter) => {
-                        const count = items.filter((item) =>
-                          matchesEventFilter(item, eventFilter.id)
-                        ).length
-
-                        return (
-                          <button
-                            key={eventFilter.id}
-                            type="button"
-                            aria-pressed={filter === eventFilter.id}
-                            className={`px-1.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
-                              filter === eventFilter.id
-                                ? 'bg-muted font-medium text-foreground'
-                                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                            }`}
-                            onClick={() => selectFilter(eventFilter.id)}
-                          >
-                            {eventFilter.label} ({count})
-                          </button>
-                        )
-                      })}
-                    </div> : null}
                     {newItemCount > 0 ? (
                       <button
                         type="button"
