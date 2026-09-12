@@ -147,6 +147,10 @@ describe('local receiver to viewer integration', () => {
   beforeEach(() => {
     window.localStorage.clear()
     window.sessionStorage.clear()
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn(() => true),
+    })
     vi.stubGlobal('EventSource', NodeEventSource)
     vi.stubGlobal('matchMedia', () => ({
       matches: false,
@@ -205,7 +209,7 @@ describe('local receiver to viewer integration', () => {
       const code = screen.getByTestId('highlighted-json')
       expect(code.textContent).toContain('GET /live-2')
       fireEvent.click(screen.getByRole('button', { name: 'Copy JSON' }))
-      expect(screen.getByRole('status', { name: 'JSON copied' })).not.toBeNull()
+      expect(await screen.findByRole('status', { name: 'JSON copied' })).not.toBeNull()
       await waitFor(() => {
         expect(screen.getByTestId('highlighted-json').querySelector('.shiki')).not.toBeNull()
       })

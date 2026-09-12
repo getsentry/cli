@@ -22,6 +22,7 @@
     "@shikijs/langs": "^3.23.0",
     "@shikijs/themes": "^3.23.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@uidotdev/usehooks": "^2.4.1",
     "@vercel/analytics": "^2.0.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

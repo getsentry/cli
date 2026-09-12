@@ -1,5 +1,6 @@
 import { Check, Copy, LoaderCircle, Radio } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
+import { useCopyToClipboard } from '@uidotdev/usehooks'
 
 export type ConnectionLandingProps = {
   endpoint: string
@@ -7,7 +8,6 @@ export type ConnectionLandingProps = {
   isConnecting: boolean
   phase: 'probing' | 'failed' | 'editing'
   onConnect: () => void
-  onCopyCommand: () => void
   onEndpointChange: (value: string) => void
 }
 
@@ -18,10 +18,10 @@ export function ConnectionLanding({
   isConnecting,
   phase,
   onConnect,
-  onCopyCommand,
   onEndpointChange,
 }: ConnectionLandingProps) {
   const [copied, setCopied] = useState(false)
+  const [, copyToClipboard] = useCopyToClipboard()
   const isProbing = phase === 'probing'
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -95,7 +95,7 @@ export function ConnectionLanding({
             aria-label="Copy local serve command"
             className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={() => {
-              onCopyCommand()
+              void copyToClipboard('sentry local serve --open')
               setCopied(true)
             }}
           >

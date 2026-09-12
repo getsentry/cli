@@ -18,6 +18,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
+import { useCopyToClipboard, useLocalStorage } from '@uidotdev/usehooks'
 import { JsonView } from '@/components/json-view.tsx'
 import { ConnectionLanding } from '@/components/connection-landing.tsx'
 import {
@@ -33,7 +34,6 @@ import {
   type ConnectionPresentation,
   type ConnectionState,
 } from '@/lib/presentation.ts'
-import { copyText } from '@/lib/clipboard.ts'
 import {
   DEFAULT_STREAM_URL,
   decodeEnvelope,
@@ -137,22 +137,6 @@ function saveRemoteStreamUrl(streamUrl: string): void {
   }
 }
 
-function getSavedSidebarCollapsed(): boolean {
-  try {
-    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true'
-  } catch {
-    return false
-  }
-}
-
-function saveSidebarCollapsed(collapsed: boolean): void {
-  try {
-    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(collapsed))
-  } catch {
-    // Private browsing or browser policy can disable storage; the current tab still works.
-  }
-}
-
 function EventEntry({ item, isSelected, showTypeBadge, onSelect }: EventEntryProps) {
   const metadata = getMetadata(item)
   const duration = formatDuration(metadata.durationMs)
@@ -252,6 +236,7 @@ function WorkspaceEmptyState({
 function EventDetail({ item, trace }: EventDetailProps) {
   const [tab, setTab] = useState<DetailTab>('overview')
   const [copiedField, setCopiedField] = useState<string>()
+  const [, copyToClipboard] = useCopyToClipboard()
   const detailTabs: DetailTab[] = ['overview', 'json']
   const metadata = getMetadata(item)
   const duration = formatDuration(metadata.durationMs)
@@ -372,7 +357,7 @@ function EventDetail({ item, trace }: EventDetailProps) {
                                     aria-label={`Copy ${field.label}`}
                                     className="shrink-0 text-muted-foreground opacity-100 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
                                     onClick={() => {
-                                      copyText(field.value)
+                                      void copyToClipboard(field.value)
                                       setCopiedField(field.label)
                                     }}
                                   >
@@ -613,7 +598,10 @@ export default function App() {
   )
   const items = telemetry.items
   const [lastViewedItemId, setLastViewedItemId] = useState<string>()
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getSavedSidebarCollapsed)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useLocalStorage(
+    SIDEBAR_COLLAPSED_STORAGE_KEY,
+    false
+  )
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false)
   const [isCommandOpen, setIsCommandOpen] = useState(false)
   const [message, setMessage] = useState<string | undefined>()
@@ -838,13 +826,7 @@ export default function App() {
             onChangeReceiver={() => setIsEditingReceiver(true)}
             onOpenCommand={openCommand}
             onSelect={selectWorkspace}
-            onToggle={() =>
-              setIsSidebarCollapsed((collapsed) => {
-                const nextCollapsed = !collapsed
-                saveSidebarCollapsed(nextCollapsed)
-                return nextCollapsed
-              })
-            }
+            onToggle={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
           />
         ) : null}
         <div className="relative flex min-w-0 flex-1 flex-col">
@@ -946,7 +928,6 @@ export default function App() {
                 isConnecting={isConnecting}
                 onEndpointChange={setDraftEndpoint}
                 onConnect={connectToDraft}
-                onCopyCommand={() => copyText('sentry local serve --open')}
               />
             ) : items.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center border border-dashed border-border bg-muted/40 px-4 text-center">

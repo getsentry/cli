@@ -5,7 +5,7 @@ import githubDark from '@shikijs/themes/github-dark'
 import githubLight from '@shikijs/themes/github-light'
 import { Check, Copy } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { copyText } from '@/lib/clipboard.ts'
+import { useCopyToClipboard } from '@uidotdev/usehooks'
 
 type JsonViewProps = {
   code: string
@@ -28,8 +28,9 @@ function formatJson(code: string) {
 /** Render JSON with Shiki only after its containing event has been expanded. */
 export function JsonView({ code }: JsonViewProps) {
   const [html, setHtml] = useState<string>()
-  const [copied, setCopied] = useState(false)
+  const [copiedText, copyToClipboard] = useCopyToClipboard()
   const formattedCode = formatJson(code)
+  const copied = copiedText === code
 
   useEffect(() => {
     let disposed = false
@@ -60,8 +61,7 @@ export function JsonView({ code }: JsonViewProps) {
   }, [formattedCode])
 
   const copyJson = () => {
-    copyText(code)
-    setCopied(true)
+    void copyToClipboard(code)
   }
 
   const copyButton = (
