@@ -435,6 +435,26 @@ describe('local receiver to viewer integration', () => {
     expect(screen.getByLabelText('Receiver endpoint')).not.toBeNull()
   })
 
+  test('keeps workspace navigation visible while reconnecting', async () => {
+    ControllableEventSource.instances = []
+    vi.stubGlobal('EventSource', ControllableEventSource)
+    renderBareViewer()
+
+    const source = ControllableEventSource.instances[0]
+    expect(source).toBeDefined()
+    await act(async () => source?.onopen?.(new Event('open')))
+    await screen.findByText('Connected to local receiver')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change receiver connection' }))
+    fireEvent.change(screen.getByLabelText('Receiver endpoint'), {
+      target: { value: 'http://127.0.0.1:8970/stream' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+    expect(screen.getByLabelText('Workspace navigation')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Connecting to receiver' })).not.toBeNull()
+  })
+
   test('keeps a healthy receiver open after an invalid replacement endpoint', async () => {
     ControllableEventSource.instances = []
     vi.stubGlobal('EventSource', ControllableEventSource)
