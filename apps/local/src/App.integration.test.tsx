@@ -176,7 +176,7 @@ describe('local receiver to viewer integration', () => {
       const shell = screen.getByTestId('app-shell')
       expect(shell.className).not.toContain('px-')
       expect(shell.className).not.toContain('py-')
-      expect(screen.getByRole('banner').className).not.toContain('border-b')
+      expect(screen.queryByRole('banner')).toBeNull()
 
       await sendEnvelope(port, 'GET /live')
       await screen.findByLabelText('View transaction event')
@@ -212,6 +212,39 @@ describe('local receiver to viewer integration', () => {
       fireEvent.click(events[0]!)
       fireEvent.click(screen.getByRole('tab', { name: 'JSON' }))
       expect(screen.getByRole('button', { name: 'Copy JSON' }).textContent).toContain('Copy JSON')
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('keeps desktop utility controls in the sidebar dock', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /dock')
+      await screen.findByLabelText('View transaction event')
+
+      const sidebar = screen.getByLabelText('Workspace navigation')
+      expect(sidebar.querySelector('button[aria-label="Search events"]')).not.toBeNull()
+      expect(sidebar.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe(
+        'Connected to local receiver'
+      )
+      expect(screen.queryByRole('banner')).toBeNull()
+      expect(
+        new Set(
+          screen
+            .getAllByRole('button', { name: 'Receiver options' })
+            .map((button) => button.getAttribute('aria-controls'))
+        ).size
+      ).toBe(2)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+      expect(screen.getByRole('button', { name: 'Open live activity view' }).className).toContain(
+        'justify-center'
+      )
     } finally {
       cleanup()
       await stopReceiver(server)
@@ -601,7 +634,7 @@ describe('local receiver to viewer integration', () => {
       await waitFor(() => {
         expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
       })
-      fireEvent.click(screen.getByRole('button', { name: 'Search events' }))
+      fireEvent.click(screen.getAllByRole('button', { name: 'Search events' })[0]!)
       fireEvent.change(screen.getByPlaceholderText('Search events and views'), {
         target: { value: 'customers' },
       })
@@ -705,7 +738,7 @@ describe('local receiver to viewer integration', () => {
       await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
       await screen.findByLabelText('View event event')
 
-      fireEvent.click(screen.getByRole('button', { name: 'Search events' }))
+      fireEvent.click(screen.getAllByRole('button', { name: 'Search events' })[0]!)
       fireEvent.change(screen.getByPlaceholderText('Search events and views'), {
         target: { value: 'broken' },
       })
@@ -740,7 +773,7 @@ describe('local receiver to viewer integration', () => {
       await sendEnvelope(port, 'GET /clear-me')
       await screen.findByLabelText('View transaction event')
 
-      fireEvent.click(screen.getByRole('button', { name: 'Receiver options' }))
+      fireEvent.click(screen.getAllByRole('button', { name: 'Receiver options' })[0]!)
       fireEvent.click(screen.getByRole('button', { name: 'Clear all events' }))
 
       expect(screen.queryByLabelText('View transaction event')).toBeNull()

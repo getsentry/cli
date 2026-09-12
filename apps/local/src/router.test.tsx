@@ -27,6 +27,9 @@ describe('LocalRouter', () => {
   test('renders the compatible root route', async () => {
     render(<LocalRouter />)
 
-    expect((await screen.findAllByRole('heading', { name: 'Live Activity' })).length).toBeGreaterThan(0)
+    expect(
+      (await screen.findByRole('button', { name: 'Open live activity view' })).getAttribute('aria-current')
+    ).toBe('page')
+    expect(screen.queryByRole('banner')).toBeNull()
   })
 })

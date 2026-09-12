@@ -1,17 +1,26 @@
 import { ChevronDown, Moon, Sun, Trash2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useTheme } from 'next-themes'
 import type { ConnectionPresentation } from '@/lib/presentation.ts'
 
 type ReceiverControlsProps = {
+  compact?: boolean
   connection: ConnectionPresentation
   eventCount: number
   onClear: () => void
+  showStatusRole?: boolean
 }
 
 /** Status and viewer-only actions kept together without exposing receiver mutations. */
-export function ReceiverControls({ connection, eventCount, onClear }: ReceiverControlsProps) {
+export function ReceiverControls({
+  compact = false,
+  connection,
+  eventCount,
+  onClear,
+  showStatusRole = true,
+}: ReceiverControlsProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const menuId = useId()
   const rootRef = useRef<HTMLDivElement>(null)
   const { resolvedTheme, setTheme } = useTheme()
   const isDark = resolvedTheme === 'dark'
@@ -43,10 +52,30 @@ export function ReceiverControls({ connection, eventCount, onClear }: ReceiverCo
         : 'bg-muted-foreground'
 
   return (
-    <div ref={rootRef} className="relative flex shrink-0">
-      <div className="flex h-8 items-center overflow-hidden rounded-md border border-border bg-background shadow-xs">
+    <div ref={rootRef} className={`relative ${compact ? 'flex justify-center' : 'flex shrink-0'}`}>
+      {compact ? (
+        <button
+          type="button"
+          aria-label="Receiver options"
+          aria-expanded={isOpen}
+          aria-controls={menuId}
+          title={connection.label}
+          className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => setIsOpen((open) => !open)}
+        >
+          <span
+            {...(showStatusRole ? { role: 'status' } : {})}
+            aria-label={connection.label}
+            className="flex size-4 items-center justify-center"
+          >
+            <span className={`size-2 rounded-full ${dotClassName}`} />
+            {showStatusRole ? <span className="sr-only">{connection.label}</span> : null}
+          </span>
+        </button>
+      ) : (
+        <div className="flex h-8 items-center overflow-hidden rounded-md border border-border bg-background shadow-xs">
         <span
-          role="status"
+          {...(showStatusRole ? { role: 'status' } : {})}
           aria-label={connection.label}
           title={connection.label}
           className="flex h-full items-center gap-2 px-2.5"
@@ -55,24 +84,27 @@ export function ReceiverControls({ connection, eventCount, onClear }: ReceiverCo
           <span className="hidden text-xs font-medium text-muted-foreground sm:inline">
             {connection.label.replace(' to local receiver', '')}
           </span>
-          <span className="sr-only">{connection.label}</span>
+          {showStatusRole ? <span className="sr-only">{connection.label}</span> : null}
         </span>
         <button
           type="button"
           aria-label="Receiver options"
           aria-expanded={isOpen}
-          aria-controls="receiver-options"
+          aria-controls={menuId}
           className="flex h-full w-8 items-center justify-center border-l border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
           onClick={() => setIsOpen((open) => !open)}
         >
           <ChevronDown className={`size-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
         </button>
-      </div>
+        </div>
+      )}
       {isOpen ? (
         <div
-          id="receiver-options"
+          id={menuId}
           aria-label="Receiver options"
-          className="absolute top-10 right-0 z-10 w-48 border border-border bg-background p-1 text-foreground shadow-lg"
+          className={`absolute z-10 w-48 border border-border bg-background p-1 text-foreground shadow-lg ${
+            compact ? 'bottom-10 left-0' : 'top-10 right-0'
+          }`}
         >
           <button
             type="button"

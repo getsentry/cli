@@ -20,6 +20,7 @@ import { TraceWaterfall } from '@/components/trace-waterfall.tsx'
 import { Badge } from '@/components/ui/badge.tsx'
 import {
   getConnectionPresentation,
+  type ConnectionPresentation,
   type ConnectionState,
 } from '@/lib/presentation.ts'
 import { copyText } from '@/lib/clipboard.ts'
@@ -382,18 +383,28 @@ function EventDetail({ item, trace }: EventDetailProps) {
 
 type WorkspaceSidebarProps = {
   activeView: WorkspaceView
+  canSearch: boolean
   collapsed: boolean
+  connection: ConnectionPresentation
+  eventCount: number
   snapshot: LocalTelemetrySnapshot
   traceCount: number
+  onClear: () => void
+  onOpenCommand: (trigger: HTMLButtonElement) => void
   onSelect: (view: WorkspaceView) => void
   onToggle: () => void
 }
 
 function WorkspaceSidebar({
   activeView,
+  canSearch,
   collapsed,
+  connection,
+  eventCount,
   snapshot,
   traceCount,
+  onClear,
+  onOpenCommand,
   onSelect,
   onToggle,
 }: WorkspaceSidebarProps) {
@@ -453,7 +464,9 @@ function WorkspaceSidebar({
                   aria-label={`Open ${entry.label.toLowerCase()} view`}
                   aria-current={active ? 'page' : undefined}
                   title={collapsed ? entry.label : undefined}
-                  className={`flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  className={`flex h-8 w-full items-center rounded-md text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    collapsed ? 'justify-center px-0' : 'gap-2 px-2 text-left'
+                  } ${
                     active
                       ? 'bg-primary/10 font-medium text-primary'
                       : 'text-muted-foreground hover:bg-muted hover:text-foreground'
@@ -473,6 +486,33 @@ function WorkspaceSidebar({
           </div>
         ))}
       </nav>
+      <div className="shrink-0 space-y-1 border-t border-border p-2">
+        {canSearch ? (
+          <button
+            type="button"
+            aria-label="Search events"
+            title={collapsed ? 'Search events and views (⌘K)' : undefined}
+            className={`flex h-8 w-full items-center rounded-md text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              collapsed ? 'justify-center px-0' : 'gap-2 px-2 text-left'
+            }`}
+            onClick={(event) => onOpenCommand(event.currentTarget)}
+          >
+            <Search className="size-4 shrink-0" aria-hidden="true" />
+            {!collapsed ? (
+              <>
+                <span className="min-w-0 flex-1 truncate">Search events and views</span>
+                <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
+              </>
+            ) : null}
+          </button>
+        ) : null}
+        <ReceiverControls
+          compact={collapsed}
+          connection={connection}
+          eventCount={eventCount}
+          onClear={onClear}
+        />
+      </div>
     </aside>
   )
 }
@@ -703,6 +743,10 @@ export default function App() {
   const commandNavigation: CommandNavigationItem[] = workspaceNavigation.map(
     ({ icon, id, label }) => ({ icon, id, label })
   )
+  const openCommand = (trigger: HTMLButtonElement) => {
+    commandTriggerRef.current = trigger
+    setIsCommandOpen(true)
+  }
 
   return (
     <main className="h-dvh overflow-hidden bg-background">
@@ -713,27 +757,21 @@ export default function App() {
         {!isReceiverUnavailable ? (
           <WorkspaceSidebar
             activeView={workspaceView}
+            canSearch={canSearch}
             collapsed={isSidebarCollapsed}
+            connection={presentation}
+            eventCount={items.length}
             snapshot={telemetry}
             traceCount={traces.length}
+            onClear={clearItems}
+            onOpenCommand={openCommand}
             onSelect={selectWorkspace}
             onToggle={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
           />
         ) : null}
         <div className="relative flex min-w-0 flex-1 flex-col">
-          <header className="flex h-11 shrink-0 items-center gap-3 px-3 sm:px-4">
-            {!isReceiverUnavailable ? (
-              <button
-                type="button"
-                aria-label="Open navigation"
-                aria-expanded={isMobileNavigationOpen}
-                className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
-                onClick={() => setIsMobileNavigationOpen((open) => !open)}
-              >
-                <Menu className="size-4" />
-              </button>
-            ) : null}
-            {isReceiverUnavailable ? (
+          {isReceiverUnavailable ? (
+            <header className="flex h-11 shrink-0 items-center px-3 sm:px-4">
               <div className="flex min-w-0 flex-1 items-center" aria-label="Sentry CLI">
                 <img
                   className="h-5 w-auto dark:hidden"
@@ -750,31 +788,37 @@ export default function App() {
                   height="20"
                 />
               </div>
-            ) : (
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-muted-foreground">Sentry Local</p>
-                <h1 className="truncate text-sm font-semibold">
-                  {showConnectionLanding ? 'Receiver setup' : activeWorkspace.label}
-                </h1>
-              </div>
-            )}
-            {canSearch ? (
+            </header>
+          ) : (
+            <div className="flex h-11 shrink-0 items-center gap-2 px-3 md:hidden">
               <button
-                ref={commandTriggerRef}
                 type="button"
-                aria-label="Search events"
-                className="flex h-8 min-w-0 max-w-lg flex-1 items-center gap-2 border border-border bg-muted/30 px-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
-                onClick={() => setIsCommandOpen(true)}
+                aria-label="Open navigation"
+                aria-expanded={isMobileNavigationOpen}
+                className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setIsMobileNavigationOpen((open) => !open)}
               >
-                <Search className="size-3.5 shrink-0" aria-hidden="true" />
-                <span className="min-w-0 flex-1 truncate">Search events and views</span>
-                <kbd className="hidden rounded border border-border px-1.5 py-0.5 font-mono text-[10px] sm:inline-block">
-                  ⌘K
-                </kbd>
+                <Menu className="size-4" />
               </button>
-            ) : null}
-            <ReceiverControls connection={presentation} eventCount={items.length} onClear={clearItems} />
-          </header>
+              {canSearch ? (
+                <button
+                  type="button"
+                  aria-label="Search events"
+                  className="flex h-8 min-w-0 flex-1 items-center gap-2 border border-border bg-muted/30 px-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                  onClick={(event) => openCommand(event.currentTarget)}
+                >
+                  <Search className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate">Search events and views</span>
+                </button>
+              ) : <span className="flex-1" />}
+              <ReceiverControls
+                connection={presentation}
+                eventCount={items.length}
+                onClear={clearItems}
+                showStatusRole={false}
+              />
+            </div>
+          )}
 
           {!isReceiverUnavailable && isMobileNavigationOpen ? (
           <div className="absolute top-11 z-20 w-full border-b border-border bg-background p-2 shadow-lg md:hidden">
