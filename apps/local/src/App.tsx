@@ -67,6 +67,7 @@ type EventEntryProps = {
 }
 
 const CONNECTION_TIMEOUT_MS = 10_000
+const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sentry.local.sidebar-collapsed'
 
 function formatTimestamp(timestamp: LocalFeedItem['timestamp']): string {
   if (timestamp === undefined) {
@@ -133,6 +134,22 @@ function saveRemoteStreamUrl(streamUrl: string): void {
     window.sessionStorage.setItem(REMOTE_STREAM_STORAGE_KEY, streamUrl)
   } catch {
     // Browser policies can disable storage; the active tab still works.
+  }
+}
+
+function getSavedSidebarCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function saveSidebarCollapsed(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(collapsed))
+  } catch {
+    // Private browsing or browser policy can disable storage; the current tab still works.
   }
 }
 
@@ -596,7 +613,7 @@ export default function App() {
   )
   const items = telemetry.items
   const [lastViewedItemId, setLastViewedItemId] = useState<string>()
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getSavedSidebarCollapsed)
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false)
   const [isCommandOpen, setIsCommandOpen] = useState(false)
   const [message, setMessage] = useState<string | undefined>()
@@ -821,7 +838,13 @@ export default function App() {
             onChangeReceiver={() => setIsEditingReceiver(true)}
             onOpenCommand={openCommand}
             onSelect={selectWorkspace}
-            onToggle={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+            onToggle={() =>
+              setIsSidebarCollapsed((collapsed) => {
+                const nextCollapsed = !collapsed
+                saveSidebarCollapsed(nextCollapsed)
+                return nextCollapsed
+              })
+            }
           />
         ) : null}
         <div className="relative flex min-w-0 flex-1 flex-col">

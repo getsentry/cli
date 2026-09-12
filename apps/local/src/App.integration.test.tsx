@@ -570,6 +570,26 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
+  test('restores the collapsed sidebar after a refresh', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+
+      expect(window.localStorage.getItem('sentry.local.sidebar-collapsed')).toBe('true')
+
+      cleanup()
+      renderViewer(port)
+
+      expect(await screen.findByRole('button', { name: 'Expand sidebar' })).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
   test('keeps raw received envelopes available outside the live event feed', async () => {
     const { server, port } = await startReceiver()
 
