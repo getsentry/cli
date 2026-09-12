@@ -97,6 +97,8 @@ const eventFilters: { id: EventFilter; label: string }[] = [
   { id: 'logs', label: 'Logs' },
 ]
 
+const CONNECTION_TIMEOUT_MS = 10_000
+
 function matchesEventFilter(item: LocalFeedItem, filter: EventFilter): boolean {
   if (filter === 'all') {
     return true
@@ -546,6 +548,7 @@ export default function App() {
   const [draftEndpoint, setDraftEndpoint] = useState(streamUrl)
   const [isEditingReceiver, setIsEditingReceiver] = useState(false)
   const [isConnectionEnabled, setIsConnectionEnabled] = useState(true)
+  const [isConnecting, setIsConnecting] = useState(false)
   const [connectionError, setConnectionError] = useState<string>()
   const [telemetryStore] = useState(() => createLocalTelemetryStore())
   const telemetry = useSyncExternalStore(
@@ -656,6 +659,7 @@ export default function App() {
     setDraftEndpoint(endpoint.url)
     setStreamUrl(endpoint.url)
     setIsConnectionEnabled(true)
+    setIsConnecting(true)
     setConnection('connecting')
     setConnectionError(undefined)
     setIsEditingReceiver(false)
@@ -674,6 +678,17 @@ export default function App() {
 
     let isCurrent = true
     const source = new EventSource(streamUrl)
+    const timeoutId = window.setTimeout(() => {
+      if (!isCurrent) {
+        return
+      }
+      isCurrent = false
+      source.close()
+      setIsConnectionEnabled(false)
+      setIsConnecting(false)
+      setConnection('failed')
+      setConnectionError('Connection timed out after 10 seconds. Check the endpoint and try again.')
+    }, CONNECTION_TIMEOUT_MS)
     const onEnvelope = (event: Event) => {
       if (!isCurrent) {
         return
@@ -702,6 +717,8 @@ export default function App() {
       if (!isCurrent) {
         return
       }
+      window.clearTimeout(timeoutId)
+      setIsConnecting(false)
       const endpoint = parseStreamEndpoint(streamUrl)
       if (endpoint?.kind === 'loopback') {
         saveStreamUrl(endpoint.url)
@@ -716,6 +733,11 @@ export default function App() {
       if (!isCurrent) {
         return
       }
+      window.clearTimeout(timeoutId)
+      isCurrent = false
+      source.close()
+      setIsConnectionEnabled(false)
+      setIsConnecting(false)
       setConnection('failed')
       setConnectionError(
         streamUrl === DEFAULT_STREAM_URL
@@ -726,6 +748,7 @@ export default function App() {
 
     return () => {
       isCurrent = false
+      window.clearTimeout(timeoutId)
       source.removeEventListener(SENTRY_ENVELOPE_EVENT, onEnvelope)
       source.close()
     }
@@ -851,6 +874,7 @@ export default function App() {
                 phase={connection === 'connecting' ? 'probing' : connection === 'failed' ? 'failed' : 'editing'}
                 endpoint={draftEndpoint}
                 error={connectionError}
+                isConnecting={isConnecting}
                 onEndpointChange={setDraftEndpoint}
                 onConnect={connectToDraft}
                 onCopyCommand={() => copyText('sentry local serve --open')}

@@ -215,7 +215,9 @@ describe('local receiver to viewer integration', () => {
     expect(screen.queryByText('Advanced connection')).toBeNull()
     const endpoint = screen.getByLabelText('Receiver endpoint') as HTMLInputElement
     expect(endpoint.value).toBe('http://localhost:8969/stream')
-    expect(screen.getByRole('button', { name: 'Connect' })).not.toBeNull()
+    const connectButton = screen.getByRole('button', { name: 'Connect' }) as HTMLButtonElement
+    expect(connectButton.disabled).toBe(false)
+    expect(connectButton.getAttribute('aria-busy')).toBe('false')
     expect(screen.getByText('Defaults to your local receiver. You can paste another local or HTTPS stream above.')).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Copy local serve command' })).not.toBeNull()
   })
@@ -318,6 +320,43 @@ describe('local receiver to viewer integration', () => {
     expect(screen.getByRole('alert').textContent).toContain(
       'Enter a loopback stream or an HTTPS remote stream'
     )
+  })
+
+  test('stops an unanswered receiver attempt after ten seconds', async () => {
+    ControllableEventSource.instances = []
+    vi.stubGlobal('EventSource', ControllableEventSource)
+    vi.useFakeTimers()
+
+    try {
+      renderBareViewer()
+
+      const initialSource = ControllableEventSource.instances[0]
+      expect(initialSource).toBeDefined()
+      await act(async () => initialSource?.onerror?.(new Event('error')))
+      fireEvent.change(screen.getByLabelText('Receiver endpoint'), {
+        target: { value: 'http://127.0.0.1:8970/stream' },
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+      const source = ControllableEventSource.instances[1]
+      expect(source).toBeDefined()
+      const connectingButton = screen.getByRole('button', { name: 'Connecting to receiver' }) as HTMLButtonElement
+      expect(connectingButton.disabled).toBe(true)
+      expect(connectingButton.getAttribute('aria-busy')).toBe('true')
+
+      await act(async () => {
+        vi.advanceTimersByTime(10_000)
+      })
+
+      expect(source?.closed).toBe(true)
+      expect(screen.getByRole('alert', { name: 'Receiver connection error' }).textContent).toContain(
+        'Connection timed out after 10 seconds'
+      )
+      expect((screen.getByRole('button', { name: 'Connect' }) as HTMLButtonElement).disabled).toBe(false)
+    } finally {
+      cleanup()
+      vi.useRealTimers()
+    }
   })
 
   test('keeps receiver selection open when an event arrives during editing', async () => {

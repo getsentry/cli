@@ -1,9 +1,10 @@
-import { Check, Copy, Radio } from 'lucide-react'
+import { Check, Copy, LoaderCircle, Radio } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 
 export type ConnectionLandingProps = {
   endpoint: string
   error?: string
+  isConnecting: boolean
   phase: 'probing' | 'failed' | 'editing'
   onConnect: () => void
   onCopyCommand: () => void
@@ -14,6 +15,7 @@ export type ConnectionLandingProps = {
 export function ConnectionLanding({
   endpoint,
   error,
+  isConnecting,
   phase,
   onConnect,
   onCopyCommand,
@@ -24,6 +26,9 @@ export function ConnectionLanding({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (isConnecting) {
+      return
+    }
     onConnect()
   }
 
@@ -66,8 +71,15 @@ export function ConnectionLanding({
               onChange={(event) => onEndpointChange(event.target.value)}
               className="h-9 min-w-0 flex-1 border border-border bg-background px-3 font-mono text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
             />
-            <button type="submit" className="h-9 shrink-0 bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              Connect
+            <button
+              type="submit"
+              disabled={isConnecting}
+              aria-busy={isConnecting}
+              aria-label={isConnecting ? 'Connecting to receiver' : 'Connect'}
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isConnecting ? <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}
+              {isConnecting ? 'Connecting' : 'Connect'}
             </button>
           </div>
         </form>
