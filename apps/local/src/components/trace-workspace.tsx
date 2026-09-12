@@ -47,16 +47,16 @@ export function TraceWorkspace({
     <div className="flex min-h-0 flex-1 overflow-hidden">
       <aside
         aria-label="Trace list"
-        className="flex w-[min(100%,25rem)] shrink-0 flex-col border-r border-border bg-card"
+        className="flex min-h-0 w-80 shrink-0 flex-col border-r border-border bg-muted/30"
       >
-        <header className="flex items-center justify-between border-b border-border px-4 py-3">
+        <header className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
           <h2 id="trace-list-heading" className="text-sm font-semibold text-foreground">Traces</h2>
           <span className="font-mono text-xs text-muted-foreground">
             {traces.length} trace{traces.length === 1 ? '' : 's'}
           </span>
         </header>
 
-        <ol className="min-h-0 overflow-y-auto p-2" aria-labelledby="trace-list-heading">
+        <ol className="min-h-0 flex-1 space-y-px overflow-y-auto" aria-labelledby="trace-list-heading">
           {traces.map((trace) => {
             const isSelected = trace.id === selectedTrace.id;
 
@@ -66,24 +66,24 @@ export function TraceWorkspace({
                   type="button"
                   aria-current={isSelected ? 'true' : undefined}
                   aria-label={`View trace ${trace.title}`}
-                  className={`w-full rounded-md px-3 py-2.5 text-left transition-colors ${
+                  className={`flex w-full items-center justify-between gap-3 px-2 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
                     isSelected
-                      ? 'bg-primary/10 text-foreground'
-                      : 'text-foreground hover:bg-muted/70'
+                      ? 'bg-muted text-foreground'
+                      : 'text-foreground hover:bg-muted/60'
                   }`}
                   onClick={() => onSelect(trace.id)}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="min-w-0 truncate text-sm font-medium">{trace.title}</span>
-                    <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                      {formatDuration(trace.durationMs)}
-                    </span>
+                  <div className="min-w-0 space-y-1">
+                    <span className="block truncate font-mono text-sm">{trace.title}</span>
+                    <div className="flex gap-2 text-xs text-muted-foreground">
+                      <span>{trace.spans.length} spans</span>
+                      {trace.errorCount > 0 ? <span className="text-red-500 dark:text-red-400">{trace.errorCount} errors</span> : null}
+                      {trace.logCount > 0 ? <span>{trace.logCount} logs</span> : null}
+                    </div>
                   </div>
-                  <div className="mt-1 flex gap-2 font-mono text-[11px] text-muted-foreground">
-                    <span>{trace.spans.length} spans</span>
-                    {trace.errorCount > 0 ? <span>{trace.errorCount} errors</span> : null}
-                    {trace.logCount > 0 ? <span>{trace.logCount} logs</span> : null}
-                  </div>
+                  <span className="shrink-0 font-mono text-sm text-muted-foreground">
+                    {formatDuration(trace.durationMs)}
+                  </span>
                 </button>
               </li>
             );
@@ -91,7 +91,7 @@ export function TraceWorkspace({
         </ol>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-auto p-4 md:p-6">
+      <div className="min-w-0 flex-1 overflow-auto bg-card">
         <TraceWaterfall trace={selectedTrace} />
       </div>
     </div>

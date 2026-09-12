@@ -765,7 +765,17 @@ describe('local receiver to viewer integration', () => {
 
       expect((await screen.findAllByRole('heading', { name: 'Traces' })).length).toBeGreaterThan(0)
       expect(screen.getByText('1 trace')).not.toBeNull()
-      expect(screen.getByRole('region', { name: 'Trace waterfall' })).not.toBeNull()
+      const traceList = screen.getByLabelText('Trace list')
+      expect(traceList.className).toContain('w-80')
+      expect(traceList.className).toContain('bg-muted/30')
+
+      const traceRow = screen.getByRole('button', { name: 'View trace GET /trace-parent' })
+      expect(traceRow.className).toContain('px-2')
+      expect(traceRow.className).toContain('py-2')
+      expect(traceRow.className).not.toContain('rounded-md')
+
+      const waterfall = screen.getByRole('region', { name: 'Trace waterfall' })
+      expect(waterfall.parentElement?.className).not.toContain('p-4')
     } finally {
       cleanup()
       await stopReceiver(server)
