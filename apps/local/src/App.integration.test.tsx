@@ -615,6 +615,82 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
+  test('offers new raw envelopes after the Envelopes view has been read', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /first-envelope')
+      await screen.findByLabelText('View transaction event')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open envelopes view' }))
+      fireEvent.click(await screen.findByLabelText('View envelope event'))
+      await sendEnvelope(port, 'GET /second-envelope')
+
+      expect(await screen.findByRole('button', { name: 'View 1 new envelope' })).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('enables clearing when only raw envelopes are retained', async () => {
+    ControllableEventSource.instances = []
+    vi.stubGlobal('EventSource', ControllableEventSource)
+    renderBareViewer()
+
+    const source = ControllableEventSource.instances[0]
+    expect(source).toBeDefined()
+    await act(async () => source?.onopen?.(new Event('open')))
+    await screen.findByText('Connected to local receiver')
+
+    await act(async () => {
+      source?.dispatchEvent(
+        new MessageEvent(SENTRY_CONTENT_TYPE, {
+          data: JSON.stringify([{}, []]),
+          lastEventId: 'raw-only-envelope',
+        })
+      )
+    })
+
+    const clearButton = screen.getByRole('button', { name: 'Clear events' }) as HTMLButtonElement
+    await waitFor(() => expect(clearButton.disabled).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: 'Open envelopes view' }))
+    expect(await screen.findByLabelText('View envelope event')).not.toBeNull()
+    fireEvent.click(clearButton)
+
+    await waitFor(() => expect(clearButton.disabled).toBe(true))
+  })
+
+  test('keeps retained raw envelopes accessible after the receiver fails', async () => {
+    ControllableEventSource.instances = []
+    vi.stubGlobal('EventSource', ControllableEventSource)
+    renderBareViewer()
+
+    const source = ControllableEventSource.instances[0]
+    expect(source).toBeDefined()
+    await act(async () => source?.onopen?.(new Event('open')))
+    await screen.findByText('Connected to local receiver')
+
+    await act(async () => {
+      source?.dispatchEvent(
+        new MessageEvent(SENTRY_CONTENT_TYPE, {
+          data: JSON.stringify([{}, []]),
+          lastEventId: 'raw-envelope-before-failure',
+        })
+      )
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Open envelopes view' }))
+    fireEvent.click(await screen.findByLabelText('View envelope event'))
+
+    await act(async () => source?.onerror?.(new Event('error')))
+
+    expect(screen.getByLabelText('Workspace navigation')).not.toBeNull()
+    expect(screen.getByRole('heading', { name: 'Raw envelope' })).not.toBeNull()
+    expect(screen.queryByLabelText('Receiver endpoint')).toBeNull()
+  })
+
   test('omits redundant type pills from dedicated Errors and Envelopes lists', async () => {
     const { server, port } = await startReceiver()
 

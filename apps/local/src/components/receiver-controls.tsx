@@ -6,7 +6,7 @@ import type { ConnectionPresentation } from '@/lib/presentation.ts'
 type ReceiverControlsProps = {
   compact?: boolean
   connection: ConnectionPresentation
-  eventCount: number
+  retainedItemCount: number
   onClear: () => void
   showStatusRole?: boolean
 }
@@ -15,7 +15,7 @@ type ReceiverControlsProps = {
 export function ReceiverControls({
   compact = false,
   connection,
-  eventCount,
+  retainedItemCount,
   onClear,
   showStatusRole = true,
 }: ReceiverControlsProps) {
@@ -119,7 +119,7 @@ export function ReceiverControls({
           </button>
           <button
             type="button"
-            disabled={eventCount === 0}
+            disabled={retainedItemCount === 0}
             className="flex w-full items-center gap-2 px-2 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
             onClick={() => {
               onClear()

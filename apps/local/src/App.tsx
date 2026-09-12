@@ -399,7 +399,7 @@ type WorkspaceSidebarProps = {
   canSearch: boolean
   collapsed: boolean
   connection: ConnectionPresentation
-  eventCount: number
+  retainedItemCount: number
   snapshot: LocalTelemetrySnapshot
   traceCount: number
   onClear: () => void
@@ -414,7 +414,7 @@ function WorkspaceSidebar({
   canSearch,
   collapsed,
   connection,
-  eventCount,
+  retainedItemCount,
   snapshot,
   traceCount,
   onClear,
@@ -559,7 +559,7 @@ function WorkspaceSidebar({
             type="button"
             aria-label="Clear events"
             title={collapsed ? 'Clear events' : undefined}
-            disabled={eventCount === 0}
+            disabled={retainedItemCount === 0}
             className={`flex h-8 w-full items-center rounded-md text-xs font-medium text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
               collapsed ? 'justify-center px-0' : 'justify-center gap-1.5 px-2'
             }`}
@@ -601,7 +601,9 @@ export default function App() {
     telemetryStore.getSnapshot
   )
   const items = telemetry.items
-  const [lastViewedItemId, setLastViewedItemId] = useState<string>()
+  const [lastViewedItemIds, setLastViewedItemIds] = useState<
+    Partial<Record<WorkspaceView, string>>
+  >({})
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useLocalStorage(
     SIDEBAR_COLLAPSED_STORAGE_KEY,
     false
@@ -616,6 +618,8 @@ export default function App() {
   const searchQuery = workspaceQuery.query
   const activeWorkspace = workspaceNavigation.find((entry) => entry.id === workspaceView)!
   const workspaceItems = activeWorkspace.getItems(telemetry)
+  const hasRetainedItems = items.length > 0 || telemetry.envelopes.length > 0
+  const retainedItemCount = items.length + telemetry.envelopes.length
   const searchedItems = workspaceItems.filter((item) => matchesSearch(item, searchQuery))
   const workspaceEmptyState = searchQuery.trim()
     ? {
@@ -627,20 +631,17 @@ export default function App() {
   const selectedEventTrace = selectedItem?.metadata?.traceId
     ? traces.find((trace) => trace.id === selectedItem.metadata?.traceId)
     : undefined
+  const lastViewedItemId = lastViewedItemIds[workspaceView]
   const lastViewedIndex = lastViewedItemId
-    ? items.findIndex((item) => item.id === lastViewedItemId)
+    ? workspaceItems.findIndex((item) => item.id === lastViewedItemId)
     : -1
   const unseenItems =
     lastViewedItemId === undefined
       ? []
       : lastViewedIndex === -1
-        ? items
-        : items.slice(lastViewedIndex + 1)
-  const newItems = unseenItems.filter(
-    (item) =>
-      workspaceItems.some((workspaceItem) => workspaceItem.id === item.id) &&
-      matchesSearch(item, searchQuery)
-  )
+        ? workspaceItems
+        : workspaceItems.slice(lastViewedIndex + 1)
+  const newItems = unseenItems.filter((item) => matchesSearch(item, searchQuery))
   const newItemCount = newItems.length
 
   useEffect(() => {
@@ -655,8 +656,12 @@ export default function App() {
     }
   }, [commandSearchQuery, debouncedCommandSearchQuery, searchQuery, workspaceQuery])
 
-  const markItemsSeen = () => {
-    setLastViewedItemId(items.at(-1)?.id)
+  const markItemsSeen = (view = workspaceView) => {
+    const viewedItems = workspaceNavigation.find((entry) => entry.id === view)!.getItems(telemetry)
+    setLastViewedItemIds((itemIds) => ({
+      ...itemIds,
+      [view]: viewedItems.at(-1)?.id,
+    }))
   }
 
   const selectItem = (id: string) => {
@@ -668,7 +673,7 @@ export default function App() {
     navigateToWorkspace(nextWorkspace)
     void workspaceQuery.resetWorkspace()
     setIsMobileNavigationOpen(false)
-    markItemsSeen()
+    markItemsSeen(nextWorkspace)
   }
 
   const selectCommandItem = (item: LocalFeedItem) => {
@@ -681,12 +686,12 @@ export default function App() {
     } else {
       navigateToCommandEvent(nextWorkspace, item.id)
     }
-    markItemsSeen()
+    markItemsSeen(nextWorkspace)
   }
 
   const clearItems = () => {
     telemetryStore.clear()
-    setLastViewedItemId(undefined)
+    setLastViewedItemIds({})
     void workspaceQuery.clearWorkspace()
 
     const endpoint = parseStreamEndpoint(streamUrl)
@@ -811,8 +816,9 @@ export default function App() {
 
   const showConnectionLanding =
     isEditingReceiver ||
-    (items.length === 0 && (connection === 'connecting' || connection === 'failed'))
-  const isReceiverUnavailable = connection !== 'connected' && !isConnecting
+    (!hasRetainedItems && (connection === 'connecting' || connection === 'failed'))
+  const isReceiverUnavailable =
+    connection !== 'connected' && !isConnecting && !hasRetainedItems
   const canSearch =
     connection === 'connected' &&
     items.length > 0 &&
@@ -843,7 +849,7 @@ export default function App() {
             canSearch={canSearch}
             collapsed={isSidebarCollapsed}
             connection={presentation}
-            eventCount={items.length}
+            retainedItemCount={retainedItemCount}
             snapshot={telemetry}
             traceCount={traces.length}
             onClear={clearItems}
@@ -897,7 +903,7 @@ export default function App() {
               ) : <span className="flex-1" />}
               <ReceiverControls
                 connection={presentation}
-                eventCount={items.length}
+                retainedItemCount={retainedItemCount}
                 onClear={clearItems}
                 showStatusRole={false}
               />
@@ -933,7 +939,7 @@ export default function App() {
         <div className="flex min-h-0 flex-1">
           <section className="flex min-h-0 flex-1 flex-col" aria-label="Local Sentry events">
 
-            {connectionError && connection === 'failed' && items.length > 0 ? (
+            {connectionError && connection === 'failed' && hasRetainedItems ? (
               <div role="alert" className="shrink-0 border-b border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
                 {connectionError}
               </div>
@@ -953,7 +959,7 @@ export default function App() {
                 onEndpointChange={setDraftEndpoint}
                 onConnect={connectToDraft}
               />
-            ) : items.length === 0 ? (
+            ) : !hasRetainedItems ? (
               <div className="flex flex-1 flex-col items-center justify-center border border-dashed border-border bg-muted/40 px-4 text-center">
                 <Terminal className="mb-3 size-5 text-primary" aria-hidden="true" />
                 <p className="font-medium">Waiting for events</p>
@@ -997,7 +1003,8 @@ export default function App() {
                           }
                         }}
                       >
-                        View {newItemCount} new event{newItemCount === 1 ? '' : 's'}
+                        View {newItemCount} new {activeWorkspace.singularLabel}
+                        {newItemCount === 1 ? '' : 's'}
                       </button>
                     ) : null}
                   </div>
