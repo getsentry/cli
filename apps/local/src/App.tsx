@@ -558,11 +558,6 @@ function WorkspaceSidebar({
           </div>
         ))}
       </nav>
-      {!collapsed ? (
-        <p className="border-t border-border px-3 py-2 text-xs leading-4 text-muted-foreground">
-          Session-only telemetry. Nothing is stored after the receiver stops.
-        </p>
-      ) : null}
     </aside>
   )
 }
