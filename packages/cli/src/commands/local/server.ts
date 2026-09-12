@@ -127,6 +127,8 @@ export function parsePort(value: string): number {
 /** Match localhost origins on any port (http or https), including IPv6. */
 const LOCALHOST_ORIGIN_RE =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+const LOCAL_UI_ORIGIN = "https://local.sentry.dev";
+const LOCAL_UI_PREVIEW_HOST_RE = /^sentry-local-git-[a-z0-9-]+\.sentry\.dev$/;
 
 export function isLoopbackHost(host: string): boolean {
   const normalized = host.replace(/^\[|\]$/g, "").toLowerCase();
@@ -152,7 +154,12 @@ function isHostedUiOrigin(origin: string | undefined): origin is string {
   }
 
   const url = new URL(origin);
-  return url.protocol === "https:" && url.hostname.endsWith(".sentry.dev");
+  return (
+    origin === url.origin &&
+    url.protocol === "https:" &&
+    (url.origin === LOCAL_UI_ORIGIN ||
+      LOCAL_UI_PREVIEW_HOST_RE.test(url.hostname))
+  );
 }
 
 function isHostedUiStreamRequest(request: {

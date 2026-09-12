@@ -446,7 +446,7 @@ describe("buildApp", () => {
     }
   });
 
-  test("CORS allows HTTPS Sentry preview subdomains to read the event stream", async () => {
+  test("CORS allows HTTPS Sentry Local preview branches to read the event stream", async () => {
     const buffer = createSpotlightBuffer(10);
     const app = buildApp(buffer);
     const origin = "https://sentry-local-git-feature-branch.sentry.dev";
@@ -456,6 +456,20 @@ describe("buildApp", () => {
     });
 
     expect(res.headers.get("access-control-allow-origin")).toBe(origin);
+    if (res.body) {
+      await res.body.cancel();
+    }
+  });
+
+  test("CORS blocks unrelated Sentry-hosted origins from reading the event stream", async () => {
+    const buffer = createSpotlightBuffer(10);
+    const app = buildApp(buffer);
+
+    const res = await app.request("/stream", {
+      headers: { Origin: "https://cli.sentry.dev" },
+    });
+
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
     if (res.body) {
       await res.body.cancel();
     }
