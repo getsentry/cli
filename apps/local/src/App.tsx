@@ -16,6 +16,7 @@ import {
   Check,
   Copy,
 } from 'lucide-react'
+import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs'
 import {
   Fragment,
   type KeyboardEvent,
@@ -25,8 +26,13 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
+import { useLocation, useNavigate } from 'react-router'
 import { JsonView } from '@/components/json-view.tsx'
 import { ConnectionLanding } from '@/components/connection-landing.tsx'
+import {
+  EventCommandDialog,
+  type CommandNavigationItem,
+} from '@/components/event-command-dialog.tsx'
 import { ReceiverControls } from '@/components/receiver-controls.tsx'
 import { TraceWorkspace } from '@/components/trace-workspace.tsx'
 import { TraceWaterfall } from '@/components/trace-waterfall.tsx'
@@ -52,25 +58,24 @@ import {
   type LocalTelemetrySnapshot,
 } from '@/lib/telemetry-store.ts'
 import { buildTraceGroups, type TraceGroup } from '@/lib/trace-model.ts'
+import {
+  eventFilters,
+  eventFilterValues,
+  isErrorEvent,
+  matchesEventFilter,
+  matchesSearch,
+  type EventFilter,
+  type WorkspaceView,
+  workspaceFromPath,
+  workspaceForItem,
+  workspacePath,
+} from '@/lib/workspace.ts'
 
 type EventEntryProps = {
   item: LocalFeedItem
   isSelected: boolean
   onSelect: (id: string) => void
 }
-
-type EventFilter = 'all' | 'errors' | 'transactions' | 'logs'
-
-type WorkspaceView =
-  | 'live'
-  | 'errors'
-  | 'traces'
-  | 'logs'
-  | 'feedback'
-  | 'envelopes'
-  | 'profiles'
-  | 'sdks'
-  | 'ai'
 
 type WorkspaceNavigationItem = {
   id: WorkspaceView
@@ -97,52 +102,7 @@ const workspaceNavigation: WorkspaceNavigationItem[] = [
   { id: 'profiles', label: 'Profiles', singularLabel: 'profile', section: 'Inspect', emptyState: { title: 'No profiles captured', description: 'Profiling data from supported SDKs will appear here.' }, icon: Gauge, getItems: (snapshot) => snapshot.profiles },
 ]
 
-const eventFilters: { id: EventFilter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'errors', label: 'Errors' },
-  { id: 'transactions', label: 'Transactions' },
-  { id: 'logs', label: 'Logs' },
-]
-
 const CONNECTION_TIMEOUT_MS = 10_000
-
-function matchesEventFilter(item: LocalFeedItem, filter: EventFilter): boolean {
-  if (filter === 'all') {
-    return true
-  }
-
-  if (filter === 'errors') {
-    return isErrorEvent(item)
-  }
-
-  return item.type === (filter === 'transactions' ? 'transaction' : 'log')
-}
-
-function isErrorEvent(item: LocalFeedItem): boolean {
-  const { level, statusCode } = getMetadata(item)
-  return level === 'error' || level === 'fatal' || (statusCode !== undefined && statusCode >= 500)
-}
-
-function matchesSearch(item: LocalFeedItem, query: string): boolean {
-  const normalizedQuery = query.trim().toLowerCase()
-  if (!normalizedQuery) {
-    return true
-  }
-
-  const metadata = getMetadata(item)
-  return [
-    item.type,
-    item.text,
-    metadata.title,
-    metadata.level,
-    metadata.method,
-    metadata.route,
-    metadata.traceId,
-    metadata.spanId,
-    metadata.operation,
-    metadata.origin,
-  ].some((value) => value?.toLowerCase().includes(normalizedQuery))
-}
 
 function formatTimestamp(timestamp: LocalFeedItem['timestamp']): string {
   if (timestamp === undefined) {
@@ -563,6 +523,14 @@ function WorkspaceSidebar({
 }
 
 export default function App() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [urlState, setUrlState] = useQueryStates({
+    event: parseAsString,
+    trace: parseAsString,
+    filter: parseAsStringEnum(eventFilterValues).withDefault('all'),
+    q: parseAsString.withDefault(''),
+  })
   const [streamUrl, setStreamUrl] = useState(() =>
     resolveInitialStreamUrl(window.location.hash, getSavedStream(), getSavedRemoteStream())
   )
@@ -579,18 +547,18 @@ export default function App() {
     telemetryStore.getSnapshot
   )
   const items = telemetry.items
-  const [selectedItemId, setSelectedItemId] = useState<string>()
-  const [selectedTraceId, setSelectedTraceId] = useState<string>()
   const [lastViewedItemId, setLastViewedItemId] = useState<string>()
-  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('live')
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false)
-  const [filter, setFilter] = useState<EventFilter>('all')
-  const [searchQuery, setSearchQuery] = useState('')
+  const [isCommandOpen, setIsCommandOpen] = useState(false)
   const [message, setMessage] = useState<string | undefined>()
   const fallbackEventId = useRef(0)
+  const commandTriggerRef = useRef<HTMLButtonElement>(null)
   const presentation = getConnectionPresentation(connection)
   const traces = useMemo(() => buildTraceGroups(items), [items])
+  const workspaceView = workspaceFromPath(location.pathname)
+  const filter = urlState.filter
+  const searchQuery = urlState.q
   const activeWorkspace = workspaceNavigation.find((entry) => entry.id === workspaceView)!
   const workspaceItems = activeWorkspace.getItems(telemetry)
   const visibleItems =
@@ -604,7 +572,7 @@ export default function App() {
         description: 'Try a different search term or clear the search to see everything in this view.',
       }
     : activeWorkspace.emptyState
-  const selectedItem = workspaceItems.find((item) => item.id === selectedItemId) ?? workspaceItems[0]
+  const selectedItem = workspaceItems.find((item) => item.id === urlState.event) ?? workspaceItems[0]
   const selectedEventTrace = selectedItem?.metadata?.traceId
     ? traces.find((trace) => trace.id === selectedItem.metadata?.traceId)
     : undefined
@@ -627,35 +595,40 @@ export default function App() {
   }
 
   const selectItem = (id: string) => {
-    setSelectedItemId(id)
+    void setUrlState({ event: id, trace: null }, { history: 'push' })
     markItemsSeen()
   }
 
   const selectFilter = (nextFilter: EventFilter) => {
-    setFilter(nextFilter)
-    const nextSelectedItem = items.find(
-      (item) => matchesEventFilter(item, nextFilter) && matchesSearch(item, searchQuery)
-    )
-    if (nextSelectedItem) {
-      setSelectedItemId(nextSelectedItem.id)
-    }
+    void setUrlState({ event: null, filter: nextFilter }, { history: 'replace' })
     markItemsSeen()
   }
 
   const selectWorkspace = (nextWorkspace: WorkspaceView) => {
-    setWorkspaceView(nextWorkspace)
-    setFilter('all')
-    setSelectedItemId(undefined)
-    setSelectedTraceId(undefined)
+    navigate({ pathname: workspacePath(nextWorkspace), search: location.search })
+    void setUrlState({ event: null, trace: null, filter: null }, { history: 'replace' })
     setIsMobileNavigationOpen(false)
+    markItemsSeen()
+  }
+
+  const selectCommandItem = (item: LocalFeedItem) => {
+    const nextWorkspace = workspaceForItem(item)
+    navigate({ pathname: workspacePath(nextWorkspace), search: location.search })
+    void setUrlState(
+      {
+        event: item.id,
+        q: null,
+        trace: nextWorkspace === 'traces' ? item.metadata?.traceId ?? null : null,
+      },
+      { history: 'push' }
+    )
     markItemsSeen()
   }
 
   const clearItems = () => {
     telemetryStore.clear()
-    setSelectedItemId(undefined)
     setLastViewedItemId(undefined)
-    setSearchQuery('')
+    void setUrlState({ event: null, q: null, trace: null }, { history: 'replace' })
 
     const endpoint = parseStreamEndpoint(streamUrl)
     if (endpoint?.kind !== 'loopback') {
@@ -784,8 +757,10 @@ export default function App() {
   const canSearch =
     connection === 'connected' &&
     items.length > 0 &&
-    !isEditingReceiver &&
-    workspaceView !== 'traces'
+    !isEditingReceiver
+  const commandNavigation: CommandNavigationItem[] = workspaceNavigation.map(
+    ({ icon, id, label }) => ({ icon, id, label })
+  )
 
   return (
     <main className="h-dvh overflow-hidden bg-background">
@@ -842,17 +817,19 @@ export default function App() {
               </div>
             )}
             {canSearch ? (
-              <label className="relative min-w-0 max-w-lg flex-1">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                <input
-                  type="search"
-                  aria-label="Search events"
-                  placeholder="Search events"
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  className="h-8 w-full border border-border bg-muted/30 pl-8 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-                />
-              </label>
+              <button
+                ref={commandTriggerRef}
+                type="button"
+                aria-label="Search events"
+                className="flex h-8 min-w-0 max-w-lg flex-1 items-center gap-2 border border-border bg-muted/30 px-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                onClick={() => setIsCommandOpen(true)}
+              >
+                <Search className="size-3.5 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate">Search events and views</span>
+                <kbd className="hidden rounded border border-border px-1.5 py-0.5 font-mono text-[10px] sm:inline-block">
+                  ⌘K
+                </kbd>
+              </button>
             ) : null}
             <ReceiverControls connection={presentation} eventCount={items.length} onClear={clearItems} />
           </header>
@@ -922,8 +899,10 @@ export default function App() {
             ) : workspaceView === 'traces' ? (
               <TraceWorkspace
                 traces={traces}
-                selectedTraceId={selectedTraceId}
-                onSelect={setSelectedTraceId}
+                selectedTraceId={urlState.trace ?? undefined}
+                onSelect={(traceId) => {
+                  void setUrlState({ event: null, trace: traceId }, { history: 'push' })
+                }}
               />
             ) : (
               <div className="flex min-h-0 flex-1 overflow-hidden bg-card">
@@ -1010,6 +989,20 @@ export default function App() {
         </div>
         </div>
       </div>
+      <EventCommandDialog
+        enabled={canSearch}
+        items={items}
+        navigation={commandNavigation}
+        open={isCommandOpen}
+        query={searchQuery}
+        triggerRef={commandTriggerRef}
+        onNavigate={selectWorkspace}
+        onOpenChange={setIsCommandOpen}
+        onQueryChange={(query) => {
+          void setUrlState({ q: query || null }, { history: 'replace' })
+        }}
+        onSelectItem={selectCommandItem}
+      />
     </main>
   )
 }

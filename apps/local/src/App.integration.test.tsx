@@ -2,6 +2,8 @@ import { createSpotlightBuffer } from '@spotlightjs/spotlight/sdk'
 import { EventSource as NodeEventSource } from 'eventsource'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { NuqsAdapter } from 'nuqs/adapters/react'
+import { BrowserRouter } from 'react-router'
 import { ThemeProvider } from '@/components/theme-provider.tsx'
 import App from './App.tsx'
 import {
@@ -86,7 +88,11 @@ function renderViewer(port: number) {
   )
   return render(
     <ThemeProvider attribute="class" defaultTheme="light">
-      <App />
+      <NuqsAdapter>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </NuqsAdapter>
     </ThemeProvider>
   )
 }
@@ -95,7 +101,11 @@ function renderBareViewer() {
   window.history.replaceState(null, '', '/')
   return render(
     <ThemeProvider attribute="class" defaultTheme="light">
-      <App />
+      <NuqsAdapter>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </NuqsAdapter>
     </ThemeProvider>
   )
 }
@@ -545,7 +555,7 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
-  test('filters retained events from the top navigation search', async () => {
+  test('filters retained events from the global command search', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -557,13 +567,44 @@ describe('local receiver to viewer integration', () => {
       await waitFor(() => {
         expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
       })
-      fireEvent.change(screen.getByRole('searchbox', { name: 'Search events' }), {
+      fireEvent.click(screen.getByRole('button', { name: 'Search events' }))
+      fireEvent.change(screen.getByPlaceholderText('Search events and views'), {
         target: { value: 'customers' },
       })
 
-      expect(screen.getAllByLabelText('View transaction event')).toHaveLength(1)
+      await waitFor(() => {
+        expect(screen.getAllByLabelText('View transaction event')).toHaveLength(1)
+      })
       expect(screen.getByTestId('event-list').textContent).toContain('/customers/42')
       expect(screen.getByTestId('event-list').textContent).not.toContain('/orders')
+      expect(new URLSearchParams(window.location.search).get('q')).toBe('customers')
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('opens a global command result in its shareable Explorer view', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /healthy')
+      await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
+      await screen.findByLabelText('View event event')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Search events' }))
+      fireEvent.change(screen.getByPlaceholderText('Search events and views'), {
+        target: { value: 'broken' },
+      })
+      fireEvent.click(screen.getByRole('option', { name: /GET \/broken/i }))
+
+      await waitFor(() => {
+        expect(window.location.pathname).toBe('/errors')
+        expect(new URLSearchParams(window.location.search).get('event')).not.toBeNull()
+      })
+      expect(screen.getByTestId('event-detail').textContent).toContain('/broken')
     } finally {
       cleanup()
       await stopReceiver(server)
