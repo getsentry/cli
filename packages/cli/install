@@ -326,35 +326,40 @@ if [[ "$no_agent_skills" == "true" ]]; then
   setup_args="$setup_args --no-agent-skills"
 fi
 
-# Find the CLI in the install locations supported by setup.
-find_sentry_binary() {
-  local dir xdg_bin_home="${XDG_BIN_HOME:-}"
-  # Match setup's absolute-path requirement, including Windows drive letters.
+# Remove trap — setup will handle temp cleanup on success
+trap - EXIT
+
+# curl | bash leaves stdin on the script pipe. Give setup the controlling
+# terminal only when both output streams are interactive; setup checks whether
+# this is a fresh human install before starting login.
+if [[ "${SENTRY_INIT:-}" != "1" && -t 1 && -t 2 ]] && { exec 3</dev/tty; } 2>/dev/null; then
+  # shellcheck disable=SC2086
+  exec "$tmp_binary" cli setup $setup_args <&3 3<&-
+fi
+
+# shellcheck disable=SC2086
+"$tmp_binary" cli setup $setup_args
+
+# Optionally launch the setup wizard after install.
+# Reconnect stdin to the real terminal so the wizard can prompt
+# interactively — when piped (curl | bash), stdin is the pipe.
+if [[ "${SENTRY_INIT:-}" == "1" ]]; then
+  sentry_bin=""
+  # Only honor XDG_BIN_HOME when absolute, per the XDG spec (matches the Node
+  # determineInstallDir logic); a relative value is ignored. Accept both POSIX
+  # (/…) and Windows drive-letter (C:\… or C:/…) absolute paths so a Windows
+  # XDG_BIN_HOME isn't dropped while Node still installs there.
+  xdg_bin_home="${XDG_BIN_HOME:-}"
   if [[ "$xdg_bin_home" != /* && ! "$xdg_bin_home" =~ ^[A-Za-z]:[\\/] ]]; then
     xdg_bin_home=""
   fi
   for dir in "${SENTRY_INSTALL_DIR:-}" "$xdg_bin_home" "$HOME/.local/bin" "$HOME/bin" "$HOME/.sentry/bin"; do
     [[ -z "$dir" ]] && continue
-    if [[ -x "${dir}/sentry${suffix}" ]]; then
-      printf '%s\n' "${dir}/sentry${suffix}"
-      return
+    if [[ -x "${dir}/sentry" ]]; then
+      sentry_bin="${dir}/sentry"
+      break
     fi
   done
-}
-
-fresh_install=true
-if [[ -n "$(find_sentry_binary)" ]]; then
-  fresh_install=false
-fi
-
-# Remove trap — setup will handle temp cleanup on success.
-trap - EXIT
-# shellcheck disable=SC2086
-"$tmp_binary" cli setup $setup_args
-
-# The wizard owns authentication when explicitly requested.
-if [[ "${SENTRY_INIT:-}" == "1" ]]; then
-  sentry_bin="$(find_sentry_binary)"
   if [[ -z "$sentry_bin" ]]; then
     die "Cannot find installed sentry binary" "init"
   fi
@@ -362,21 +367,4 @@ if [[ "${SENTRY_INIT:-}" == "1" ]]; then
     die "SENTRY_INIT=1 requires an interactive terminal (/dev/tty not available)" "init"
   fi
   exec "$sentry_bin" init </dev/tty
-fi
-
-# curl | bash leaves stdin on the script pipe. Only offer login when terminal
-# output and an openable controlling terminal are available; the command also
-# checks for agents and existing credentials before starting OAuth.
-if [[ "$fresh_install" == "true" && -t 1 && -t 2 ]] && { exec 3</dev/tty; } 2>/dev/null; then
-  if [[ "$os" == "windows" ]]; then
-    # Windows retains the running setup executable. Reuse it to avoid
-    # antivirus scanning of the freshly copied destination during login.
-    sentry_bin="$tmp_binary"
-  else
-    sentry_bin="$(find_sentry_binary)"
-  fi
-  if [[ -z "$sentry_bin" ]] || ! "$sentry_bin" auth login --automatic <&3 3<&-; then
-    echo "Run 'sentry auth login' to authenticate later." >&2
-  fi
-  exec 3<&-
 fi

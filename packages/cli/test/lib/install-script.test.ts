@@ -1,6 +1,6 @@
 /**
  * Exercises the shell installer with a fake downloaded executable. Real PTYs
- * verify the handoff from piped installation to interactive login or init.
+ * verify terminal reconnection for setup and the existing init handoff.
  */
 
 import { spawnSync } from "node:child_process";
@@ -68,11 +68,9 @@ if [[ "$1" == "cli" && "$2" == "setup" ]]; then
   printf '%s\\n' "$0" > "$SENTRY_TEST_DIR/setup-binary"
   record_tty 3> "$SENTRY_TEST_DIR/setup-tty"
   mkdir -p "$SENTRY_INSTALL_DIR"
-  cp "$0" "$SENTRY_INSTALL_DIR/sentry\${SENTRY_TEST_SUFFIX:-}"
-  if [[ "\${SENTRY_TEST_SUFFIX:-}" != ".exe" ]]; then
-    rm "$0"
-  fi
-  exit 0
+  cp "$0" "$SENTRY_INSTALL_DIR/sentry"
+  rm "$0"
+  exit "\${SENTRY_TEST_SETUP_EXIT:-0}"
 fi
 printf '%s\\n' "$@" >> "$SENTRY_TEST_DIR/post-args"
 printf '%s\\n' "$0" >> "$SENTRY_TEST_DIR/post-binary"
@@ -95,16 +93,6 @@ SCRIPT
     return existsSync(path)
       ? readFileSync(path, "utf8").trim().split("\n")
       : [];
-  }
-
-  /** Exercise Windows installer branching without executing a Windows binary. */
-  function useWindowsArtifact(): void {
-    env.SENTRY_TEST_SUFFIX = ".exe";
-    writeFileSync(
-      join(binDir, "uname"),
-      '#!/bin/sh\ncase "$1" in -s) echo MSYS_NT-10.0 ;; -m) echo x86_64 ;; esac\n'
-    );
-    chmodSync(join(binDir, "uname"), 0o755);
   }
 
   /** Run curl-style piped installation in a real controlling terminal. */
@@ -183,23 +171,17 @@ process.exitCode = result.status ?? 1;
     expect(existsSync(join(installDir, "sentry"))).toBe(true);
   });
 
-  test("keeps setup piped and launches automatic login on the controlling terminal", () => {
+  test("connects setup to the controlling terminal without launching another process", () => {
     const result = runInTerminal();
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(recorded("setup-tty")).toEqual([
-      "0:false",
-      "1:true",
-      "2:true",
-      "controlling:true",
-    ]);
-    expect(recorded("post-args")).toEqual(["auth", "login", "--automatic"]);
-    expect(recorded("post-tty")).toEqual([
       "0:true",
       "1:true",
       "2:true",
       "controlling:true",
     ]);
-    expect(recorded("post-binary")).toEqual([join(installDir, "sentry")]);
+    expect(recorded("post-args")).toEqual([]);
+    expect(existsSync(join(installDir, "sentry"))).toBe(true);
   });
 
   test.each([
@@ -225,27 +207,12 @@ process.exitCode = result.status ?? 1;
     expect(recorded("post-args")).toEqual([]);
   });
 
-  test.each([
-    false,
-    true,
-  ])("skips login for an existing CLI (Windows: %s)", (windows) => {
-    if (windows) useWindowsArtifact();
-    mkdirSync(installDir);
-    const target = join(installDir, windows ? "sentry.exe" : "sentry");
-    writeFileSync(target, "#!/bin/sh\nexit 99\n");
-    chmodSync(target, 0o755);
-    const result = runInTerminal();
-    expect(result.status, result.stdout + result.stderr).toBe(0);
-    expect(recorded("setup-args").slice(0, 2)).toEqual(["cli", "setup"]);
-    expect(recorded("post-args")).toEqual([]);
-    expect(readFileSync(target, "utf8")).toContain("record_tty");
-  });
-
   test("hands off to init instead of login when SENTRY_INIT is set", () => {
     env.SENTRY_INIT = "1";
     env.SENTRY_TEST_POST_EXIT = "7";
     const result = runInTerminal();
     expect(result.status, result.stdout + result.stderr).toBe(7);
+    expect(recorded("setup-tty")[0]).toBe("0:false");
     expect(recorded("post-args")).toEqual(["init"]);
     expect(recorded("post-binary")).toEqual([join(installDir, "sentry")]);
     expect(recorded("post-tty")).toEqual([
@@ -258,27 +225,11 @@ process.exitCode = result.status ?? 1;
 
   test.each([
     1, 130,
-  ])("keeps install successful when login exits with %i", (exitCode) => {
-    env.SENTRY_TEST_POST_EXIT = String(exitCode);
+  ])("preserves setup failure or interruption exit %i", (exitCode) => {
+    env.SENTRY_TEST_SETUP_EXIT = String(exitCode);
     const result = runInTerminal();
-    expect(result.status, result.stdout + result.stderr).toBe(0);
-    expect(recorded("post-args")).toEqual(["auth", "login", "--automatic"]);
-    expect(recorded("post-binary")).toHaveLength(1);
-    expect(result.stdout + result.stderr).toContain(
-      "Run 'sentry auth login' to authenticate later."
-    );
+    expect(result.status, result.stdout + result.stderr).toBe(exitCode);
+    expect(recorded("post-args")).toEqual([]);
     expect(existsSync(join(installDir, "sentry"))).toBe(true);
-  });
-
-  test("runs Windows login from the temporary binary that already ran setup", () => {
-    useWindowsArtifact();
-    const result = runInTerminal();
-    expect(result.status, result.stdout + result.stderr).toBe(0);
-    expect(recorded("post-args")).toEqual(["auth", "login", "--automatic"]);
-    expect(recorded("post-binary")).toEqual(recorded("setup-binary"));
-    expect(recorded("post-binary")).not.toEqual([
-      join(installDir, "sentry.exe"),
-    ]);
-    expect(existsSync(join(installDir, "sentry.exe"))).toBe(true);
   });
 });
