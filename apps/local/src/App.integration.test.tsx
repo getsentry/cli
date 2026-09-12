@@ -2,8 +2,11 @@ import { createSpotlightBuffer } from '@spotlightjs/spotlight/sdk'
 import { EventSource as NodeEventSource } from 'eventsource'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { NuqsAdapter } from 'nuqs/adapters/react'
+import { BrowserRouter } from 'react-router'
 import { ThemeProvider } from '@/components/theme-provider.tsx'
 import App from './App.tsx'
+import { LocalWorkspaceRoute } from './routes/local-workspace-route.tsx'
 import {
   REMOTE_STREAM_STORAGE_KEY,
   STREAM_STORAGE_KEY,
@@ -78,15 +81,21 @@ async function sendEnvelope(
   expect(response.status).toBe(204)
 }
 
-function renderViewer(port: number) {
+function renderViewer(port: number, path = '/') {
   window.history.replaceState(
     null,
     '',
-    `/#stream=${encodeURIComponent(`http://127.0.0.1:${port}/stream`)}`
+    `${path}#stream=${encodeURIComponent(`http://127.0.0.1:${port}/stream`)}`
   )
   return render(
     <ThemeProvider attribute="class" defaultTheme="light">
-      <App />
+      <NuqsAdapter>
+        <BrowserRouter>
+          <LocalWorkspaceRoute>
+            <App />
+          </LocalWorkspaceRoute>
+        </BrowserRouter>
+      </NuqsAdapter>
     </ThemeProvider>
   )
 }
@@ -95,7 +104,13 @@ function renderBareViewer() {
   window.history.replaceState(null, '', '/')
   return render(
     <ThemeProvider attribute="class" defaultTheme="light">
-      <App />
+      <NuqsAdapter>
+        <BrowserRouter>
+          <LocalWorkspaceRoute>
+            <App />
+          </LocalWorkspaceRoute>
+        </BrowserRouter>
+      </NuqsAdapter>
     </ThemeProvider>
   )
 }
@@ -132,6 +147,10 @@ describe('local receiver to viewer integration', () => {
   beforeEach(() => {
     window.localStorage.clear()
     window.sessionStorage.clear()
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn(() => true),
+    })
     vi.stubGlobal('EventSource', NodeEventSource)
     vi.stubGlobal('matchMedia', () => ({
       matches: false,
@@ -161,7 +180,7 @@ describe('local receiver to viewer integration', () => {
       const shell = screen.getByTestId('app-shell')
       expect(shell.className).not.toContain('px-')
       expect(shell.className).not.toContain('py-')
-      expect(screen.getByRole('banner').className).not.toContain('border-b')
+      expect(screen.queryByRole('banner')).toBeNull()
 
       await sendEnvelope(port, 'GET /live')
       await screen.findByLabelText('View transaction event')
@@ -173,7 +192,7 @@ describe('local receiver to viewer integration', () => {
       const eventList = screen.getByTestId('event-list')
       expect(eventList.className).toContain('flex-1')
       expect(eventList.className).not.toContain('max-h-[42rem]')
-      expect(screen.getByRole('complementary', { name: 'Events' })).not.toBeNull()
+      expect(screen.getByRole('complementary', { name: 'Live Activity' })).not.toBeNull()
       const detail = screen.getByTestId('event-detail')
       expect(detail.textContent).toContain('GET /live')
       expect(detail.textContent).not.toContain('GET /live-2')
@@ -190,7 +209,7 @@ describe('local receiver to viewer integration', () => {
       const code = screen.getByTestId('highlighted-json')
       expect(code.textContent).toContain('GET /live-2')
       fireEvent.click(screen.getByRole('button', { name: 'Copy JSON' }))
-      expect(screen.getByRole('status', { name: 'JSON copied' })).not.toBeNull()
+      expect(await screen.findByRole('status', { name: 'JSON copied' })).not.toBeNull()
       await waitFor(() => {
         expect(screen.getByTestId('highlighted-json').querySelector('.shiki')).not.toBeNull()
       })
@@ -203,15 +222,98 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
+  test('keeps direct receiver actions in a compact sidebar utility bar', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /dock')
+      await screen.findByLabelText('View transaction event')
+
+      const sidebar = screen.getByLabelText('Workspace navigation')
+      const utilityBar = sidebar.querySelector('[data-testid="sidebar-utility-bar"]')
+      expect(utilityBar).not.toBeNull()
+      expect(utilityBar?.textContent).toContain('Connected')
+      expect(utilityBar?.querySelector('button[aria-label="Search events"]')).not.toBeNull()
+      expect(utilityBar?.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe(
+        'Connected to local receiver'
+      )
+      expect(sidebar.querySelector('button[aria-label="Change receiver connection"]')).not.toBeNull()
+      expect(sidebar.querySelector('button[aria-label="Clear events"]')).not.toBeNull()
+      expect(screen.queryByRole('banner')).toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+      expect(screen.getByRole('button', { name: 'Open live activity view' }).className).toContain(
+        'justify-center'
+      )
+      expect(utilityBar?.querySelector('button[aria-label="Search events"]')?.className).toContain(
+        'mx-auto'
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: 'Change receiver connection' }))
+      expect(await screen.findByRole('heading', { name: 'Connect a receiver' })).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
   test('offers a useful connection landing for a bare viewer visit', () => {
     renderBareViewer()
 
+    expect(screen.getByAltText('Sentry CLI')).not.toBeNull()
+    expect(screen.getByRole('banner').textContent).not.toContain('Receiver setup')
+    expect(screen.queryByRole('searchbox', { name: 'Search events' })).toBeNull()
+    expect(screen.queryByLabelText('Workspace navigation')).toBeNull()
     expect(screen.getByText('Looking for Sentry Local')).not.toBeNull()
+    expect(screen.getByRole('status', { name: 'Checking receiver' })).not.toBeNull()
+    expect(screen.queryByText('Advanced connection')).toBeNull()
     const endpoint = screen.getByLabelText('Receiver endpoint') as HTMLInputElement
     expect(endpoint.value).toBe('http://localhost:8969/stream')
-    expect(screen.getByRole('button', { name: 'Connect' })).not.toBeNull()
-    expect(screen.getByText('Advanced connection')).not.toBeNull()
+    const connectButton = screen.getByRole('button', { name: 'Connect' }) as HTMLButtonElement
+    expect(connectButton.disabled).toBe(false)
+    expect(connectButton.getAttribute('aria-busy')).toBe('false')
+    expect(screen.getByText('Defaults to your local receiver. You can paste another local or HTTPS stream above.')).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Copy local serve command' })).not.toBeNull()
+  })
+
+  test('renders every Explorer view from a receiver-backed telemetry session', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /trace')
+      await sendEnvelope(port, 'GET /error', { type: 'event', level: 'error' })
+      await sendEnvelope(port, 'GET /logs', { type: 'log' })
+      await sendEnvelope(port, 'GET /feedback', { type: 'user_report' })
+      await sendEnvelope(port, 'GET /profile', { type: 'profile' })
+      await sendEnvelope(port, 'GET /sdk', { type: 'client_report' })
+      await sendEnvelope(port, 'GET /ai', { operation: 'ai.generate' })
+
+      const explorerViews = [
+        ['Open live activity view', 'View transaction event'],
+        ['Open errors view', 'View event event'],
+        ['Open logs view', 'View log event'],
+        ['Open feedback view', 'View user_report event'],
+        ['Open envelopes view', 'View envelope event'],
+        ['Open profiles view', 'View profile event'],
+        ['Open sessions & sdks view', 'View client_report event'],
+        ['Open ai view', 'View transaction event'],
+      ] as const
+
+      for (const [view, event] of explorerViews) {
+        fireEvent.click(screen.getByRole('button', { name: view }))
+        expect((await screen.findAllByLabelText(event)).length).toBeGreaterThan(0)
+      }
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open traces view' }))
+      expect(await screen.findByRole('region', { name: 'Trace waterfall' })).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
   })
 
   test('connects a bare viewer to a custom loopback receiver and saves it after opening', async () => {
@@ -278,6 +380,43 @@ describe('local receiver to viewer integration', () => {
     )
   })
 
+  test('stops an unanswered receiver attempt after ten seconds', async () => {
+    ControllableEventSource.instances = []
+    vi.stubGlobal('EventSource', ControllableEventSource)
+    vi.useFakeTimers()
+
+    try {
+      renderBareViewer()
+
+      const initialSource = ControllableEventSource.instances[0]
+      expect(initialSource).toBeDefined()
+      await act(async () => initialSource?.onerror?.(new Event('error')))
+      fireEvent.change(screen.getByLabelText('Receiver endpoint'), {
+        target: { value: 'http://127.0.0.1:8970/stream' },
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+      const source = ControllableEventSource.instances[1]
+      expect(source).toBeDefined()
+      const connectingButton = screen.getByRole('button', { name: 'Connecting to receiver' }) as HTMLButtonElement
+      expect(connectingButton.disabled).toBe(true)
+      expect(connectingButton.getAttribute('aria-busy')).toBe('true')
+
+      await act(async () => {
+        vi.advanceTimersByTime(10_000)
+      })
+
+      expect(source?.closed).toBe(true)
+      expect(screen.getByRole('alert', { name: 'Receiver connection error' }).textContent).toContain(
+        'Connection timed out after 10 seconds'
+      )
+      expect((screen.getByRole('button', { name: 'Connect' }) as HTMLButtonElement).disabled).toBe(false)
+    } finally {
+      cleanup()
+      vi.useRealTimers()
+    }
+  })
+
   test('keeps receiver selection open when an event arrives during editing', async () => {
     ControllableEventSource.instances = []
     vi.stubGlobal('EventSource', ControllableEventSource)
@@ -301,6 +440,26 @@ describe('local receiver to viewer integration', () => {
     })
 
     expect(screen.getByLabelText('Receiver endpoint')).not.toBeNull()
+  })
+
+  test('keeps workspace navigation visible while reconnecting', async () => {
+    ControllableEventSource.instances = []
+    vi.stubGlobal('EventSource', ControllableEventSource)
+    renderBareViewer()
+
+    const source = ControllableEventSource.instances[0]
+    expect(source).toBeDefined()
+    await act(async () => source?.onopen?.(new Event('open')))
+    await screen.findByText('Connected to local receiver')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change receiver connection' }))
+    fireEvent.change(screen.getByLabelText('Receiver endpoint'), {
+      target: { value: 'http://127.0.0.1:8970/stream' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+    expect(screen.getByLabelText('Workspace navigation')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Connecting to receiver' })).not.toBeNull()
   })
 
   test('keeps a healthy receiver open after an invalid replacement endpoint', async () => {
@@ -357,7 +516,7 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
-  test('filters the feed by event class', async () => {
+  test('keeps Live Activity unfiltered and uses the sidebar for event classes', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -369,12 +528,107 @@ describe('local receiver to viewer integration', () => {
       await screen.findByLabelText('View transaction event')
       await screen.findByLabelText('View event event')
 
-      fireEvent.click(screen.getByRole('button', { name: 'Errors (1)' }))
-
-      expect(screen.queryByLabelText('View transaction event')).toBeNull()
+      expect(screen.queryByLabelText('Filter events')).toBeNull()
+      expect(screen.getByLabelText('View transaction event').textContent).toContain('/healthy')
       expect(screen.getByLabelText('View event event').textContent).toContain(
         '/broken'
       )
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open errors view' }))
+      expect(screen.queryByLabelText('View transaction event')).toBeNull()
+      expect(screen.getByLabelText('View event event').textContent).toContain('/broken')
+
+      await sendEnvelope(port, 'GET /another-healthy')
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Open live activity view' }).textContent).toContain('3')
+      })
+      expect(screen.queryByRole('button', { name: /View 1 new event/ })).toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('uses the collapsible workspace sidebar to focus an observability view', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /healthy')
+      await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
+
+      await screen.findByLabelText('View event event')
+      expect(screen.getByRole('button', { name: 'Open live activity view' })).not.toBeNull()
+      expect(screen.getByRole('button', { name: 'Open errors view' }).textContent).toContain('1')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open errors view' }))
+      expect(screen.getByRole('button', { name: 'Open errors view' }).getAttribute('aria-current')).toBe('page')
+      expect(screen.getAllByLabelText(/View .* event/)).toHaveLength(1)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+      expect(screen.getByRole('button', { name: 'Expand sidebar' })).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('restores the collapsed sidebar after a refresh', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+
+      expect(window.localStorage.getItem('sentry.local.sidebar-collapsed')).toBe('true')
+
+      cleanup()
+      renderViewer(port)
+
+      expect(await screen.findByRole('button', { name: 'Expand sidebar' })).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('keeps raw received envelopes available outside the live event feed', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /raw-envelope')
+      await screen.findByLabelText('View transaction event')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open envelopes view' }))
+
+      expect(screen.getByRole('button', { name: 'Open envelopes view' }).textContent).toContain('1')
+      fireEvent.click(screen.getByLabelText('View envelope event'))
+      expect(screen.getByRole('heading', { name: 'Raw envelope' })).not.toBeNull()
+      expect(screen.getByTestId('event-detail').textContent).toContain('Envelope')
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('omits redundant type pills from dedicated Errors and Envelopes lists', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
+      await screen.findByLabelText('View event event')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open errors view' }))
+      expect(screen.getByLabelText('View event event').textContent).not.toContain('Error')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open envelopes view' }))
+      expect(screen.getByLabelText('View envelope event').textContent).not.toContain('envelope')
     } finally {
       cleanup()
       await stopReceiver(server)
@@ -396,7 +650,27 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
-  test('filters retained events from the top navigation search', async () => {
+  test('selects an event from the active workspace instead of retaining a live event', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /healthy')
+      await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
+
+      await screen.findByLabelText('View event event')
+      fireEvent.click(screen.getByRole('button', { name: 'Open errors view' }))
+
+      expect(screen.getByTestId('event-detail').textContent).toContain('/broken')
+      expect(screen.getByTestId('event-detail').textContent).not.toContain('/healthy')
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('filters retained events from the global command search', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -408,20 +682,140 @@ describe('local receiver to viewer integration', () => {
       await waitFor(() => {
         expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
       })
-      fireEvent.change(screen.getByRole('searchbox', { name: 'Search events' }), {
+      fireEvent.click(screen.getAllByRole('button', { name: 'Search events' })[0]!)
+      fireEvent.change(screen.getByPlaceholderText('Search events and views'), {
         target: { value: 'customers' },
       })
 
-      expect(screen.getAllByLabelText('View transaction event')).toHaveLength(1)
+      expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
+      expect(new URLSearchParams(window.location.search).get('q')).toBeNull()
+
+      await waitFor(() => {
+        expect(screen.getAllByLabelText('View transaction event')).toHaveLength(1)
+      })
       expect(screen.getByTestId('event-list').textContent).toContain('/customers/42')
       expect(screen.getByTestId('event-list').textContent).not.toContain('/orders')
+      expect(new URLSearchParams(window.location.search).get('q')).toBe('customers')
     } finally {
       cleanup()
       await stopReceiver(server)
     }
   })
 
-  test('clears the local viewer feed from receiver options', async () => {
+  test('hydrates a shareable Explorer route and selected event from the URL', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      await sendEnvelope(port, 'GET /other-error', {
+        level: 'error',
+        type: 'event',
+      })
+      await sendEnvelope(port, 'GET /shared-error', {
+        level: 'error',
+        type: 'event',
+      })
+
+      renderViewer(port, '/errors')
+      await screen.findByText('Connected to local receiver')
+      await waitFor(() => {
+        expect(screen.getAllByLabelText('View event event')).toHaveLength(2)
+      })
+      fireEvent.click(screen.getAllByLabelText('View event event')[1]!)
+      const sharedEventId = await waitFor(() => {
+        const eventId = new URLSearchParams(window.location.search).get('event')
+        expect(eventId).not.toBeNull()
+        return eventId!
+      })
+
+      cleanup()
+      renderViewer(port, `/errors?event=${encodeURIComponent(sharedEventId)}`)
+      await screen.findByText('Connected to local receiver')
+      await waitFor(() => {
+        expect(screen.getAllByLabelText('View event event')).toHaveLength(2)
+      })
+      expect(
+        screen.getByRole('button', { name: 'Open errors view' }).getAttribute('aria-current')
+      ).toBe('page')
+      expect(screen.getByTestId('event-detail').textContent).toContain('/shared-error')
+      expect(screen.getByTestId('event-detail').textContent).not.toContain('/other-error')
+      expect(new URLSearchParams(window.location.search).get('event')).toBe(sharedEventId)
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('restores the prior selected event when browser history goes back', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /first')
+      await sendEnvelope(port, 'GET /second')
+
+      await waitFor(() => {
+        expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
+      })
+      const events = screen.getAllByLabelText('View transaction event')
+      fireEvent.click(events[1]!)
+      const selectedEventId = await waitFor(() => {
+        const eventId = new URLSearchParams(window.location.search).get('event')
+        expect(eventId).not.toBeNull()
+        return eventId!
+      })
+      expect(new URLSearchParams(window.location.search).get('event')).toBe(selectedEventId)
+      expect(screen.getByTestId('event-detail').textContent).toContain('/second')
+
+      await act(async () => {
+        window.history.back()
+      })
+      await waitFor(() => {
+        expect(screen.getByTestId('event-detail').textContent).toContain('/first')
+      })
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('opens a global command result in its shareable Explorer view', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /healthy')
+      await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
+      await screen.findByLabelText('View event event')
+
+      fireEvent.click(screen.getAllByRole('button', { name: 'Search events' })[0]!)
+      fireEvent.change(screen.getByPlaceholderText('Search events and views'), {
+        target: { value: 'broken' },
+      })
+      fireEvent.click(screen.getByRole('option', { name: /GET \/broken/i }))
+
+      await waitFor(() => {
+        expect(window.location.pathname).toBe('/errors')
+        expect(new URLSearchParams(window.location.search).get('event')).not.toBeNull()
+      })
+      expect(screen.getByTestId('event-detail').textContent).toContain('/broken')
+
+      await act(async () => {
+        window.history.back()
+      })
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: 'Open live activity view' }).getAttribute('aria-current')
+        ).toBe('page')
+      })
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('clears the local viewer feed from the sidebar', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -430,8 +824,7 @@ describe('local receiver to viewer integration', () => {
       await sendEnvelope(port, 'GET /clear-me')
       await screen.findByLabelText('View transaction event')
 
-      fireEvent.click(screen.getByRole('button', { name: 'Receiver options' }))
-      fireEvent.click(screen.getByRole('button', { name: 'Clear all events' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Clear events' }))
 
       expect(screen.queryByLabelText('View transaction event')).toBeNull()
       expect(screen.getByText('Waiting for events')).not.toBeNull()
@@ -441,7 +834,7 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
-  test('summarizes other retained events in the selected trace overview', async () => {
+  test('summarizes related retained events in the trace waterfall', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -454,9 +847,8 @@ describe('local receiver to viewer integration', () => {
         expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
       })
 
-      const details = screen.getByRole('table', { name: 'Event details' })
-      expect(details.textContent).toContain('Related events')
-      expect(details.textContent).toContain('1')
+      const traceRelationship = await screen.findByLabelText('Trace relationship')
+      expect(traceRelationship.textContent).toContain('2 captured items')
     } finally {
       cleanup()
       await stopReceiver(server)
@@ -489,34 +881,7 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
-  test('only offers new events that match the active filter', async () => {
-    const { server, port } = await startReceiver()
-
-    try {
-      renderViewer(port)
-      await screen.findByText('Connected to local receiver')
-      await sendEnvelope(port, 'GET /first-error', { type: 'event', level: 'error' })
-      await screen.findByLabelText('View event event')
-      fireEvent.click(screen.getByRole('button', { name: 'Errors (1)' }))
-      await sendEnvelope(port, 'GET /healthy')
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'All (2)' })).not.toBeNull()
-      })
-      expect(screen.queryByRole('button', { name: /View 1 new event/ })).toBeNull()
-
-      await sendEnvelope(port, 'GET /second-error', { type: 'event', level: 'error' })
-
-      const newEvents = await screen.findByRole('button', { name: 'View 1 new event' })
-      fireEvent.click(newEvents)
-      expect(screen.getByTestId('event-detail').textContent).toContain('GET /second-error')
-    } finally {
-      cleanup()
-      await stopReceiver(server)
-    }
-  })
-
-  test('shows a copyable, grouped inspector table in the selected event overview', async () => {
+  test('keeps the event overview to non-repeated diagnostic details', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -532,12 +897,15 @@ describe('local receiver to viewer integration', () => {
       const details = await screen.findByRole('table', { name: 'Event details' })
       expect(details.textContent).toContain('201')
       expect(details.textContent).toContain('6.17ms')
-      expect(details.textContent).toContain('http.server')
-      expect(screen.getByRole('rowheader', { name: 'Method' })).not.toBeNull()
-      expect(screen.getByRole('rowheader', { name: 'Trace ID' })).not.toBeNull()
+      expect(details.textContent).not.toContain('Method')
+      expect(details.textContent).not.toContain('Route')
+      expect(details.textContent).not.toContain('Trace ID')
+      expect(details.textContent).not.toContain('Operation')
+      expect(screen.getByTestId('event-detail').textContent).toContain('GET /summary')
+      expect(screen.getByTestId('event-detail').textContent).toContain('http.server')
 
-      fireEvent.click(screen.getByRole('button', { name: 'Copy Route' }))
-      expect(screen.getByRole('status', { name: 'Route copied' })).not.toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'Copy Status' }))
+      expect(screen.getByRole('status', { name: 'Status copied' })).not.toBeNull()
     } finally {
       cleanup()
       await stopReceiver(server)
@@ -575,19 +943,77 @@ describe('local receiver to viewer integration', () => {
         ],
       })
 
-      fireEvent.click(await screen.findByRole('tab', { name: 'Trace' }))
-
-      expect(screen.getByRole('region', { name: 'Trace waterfall' })).not.toBeNull()
+      expect(await screen.findByRole('region', { name: 'Trace waterfall' })).not.toBeNull()
       expect(screen.getByRole('columnheader', { name: 'Span' })).not.toBeNull()
       expect(
         screen.getByRole('columnheader', { name: 'Timeline from 0ms to 12ms' })
       ).not.toBeNull()
       expect(screen.getByRole('columnheader', { name: 'Duration' })).not.toBeNull()
-      expect(screen.getByLabelText('Trace summary').textContent).toContain('3 spans')
+      expect(screen.getByLabelText('Trace relationship').textContent).toContain('1 captured item')
+      expect(screen.queryByLabelText('Trace summary')).toBeNull()
       expect(screen.getByText('db.query')).not.toBeNull()
       expect(screen.getByText('http.client')).not.toBeNull()
       expect(screen.getByRole('cell', { name: 'Duration 4.00ms' })).not.toBeNull()
       expect(screen.getByTestId('waterfall-bar-db-span')).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('groups trace records into one trace investigation', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /trace-parent', {
+        operation: 'http.server',
+        spanId: 'parent-span',
+        traceId: 'grouped-trace',
+      })
+      await sendEnvelope(port, 'GET /trace-child', {
+        operation: 'db.query',
+        spanId: 'child-span',
+        traceId: 'grouped-trace',
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open traces view' }))
+
+      expect((await screen.findAllByRole('heading', { name: 'Traces' })).length).toBeGreaterThan(0)
+      expect(screen.getByText('1 trace')).not.toBeNull()
+      const traceList = screen.getByLabelText('Trace list')
+      expect(traceList.className).toContain('w-80')
+      expect(traceList.className).toContain('bg-muted/30')
+
+      const traceRow = screen.getByRole('button', { name: 'View trace GET /trace-parent' })
+      expect(traceRow.className).toContain('px-2')
+      expect(traceRow.className).toContain('py-2')
+      expect(traceRow.className).not.toContain('rounded-md')
+
+      const waterfall = screen.getByRole('region', { name: 'Trace waterfall' })
+      expect(waterfall.parentElement?.className).not.toContain('p-4')
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('uses the active Explorer view label and gives empty views a useful explanation', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open errors view' }))
+      expect(await screen.findByRole('heading', { name: 'Errors' })).not.toBeNull()
+      expect(screen.getByText('1 error')).not.toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open feedback view' }))
+      expect(await screen.findByRole('heading', { name: 'No feedback received' })).not.toBeNull()
+      expect(screen.getByText('User feedback submitted through supported SDKs will appear here.')).not.toBeNull()
     } finally {
       cleanup()
       await stopReceiver(server)

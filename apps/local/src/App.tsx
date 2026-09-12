@@ -1,17 +1,40 @@
-import { Check, Copy, Search, Terminal } from 'lucide-react'
-import { Fragment, type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Menu,
+  Radio,
+  Search,
+  Terminal,
+  Trash2,
+} from 'lucide-react'
+import {
+  Fragment,
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
+import { useCopyToClipboard, useDebounce, useLocalStorage } from '@uidotdev/usehooks'
 import { JsonView } from '@/components/json-view.tsx'
 import { ConnectionLanding } from '@/components/connection-landing.tsx'
+import {
+  EventCommandDialog,
+  type CommandNavigationItem,
+} from '@/components/event-command-dialog.tsx'
 import { ReceiverControls } from '@/components/receiver-controls.tsx'
+import { TraceWorkspace } from '@/components/trace-workspace.tsx'
 import { TraceWaterfall } from '@/components/trace-waterfall.tsx'
 import { Badge } from '@/components/ui/badge.tsx'
 import {
   getConnectionPresentation,
+  type ConnectionPresentation,
   type ConnectionState,
 } from '@/lib/presentation.ts'
-import { copyText } from '@/lib/clipboard.ts'
 import {
-  appendBounded,
   DEFAULT_STREAM_URL,
   decodeEnvelope,
   parseStreamEndpoint,
@@ -22,60 +45,30 @@ import {
   type EventMetadata,
   type LocalFeedItem,
 } from '@/lib/spotlight.ts'
-import { buildTraceGroups, type TraceGroup } from '@/lib/trace-model.ts'
+import {
+  createLocalTelemetryStore,
+  type LocalTelemetrySnapshot,
+} from '@/lib/telemetry-store.ts'
+import { buildTraceGroups, traceIdForItem, type TraceGroup } from '@/lib/trace-model.ts'
+import { workspaceNavigation } from '@/lib/workspace-navigation.ts'
+import {
+  isErrorEvent,
+  matchesSearch,
+  type WorkspaceView,
+  workspaceForItem,
+} from '@/lib/workspace.ts'
+import { useLocalWorkspaceRoute } from '@/routes/local-workspace-context.ts'
 
 type EventEntryProps = {
   item: LocalFeedItem
   isSelected: boolean
+  showTypeBadge: boolean
   onSelect: (id: string) => void
 }
 
-type EventFilter = 'all' | 'errors' | 'transactions' | 'logs'
-
-const eventFilters: { id: EventFilter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'errors', label: 'Errors' },
-  { id: 'transactions', label: 'Transactions' },
-  { id: 'logs', label: 'Logs' },
-]
-
-function matchesEventFilter(item: LocalFeedItem, filter: EventFilter): boolean {
-  if (filter === 'all') {
-    return true
-  }
-
-  if (filter === 'errors') {
-    return isErrorEvent(item)
-  }
-
-  return item.type === (filter === 'transactions' ? 'transaction' : 'log')
-}
-
-function isErrorEvent(item: LocalFeedItem): boolean {
-  const { level, statusCode } = getMetadata(item)
-  return level === 'error' || level === 'fatal' || (statusCode !== undefined && statusCode >= 500)
-}
-
-function matchesSearch(item: LocalFeedItem, query: string): boolean {
-  const normalizedQuery = query.trim().toLowerCase()
-  if (!normalizedQuery) {
-    return true
-  }
-
-  const metadata = getMetadata(item)
-  return [
-    item.type,
-    item.text,
-    metadata.title,
-    metadata.level,
-    metadata.method,
-    metadata.route,
-    metadata.traceId,
-    metadata.spanId,
-    metadata.operation,
-    metadata.origin,
-  ].some((value) => value?.toLowerCase().includes(normalizedQuery))
-}
+const CONNECTION_TIMEOUT_MS = 10_000
+const SEARCH_DEBOUNCE_MS = 150
+const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sentry.local.sidebar-collapsed'
 
 function formatTimestamp(timestamp: LocalFeedItem['timestamp']): string {
   if (timestamp === undefined) {
@@ -145,7 +138,7 @@ function saveRemoteStreamUrl(streamUrl: string): void {
   }
 }
 
-function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
+function EventEntry({ item, isSelected, showTypeBadge, onSelect }: EventEntryProps) {
   const metadata = getMetadata(item)
   const duration = formatDuration(metadata.durationMs)
   const isError = isErrorEvent(item)
@@ -163,9 +156,11 @@ function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
       >
         <div className="min-w-0 space-y-1">
           <div className="flex min-w-0 items-center gap-2">
-            <Badge variant={isError ? 'destructive' : 'default'}>
-              {isError ? 'Error' : metadata.method ?? metadata.operation ?? item.type}
-            </Badge>
+            {showTypeBadge ? (
+              <Badge variant={isError ? 'destructive' : 'default'}>
+                {isError ? 'Error' : metadata.method ?? metadata.operation ?? item.type}
+              </Badge>
+            ) : null}
             <span className="truncate font-mono text-sm">{metadata.route ?? metadata.title}</span>
           </div>
           <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
@@ -187,10 +182,9 @@ function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
 type EventDetailProps = {
   item: LocalFeedItem
   trace?: TraceGroup
-  relatedItems: LocalFeedItem[]
 }
 
-type DetailTab = 'overview' | 'trace' | 'json'
+type DetailTab = 'overview' | 'json'
 
 type DetailField = {
   label: string
@@ -202,18 +196,55 @@ type DetailGroup = {
   fields: DetailField[]
 }
 
-function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
+function RawEnvelopeDetail({ item }: { item: LocalFeedItem }) {
+  return (
+    <section
+      data-testid="event-detail"
+      aria-label="Raw envelope detail"
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
+    >
+      <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border px-3">
+        <div className="min-w-0">
+          <h2 className="font-mono text-sm font-medium">Raw envelope</h2>
+          <p className="text-xs text-muted-foreground">Received {formatTimestamp(item.timestamp)}</p>
+        </div>
+        <Badge>Envelope</Badge>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        <JsonView code={item.text} />
+      </div>
+    </section>
+  )
+}
+
+function WorkspaceEmptyState({
+  title,
+  description,
+}: {
+  title: string
+  description: string
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 items-center justify-center p-6 text-center">
+      <div className="max-w-sm">
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+      </div>
+    </div>
+  )
+}
+
+function EventDetail({ item, trace }: EventDetailProps) {
   const [tab, setTab] = useState<DetailTab>('overview')
   const [copiedField, setCopiedField] = useState<string>()
-  const detailTabs: DetailTab[] = trace?.spans.length ? ['overview', 'trace', 'json'] : ['overview', 'json']
+  const [, copyToClipboard] = useCopyToClipboard()
+  const detailTabs: DetailTab[] = ['overview', 'json']
   const metadata = getMetadata(item)
   const duration = formatDuration(metadata.durationMs)
   const detailGroups: DetailGroup[] = [
     {
-      label: 'Request',
+      label: 'Details',
       fields: [
-        ...(metadata.method ? [{ label: 'Method', value: metadata.method }] : []),
-        ...(metadata.route ? [{ label: 'Route', value: metadata.route }] : []),
         ...(metadata.statusCode !== undefined
           ? [{ label: 'Status', value: String(metadata.statusCode) }]
           : []),
@@ -221,20 +252,9 @@ function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
       ],
     },
     {
-      label: 'Trace context',
+      label: 'Telemetry',
       fields: [
-        ...(metadata.traceId ? [{ label: 'Trace ID', value: metadata.traceId }] : []),
-        ...(metadata.spanId ? [{ label: 'Span ID', value: metadata.spanId }] : []),
-        ...(metadata.operation ? [{ label: 'Operation', value: metadata.operation }] : []),
         ...(metadata.origin ? [{ label: 'Origin', value: metadata.origin }] : []),
-        ...(relatedItems.length > 0
-          ? [
-              {
-                label: 'Related events',
-                value: `${relatedItems.length} other event${relatedItems.length === 1 ? '' : 's'} in this trace`,
-              },
-            ]
-          : []),
       ],
     },
   ]
@@ -291,21 +311,6 @@ function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
             >
               Overview
             </button>
-            {trace?.spans.length ? (
-              <button
-                id="event-detail-tab-trace"
-                type="button"
-                role="tab"
-                aria-selected={tab === 'trace'}
-                aria-controls="event-detail-panel"
-                tabIndex={tab === 'trace' ? 0 : -1}
-                className={`px-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${tab === 'trace' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                onClick={() => setTab('trace')}
-                onKeyDown={handleTabKeyDown}
-              >
-                Trace
-              </button>
-            ) : null}
             <button
               id="event-detail-tab-json"
               type="button"
@@ -353,7 +358,7 @@ function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
                                     aria-label={`Copy ${field.label}`}
                                     className="shrink-0 text-muted-foreground opacity-100 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
                                     onClick={() => {
-                                      copyText(field.value)
+                                      void copyToClipboard(field.value)
                                       setCopiedField(field.label)
                                     }}
                                   >
@@ -373,11 +378,12 @@ function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
               <p className="text-sm text-muted-foreground">No additional event details.</p>
             )}
             {copiedField ? <span role="status" aria-label={`${copiedField} copied`} className="sr-only">{copiedField} copied</span> : null}
+            {trace ? (
+              <div className="mt-4 border border-border">
+                <TraceWaterfall compact trace={trace} />
+              </div>
+            ) : null}
           </div>
-        </div>
-      ) : tab === 'trace' && trace ? (
-        <div id="event-detail-panel" role="tabpanel" className="min-h-0 flex-1 overflow-auto">
-          <TraceWaterfall trace={trace} />
         </div>
       ) : (
         <div id="event-detail-panel" role="tabpanel" className="min-h-0 flex-1 overflow-auto">
@@ -388,7 +394,197 @@ function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
   )
 }
 
+type WorkspaceSidebarProps = {
+  activeView: WorkspaceView
+  canSearch: boolean
+  collapsed: boolean
+  connection: ConnectionPresentation
+  eventCount: number
+  snapshot: LocalTelemetrySnapshot
+  traceCount: number
+  onClear: () => void
+  onChangeReceiver: () => void
+  onOpenCommand: (trigger: HTMLButtonElement) => void
+  onSelect: (view: WorkspaceView) => void
+  onToggle: () => void
+}
+
+function WorkspaceSidebar({
+  activeView,
+  canSearch,
+  collapsed,
+  connection,
+  eventCount,
+  snapshot,
+  traceCount,
+  onClear,
+  onChangeReceiver,
+  onOpenCommand,
+  onSelect,
+  onToggle,
+}: WorkspaceSidebarProps) {
+  const statusLabel = connection.label.replace(' to local receiver', '')
+  const statusDotClass =
+    connection.tone === 'success'
+      ? 'bg-emerald-500 shadow-[0_0_10px_oklch(0.72_0.19_160)]'
+      : connection.tone === 'warning'
+        ? 'bg-amber-500'
+        : 'bg-muted-foreground'
+
+  return (
+    <aside
+      aria-label="Workspace navigation"
+      className={`hidden shrink-0 border-r border-border bg-muted/20 transition-[width] duration-200 md:flex md:flex-col ${
+        collapsed ? 'w-14' : 'w-52'
+      }`}
+    >
+      <div className="flex h-11 items-center border-b border-border px-3">
+        {!collapsed ? (
+          <>
+            <img
+              className="h-5 w-auto dark:hidden"
+              src="/sentry-cli-light.svg"
+              alt="Sentry CLI"
+              width="117"
+              height="20"
+            />
+            <img
+              className="hidden h-5 w-auto dark:block"
+              src="/sentry-cli.svg"
+              alt=""
+              width="117"
+              height="20"
+            />
+          </>
+        ) : null}
+        <button
+          type="button"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className={`flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            collapsed ? 'mx-auto' : 'ml-auto'
+          }`}
+          onClick={onToggle}
+        >
+          {collapsed ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
+        </button>
+      </div>
+      <div
+        data-testid="sidebar-utility-bar"
+        className={`shrink-0 border-b border-border p-2 ${
+          collapsed ? 'space-y-1' : 'flex items-center justify-between'
+        }`}
+      >
+        <span
+          role="status"
+          aria-label={connection.label}
+          title={collapsed ? connection.label : undefined}
+          className={`flex h-8 items-center rounded-md ${
+            collapsed ? 'justify-center px-0' : 'gap-2 bg-emerald-500/10 px-2.5 text-emerald-700 dark:text-emerald-400'
+          }`}
+        >
+          <span className={`size-2 shrink-0 rounded-full ${statusDotClass}`} />
+          {!collapsed ? <span className="text-xs font-medium">{statusLabel}</span> : null}
+          <span className="sr-only">{connection.label}</span>
+        </span>
+        {canSearch ? (
+          <button
+            type="button"
+            aria-label="Search events"
+            title="Search events and views (⌘K)"
+            className={`flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              collapsed ? 'mx-auto' : ''
+            }`}
+            onClick={(event) => onOpenCommand(event.currentTarget)}
+          >
+            <Search className="size-4" aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
+        {(['Explore', 'Inspect'] as const).map((section) => (
+          <div key={section} className="space-y-1">
+            {!collapsed ? (
+              <p className="px-1 pb-1 pt-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                {section}
+              </p>
+            ) : null}
+            {workspaceNavigation.filter((entry) => entry.section === section).map((entry) => {
+              const Icon = entry.icon
+              const count = entry.id === 'traces' ? traceCount : entry.getItems(snapshot).length
+              const active = activeView === entry.id
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  aria-label={`Open ${entry.label.toLowerCase()} view`}
+                  aria-current={active ? 'page' : undefined}
+                  title={collapsed ? entry.label : undefined}
+                  className={`flex h-8 w-full items-center rounded-md text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    collapsed ? 'justify-center px-0' : 'gap-2 px-2 text-left'
+                  } ${
+                    active
+                      ? 'bg-primary/10 font-medium text-primary'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  }`}
+                  onClick={() => onSelect(entry.id)}
+                >
+                  <Icon className="size-4 shrink-0" aria-hidden="true" />
+                  {!collapsed ? (
+                    <>
+                      <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+                      {count > 0 ? <span className="text-xs tabular-nums text-muted-foreground">{count}</span> : null}
+                    </>
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+        ))}
+      </nav>
+      <div className="shrink-0 border-t border-border p-2">
+        <div className={collapsed ? 'space-y-1' : 'grid grid-cols-2 gap-1'}>
+          <button
+            type="button"
+            aria-label="Change receiver connection"
+            title={collapsed ? 'Change receiver connection' : undefined}
+            className={`flex h-8 w-full items-center rounded-md text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              collapsed ? 'justify-center px-0' : 'justify-center gap-1.5 px-2'
+            }`}
+            onClick={onChangeReceiver}
+          >
+            <Radio className="size-3.5 shrink-0" aria-hidden="true" />
+            {!collapsed ? <span>Change</span> : null}
+          </button>
+          <button
+            type="button"
+            aria-label="Clear events"
+            title={collapsed ? 'Clear events' : undefined}
+            disabled={eventCount === 0}
+            className={`flex h-8 w-full items-center rounded-md text-xs font-medium text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+              collapsed ? 'justify-center px-0' : 'justify-center gap-1.5 px-2'
+            }`}
+            onClick={onClear}
+          >
+            <Trash2 className="size-3.5 shrink-0" aria-hidden="true" />
+            {!collapsed ? <span>Clear</span> : null}
+          </button>
+        </div>
+      </div>
+    </aside>
+  )
+}
+
 export default function App() {
+  const {
+    navigateToCommandEvent,
+    navigateToCommandTrace,
+    navigateToWorkspace,
+    workspaceQuery,
+    workspaceView,
+  } = useLocalWorkspaceRoute()
+  const [commandSearchQuery, setCommandSearchQuery] = useState(workspaceQuery.query)
+  const debouncedCommandSearchQuery = useDebounce(commandSearchQuery, SEARCH_DEBOUNCE_MS)
+  const isClearingCommandSearch = useRef(false)
   const [streamUrl, setStreamUrl] = useState(() =>
     resolveInitialStreamUrl(window.location.hash, getSavedStream(), getSavedRemoteStream())
   )
@@ -396,29 +592,41 @@ export default function App() {
   const [draftEndpoint, setDraftEndpoint] = useState(streamUrl)
   const [isEditingReceiver, setIsEditingReceiver] = useState(false)
   const [isConnectionEnabled, setIsConnectionEnabled] = useState(true)
+  const [isConnecting, setIsConnecting] = useState(false)
   const [connectionError, setConnectionError] = useState<string>()
-  const [items, setItems] = useState<LocalFeedItem[]>([])
-  const [selectedItemId, setSelectedItemId] = useState<string>()
+  const [telemetryStore] = useState(() => createLocalTelemetryStore())
+  const telemetry = useSyncExternalStore(
+    telemetryStore.subscribe,
+    telemetryStore.getSnapshot,
+    telemetryStore.getSnapshot
+  )
+  const items = telemetry.items
   const [lastViewedItemId, setLastViewedItemId] = useState<string>()
-  const [filter, setFilter] = useState<EventFilter>('all')
-  const [searchQuery, setSearchQuery] = useState('')
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useLocalStorage(
+    SIDEBAR_COLLAPSED_STORAGE_KEY,
+    false
+  )
+  const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false)
+  const [isCommandOpen, setIsCommandOpen] = useState(false)
   const [message, setMessage] = useState<string | undefined>()
   const fallbackEventId = useRef(0)
+  const commandTriggerRef = useRef<HTMLButtonElement>(null)
   const presentation = getConnectionPresentation(connection)
   const traces = useMemo(() => buildTraceGroups(items), [items])
-  const selectedItem = items.find((item) => item.id === selectedItemId) ?? items[0]
-  const selectedTrace = selectedItem?.metadata?.traceId
+  const searchQuery = workspaceQuery.query
+  const activeWorkspace = workspaceNavigation.find((entry) => entry.id === workspaceView)!
+  const workspaceItems = activeWorkspace.getItems(telemetry)
+  const searchedItems = workspaceItems.filter((item) => matchesSearch(item, searchQuery))
+  const workspaceEmptyState = searchQuery.trim()
+    ? {
+        title: `No matching ${activeWorkspace.singularLabel}s`,
+        description: 'Try a different search term or clear the search to see everything in this view.',
+      }
+    : activeWorkspace.emptyState
+  const selectedItem = workspaceItems.find((item) => item.id === workspaceQuery.eventId) ?? workspaceItems[0]
+  const selectedEventTrace = selectedItem?.metadata?.traceId
     ? traces.find((trace) => trace.id === selectedItem.metadata?.traceId)
     : undefined
-  const visibleItems = items.filter((item) => matchesEventFilter(item, filter))
-  const searchedItems = visibleItems.filter((item) => matchesSearch(item, searchQuery))
-  const relatedItems = selectedItem?.metadata?.traceId
-    ? items.filter(
-        (item) =>
-          item.id !== selectedItem.id &&
-          item.metadata?.traceId === selectedItem.metadata?.traceId
-      )
-    : []
   const lastViewedIndex = lastViewedItemId
     ? items.findIndex((item) => item.id === lastViewedItemId)
     : -1
@@ -429,35 +637,68 @@ export default function App() {
         ? items
         : items.slice(lastViewedIndex + 1)
   const newItems = unseenItems.filter(
-    (item) => matchesEventFilter(item, filter) && matchesSearch(item, searchQuery)
+    (item) =>
+      workspaceItems.some((workspaceItem) => workspaceItem.id === item.id) &&
+      matchesSearch(item, searchQuery)
   )
   const newItemCount = newItems.length
+
+  useEffect(() => {
+    if (isClearingCommandSearch.current) {
+      if (debouncedCommandSearchQuery !== commandSearchQuery) {
+        return
+      }
+      isClearingCommandSearch.current = false
+    }
+    if (debouncedCommandSearchQuery !== searchQuery) {
+      void workspaceQuery.setSearchQuery(debouncedCommandSearchQuery)
+    }
+  }, [commandSearchQuery, debouncedCommandSearchQuery, searchQuery, workspaceQuery])
 
   const markItemsSeen = () => {
     setLastViewedItemId(items.at(-1)?.id)
   }
 
   const selectItem = (id: string) => {
-    setSelectedItemId(id)
+    void workspaceQuery.selectEvent(id)
     markItemsSeen()
   }
 
-  const selectFilter = (nextFilter: EventFilter) => {
-    setFilter(nextFilter)
-    const nextSelectedItem = items.find(
-      (item) => matchesEventFilter(item, nextFilter) && matchesSearch(item, searchQuery)
-    )
-    if (nextSelectedItem) {
-      setSelectedItemId(nextSelectedItem.id)
+  const selectWorkspace = (nextWorkspace: WorkspaceView) => {
+    navigateToWorkspace(nextWorkspace)
+    void workspaceQuery.resetWorkspace()
+    setIsMobileNavigationOpen(false)
+    markItemsSeen()
+  }
+
+  const selectCommandItem = (item: LocalFeedItem) => {
+    isClearingCommandSearch.current = true
+    setCommandSearchQuery('')
+    const nextWorkspace = workspaceForItem(item)
+    const traceId = traceIdForItem(item)
+    if (nextWorkspace === 'traces' && traceId) {
+      navigateToCommandTrace(nextWorkspace, traceId)
+    } else {
+      navigateToCommandEvent(nextWorkspace, item.id)
     }
     markItemsSeen()
   }
 
   const clearItems = () => {
-    setItems([])
-    setSelectedItemId(undefined)
+    telemetryStore.clear()
     setLastViewedItemId(undefined)
-    setSearchQuery('')
+    void workspaceQuery.clearWorkspace()
+
+    const endpoint = parseStreamEndpoint(streamUrl)
+    if (endpoint?.kind !== 'loopback') {
+      return
+    }
+    const clearUrl = new URL(endpoint.url)
+    clearUrl.pathname = '/clear'
+    clearUrl.search = ''
+    void fetch(clearUrl, { method: 'DELETE' }).catch(() => {
+      setMessage('Cleared this viewer, but the receiver could not clear its retained session.')
+    })
   }
 
   const connectToDraft = () => {
@@ -473,6 +714,7 @@ export default function App() {
     setDraftEndpoint(endpoint.url)
     setStreamUrl(endpoint.url)
     setIsConnectionEnabled(true)
+    setIsConnecting(true)
     setConnection('connecting')
     setConnectionError(undefined)
     setIsEditingReceiver(false)
@@ -491,6 +733,17 @@ export default function App() {
 
     let isCurrent = true
     const source = new EventSource(streamUrl)
+    const timeoutId = window.setTimeout(() => {
+      if (!isCurrent) {
+        return
+      }
+      isCurrent = false
+      source.close()
+      setIsConnectionEnabled(false)
+      setIsConnecting(false)
+      setConnection('failed')
+      setConnectionError('Connection timed out after 10 seconds. Check the endpoint and try again.')
+    }, CONNECTION_TIMEOUT_MS)
     const onEnvelope = (event: Event) => {
       if (!isCurrent) {
         return
@@ -498,8 +751,16 @@ export default function App() {
       try {
         const messageEvent = event as MessageEvent<string>
         const eventId = messageEvent.lastEventId || `event-${fallbackEventId.current++}`
+        telemetryStore.recordEnvelope({
+          id: eventId,
+          type: 'envelope',
+          timestamp: Date.now(),
+          text: messageEvent.data,
+          payload: messageEvent.data,
+          metadata: { title: `Envelope ${eventId.slice(-8)}` },
+        })
         const decoded = decodeEnvelope(messageEvent.data, eventId)
-        setItems((current) => appendBounded(current, decoded))
+        telemetryStore.append(decoded)
         setMessage(undefined)
       } catch {
         setMessage('Received an event that could not be decoded.')
@@ -511,6 +772,8 @@ export default function App() {
       if (!isCurrent) {
         return
       }
+      window.clearTimeout(timeoutId)
+      setIsConnecting(false)
       const endpoint = parseStreamEndpoint(streamUrl)
       if (endpoint?.kind === 'loopback') {
         saveStreamUrl(endpoint.url)
@@ -525,6 +788,11 @@ export default function App() {
       if (!isCurrent) {
         return
       }
+      window.clearTimeout(timeoutId)
+      isCurrent = false
+      source.close()
+      setIsConnectionEnabled(false)
+      setIsConnecting(false)
       setConnection('failed')
       setConnectionError(
         streamUrl === DEFAULT_STREAM_URL
@@ -535,51 +803,134 @@ export default function App() {
 
     return () => {
       isCurrent = false
+      window.clearTimeout(timeoutId)
       source.removeEventListener(SENTRY_ENVELOPE_EVENT, onEnvelope)
       source.close()
     }
-  }, [isConnectionEnabled, streamUrl])
+  }, [isConnectionEnabled, streamUrl, telemetryStore])
+
+  const showConnectionLanding =
+    isEditingReceiver ||
+    (items.length === 0 && (connection === 'connecting' || connection === 'failed'))
+  const isReceiverUnavailable = connection !== 'connected' && !isConnecting
+  const canSearch =
+    connection === 'connected' &&
+    items.length > 0 &&
+    !isEditingReceiver
+  const commandNavigation: CommandNavigationItem[] = workspaceNavigation.map(
+    ({ icon, id, label }) => ({ icon, id, label })
+  )
+  const setCommandOpen = (open: boolean) => {
+    if (open) {
+      setCommandSearchQuery(searchQuery)
+    }
+    setIsCommandOpen(open)
+  }
+  const openCommand = (trigger: HTMLButtonElement) => {
+    commandTriggerRef.current = trigger
+    setCommandOpen(true)
+  }
 
   return (
     <main className="h-dvh overflow-hidden bg-background">
       <div
         data-testid="app-shell"
-        className="mx-auto flex h-full w-full max-w-none flex-col"
+        className="mx-auto flex h-full w-full max-w-none"
       >
-        <header className="flex h-11 shrink-0 items-center justify-between gap-3 px-3 sm:px-4">
-          <div className="flex items-center" aria-label="Sentry CLI">
-            <img
-              className="h-5 w-auto dark:hidden"
-              src="/sentry-cli-light.svg"
-              alt="Sentry CLI"
-              width="117"
-              height="20"
-            />
-            <img
-              className="hidden h-5 w-auto dark:block"
-              src="/sentry-cli.svg"
-              alt=""
-              width="117"
-              height="20"
-            />
-          </div>
-          <label className="relative mx-auto min-w-0 max-w-lg flex-1">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <input
-              type="search"
-              aria-label="Search events"
-              placeholder="Search events"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              className="h-8 w-full border border-border bg-muted/30 pr-3 pl-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-            />
-          </label>
-          <div className="flex items-center">
-            <ReceiverControls connection={presentation} eventCount={items.length} onClear={clearItems} />
-          </div>
-        </header>
+        {!isReceiverUnavailable ? (
+          <WorkspaceSidebar
+            activeView={workspaceView}
+            canSearch={canSearch}
+            collapsed={isSidebarCollapsed}
+            connection={presentation}
+            eventCount={items.length}
+            snapshot={telemetry}
+            traceCount={traces.length}
+            onClear={clearItems}
+            onChangeReceiver={() => setIsEditingReceiver(true)}
+            onOpenCommand={openCommand}
+            onSelect={selectWorkspace}
+            onToggle={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+          />
+        ) : null}
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          {isReceiverUnavailable ? (
+            <header className="flex h-11 shrink-0 items-center px-3 sm:px-4">
+              <div className="flex min-w-0 flex-1 items-center" aria-label="Sentry CLI">
+                <img
+                  className="h-5 w-auto dark:hidden"
+                  src="/sentry-cli-light.svg"
+                  alt="Sentry CLI"
+                  width="117"
+                  height="20"
+                />
+                <img
+                  className="hidden h-5 w-auto dark:block"
+                  src="/sentry-cli.svg"
+                  alt=""
+                  width="117"
+                  height="20"
+                />
+              </div>
+            </header>
+          ) : (
+            <div className="flex h-11 shrink-0 items-center gap-2 px-3 md:hidden">
+              <button
+                type="button"
+                aria-label="Open navigation"
+                aria-expanded={isMobileNavigationOpen}
+                className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setIsMobileNavigationOpen((open) => !open)}
+              >
+                <Menu className="size-4" />
+              </button>
+              {canSearch ? (
+                <button
+                  type="button"
+                  aria-label="Search events"
+                  className="flex h-8 min-w-0 flex-1 items-center gap-2 border border-border bg-muted/30 px-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                  onClick={(event) => openCommand(event.currentTarget)}
+                >
+                  <Search className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate">Search events and views</span>
+                </button>
+              ) : <span className="flex-1" />}
+              <ReceiverControls
+                connection={presentation}
+                eventCount={items.length}
+                onClear={clearItems}
+                showStatusRole={false}
+              />
+            </div>
+          )}
 
-        <div className="flex min-h-0 flex-1 flex-col">
+          {!isReceiverUnavailable && isMobileNavigationOpen ? (
+          <div className="absolute top-11 z-20 w-full border-b border-border bg-background p-2 shadow-lg md:hidden">
+            <nav aria-label="Workspace navigation" className="grid grid-cols-2 gap-1">
+              {workspaceNavigation.map((entry) => {
+                const Icon = entry.icon
+                const active = workspaceView === entry.id
+                return (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    aria-label={`Open ${entry.label.toLowerCase()} view`}
+                    aria-current={active ? 'page' : undefined}
+                    className={`flex h-9 items-center gap-2 rounded-md px-2 text-left text-sm ${
+                      active ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    }`}
+                    onClick={() => selectWorkspace(entry.id)}
+                  >
+                    <Icon className="size-4" />
+                    {entry.label}
+                  </button>
+                )
+              })}
+            </nav>
+          </div>
+          ) : null}
+
+        <div className="flex min-h-0 flex-1">
           <section className="flex min-h-0 flex-1 flex-col" aria-label="Local Sentry events">
 
             {connectionError && connection === 'failed' && items.length > 0 ? (
@@ -593,14 +944,14 @@ export default function App() {
               </div>
             ) : null}
 
-            {isEditingReceiver || (items.length === 0 && (connection === 'connecting' || connection === 'failed')) ? (
+            {showConnectionLanding ? (
               <ConnectionLanding
                 phase={connection === 'connecting' ? 'probing' : connection === 'failed' ? 'failed' : 'editing'}
                 endpoint={draftEndpoint}
                 error={connectionError}
+                isConnecting={isConnecting}
                 onEndpointChange={setDraftEndpoint}
                 onConnect={connectToDraft}
-                onCopyCommand={() => copyText('sentry local serve --open')}
               />
             ) : items.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center border border-dashed border-border bg-muted/40 px-4 text-center">
@@ -614,6 +965,14 @@ export default function App() {
                   Change receiver
                 </button>
               </div>
+            ) : workspaceView === 'traces' ? (
+              <TraceWorkspace
+                traces={traces}
+                selectedTraceId={workspaceQuery.traceId ?? undefined}
+                onSelect={(traceId) => {
+                  void workspaceQuery.selectTrace(traceId)
+                }}
+              />
             ) : (
               <div className="flex min-h-0 flex-1 overflow-hidden bg-card">
                 <aside
@@ -622,33 +981,10 @@ export default function App() {
                 >
                   <div className="shrink-0 border-b border-border px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
-                      <h1 id="event-list-heading" className="text-sm font-semibold">Events</h1>
+                      <h1 id="event-list-heading" className="text-sm font-semibold">{activeWorkspace.label}</h1>
                       <span className="text-xs tabular-nums text-muted-foreground">
-                        {items.length} / 500
+                        {searchedItems.length} {activeWorkspace.singularLabel}{searchedItems.length === 1 ? '' : 's'}
                       </span>
-                    </div>
-                    <div className="mt-2 flex gap-1" aria-label="Filter events">
-                      {eventFilters.map((eventFilter) => {
-                        const count = items.filter((item) =>
-                          matchesEventFilter(item, eventFilter.id)
-                        ).length
-
-                        return (
-                          <button
-                            key={eventFilter.id}
-                            type="button"
-                            aria-pressed={filter === eventFilter.id}
-                            className={`px-1.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
-                              filter === eventFilter.id
-                                ? 'bg-muted font-medium text-foreground'
-                                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                            }`}
-                            onClick={() => selectFilter(eventFilter.id)}
-                          >
-                            {eventFilter.label} ({count})
-                          </button>
-                        )
-                      })}
                     </div>
                     {newItemCount > 0 ? (
                       <button
@@ -674,27 +1010,44 @@ export default function App() {
                         key={item.id}
                         item={item}
                         isSelected={item.id === selectedItem?.id}
+                        showTypeBadge={workspaceView !== 'errors' && workspaceView !== 'envelopes'}
                         onSelect={selectItem}
                       />
                     ))}
                     {searchedItems.length === 0 ? (
-                      <li className="px-3 py-4 text-sm text-muted-foreground">No matching events.</li>
+                      <li className="px-3 py-4 text-sm text-muted-foreground">{workspaceEmptyState.title}</li>
                     ) : null}
                   </ol>
                 </aside>
-                {selectedItem ? (
+                {searchedItems.length === 0 ? (
+                  <WorkspaceEmptyState {...workspaceEmptyState} />
+                ) : selectedItem?.type === 'envelope' ? (
+                  <RawEnvelopeDetail item={selectedItem} />
+                ) : selectedItem ? (
                   <EventDetail
                     key={selectedItem.id}
                     item={selectedItem}
-                    trace={selectedTrace}
-                    relatedItems={relatedItems}
+                    trace={selectedEventTrace}
                   />
                 ) : null}
               </div>
             )}
           </section>
         </div>
+        </div>
       </div>
+      <EventCommandDialog
+        enabled={canSearch}
+        items={items}
+        navigation={commandNavigation}
+        open={isCommandOpen}
+        query={commandSearchQuery}
+        triggerRef={commandTriggerRef}
+        onNavigate={selectWorkspace}
+        onOpenChange={setCommandOpen}
+        onQueryChange={setCommandSearchQuery}
+        onSelectItem={selectCommandItem}
+      />
     </main>
   )
 }

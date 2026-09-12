@@ -1,4 +1,5 @@
 import type { LocalFeedItem } from "./spotlight.js"
+import { isErrorEvent } from "./workspace.js"
 
 export type TraceSpan = {
   id: string
@@ -130,9 +131,9 @@ function getDurationMs(startTimestamp: number | undefined, endTimestamp: number 
   return Math.round((endTimestamp - startTimestamp) * 100_000) / 100
 }
 
-function isError(item: LocalFeedItem): boolean {
-  const { level, statusCode } = item.metadata ?? {}
-  return level === "error" || level === "fatal" || (statusCode !== undefined && statusCode >= 500)
+export function traceIdForItem(item: LocalFeedItem): string | undefined {
+  return item.metadata?.traceId ??
+    (item.type === "transaction" || item.type === "span" ? item.id : undefined)
 }
 
 function sortByTimestamp<T extends { startTimestamp?: number }>(items: T[]): T[] {
@@ -161,7 +162,7 @@ export function buildTraceGroups(items: readonly LocalFeedItem[]): TraceGroup[] 
   const traces = new Map<string, MutableTraceGroup>()
 
   for (const item of items) {
-    const traceId = item.metadata?.traceId
+    const traceId = traceIdForItem(item)
     if (!traceId) {
       continue
     }
@@ -182,7 +183,7 @@ export function buildTraceGroups(items: readonly LocalFeedItem[]): TraceGroup[] 
     if (item.type === "log") {
       trace.logCount += 1
     }
-    if (isError(item)) {
+    if (isErrorEvent(item)) {
       trace.errorCount += 1
     }
 
