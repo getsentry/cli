@@ -734,6 +734,7 @@ export default function App() {
   const showConnectionLanding =
     isEditingReceiver ||
     (items.length === 0 && (connection === 'connecting' || connection === 'failed'))
+  const isReceiverUnavailable = connection !== 'connected'
   const canSearch = connection === 'connected' && items.length > 0 && !isEditingReceiver
 
   return (
@@ -742,30 +743,53 @@ export default function App() {
         data-testid="app-shell"
         className="mx-auto flex h-full w-full max-w-none"
       >
-        <WorkspaceSidebar
-          activeView={workspaceView}
-          collapsed={isSidebarCollapsed}
-          snapshot={telemetry}
-          onSelect={selectWorkspace}
-          onToggle={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
-        />
+        {!isReceiverUnavailable ? (
+          <WorkspaceSidebar
+            activeView={workspaceView}
+            collapsed={isSidebarCollapsed}
+            snapshot={telemetry}
+            onSelect={selectWorkspace}
+            onToggle={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+          />
+        ) : null}
         <div className="relative flex min-w-0 flex-1 flex-col">
           <header className="flex h-11 shrink-0 items-center gap-3 px-3 sm:px-4">
-            <button
-              type="button"
-              aria-label="Open navigation"
-              aria-expanded={isMobileNavigationOpen}
-              className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
-              onClick={() => setIsMobileNavigationOpen((open) => !open)}
-            >
-              <Menu className="size-4" />
-            </button>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium text-muted-foreground">Sentry Local</p>
-              <h1 className="truncate text-sm font-semibold">
-                {showConnectionLanding ? 'Receiver setup' : activeWorkspace.label}
-              </h1>
-            </div>
+            {!isReceiverUnavailable ? (
+              <button
+                type="button"
+                aria-label="Open navigation"
+                aria-expanded={isMobileNavigationOpen}
+                className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+                onClick={() => setIsMobileNavigationOpen((open) => !open)}
+              >
+                <Menu className="size-4" />
+              </button>
+            ) : null}
+            {isReceiverUnavailable ? (
+              <div className="flex min-w-0 flex-1 items-center" aria-label="Sentry CLI">
+                <img
+                  className="h-5 w-auto dark:hidden"
+                  src="/sentry-cli-light.svg"
+                  alt="Sentry CLI"
+                  width="117"
+                  height="20"
+                />
+                <img
+                  className="hidden h-5 w-auto dark:block"
+                  src="/sentry-cli.svg"
+                  alt=""
+                  width="117"
+                  height="20"
+                />
+              </div>
+            ) : (
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-muted-foreground">Sentry Local</p>
+                <h1 className="truncate text-sm font-semibold">
+                  {showConnectionLanding ? 'Receiver setup' : activeWorkspace.label}
+                </h1>
+              </div>
+            )}
             {canSearch ? (
               <label className="relative min-w-0 max-w-lg flex-1">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
@@ -782,7 +806,7 @@ export default function App() {
             <ReceiverControls connection={presentation} eventCount={items.length} onClear={clearItems} />
           </header>
 
-          {isMobileNavigationOpen ? (
+          {!isReceiverUnavailable && isMobileNavigationOpen ? (
           <div className="absolute top-11 z-20 w-full border-b border-border bg-background p-2 shadow-lg md:hidden">
             <nav aria-label="Workspace navigation" className="grid grid-cols-2 gap-1">
               {workspaceNavigation.map((entry) => {

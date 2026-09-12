@@ -206,14 +206,52 @@ describe('local receiver to viewer integration', () => {
   test('offers a useful connection landing for a bare viewer visit', () => {
     renderBareViewer()
 
-    expect(screen.getByRole('banner').textContent).toContain('Receiver setup')
+    expect(screen.getByAltText('Sentry CLI')).not.toBeNull()
+    expect(screen.getByRole('banner').textContent).not.toContain('Receiver setup')
     expect(screen.queryByRole('searchbox', { name: 'Search events' })).toBeNull()
+    expect(screen.queryByLabelText('Workspace navigation')).toBeNull()
     expect(screen.getByText('Looking for Sentry Local')).not.toBeNull()
     const endpoint = screen.getByLabelText('Receiver endpoint') as HTMLInputElement
     expect(endpoint.value).toBe('http://localhost:8969/stream')
     expect(screen.getByRole('button', { name: 'Connect' })).not.toBeNull()
     expect(screen.getByText('Advanced connection')).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Copy local serve command' })).not.toBeNull()
+  })
+
+  test('renders every Explorer view from a receiver-backed telemetry session', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /trace')
+      await sendEnvelope(port, 'GET /error', { type: 'event', level: 'error' })
+      await sendEnvelope(port, 'GET /logs', { type: 'log' })
+      await sendEnvelope(port, 'GET /feedback', { type: 'user_report' })
+      await sendEnvelope(port, 'GET /profile', { type: 'profile' })
+      await sendEnvelope(port, 'GET /sdk', { type: 'client_report' })
+      await sendEnvelope(port, 'GET /ai', { operation: 'ai.generate' })
+
+      const explorerViews = [
+        ['Open live activity view', 'View transaction event'],
+        ['Open errors view', 'View event event'],
+        ['Open traces view', 'View transaction event'],
+        ['Open logs view', 'View log event'],
+        ['Open feedback view', 'View user_report event'],
+        ['Open envelopes view', 'View envelope event'],
+        ['Open profiles view', 'View profile event'],
+        ['Open sdks view', 'View client_report event'],
+        ['Open ai view', 'View transaction event'],
+      ] as const
+
+      for (const [view, event] of explorerViews) {
+        fireEvent.click(screen.getByRole('button', { name: view }))
+        expect((await screen.findAllByLabelText(event)).length).toBeGreaterThan(0)
+      }
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
   })
 
   test('connects a bare viewer to a custom loopback receiver and saves it after opening', async () => {

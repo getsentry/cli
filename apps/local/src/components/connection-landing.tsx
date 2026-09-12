@@ -28,8 +28,8 @@ export function ConnectionLanding({
   }
 
   return (
-    <section aria-labelledby="connection-title" className="flex min-h-0 flex-1 items-start justify-start bg-muted/10 px-4 py-8 sm:px-8 sm:py-10 lg:px-12">
-      <div className="w-full max-w-2xl border border-border bg-card p-5 shadow-sm sm:p-6">
+    <section aria-labelledby="connection-title" className="flex min-h-0 flex-1 items-center justify-center bg-muted/10 px-4 py-8 sm:p-8">
+      <div className="w-full max-w-xl border border-border bg-card p-5 shadow-sm sm:p-6">
         <div className="flex items-start gap-3">
           <Radio className={`mt-0.5 size-5 ${isProbing ? 'animate-pulse text-primary' : 'text-muted-foreground'}`} aria-hidden="true" />
           <div>
