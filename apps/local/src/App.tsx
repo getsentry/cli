@@ -54,6 +54,7 @@ import { useLocalWorkspaceRoute } from '@/routes/local-workspace-context.ts'
 type EventEntryProps = {
   item: LocalFeedItem
   isSelected: boolean
+  showTypeBadge: boolean
   onSelect: (id: string) => void
 }
 
@@ -127,7 +128,7 @@ function saveRemoteStreamUrl(streamUrl: string): void {
   }
 }
 
-function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
+function EventEntry({ item, isSelected, showTypeBadge, onSelect }: EventEntryProps) {
   const metadata = getMetadata(item)
   const duration = formatDuration(metadata.durationMs)
   const isError = isErrorEvent(item)
@@ -145,9 +146,11 @@ function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
       >
         <div className="min-w-0 space-y-1">
           <div className="flex min-w-0 items-center gap-2">
-            <Badge variant={isError ? 'destructive' : 'default'}>
-              {isError ? 'Error' : metadata.method ?? metadata.operation ?? item.type}
-            </Badge>
+            {showTypeBadge ? (
+              <Badge variant={isError ? 'destructive' : 'default'}>
+                {isError ? 'Error' : metadata.method ?? metadata.operation ?? item.type}
+              </Badge>
+            ) : null}
             <span className="truncate font-mono text-sm">{metadata.route ?? metadata.title}</span>
           </div>
           <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
@@ -914,6 +917,7 @@ export default function App() {
                         key={item.id}
                         item={item}
                         isSelected={item.id === selectedItem?.id}
+                        showTypeBadge={workspaceView !== 'errors' && workspaceView !== 'envelopes'}
                         onSelect={selectItem}
                       />
                     ))}

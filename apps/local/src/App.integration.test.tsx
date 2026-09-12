@@ -525,6 +525,26 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
+  test('omits redundant type pills from dedicated Errors and Envelopes lists', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
+      await screen.findByLabelText('View event event')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open errors view' }))
+      expect(screen.getByLabelText('View event event').textContent).not.toContain('Error')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open envelopes view' }))
+      expect(screen.getByLabelText('View envelope event').textContent).not.toContain('envelope')
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
   test('marks an error entry in the mixed event feed', async () => {
     const { server, port } = await startReceiver()
 
