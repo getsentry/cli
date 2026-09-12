@@ -254,7 +254,6 @@ function EventEntry({ item, isSelected, onSelect }: EventEntryProps) {
 type EventDetailProps = {
   item: LocalFeedItem
   trace?: TraceGroup
-  relatedItems: LocalFeedItem[]
 }
 
 type DetailTab = 'overview' | 'json'
@@ -307,7 +306,7 @@ function WorkspaceEmptyState({
   )
 }
 
-function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
+function EventDetail({ item, trace }: EventDetailProps) {
   const [tab, setTab] = useState<DetailTab>('overview')
   const [copiedField, setCopiedField] = useState<string>()
   const detailTabs: DetailTab[] = ['overview', 'json']
@@ -315,10 +314,8 @@ function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
   const duration = formatDuration(metadata.durationMs)
   const detailGroups: DetailGroup[] = [
     {
-      label: 'Request',
+      label: 'Details',
       fields: [
-        ...(metadata.method ? [{ label: 'Method', value: metadata.method }] : []),
-        ...(metadata.route ? [{ label: 'Route', value: metadata.route }] : []),
         ...(metadata.statusCode !== undefined
           ? [{ label: 'Status', value: String(metadata.statusCode) }]
           : []),
@@ -326,20 +323,9 @@ function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
       ],
     },
     {
-      label: 'Trace context',
+      label: 'Telemetry',
       fields: [
-        ...(metadata.traceId ? [{ label: 'Trace ID', value: metadata.traceId }] : []),
-        ...(metadata.spanId ? [{ label: 'Span ID', value: metadata.spanId }] : []),
-        ...(metadata.operation ? [{ label: 'Operation', value: metadata.operation }] : []),
         ...(metadata.origin ? [{ label: 'Origin', value: metadata.origin }] : []),
-        ...(relatedItems.length > 0
-          ? [
-              {
-                label: 'Related events',
-                value: `${relatedItems.length} other event${relatedItems.length === 1 ? '' : 's'} in this trace`,
-              },
-            ]
-          : []),
       ],
     },
   ]
@@ -463,9 +449,9 @@ function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
               <p className="text-sm text-muted-foreground">No additional event details.</p>
             )}
             {copiedField ? <span role="status" aria-label={`${copiedField} copied`} className="sr-only">{copiedField} copied</span> : null}
-            {trace?.spans.length ? (
+            {trace ? (
               <div className="mt-4 border border-border">
-                <TraceWaterfall trace={trace} />
+                <TraceWaterfall compact trace={trace} />
               </div>
             ) : null}
           </div>
@@ -627,13 +613,6 @@ export default function App() {
   const selectedEventTrace = selectedItem?.metadata?.traceId
     ? traces.find((trace) => trace.id === selectedItem.metadata?.traceId)
     : undefined
-  const relatedItems = selectedItem?.metadata?.traceId
-    ? items.filter(
-        (item) =>
-          item.id !== selectedItem.id &&
-          item.metadata?.traceId === selectedItem.metadata?.traceId
-      )
-    : []
   const lastViewedIndex = lastViewedItemId
     ? items.findIndex((item) => item.id === lastViewedItemId)
     : -1
@@ -1028,7 +1007,6 @@ export default function App() {
                     key={selectedItem.id}
                     item={selectedItem}
                     trace={selectedEventTrace}
-                    relatedItems={relatedItems}
                   />
                 ) : null}
               </div>

@@ -590,7 +590,7 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
-  test('summarizes other retained events in the selected trace overview', async () => {
+  test('summarizes related retained events in the trace waterfall', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -603,9 +603,8 @@ describe('local receiver to viewer integration', () => {
         expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
       })
 
-      const details = screen.getByRole('table', { name: 'Event details' })
-      expect(details.textContent).toContain('Related events')
-      expect(details.textContent).toContain('1')
+      const traceRelationship = await screen.findByLabelText('Trace relationship')
+      expect(traceRelationship.textContent).toContain('2 captured items')
     } finally {
       cleanup()
       await stopReceiver(server)
@@ -665,7 +664,7 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
-  test('shows a copyable, grouped inspector table in the selected event overview', async () => {
+  test('keeps the event overview to non-repeated diagnostic details', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -681,12 +680,15 @@ describe('local receiver to viewer integration', () => {
       const details = await screen.findByRole('table', { name: 'Event details' })
       expect(details.textContent).toContain('201')
       expect(details.textContent).toContain('6.17ms')
-      expect(details.textContent).toContain('http.server')
-      expect(screen.getByRole('rowheader', { name: 'Method' })).not.toBeNull()
-      expect(screen.getByRole('rowheader', { name: 'Trace ID' })).not.toBeNull()
+      expect(details.textContent).not.toContain('Method')
+      expect(details.textContent).not.toContain('Route')
+      expect(details.textContent).not.toContain('Trace ID')
+      expect(details.textContent).not.toContain('Operation')
+      expect(screen.getByTestId('event-detail').textContent).toContain('GET /summary')
+      expect(screen.getByTestId('event-detail').textContent).toContain('http.server')
 
-      fireEvent.click(screen.getByRole('button', { name: 'Copy Route' }))
-      expect(screen.getByRole('status', { name: 'Route copied' })).not.toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'Copy Status' }))
+      expect(screen.getByRole('status', { name: 'Status copied' })).not.toBeNull()
     } finally {
       cleanup()
       await stopReceiver(server)
@@ -730,7 +732,8 @@ describe('local receiver to viewer integration', () => {
         screen.getByRole('columnheader', { name: 'Timeline from 0ms to 12ms' })
       ).not.toBeNull()
       expect(screen.getByRole('columnheader', { name: 'Duration' })).not.toBeNull()
-      expect(screen.getByLabelText('Trace summary').textContent).toContain('3 spans')
+      expect(screen.getByLabelText('Trace relationship').textContent).toContain('1 captured item')
+      expect(screen.queryByLabelText('Trace summary')).toBeNull()
       expect(screen.getByText('db.query')).not.toBeNull()
       expect(screen.getByText('http.client')).not.toBeNull()
       expect(screen.getByRole('cell', { name: 'Duration 4.00ms' })).not.toBeNull()
