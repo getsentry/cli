@@ -431,6 +431,21 @@ describe("buildApp", () => {
     }
   });
 
+  test("CORS allows the configured Sentry Local preview to read the event stream", async () => {
+    const buffer = createSpotlightBuffer(10);
+    const app = buildApp(buffer);
+    const origin =
+      "https://sentry-local-git-codex-featlocal-observability-workspace.sentry.dev";
+
+    const res = await app.request("/stream", {
+      headers: { Origin: origin },
+    });
+    expect(res.headers.get("access-control-allow-origin")).toBe(origin);
+    if (res.body) {
+      await res.body.cancel();
+    }
+  });
+
   test("CORS permits the SSE resume header from the hosted local UI", async () => {
     const buffer = createSpotlightBuffer(10);
     const app = buildApp(buffer);
@@ -495,9 +510,30 @@ describe("buildApp", () => {
     const app = buildApp(buffer);
 
     const res = await app.request("/health", {
-      headers: { Origin: "https://not-local.sentry.dev" },
+      headers: { Origin: "https://local.sentry.dev.example.com" },
     });
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("limits the configured Sentry Local preview to stream reads", async () => {
+    const app = buildApp(createSpotlightBuffer(10), { uiActions: true });
+    const origin =
+      "https://sentry-local-git-codex-featlocal-observability-workspace.sentry.dev";
+
+    const [write, controls] = await Promise.all([
+      app.request("/stream", {
+        method: "POST",
+        headers: {
+          Origin: origin,
+          "Content-Type": SENTRY_CONTENT_TYPE,
+        },
+        body: '{"type":"event"}\n{}',
+      }),
+      app.request("/capabilities", { headers: { Origin: origin } }),
+    ]);
+
+    expect(write.status).toBe(403);
+    expect(controls.status).toBe(403);
   });
 
   test("CORS blocks non-localhost origins", async () => {

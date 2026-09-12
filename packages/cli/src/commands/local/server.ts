@@ -128,6 +128,8 @@ export function parsePort(value: string): number {
 const LOCALHOST_ORIGIN_RE =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 const LOCAL_UI_ORIGIN = "https://local.sentry.dev";
+const LOCAL_UI_PREVIEW_ORIGIN =
+  "https://sentry-local-git-codex-featlocal-observability-workspace.sentry.dev";
 
 export function isLoopbackHost(host: string): boolean {
   const normalized = host.replace(/^\[|\]$/g, "").toLowerCase();
@@ -143,13 +145,17 @@ type LocalReceiverOptions = {
   uiActions?: boolean;
 };
 
+function isHostedUiOrigin(origin: string | undefined): origin is string {
+  return origin === LOCAL_UI_ORIGIN || origin === LOCAL_UI_PREVIEW_ORIGIN;
+}
+
 function isHostedUiStreamRequest(request: {
   method: string;
   path: string;
   header: (name: string) => string | undefined;
 }): boolean {
   if (
-    request.header("origin") !== LOCAL_UI_ORIGIN ||
+    !isHostedUiOrigin(request.header("origin")) ||
     request.path !== "/stream"
   ) {
     return false;
@@ -165,9 +171,9 @@ function isHostedUiStreamRequest(request: {
 /**
  * Build the Hono application.
  *
- * CORS is restricted to localhost origins — dev stacks send from arbitrary
- * `localhost:*` ports (Vite, Next, Astro, etc.) but we must not allow
- * arbitrary remote origins to read the SSE envelope stream.
+ * CORS is restricted to localhost origins and the production/current-preview
+ * Sentry Local UIs. Dev stacks send from arbitrary `localhost:*` ports (Vite,
+ * Next, Astro, etc.). Remote origins may read only the SSE envelope stream.
  */
 
 /**
@@ -245,13 +251,14 @@ export function buildApp(
     ],
   });
   const hostedStreamCors = cors({
-    origin: LOCAL_UI_ORIGIN,
+    origin: (origin) => (isHostedUiOrigin(origin) ? origin : null),
     allowMethods: ["GET", "OPTIONS"],
     allowHeaders: ["Last-Event-ID"],
   });
 
   app.use("*", async (c, next) => {
-    const hostedUiOrigin = c.req.header("origin") === LOCAL_UI_ORIGIN;
+    const requestOrigin = c.req.header("origin") ?? "";
+    const hostedUiOrigin = isHostedUiOrigin(requestOrigin);
     const hostedStreamRequest = isHostedUiStreamRequest(c.req);
 
     // The hosted UI may only read the event stream. CORS alone cannot stop a
@@ -267,7 +274,7 @@ export function buildApp(
     if (c.req.method === "OPTIONS") {
       const isPrivateNetworkRequest =
         c.req.header("access-control-request-private-network") === "true";
-      c.header("Access-Control-Allow-Origin", LOCAL_UI_ORIGIN);
+      c.header("Access-Control-Allow-Origin", requestOrigin);
       c.header("Access-Control-Allow-Methods", "GET, OPTIONS");
       c.header("Access-Control-Allow-Headers", "Last-Event-ID");
       if (isPrivateNetworkRequest) {
