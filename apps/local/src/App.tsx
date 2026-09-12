@@ -1,4 +1,14 @@
-import { Check, ChevronLeft, ChevronRight, Copy, Menu, Search, Terminal } from 'lucide-react'
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Menu,
+  Radio,
+  Search,
+  Terminal,
+  Trash2,
+} from 'lucide-react'
 import {
   Fragment,
   type KeyboardEvent,
@@ -390,6 +400,7 @@ type WorkspaceSidebarProps = {
   snapshot: LocalTelemetrySnapshot
   traceCount: number
   onClear: () => void
+  onChangeReceiver: () => void
   onOpenCommand: (trigger: HTMLButtonElement) => void
   onSelect: (view: WorkspaceView) => void
   onToggle: () => void
@@ -404,10 +415,19 @@ function WorkspaceSidebar({
   snapshot,
   traceCount,
   onClear,
+  onChangeReceiver,
   onOpenCommand,
   onSelect,
   onToggle,
 }: WorkspaceSidebarProps) {
+  const statusLabel = connection.label.replace(' to local receiver', '')
+  const statusDotClass =
+    connection.tone === 'success'
+      ? 'bg-emerald-500 shadow-[0_0_10px_oklch(0.72_0.19_160)]'
+      : connection.tone === 'warning'
+        ? 'bg-amber-500'
+        : 'bg-muted-foreground'
+
   return (
     <aside
       aria-label="Workspace navigation"
@@ -444,6 +464,36 @@ function WorkspaceSidebar({
         >
           {collapsed ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
         </button>
+      </div>
+      <div
+        data-testid="sidebar-utility-bar"
+        className={`shrink-0 border-b border-border p-2 ${
+          collapsed ? 'space-y-1' : 'flex items-center justify-between'
+        }`}
+      >
+        <span
+          role="status"
+          aria-label={connection.label}
+          title={collapsed ? connection.label : undefined}
+          className={`flex h-8 items-center rounded-md ${
+            collapsed ? 'justify-center px-0' : 'gap-2 bg-emerald-500/10 px-2.5 text-emerald-700 dark:text-emerald-400'
+          }`}
+        >
+          <span className={`size-2 shrink-0 rounded-full ${statusDotClass}`} />
+          {!collapsed ? <span className="text-xs font-medium">{statusLabel}</span> : null}
+          <span className="sr-only">{connection.label}</span>
+        </span>
+        {canSearch ? (
+          <button
+            type="button"
+            aria-label="Search events"
+            title="Search events and views (⌘K)"
+            className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={(event) => onOpenCommand(event.currentTarget)}
+          >
+            <Search className="size-4" aria-hidden="true" />
+          </button>
+        ) : null}
       </div>
       <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
         {(['Explore', 'Inspect'] as const).map((section) => (
@@ -486,32 +536,34 @@ function WorkspaceSidebar({
           </div>
         ))}
       </nav>
-      <div className="shrink-0 space-y-1 border-t border-border p-2">
-        {canSearch ? (
+      <div className="shrink-0 border-t border-border p-2">
+        <div className={collapsed ? 'space-y-1' : 'grid grid-cols-2 gap-1'}>
           <button
             type="button"
-            aria-label="Search events"
-            title={collapsed ? 'Search events and views (⌘K)' : undefined}
-            className={`flex h-8 w-full items-center rounded-md text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-              collapsed ? 'justify-center px-0' : 'gap-2 px-2 text-left'
+            aria-label="Change receiver connection"
+            title={collapsed ? 'Change receiver connection' : undefined}
+            className={`flex h-8 w-full items-center rounded-md text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              collapsed ? 'justify-center px-0' : 'justify-center gap-1.5 px-2'
             }`}
-            onClick={(event) => onOpenCommand(event.currentTarget)}
+            onClick={onChangeReceiver}
           >
-            <Search className="size-4 shrink-0" aria-hidden="true" />
-            {!collapsed ? (
-              <>
-                <span className="min-w-0 flex-1 truncate">Search events and views</span>
-                <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
-              </>
-            ) : null}
+            <Radio className="size-3.5 shrink-0" aria-hidden="true" />
+            {!collapsed ? <span>Change</span> : null}
           </button>
-        ) : null}
-        <ReceiverControls
-          compact={collapsed}
-          connection={connection}
-          eventCount={eventCount}
-          onClear={onClear}
-        />
+          <button
+            type="button"
+            aria-label="Clear events"
+            title={collapsed ? 'Clear events' : undefined}
+            disabled={eventCount === 0}
+            className={`flex h-8 w-full items-center rounded-md text-xs font-medium text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+              collapsed ? 'justify-center px-0' : 'justify-center gap-1.5 px-2'
+            }`}
+            onClick={onClear}
+          >
+            <Trash2 className="size-3.5 shrink-0" aria-hidden="true" />
+            {!collapsed ? <span>Clear</span> : null}
+          </button>
+        </div>
       </div>
     </aside>
   )
@@ -764,6 +816,7 @@ export default function App() {
             snapshot={telemetry}
             traceCount={traces.length}
             onClear={clearItems}
+            onChangeReceiver={() => setIsEditingReceiver(true)}
             onOpenCommand={openCommand}
             onSelect={selectWorkspace}
             onToggle={() => setIsSidebarCollapsed((collapsed) => !collapsed)}

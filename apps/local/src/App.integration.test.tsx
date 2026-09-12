@@ -218,7 +218,7 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
-  test('keeps desktop utility controls in the sidebar dock', async () => {
+  test('keeps direct receiver actions in a compact sidebar utility bar', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -228,18 +228,19 @@ describe('local receiver to viewer integration', () => {
       await screen.findByLabelText('View transaction event')
 
       const sidebar = screen.getByLabelText('Workspace navigation')
-      expect(sidebar.querySelector('button[aria-label="Search events"]')).not.toBeNull()
-      expect(sidebar.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe(
+      const utilityBar = sidebar.querySelector('[data-testid="sidebar-utility-bar"]')
+      expect(utilityBar).not.toBeNull()
+      expect(utilityBar?.textContent).toContain('Connected')
+      expect(utilityBar?.querySelector('button[aria-label="Search events"]')).not.toBeNull()
+      expect(utilityBar?.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe(
         'Connected to local receiver'
       )
+      expect(sidebar.querySelector('button[aria-label="Change receiver connection"]')).not.toBeNull()
+      expect(sidebar.querySelector('button[aria-label="Clear events"]')).not.toBeNull()
       expect(screen.queryByRole('banner')).toBeNull()
-      expect(
-        new Set(
-          screen
-            .getAllByRole('button', { name: 'Receiver options' })
-            .map((button) => button.getAttribute('aria-controls'))
-        ).size
-      ).toBe(2)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Change receiver connection' }))
+      expect(await screen.findByRole('heading', { name: 'Connect a receiver' })).not.toBeNull()
 
       fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
       expect(screen.getByRole('button', { name: 'Open live activity view' }).className).toContain(
@@ -764,7 +765,7 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
-  test('clears the local viewer feed from receiver options', async () => {
+  test('clears the local viewer feed from the sidebar', async () => {
     const { server, port } = await startReceiver()
 
     try {
@@ -773,8 +774,7 @@ describe('local receiver to viewer integration', () => {
       await sendEnvelope(port, 'GET /clear-me')
       await screen.findByLabelText('View transaction event')
 
-      fireEvent.click(screen.getAllByRole('button', { name: 'Receiver options' })[0]!)
-      fireEvent.click(screen.getByRole('button', { name: 'Clear all events' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Clear events' }))
 
       expect(screen.queryByLabelText('View transaction event')).toBeNull()
       expect(screen.getByText('Waiting for events')).not.toBeNull()
