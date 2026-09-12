@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 import type { LocalFeedItem } from "./spotlight.js"
-import { buildTraceGroups } from "./trace-model.js"
+import { buildTraceGroups, traceIdForItem } from "./trace-model.js"
 
 function item(overrides: Partial<LocalFeedItem>): LocalFeedItem {
   return {
@@ -14,6 +14,14 @@ function item(overrides: Partial<LocalFeedItem>): LocalFeedItem {
 }
 
 describe("buildTraceGroups", () => {
+  test("uses a transaction ID as the trace fallback used by routing", () => {
+    expect(
+      traceIdForItem(
+        item({ id: "transaction-without-trace", metadata: { title: "GET /standalone" } })
+      )
+    ).toBe("transaction-without-trace")
+  })
+
   test("keeps a standalone transaction discoverable when it has no trace context", () => {
     const traces = buildTraceGroups([
       {

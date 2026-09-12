@@ -446,6 +446,21 @@ describe("buildApp", () => {
     }
   });
 
+  test("CORS allows HTTPS Sentry preview subdomains to read the event stream", async () => {
+    const buffer = createSpotlightBuffer(10);
+    const app = buildApp(buffer);
+    const origin = "https://sentry-local-git-feature-branch.sentry.dev";
+
+    const res = await app.request("/stream", {
+      headers: { Origin: origin },
+    });
+
+    expect(res.headers.get("access-control-allow-origin")).toBe(origin);
+    if (res.body) {
+      await res.body.cancel();
+    }
+  });
+
   test("CORS permits the SSE resume header from the hosted local UI", async () => {
     const buffer = createSpotlightBuffer(10);
     const app = buildApp(buffer);
@@ -513,6 +528,22 @@ describe("buildApp", () => {
       headers: { Origin: "https://local.sentry.dev.example.com" },
     });
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("CORS requires HTTPS for hosted Sentry preview origins", async () => {
+    const buffer = createSpotlightBuffer(10);
+    const app = buildApp(buffer);
+
+    const res = await app.request("/stream", {
+      headers: {
+        Origin: "http://sentry-local-git-feature-branch.sentry.dev",
+      },
+    });
+
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+    if (res.body) {
+      await res.body.cancel();
+    }
   });
 
   test("limits the configured Sentry Local preview to stream reads", async () => {

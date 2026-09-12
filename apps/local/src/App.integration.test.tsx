@@ -6,6 +6,7 @@ import { NuqsAdapter } from 'nuqs/adapters/react'
 import { BrowserRouter } from 'react-router'
 import { ThemeProvider } from '@/components/theme-provider.tsx'
 import App from './App.tsx'
+import { LocalWorkspaceRoute } from './routes/local-workspace-route.tsx'
 import {
   REMOTE_STREAM_STORAGE_KEY,
   STREAM_STORAGE_KEY,
@@ -80,17 +81,19 @@ async function sendEnvelope(
   expect(response.status).toBe(204)
 }
 
-function renderViewer(port: number) {
+function renderViewer(port: number, path = '/') {
   window.history.replaceState(
     null,
     '',
-    `/#stream=${encodeURIComponent(`http://127.0.0.1:${port}/stream`)}`
+    `${path}#stream=${encodeURIComponent(`http://127.0.0.1:${port}/stream`)}`
   )
   return render(
     <ThemeProvider attribute="class" defaultTheme="light">
       <NuqsAdapter>
         <BrowserRouter>
-          <App />
+          <LocalWorkspaceRoute>
+            <App />
+          </LocalWorkspaceRoute>
         </BrowserRouter>
       </NuqsAdapter>
     </ThemeProvider>
@@ -103,7 +106,9 @@ function renderBareViewer() {
     <ThemeProvider attribute="class" defaultTheme="light">
       <NuqsAdapter>
         <BrowserRouter>
-          <App />
+          <LocalWorkspaceRoute>
+            <App />
+          </LocalWorkspaceRoute>
         </BrowserRouter>
       </NuqsAdapter>
     </ThemeProvider>
@@ -584,6 +589,83 @@ describe('local receiver to viewer integration', () => {
     }
   })
 
+  test('hydrates a shareable Explorer route and selected event from the URL', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      await sendEnvelope(port, 'GET /other-error', {
+        level: 'error',
+        type: 'event',
+      })
+      await sendEnvelope(port, 'GET /shared-error', {
+        level: 'error',
+        type: 'event',
+      })
+
+      renderViewer(port, '/errors')
+      await screen.findByText('Connected to local receiver')
+      await waitFor(() => {
+        expect(screen.getAllByLabelText('View event event')).toHaveLength(2)
+      })
+      fireEvent.click(screen.getAllByLabelText('View event event')[1]!)
+      const sharedEventId = await waitFor(() => {
+        const eventId = new URLSearchParams(window.location.search).get('event')
+        expect(eventId).not.toBeNull()
+        return eventId!
+      })
+
+      cleanup()
+      renderViewer(port, `/errors?event=${encodeURIComponent(sharedEventId)}`)
+      await screen.findByText('Connected to local receiver')
+      await waitFor(() => {
+        expect(screen.getAllByLabelText('View event event')).toHaveLength(2)
+      })
+      expect(
+        screen.getByRole('button', { name: 'Open errors view' }).getAttribute('aria-current')
+      ).toBe('page')
+      expect(screen.getByTestId('event-detail').textContent).toContain('/shared-error')
+      expect(screen.getByTestId('event-detail').textContent).not.toContain('/other-error')
+      expect(new URLSearchParams(window.location.search).get('event')).toBe(sharedEventId)
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('restores the prior selected event when browser history goes back', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /first')
+      await sendEnvelope(port, 'GET /second')
+
+      await waitFor(() => {
+        expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
+      })
+      const events = screen.getAllByLabelText('View transaction event')
+      fireEvent.click(events[1]!)
+      const selectedEventId = await waitFor(() => {
+        const eventId = new URLSearchParams(window.location.search).get('event')
+        expect(eventId).not.toBeNull()
+        return eventId!
+      })
+      expect(new URLSearchParams(window.location.search).get('event')).toBe(selectedEventId)
+      expect(screen.getByTestId('event-detail').textContent).toContain('/second')
+
+      await act(async () => {
+        window.history.back()
+      })
+      await waitFor(() => {
+        expect(screen.getByTestId('event-detail').textContent).toContain('/first')
+      })
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
   test('opens a global command result in its shareable Explorer view', async () => {
     const { server, port } = await startReceiver()
 
@@ -605,6 +687,15 @@ describe('local receiver to viewer integration', () => {
         expect(new URLSearchParams(window.location.search).get('event')).not.toBeNull()
       })
       expect(screen.getByTestId('event-detail').textContent).toContain('/broken')
+
+      await act(async () => {
+        window.history.back()
+      })
+      await waitFor(() => {
+        expect(
+          screen.getByRole('button', { name: 'Open live activity view' }).getAttribute('aria-current')
+        ).toBe('page')
+      })
     } finally {
       cleanup()
       await stopReceiver(server)

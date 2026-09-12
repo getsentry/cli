@@ -1,4 +1,5 @@
 import type { LocalFeedItem } from './spotlight.ts'
+import { isAiEvent, isErrorEvent } from './workspace.ts'
 
 export type LocalTelemetrySnapshot = {
   items: LocalFeedItem[]
@@ -34,23 +35,13 @@ const EMPTY_SNAPSHOT: LocalTelemetrySnapshot = {
   ai: [],
 }
 
-function isError(item: LocalFeedItem): boolean {
-  const { level, statusCode } = item.metadata ?? {}
-  return level === 'error' || level === 'fatal' || (statusCode !== undefined && statusCode >= 500)
-}
-
-function isAiItem(item: LocalFeedItem): boolean {
-  const search = `${item.type} ${item.metadata?.operation ?? ''} ${item.metadata?.origin ?? ''}`.toLowerCase()
-  return search.includes('ai') || search.includes('gen_ai') || search.includes('llm')
-}
-
 function buildSnapshot(
   items: LocalFeedItem[],
   envelopes: LocalFeedItem[]
 ): LocalTelemetrySnapshot {
   return {
     items,
-    errors: items.filter(isError),
+    errors: items.filter(isErrorEvent),
     traces: items.filter((item) => item.type === 'transaction' || item.type === 'span'),
     logs: items.filter((item) => item.type === 'log'),
     feedback: items.filter((item) => item.type === 'user_report' || item.type === 'feedback'),
@@ -58,7 +49,7 @@ function buildSnapshot(
     attachments: items.filter((item) => item.type === 'attachment'),
     profiles: items.filter((item) => item.type === 'profile' || item.type === 'profile_chunk'),
     sdks: items.filter((item) => item.type === 'client_report' || item.type === 'session'),
-    ai: items.filter(isAiItem),
+    ai: items.filter(isAiEvent),
   }
 }
 

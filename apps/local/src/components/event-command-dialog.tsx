@@ -131,6 +131,17 @@ export function EventCommandDialog({
             </CommandItem>
           ))}
         </CommandGroup>
+        {query.trim() ? (
+          <CommandGroup heading="Filter current view">
+            <CommandItem
+              value={`filter current view ${query}`}
+              onSelect={close}
+            >
+              <Search aria-hidden="true" />
+              <span className="min-w-0 truncate">Filter current view for “{query.trim()}”</span>
+            </CommandItem>
+          </CommandGroup>
+        ) : null}
       </CommandList>
     </CommandDialog>
   )

@@ -1,22 +1,4 @@
-import {
-  Activity,
-  Bot,
-  Boxes,
-  Bug,
-  ChevronLeft,
-  ChevronRight,
-  FileArchive,
-  Gauge,
-  ListTree,
-  Menu,
-  MessageSquareText,
-  Search,
-  Terminal,
-  type LucideIcon,
-  Check,
-  Copy,
-} from 'lucide-react'
-import { parseAsString, parseAsStringEnum, useQueryStates } from 'nuqs'
+import { Check, ChevronLeft, ChevronRight, Copy, Menu, Search, Terminal } from 'lucide-react'
 import {
   Fragment,
   type KeyboardEvent,
@@ -26,7 +8,6 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
-import { useLocation, useNavigate } from 'react-router'
 import { JsonView } from '@/components/json-view.tsx'
 import { ConnectionLanding } from '@/components/connection-landing.tsx'
 import {
@@ -57,50 +38,24 @@ import {
   createLocalTelemetryStore,
   type LocalTelemetrySnapshot,
 } from '@/lib/telemetry-store.ts'
-import { buildTraceGroups, type TraceGroup } from '@/lib/trace-model.ts'
+import { buildTraceGroups, traceIdForItem, type TraceGroup } from '@/lib/trace-model.ts'
+import { workspaceNavigation } from '@/lib/workspace-navigation.ts'
 import {
   eventFilters,
-  eventFilterValues,
   isErrorEvent,
   matchesEventFilter,
   matchesSearch,
   type EventFilter,
   type WorkspaceView,
-  workspaceFromPath,
   workspaceForItem,
-  workspacePath,
 } from '@/lib/workspace.ts'
+import { useLocalWorkspaceRoute } from '@/routes/local-workspace-context.ts'
 
 type EventEntryProps = {
   item: LocalFeedItem
   isSelected: boolean
   onSelect: (id: string) => void
 }
-
-type WorkspaceNavigationItem = {
-  id: WorkspaceView
-  label: string
-  singularLabel: string
-  section: 'Explore' | 'Inspect'
-  emptyState: {
-    title: string
-    description: string
-  }
-  icon: LucideIcon
-  getItems: (snapshot: LocalTelemetrySnapshot) => LocalFeedItem[]
-}
-
-const workspaceNavigation: WorkspaceNavigationItem[] = [
-  { id: 'live', label: 'Live Activity', singularLabel: 'event', section: 'Explore', emptyState: { title: 'Waiting for events', description: 'Incoming local telemetry will appear here.' }, icon: Activity, getItems: (snapshot) => snapshot.items },
-  { id: 'traces', label: 'Traces', singularLabel: 'trace', section: 'Explore', emptyState: { title: 'No traces captured', description: 'Transactions and spans from your receiver will appear here as a single trace.' }, icon: ListTree, getItems: (snapshot) => snapshot.traces },
-  { id: 'errors', label: 'Errors', singularLabel: 'error', section: 'Explore', emptyState: { title: 'No errors captured', description: 'Errors and failed requests from this receiver will appear here.' }, icon: Bug, getItems: (snapshot) => snapshot.errors },
-  { id: 'logs', label: 'Logs', singularLabel: 'log', section: 'Explore', emptyState: { title: 'No logs captured', description: 'Structured logs sent through the receiver will appear here.' }, icon: Terminal, getItems: (snapshot) => snapshot.logs },
-  { id: 'ai', label: 'AI', singularLabel: 'AI event', section: 'Explore', emptyState: { title: 'No AI activity captured', description: 'AI spans and related telemetry will appear here.' }, icon: Bot, getItems: (snapshot) => snapshot.ai },
-  { id: 'envelopes', label: 'Envelopes', singularLabel: 'envelope', section: 'Inspect', emptyState: { title: 'No envelopes received', description: 'Raw envelopes received by this viewer will appear here.' }, icon: FileArchive, getItems: (snapshot) => snapshot.envelopes },
-  { id: 'sdks', label: 'Sessions & SDKs', singularLabel: 'session or client report', section: 'Inspect', emptyState: { title: 'No sessions or client reports', description: 'SDK sessions and client reports will appear here.' }, icon: Boxes, getItems: (snapshot) => snapshot.sdks },
-  { id: 'feedback', label: 'Feedback', singularLabel: 'feedback item', section: 'Inspect', emptyState: { title: 'No feedback received', description: 'User feedback submitted through supported SDKs will appear here.' }, icon: MessageSquareText, getItems: (snapshot) => snapshot.feedback },
-  { id: 'profiles', label: 'Profiles', singularLabel: 'profile', section: 'Inspect', emptyState: { title: 'No profiles captured', description: 'Profiling data from supported SDKs will appear here.' }, icon: Gauge, getItems: (snapshot) => snapshot.profiles },
-]
 
 const CONNECTION_TIMEOUT_MS = 10_000
 
@@ -523,14 +478,13 @@ function WorkspaceSidebar({
 }
 
 export default function App() {
-  const location = useLocation()
-  const navigate = useNavigate()
-  const [urlState, setUrlState] = useQueryStates({
-    event: parseAsString,
-    trace: parseAsString,
-    filter: parseAsStringEnum(eventFilterValues).withDefault('all'),
-    q: parseAsString.withDefault(''),
-  })
+  const {
+    navigateToCommandEvent,
+    navigateToCommandTrace,
+    navigateToWorkspace,
+    workspaceQuery,
+    workspaceView,
+  } = useLocalWorkspaceRoute()
   const [streamUrl, setStreamUrl] = useState(() =>
     resolveInitialStreamUrl(window.location.hash, getSavedStream(), getSavedRemoteStream())
   )
@@ -556,9 +510,8 @@ export default function App() {
   const commandTriggerRef = useRef<HTMLButtonElement>(null)
   const presentation = getConnectionPresentation(connection)
   const traces = useMemo(() => buildTraceGroups(items), [items])
-  const workspaceView = workspaceFromPath(location.pathname)
-  const filter = urlState.filter
-  const searchQuery = urlState.q
+  const filter = workspaceQuery.filter
+  const searchQuery = workspaceQuery.query
   const activeWorkspace = workspaceNavigation.find((entry) => entry.id === workspaceView)!
   const workspaceItems = activeWorkspace.getItems(telemetry)
   const visibleItems =
@@ -572,7 +525,7 @@ export default function App() {
         description: 'Try a different search term or clear the search to see everything in this view.',
       }
     : activeWorkspace.emptyState
-  const selectedItem = workspaceItems.find((item) => item.id === urlState.event) ?? workspaceItems[0]
+  const selectedItem = workspaceItems.find((item) => item.id === workspaceQuery.eventId) ?? workspaceItems[0]
   const selectedEventTrace = selectedItem?.metadata?.traceId
     ? traces.find((trace) => trace.id === selectedItem.metadata?.traceId)
     : undefined
@@ -595,40 +548,37 @@ export default function App() {
   }
 
   const selectItem = (id: string) => {
-    void setUrlState({ event: id, trace: null }, { history: 'push' })
+    void workspaceQuery.selectEvent(id)
     markItemsSeen()
   }
 
   const selectFilter = (nextFilter: EventFilter) => {
-    void setUrlState({ event: null, filter: nextFilter }, { history: 'replace' })
+    void workspaceQuery.setLiveFilter(nextFilter)
     markItemsSeen()
   }
 
   const selectWorkspace = (nextWorkspace: WorkspaceView) => {
-    navigate({ pathname: workspacePath(nextWorkspace), search: location.search })
-    void setUrlState({ event: null, trace: null, filter: null }, { history: 'replace' })
+    navigateToWorkspace(nextWorkspace)
+    void workspaceQuery.resetWorkspace()
     setIsMobileNavigationOpen(false)
     markItemsSeen()
   }
 
   const selectCommandItem = (item: LocalFeedItem) => {
     const nextWorkspace = workspaceForItem(item)
-    navigate({ pathname: workspacePath(nextWorkspace), search: location.search })
-    void setUrlState(
-      {
-        event: item.id,
-        q: null,
-        trace: nextWorkspace === 'traces' ? item.metadata?.traceId ?? null : null,
-      },
-      { history: 'push' }
-    )
+    const traceId = traceIdForItem(item)
+    if (nextWorkspace === 'traces' && traceId) {
+      navigateToCommandTrace(nextWorkspace, traceId)
+    } else {
+      navigateToCommandEvent(nextWorkspace, item.id)
+    }
     markItemsSeen()
   }
 
   const clearItems = () => {
     telemetryStore.clear()
     setLastViewedItemId(undefined)
-    void setUrlState({ event: null, q: null, trace: null }, { history: 'replace' })
+    void workspaceQuery.clearWorkspace()
 
     const endpoint = parseStreamEndpoint(streamUrl)
     if (endpoint?.kind !== 'loopback') {
@@ -899,9 +849,9 @@ export default function App() {
             ) : workspaceView === 'traces' ? (
               <TraceWorkspace
                 traces={traces}
-                selectedTraceId={urlState.trace ?? undefined}
+                selectedTraceId={workspaceQuery.traceId ?? undefined}
                 onSelect={(traceId) => {
-                  void setUrlState({ event: null, trace: traceId }, { history: 'push' })
+                  void workspaceQuery.selectTrace(traceId)
                 }}
               />
             ) : (
@@ -999,7 +949,7 @@ export default function App() {
         onNavigate={selectWorkspace}
         onOpenChange={setIsCommandOpen}
         onQueryChange={(query) => {
-          void setUrlState({ q: query || null }, { history: 'replace' })
+          void workspaceQuery.setSearchQuery(query)
         }}
         onSelectItem={selectCommandItem}
       />

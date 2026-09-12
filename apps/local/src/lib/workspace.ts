@@ -47,7 +47,7 @@ export function isErrorEvent(item: LocalFeedItem) {
   return level === 'error' || level === 'fatal' || (statusCode !== undefined && statusCode >= 500)
 }
 
-function isAiEvent(item: LocalFeedItem) {
+export function isAiEvent(item: LocalFeedItem) {
   const metadata = getMetadata(item)
   return `${item.type} ${metadata.operation ?? ''} ${metadata.origin ?? ''}`
     .toLowerCase()

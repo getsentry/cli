@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ListTree } from 'lucide-react'
-import { useState } from 'react'
-import { describe, expect, test, vi } from 'vitest'
+import { useRef, useState } from 'react'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
   EventCommandDialog,
   type CommandNavigationItem,
@@ -23,6 +23,8 @@ const items = [
 const navigation: CommandNavigationItem[] = [
   { id: 'traces', label: 'Traces', icon: ListTree },
 ]
+
+afterEach(cleanup)
 
 describe('EventCommandDialog', () => {
   test('opens with Meta+K and selects a fuzzy-matched retained event', () => {
@@ -73,5 +75,55 @@ describe('EventCommandDialog', () => {
 
     expect(screen.getByRole('dialog', { name: 'Search Local events' })).not.toBeNull()
     expect(screen.getByRole('option', { name: 'Traces' })).not.toBeNull()
+  })
+
+  test('closes on Escape and returns focus to the search trigger', async () => {
+    function Harness() {
+      const [open, setOpen] = useState(true)
+      const triggerRef = useRef<HTMLButtonElement>(null)
+      return (
+        <>
+          <button ref={triggerRef} type="button">Search events</button>
+          <EventCommandDialog
+            enabled
+            items={items}
+            navigation={navigation}
+            open={open}
+            query=""
+            triggerRef={triggerRef}
+            onNavigate={vi.fn()}
+            onOpenChange={setOpen}
+            onQueryChange={vi.fn()}
+            onSelectItem={vi.fn()}
+          />
+        </>
+      )
+    }
+
+    render(<Harness />)
+    fireEvent.keyDown(screen.getByPlaceholderText('Search events and views'), { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Search events' }))
+    })
+  })
+
+  test('offers the current-view filter when a search query is present', () => {
+    render(
+      <EventCommandDialog
+        enabled
+        items={items}
+        navigation={navigation}
+        open
+        query="users"
+        onNavigate={vi.fn()}
+        onOpenChange={vi.fn()}
+        onQueryChange={vi.fn()}
+        onSelectItem={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('Filter current view')).not.toBeNull()
+    expect(screen.getByRole('option', { name: /Filter current view for “users”/ })).not.toBeNull()
   })
 })

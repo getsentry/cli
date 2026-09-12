@@ -127,9 +127,6 @@ export function parsePort(value: string): number {
 /** Match localhost origins on any port (http or https), including IPv6. */
 const LOCALHOST_ORIGIN_RE =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
-const LOCAL_UI_ORIGIN = "https://local.sentry.dev";
-const LOCAL_UI_PREVIEW_ORIGIN =
-  "https://sentry-local-git-codex-featlocal-observability-workspace.sentry.dev";
 
 export function isLoopbackHost(host: string): boolean {
   const normalized = host.replace(/^\[|\]$/g, "").toLowerCase();
@@ -146,7 +143,16 @@ type LocalReceiverOptions = {
 };
 
 function isHostedUiOrigin(origin: string | undefined): origin is string {
-  return origin === LOCAL_UI_ORIGIN || origin === LOCAL_UI_PREVIEW_ORIGIN;
+  if (!origin) {
+    return false;
+  }
+
+  if (!URL.canParse(origin)) {
+    return false;
+  }
+
+  const url = new URL(origin);
+  return url.protocol === "https:" && url.hostname.endsWith(".sentry.dev");
 }
 
 function isHostedUiStreamRequest(request: {
