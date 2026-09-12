@@ -18,7 +18,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
-import { useCopyToClipboard, useLocalStorage } from '@uidotdev/usehooks'
+import { useCopyToClipboard, useDebounce, useLocalStorage } from '@uidotdev/usehooks'
 import { JsonView } from '@/components/json-view.tsx'
 import { ConnectionLanding } from '@/components/connection-landing.tsx'
 import {
@@ -67,6 +67,7 @@ type EventEntryProps = {
 }
 
 const CONNECTION_TIMEOUT_MS = 10_000
+const SEARCH_DEBOUNCE_MS = 150
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sentry.local.sidebar-collapsed'
 
 function formatTimestamp(timestamp: LocalFeedItem['timestamp']): string {
@@ -581,6 +582,9 @@ export default function App() {
     workspaceQuery,
     workspaceView,
   } = useLocalWorkspaceRoute()
+  const [commandSearchQuery, setCommandSearchQuery] = useState(workspaceQuery.query)
+  const debouncedCommandSearchQuery = useDebounce(commandSearchQuery, SEARCH_DEBOUNCE_MS)
+  const isClearingCommandSearch = useRef(false)
   const [streamUrl, setStreamUrl] = useState(() =>
     resolveInitialStreamUrl(window.location.hash, getSavedStream(), getSavedRemoteStream())
   )
@@ -639,6 +643,18 @@ export default function App() {
   )
   const newItemCount = newItems.length
 
+  useEffect(() => {
+    if (isClearingCommandSearch.current) {
+      if (debouncedCommandSearchQuery !== commandSearchQuery) {
+        return
+      }
+      isClearingCommandSearch.current = false
+    }
+    if (debouncedCommandSearchQuery !== searchQuery) {
+      void workspaceQuery.setSearchQuery(debouncedCommandSearchQuery)
+    }
+  }, [commandSearchQuery, debouncedCommandSearchQuery, searchQuery, workspaceQuery])
+
   const markItemsSeen = () => {
     setLastViewedItemId(items.at(-1)?.id)
   }
@@ -656,6 +672,8 @@ export default function App() {
   }
 
   const selectCommandItem = (item: LocalFeedItem) => {
+    isClearingCommandSearch.current = true
+    setCommandSearchQuery('')
     const nextWorkspace = workspaceForItem(item)
     const traceId = traceIdForItem(item)
     if (nextWorkspace === 'traces' && traceId) {
@@ -802,9 +820,15 @@ export default function App() {
   const commandNavigation: CommandNavigationItem[] = workspaceNavigation.map(
     ({ icon, id, label }) => ({ icon, id, label })
   )
+  const setCommandOpen = (open: boolean) => {
+    if (open) {
+      setCommandSearchQuery(searchQuery)
+    }
+    setIsCommandOpen(open)
+  }
   const openCommand = (trigger: HTMLButtonElement) => {
     commandTriggerRef.current = trigger
-    setIsCommandOpen(true)
+    setCommandOpen(true)
   }
 
   return (
@@ -1017,13 +1041,11 @@ export default function App() {
         items={items}
         navigation={commandNavigation}
         open={isCommandOpen}
-        query={searchQuery}
+        query={commandSearchQuery}
         triggerRef={commandTriggerRef}
         onNavigate={selectWorkspace}
-        onOpenChange={setIsCommandOpen}
-        onQueryChange={(query) => {
-          void workspaceQuery.setSearchQuery(query)
-        }}
+        onOpenChange={setCommandOpen}
+        onQueryChange={setCommandSearchQuery}
         onSelectItem={selectCommandItem}
       />
     </main>

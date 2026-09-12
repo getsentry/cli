@@ -687,6 +687,9 @@ describe('local receiver to viewer integration', () => {
         target: { value: 'customers' },
       })
 
+      expect(screen.getAllByLabelText('View transaction event')).toHaveLength(2)
+      expect(new URLSearchParams(window.location.search).get('q')).toBeNull()
+
       await waitFor(() => {
         expect(screen.getAllByLabelText('View transaction event')).toHaveLength(1)
       })
