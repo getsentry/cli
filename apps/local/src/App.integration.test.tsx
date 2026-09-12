@@ -173,7 +173,7 @@ describe('local receiver to viewer integration', () => {
       const eventList = screen.getByTestId('event-list')
       expect(eventList.className).toContain('flex-1')
       expect(eventList.className).not.toContain('max-h-[42rem]')
-      expect(screen.getByRole('complementary', { name: 'Events' })).not.toBeNull()
+      expect(screen.getByRole('complementary', { name: 'Live Activity' })).not.toBeNull()
       const detail = screen.getByTestId('event-detail')
       expect(detail.textContent).toContain('GET /live')
       expect(detail.textContent).not.toContain('GET /live-2')
@@ -239,12 +239,11 @@ describe('local receiver to viewer integration', () => {
       const explorerViews = [
         ['Open live activity view', 'View transaction event'],
         ['Open errors view', 'View event event'],
-        ['Open traces view', 'View transaction event'],
         ['Open logs view', 'View log event'],
         ['Open feedback view', 'View user_report event'],
         ['Open envelopes view', 'View envelope event'],
         ['Open profiles view', 'View profile event'],
-        ['Open sdks view', 'View client_report event'],
+        ['Open sessions & sdks view', 'View client_report event'],
         ['Open ai view', 'View transaction event'],
       ] as const
 
@@ -252,6 +251,9 @@ describe('local receiver to viewer integration', () => {
         fireEvent.click(screen.getByRole('button', { name: view }))
         expect((await screen.findAllByLabelText(event)).length).toBeGreaterThan(0)
       }
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open traces view' }))
+      expect(await screen.findByRole('region', { name: 'Trace waterfall' })).not.toBeNull()
     } finally {
       cleanup()
       await stopReceiver(server)
@@ -499,7 +501,9 @@ describe('local receiver to viewer integration', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Open envelopes view' }))
 
       expect(screen.getByRole('button', { name: 'Open envelopes view' }).textContent).toContain('1')
-      expect(screen.getByLabelText('View envelope event')).not.toBeNull()
+      fireEvent.click(screen.getByLabelText('View envelope event'))
+      expect(screen.getByRole('heading', { name: 'Raw envelope' })).not.toBeNull()
+      expect(screen.getByTestId('event-detail').textContent).toContain('Envelope')
     } finally {
       cleanup()
       await stopReceiver(server)
@@ -515,6 +519,26 @@ describe('local receiver to viewer integration', () => {
       await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
 
       expect((await screen.findByLabelText('View event event')).textContent).toContain('Error')
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('selects an event from the active workspace instead of retaining a live event', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /healthy')
+      await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
+
+      await screen.findByLabelText('View event event')
+      fireEvent.click(screen.getByRole('button', { name: 'Open errors view' }))
+
+      expect(screen.getByTestId('event-detail').textContent).toContain('/broken')
+      expect(screen.getByTestId('event-detail').textContent).not.toContain('/healthy')
     } finally {
       cleanup()
       await stopReceiver(server)
@@ -700,9 +724,7 @@ describe('local receiver to viewer integration', () => {
         ],
       })
 
-      fireEvent.click(await screen.findByRole('tab', { name: 'Trace' }))
-
-      expect(screen.getByRole('region', { name: 'Trace waterfall' })).not.toBeNull()
+      expect(await screen.findByRole('region', { name: 'Trace waterfall' })).not.toBeNull()
       expect(screen.getByRole('columnheader', { name: 'Span' })).not.toBeNull()
       expect(
         screen.getByRole('columnheader', { name: 'Timeline from 0ms to 12ms' })
@@ -713,6 +735,55 @@ describe('local receiver to viewer integration', () => {
       expect(screen.getByText('http.client')).not.toBeNull()
       expect(screen.getByRole('cell', { name: 'Duration 4.00ms' })).not.toBeNull()
       expect(screen.getByTestId('waterfall-bar-db-span')).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('groups trace records into one trace investigation', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /trace-parent', {
+        operation: 'http.server',
+        spanId: 'parent-span',
+        traceId: 'grouped-trace',
+      })
+      await sendEnvelope(port, 'GET /trace-child', {
+        operation: 'db.query',
+        spanId: 'child-span',
+        traceId: 'grouped-trace',
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open traces view' }))
+
+      expect((await screen.findAllByRole('heading', { name: 'Traces' })).length).toBeGreaterThan(0)
+      expect(screen.getByText('1 trace')).not.toBeNull()
+      expect(screen.getByRole('region', { name: 'Trace waterfall' })).not.toBeNull()
+    } finally {
+      cleanup()
+      await stopReceiver(server)
+    }
+  })
+
+  test('uses the active Explorer view label and gives empty views a useful explanation', async () => {
+    const { server, port } = await startReceiver()
+
+    try {
+      renderViewer(port)
+      await screen.findByText('Connected to local receiver')
+      await sendEnvelope(port, 'GET /broken', { type: 'event', level: 'error' })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open errors view' }))
+      expect(await screen.findByRole('heading', { name: 'Errors' })).not.toBeNull()
+      expect(screen.getByText('1 error')).not.toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open feedback view' }))
+      expect(await screen.findByRole('heading', { name: 'No feedback received' })).not.toBeNull()
+      expect(screen.getByText('User feedback submitted through supported SDKs will appear here.')).not.toBeNull()
     } finally {
       cleanup()
       await stopReceiver(server)

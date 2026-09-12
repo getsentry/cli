@@ -161,7 +161,9 @@ export function buildTraceGroups(items: readonly LocalFeedItem[]): TraceGroup[] 
   const traces = new Map<string, MutableTraceGroup>()
 
   for (const item of items) {
-    const traceId = item.metadata?.traceId
+    const traceId =
+      item.metadata?.traceId ??
+      (item.type === "transaction" || item.type === "span" ? item.id : undefined)
     if (!traceId) {
       continue
     }

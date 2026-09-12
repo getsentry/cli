@@ -14,6 +14,23 @@ function item(overrides: Partial<LocalFeedItem>): LocalFeedItem {
 }
 
 describe("buildTraceGroups", () => {
+  test("keeps a standalone transaction discoverable when it has no trace context", () => {
+    const traces = buildTraceGroups([
+      {
+        id: "transaction-without-trace",
+        type: "transaction",
+        timestamp: 1_700_000_000_000,
+        text: "{}",
+        payload: {},
+        metadata: { title: "GET /standalone" },
+      },
+    ])
+
+    expect(traces).toHaveLength(1)
+    expect(traces[0]?.id).toBe("transaction-without-trace")
+    expect(traces[0]?.title).toBe("GET /standalone")
+  })
+
   test("builds a timestamped span tree and correlates trace errors and logs", () => {
     const traces = buildTraceGroups([
       item({

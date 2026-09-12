@@ -134,9 +134,23 @@ function SpanRow({
 export function TraceWaterfall({ trace }: TraceWaterfallProps) {
   if (trace.spans.length === 0) {
     return (
-      <div className="p-4 text-sm text-muted-foreground">
-        This trace has no timestamped spans to display yet.
-      </div>
+      <section aria-label="Trace waterfall" className="min-h-0 overflow-auto">
+        <header className="border-b border-border px-3 py-3 sm:px-4">
+          <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Trace</p>
+          <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+            <h2 className="font-mono text-sm font-medium">{trace.title}</h2>
+            <span className="font-mono text-sm tabular-nums text-foreground">
+              {formatDuration(trace.durationMs)}
+            </span>
+          </div>
+          <div aria-label="Trace summary" className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>Trace ID {trace.id.slice(0, 8)}</span>
+          </div>
+        </header>
+        <p className="p-4 text-sm text-muted-foreground">
+          This trace has no timestamped spans to display yet.
+        </p>
+      </section>
     )
   }
 

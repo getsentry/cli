@@ -28,6 +28,7 @@ import {
 import { JsonView } from '@/components/json-view.tsx'
 import { ConnectionLanding } from '@/components/connection-landing.tsx'
 import { ReceiverControls } from '@/components/receiver-controls.tsx'
+import { TraceWorkspace } from '@/components/trace-workspace.tsx'
 import { TraceWaterfall } from '@/components/trace-waterfall.tsx'
 import { Badge } from '@/components/ui/badge.tsx'
 import {
@@ -74,20 +75,26 @@ type WorkspaceView =
 type WorkspaceNavigationItem = {
   id: WorkspaceView
   label: string
+  singularLabel: string
+  section: 'Explore' | 'Inspect'
+  emptyState: {
+    title: string
+    description: string
+  }
   icon: LucideIcon
   getItems: (snapshot: LocalTelemetrySnapshot) => LocalFeedItem[]
 }
 
 const workspaceNavigation: WorkspaceNavigationItem[] = [
-  { id: 'live', label: 'Live Activity', icon: Activity, getItems: (snapshot) => snapshot.items },
-  { id: 'errors', label: 'Errors', icon: Bug, getItems: (snapshot) => snapshot.errors },
-  { id: 'traces', label: 'Traces', icon: ListTree, getItems: (snapshot) => snapshot.traces },
-  { id: 'logs', label: 'Logs', icon: Terminal, getItems: (snapshot) => snapshot.logs },
-  { id: 'feedback', label: 'Feedback', icon: MessageSquareText, getItems: (snapshot) => snapshot.feedback },
-  { id: 'envelopes', label: 'Envelopes', icon: FileArchive, getItems: (snapshot) => snapshot.envelopes },
-  { id: 'profiles', label: 'Profiles', icon: Gauge, getItems: (snapshot) => snapshot.profiles },
-  { id: 'sdks', label: 'SDKs', icon: Boxes, getItems: (snapshot) => snapshot.sdks },
-  { id: 'ai', label: 'AI', icon: Bot, getItems: (snapshot) => snapshot.ai },
+  { id: 'live', label: 'Live Activity', singularLabel: 'event', section: 'Explore', emptyState: { title: 'Waiting for events', description: 'Incoming local telemetry will appear here.' }, icon: Activity, getItems: (snapshot) => snapshot.items },
+  { id: 'traces', label: 'Traces', singularLabel: 'trace', section: 'Explore', emptyState: { title: 'No traces captured', description: 'Transactions and spans from your receiver will appear here as a single trace.' }, icon: ListTree, getItems: (snapshot) => snapshot.traces },
+  { id: 'errors', label: 'Errors', singularLabel: 'error', section: 'Explore', emptyState: { title: 'No errors captured', description: 'Errors and failed requests from this receiver will appear here.' }, icon: Bug, getItems: (snapshot) => snapshot.errors },
+  { id: 'logs', label: 'Logs', singularLabel: 'log', section: 'Explore', emptyState: { title: 'No logs captured', description: 'Structured logs sent through the receiver will appear here.' }, icon: Terminal, getItems: (snapshot) => snapshot.logs },
+  { id: 'ai', label: 'AI', singularLabel: 'AI event', section: 'Explore', emptyState: { title: 'No AI activity captured', description: 'AI spans and related telemetry will appear here.' }, icon: Bot, getItems: (snapshot) => snapshot.ai },
+  { id: 'envelopes', label: 'Envelopes', singularLabel: 'envelope', section: 'Inspect', emptyState: { title: 'No envelopes received', description: 'Raw envelopes received by this viewer will appear here.' }, icon: FileArchive, getItems: (snapshot) => snapshot.envelopes },
+  { id: 'sdks', label: 'Sessions & SDKs', singularLabel: 'session or client report', section: 'Inspect', emptyState: { title: 'No sessions or client reports', description: 'SDK sessions and client reports will appear here.' }, icon: Boxes, getItems: (snapshot) => snapshot.sdks },
+  { id: 'feedback', label: 'Feedback', singularLabel: 'feedback item', section: 'Inspect', emptyState: { title: 'No feedback received', description: 'User feedback submitted through supported SDKs will appear here.' }, icon: MessageSquareText, getItems: (snapshot) => snapshot.feedback },
+  { id: 'profiles', label: 'Profiles', singularLabel: 'profile', section: 'Inspect', emptyState: { title: 'No profiles captured', description: 'Profiling data from supported SDKs will appear here.' }, icon: Gauge, getItems: (snapshot) => snapshot.profiles },
 ]
 
 const eventFilters: { id: EventFilter; label: string }[] = [
@@ -250,7 +257,7 @@ type EventDetailProps = {
   relatedItems: LocalFeedItem[]
 }
 
-type DetailTab = 'overview' | 'trace' | 'json'
+type DetailTab = 'overview' | 'json'
 
 type DetailField = {
   label: string
@@ -262,10 +269,48 @@ type DetailGroup = {
   fields: DetailField[]
 }
 
+function RawEnvelopeDetail({ item }: { item: LocalFeedItem }) {
+  return (
+    <section
+      data-testid="event-detail"
+      aria-label="Raw envelope detail"
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
+    >
+      <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border px-3">
+        <div className="min-w-0">
+          <h2 className="font-mono text-sm font-medium">Raw envelope</h2>
+          <p className="text-xs text-muted-foreground">Received {formatTimestamp(item.timestamp)}</p>
+        </div>
+        <Badge>Envelope</Badge>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        <JsonView code={item.text} />
+      </div>
+    </section>
+  )
+}
+
+function WorkspaceEmptyState({
+  title,
+  description,
+}: {
+  title: string
+  description: string
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 items-center justify-center p-6 text-center">
+      <div className="max-w-sm">
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
+      </div>
+    </div>
+  )
+}
+
 function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
   const [tab, setTab] = useState<DetailTab>('overview')
   const [copiedField, setCopiedField] = useState<string>()
-  const detailTabs: DetailTab[] = trace?.spans.length ? ['overview', 'trace', 'json'] : ['overview', 'json']
+  const detailTabs: DetailTab[] = ['overview', 'json']
   const metadata = getMetadata(item)
   const duration = formatDuration(metadata.durationMs)
   const detailGroups: DetailGroup[] = [
@@ -351,21 +396,6 @@ function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
             >
               Overview
             </button>
-            {trace?.spans.length ? (
-              <button
-                id="event-detail-tab-trace"
-                type="button"
-                role="tab"
-                aria-selected={tab === 'trace'}
-                aria-controls="event-detail-panel"
-                tabIndex={tab === 'trace' ? 0 : -1}
-                className={`px-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${tab === 'trace' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                onClick={() => setTab('trace')}
-                onKeyDown={handleTabKeyDown}
-              >
-                Trace
-              </button>
-            ) : null}
             <button
               id="event-detail-tab-json"
               type="button"
@@ -433,11 +463,12 @@ function EventDetail({ item, trace, relatedItems }: EventDetailProps) {
               <p className="text-sm text-muted-foreground">No additional event details.</p>
             )}
             {copiedField ? <span role="status" aria-label={`${copiedField} copied`} className="sr-only">{copiedField} copied</span> : null}
+            {trace?.spans.length ? (
+              <div className="mt-4 border border-border">
+                <TraceWaterfall trace={trace} />
+              </div>
+            ) : null}
           </div>
-        </div>
-      ) : tab === 'trace' && trace ? (
-        <div id="event-detail-panel" role="tabpanel" className="min-h-0 flex-1 overflow-auto">
-          <TraceWaterfall trace={trace} />
         </div>
       ) : (
         <div id="event-detail-panel" role="tabpanel" className="min-h-0 flex-1 overflow-auto">
@@ -452,6 +483,7 @@ type WorkspaceSidebarProps = {
   activeView: WorkspaceView
   collapsed: boolean
   snapshot: LocalTelemetrySnapshot
+  traceCount: number
   onSelect: (view: WorkspaceView) => void
   onToggle: () => void
 }
@@ -460,6 +492,7 @@ function WorkspaceSidebar({
   activeView,
   collapsed,
   snapshot,
+  traceCount,
   onSelect,
   onToggle,
 }: WorkspaceSidebarProps) {
@@ -500,36 +533,44 @@ function WorkspaceSidebar({
           {collapsed ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
         </button>
       </div>
-      {!collapsed ? <p className="px-3 pb-2 pt-4 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Explore</p> : null}
       <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
-        {workspaceNavigation.map((entry) => {
-          const Icon = entry.icon
-          const count = entry.getItems(snapshot).length
-          const active = activeView === entry.id
-          return (
-            <button
-              key={entry.id}
-              type="button"
-              aria-label={`Open ${entry.label.toLowerCase()} view`}
-              aria-current={active ? 'page' : undefined}
-              title={collapsed ? entry.label : undefined}
-              className={`flex h-8 items-center gap-2 rounded-md px-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                active
-                  ? 'bg-primary/10 font-medium text-primary'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              }`}
-              onClick={() => onSelect(entry.id)}
-            >
-              <Icon className="size-4 shrink-0" aria-hidden="true" />
-              {!collapsed ? (
-                <>
-                  <span className="min-w-0 flex-1 truncate">{entry.label}</span>
-                  {count > 0 ? <span className="text-xs tabular-nums text-muted-foreground">{count}</span> : null}
-                </>
-              ) : null}
-            </button>
-          )
-        })}
+        {(['Explore', 'Inspect'] as const).map((section) => (
+          <div key={section} className="space-y-1">
+            {!collapsed ? (
+              <p className="px-1 pb-1 pt-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                {section}
+              </p>
+            ) : null}
+            {workspaceNavigation.filter((entry) => entry.section === section).map((entry) => {
+              const Icon = entry.icon
+              const count = entry.id === 'traces' ? traceCount : entry.getItems(snapshot).length
+              const active = activeView === entry.id
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  aria-label={`Open ${entry.label.toLowerCase()} view`}
+                  aria-current={active ? 'page' : undefined}
+                  title={collapsed ? entry.label : undefined}
+                  className={`flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    active
+                      ? 'bg-primary/10 font-medium text-primary'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  }`}
+                  onClick={() => onSelect(entry.id)}
+                >
+                  <Icon className="size-4 shrink-0" aria-hidden="true" />
+                  {!collapsed ? (
+                    <>
+                      <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+                      {count > 0 ? <span className="text-xs tabular-nums text-muted-foreground">{count}</span> : null}
+                    </>
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+        ))}
       </nav>
       {!collapsed ? (
         <p className="border-t border-border px-3 py-2 text-xs leading-4 text-muted-foreground">
@@ -558,6 +599,7 @@ export default function App() {
   )
   const items = telemetry.items
   const [selectedItemId, setSelectedItemId] = useState<string>()
+  const [selectedTraceId, setSelectedTraceId] = useState<string>()
   const [lastViewedItemId, setLastViewedItemId] = useState<string>()
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('live')
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
@@ -568,10 +610,6 @@ export default function App() {
   const fallbackEventId = useRef(0)
   const presentation = getConnectionPresentation(connection)
   const traces = useMemo(() => buildTraceGroups(items), [items])
-  const selectedItem = items.find((item) => item.id === selectedItemId) ?? items[0]
-  const selectedTrace = selectedItem?.metadata?.traceId
-    ? traces.find((trace) => trace.id === selectedItem.metadata?.traceId)
-    : undefined
   const activeWorkspace = workspaceNavigation.find((entry) => entry.id === workspaceView)!
   const workspaceItems = activeWorkspace.getItems(telemetry)
   const visibleItems =
@@ -579,6 +617,16 @@ export default function App() {
       ? workspaceItems.filter((item) => matchesEventFilter(item, filter))
       : workspaceItems
   const searchedItems = visibleItems.filter((item) => matchesSearch(item, searchQuery))
+  const workspaceEmptyState = searchQuery.trim()
+    ? {
+        title: `No matching ${activeWorkspace.singularLabel}s`,
+        description: 'Try a different search term or clear the search to see everything in this view.',
+      }
+    : activeWorkspace.emptyState
+  const selectedItem = workspaceItems.find((item) => item.id === selectedItemId) ?? workspaceItems[0]
+  const selectedEventTrace = selectedItem?.metadata?.traceId
+    ? traces.find((trace) => trace.id === selectedItem.metadata?.traceId)
+    : undefined
   const relatedItems = selectedItem?.metadata?.traceId
     ? items.filter(
         (item) =>
@@ -624,6 +672,7 @@ export default function App() {
     setWorkspaceView(nextWorkspace)
     setFilter('all')
     setSelectedItemId(undefined)
+    setSelectedTraceId(undefined)
     setIsMobileNavigationOpen(false)
     markItemsSeen()
   }
@@ -702,7 +751,7 @@ export default function App() {
           timestamp: Date.now(),
           text: messageEvent.data,
           payload: messageEvent.data,
-          metadata: { title: `Envelope ${eventId.slice(0, 8)}` },
+          metadata: { title: `Envelope ${eventId.slice(-8)}` },
         })
         const decoded = decodeEnvelope(messageEvent.data, eventId)
         telemetryStore.append(decoded)
@@ -758,7 +807,11 @@ export default function App() {
     isEditingReceiver ||
     (items.length === 0 && (connection === 'connecting' || connection === 'failed'))
   const isReceiverUnavailable = connection !== 'connected'
-  const canSearch = connection === 'connected' && items.length > 0 && !isEditingReceiver
+  const canSearch =
+    connection === 'connected' &&
+    items.length > 0 &&
+    !isEditingReceiver &&
+    workspaceView !== 'traces'
 
   return (
     <main className="h-dvh overflow-hidden bg-background">
@@ -771,6 +824,7 @@ export default function App() {
             activeView={workspaceView}
             collapsed={isSidebarCollapsed}
             snapshot={telemetry}
+            traceCount={traces.length}
             onSelect={selectWorkspace}
             onToggle={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
           />
@@ -891,6 +945,12 @@ export default function App() {
                   Change receiver
                 </button>
               </div>
+            ) : workspaceView === 'traces' ? (
+              <TraceWorkspace
+                traces={traces}
+                selectedTraceId={selectedTraceId}
+                onSelect={setSelectedTraceId}
+              />
             ) : (
               <div className="flex min-h-0 flex-1 overflow-hidden bg-card">
                 <aside
@@ -899,9 +959,9 @@ export default function App() {
                 >
                   <div className="shrink-0 border-b border-border px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
-                      <h1 id="event-list-heading" className="text-sm font-semibold">Events</h1>
+                      <h1 id="event-list-heading" className="text-sm font-semibold">{activeWorkspace.label}</h1>
                       <span className="text-xs tabular-nums text-muted-foreground">
-                        {items.length} / 500
+                        {searchedItems.length} {activeWorkspace.singularLabel}{searchedItems.length === 1 ? '' : 's'}
                       </span>
                     </div>
                     {workspaceView === 'live' ? <div className="mt-2 flex gap-1" aria-label="Filter events">
@@ -955,15 +1015,19 @@ export default function App() {
                       />
                     ))}
                     {searchedItems.length === 0 ? (
-                      <li className="px-3 py-4 text-sm text-muted-foreground">No matching events.</li>
+                      <li className="px-3 py-4 text-sm text-muted-foreground">{workspaceEmptyState.title}</li>
                     ) : null}
                   </ol>
                 </aside>
-                {selectedItem ? (
+                {searchedItems.length === 0 ? (
+                  <WorkspaceEmptyState {...workspaceEmptyState} />
+                ) : selectedItem?.type === 'envelope' ? (
+                  <RawEnvelopeDetail item={selectedItem} />
+                ) : selectedItem ? (
                   <EventDetail
                     key={selectedItem.id}
                     item={selectedItem}
-                    trace={selectedTrace}
+                    trace={selectedEventTrace}
                     relatedItems={relatedItems}
                   />
                 ) : null}
