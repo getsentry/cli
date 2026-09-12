@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Copy, Radio } from 'lucide-react'
+import { Check, Copy, Radio } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 
 export type ConnectionLandingProps = {
@@ -31,7 +31,16 @@ export function ConnectionLanding({
     <section aria-labelledby="connection-title" className="flex min-h-0 flex-1 items-center justify-center bg-muted/10 px-4 py-8 sm:p-8">
       <div className="w-full max-w-xl border border-border bg-card p-5 shadow-sm sm:p-6">
         <div className="flex items-start gap-3">
-          <Radio className={`mt-0.5 size-5 ${isProbing ? 'animate-pulse text-primary' : 'text-muted-foreground'}`} aria-hidden="true" />
+          <div
+            role={isProbing ? 'status' : undefined}
+            aria-label={isProbing ? 'Checking receiver' : undefined}
+            className="relative mt-0.5 flex size-5 shrink-0 items-center justify-center"
+          >
+            {isProbing ? (
+              <span className="absolute -inset-1 rounded-full border-2 border-primary/15 border-r-primary/50 border-t-primary motion-safe:animate-[spin_1.1s_linear_infinite] motion-reduce:animate-none" />
+            ) : null}
+            <Radio className={`size-5 ${isProbing ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden="true" />
+          </div>
           <div>
             <p className="text-xs font-semibold tracking-wide text-primary uppercase">Sentry Local</p>
             <h2 id="connection-title" className="mt-1 text-xl font-semibold">
@@ -63,17 +72,11 @@ export function ConnectionLanding({
           </div>
         </form>
 
-        <details className="mt-5 border-t border-border pt-4">
-          <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium">
-            <ChevronDown className="size-4" aria-hidden="true" />
-            Advanced connection
-          </summary>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Loopback streams are remembered. Remote streams must use HTTPS, need CORS access for this viewer, and are kept only for this browser session.
-          </p>
-        </details>
+        <p className="mt-3 text-xs leading-5 text-muted-foreground">
+          Defaults to your local receiver. You can paste another local or HTTPS stream above.
+        </p>
 
-        <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-border pt-4">
           <code className="min-w-0 truncate font-mono text-xs text-muted-foreground">sentry local serve --open</code>
           <button
             type="button"

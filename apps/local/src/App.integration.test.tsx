@@ -211,10 +211,12 @@ describe('local receiver to viewer integration', () => {
     expect(screen.queryByRole('searchbox', { name: 'Search events' })).toBeNull()
     expect(screen.queryByLabelText('Workspace navigation')).toBeNull()
     expect(screen.getByText('Looking for Sentry Local')).not.toBeNull()
+    expect(screen.getByRole('status', { name: 'Checking receiver' })).not.toBeNull()
+    expect(screen.queryByText('Advanced connection')).toBeNull()
     const endpoint = screen.getByLabelText('Receiver endpoint') as HTMLInputElement
     expect(endpoint.value).toBe('http://localhost:8969/stream')
     expect(screen.getByRole('button', { name: 'Connect' })).not.toBeNull()
-    expect(screen.getByText('Advanced connection')).not.toBeNull()
+    expect(screen.getByText('Defaults to your local receiver. You can paste another local or HTTPS stream above.')).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Copy local serve command' })).not.toBeNull()
   })
 
