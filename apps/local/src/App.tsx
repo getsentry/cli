@@ -488,7 +488,9 @@ function WorkspaceSidebar({
             type="button"
             aria-label="Search events"
             title="Search events and views (⌘K)"
-            className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={`flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              collapsed ? 'mx-auto' : ''
+            }`}
             onClick={(event) => onOpenCommand(event.currentTarget)}
           >
             <Search className="size-4" aria-hidden="true" />

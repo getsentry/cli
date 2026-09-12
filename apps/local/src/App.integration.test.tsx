@@ -239,13 +239,16 @@ describe('local receiver to viewer integration', () => {
       expect(sidebar.querySelector('button[aria-label="Clear events"]')).not.toBeNull()
       expect(screen.queryByRole('banner')).toBeNull()
 
-      fireEvent.click(screen.getByRole('button', { name: 'Change receiver connection' }))
-      expect(await screen.findByRole('heading', { name: 'Connect a receiver' })).not.toBeNull()
-
       fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
       expect(screen.getByRole('button', { name: 'Open live activity view' }).className).toContain(
         'justify-center'
       )
+      expect(utilityBar?.querySelector('button[aria-label="Search events"]')?.className).toContain(
+        'mx-auto'
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: 'Change receiver connection' }))
+      expect(await screen.findByRole('heading', { name: 'Connect a receiver' })).not.toBeNull()
     } finally {
       cleanup()
       await stopReceiver(server)
