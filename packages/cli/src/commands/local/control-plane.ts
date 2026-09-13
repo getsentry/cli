@@ -79,6 +79,7 @@ export function createLocalControlPlane({
   const app = new Hono();
   const baseUrl = controlUrl(host, port);
   const sessionExists = (reference: string): boolean => {
+    sessionStore.pruneExpired();
     try {
       sessionStore.resolve(reference);
       return true;
@@ -101,9 +102,10 @@ export function createLocalControlPlane({
     await next();
   });
 
-  app.get(`${CONTROL_PLANE_PREFIX}/sessions`, (c) =>
-    c.json({ sessions: sessionStore.list() })
-  );
+  app.get(`${CONTROL_PLANE_PREFIX}/sessions`, (c) => {
+    sessionStore.pruneExpired();
+    return c.json({ sessions: sessionStore.list() });
+  });
 
   app.get(`${CONTROL_PLANE_PREFIX}/sessions/:id`, (c) => {
     if (!sessionExists(c.req.param("id"))) {

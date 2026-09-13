@@ -137,16 +137,16 @@ export function parseStreamEndpoint(stream: string | null): StreamEndpoint | und
   }
   try {
     const url = new URL(stream)
-    if (
-      url.pathname !== "/stream" ||
-      url.username ||
-      url.password ||
-      url.hash
-    ) {
+    const daemonStream = /^\/_local\/v1\/sessions\/[^/]+\/stream$/.test(url.pathname)
+    if ((!daemonStream && url.pathname !== "/stream") || url.username || url.password || url.hash) {
       return undefined
     }
     if (isLoopbackHost(url.hostname)) {
-      if ((url.protocol !== "http:" && url.protocol !== "https:") || url.search) {
+      if (
+        (url.protocol !== "http:" && url.protocol !== "https:") ||
+        (!daemonStream && url.search) ||
+        (daemonStream && !url.searchParams.get("cap"))
+      ) {
         return undefined
       }
       return { url: url.toString(), kind: "loopback" }

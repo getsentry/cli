@@ -25,7 +25,7 @@ import {
   CONTROL_PLANE_PREFIX,
   createLocalControlPlane,
 } from "./control-plane.js";
-import { DEFAULT_PORT, tryListen } from "./server.js";
+import { DEFAULT_PORT, isLoopbackHost, tryListen } from "./server.js";
 
 export const LOCAL_DAEMON_STATE_FILENAME = "local-control-plane.json";
 export const LOCAL_DAEMON_PROTOCOL_VERSION = 1;
@@ -159,6 +159,12 @@ export async function ensureLocalDaemon({
   host?: string;
   port?: number;
 } = {}): Promise<LocalDaemonState> {
+  if (!isLoopbackHost(host)) {
+    throw new Error("The Local control-plane host must be loopback-only.");
+  }
+  if (port === 0) {
+    throw new Error("The Local control-plane port must be non-zero.");
+  }
   const running = await getRunningLocalDaemon();
   if (running) {
     return running;
@@ -234,6 +240,9 @@ export async function runLocalDaemonForeground({
   host?: string;
   port?: number;
 } = {}): Promise<void> {
+  if (!isLoopbackHost(host)) {
+    throw new Error("The Local control-plane host must be loopback-only.");
+  }
   const directory = getConfigDir();
   const token = randomBytes(32).toString("base64url");
   let stop: (() => void) | undefined;

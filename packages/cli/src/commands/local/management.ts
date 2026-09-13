@@ -109,7 +109,9 @@ const daemonStatusCommand = buildCommand({
   auth: false,
   async *func() {
     const daemon = await getRunningLocalDaemon();
-    yield new CommandOutput({ daemon: daemon ? publicDaemonState(daemon) : null });
+    yield new CommandOutput({
+      daemon: daemon ? publicDaemonState(daemon) : null,
+    });
   },
 });
 
