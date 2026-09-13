@@ -16,6 +16,7 @@ Sentry for local development
 Start the Local control-plane daemon
 
 **Flags:**
+- `--clientId <value> - Idempotency key for retried agent session creation`
 - `--foreground - Run in the foreground`
 - `--host <value> - Loopback host - (default: "localhost")`
 - `--port <value> - Control-plane port - (default: "8969")`
