@@ -11,6 +11,43 @@ requires:
 
 Sentry for local development
 
+### `sentry local daemon start`
+
+Start the Local control-plane daemon
+
+**Flags:**
+- `--foreground - Run in the foreground`
+- `--host <value> - Loopback host - (default: "localhost")`
+- `--port <value> - Control-plane port - (default: "8969")`
+
+### `sentry local daemon status`
+
+Show Local control-plane status
+
+### `sentry local daemon stop`
+
+Stop the Local control-plane daemon
+
+### `sentry local daemon restart`
+
+Restart the Local control-plane daemon
+
+### `sentry local envelope list <session...>`
+
+List retained envelopes for a Local session
+
+### `sentry local envelope view <session envelope...>`
+
+View a raw Local envelope
+
+### `sentry local event list <session...>`
+
+List decoded events for a Local session
+
+### `sentry local event view <session event...>`
+
+View a decoded Local event
+
 ### `sentry local serve`
 
 Start the local dev server and tail events
@@ -23,6 +60,31 @@ Start the local dev server and tail events
 - `-F, --format <value> - Output format: human (default) or json (NDJSON on stdout) - (default: "human")`
 - `-a, --attributes - Show a grouped attribute table (user vs SDK) under each transaction`
 - `--open - Open Sentry Local UI in the browser`
+- `--session <value> - Create a daemon-owned telemetry session with this label`
+
+### `sentry local session create <name...>`
+
+Create a Local telemetry session
+
+**Flags:**
+- `--host <value> - Loopback host - (default: "localhost")`
+- `--port <value> - Control-plane port - (default: "8969")`
+
+### `sentry local session list`
+
+List Local telemetry sessions
+
+### `sentry local session view <session...>`
+
+View a Local telemetry session
+
+### `sentry local session close <session...>`
+
+Close a Local telemetry session
+
+### `sentry local session reset <session...>`
+
+Clear a Local telemetry session
 
 ### `sentry local run <command...>`
 
@@ -37,6 +99,7 @@ Run a command with the local dev server enabled
 - `-F, --format <value> - Output format: human (default) or json (NDJSON on stdout) - (default: "human")`
 - `-a, --attributes - Include selected event attributes in output`
 - `--open - Open Sentry Local UI in the browser`
+- `--session <value> - Create a daemon-owned telemetry session with this label`
 
 **Examples:**
 
