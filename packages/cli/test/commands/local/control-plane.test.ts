@@ -129,4 +129,27 @@ describe("Local control plane", () => {
     );
     expect(viewed.status).toBe(200);
   });
+
+  test("permits browser preflight only from a loopback development origin", async () => {
+    const controlPlane = createLocalControlPlane({
+      controlToken: CONTROL_TOKEN,
+    });
+    const created = await controlPlane.app.request("/_local/v1/sessions", {
+      method: "POST",
+      headers: { ...controlHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "web", cwd: "/work/web" }),
+    });
+    const session = (await created.json()) as { ingestUrl: string };
+    const response = await controlPlane.app.request(session.ingestUrl, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:5173",
+        "Access-Control-Request-Method": "POST",
+      },
+    });
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost:5173"
+    );
+  });
 });

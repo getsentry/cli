@@ -8,6 +8,7 @@
 import { Buffer } from "node:buffer";
 import { pushToSpotlightBuffer } from "@spotlightjs/spotlight/sdk";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { logger } from "../../lib/logger.js";
 import {
@@ -16,6 +17,8 @@ import {
 } from "./session-store.js";
 
 export const CONTROL_PLANE_PREFIX = "/_local/v1";
+const LOOPBACK_ORIGIN_RE =
+  /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
 export type LocalControlPlane = {
   readonly app: Hono;
@@ -116,6 +119,14 @@ export function createLocalControlPlane({
     }
     await next();
   });
+  app.use(
+    `${CONTROL_PLANE_PREFIX}/sessions/:id/stream`,
+    cors({
+      allowHeaders: ["Content-Type", "Content-Encoding", "User-Agent"],
+      allowMethods: ["GET", "POST", "OPTIONS"],
+      origin: (origin) => (LOOPBACK_ORIGIN_RE.test(origin) ? origin : null),
+    })
+  );
 
   app.get(`${CONTROL_PLANE_PREFIX}/sessions`, (c) => {
     sessionStore.pruneExpired();

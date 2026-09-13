@@ -77,12 +77,6 @@ const daemonStartCommand = buildCommand({
   output: { human: formatHuman },
   parameters: {
     flags: {
-      clientId: {
-        kind: "parsed",
-        parse: String,
-        brief: "Idempotency key for retried agent session creation",
-        optional: true,
-      },
       foreground: {
         kind: "boolean",
         brief: "Run in the foreground",
@@ -163,6 +157,12 @@ const sessionCreateCommand = buildCommand({
   output: { human: formatHuman },
   parameters: {
     flags: {
+      clientId: {
+        kind: "parsed",
+        parse: String,
+        brief: "Idempotency key for retried agent session creation",
+        optional: true,
+      },
       host: {
         kind: "parsed",
         parse: String,

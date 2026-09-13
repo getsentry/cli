@@ -169,7 +169,7 @@ export function createLocalSessionStore({
         .map((session) => session.id);
       for (const id of expired) {
         const session = sessions.get(id);
-        if (session?.clientId) {
+        if (session?.clientId && clientSessions.get(session.clientId) === id) {
           clientSessions.delete(session.clientId);
         }
         sessions.delete(id);
