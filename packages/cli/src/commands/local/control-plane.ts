@@ -124,12 +124,18 @@ export function createLocalControlPlane({
       input === null ||
       Array.isArray(input) ||
       typeof (input as { label?: unknown }).label !== "string" ||
-      typeof (input as { cwd?: unknown }).cwd !== "string"
+      typeof (input as { cwd?: unknown }).cwd !== "string" ||
+      ("clientId" in input &&
+        typeof (input as { clientId?: unknown }).clientId !== "string")
     ) {
       return c.json({ error: "label and cwd are required." }, 400);
     }
-    const { label, cwd } = input as { label: string; cwd: string };
-    const session = sessionStore.create({ label, cwd });
+    const { clientId, label, cwd } = input as {
+      clientId?: string;
+      label: string;
+      cwd: string;
+    };
+    const session = sessionStore.create({ clientId, label, cwd });
     const capabilities = sessionStore.getCapabilities(session.id);
     const path = `${CONTROL_PLANE_PREFIX}/sessions/${session.id}/stream`;
     return c.json(

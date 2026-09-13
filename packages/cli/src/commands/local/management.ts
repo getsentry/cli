@@ -20,7 +20,11 @@ type DaemonFlags = {
   readonly host: string;
   readonly port: number;
 };
-type SessionFlags = { readonly host: string; readonly port: number };
+type SessionFlags = {
+  readonly clientId?: string;
+  readonly host: string;
+  readonly port: number;
+};
 type ControlResult = Record<string, unknown>;
 
 function publicDaemonState(state: {
@@ -73,6 +77,12 @@ const daemonStartCommand = buildCommand({
   output: { human: formatHuman },
   parameters: {
     flags: {
+      clientId: {
+        kind: "parsed",
+        parse: String,
+        brief: "Idempotency key for retried agent session creation",
+        optional: true,
+      },
       foreground: {
         kind: "boolean",
         brief: "Run in the foreground",
@@ -184,7 +194,11 @@ const sessionCreateCommand = buildCommand({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ label, cwd: this.cwd }),
+          body: JSON.stringify({
+            clientId: flags.clientId,
+            label,
+            cwd: this.cwd,
+          }),
         },
         flags
       )

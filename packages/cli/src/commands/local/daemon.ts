@@ -317,11 +317,13 @@ export function requestLocalDaemon(
 
 /** Create a session and return its separate ingestion and read capabilities. */
 export async function createLocalDaemonSession({
+  clientId,
   cwd,
   host,
   label,
   port,
 }: {
+  readonly clientId?: string;
   readonly cwd: string;
   readonly host?: string;
   readonly label: string;
@@ -329,7 +331,7 @@ export async function createLocalDaemonSession({
 }): Promise<LocalDaemonSession> {
   const state = await ensureLocalDaemon({ host, port });
   const response = await requestLocalDaemon(state, "/sessions", {
-    body: JSON.stringify({ cwd, label }),
+    body: JSON.stringify({ clientId, cwd, label }),
     headers: { "Content-Type": "application/json" },
     method: "POST",
   });

@@ -17,6 +17,7 @@ export const SESSION_RETENTION_MS = 3 * 60 * 60 * 1000;
 export type LocalSessionState = "open" | "retained";
 
 export type LocalSession = {
+  readonly clientId?: string;
   readonly id: string;
   readonly label: string;
   readonly cwd: string;
@@ -33,6 +34,7 @@ type StoredSession = LocalSession & {
 };
 
 export type CreateLocalSessionInput = {
+  readonly clientId?: string;
   readonly label: string;
   readonly cwd: string;
 };
@@ -68,6 +70,7 @@ export function createLocalSessionStore({
   now?: () => number;
 } = {}): LocalSessionStore {
   const sessions = new Map<string, StoredSession>();
+  const clientSessions = new Map<string, string>();
 
   const resolveStored = (reference: string): StoredSession => {
     const byId = sessions.get(reference);
@@ -104,10 +107,15 @@ export function createLocalSessionStore({
   };
 
   return {
-    create({ label, cwd }) {
+    create({ clientId, label, cwd }) {
+      const existingId = clientId ? clientSessions.get(clientId) : undefined;
+      if (existingId) {
+        return toPublicSession(resolveStored(existingId));
+      }
       const timestamp = now();
       const session: StoredSession = {
         id: uuidv7(),
+        clientId,
         label,
         cwd,
         createdAt: timestamp,
@@ -118,6 +126,9 @@ export function createLocalSessionStore({
         streamCapability: randomBytes(24).toString("base64url"),
       };
       sessions.set(session.id, session);
+      if (clientId) {
+        clientSessions.set(clientId, session.id);
+      }
       return toPublicSession(session);
     },
     close(reference) {

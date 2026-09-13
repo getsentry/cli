@@ -25,6 +25,23 @@ describe("LocalSessionStore", () => {
     expect(() => store.resolve("web")).toThrow(/ambiguous/i);
   });
 
+  test("reuses a session when an agent retries with the same client ID", () => {
+    const store = createLocalSessionStore();
+    const first = store.create({
+      clientId: "agent-turn-7",
+      label: "web",
+      cwd: "/work/web",
+    });
+    const retried = store.create({
+      clientId: "agent-turn-7",
+      label: "web",
+      cwd: "/work/web",
+    });
+
+    expect(retried.id).toBe(first.id);
+    expect(store.list()).toHaveLength(1);
+  });
+
   test("retains a closed session for three hours and then expires it", () => {
     let now = 1000;
     const store = createLocalSessionStore({ now: () => now });
