@@ -39,6 +39,21 @@ function hasControlCapability(request: Request, controlToken: string): boolean {
   return request.headers.get("authorization") === `Bearer ${controlToken}`;
 }
 
+function eventSummary(parsed: {
+  envelope: [Record<string, unknown>, unknown[]];
+}): { envelopeId: string; eventId: string; itemTypes: string[] } {
+  const [header, items] = parsed.envelope;
+  return {
+    envelopeId: String(header.__spotlight_envelope_id ?? ""),
+    eventId: String(header.event_id ?? header.__spotlight_envelope_id ?? ""),
+    itemTypes: items.map((item) =>
+      Array.isArray(item) && typeof item[0] === "object" && item[0]
+        ? String((item[0] as { type?: unknown }).type ?? "unknown")
+        : "unknown"
+    ),
+  };
+}
+
 function buildSSEHandler(stream: {
   writeSSE: (event: {
     data: string;
@@ -248,13 +263,9 @@ export function createLocalControlPlane({
         if (!parsed) {
           return [];
         }
-        const header = parsed.envelope[0] as {
-          __spotlight_envelope_id?: unknown;
-        };
         return [
           {
-            envelopeId: String(header.__spotlight_envelope_id ?? ""),
-            envelope: parsed.envelope,
+            ...eventSummary(parsed),
           },
         ];
       })
@@ -268,13 +279,19 @@ export function createLocalControlPlane({
     }
     const container = sessionStore
       .getBuffer(c.req.param("id"))
-      .read({ envelopeId: c.req.param("eventId") })[0];
+      .read({ all: true })
+      .find((candidate) => {
+        const parsed = candidate.getParsedEnvelope();
+        return (
+          parsed && eventSummary(parsed).eventId === c.req.param("eventId")
+        );
+      });
     const parsed = container?.getParsedEnvelope();
     if (!parsed) {
       return c.body(null, 404);
     }
     return c.json({
-      envelopeId: c.req.param("eventId"),
+      ...eventSummary(parsed),
       envelope: parsed.envelope,
     });
   });

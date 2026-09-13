@@ -100,4 +100,33 @@ describe("Local control plane", () => {
     expect(stream.headers.get("content-type")).toContain("text/event-stream");
     await stream.body?.cancel();
   });
+
+  test("indexes decoded events by their Sentry event ID", async () => {
+    const controlPlane = createLocalControlPlane({
+      controlToken: CONTROL_TOKEN,
+    });
+    const created = await controlPlane.app.request("/_local/v1/sessions", {
+      method: "POST",
+      headers: { ...controlHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "web", cwd: "/work/web" }),
+    });
+    const session = (await created.json()) as { id: string; ingestUrl: string };
+    await controlPlane.app.request(session.ingestUrl, {
+      method: "POST",
+      body: '{"event_id":"event-123"}\n{"type":"event"}\n{"message":"isolated"}',
+    });
+
+    const listed = await controlPlane.app.request(
+      `/_local/v1/sessions/${session.id}/events`,
+      { headers: controlHeaders() }
+    );
+    await expect(listed.json()).resolves.toMatchObject({
+      events: [{ eventId: "event-123" }],
+    });
+    const viewed = await controlPlane.app.request(
+      `/_local/v1/sessions/${session.id}/events/event-123`,
+      { headers: controlHeaders() }
+    );
+    expect(viewed.status).toBe(200);
+  });
 });
