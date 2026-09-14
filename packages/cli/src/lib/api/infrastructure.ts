@@ -21,8 +21,8 @@ import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import {
   getApiBaseUrl,
-  getDefaultSdkConfig,
   getSdkConfig,
+  type SentryRequestOptions,
 } from "../sentry-client.js";
 
 /**
@@ -178,7 +178,7 @@ const zstdCompressAsync =
   typeof zstdCompressCb === "function" ? promisify(zstdCompressCb) : null;
 
 /** Options for raw API requests to Sentry endpoints. */
-export type ApiRequestOptions<T = unknown> = {
+export type ApiRequestOptions<T = unknown> = SentryRequestOptions & {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   body?: unknown;
   /**
@@ -492,7 +492,7 @@ export async function apiRequestToRegion<T>(
   options: ApiRequestOptions<T> = {}
 ): Promise<{ data: T; headers: Headers }> {
   const { method = "GET", body, bodyEncoding, params, schema } = options;
-  const config = getSdkConfig(regionUrl);
+  const config = getSdkConfig(regionUrl, options);
 
   const searchParams = buildSearchParams(params);
   const normalizedEndpoint = endpoint.startsWith("/")
@@ -649,7 +649,7 @@ export async function apiRequestToRegionNoContent(
   options: Omit<ApiRequestOptions, "schema"> = {}
 ): Promise<void> {
   const { method = "GET", body, params } = options;
-  const config = getSdkConfig(regionUrl);
+  const config = getSdkConfig(regionUrl, options);
 
   const searchParams = buildSearchParams(params);
   const normalizedEndpoint = endpoint.startsWith("/")
@@ -763,7 +763,7 @@ export async function rawApiRequest(
 }> {
   const { method = "GET", body, params, headers: customHeaders = {} } = options;
 
-  const config = getDefaultSdkConfig();
+  const config = getSdkConfig(getApiBaseUrl(), options);
 
   const searchParams = buildSearchParams(params);
   const normalizedEndpoint = endpoint.startsWith("/")
