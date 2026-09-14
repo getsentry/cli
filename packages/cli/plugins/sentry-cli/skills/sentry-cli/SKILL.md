@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.45.0-dev.0
+version: 0.46.0-dev.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -136,6 +136,10 @@ sentry log list --query "severity:error"
 # reaches the user's Sentry org, no production quota). With a DSN set, the
 # SDK sends to both.
 sentry local run -- npm run dev          # or: python manage.py runserver, etc.
+
+# From a CLI source checkout, run the Local UI in a second terminal, then open it.
+pnpm --filter local dev
+sentry local run --open -- npm run dev
 
 # Watch only AI/agent (gen_ai, mcp) spans while iterating on an agent.
 sentry local -f ai
