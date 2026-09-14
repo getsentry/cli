@@ -48,6 +48,7 @@ const ID_COLUMN: Column<ConversationListItem> = {
   header: "ID",
   value: (c) => escapeMarkdownCell(truncate(c.conversationId, 40)),
   truncate: true,
+  shrinkable: false,
 };
 
 const TITLE_COLUMN: Column<ConversationListItem> = {
