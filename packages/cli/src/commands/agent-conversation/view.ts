@@ -59,6 +59,7 @@ function parseConversationTarget(target: string): {
 export const viewCommand = buildCommand({
   docs: {
     brief: "View an agent conversation transcript",
+    customUsage: ["[<org>/]<conversation-id>"],
     fullDescription:
       "View the full transcript of an agent conversation.\n\n" +
       "The org is optional and auto-detected from your project context when\n" +
