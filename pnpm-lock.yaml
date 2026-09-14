@@ -186,8 +186,8 @@ importers:
         specifier: ^1.38.0
         version: 1.38.0(express@5.2.1)(zod@4.4.3)
       '@sentry/api':
-        specifier: ^0.256.0
-        version: 0.256.0(valibot@1.4.2(typescript@5.9.3))(zod@4.4.3)
+        specifier: ^0.305.0
+        version: 0.305.0(valibot@1.4.2(typescript@5.9.3))(zod@4.4.3)
       '@sentry/core':
         specifier: 10.63.0
         version: 10.63.0(patch_hash=e663994979ff877a26ab6d4dea5968fbaee4ccdfdeb85623983535a572678940)
@@ -2002,8 +2002,8 @@ packages:
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
 
-  '@sentry/api@0.256.0':
-    resolution: {integrity: sha512-6SL/EpZW569eAEAOHossu2bWHXl1ODJsvs1xWro0hbmLieDD2G4FjBIyNj+zPwbHcCpXNfPhpCTLmkLVih9khA==}
+  '@sentry/api@0.305.0':
+    resolution: {integrity: sha512-vyK+ytFWsqKNW9USxGcxavK39Yo0NGYRTDXVKoYNcOO4e3Vdc2KizrCNwybOtXYfmyQgGezktAq9QqDdygoxQw==}
     engines: {node: '>=22'}
     peerDependencies:
       valibot: '*'
@@ -7295,7 +7295,7 @@ snapshots:
 
   '@sec-ant/readable-stream@0.4.1': {}
 
-  '@sentry/api@0.256.0(valibot@1.4.2(typescript@5.9.3))(zod@4.4.3)':
+  '@sentry/api@0.305.0(valibot@1.4.2(typescript@5.9.3))(zod@4.4.3)':
     optionalDependencies:
       valibot: 1.4.2(typescript@5.9.3)
       zod: 4.4.3

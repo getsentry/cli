@@ -290,12 +290,10 @@ describe("native tracker issue links", () => {
         });
         linked = true;
         // The mutation uses GitHub's html_url; listing reconstructs /issues/N.
-        return json({
-          ...storedLink,
-          id: 1234,
-          integrationId: 10,
-          url: pullUrl,
-        });
+        return Response.json(
+          { ...storedLink, id: 1234, integrationId: 10, url: pullUrl },
+          { status: 201 }
+        );
       }
       if (request.method === "DELETE") {
         expect(url.pathname).toBe(`${INTEGRATIONS}10/`);
@@ -445,7 +443,10 @@ describe("native tracker issue links", () => {
           repo: "owner/repo",
           externalIssue: "7",
         });
-        return json({ ...githubLink, id: 1234, integrationId: 10 });
+        return Response.json(
+          { ...githubLink, id: 1234, integrationId: 10 },
+          { status: 201 }
+        );
       }
       expect(request.method).toBe("GET");
       if (url.pathname === INTEGRATIONS) {
@@ -518,7 +519,10 @@ describe("native tracker issue links", () => {
       if (request.method === "PUT") {
         expect(new URL(request.url).pathname).toBe(`${INTEGRATIONS}10/`);
         expect(await request.json()).toEqual({ externalIssue: "PROJ-7" });
-        return json({ ...LINK, id: 1234, integrationId: 10 });
+        return Response.json(
+          { ...LINK, id: 1234, integrationId: 10 },
+          { status: 201 }
+        );
       }
       expect(request.method).toBe("GET");
       return json([integration()]);

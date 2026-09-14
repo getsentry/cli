@@ -96,8 +96,8 @@ export type PreparedNativeIssueLink = {
   url: string;
   /** Provider issue key for the preview. */
   key: string;
-  /** The backend also requires repo for GitHub and Bitbucket; the SDK schema omits it. */
-  body: LinkExternalIssueRequest & { repo?: string };
+  /** Provider-specific issue identifier and repository. */
+  body: LinkExternalIssueRequest;
   /** Reference found during fresh preflight; avoids a duplicate mutation. */
   existing?: NativeIssueLink;
 };
@@ -356,12 +356,10 @@ async function listFreshRepositories(
     cache: "no-store",
   });
   return listFreshPages(async (cursor) => {
-    // per_page is supported by Sentry's paginator but absent from the SDK query type.
-    const query = { cursor, per_page: API_MAX_PER_PAGE };
     const result = await listOrganizationRepos({
       ...config,
       path: { organization_id_or_slug: orgSlug },
-      query,
+      query: { cursor, per_page: API_MAX_PER_PAGE },
     });
     const page = unwrapPaginatedResult<unknown>(
       result,

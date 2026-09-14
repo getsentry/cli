@@ -259,8 +259,7 @@ export async function listAppIssueLinks(
       const result = await listOrganizationIssueExternalIssues({
         ...config,
         path: { organization_id_or_slug: orgSlug, issue_id: issueId },
-        // SDK0.256.0 omits cursor from this paginated endpoint's query schema.
-        query: { cursor } as never,
+        query: { cursor },
       });
       return unwrapPaginatedResult(result, "Failed to list app issue links");
     },
@@ -346,7 +345,7 @@ async function getLinkForm(
   installation: AppInstallation
 ): Promise<LinkForm> {
   const endpoint = `/organizations/${encodeURIComponent(orgSlug)}/sentry-app-components/`;
-  // SDK0.256.0 has no operation for installed app UI components.
+  // Installed app UI components are not exposed by the SDK.
   const components = await listAll<Component>(
     async (cursor) => {
       const { data, headers } = await apiRequestToRegion<unknown>(
@@ -416,7 +415,7 @@ async function getChoices({
     }
     dependentData[name] = values[name];
   }
-  // SDK0.256.0 does not expose app form option searches.
+  // App form option searches are not exposed by the SDK.
   const { data } = await apiRequestToRegion<{ choices: Choice[] }>(
     getControlSiloUrl(),
     `/sentry-app-installations/${encodeURIComponent(installationUuid)}/external-requests/`,
@@ -691,7 +690,7 @@ export async function linkAppIssue(
     );
   }
   validateUri(prepared.uri);
-  // SDK0.256.0 only has direct registration, which skips the app's link callback.
+  // The SDK's direct registration skips the app's link callback.
   const { data: link } = await apiRequestToRegion<AppIssueLink>(
     getControlSiloUrl(),
     `/sentry-app-installations/${encodeURIComponent(prepared.installationUuid)}/external-issue-actions/`,
