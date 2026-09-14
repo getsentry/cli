@@ -88,54 +88,80 @@ const COMMON_FLAGS: readonly CommonFlagEntry[] = [
   },
 ];
 
+/** Human-facing command order, capped to keep the root help scannable. */
+const HUMAN_COMMAND_ORDER = ["auth", "issue", "event", "trace", "log"] as const;
+
+/** Human-facing subcommand order for the featured route groups. */
+const HUMAN_SUBCOMMAND_ORDER: Readonly<Record<string, readonly string[]>> = {
+  auth: ["login", "status", "whoami"],
+  issue: ["list", "view", "explain", "plan", "resolve"],
+  event: ["list", "view"],
+  trace: ["list", "view", "logs"],
+  log: ["list", "view"],
+};
+
 /**
  * Generate the commands list dynamically from Stricli's route structure.
  * This ensures help text stays in sync with actual registered commands.
  */
-function generateCommands(includeSubcommands: boolean): HelpCommand[] {
+function generateCommands(includeAllCommands: boolean): HelpCommand[] {
   // Cast to our introspection types — Stricli's generic types are compatible
   const routeMap = routes as unknown as RouteMap;
   const entries = routeMap.getAllEntries();
 
-  return entries
-    .filter((entry: RouteMapEntry) => !entry.hidden)
-    .map((entry: RouteMapEntry) => {
-      const routeName = entry.name.original;
-      const brief = entry.target.brief;
+  const visibleEntries = entries.filter(
+    (entry: RouteMapEntry) => !entry.hidden
+  );
+  const displayedEntries = includeAllCommands
+    ? visibleEntries
+    : HUMAN_COMMAND_ORDER.flatMap((name) => {
+        const entry = visibleEntries.find(
+          (candidate) => candidate.name.original === name
+        );
+        return entry ? [entry] : [];
+      });
 
-      if (isRouteMap(entry.target)) {
-        // Get visible subcommand names and join with pipes
-        const subEntries = entry.target
-          .getAllEntries()
-          .filter((sub: RouteMapEntry) => !sub.hidden);
-        const subNames = subEntries
-          .map((sub: RouteMapEntry) => sub.name.original)
-          .join(" | ");
-        return {
-          usage: includeSubcommands
-            ? `sentry ${routeName} ${subNames}`
-            : `sentry ${routeName}`,
-          description: brief,
-        };
-      }
+  return displayedEntries.map((entry: RouteMapEntry) => {
+    const routeName = entry.name.original;
+    const brief = entry.target.brief;
 
-      // Direct command - use any public syntax override before raw parameters
-      if (isCommand(entry.target)) {
-        const placeholder =
-          entry.target.__primaryUsage ??
-          getPositionalString(entry.target.parameters.positional);
-        const usageSuffix = placeholder ? ` ${placeholder}` : "";
-        return {
-          usage: `sentry ${routeName}${usageSuffix}`,
-          description: brief,
-        };
-      }
-
+    if (isRouteMap(entry.target)) {
+      // Get visible subcommand names and join with pipes
+      const subEntries = entry.target
+        .getAllEntries()
+        .filter((sub: RouteMapEntry) => !sub.hidden);
+      const visibleSubNames = subEntries.map(
+        (sub: RouteMapEntry) => sub.name.original
+      );
+      const preferredSubcommands = HUMAN_SUBCOMMAND_ORDER[routeName];
+      const subNames = includeAllCommands
+        ? visibleSubNames
+        : (preferredSubcommands?.filter((name) =>
+            visibleSubNames.includes(name)
+          ) ?? visibleSubNames.slice(0, 5));
       return {
-        usage: `sentry ${routeName}`,
+        usage: `sentry ${routeName} ${subNames.join(" | ")}`,
         description: brief,
       };
-    });
+    }
+
+    // Direct command - use any public syntax override before raw parameters
+    if (isCommand(entry.target)) {
+      const placeholder =
+        entry.target.__primaryUsage ??
+        getPositionalString(entry.target.parameters.positional);
+      const usageSuffix = placeholder ? ` ${placeholder}` : "";
+      return {
+        usage: `sentry ${routeName}${usageSuffix}`,
+        description: brief,
+      };
+    }
+
+    return {
+      usage: `sentry ${routeName}`,
+      description: brief,
+    };
+  });
 }
 
 const EXAMPLE_LOGGED_OUT = "sentry auth";
