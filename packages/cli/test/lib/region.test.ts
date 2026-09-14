@@ -203,6 +203,76 @@ describe("resolveOrgRegion", () => {
     }
   });
 
+  test("falls back to baseUrl when API returns a relative regionUrl", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/organizations/relative-region-org/")) {
+        return new Response(
+          JSON.stringify({
+            id: "789",
+            slug: "relative-region-org",
+            name: "Self-hosted Org",
+            links: {
+              organizationUrl: "/organizations/relative-region-org/",
+              // Self-hosted instance returns a relative path instead of an absolute URL
+              regionUrl: "/",
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    try {
+      const regionUrl = await resolveOrgRegion("relative-region-org");
+      // Should fall back to the configured baseUrl, not use the relative regionUrl
+      expect(regionUrl).toBe("https://sentry.io");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("falls back to baseUrl when API returns a malformed regionUrl", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (req.url.includes("/organizations/malformed-region-org/")) {
+        return new Response(
+          JSON.stringify({
+            id: "790",
+            slug: "malformed-region-org",
+            name: "Self-hosted Org 2",
+            links: {
+              organizationUrl: "/organizations/malformed-region-org/",
+              regionUrl: "not-a-valid-url",
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    };
+
+    try {
+      const regionUrl = await resolveOrgRegion("malformed-region-org");
+      expect(regionUrl).toBe("https://sentry.io");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("falls back to default URL when API call fails", async () => {
     // Mock fetch to fail
     const originalFetch = globalThis.fetch;
