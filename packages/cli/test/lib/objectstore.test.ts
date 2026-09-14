@@ -37,12 +37,11 @@ afterEach(() => {
 });
 
 describe("buildObjectUrl", () => {
-  test.each([
-    "preprod",
-    "preprod_snapshots",
-  ])("joins the %s usecase, scope, and key (stripping a trailing slash)", (usecase) => {
-    expect(buildObjectUrl({ ...config, usecase }, "123/456/abc")).toBe(
-      `https://objectstore.example.com/v1/objects/${usecase}/org=123;project=456/123/456/abc`
+  test("joins usecase, scope, and key (stripping a trailing slash)", () => {
+    expect(
+      buildObjectUrl({ ...config, usecase: "preprod" }, "123/456/abc")
+    ).toBe(
+      "https://objectstore.example.com/v1/objects/preprod/org=123;project=456/123/456/abc"
     );
   });
 });

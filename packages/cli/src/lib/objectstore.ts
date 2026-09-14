@@ -35,7 +35,6 @@ const PUT_TIMEOUT_MS = 120_000;
 export type ObjectstoreConfig = {
   /** Base service URL (may include a path prefix). */
   url: string;
-  /** Server-selected usecase matching the upload token. */
   usecase: string;
   /** Ordered scope pairs (e.g. `[["org","1"],["project","2"]]`). */
   scopes: [string, string][];
