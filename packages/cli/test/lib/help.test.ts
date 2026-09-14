@@ -5,8 +5,10 @@
  * command generation from routes, and contextual examples.
  */
 
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { bannerLinesForWidth, formatBanner } from "../../src/lib/banner.js";
+import { ENV_VAR_AGENTS } from "../../src/lib/detect-agent.js";
+import { setEnv } from "../../src/lib/env.js";
 import { introspectAllCommands, printCustomHelp } from "../../src/lib/help.js";
 import { useTestConfigDir } from "../helpers.js";
 
@@ -15,6 +17,20 @@ import { useTestConfigDir } from "../helpers.js";
 const ANSI_RE = /\u001B\[[0-9;]*m/g;
 function stripAnsi(str: string): string {
   return str.replace(ANSI_RE, "");
+}
+
+function withoutAgentEnv(): NodeJS.ProcessEnv {
+  const agentKeys = new Set([
+    "AI_AGENT",
+    "AGENT",
+    "CLAUDECODE",
+    "CLAUDE_CODE",
+    "CURSOR_EXTENSION_HOST_ROLE",
+    ...ENV_VAR_AGENTS.keys(),
+  ]);
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !agentKeys.has(key))
+  );
 }
 
 /** Widest line (in code points) in a rendered banner, ignoring ANSI codes. */
@@ -67,6 +83,10 @@ describe("formatBanner", () => {
 describe("printCustomHelp", () => {
   useTestConfigDir("help-test-");
 
+  afterEach(() => {
+    setEnv(process.env);
+  });
+
   test("returns non-empty string", async () => {
     const output = printCustomHelp();
     expect(output.length).toBeGreaterThan(0);
@@ -91,6 +111,23 @@ describe("printCustomHelp", () => {
   test("output contains docs URL", async () => {
     const output = stripAnsi(printCustomHelp());
     expect(output).toContain("cli.sentry.dev");
+  });
+
+  test("hides route subcommands for human users", () => {
+    setEnv(withoutAgentEnv());
+
+    const output = stripAnsi(printCustomHelp());
+
+    expect(output).toMatch(/\$ sentry auth\s+Authenticate with Sentry/);
+    expect(output).not.toContain("sentry auth login | logout");
+  });
+
+  test("shows route subcommands for agent-driven runs", () => {
+    setEnv({ ...withoutAgentEnv(), AI_AGENT: "test-agent" });
+
+    const output = stripAnsi(printCustomHelp());
+
+    expect(output).toContain("sentry auth login | logout");
   });
 
   test("includes the banner only when stdout is a TTY", () => {

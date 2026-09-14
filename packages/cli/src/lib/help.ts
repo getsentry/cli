@@ -9,6 +9,7 @@
 import { routes } from "../app.js";
 import { formatBanner } from "./banner.js";
 import { isAuthenticated } from "./db/auth.js";
+import { detectAgent } from "./detect-agent.js";
 import { TOP_LEVEL_ENV_VARS } from "./env-registry.js";
 import { cyan, magenta, muted } from "./formatters/colors.js";
 import {
@@ -91,7 +92,7 @@ const COMMON_FLAGS: readonly CommonFlagEntry[] = [
  * Generate the commands list dynamically from Stricli's route structure.
  * This ensures help text stays in sync with actual registered commands.
  */
-function generateCommands(): HelpCommand[] {
+function generateCommands(includeSubcommands: boolean): HelpCommand[] {
   // Cast to our introspection types — Stricli's generic types are compatible
   const routeMap = routes as unknown as RouteMap;
   const entries = routeMap.getAllEntries();
@@ -111,7 +112,9 @@ function generateCommands(): HelpCommand[] {
           .map((sub: RouteMapEntry) => sub.name.original)
           .join(" | ");
         return {
-          usage: `sentry ${routeName} ${subNames}`,
+          usage: includeSubcommands
+            ? `sentry ${routeName} ${subNames}`
+            : `sentry ${routeName}`,
           description: brief,
         };
       }
@@ -227,8 +230,9 @@ export function printCustomHelp(): string {
   lines.push(`  ${TAGLINE}`);
   lines.push("");
 
-  // Commands (auto-generated from Stricli routes)
-  lines.push(formatCommands(generateCommands()));
+  // Keep the human overview scannable. Agent-driven runs retain inline
+  // subcommands so they can discover the full CLI with fewer help calls.
+  lines.push(formatCommands(generateCommands(Boolean(detectAgent()))));
   lines.push("");
 
   // Common flags
