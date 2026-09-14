@@ -20,7 +20,7 @@ import {
 
 const config: ObjectstoreConfig = {
   url: "https://objectstore.example.com/",
-  usecase: "snapshots",
+  usecase: "preprod_snapshots",
   scopes: [
     ["org", "123"],
     ["project", "456"],
@@ -39,7 +39,7 @@ afterEach(() => {
 describe("buildObjectUrl", () => {
   test.each([
     "preprod",
-    "snapshots",
+    "preprod_snapshots",
   ])("joins the %s usecase, scope, and key (stripping a trailing slash)", (usecase) => {
     expect(buildObjectUrl({ ...config, usecase }, "123/456/abc")).toBe(
       `https://objectstore.example.com/v1/objects/${usecase}/org=123;project=456/123/456/abc`
@@ -53,7 +53,7 @@ describe("objectExists", () => {
     expect(await objectExists(config, "123/456/abc")).toBe(true);
     const [url, init] = customFetchMock.mock.calls[0] ?? [];
     expect(url).toContain(
-      "/v1/objects/snapshots/org=123;project=456/123/456/abc"
+      "/v1/objects/preprod_snapshots/org=123;project=456/123/456/abc"
     );
     expect(init.method).toBe("HEAD");
     expect(init.headers["x-os-auth"]).toBe("Bearer jwt-token");
@@ -90,7 +90,7 @@ describe("putObject", () => {
 
     const [url, init] = customFetchMock.mock.calls[0] ?? [];
     expect(url).toBe(
-      "https://objectstore.example.com/v1/objects/snapshots/org=123;project=456/123/456/abc"
+      "https://objectstore.example.com/v1/objects/preprod_snapshots/org=123;project=456/123/456/abc"
     );
     expect(init.method).toBe("PUT");
     expect(init.headers["x-os-auth"]).toBe("Bearer jwt-token");

@@ -380,7 +380,7 @@ describe("snapshots", () => {
   });
 
   test.each([
-    { usecase: "snapshots", expectedUsecase: "snapshots" },
+    { usecase: "preprod_snapshots", expectedUsecase: "preprod_snapshots" },
     { usecase: "preprod", expectedUsecase: "preprod" },
     { usecase: undefined, expectedUsecase: "preprod" },
   ])("fetchSnapshotsUploadOptions negotiates auto and parses $usecase as $expectedUsecase", async ({

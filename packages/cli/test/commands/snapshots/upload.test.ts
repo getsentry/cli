@@ -55,7 +55,7 @@ function pngBytes(width: number, height: number): Buffer {
 const UPLOAD_OPTIONS = {
   objectstore: {
     url: "https://os.example.com",
-    usecase: "snapshots",
+    usecase: "preprod_snapshots",
     scopes: [
       ["org", "1"],
       ["project", "2"],
@@ -106,7 +106,7 @@ describe("snapshots upload", () => {
 
   test.each([
     "preprod",
-    "snapshots",
+    "preprod_snapshots",
   ])("uploads images to %s and creates a snapshot with a correct manifest", async (usecase) => {
     const config = { ...UPLOAD_OPTIONS.objectstore, usecase };
     uploadOptionsSpy.mockResolvedValue({ objectstore: config });
