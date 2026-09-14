@@ -319,4 +319,46 @@ describe("resolveOrgRegion", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  test("routes the org-details request to a bare sntrys_ token's claim host", async () => {
+    // Regression for #1568: with only SENTRY_AUTH_TOKEN (an sntrys_ token
+    // embedding a custom host) and no SENTRY_URL/SENTRY_HOST, the org-details
+    // request must go to the token's claim host, not default to sentry.io —
+    // otherwise it trips the host-scoping guard.
+    const { clearAuth } = await import("../../src/lib/db/auth.js");
+    const { resetHostScopingState, mintSntrysToken } = await import(
+      "../helpers.js"
+    );
+    await clearAuth();
+    await resetHostScopingState();
+    process.env.SENTRY_AUTH_TOKEN = mintSntrysToken({
+      iat: 1_700_000_000,
+      url: "http://localhost:8000",
+      org: "acme",
+    });
+
+    const requestedUrls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init);
+      requestedUrls.push(req.url);
+      return new Response(
+        JSON.stringify({ id: "1", slug: "sh-org", name: "Self Hosted" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    };
+
+    try {
+      const regionUrl = await resolveOrgRegion("sh-org");
+      expect(regionUrl).toBe("http://localhost:8000");
+      expect(requestedUrls).not.toHaveLength(0);
+      for (const url of requestedUrls) {
+        expect(url.startsWith("http://localhost:8000/")).toBe(true);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete process.env.SENTRY_AUTH_TOKEN;
+      await resetHostScopingState();
+    }
+  });
 });
