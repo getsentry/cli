@@ -519,7 +519,7 @@ async function findCompanionMap(
  *   dropping large JS files would skip debug-ID injection on the
  *   exact bundles users care about most.
  */
-const SOURCEMAP_SKIP_DIRS: readonly string[] = [NODE_MODULES_DIRNAME];
+export const SOURCEMAP_SKIP_DIRS: readonly string[] = [NODE_MODULES_DIRNAME];
 
 /**
  * Build an `ignore` matcher from user-provided patterns and/or an
@@ -664,6 +664,13 @@ export async function assertDirectoryReadable(dir: string): Promise<void> {
 export type DiscoveryDiagnostic = {
   jsFiles: number;
   mapFiles: number;
+  /**
+   * `.wasm` modules found, excluding DWARF companions. Filled in by
+   * `addWasmDiscoveryCounts`; absent when only JS was scanned.
+   */
+  wasmFiles?: number;
+  /** `.wasm.map` files found. */
+  wasmMaps?: number;
 };
 
 /**
@@ -841,6 +848,19 @@ export function buildEmptyDiscoveryError(
   diag: DiscoveryDiagnostic
 ): ValidationError {
   const { jsFiles, mapFiles } = diag;
+  const wasmFiles = diag.wasmFiles ?? 0;
+  const wasmMaps = diag.wasmMaps ?? 0;
+  // A wasm-only build directory: the JS advice would send the user to a
+  // bundler setting that has nothing to do with their toolchain.
+  if (jsFiles === 0 && mapFiles === 0 && wasmFiles > 0 && wasmMaps === 0) {
+    return new ValidationError(
+      `Found ${wasmFiles} .wasm file(s) in '${dir}' but no companion ` +
+        ".wasm.map files. Your build is not emitting wasm sourcemaps: " +
+        "compile with `-gsource-map` (Emscripten). Pass --allow-empty " +
+        "to suppress.",
+      "directory"
+    );
+  }
   if (jsFiles === 0 && mapFiles === 0) {
     return new ValidationError(
       `Directory '${dir}' contains no JS or sourcemap files. ` +
