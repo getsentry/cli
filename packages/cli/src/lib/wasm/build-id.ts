@@ -72,6 +72,35 @@ export function uuidToBytes(uuid: string): Uint8Array | null {
   return bytes;
 }
 
+/** Hex digits in a UUID, excluding hyphens. */
+const UUID_HEX_LENGTH = UUID_BYTE_LENGTH * 2;
+
+/** Hex-digit counts of a canonical UUID's five hyphen-separated groups. */
+const UUID_GROUP_SIZES = [8, 4, 4, 4, 12];
+
+/**
+ * Convert a hex build id into the canonical dashed UUID Sentry indexes as the
+ * module's debug id.
+ *
+ * Only the first 16 bytes are significant, mirroring how `symbolic` derives a
+ * WASM object's debug id from its `build_id`. Returns `undefined` for a build
+ * id too short to form a UUID, in which case callers should omit the advisory
+ * id rather than send a malformed one.
+ */
+export function debugIdFromBuildId(buildId: string): string | undefined {
+  if (buildId.length < UUID_HEX_LENGTH) {
+    return;
+  }
+  const hex = buildId.slice(0, UUID_HEX_LENGTH);
+  const groups: string[] = [];
+  let offset = 0;
+  for (const size of UUID_GROUP_SIZES) {
+    groups.push(hex.slice(offset, offset + size));
+    offset += size;
+  }
+  return groups.join("-");
+}
+
 /** Generate a random v4 build id. */
 export function randomBuildId(): Uint8Array {
   // randomUUID always yields a well-formed v4 UUID, so the parse cannot fail.

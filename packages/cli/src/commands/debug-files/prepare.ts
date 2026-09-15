@@ -45,10 +45,9 @@ import {
   compileMatchers,
   matchesAny,
 } from "../../lib/scan/path-utils.js";
-import { uuidToBytes } from "../../lib/wasm/build-id.js";
+import { debugIdFromBuildId, uuidToBytes } from "../../lib/wasm/build-id.js";
 import {
   type DebugQuality,
-  debugIdFromBuildId,
   hasDwarfQuality,
   isDebugCompanionPath,
   isWasmPath,

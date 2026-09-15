@@ -23,7 +23,6 @@ import {
 import { formatBuildId, uuidToBytes } from "../../../src/lib/wasm/build-id.js";
 import {
   companionPath,
-  debugIdFromBuildId,
   hasDwarfQuality,
   inspectWasm,
   prepareWasmFile,
@@ -222,18 +221,6 @@ describe("hasDwarfQuality", () => {
     expect(hasDwarfQuality("external-debug-info")).toBe(true);
     expect(hasDwarfQuality("symtab")).toBe(false);
     expect(hasDwarfQuality("none")).toBe(false);
-  });
-});
-
-describe("debugIdFromBuildId", () => {
-  test("formats a build id as a canonical dashed UUID", () => {
-    expect(debugIdFromBuildId("00000000000040008000000000000000")).toBe(
-      "00000000-0000-4000-8000-000000000000"
-    );
-  });
-
-  test("returns undefined for a build id too short to be a UUID", () => {
-    expect(debugIdFromBuildId("0011223344")).toBeUndefined();
   });
 });
 

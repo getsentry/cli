@@ -16,6 +16,7 @@ import {
   parseSections,
 } from "../../../src/lib/wasm/binary.js";
 import {
+  debugIdFromBuildId,
   ensureWasmBuildId,
   formatBuildId,
   readWasmBuildId,
@@ -47,6 +48,18 @@ async function writeModule(name: string, buildId?: Uint8Array) {
   await writeFile(path, bytes);
   return { path, sections: parseSections(bytes) };
 }
+
+describe("debugIdFromBuildId", () => {
+  test("formats a build id as a canonical dashed UUID", () => {
+    expect(debugIdFromBuildId("00000000000040008000000000000000")).toBe(
+      "00000000-0000-4000-8000-000000000000"
+    );
+  });
+
+  test("returns undefined for a build id too short to be a UUID", () => {
+    expect(debugIdFromBuildId("0011223344")).toBeUndefined();
+  });
+});
 
 describe("readWasmBuildId", () => {
   test("reads an id the module carries", async () => {
