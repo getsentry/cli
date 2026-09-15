@@ -14,7 +14,6 @@
  * tool are interchangeable in Sentry.
  */
 
-import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { logger } from "../logger.js";
@@ -32,23 +31,18 @@ import {
   parseSections,
   type WasmSection,
 } from "./binary.js";
+import {
+  ensureWasmBuildId,
+  formatBuildId,
+  randomBuildId,
+  readWasmBuildId,
+  UUID_BYTE_LENGTH,
+} from "./build-id.js";
 
 const log = logger.withTag("wasm.prepare");
 
-/** Number of bytes in a UUID, the canonical `build_id` length. */
-const UUID_BYTE_LENGTH = 16;
-
-/** Radix used when converting build id bytes to their hex representation. */
-const HEX_RADIX = 16;
-
 /** Suffix identifying a debug companion produced by this command. */
 const COMPANION_SUFFIX = ".debug.wasm";
-
-/** Hyphens in a UUID, stripped before parsing. */
-const UUID_SEPARATORS = /-/g;
-
-/** A run of lowercase hex digits, spanning the whole string. */
-const HEX_ONLY = /^[0-9a-f]+$/;
 
 /** Trailing `.wasm` extension, in any case. */
 const WASM_EXTENSION = /\.wasm$/i;
@@ -137,13 +131,6 @@ export type PrepareOptions = {
   stripNames?: boolean;
 };
 
-/** Render build id bytes as lowercase hex. */
-export function formatBuildId(buildId: Uint8Array): string {
-  return Array.from(buildId)
-    .map((byte) => byte.toString(HEX_RADIX).padStart(2, "0"))
-    .join("");
-}
-
 /** Hex digits in a UUID, excluding hyphens. */
 const UUID_HEX_LENGTH = UUID_BYTE_LENGTH * 2;
 
@@ -184,33 +171,6 @@ export function debugIdFromBuildId(buildId: string): string | undefined {
  */
 export function hasDwarfQuality(quality: DebugQuality): boolean {
   return quality === "dwarf" || quality === "external-debug-info";
-}
-
-/**
- * Convert a UUID string to its 16 raw bytes.
- *
- * @param uuid - UUID, with or without hyphens.
- * @returns The raw bytes, or `null` when the input is not a UUID.
- */
-export function uuidToBytes(uuid: string): Uint8Array | null {
-  const hex = uuid.replace(UUID_SEPARATORS, "").toLowerCase();
-  if (hex.length !== UUID_BYTE_LENGTH * 2 || !HEX_ONLY.test(hex)) {
-    return null;
-  }
-  const bytes = new Uint8Array(UUID_BYTE_LENGTH);
-  for (let index = 0; index < UUID_BYTE_LENGTH; index++) {
-    bytes[index] = Number.parseInt(
-      hex.slice(index * 2, index * 2 + 2),
-      HEX_RADIX
-    );
-  }
-  return bytes;
-}
-
-/** Generate a random v4 build id. */
-function randomBuildId(): Uint8Array {
-  // randomUUID always yields a well-formed v4 UUID, so the parse cannot fail.
-  return uuidToBytes(randomUUID()) as Uint8Array;
 }
 
 /** Whether a path names a debug companion produced by this command. */
@@ -366,46 +326,6 @@ export function splitWasm(
   return { buildId, stripped: encodeModule(strippedSections), companion };
 }
 
-/**
- * Give a module that will not be split a build id, writing it back in place.
- *
- * `wasm-split` stamps every module it processes regardless of debug quality.
- * Sentry matches a stack frame to its debug file by build id, so an unstamped
- * module can never be symbolicated — not even from a debug file uploaded
- * later. Stamping now keeps that option open.
- *
- * @returns The effective build id, or `null` when a dry run left the module
- *   untouched.
- */
-async function ensureBuildId(
-  path: string,
-  sections: WasmSection[],
-  existing: Uint8Array | null,
-  options: PrepareOptions
-): Promise<Uint8Array | null> {
-  if (existing) {
-    return existing;
-  }
-  if (options.dryRun) {
-    return null;
-  }
-  const buildId = options.buildId ?? randomBuildId();
-  const stamped = [...sections, makeBuildIdSection(buildId)];
-  await writeFile(path, encodeModule(stamped));
-  return buildId;
-}
-
-/** Read a module's build id from disk, or `null` if it has none/unreadable. */
-async function readBuildId(path: string): Promise<Uint8Array | null> {
-  try {
-    return inspectWasm(await readFile(path)).buildId;
-  } catch (error) {
-    // A missing or malformed companion simply means "not already prepared".
-    log.debug(`No readable build id at ${path}`, error);
-    return null;
-  }
-}
-
 /** Whether two build ids are byte-identical. */
 function buildIdsMatch(a: Uint8Array | null, b: Uint8Array | null): boolean {
   if (!(a && b) || a.length !== b.length) {
@@ -490,13 +410,15 @@ async function findExistingCompanion(
     );
     if (
       referenced &&
-      buildIdsMatch(await readBuildId(referenced), inspection.buildId)
+      buildIdsMatch(await readWasmBuildId(referenced), inspection.buildId)
     ) {
       return { companion: referenced, quality: "external-debug-info" };
     }
   }
 
-  if (buildIdsMatch(await readBuildId(expectedCompanion), inspection.buildId)) {
+  if (
+    buildIdsMatch(await readWasmBuildId(expectedCompanion), inspection.buildId)
+  ) {
     return { companion: expectedCompanion, quality: inspection.quality };
   }
   return null;
@@ -518,7 +440,7 @@ async function reportSkip(
   if (!warning) {
     return null;
   }
-  const buildId = await ensureBuildId(
+  const buildId = await ensureWasmBuildId(
     path,
     sections,
     inspection.buildId,

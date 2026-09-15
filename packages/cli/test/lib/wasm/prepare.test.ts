@@ -20,16 +20,15 @@ import {
   type WasmSection,
   writeVarUint32,
 } from "../../../src/lib/wasm/binary.js";
+import { formatBuildId, uuidToBytes } from "../../../src/lib/wasm/build-id.js";
 import {
   companionPath,
   debugIdFromBuildId,
-  formatBuildId,
   hasDwarfQuality,
   inspectWasm,
   prepareWasmFile,
   splitWasm,
   uploadPath,
-  uuidToBytes,
 } from "../../../src/lib/wasm/prepare.js";
 
 /** Section id of the Code section. */

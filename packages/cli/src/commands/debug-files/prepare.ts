@@ -45,6 +45,7 @@ import {
   compileMatchers,
   matchesAny,
 } from "../../lib/scan/path-utils.js";
+import { uuidToBytes } from "../../lib/wasm/build-id.js";
 import {
   type DebugQuality,
   debugIdFromBuildId,
@@ -55,7 +56,6 @@ import {
   type PrepareResult,
   prepareWasmFile,
   uploadPath,
-  uuidToBytes,
 } from "../../lib/wasm/prepare.js";
 
 const log = logger.withTag("debug-files.prepare");
