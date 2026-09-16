@@ -35,6 +35,9 @@ const log = logger.withTag("wasm.binary");
 /** Section id of a custom section. */
 const CUSTOM_SECTION_ID = 0;
 
+/** Section id of the code section. DWARF offsets are relative to it. */
+const CODE_SECTION_ID = 10;
+
 /** Name of the custom section holding function names. */
 const NAME_SECTION = "name";
 
@@ -68,7 +71,7 @@ const SECTION_ORDER = [
   [8, "start"],
   [9, "element"],
   [12, "data count"],
-  [10, "code"],
+  [CODE_SECTION_ID, "code"],
   [11, "data"],
 ] as const;
 
@@ -141,7 +144,7 @@ export type WasmSection = {
 };
 
 /** A varuint32 read off a byte stream. */
-export type VarUint32 = {
+type VarUint32 = {
   /** The decoded value. */
   value: number;
   /** Bytes the encoding occupied. */
@@ -158,7 +161,7 @@ export type VarUint32 = {
  * @throws {WasmParseError} when the encoding runs past the buffer, spans more
  *   groups than a 32-bit value can need, or decodes above 2^32 - 1
  */
-export function readVarUint32(bytes: Uint8Array, offset: number): VarUint32 {
+function readVarUint32(bytes: Uint8Array, offset: number): VarUint32 {
   let value = 0;
   let scale = 1;
   for (let size = 0; size < MAX_VARUINT32_BYTES; size++) {
@@ -192,7 +195,7 @@ export function readVarUint32(bytes: Uint8Array, offset: number): VarUint32 {
  * @param value - A non-negative integer below 2^32
  * @returns The encoded bytes, one to five of them
  */
-export function writeVarUint32(value: number): Uint8Array {
+function writeVarUint32(value: number): Uint8Array {
   const bytes: number[] = [];
   let remaining = value;
   do {
@@ -319,6 +322,38 @@ export function makeExternalDebugInfoSection(url: string): WasmSection {
  */
 export function decodeBuildId(contents: Uint8Array): Uint8Array | null {
   return decodeByteVector(contents, BUILD_ID_SECTION);
+}
+
+/**
+ * Read the URL out of an `external_debug_info` section body.
+ *
+ * @param contents - The section body, after its name
+ * @returns The URL, or `null` when the body is malformed or not UTF-8
+ */
+export function decodeExternalDebugInfo(contents: Uint8Array): string | null {
+  const bytes = decodeByteVector(contents, EXTERNAL_DEBUG_INFO_SECTION);
+  if (bytes === null) {
+    return null;
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error) {
+    log.debug(`${EXTERNAL_DEBUG_INFO_SECTION} body is not valid UTF-8`, error);
+    return null;
+  }
+}
+
+/** Whether a section is the code section. */
+export function isCodeSection(section: WasmSection): boolean {
+  return section.id === CODE_SECTION_ID;
+}
+
+/** Whether a section points at a debug companion. */
+export function isExternalDebugInfoSection(section: WasmSection): boolean {
+  return (
+    section.id === CUSTOM_SECTION_ID &&
+    section.name === EXTERNAL_DEBUG_INFO_SECTION
+  );
 }
 
 /** Whether a section is one of the custom sections carrying DWARF. */

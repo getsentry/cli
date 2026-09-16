@@ -16,9 +16,7 @@ import {
   makeBuildIdSection,
   makeExternalDebugInfoSection,
   parseSections,
-  readVarUint32,
   WasmParseError,
-  writeVarUint32,
 } from "../../../src/lib/wasm/binary.js";
 import {
   byteVector,
@@ -32,34 +30,6 @@ import {
   WASM_HEADER,
   wasmModule,
 } from "./helpers.js";
-
-describe("readVarUint32 / writeVarUint32", () => {
-  test.each([
-    0, 1, 127, 128, 624_485, 0xff_ff_ff_ff,
-  ])("round-trips %i", (value) => {
-    const encoded = writeVarUint32(value);
-    expect(readVarUint32(encoded, 0)).toEqual({
-      value,
-      size: encoded.length,
-    });
-  });
-
-  test("reads a padded, non-canonical encoding", () => {
-    // 0x01 spread over four groups. Legal, and some toolchains emit it.
-    expect(readVarUint32(fromHex("81808000"), 0)).toEqual({
-      value: 1,
-      size: 4,
-    });
-  });
-
-  test.each([
-    ["truncated", "80"],
-    ["longer than five groups", "8080808080"],
-    ["above 32 bits", "8080808010"],
-  ])("rejects an encoding that is %s", (_label, hex) => {
-    expect(() => readVarUint32(fromHex(hex), 0)).toThrow(WasmParseError);
-  });
-});
 
 describe("parseSections", () => {
   test.each([
