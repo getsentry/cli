@@ -72,9 +72,10 @@ export type SourcemapStampResult = {
  *
  * Unlike {@link injectDebugId} this touches no host file, so it suits maps
  * whose companion artifact is not JavaScript — a wasm module carries its own
- * id in a custom section and must never be rewritten as text. Nothing is
- * offset either: `mappings` only shifts when injection prepends a runtime
- * snippet line to a JS bundle.
+ * id in a custom section and must never be rewritten as text. The map itself is
+ * edited by {@link mutateSourcemap}, so it gains the id under both field
+ * spellings exactly as an injected map does, with no `mappings` offset:
+ * `mappings` only shifts when injection prepends a runtime snippet line.
  *
  * Idempotent: a map already carrying `debugId` is left byte-identical.
  *
@@ -96,8 +97,7 @@ export async function setSourcemapDebugId(
   if (options.dryRun) {
     return { written: false, replaced: existing };
   }
-  map.debug_id = debugId;
-  map.debugId = debugId;
+  mutateSourcemap(map, debugId, { offsetMappings: false });
   await writeFile(mapPath, JSON.stringify(map));
   return { written: true, replaced: existing };
 }

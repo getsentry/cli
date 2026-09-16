@@ -16,12 +16,19 @@ import {
   discoverWasmPairs,
   syncWasmSourcemap,
 } from "../../../src/lib/sourcemap/wasm.js";
+import { parseSections } from "../../../src/lib/wasm/binary.js";
 import {
-  encodeModule,
-  makeBuildIdSection,
-  makeCustomSection,
-} from "../../../src/lib/wasm/binary.js";
-import { uuidToBytes } from "../../../src/lib/wasm/build-id.js";
+  buildIdFromSections,
+  debugIdFromBuildId,
+  formatBuildId,
+  uuidToBytes,
+} from "../../../src/lib/wasm/build-id.js";
+import {
+  byteVector,
+  customSection,
+  fromHex,
+  wasmModule,
+} from "../wasm/helpers.js";
 
 /** Deterministic build id used wherever the exact debug ID matters. */
 const FIXED_UUID = "00000000-0000-4000-8000-000000000000";
@@ -37,12 +44,14 @@ beforeEach(async () => {
 
 /** Write a wasm module, optionally carrying a `build_id`. */
 async function writeWasm(name: string, buildId?: string): Promise<string> {
-  const sections = [makeCustomSection("name", Uint8Array.from([0x00]))];
+  const sections = [customSection("name", fromHex("00"))];
   if (buildId) {
-    sections.push(makeBuildIdSection(uuidToBytes(buildId) as Uint8Array));
+    sections.push(
+      customSection("build_id", byteVector(uuidToBytes(buildId) as Uint8Array))
+    );
   }
   const path = join(dir, name);
-  await writeFile(path, encodeModule(sections));
+  await writeFile(path, wasmModule(sections));
   return path;
 }
 
@@ -67,6 +76,12 @@ async function readMap(path: string): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(path, "utf-8"));
 }
 
+/** Read the debug ID a module's `build_id` section stands for. */
+async function readModuleDebugId(path: string): Promise<string | undefined> {
+  const buildId = buildIdFromSections(parseSections(await readFile(path)));
+  return buildId ? debugIdFromBuildId(formatBuildId(buildId)) : undefined;
+}
+
 describe("syncWasmSourcemap", () => {
   test("stamps the map with the id the module already carries", async () => {
     const wasmPath = await writeWasm("app.wasm", FIXED_UUID);
@@ -89,14 +104,13 @@ describe("syncWasmSourcemap", () => {
     const wasmPath = await writeWasm("bare.wasm");
     const mapPath = await writeMap("bare.wasm.map");
 
-    const result = await syncWasmSourcemap(
-      { wasmPath, mapPath },
-      { buildId: uuidToBytes(FIXED_UUID) as Uint8Array }
-    );
+    const result = await syncWasmSourcemap({ wasmPath, mapPath });
 
     expect(result.moduleStamped).toBe(true);
-    expect(result.debugId).toBe(FIXED_UUID);
-    expect((await readMap(mapPath)).debug_id).toBe(FIXED_UUID);
+    // The minted id is random, so the invariant to check is that both sides
+    // ended up with the one now on the module.
+    expect(result.debugId).toBe(await readModuleDebugId(wasmPath));
+    expect((await readMap(mapPath)).debug_id).toBe(result.debugId);
   });
 
   test("writes nothing when the map already carries the module's id", async () => {
@@ -192,7 +206,12 @@ describe("discoverWasmPairs", () => {
     await mkdir(join(dir, "vendor"));
     await writeFile(
       join(dir, "vendor", "lib.wasm"),
-      encodeModule([makeBuildIdSection(uuidToBytes(FIXED_UUID) as Uint8Array)])
+      wasmModule([
+        customSection(
+          "build_id",
+          byteVector(uuidToBytes(FIXED_UUID) as Uint8Array)
+        ),
+      ])
     );
     await writeFile(join(dir, "vendor", "lib.wasm.map"), '{"version":3}');
     const wasmPath = await writeWasm("app.wasm", FIXED_UUID);

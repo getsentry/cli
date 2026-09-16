@@ -25,10 +25,10 @@ import { parseSections } from "../wasm/binary.js";
 import {
   buildIdFromSections,
   debugIdFromBuildId,
-  ensureWasmBuildId,
   formatBuildId,
 } from "../wasm/build-id.js";
 import { isDebugCompanionPath } from "../wasm/prepare.js";
+import { ensureBuildIdOnDisk } from "../wasm/stamp.js";
 import { setSourcemapDebugId } from "./debug-id.js";
 import { type DiscoveryDiagnostic, SOURCEMAP_SKIP_DIRS } from "./inject.js";
 
@@ -65,15 +65,10 @@ export type WasmSyncResult = {
   moduleStamped: boolean;
 };
 
-/** Controls the id a pair is reconciled onto, and whether anything is written. */
+/** Whether reconciling a pair is allowed to write. */
 export type WasmSyncOptions = {
   /** Report what would change without touching either file. */
   dryRun?: boolean;
-  /**
-   * Build id to stamp when the module has none. Defaults to a random UUID.
-   * A library-level seam for deterministic tests, not a CLI flag.
-   */
-  buildId?: Uint8Array;
 };
 
 /**
@@ -94,14 +89,11 @@ export async function syncWasmSourcemap(
 ): Promise<WasmSyncResult> {
   const { wasmPath, mapPath } = pair;
 
-  // One parse serves both the read and the stamp — `ensureWasmBuildId` takes
-  // the sections it should re-encode, so nothing re-reads the module.
-  const sections = parseSections(await readFile(wasmPath));
-  const existing = buildIdFromSections(sections);
-  const buildId = await ensureWasmBuildId(wasmPath, sections, existing, {
-    buildId: options.buildId,
-    dryRun: options.dryRun,
-  });
+  // One read serves both the lookup and the stamp. Reading the id first also
+  // spares an already-stamped module the full re-encode `stampBuildId` does.
+  const bytes = await readFile(wasmPath);
+  const existing = buildIdFromSections(parseSections(bytes));
+  const buildId = await ensureBuildIdOnDisk(wasmPath, bytes, existing, options);
   const moduleStamped = !existing && buildId !== null;
 
   const debugId = buildId
