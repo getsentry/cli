@@ -21,12 +21,10 @@ import {
   BUILD_ID_SECTION,
   decodeBuildId,
   decodeExternalDebugInfo,
-  encodeModule,
   isCodeSection,
   isDebugSection,
   isExternalDebugInfoSection,
   isNameSection,
-  makeBuildIdSection,
   parseSections,
   type WasmSection,
 } from "./binary.js";
@@ -255,29 +253,38 @@ async function readCompanionBuildId(path: string): Promise<Uint8Array | null> {
  * later. Stamping now keeps that option open.
  *
  * @param path - Module to stamp.
- * @param sections - Sections already parsed from that module.
+ * @param bytes - The module as read from disk.
  * @param existing - Id the module already carries, if any.
  * @returns The effective build id, or `null` when a dry run left the module
  *   untouched.
  */
 async function ensureBuildIdOnDisk(
   path: string,
-  sections: WasmSection[],
+  bytes: Uint8Array,
   existing: Uint8Array | null,
   options: PrepareOptions
 ): Promise<Uint8Array | null> {
+  // Checked before splitting so an already-stamped module is never re-encoded.
   if (existing) {
     return existing;
   }
   if (options.dryRun) {
     return null;
   }
-  const buildId = options.buildId ?? randomBuildId();
-  await writeFile(
-    path,
-    encodeModule([...sections, makeBuildIdSection(buildId)])
-  );
-  return buildId;
+  const stamped = stampBuildId(bytes, options.buildId);
+  await writeFile(path, stamped.module);
+  return stamped.buildId;
+}
+
+/**
+ * Stamp a module with a build id, changing nothing else.
+ *
+ * A split with neither `strip` nor `companion` is exactly that, so stamping
+ * shares one implementation with the real split rather than reassembling the
+ * section list by hand.
+ */
+function stampBuildId(bytes: Uint8Array, buildId?: Uint8Array) {
+  return splitWasm(bytes, { ...(buildId ? { buildId } : {}) });
 }
 
 /** Whether two build ids are byte-identical. */
@@ -389,7 +396,7 @@ async function findExistingCompanion(
  */
 async function reportSkip(
   path: string,
-  sections: WasmSection[],
+  bytes: Uint8Array,
   inspection: WasmInspection,
   options: PrepareOptions
 ): Promise<PrepareResult | null> {
@@ -399,7 +406,7 @@ async function reportSkip(
   }
   const buildId = await ensureBuildIdOnDisk(
     path,
-    sections,
+    bytes,
     inspection.buildId,
     options
   );
@@ -432,7 +439,7 @@ async function reportSkip(
  */
 async function repairUnpairedCompanion(
   wasmPath: string,
-  sections: WasmSection[],
+  bytes: Uint8Array,
   inspection: WasmInspection,
   options: PrepareOptions
 ): Promise<PrepareResult | null> {
@@ -448,11 +455,10 @@ async function repairUnpairedCompanion(
     return null;
   }
 
-  let companionSections: WasmSection[];
+  let companionBytes: Uint8Array;
   let companionInspection: WasmInspection;
   try {
-    const companionBytes = await readFile(companion);
-    companionSections = parseSections(companionBytes);
+    companionBytes = await readFile(companion);
     companionInspection = inspectWasm(companionBytes);
   } catch (error) {
     log.debug(`No usable companion at ${companion}`, error);
@@ -481,15 +487,9 @@ async function repairUnpairedCompanion(
   }
 
   if (!adopted) {
-    await writeFile(
-      companion,
-      encodeModule([...companionSections, makeBuildIdSection(buildId)])
-    );
+    await writeFile(companion, stampBuildId(companionBytes, buildId).module);
   }
-  await writeFile(
-    wasmPath,
-    encodeModule([...sections, makeBuildIdSection(buildId)])
-  );
+  await writeFile(wasmPath, stampBuildId(bytes, buildId).module);
 
   return {
     path: wasmPath,
@@ -528,10 +528,8 @@ export async function prepareWasmFile(
   }
 
   const bytes = await readFile(path);
-  let sections: WasmSection[];
   let inspection: WasmInspection;
   try {
-    sections = parseSections(bytes);
     inspection = inspectWasm(bytes);
   } catch (error) {
     return {
@@ -566,7 +564,7 @@ export async function prepareWasmFile(
   if (!inspection.buildId && inspection.quality === "external-debug-info") {
     const repaired = await repairUnpairedCompanion(
       path,
-      sections,
+      bytes,
       inspection,
       options
     );
@@ -575,7 +573,7 @@ export async function prepareWasmFile(
     }
   }
 
-  const skipped = await reportSkip(path, sections, inspection, options);
+  const skipped = await reportSkip(path, bytes, inspection, options);
   if (skipped) {
     return skipped;
   }
