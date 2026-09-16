@@ -10,26 +10,12 @@
  * are interchangeable with those written by the Rust `wasm-split`.
  */
 
-import { randomUUID } from "node:crypto";
+import { UUID, uuidv4obj } from "uuidv7";
 import { BUILD_ID_SECTION, decodeBuildId, type WasmSection } from "./binary.js";
-
-/** Number of bytes in a UUID, the canonical `build_id` length. */
-const UUID_BYTE_LENGTH = 16;
-
-/** Radix used when converting build id bytes to their hex representation. */
-const HEX_RADIX = 16;
-
-/** Hyphens in a UUID, stripped before parsing. */
-const UUID_SEPARATORS = /-/g;
-
-/** A run of lowercase hex digits, spanning the whole string. */
-const HEX_ONLY = /^[0-9a-f]+$/;
 
 /** Render build id bytes as lowercase hex. */
 export function formatBuildId(buildId: Uint8Array): string {
-  return Array.from(buildId)
-    .map((byte) => byte.toString(HEX_RADIX).padStart(2, "0"))
-    .join("");
+  return UUID.ofInner(buildId).toHex();
 }
 
 /**
@@ -39,24 +25,16 @@ export function formatBuildId(buildId: Uint8Array): string {
  * @returns The bytes, or `null` when the string is not a UUID
  */
 export function uuidToBytes(uuid: string): Uint8Array | null {
-  const hex = uuid.replace(UUID_SEPARATORS, "").toLowerCase();
-  if (hex.length !== UUID_BYTE_LENGTH * 2 || !HEX_ONLY.test(hex)) {
+  try {
+    return new Uint8Array(UUID.parse(uuid).bytes);
+  } catch {
     return null;
   }
-  const bytes = new Uint8Array(UUID_BYTE_LENGTH);
-  for (let index = 0; index < UUID_BYTE_LENGTH; index++) {
-    bytes[index] = Number.parseInt(
-      hex.slice(index * 2, index * 2 + 2),
-      HEX_RADIX
-    );
-  }
-  return bytes;
 }
 
 /** Generate a random v4 build id. */
 export function randomBuildId(): Uint8Array {
-  // randomUUID always yields a well-formed v4 UUID, so the parse cannot fail.
-  return uuidToBytes(randomUUID()) as Uint8Array;
+  return new Uint8Array(uuidv4obj().bytes);
 }
 
 /**
