@@ -15,7 +15,7 @@ import { BUILD_ID_SECTION, decodeBuildId, type WasmSection } from "./binary.js";
 
 /** Render build id bytes as lowercase hex. */
 export function formatBuildId(buildId: Uint8Array): string {
-  return UUID.ofInner(buildId).toHex();
+  return Buffer.from(buildId).toString("hex");
 }
 
 /**
@@ -25,6 +25,7 @@ export function formatBuildId(buildId: Uint8Array): string {
  * @returns The bytes, or `null` when the string is not a UUID
  */
 export function uuidToBytes(uuid: string): Uint8Array | null {
+  // biome-ignore lint/plugin: a parse failure is the answer — the caller turns null into its own error
   try {
     return new Uint8Array(UUID.parse(uuid).bytes);
   } catch {

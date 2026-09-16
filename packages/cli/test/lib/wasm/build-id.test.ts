@@ -48,6 +48,12 @@ describe("uuidToBytes", () => {
   });
 });
 
+describe("formatBuildId", () => {
+  test("prints an id that is not a UUID, as the Rust tool does", () => {
+    expect(formatBuildId(fromHex("0102030405"))).toBe("0102030405");
+  });
+});
+
 describe("randomBuildId", () => {
   test("mints a distinct v4 UUID each time", () => {
     // Version nibble 4 and variant nibble 8-b, at bytes 6 and 8.
