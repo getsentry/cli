@@ -8,6 +8,11 @@
  * flags, same behaviour, and the same stdout contract of a single lowercase hex
  * build id, so `BUILD_ID=$(sentry wasm-split app.wasm)` keeps working for
  * anyone moving off the Rust tool.
+ *
+ * "Drop-in" is meant to cover which files are rejected too, not just what the
+ * accepted ones turn into. The same modules go through and the same ones fail,
+ * because the parser is calibrated against the Rust tool's own; see
+ * `lib/wasm/binary.ts`.
  */
 
 import { readFile, writeFile } from "node:fs/promises";

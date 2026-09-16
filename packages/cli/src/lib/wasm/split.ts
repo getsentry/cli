@@ -6,6 +6,10 @@
  * of the steps is part of the contract rather than an implementation detail.
  * See {@link splitWasm} for what that ordering buys.
  *
+ * Parity covers which modules are refused as well as what happens to the ones
+ * that are accepted. Parsing is the gate, and it is calibrated against `wasmbin`
+ * rather than against a full validator; see `binary.ts` for how deep that goes.
+ *
  * The function is pure: it takes bytes and returns bytes. Reading and writing
  * files, resolving paths, and reporting to the user all belong to the caller,
  * which is what lets the `wasm-split` command and the debug-file pipeline share
@@ -81,10 +85,14 @@ export type SplitWasmResult = {
  * section, so a companion without it cannot be symbolicated, however much
  * `.debug_*` data it holds.
  *
+ * Nothing is built until the input has been parsed in full, so a module the Rust
+ * tool would refuse costs the caller an error and no output.
+ *
  * @param bytes - A complete WebAssembly module
  * @param options - How to split it
  * @returns The effective build id, the deployable module, and the companion
- * @throws {import("./binary.js").WasmParseError} when `bytes` is not a module
+ * @throws {import("./binary.js").WasmParseError} when `bytes` is not a module the
+ *   Rust `wasm-split` would accept
  */
 export function splitWasm(
   bytes: Uint8Array,

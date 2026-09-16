@@ -7,6 +7,14 @@
  * code, data, and anything this parser has never heard of exactly as it found
  * them.
  *
+ * Payloads being opaque does not make the envelope unchecked. Validation goes
+ * exactly as deep as `wasmbin`, the parser behind the Rust `wasm-split`, and no
+ * deeper: `wasmbin` reads each section as a lazy length-prefixed blob, so it
+ * accepts a module whose code section is nonsense, and rejects one whose
+ * envelope is wrong — a section id the spec does not define, or sections out of
+ * the mandated order. `WebAssembly.validate` is not a substitute. It also
+ * type-checks function bodies, and so rejects files the Rust tool accepts.
+ *
  * Round-trip fidelity is a hard requirement, not a convenience. A module whose
  * sections are parsed and re-encoded unchanged must come out byte-identical, so
  * each parsed section keeps a view of its original bytes and is emitted
@@ -38,6 +46,44 @@ const EXTERNAL_DEBUG_INFO_SECTION = "external_debug_info";
 
 /** Prefix shared by the custom sections that carry DWARF. */
 const DEBUG_SECTION_PREFIX = ".debug_";
+
+/**
+ * Non-custom section ids, in the order the spec mandates they appear.
+ *
+ * Deliberately not sorted by id. The data count section (12) was numbered after
+ * the code section (10) but has to precede it, and the exception tag section
+ * (13) belongs between memory and global. `wasmbin` spells the same sequence as
+ * the declaration order of its section enum, and the Rust `wasm-split` builds it
+ * with the `exception-handling` feature on, which is what makes 13 legal here.
+ */
+const SECTION_ORDER = [
+  [1, "type"],
+  [2, "import"],
+  [3, "function"],
+  [4, "table"],
+  [5, "memory"],
+  [13, "exception tag"],
+  [6, "global"],
+  [7, "export"],
+  [8, "start"],
+  [9, "element"],
+  [12, "data count"],
+  [10, "code"],
+  [11, "data"],
+] as const;
+
+/** What a non-custom section id means, and where it sorts. */
+type SectionKind = {
+  /** Human-readable name, for error messages. */
+  name: string;
+  /** Position in {@link SECTION_ORDER}. */
+  rank: number;
+};
+
+/** {@link SECTION_ORDER} keyed by section id. */
+const SECTION_KINDS = new Map<number, SectionKind>(
+  SECTION_ORDER.map(([id, name], rank) => [id, { name, rank }])
+);
 
 /** Magic bytes and version that open every WebAssembly module. */
 const WASM_HEADER = Uint8Array.from([
@@ -166,17 +212,22 @@ export function writeVarUint32(value: number): Uint8Array {
  *
  * @param bytes - A complete WebAssembly module
  * @returns The module's sections, in the order they appear
- * @throws {WasmParseError} when the header is wrong or a section runs past the
- *   end of the buffer
+ * @throws {WasmParseError} when the header is wrong, a section runs past the end
+ *   of the buffer, a section id is not one the spec defines, or the sections are
+ *   out of the mandated order
  */
 export function parseSections(bytes: Uint8Array): WasmSection[] {
   assertWasmHeader(bytes);
   const sections: WasmSection[] = [];
   let offset = WASM_HEADER_LENGTH;
+  let lastRank = -1;
   while (offset < bytes.length) {
     const start = offset;
     const id = bytes[offset] as number;
     offset += 1;
+    // Id first, then length, then position: the order `wasmbin` reports these
+    // in, so a module wrong in two ways gets the same complaint from both tools.
+    const kind = sectionKind(id, start);
     const { value: payloadLength, size } = readVarUint32(bytes, offset);
     offset += size;
     const payloadEnd = offset + payloadLength;
@@ -185,6 +236,7 @@ export function parseSections(bytes: Uint8Array): WasmSection[] {
         `section at offset ${start} claims ${payloadLength} bytes but only ${bytes.length - offset} remain`
       );
     }
+    lastRank = checkSectionOrder(kind, lastRank, start);
     const payload = bytes.subarray(offset, payloadEnd);
     sections.push({
       id,
@@ -300,11 +352,64 @@ function assertWasmHeader(bytes: Uint8Array): void {
 }
 
 /**
+ * Resolve a section id to its kind, rejecting ids the spec does not define.
+ *
+ * A custom section has no kind: it may appear anywhere, as often as it likes, so
+ * it takes no part in the section order.
+ *
+ * @returns The kind, or `null` for a custom section
+ * @throws {WasmParseError} when no released spec defines the id
+ */
+function sectionKind(id: number, offset: number): SectionKind | null {
+  if (id === CUSTOM_SECTION_ID) {
+    return null;
+  }
+  const kind = SECTION_KINDS.get(id);
+  if (kind === undefined) {
+    throw new WasmParseError(
+      `unknown section id ${id} at offset ${offset}: not a section any released WebAssembly version defines`
+    );
+  }
+  return kind;
+}
+
+/**
+ * Check where a section sits relative to the one before it.
+ *
+ * Ranks have to strictly increase, which rejects a section placed before one it
+ * should follow and, because equal ranks are refused too, a second copy of a
+ * section that may appear only once.
+ *
+ * @returns The rank to compare the next section against
+ * @throws {WasmParseError} when the section is out of order or repeated
+ */
+function checkSectionOrder(
+  kind: SectionKind | null,
+  lastRank: number,
+  offset: number
+): number {
+  if (kind === null) {
+    return lastRank;
+  }
+  if (kind.rank <= lastRank) {
+    throw new WasmParseError(
+      `${kind.name} section at offset ${offset} is out of order or repeated`
+    );
+  }
+  return kind.rank;
+}
+
+/**
  * Read a custom section's name and body.
  *
  * Returns nothing for a non-custom section, and nothing for a custom section
  * whose name is truncated or not valid UTF-8 — the section itself is still
  * carried, so a single bad header costs only the ability to address it by name.
+ *
+ * Skipping rather than rejecting is what the Rust tool does. `wasmbin` decodes a
+ * custom section's name only when something asks for it, and `wasm-split` drops
+ * that error on the floor, so an unreadable name costs the section its identity
+ * and nothing more.
  */
 function readCustomHeader(
   id: number,

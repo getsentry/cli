@@ -19,6 +19,14 @@ export const WASM_HEADER = Uint8Array.from([
  */
 export const CODE_SECTION_ID = 10;
 
+/**
+ * Section id of the Data count section.
+ *
+ * Numbered after the code section but required to precede it, which is why the
+ * section order cannot be checked by comparing ids.
+ */
+export const DATA_COUNT_SECTION_ID = 12;
+
 /** Parse a hex string into bytes. */
 export function fromHex(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);

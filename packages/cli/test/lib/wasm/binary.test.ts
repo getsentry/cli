@@ -25,6 +25,7 @@ import {
   CODE_SECTION_ID,
   concat,
   customSection,
+  DATA_COUNT_SECTION_ID,
   fromHex,
   section,
   toHex,
@@ -96,15 +97,74 @@ describe("parseSections", () => {
   });
 });
 
+/**
+ * Which modules are refused, and which are waved through.
+ *
+ * Calibrated against `wasmbin`, the parser behind the Rust `wasm-split`, rather
+ * than a full validator, and checked against the Rust binary itself. Sections
+ * sort by spec rank and not by id, so the cases that pin that table down count
+ * for as much as the ones that reject.
+ */
+describe("section id and order validation", () => {
+  test.each([
+    ["an id no released spec defines", [section(0x7a, fromHex("ff00ff"))]],
+    [
+      "sections out of order",
+      [section(3, fromHex("0100")), section(1, fromHex("60000000"))],
+    ],
+    [
+      "a non-custom section twice",
+      [section(1, fromHex("00")), section(1, fromHex("00"))],
+    ],
+    [
+      "data count after code",
+      [
+        section(CODE_SECTION_ID, fromHex("00")),
+        section(DATA_COUNT_SECTION_ID, fromHex("01")),
+      ],
+    ],
+  ])("rejects %s", (_label, sections) => {
+    expect(() => parseSections(wasmModule(sections))).toThrow(WasmParseError);
+  });
+
+  test.each([
+    [
+      "data count before code",
+      [
+        section(DATA_COUNT_SECTION_ID, fromHex("01")),
+        section(CODE_SECTION_ID, fromHex("00")),
+      ],
+    ],
+    [
+      "an exception tag between memory and global",
+      [
+        section(5, fromHex("00")),
+        section(13, fromHex("00")),
+        section(6, fromHex("00")),
+      ],
+    ],
+  ])("accepts %s", (_label, sections) => {
+    expect(() => parseSections(wasmModule(sections))).not.toThrow();
+  });
+
+  test("accepts what a full validator rejects, as the Rust tool does", () => {
+    // A function with no type section to give it a signature: junk to a
+    // validator, an ordinary envelope to `wasmbin`. Guards against anyone
+    // reaching for `WebAssembly.validate` here.
+    const input = wasmModule([section(3, fromHex("0100"))]);
+    expect(WebAssembly.validate(input)).toBe(false);
+    expect(parseSections(input)).toHaveLength(1);
+  });
+});
+
 describe("round-trip fidelity", () => {
-  test("preserves a module of known and unknown sections", () => {
+  test("preserves a module of named and opaque sections", () => {
     const input = wasmModule([
       section(1, fromHex("60000000")),
       customSection("name", fromHex("deadbeef")),
+      section(DATA_COUNT_SECTION_ID, fromHex("01")),
       section(CODE_SECTION_ID, fromHex("01020304")),
       customSection(".debug_info", fromHex("cafebabe")),
-      // A section id no released wasm version defines.
-      section(0x7a, fromHex("ff00ff")),
     ]);
     expect(toHex(encodeModule(parseSections(input)))).toBe(toHex(input));
   });
