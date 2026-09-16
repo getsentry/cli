@@ -115,8 +115,13 @@ export function splitWasm(
 
   if (options.strip) {
     const stripNames = options.stripNames ?? false;
-    sections = sections.filter((section) => !isStrippable(section, stripNames));
-    moduleChanged = true;
+    const kept = sections.filter(
+      (section) => !isStrippable(section, stripNames)
+    );
+    if (kept.length !== sections.length) {
+      sections = kept;
+      moduleChanged = true;
+    }
   }
 
   if (options.externalDebugInfo) {

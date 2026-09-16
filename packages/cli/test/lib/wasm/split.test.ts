@@ -205,4 +205,16 @@ describe("moduleChanged", () => {
     // Requesting a companion reads the module but never rewrites it.
     expect(splitWasm(input, { companion: true }).moduleChanged).toBe(false);
   });
+
+  test("is false when stripping finds nothing to strip", () => {
+    const input = wasmModule([
+      section(CODE_SECTION_ID, fromHex("01")),
+      customSection("build_id", byteVector(fromHex("00".repeat(16)))),
+    ]);
+
+    const result = splitWasm(input, { strip: true });
+
+    expect(result.moduleChanged).toBe(false);
+    expect(toHex(result.module)).toBe(toHex(input));
+  });
 });
