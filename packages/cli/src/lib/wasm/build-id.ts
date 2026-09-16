@@ -13,13 +13,21 @@
 import { UUID, uuidv4obj } from "uuidv7";
 import { BUILD_ID_SECTION, decodeBuildId, type WasmSection } from "./binary.js";
 
-/** Render build id bytes as lowercase hex. */
+/**
+ * Render build id bytes as lowercase hex.
+ *
+ * Used by `wasm-split` for stdout and `--json` output; accepts any length so
+ * ids read from a module match the Rust tool's `hex::encode`, not only UUIDs.
+ */
 export function formatBuildId(buildId: Uint8Array): string {
   return Buffer.from(buildId).toString("hex");
 }
 
 /**
  * Parse a UUID string into its 16 raw bytes.
+ *
+ * Used by `wasm-split` for `--build-id`; returns `null` instead of throwing so
+ * the command can raise a `ValidationError` rather than a `SyntaxError`.
  *
  * @param uuid - A UUID, with or without hyphens, in either case
  * @returns The bytes, or `null` when the string is not a UUID
@@ -33,13 +41,21 @@ export function uuidToBytes(uuid: string): Uint8Array | null {
   }
 }
 
-/** Generate a random v4 build id. */
+/**
+ * Generate a random v4 build id.
+ *
+ * Used by `splitWasm` when the module carries no readable id and the caller
+ * did not pass `--build-id`.
+ */
 export function randomBuildId(): Uint8Array {
   return new Uint8Array(uuidv4obj().bytes);
 }
 
 /**
  * Read the build id out of already-parsed sections.
+ *
+ * Used by `splitWasm` before minting or stamping; an existing id must be reused
+ * so debug files already uploaded against it stay matched.
  *
  * The first readable `build_id` wins, and a malformed section is skipped rather
  * than treated as an answer — both matching the Rust tool, where a section that
