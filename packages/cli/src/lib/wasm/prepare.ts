@@ -18,8 +18,6 @@ import { readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { logger } from "../logger.js";
 import {
-  BUILD_ID_SECTION,
-  decodeBuildId,
   decodeExternalDebugInfo,
   isCodeSection,
   isDebugSection,
@@ -162,7 +160,6 @@ type SectionSurvey = {
   hasDwarf: boolean;
   hasNameSection: boolean;
   hasCode: boolean;
-  buildId: Uint8Array | null;
   externalDebugInfo: string | null;
 };
 
@@ -174,11 +171,7 @@ function surveySection(found: SectionSurvey, section: WasmSection): void {
   if (!section.contents) {
     return;
   }
-  if (section.name === BUILD_ID_SECTION) {
-    // First readable id wins, as in `buildIdFromSections` and the Rust tool;
-    // a later malformed section must not erase an id already found.
-    found.buildId ??= decodeBuildId(section.contents);
-  } else if (isNameSection(section)) {
+  if (isNameSection(section)) {
     found.hasNameSection = true;
   } else if (isExternalDebugInfoSection(section)) {
     found.externalDebugInfo = decodeExternalDebugInfo(section.contents);
@@ -214,17 +207,17 @@ export function inspectWasm(bytes: Uint8Array): WasmInspection {
     hasDwarf: false,
     hasNameSection: false,
     hasCode: false,
-    buildId: null,
     externalDebugInfo: null,
   };
 
-  for (const section of parseSections(bytes)) {
+  const sections = parseSections(bytes);
+  for (const section of sections) {
     surveySection(found, section);
   }
 
   return {
     quality: classifyDebugQuality(found),
-    buildId: found.buildId,
+    buildId: buildIdFromSections(sections),
     hasCode: found.hasCode,
     externalDebugInfo: found.externalDebugInfo,
   };
