@@ -57,7 +57,7 @@ import { CommandOutput } from "../../lib/formatters/output.js";
 import { logger } from "../../lib/logger.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import { readSourceFile } from "./read-file.js";
-import { resolveWaitMode } from "./wait.js";
+import { resolveWaitMode, type WaitFlags } from "./wait.js";
 
 const log = logger.withTag("debug-files.upload");
 
@@ -126,7 +126,7 @@ type DebugFilesUploadResult = {
 };
 
 /** Flags accepted by the upload command. */
-type UploadFlags = {
+type UploadFlags = WaitFlags & {
   type?: string[];
   id?: string[];
   "require-all"?: boolean;
@@ -138,8 +138,6 @@ type UploadFlags = {
   "derived-data"?: boolean;
   "no-zips"?: boolean;
   "no-upload"?: boolean;
-  wait?: boolean;
-  "wait-for"?: number;
 };
 
 // ── Formatter ───────────────────────────────────────────────────────

@@ -175,7 +175,9 @@ function surveySection(found: SectionSurvey, section: WasmSection): void {
     return;
   }
   if (section.name === BUILD_ID_SECTION) {
-    found.buildId = decodeBuildId(section.contents);
+    // First readable id wins, as in `buildIdFromSections` and the Rust tool;
+    // a later malformed section must not erase an id already found.
+    found.buildId ??= decodeBuildId(section.contents);
   } else if (isNameSection(section)) {
     found.hasNameSection = true;
   } else if (isExternalDebugInfoSection(section)) {

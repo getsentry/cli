@@ -50,14 +50,14 @@ import {
   uploadPath,
 } from "../../lib/wasm/prepare.js";
 import { readSourceFile } from "./read-file.js";
-import { resolveWaitMode } from "./wait.js";
+import { resolveWaitMode, type WaitFlags } from "./wait.js";
 
 const log = logger.withTag("debug-files.prepare");
 
 const USAGE_HINT = "sentry debug-files prepare <path>...";
 
 /** Flags accepted by the prepare command. */
-type PrepareFlags = {
+type PrepareFlags = WaitFlags & {
   "dry-run"?: boolean;
   "no-upload"?: boolean;
   "require-dwarf"?: boolean;
@@ -67,12 +67,8 @@ type PrepareFlags = {
   "include-sources"?: boolean;
   ignore?: string[];
   "ignore-file"?: string;
-  wait?: boolean;
-  "wait-for"?: number;
 };
 
-/**
- * Resolve the wait mode and deadline from `--wait` / `--wait-for`.
 /**
  * Parse the explicit `--build-id` value into raw bytes.
  *
