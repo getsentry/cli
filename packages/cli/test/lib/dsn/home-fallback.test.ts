@@ -74,11 +74,15 @@ describe("DSN detection from $HOME fallback", () => {
     // getStopBoundary() returns homedir() raw; a trailing slash must not
     // make the home-fallback skip fail open. See getsentry/cli#1590.
     fakeHome.path = `${home}/`;
-    const sensitiveDsn = "https://leaked@o999.ingest.sentry.io/999";
-    mkdirSync(join(home, ".aws"), { recursive: true });
+    // Plant the DSN in a plain code file at the top of $HOME — not inside
+    // a DSN_ADDITIONAL_SKIP_DIRS directory — so that if isHomeOrAncestor
+    // regressed to failing open, the downward scan WOULD reach and return
+    // it. That makes this test actually exercise the resolve() fix rather
+    // than the skip list.
+    const scannedDsn = "https://leaked@o999.ingest.sentry.io/999";
     writeFileSync(
-      join(home, ".aws", "credentials"),
-      `sentry_dsn=${sensitiveDsn}`
+      join(home, "config.ts"),
+      `Sentry.init({ dsn: "${scannedDsn}" });`
     );
 
     const result = await detectDsn(home);
