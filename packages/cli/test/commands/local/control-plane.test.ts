@@ -1,5 +1,7 @@
+import { request } from "node:http";
 import { describe, expect, test } from "vitest";
 import { createLocalControlPlane } from "../../../src/commands/local/control-plane.js";
+import { tryListen } from "../../../src/commands/local/server.js";
 
 const CONTROL_TOKEN = "control-token";
 
@@ -151,5 +153,32 @@ describe("Local control plane", () => {
     expect(response.headers.get("access-control-allow-origin")).toBe(
       "http://localhost:5173"
     );
+  });
+
+  test("acknowledges a daemon stop request before closing its listener", async () => {
+    let server: import("node:http").Server | undefined;
+    const controlPlane = createLocalControlPlane({
+      controlToken: CONTROL_TOKEN,
+      onStop: () => {
+        server?.closeAllConnections();
+        server?.close();
+      },
+    });
+    const listening = await tryListen(controlPlane.app, 0, "127.0.0.1");
+    server = listening.server;
+
+    const statusCode = await new Promise<number>((resolve, reject) => {
+      const stopRequest = request(
+        `http://127.0.0.1:${listening.port}/_local/v1/daemon/stop`,
+        { method: "POST", headers: controlHeaders() },
+        (response) => {
+          response.resume();
+          response.on("end", () => resolve(response.statusCode ?? 0));
+        }
+      );
+      stopRequest.on("error", reject);
+      stopRequest.end();
+    });
+    expect(statusCode).toBe(202);
   });
 });

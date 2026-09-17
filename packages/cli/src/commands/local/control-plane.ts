@@ -328,7 +328,7 @@ export function createLocalControlPlane({
     if (!onStop) {
       return c.body(null, 409);
     }
-    queueMicrotask(onStop);
+    setTimeout(onStop, 0);
     return c.body(null, 202);
   });
 
