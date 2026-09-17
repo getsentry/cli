@@ -40,6 +40,16 @@ const log = logger.withTag("sourcemap.wasm");
  */
 const WASM_EXTENSIONS: ReadonlySet<string> = new Set([".wasm"]);
 
+/**
+ * Extensions scanned when counting artifacts for the zero-pairs diagnostic.
+ * Covers `.map` so an orphaned `app.wasm.map` — a map whose module is not in
+ * the directory — is attributed to wasm instead of being left in the JS tally.
+ */
+const WASM_DIAGNOSTIC_EXTENSIONS: ReadonlySet<string> = new Set([
+  ".wasm",
+  ".map",
+]);
+
 /** A WebAssembly module and the sourcemap sitting next to it. */
 export type WasmPair = {
   /** Absolute path to the `.wasm` module. */
@@ -178,7 +188,9 @@ export async function discoverWasmPairs(
  * Only called on the zero-pairs error path, so a second walk costs nothing
  * that matters. `.wasm.map` files are moved out of the JS `mapFiles` tally —
  * the JS walk counts every `.map` — so the JS branches of
- * `buildEmptyDiscoveryError` keep describing JS alone.
+ * `buildEmptyDiscoveryError` keep describing JS alone. Maps are counted
+ * independently of modules, so a map left behind by a missing module is still
+ * recognised as wasm.
  *
  * @param dir - Directory to scan
  * @param js - The diagnostic from `diagnoseEmptyDiscovery`
@@ -191,10 +203,17 @@ export async function addWasmDiscoveryCounts(
   const absDir = resolvePath(dir);
   let wasmFiles = 0;
   let wasmMaps = 0;
-  for await (const wasmPath of walkWasmModules(absDir)) {
-    wasmFiles += 1;
-    if (await hasCompanionMap(`${wasmPath}.map`)) {
+  for await (const path of walkWasmModules(
+    absDir,
+    undefined,
+    WASM_DIAGNOSTIC_EXTENSIONS
+  )) {
+    // The widened extension set also yields JS `.map` files; those stay in the
+    // JS tally.
+    if (path.endsWith(".wasm.map")) {
       wasmMaps += 1;
+    } else if (path.endsWith(".wasm")) {
+      wasmFiles += 1;
     }
   }
   return {
@@ -211,14 +230,18 @@ export async function addWasmDiscoveryCounts(
  * Uses the same traversal settings as JS discovery — build outputs are usually
  * gitignored, `dist`/`build` must not be pruned, and a wasm module easily
  * exceeds any size cap.
+ *
+ * @param extensions - Widened only by the diagnostic walk, which also needs
+ * `.map` files; callers must then filter the extra extensions themselves.
  */
 async function* walkWasmModules(
   absDir: string,
-  ignoreMatcher?: ReturnType<typeof ignore>
+  ignoreMatcher?: ReturnType<typeof ignore>,
+  extensions: ReadonlySet<string> = WASM_EXTENSIONS
 ): AsyncGenerator<string> {
   for await (const entry of walkFiles({
     cwd: absDir,
-    extensions: WASM_EXTENSIONS,
+    extensions,
     alwaysSkipDirs: SOURCEMAP_SKIP_DIRS,
     hidden: false,
     respectGitignore: false,

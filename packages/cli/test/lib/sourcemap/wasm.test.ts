@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ignore from "ignore";
 import { beforeEach, describe, expect, test } from "vitest";
+import { buildEmptyDiscoveryError } from "../../../src/lib/sourcemap/inject.js";
 import {
   addWasmDiscoveryCounts,
   discoverWasmPairs,
@@ -253,6 +254,37 @@ describe("addWasmDiscoveryCounts", () => {
     });
 
     expect(diag.wasmFiles).toBe(1);
+    expect(diag.wasmMaps).toBe(0);
+  });
+
+  test("attributes a map with no module to wasm, not JS", async () => {
+    await writeMap("app.wasm.map");
+
+    const diag = await addWasmDiscoveryCounts(dir, {
+      jsFiles: 0,
+      mapFiles: 1,
+    });
+
+    expect(diag).toEqual({
+      jsFiles: 0,
+      mapFiles: 0,
+      wasmFiles: 0,
+      wasmMaps: 1,
+    });
+    expect(buildEmptyDiscoveryError(dir, diag).message).toContain(
+      "1 .wasm.map file(s)"
+    );
+  });
+
+  test("leaves JS maps in the JS tally", async () => {
+    await writeMap("app.js.map");
+
+    const diag = await addWasmDiscoveryCounts(dir, {
+      jsFiles: 0,
+      mapFiles: 1,
+    });
+
+    expect(diag.mapFiles).toBe(1);
     expect(diag.wasmMaps).toBe(0);
   });
 });

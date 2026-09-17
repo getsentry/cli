@@ -827,6 +827,17 @@ export function buildEmptyDiscoveryError(
       "directory"
     );
   }
+  // Wasm maps with no module beside them: the debug ID comes from the
+  // module's `build_id`, so the map alone is not uploadable.
+  if (jsFiles === 0 && mapFiles === 0 && wasmMaps > 0 && wasmFiles === 0) {
+    return new ValidationError(
+      `Found ${wasmMaps} .wasm.map file(s) in '${dir}' but no .wasm ` +
+        "modules. A wasm sourcemap is matched to its module's build_id, so " +
+        "the .wasm file must sit beside it — point the command at your " +
+        "build output. Pass --allow-empty to suppress.",
+      "directory"
+    );
+  }
   if (jsFiles === 0 && mapFiles === 0) {
     return new ValidationError(
       `Directory '${dir}' contains no JS or sourcemap files. ` +
