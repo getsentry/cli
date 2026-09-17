@@ -10,6 +10,7 @@ import { getConfiguredSentryUrl } from "./constants.js";
 import { getOrgByNumericId, getOrgRegion, setOrgRegion } from "./db/regions.js";
 import { stripDsnOrgPrefix } from "./dsn/index.js";
 import { withAuthGuard } from "./errors.js";
+import { logger } from "./logger.js";
 import { getSdkConfig } from "./sentry-client.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
 
@@ -85,7 +86,23 @@ async function resolveOrgRegionUncached(orgSlug: string): Promise<string> {
       throw response.error;
     }
 
-    const regionUrl = response.data?.links?.regionUrl || baseUrl;
+    // Validate that the regionUrl is an absolute URL. Self-hosted instances
+    // may return a relative path (e.g. "/") which is truthy but would break
+    // fetch calls that depend on an absolute base URL.
+    const rawRegionUrl = response.data?.links?.regionUrl;
+    let regionUrl: string;
+    try {
+      if (rawRegionUrl && new URL(rawRegionUrl).hostname) {
+        regionUrl = rawRegionUrl;
+      } else {
+        regionUrl = baseUrl;
+      }
+    } catch {
+      logger.debug(
+        `regionUrl "${rawRegionUrl}" from API is not a valid absolute URL; falling back to baseUrl`
+      );
+      regionUrl = baseUrl;
+    }
 
     // Cache for future use. setOrgRegion also extends the in-process
     // trust class so the subsequent request to this region passes the
