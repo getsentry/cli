@@ -85,10 +85,9 @@ function summaryLines(data: PrepareCommandResult): string[] {
 
 /** Format human-readable output for the prepare result. */
 export function formatPrepareResult(data: PrepareCommandResult): string {
-  const sections = data.modules.map(moduleSection);
-  return renderMarkdown(
-    [...summaryLines(data), ...sections.flatMap((section) => ["", section])]
-      .join("\n")
-      .trim()
-  );
+  const lines = summaryLines(data);
+  for (const module of data.modules) {
+    lines.push("", moduleSection(module));
+  }
+  return renderMarkdown(lines.join("\n").trim());
 }

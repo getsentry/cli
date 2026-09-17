@@ -35,8 +35,44 @@ const log = logger.withTag("wasm.binary");
 /** Section id of a custom section. */
 const CUSTOM_SECTION_ID = 0;
 
+/** Section id of the type section. */
+const TYPE_SECTION_ID = 1;
+
+/** Section id of the import section. */
+const IMPORT_SECTION_ID = 2;
+
+/** Section id of the function section. */
+const FUNCTION_SECTION_ID = 3;
+
+/** Section id of the table section. */
+const TABLE_SECTION_ID = 4;
+
+/** Section id of the memory section. */
+const MEMORY_SECTION_ID = 5;
+
+/** Section id of the global section. */
+const GLOBAL_SECTION_ID = 6;
+
+/** Section id of the export section. */
+const EXPORT_SECTION_ID = 7;
+
+/** Section id of the start section. */
+const START_SECTION_ID = 8;
+
+/** Section id of the element section. */
+const ELEMENT_SECTION_ID = 9;
+
 /** Section id of the code section. DWARF offsets are relative to it. */
 const CODE_SECTION_ID = 10;
+
+/** Section id of the data section. */
+const DATA_SECTION_ID = 11;
+
+/** Section id of the data count section. */
+const DATA_COUNT_SECTION_ID = 12;
+
+/** Section id of the exception tag section, from the exception-handling proposal. */
+const EXCEPTION_TAG_SECTION_ID = 13;
 
 /** Name of the custom section holding function names. */
 const NAME_SECTION = "name";
@@ -60,19 +96,19 @@ const DEBUG_SECTION_PREFIX = ".debug_";
  * with the `exception-handling` feature on, which is what makes 13 legal here.
  */
 const SECTION_ORDER = [
-  [1, "type"],
-  [2, "import"],
-  [3, "function"],
-  [4, "table"],
-  [5, "memory"],
-  [13, "exception tag"],
-  [6, "global"],
-  [7, "export"],
-  [8, "start"],
-  [9, "element"],
-  [12, "data count"],
+  [TYPE_SECTION_ID, "type"],
+  [IMPORT_SECTION_ID, "import"],
+  [FUNCTION_SECTION_ID, "function"],
+  [TABLE_SECTION_ID, "table"],
+  [MEMORY_SECTION_ID, "memory"],
+  [EXCEPTION_TAG_SECTION_ID, "exception tag"],
+  [GLOBAL_SECTION_ID, "global"],
+  [EXPORT_SECTION_ID, "export"],
+  [START_SECTION_ID, "start"],
+  [ELEMENT_SECTION_ID, "element"],
+  [DATA_COUNT_SECTION_ID, "data count"],
   [CODE_SECTION_ID, "code"],
-  [11, "data"],
+  [DATA_SECTION_ID, "data"],
 ] as const;
 
 /** What a non-custom section id means, and where it sorts. */
