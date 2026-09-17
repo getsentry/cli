@@ -679,11 +679,28 @@ function getAuthenticatedFetch(): typeof fetch {
 }
 
 /**
+ * Resolve the base URL for API requests.
+ *
+ * Precedence:
+ * 1. An explicitly configured URL (`SENTRY_HOST`/`SENTRY_URL`, which the boot
+ *    path also populates from `--url`, `.sentryclirc`, and stored defaults).
+ * 2. The active token's host. For `sntrys_` org-auth tokens this is the
+ *    embedded `url` claim, which is authoritative for the request destination.
+ *    Without this fallback, a bare `SENTRY_AUTH_TOKEN` would route to
+ *    `https://sentry.io` while the host-scoping guard trusts the claim host,
+ *    tripping the "Refusing to route requests" error (see #1568).
+ * 3. `DEFAULT_SENTRY_URL` (SaaS).
+ */
+function resolveBaseUrl(): string {
+  return getConfiguredSentryUrl() ?? getActiveTokenHost() ?? DEFAULT_SENTRY_URL;
+}
+
+/**
  * Get the Sentry API base URL.
  * Supports self-hosted instances via SENTRY_URL env var.
  */
 export function getApiBaseUrl(): string {
-  return getConfiguredSentryUrl() ?? DEFAULT_SENTRY_URL;
+  return resolveBaseUrl();
 }
 
 /**
@@ -694,7 +711,7 @@ export function getApiBaseUrl(): string {
  * (e.g., from URL argument parsing for self-hosted instances) is respected.
  */
 export function getControlSiloUrl(): string {
-  return getConfiguredSentryUrl() ?? DEFAULT_SENTRY_URL;
+  return resolveBaseUrl();
 }
 
 /**
