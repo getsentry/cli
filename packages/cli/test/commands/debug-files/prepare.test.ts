@@ -9,9 +9,16 @@
  * emits no stray tag markup.
  */
 
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import chalk from "chalk";
-import { describe, expect, test } from "vitest";
-import { lacksDwarf } from "../../../src/commands/debug-files/prepare.js";
+import { describe, expect, test, vi } from "vitest";
+import {
+  lacksDwarf,
+  prepareCommand,
+} from "../../../src/commands/debug-files/prepare.js";
+import { ValidationError } from "../../../src/lib/errors.js";
 import { COLORS } from "../../../src/lib/formatters/colors.js";
 import { formatPrepareResult } from "../../../src/lib/formatters/wasm-prepare.js";
 import type { PrepareResult } from "../../../src/lib/wasm/prepare.js";
@@ -187,5 +194,59 @@ describe("lacksDwarf", () => {
       false
     );
     expect(lacksDwarf({ ...splitModule, action: "would-split" })).toBe(false);
+  });
+});
+
+describe("--build-id", () => {
+  const BUILD_ID = "a1b2c3d4-e5f6-4788-99aa-bbccddeeff00";
+
+  /** Run the command with `--build-id` over the given paths. */
+  async function runWithBuildId(...paths: string[]): Promise<void> {
+    const func = (await prepareCommand.loader()) as unknown as (
+      this: unknown,
+      flags: Record<string, unknown>,
+      ...rest: string[]
+    ) => Promise<unknown>;
+    const context = {
+      stdout: { write: vi.fn(() => true) },
+      stderr: { write: vi.fn(() => true) },
+      cwd: "/tmp",
+      env: {} as NodeJS.ProcessEnv,
+      process: { ...process, exitCode: undefined } as typeof process,
+    };
+    await func.call(
+      context,
+      { "build-id": BUILD_ID, "dry-run": true, "no-upload": true },
+      ...paths
+    );
+  }
+
+  /** A directory holding one module, so only the path kind is under test. */
+  async function moduleDir(): Promise<{ dir: string; module: string }> {
+    const dir = await mkdtemp(join(tmpdir(), "prepare-build-id-"));
+    const module = join(dir, "app.wasm");
+    await writeFile(module, Uint8Array.from([0x00, 0x61, 0x73, 0x6d]));
+    return { dir, module };
+  }
+
+  test("is refused for a directory, which may hold several modules", async () => {
+    const { dir } = await moduleDir();
+
+    await expect(runWithBuildId(dir)).rejects.toThrow(ValidationError);
+  });
+
+  test("is refused for several paths", async () => {
+    const { module } = await moduleDir();
+    const second = await moduleDir();
+
+    await expect(runWithBuildId(module, second.module)).rejects.toThrow(
+      /single .wasm file/
+    );
+  });
+
+  test("is accepted for one named module", async () => {
+    const { module } = await moduleDir();
+
+    await expect(runWithBuildId(module)).resolves.toBeUndefined();
   });
 });

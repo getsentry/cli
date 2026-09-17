@@ -35,7 +35,7 @@ Split WebAssembly debug info and upload it to Sentry
 - `--require-dwarf - Fail if any scanned module lacks DWARF debug info`
 - `--out-dir <value> - Directory for *.debug.wasm companions (modules are stripped in place)`
 - `--strip-names - Also drop the name section from split modules (companion keeps it)`
-- `--build-id <value> - Use this UUID as the build id instead of a random one`
+- `--build-id <value> - Use this UUID as the build id instead of a random one (one .wasm file only)`
 - `--include-sources - Also upload a source bundle for each companion`
 - `--ignore <value>... - Skip files and folders matching this glob (repeatable)`
 - `--ignore-file <value> - Skip files and folders listed in this ignore file`

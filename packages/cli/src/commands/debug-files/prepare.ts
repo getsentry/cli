@@ -322,6 +322,32 @@ async function assertWasmPaths(paths: string[]): Promise<void> {
   }
 }
 
+/**
+ * Reject `--build-id` for anything but one explicitly named module.
+ *
+ * The flag supplies a single id, and every module that needs stamping would
+ * receive it. Sentry matches a stack frame to its debug file by build id, so
+ * modules sharing one are indistinguishable and neither symbolicates
+ * reliably. A directory can always hold more than one module, which is why it
+ * is refused even when it currently holds exactly one.
+ *
+ * @throws {ValidationError} If several paths were given, or the single path is
+ *   not a file.
+ */
+async function assertSingleModuleForBuildId(paths: string[]): Promise<void> {
+  const [path, ...rest] = paths;
+  // A path that does not exist is left to the scan, which names it in its own
+  // error rather than blaming the flag.
+  const info = path ? await stat(path).catch(() => null) : null;
+  if (rest.length > 0 || info?.isDirectory()) {
+    throw new ValidationError(
+      "--build-id applies to one module: pass a single .wasm file, not a " +
+        "directory or several paths",
+      "build-id"
+    );
+  }
+}
+
 export const prepareCommand = buildCommand({
   // Auth is only needed on the upload path; --dry-run and --no-upload skip it.
   auth: false,
@@ -343,9 +369,14 @@ export const prepareCommand = buildCommand({
       "missing debug info fails without pushing files first. A module whose " +
       "external_debug_info points at a companion that cannot be found fails " +
       "too: its debug info is unreachable.\n\n" +
+      "--build-id names one module and is rejected for a directory or for " +
+      "several paths. Every module that needs stamping would take the id, and " +
+      "modules sharing one cannot be told apart when Sentry looks for their " +
+      "debug files.\n\n" +
       "Usage:\n" +
       "  sentry debug-files prepare ./dist\n" +
       "  sentry debug-files prepare ./app.wasm --no-upload\n" +
+      "  sentry debug-files prepare ./app.wasm --build-id <UUID>\n" +
       "  sentry debug-files prepare ./dist --dry-run\n" +
       "  sentry debug-files prepare ./dist --require-dwarf\n" +
       "  sentry debug-files prepare ./dist --out-dir ./symbols\n" +
@@ -400,7 +431,8 @@ export const prepareCommand = buildCommand({
       "build-id": {
         kind: "parsed",
         parse: String,
-        brief: "Use this UUID as the build id instead of a random one",
+        brief:
+          "Use this UUID as the build id instead of a random one (one .wasm file only)",
         optional: true,
       },
       "include-sources": {
@@ -448,6 +480,9 @@ export const prepareCommand = buildCommand({
     };
 
     await assertWasmPaths(paths);
+    if (buildId) {
+      await assertSingleModuleForBuildId(paths);
+    }
     const ignoreMatchers = await buildIgnoreMatchers(
       flags.ignore,
       flags["ignore-file"]
