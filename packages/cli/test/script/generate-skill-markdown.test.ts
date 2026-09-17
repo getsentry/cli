@@ -25,6 +25,33 @@ describe("extractCommandPathFromHeading", () => {
 });
 
 describe("matchExampleToCommand", () => {
+  test("conversation headings preserve optional organization detection", async () => {
+    const reference = await readFile(
+      "plugins/sentry-cli/skills/sentry-cli/references/agent-conversation.md",
+      "utf8"
+    );
+
+    expect(reference).toContain("### `sentry agent-conversation list [<org>]`");
+    expect(reference).toContain(
+      "### `sentry agent-conversation view [<org>/]<conversation-id>`"
+    );
+  });
+
+  test("conversation examples keep the organization and ID in one positional", async () => {
+    const reference = await readFile(
+      "plugins/sentry-cli/skills/sentry-cli/references/agent-conversation.md",
+      "utf8"
+    );
+
+    expect(reference).not.toContain(
+      "sentry agent-conversation view my-org conv-123"
+    );
+    expect(reference).toContain(
+      "sentry agent-conversation view my-org/conv-123"
+    );
+    expect(reference).toContain("sentry agent-conversation view conv-123");
+  });
+
   test("associates a project create block with its command", () => {
     const code = [
       "# Create projects",
