@@ -56,7 +56,9 @@ function makeUI(): { ui: WizardUI; errors: string[]; warns: string[] } {
   return { ui, errors, warns };
 }
 
-const OK_RESPONSE = new Response(null, { status: 200 });
+const OK_RESPONSE = new Response(JSON.stringify({ status: "ok" }), {
+  status: 200,
+});
 const ERR_RESPONSE = new Response(null, { status: 503 });
 
 let fetchSpy: ReturnType<typeof spyOn>;
