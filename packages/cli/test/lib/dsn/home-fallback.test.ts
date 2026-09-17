@@ -70,6 +70,21 @@ describe("DSN detection from $HOME fallback", () => {
     expect(all.primary).toBeNull();
   });
 
+  test("skips the scan even when $HOME carries a trailing slash", async () => {
+    // getStopBoundary() returns homedir() raw; a trailing slash must not
+    // make the home-fallback skip fail open. See getsentry/cli#1590.
+    fakeHome.path = `${home}/`;
+    const sensitiveDsn = "https://leaked@o999.ingest.sentry.io/999";
+    mkdirSync(join(home, ".aws"), { recursive: true });
+    writeFileSync(
+      join(home, ".aws", "credentials"),
+      `sentry_dsn=${sensitiveDsn}`
+    );
+
+    const result = await detectDsn(home);
+    expect(result).toBeNull();
+  });
+
   test("still returns SENTRY_DSN env var when set from $HOME", async () => {
     const envDsn = "https://var@o111.ingest.sentry.io/111";
     process.env.SENTRY_DSN = envDsn;

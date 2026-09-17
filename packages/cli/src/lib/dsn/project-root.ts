@@ -409,7 +409,10 @@ export function getStopBoundary(): string {
  * `~/.aws`, …) that must never be touched.
  */
 export function isHomeOrAncestor(dir: string): boolean {
-  const home = getStopBoundary();
+  // Normalize both sides through resolve() so a trailing slash or other
+  // non-canonical form of $HOME (getStopBoundary returns homedir() raw)
+  // can't make the equality and relative() checks disagree and fail open.
+  const home = resolve(getStopBoundary());
   const resolvedDir = resolve(dir);
   if (resolvedDir === home) {
     return true;
