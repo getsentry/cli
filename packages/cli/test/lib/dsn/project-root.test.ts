@@ -31,6 +31,7 @@ import {
   hasBuildSystemMarker,
   hasLanguageMarker,
   hasRepoRootMarker,
+  isHomeOrAncestor,
   STAT_CONCURRENCY,
 } from "../../../src/lib/dsn/project-root.js";
 
@@ -62,6 +63,22 @@ describe("project-root", () => {
     } catch {
       // Ignore cleanup errors
     }
+  });
+
+  describe("isHomeOrAncestor", () => {
+    test("returns true for the home directory itself", () => {
+      expect(isHomeOrAncestor(homedir())).toBe(true);
+    });
+
+    test("returns true for ancestors of home", () => {
+      expect(isHomeOrAncestor(join(homedir(), ".."))).toBe(true);
+      expect(isHomeOrAncestor("/")).toBe(true);
+    });
+
+    test("returns false for directories under home", () => {
+      expect(isHomeOrAncestor(join(homedir(), "projects", "app"))).toBe(false);
+      expect(isHomeOrAncestor(join(homedir(), "Library"))).toBe(false);
+    });
   });
 
   describe("getStopBoundary", () => {
