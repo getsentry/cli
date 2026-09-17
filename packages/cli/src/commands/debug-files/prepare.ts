@@ -34,16 +34,13 @@ import { CommandOutput } from "../../lib/formatters/output.js";
 import { formatPrepareResult } from "../../lib/formatters/wasm-prepare.js";
 import { logger } from "../../lib/logger.js";
 import { resolveOrgAndProject } from "../../lib/resolve-target.js";
-import {
-  type CompiledMatcher,
-  compileMatchers,
-  matchesAny,
-} from "../../lib/scan/path-utils.js";
+import { buildIgnoreMatcher, normalizePath } from "../../lib/scan/index.js";
 import { debugIdFromBuildId, uuidToBytes } from "../../lib/wasm/build-id.js";
 import {
   hasDwarfQuality,
   isDebugCompanionPath,
   isWasmPath,
+  type PrepareAction,
   type PrepareCommandResult,
   type PrepareResult,
   prepareWasmFile,
@@ -161,6 +158,12 @@ async function* reportUpload(
   };
 }
 
+const COMPANION_PRODUCING_ACTIONS = new Set<PrepareAction>([
+  "split",
+  "would-split",
+  "already-prepared",
+]);
+
 /**
  * Whether a module has a companion, or would get one on a real run.
  *
@@ -168,11 +171,7 @@ async function* reportUpload(
  * work it would do rather than the (always empty) set it would upload.
  */
 function producesCompanion(result: PrepareResult): boolean {
-  return (
-    result.action === "split" ||
-    result.action === "would-split" ||
-    result.action === "already-prepared"
-  );
+  return COMPANION_PRODUCING_ACTIONS.has(result.action);
 }
 
 /**
@@ -239,37 +238,13 @@ async function collectCompanionDifs(
 }
 
 /**
- * Compile `--ignore` globs and `--ignore-file` entries into path matchers.
- *
- * The ignore file is read as gitignore-style lines: blanks and `#` comments are
- * dropped and every other line is treated as a glob. Patterns are not split on
- * commas, because a glob's brace group (`{a,b}`) legitimately contains them.
- */
-async function buildIgnoreMatchers(
-  ignores: string[] | undefined,
-  ignoreFile: string | undefined
-): Promise<CompiledMatcher[]> {
-  const patterns = [...(ignores ?? [])];
-  if (ignoreFile) {
-    const contents = await readFile(ignoreFile, "utf-8");
-    for (const line of contents.split("\n")) {
-      const trimmed = line.trim();
-      if (trimmed.length > 0 && !trimmed.startsWith("#")) {
-        patterns.push(trimmed);
-      }
-    }
-  }
-  return compileMatchers(patterns);
-}
-
-/**
  * Path of a scanned file relative to the scan root it came from.
  *
- * Ignore globs are written against the tree the user pointed at — `--ignore
+ * Ignore patterns are written against the tree the user pointed at — `--ignore
  * 'vendor/**'` for `prepare ./dist` means `./dist/vendor` — so they must be
  * tested against a root-relative path rather than one relative to the process
- * working directory. Separators are normalized to `/` because glob patterns
- * always use them.
+ * working directory. Separators are normalized to `/` because the `ignore`
+ * package only understands POSIX paths.
  */
 function pathRelativeToRoot(path: string, roots: string[]): string {
   const resolved = resolve(path);
@@ -285,19 +260,7 @@ function pathRelativeToRoot(path: string, roots: string[]): string {
   // A root naming the file itself leaves nothing relative to match on, so fall
   // back to the basename.
   const rel = deepestRoot ? relative(deepestRoot, resolved) : "";
-  return (rel === "" ? basename(resolved) : rel).split(sep).join("/");
-}
-
-/** Whether a scanned path is excluded by the ignore matchers. */
-function isIgnored(
-  path: string,
-  matchers: CompiledMatcher[],
-  roots: string[]
-): boolean {
-  if (matchers.length === 0) {
-    return false;
-  }
-  return matchesAny(matchers, pathRelativeToRoot(path, roots), basename(path));
+  return normalizePath(rel === "" ? basename(resolved) : rel);
 }
 
 /**
@@ -483,7 +446,7 @@ export const prepareCommand = buildCommand({
     if (buildId) {
       await assertSingleModuleForBuildId(paths);
     }
-    const ignoreMatchers = await buildIgnoreMatchers(
+    const ignoreMatcher = await buildIgnoreMatcher(
       flags.ignore,
       flags["ignore-file"]
     );
@@ -493,7 +456,7 @@ export const prepareCommand = buildCommand({
       (path) =>
         isWasmPath(path) &&
         !isDebugCompanionPath(path) &&
-        !isIgnored(path, ignoreMatchers, paths)
+        !ignoreMatcher?.ignores(pathRelativeToRoot(path, paths))
     );
 
     if (candidates.length === 0) {
