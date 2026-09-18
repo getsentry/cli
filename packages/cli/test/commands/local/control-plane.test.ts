@@ -181,4 +181,74 @@ describe("Local control plane", () => {
     });
     expect(statusCode).toBe(202);
   });
+
+  test("lets a loopback UI reset and close only its scoped session", async () => {
+    const controlPlane = createLocalControlPlane({
+      controlToken: CONTROL_TOKEN,
+    });
+    const created = await controlPlane.app.request("/_local/v1/sessions", {
+      method: "POST",
+      headers: { ...controlHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "web", cwd: "/work/web" }),
+    });
+    const session = (await created.json()) as {
+      id: string;
+      ingestUrl: string;
+      streamUrl: string;
+    };
+    const resetUrl = session.streamUrl.replace(/\/stream\?/, "/ui/reset?");
+    const closeUrl = session.streamUrl.replace(/\/stream\?/, "/ui/close?");
+    await controlPlane.app.request(session.ingestUrl, {
+      method: "POST",
+      body: '{"event_id":"before-reset"}\n{"type":"event"}\n{"message":"kept private"}',
+    });
+    expect(
+      controlPlane.sessionStore.getBuffer(session.id).read({ all: true })
+    ).toHaveLength(1);
+
+    const preflight = await controlPlane.app.request(resetUrl, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://localhost:5173",
+        "Access-Control-Request-Method": "POST",
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe(
+      "http://localhost:5173"
+    );
+
+    const wrongCapability = await controlPlane.app.request(
+      resetUrl.replace(/cap=[^&]+/, "cap=wrong"),
+      { method: "POST", headers: { Origin: "http://localhost:5173" } }
+    );
+    expect(wrongCapability.status).toBe(401);
+
+    expect(
+      (
+        await controlPlane.app.request(resetUrl, {
+          method: "POST",
+          headers: { Origin: "http://localhost:5173" },
+        })
+      ).status
+    ).toBe(204);
+    expect(
+      controlPlane.sessionStore.getBuffer(session.id).read({ all: true })
+    ).toHaveLength(0);
+
+    const rejected = await controlPlane.app.request(closeUrl, {
+      method: "POST",
+      headers: { Origin: "https://receiver.example" },
+    });
+    expect(rejected.status).toBe(403);
+
+    const closed = await controlPlane.app.request(closeUrl, {
+      method: "POST",
+      headers: { Origin: "http://localhost:5173" },
+    });
+    expect(closed.status).toBe(200);
+    expect(controlPlane.sessionStore.resolve(session.id).state).toBe(
+      "retained"
+    );
+  });
 });

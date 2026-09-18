@@ -19,6 +19,7 @@ import {
 export const CONTROL_PLANE_PREFIX = "/_local/v1";
 const LOOPBACK_ORIGIN_RE =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+const SESSION_UI_ACTION_RE = /\/sessions\/[^/]+\/ui\/(reset|close)$/;
 
 export type LocalControlPlane = {
   readonly app: Hono;
@@ -40,6 +41,15 @@ function controlUrl(host: string, port: number): string {
 
 function hasControlCapability(request: Request, controlToken: string): boolean {
   return request.headers.get("authorization") === `Bearer ${controlToken}`;
+}
+
+function isSessionUiAction(path: string): boolean {
+  return SESSION_UI_ACTION_RE.test(path);
+}
+
+function isLoopbackBrowserRequest(request: Request): boolean {
+  const origin = request.headers.get("origin");
+  return origin === null || LOOPBACK_ORIGIN_RE.test(origin);
 }
 
 function eventSummary(parsed: {
@@ -110,7 +120,7 @@ export function createLocalControlPlane({
   app.get("/health", (c) => c.text("OK"));
 
   app.use(`${CONTROL_PLANE_PREFIX}/*`, async (c, next) => {
-    if (c.req.path.endsWith("/stream")) {
+    if (c.req.path.endsWith("/stream") || isSessionUiAction(c.req.path)) {
       await next();
       return;
     }
@@ -124,6 +134,13 @@ export function createLocalControlPlane({
     cors({
       allowHeaders: ["Content-Type", "Content-Encoding", "User-Agent"],
       allowMethods: ["GET", "POST", "OPTIONS"],
+      origin: (origin) => (LOOPBACK_ORIGIN_RE.test(origin) ? origin : null),
+    })
+  );
+  app.use(
+    `${CONTROL_PLANE_PREFIX}/sessions/:id/ui/*`,
+    cors({
+      allowMethods: ["POST", "OPTIONS"],
       origin: (origin) => (LOOPBACK_ORIGIN_RE.test(origin) ? origin : null),
     })
   );
@@ -229,6 +246,26 @@ export function createLocalControlPlane({
   app.post(`${CONTROL_PLANE_PREFIX}/sessions/:id/close`, (c) => {
     if (!sessionExists(c.req.param("id"))) {
       return c.body(null, 404);
+    }
+    return c.json(sessionStore.close(c.req.param("id")));
+  });
+
+  app.post(`${CONTROL_PLANE_PREFIX}/sessions/:id/ui/:action`, (c) => {
+    if (!(isSessionUiAction(c.req.path) && sessionExists(c.req.param("id")))) {
+      return c.body(null, 404);
+    }
+    if (!isLoopbackBrowserRequest(c.req.raw)) {
+      return c.body(null, 403);
+    }
+    if (
+      c.req.query("cap") !==
+      sessionStore.getCapabilities(c.req.param("id")).stream
+    ) {
+      return c.body(null, 401);
+    }
+    if (c.req.param("action") === "reset") {
+      sessionStore.getBuffer(c.req.param("id")).clear();
+      return c.body(null, 204);
     }
     return c.json(sessionStore.close(c.req.param("id")));
   });
