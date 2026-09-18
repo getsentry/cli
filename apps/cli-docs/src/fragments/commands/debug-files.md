@@ -69,10 +69,10 @@ sentry debug-files prepare ./dist --require-dwarf
 ## Notes on `prepare`
 
 - For each module carrying inline DWARF it injects a `build_id` (if absent),
-  writes a `*.debug.wasm` companion retaining the Code section and DWARF,
-  strips the `.debug_*` sections from the deployable module **in place**, and
-  points it at the companion via `external_debug_info`. Your build artifact
-  keeps its path; only the companion is new.
+  writes a `<stem>.<build_id>.debug.wasm` companion retaining the Code section
+  and DWARF, strips the `.debug_*` sections from the deployable module **in
+  place**, and points it at the companion via `external_debug_info`. Your build
+  artifact keeps its path; only the companion is new.
 - The companion must keep the Code section — DWARF addresses are relative to it,
   so a companion without it cannot be symbolicated.
 - Modules without DWARF are still stamped with a `build_id` and reported with a

@@ -7,7 +7,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -17,6 +17,7 @@ import {
   companionPath,
   hasDwarfQuality,
   inspectWasm,
+  isDebugCompanionPath,
   prepareWasmFile,
   uploadPath,
 } from "../../../src/lib/wasm/prepare.js";
@@ -109,6 +110,17 @@ async function writeModule(name: string, bytes: Uint8Array): Promise<string> {
   return path;
 }
 
+/**
+ * Companions written into a directory.
+ *
+ * Companion names carry a build id, which is random unless the test pinned one,
+ * so tests assert on what landed in the directory rather than on a name they
+ * would have to reconstruct.
+ */
+async function companionsIn(target = dir): Promise<string[]> {
+  return (await readdir(target)).filter(isDebugCompanionPath);
+}
+
 describe("hasDwarfQuality", () => {
   test("counts an external companion pointer as having DWARF", () => {
     // Mirrors DebugQuality::has_dwarf in the Rust CLI: this describes how the
@@ -164,10 +176,51 @@ describe("prepareWasmFile", () => {
 
     expect(result.action).toBe("split");
     expect(result.quality).toBe("dwarf");
-    expect(existsSync(companionPath(path))).toBe(true);
-    expect(uploadPath(result)).toBe(companionPath(path));
+    expect(result.companion).toBe(
+      companionPath(path, result.buildId as string)
+    );
+    expect(existsSync(result.companion as string)).toBe(true);
+    expect(uploadPath(result)).toBe(result.companion);
     // The deployable keeps its original path so the build artifact does not move.
     expect(hasSection(await readFile(path), ".debug_info")).toBe(false);
+  });
+
+  test("names the companion after the build id and points the module at it", async () => {
+    const path = await writeModule("app.wasm", dwarfModule());
+    const result = await prepareWasmFile(path);
+
+    expect(result.companion).toBe(
+      join(dir, `app.${result.buildId}.debug.wasm`)
+    );
+    // The pointer is resolved relative to the module, so it must name the
+    // companion as written, not as a guess at the old convention.
+    expect(inspectWasm(await readFile(path)).externalDebugInfo).toBe(
+      `app.${result.buildId}.debug.wasm`
+    );
+  });
+
+  test("keeps companions apart for same-named modules sharing an out-dir", async () => {
+    // The collision --out-dir used to cause: both modules named their companion
+    // app.debug.wasm, so the second write destroyed the first module's DWARF
+    // after it had already been stripped in place.
+    const outDir = await mkdtemp(join(tmpdir(), "wasm-out-"));
+    await mkdir(join(dir, "a"));
+    await mkdir(join(dir, "b"));
+    const first = await writeModule(join("a", "app.wasm"), dwarfModule());
+    const second = await writeModule(join("b", "app.wasm"), dwarfModule());
+
+    const a = await prepareWasmFile(first, { outDir });
+    const b = await prepareWasmFile(second, { outDir });
+
+    expect(a.companion).not.toBe(b.companion);
+    expect(await companionsIn(outDir)).toHaveLength(2);
+    // Both companions still hold the DWARF their module gave up.
+    expect(
+      hasSection(await readFile(a.companion as string), ".debug_info")
+    ).toBe(true);
+    expect(
+      hasSection(await readFile(b.companion as string), ".debug_info")
+    ).toBe(true);
   });
 
   test("stamps a symtab-only module but uploads nothing", async () => {
@@ -177,7 +230,7 @@ describe("prepareWasmFile", () => {
     expect(result.action).toBe("skipped");
     expect(result.quality).toBe("symtab");
     expect(result.warning).toContain("no line-level");
-    expect(existsSync(companionPath(path))).toBe(false);
+    expect(await companionsIn()).toEqual([]);
     // Stamped so a later DWARF build can be matched, but the name section stays
     // readable in the deployable, so there is nothing worth uploading.
     expect(result.buildId).toBeDefined();
@@ -202,7 +255,7 @@ describe("prepareWasmFile", () => {
     expect(result.action).toBe("skipped");
     expect(result.quality).toBe("none");
     expect(result.warning).toContain("no debug information");
-    expect(existsSync(companionPath(path))).toBe(false);
+    expect(await companionsIn()).toEqual([]);
   });
 
   test("recommends checking build flags when debug info is missing", async () => {
@@ -233,8 +286,30 @@ describe("prepareWasmFile", () => {
     const result = await prepareWasmFile(path, { dryRun: true });
 
     expect(result.action).toBe("would-split");
-    expect(existsSync(companionPath(path))).toBe(false);
+    expect(await companionsIn()).toEqual([]);
     expect(await readFile(path)).toEqual(before);
+  });
+
+  test("dry run names the companion when the id is already settled", async () => {
+    const path = await writeModule("app.wasm", dwarfModule());
+    const result = await prepareWasmFile(path, {
+      dryRun: true,
+      buildId: uuidToBytes(FIXED_UUID) as Uint8Array,
+    });
+
+    // --build-id makes the real run's name knowable, so report it exactly.
+    expect(result.companion).toBe(
+      join(dir, "app.00000000000040008000000000000000.debug.wasm")
+    );
+  });
+
+  test("dry run reports a placeholder name for an unsettled id", async () => {
+    const path = await writeModule("app.wasm", dwarfModule());
+    const result = await prepareWasmFile(path, { dryRun: true });
+
+    // The id will be random, so the shape of the name is the honest answer.
+    expect(result.buildId).toBeUndefined();
+    expect(result.companion).toBe(join(dir, "app.<build-id>.debug.wasm"));
   });
 
   test("dry run does not stamp a skipped module", async () => {
@@ -260,12 +335,29 @@ describe("prepareWasmFile", () => {
     const path = await writeModule("app.wasm", dwarfModule());
     const result = await prepareWasmFile(path, { outDir });
 
-    expect(result.companion).toBe(join(outDir, "app.debug.wasm"));
-    expect(existsSync(join(outDir, "app.debug.wasm"))).toBe(true);
-    expect(existsSync(companionPath(path))).toBe(false);
+    expect(result.companion).toBe(
+      join(outDir, `app.${result.buildId}.debug.wasm`)
+    );
+    expect(existsSync(result.companion as string)).toBe(true);
+    expect(await companionsIn()).toEqual([]);
     // The deployed path is the one that ends up stripped and stamped.
     expect(hasSection(await readFile(path), ".debug_info")).toBe(false);
     expect(inspectWasm(await readFile(path)).buildId).not.toBeNull();
+  });
+
+  test("out-dir leaves a pointer the module can resolve", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "wasm-out-"));
+    const path = await writeModule("app.wasm", dwarfModule());
+    const result = await prepareWasmFile(path, { outDir });
+
+    // A bare basename here would be a dangling pointer: the companion is not
+    // beside the module. A second run has to be able to follow it.
+    const pointer = inspectWasm(await readFile(path)).externalDebugInfo;
+    expect(existsSync(join(dir, pointer as string))).toBe(true);
+    expect(await prepareWasmFile(path, { outDir })).toMatchObject({
+      action: "already-prepared",
+      companion: result.companion,
+    });
   });
 
   test("skips a companion given as input", async () => {
@@ -277,8 +369,8 @@ describe("prepareWasmFile", () => {
   });
 
   test("recognizes a companion named by external_debug_info", async () => {
-    // A companion whose name does not follow the <stem>.debug.wasm convention
-    // is only findable by following the module's own pointer.
+    // A companion named by another tool is only findable by following the
+    // module's own pointer.
     const result = split(dwarfModule(), "custom-name.wasm");
     const path = await writeModule("app.wasm", result.module);
     await writeModule("custom-name.wasm", result.companion as Uint8Array);

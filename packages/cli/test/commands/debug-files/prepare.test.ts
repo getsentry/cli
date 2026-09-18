@@ -117,6 +117,18 @@ describe("formatPrepareResult", () => {
     expect(output).toContain("build/_my_module_.wasm");
   });
 
+  test("keeps a dry-run companion placeholder intact", () => {
+    // A dry run cannot know the random build id, so it reports the name as a
+    // template. The angle brackets must survive rendering.
+    const output = report({
+      ...splitModule,
+      action: "would-split",
+      companion: "symbols/app.<build-id>.debug.wasm",
+    });
+
+    expect(output).toContain("symbols/app.<build-id>.debug.wasm");
+  });
+
   test("opens with the scanned count and pluralizes it", () => {
     expect(report(splitModule).split("\n")[0]).toBe("Found 1 wasm file");
     expect(report(splitModule, skippedModule).split("\n")[0]).toBe(

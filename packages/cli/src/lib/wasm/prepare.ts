@@ -15,7 +15,7 @@
  */
 
 import { readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { logger } from "../logger.js";
 import {
   decodeExternalDebugInfo,
@@ -37,6 +37,15 @@ const log = logger.withTag("wasm.prepare");
 
 /** Suffix identifying a debug companion produced by this command. */
 const COMPANION_SUFFIX = ".debug.wasm";
+
+/**
+ * Stands in for the build id in a dry-run companion name.
+ *
+ * A module carrying no id yet, and given none explicitly, gets a random one on
+ * the real run. The name is therefore unknowable, and the shape of it is the
+ * useful answer.
+ */
+const BUILD_ID_PLACEHOLDER = "<build-id>";
 
 /** Trailing `.wasm` extension, in any case. */
 const WASM_EXTENSION = /\.wasm$/i;
@@ -143,16 +152,26 @@ export function isWasmPath(path: string): boolean {
 }
 
 /**
- * Companion path for a module: `app.wasm` becomes `app.debug.wasm`.
+ * Companion path for a module: `app.wasm` becomes `app.<build_id>.debug.wasm`.
  *
  * @param wasmPath - Path of the input module.
+ * @param buildId - Effective build id in hex, as both files will carry it.
  * @param outDir - Directory to place the companion in, or omitted for
  *   alongside the input.
  */
-export function companionPath(wasmPath: string, outDir?: string): string {
-  const name = basename(wasmPath).replace(WASM_EXTENSION, "");
-  const fileName = `${name}${COMPANION_SUFFIX}`;
+export function companionPath(
+  wasmPath: string,
+  buildId: string,
+  outDir?: string
+): string {
+  const stem = basename(wasmPath).replace(WASM_EXTENSION, "");
+  const fileName = `${stem}.${buildId}${COMPANION_SUFFIX}`;
   return join(outDir ?? dirname(wasmPath), fileName);
+}
+
+/** Path relative to the module, for its `external_debug_info` section. */
+function externalDebugInfoPath(wasmPath: string, companion: string): string {
+  return relative(dirname(wasmPath), companion).split(sep).join("/");
 }
 
 /** Which debug-relevant sections a module turned out to contain. */
@@ -347,8 +366,8 @@ type ExistingCompanion = { companion: string; quality: DebugQuality };
  * holding no DWARF, so this check runs before the quality classification.
  *
  * The module's own `external_debug_info` pointer is followed first, so a
- * companion named anything other than `<stem>.debug.wasm` (as `wasm-split` may
- * produce) is still recognized. The conventional path is the fallback.
+ * companion named by another tool (as `wasm-split` may produce) is still
+ * recognized. The conventional path is the fallback.
  */
 async function findExistingCompanion(
   wasmPath: string,
@@ -499,6 +518,31 @@ async function repairUnpairedCompanion(
 }
 
 /**
+ * Report the split a dry run stopped short of performing.
+ *
+ * The companion is named after the build id, so a module carrying none — and
+ * given none explicitly — has no name to report: the real run will mint a
+ * random id. Reporting a name built from an id generated here would name a file
+ * that never appears, so the placeholder stands in and the preview shows the
+ * shape of the name instead.
+ */
+function reportWouldSplit(
+  path: string,
+  inspection: WasmInspection,
+  options: PrepareOptions
+): PrepareResult {
+  const settled = inspection.buildId ?? options.buildId;
+  const name = settled ? formatBuildId(settled) : BUILD_ID_PLACEHOLDER;
+  return {
+    path,
+    action: "would-split",
+    quality: inspection.quality,
+    ...(settled ? { buildId: formatBuildId(settled) } : {}),
+    companion: companionPath(path, name, options.outDir),
+  };
+}
+
+/**
  * Classify and, where possible, split a single `.wasm` file.
  *
  * Modules that cannot be split are stamped with a build id and reported with a
@@ -535,13 +579,17 @@ export async function prepareWasmFile(
     };
   }
 
-  const expectedCompanion = companionPath(path, options.outDir);
+  // Naming a companion takes the id it will carry, so the conventional path
+  // only exists once the module has one.
+  const knownCompanion = inspection.buildId
+    ? companionPath(path, formatBuildId(inspection.buildId), options.outDir)
+    : null;
 
-  if (inspection.quality !== "dwarf") {
+  if (inspection.quality !== "dwarf" && knownCompanion) {
     const existing = await findExistingCompanion(
       path,
       inspection,
-      expectedCompanion
+      knownCompanion
     );
     if (existing) {
       return {
@@ -574,29 +622,27 @@ export async function prepareWasmFile(
   }
 
   if (options.dryRun) {
-    return {
-      path,
-      action: "would-split",
-      quality: inspection.quality,
-      ...(inspection.buildId
-        ? { buildId: formatBuildId(inspection.buildId) }
-        : {}),
-      companion: expectedCompanion,
-    };
+    return reportWouldSplit(path, inspection, options);
   }
+
+  // Resolved here rather than inside the split, because the companion is named
+  // after the id and the split needs that name as its pointer. An id already on
+  // the module still wins: `splitWasm` ignores `buildId` when it finds one.
+  const buildId = inspection.buildId ?? options.buildId ?? randomBuildId();
+  const companion = companionPath(path, formatBuildId(buildId), options.outDir);
 
   const split = splitWasm(bytes, {
     companion: true,
     strip: true,
-    ...(options.buildId ? { buildId: options.buildId } : {}),
+    buildId,
     stripNames: options.stripNames ?? false,
-    externalDebugInfo: basename(expectedCompanion),
+    externalDebugInfo: externalDebugInfoPath(path, companion),
   });
 
   // Write the companion first: if the process dies between the two writes, an
   // orphan companion is recoverable, whereas a stripped module whose DWARF was
   // never saved anywhere is not.
-  await writeFile(expectedCompanion, split.companion as Uint8Array);
+  await writeFile(companion, split.companion as Uint8Array);
   await writeFile(path, split.module);
 
   return {
@@ -604,7 +650,7 @@ export async function prepareWasmFile(
     action: "split",
     quality: inspection.quality,
     buildId: formatBuildId(split.buildId),
-    companion: expectedCompanion,
+    companion,
   };
 }
 

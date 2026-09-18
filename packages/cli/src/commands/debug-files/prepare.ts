@@ -320,10 +320,11 @@ export const prepareCommand = buildCommand({
       "Scan files and directories for WebAssembly modules, split the ones " +
       "carrying inline DWARF, and upload the debug companions to Sentry.\n\n" +
       "For each module with DWARF this injects a build_id (if absent), writes " +
-      "a *.debug.wasm companion retaining the Code section and DWARF, strips " +
-      "the .debug_* sections from the deployable module in place, and points " +
-      "it at the companion via external_debug_info. The deployable module " +
-      "keeps its original path, so your build artifact does not move.\n\n" +
+      "a <stem>.<build_id>.debug.wasm companion retaining the Code section " +
+      "and DWARF, strips the .debug_* sections from the deployable module in " +
+      "place, and points it at the companion via external_debug_info. The " +
+      "deployable module keeps its original path, so your build artifact does " +
+      "not move.\n\n" +
       "Modules without DWARF are stamped with a build_id and reported with a " +
       "warning instead of failing the run. Running the command twice is safe: " +
       "an already-prepared module is detected and left alone.\n\n" +
