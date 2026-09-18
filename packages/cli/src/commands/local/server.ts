@@ -12,6 +12,7 @@
  */
 
 import type { Server } from "node:http";
+import { basename } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import {
@@ -105,6 +106,7 @@ type LocalFlags = {
   readonly format: FormatValue;
   readonly attributes: boolean;
   readonly open: boolean;
+  readonly session?: string;
 };
 
 /**
@@ -600,6 +602,8 @@ const SSE_MAX_RETRY_MS = 30_000;
 /** Options for consuming an SSE stream. */
 export type ConsumeSSEOptions = {
   url: string;
+  /** A full scoped stream URL, when consuming a daemon-owned session. */
+  streamUrl?: string;
   activeFilters: ReadonlySet<FilterValue>;
   signal: AbortSignal;
   quiet?: boolean;
@@ -734,6 +738,7 @@ async function attemptSSEConnection(
 /** Options for a single SSE connection attempt. */
 type ConsumeSSEOnceOptions = {
   url: string;
+  streamUrl?: string;
   activeFilters: ReadonlySet<FilterValue>;
   signal: AbortSignal;
   quiet: boolean;
@@ -766,7 +771,10 @@ async function consumeSSEOnce(opts: ConsumeSSEOnceOptions): Promise<boolean> {
   if (lastEventId) {
     headers["Last-Event-ID"] = lastEventId;
   }
-  const res = await fetch(`${url}/stream`, { headers, signal });
+  const res = await fetch(opts.streamUrl ?? `${url}/stream`, {
+    headers,
+    signal,
+  });
   if (!res.ok) {
     logger.warn(`SSE stream returned HTTP ${res.status}`);
     return false;
@@ -917,6 +925,12 @@ export const serverCommand = buildCommand({
         brief: "Open Sentry Local UI in the browser",
         default: false,
       },
+      session: {
+        kind: "parsed",
+        parse: String,
+        brief: "Create a daemon-owned telemetry session with this label",
+        optional: true,
+      },
     },
     aliases: {
       p: "port",
@@ -928,10 +942,48 @@ export const serverCommand = buildCommand({
     },
   },
   auth: false,
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: foreground server lifecycle handles both legacy and scoped sessions.
   async *func(this: SentryContext, flags: LocalFlags) {
     validateOpenHost(flags.open, flags.host);
     const activeFilters = new Set(flags.filter);
     const url = formatLocalServerUrl(flags.host, flags.port);
+
+    if (flags.session) {
+      const { createLocalDaemonSession, retainLocalDaemonSession } =
+        await import("./daemon.js");
+      const session = await createLocalDaemonSession({
+        cwd: this.cwd,
+        host: flags.host,
+        label: flags.session || basename(this.cwd),
+        port: flags.port,
+      });
+      logger.info("Sentry Local telemetry session");
+      logger.info(`  Session: ${bold(session.id)} (${session.label})`);
+      logger.info(`  Ingest: ${bold(session.ingestUrl)}`);
+      logger.info("Press Ctrl-C to stop.");
+      await openLocalUiIfRequested(flags.open, session.streamUrl);
+
+      const controller = new AbortController();
+      const stop = () => controller.abort();
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+      try {
+        await consumeSSE({
+          activeFilters,
+          quiet: flags.quiet,
+          showAttributes: flags.attributes,
+          signal: controller.signal,
+          streamUrl: session.streamUrl,
+          url: new URL(session.streamUrl).origin,
+          useJson: flags.format === "json",
+        });
+      } finally {
+        process.removeListener("SIGINT", stop);
+        process.removeListener("SIGTERM", stop);
+        await retainLocalDaemonSession(session.id);
+      }
+      return;
+    }
 
     if (await isServerRunning(url)) {
       logger.info(`Connected to existing server at ${bold(url)}`);

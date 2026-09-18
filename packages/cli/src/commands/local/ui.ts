@@ -51,7 +51,9 @@ export function buildLocalUiUrl(receiverUrl: string): string {
   const receiver = new URL(receiverUrl);
   assertLoopbackHostForUi(receiver.hostname);
 
-  const streamUrl = new URL("/stream", receiver).toString();
+  const streamUrl = receiver.pathname.endsWith("/stream")
+    ? receiver.toString()
+    : new URL("/stream", receiver).toString();
   const uiUrl = new URL(getLocalUiBaseUrl());
   uiUrl.hash = new URLSearchParams({ stream: streamUrl }).toString();
   return uiUrl.toString();

@@ -1,10 +1,20 @@
 import { buildRouteMap } from "../../lib/route-map.js";
+import {
+  daemonRoute,
+  envelopeRoute,
+  eventRoute,
+  sessionRoute,
+} from "./management.js";
 import { runCommand } from "./run.js";
 import { serverCommand } from "./server.js";
 
 export const localRoute = buildRouteMap({
   routes: {
+    daemon: daemonRoute,
+    envelope: envelopeRoute,
+    event: eventRoute,
     serve: serverCommand,
+    session: sessionRoute,
     run: runCommand,
   },
   defaultCommand: "serve",
