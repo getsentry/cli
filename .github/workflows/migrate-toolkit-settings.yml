@@ -1,0 +1,92 @@
+name: Migrate toolkit settings
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: migrate-toolkit-settings
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: >-
+      github.repository_id == '1114546946' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      GH_TOKEN: ${{ secrets.SENTRY_MCP_MIGRATION_PAT }}
+      TARGET_REPOSITORY: getsentry/sentry-mcp
+      TARGET_REPOSITORY_ID: '957245447'
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      SENTRY_CLIENT_ID: ${{ vars.SENTRY_CLIENT_ID }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_CERT_DATA: ${{ secrets.APPLE_CERT_DATA }}
+      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+    steps:
+      - name: Validate migration inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${GH_TOKEN:?SENTRY_MCP_MIGRATION_PAT is not configured}"
+          : "${AI_GATEWAY_API_KEY:?AI_GATEWAY_API_KEY is not configured}"
+          : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is not configured}"
+          : "${OPENROUTER_API_KEY:?OPENROUTER_API_KEY is not configured}"
+          : "${SENTRY_CLIENT_ID:?SENTRY_CLIENT_ID is not configured}"
+          : "${APPLE_API_KEY:?APPLE_API_KEY is not configured}"
+          : "${APPLE_CERT_DATA:?APPLE_CERT_DATA is not configured}"
+          : "${APPLE_CERT_PASSWORD:?APPLE_CERT_PASSWORD is not configured}"
+          : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is not configured}"
+          : "${SENTRY_AUTH_TOKEN:?SENTRY_AUTH_TOKEN is not configured}"
+
+          test "$(gh api "repos/${TARGET_REPOSITORY}" --jq .id)" = "${TARGET_REPOSITORY_ID}"
+
+      - name: Create destination production environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n '{deployment_branch_policy: {
+            protected_branches: true,
+            custom_branch_policies: false
+          }}' | gh api --method PUT "repos/${TARGET_REPOSITORY}/environments/production" --input - >/dev/null
+
+      - name: Copy repository settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          printf '%s' "${AI_GATEWAY_API_KEY}" | gh secret set AI_GATEWAY_API_KEY --repo "${TARGET_REPOSITORY}" --app actions
+          printf '%s' "${ANTHROPIC_API_KEY}" | gh secret set ANTHROPIC_API_KEY --repo "${TARGET_REPOSITORY}" --app actions
+          printf '%s' "${OPENROUTER_API_KEY}" | gh secret set OPENROUTER_API_KEY --repo "${TARGET_REPOSITORY}" --app actions
+          printf '%s' "${SENTRY_CLIENT_ID}" | gh variable set SENTRY_CLIENT_ID --repo "${TARGET_REPOSITORY}"
+
+      - name: Copy production environment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          printf '%s' "${APPLE_API_KEY}" | gh secret set APPLE_API_KEY --repo "${TARGET_REPOSITORY}" --env production --app actions
+          printf '%s' "${APPLE_CERT_DATA}" | gh secret set APPLE_CERT_DATA --repo "${TARGET_REPOSITORY}" --env production --app actions
+          printf '%s' "${APPLE_CERT_PASSWORD}" | gh secret set APPLE_CERT_PASSWORD --repo "${TARGET_REPOSITORY}" --env production --app actions
+          printf '%s' "${APPLE_TEAM_ID}" | gh secret set APPLE_TEAM_ID --repo "${TARGET_REPOSITORY}" --env production --app actions
+          printf '%s' "${SENTRY_AUTH_TOKEN}" | gh secret set SENTRY_AUTH_TOKEN --repo "${TARGET_REPOSITORY}" --env production --app actions
+
+      - name: Verify destination setting names
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/${TARGET_REPOSITORY}/environments/production" --jq '.deployment_branch_policy | "\(.protected_branches):\(.custom_branch_policies)"')" = 'true:false'
+          diff -u \
+            <(printf '%s\n' AI_GATEWAY_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY | sort) \
+            <(gh secret list --repo "${TARGET_REPOSITORY}" --json name --jq '.[].name' | grep -E '^(AI_GATEWAY_API_KEY|ANTHROPIC_API_KEY|OPENROUTER_API_KEY)$' | sort)
+          test "$(gh variable get SENTRY_CLIENT_ID --repo "${TARGET_REPOSITORY}" --json name --jq .name)" = SENTRY_CLIENT_ID
+          diff -u \
+            <(printf '%s\n' APPLE_API_KEY APPLE_CERT_DATA APPLE_CERT_PASSWORD APPLE_TEAM_ID SENTRY_AUTH_TOKEN | sort) \
+            <(gh secret list --repo "${TARGET_REPOSITORY}" --env production --json name --jq '.[].name' | sort)
