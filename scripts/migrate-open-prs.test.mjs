@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   buildMappedManifest,
@@ -22,6 +23,18 @@ import {
 } from "./lib/pr-migration-plan.mjs";
 
 const MOVED_REFERENCE_ERROR = /moved to/;
+
+test("imports every plan helper referenced by the executable", async () => {
+  const source = await readFile(
+    new URL("./migrate-open-prs.mjs", import.meta.url),
+    "utf8"
+  );
+  const imports = source.match(
+    /import \{(?<names>[\s\S]*?)\} from "\.\/lib\/pr-migration-plan\.mjs";/
+  )?.groups?.names;
+  assert.ok(imports);
+  assert.match(imports, /\bisMigratedPath\b/);
+});
 
 function snapshot(number, head, base = "main", repository = "getsentry/cli") {
   return {

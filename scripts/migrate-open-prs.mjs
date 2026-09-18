@@ -16,6 +16,7 @@ import {
   digest,
   FILTERED_TIPS,
   guardedMigrationWrite,
+  isMigratedPath,
   LEGACY_PATH_MOVES,
   MIGRATED_PATHS,
   mapSourcePath,
