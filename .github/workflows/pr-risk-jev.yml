@@ -27,7 +27,7 @@ jobs:
     steps:
       # The Action reads PR Git objects without checking out or executing PR code.
       - name: Classify PR risk
-        uses: getsentry/pr-risk-action@1745669bf193065d00d16d96ab7ca4e0853a26e8
+        uses: getsentry/pr-risk-action@42934115c8d8417f2758462bbf918f71360ac2b1
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
         with:
