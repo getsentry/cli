@@ -116,4 +116,58 @@ describe("DSN detection from $HOME fallback", () => {
     expect(result?.raw).toBe(projectDsn);
     expect(result?.source).toBe("code");
   });
+
+  describe("from an ancestor of $HOME", () => {
+    let ancestor: string;
+
+    beforeEach(() => {
+      // e.g. running from /Users when $HOME is /Users/alice. findProjectRoot
+      // finds no markers and falls back to the ancestor itself, which
+      // isHomeOrAncestor still treats as at/above home — the downward scan
+      // must be skipped there too, or it would walk straight into every
+      // user's home directory.
+      ancestor = join(getConfigDir(), "ancestor");
+      home = join(ancestor, "alice");
+      mkdirSync(home, { recursive: true });
+      fakeHome.path = home;
+      clearDsnCache(ancestor);
+    });
+
+    test("does not scan into sibling home directories", async () => {
+      const scannedDsn = "https://leaked@o999.ingest.sentry.io/999";
+      // A plain code file directly under the ancestor — reachable by the
+      // downward scan only if the home-fallback skip fails to trigger.
+      writeFileSync(
+        join(ancestor, "config.ts"),
+        `Sentry.init({ dsn: "${scannedDsn}" });`
+      );
+      // And one inside a would-be sibling home, to mirror the real risk.
+      const sibling = join(ancestor, "bob");
+      mkdirSync(sibling, { recursive: true });
+      writeFileSync(
+        join(sibling, "config.ts"),
+        `Sentry.init({ dsn: "${scannedDsn}" });`
+      );
+
+      const result = await detectDsn(ancestor);
+      expect(result).toBeNull();
+
+      const all = await detectAllDsns(ancestor);
+      expect(all.all).toHaveLength(0);
+      expect(all.primary).toBeNull();
+    });
+
+    test("still returns SENTRY_DSN env var when set from an ancestor", async () => {
+      const envDsn = "https://var@o333.ingest.sentry.io/333";
+      process.env.SENTRY_DSN = envDsn;
+
+      const result = await detectDsn(ancestor);
+      expect(result?.raw).toBe(envDsn);
+      expect(result?.source).toBe("env");
+
+      const all = await detectAllDsns(ancestor);
+      expect(all.primary?.raw).toBe(envDsn);
+      expect(all.all).toHaveLength(1);
+    });
+  });
 });
