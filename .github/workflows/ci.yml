@@ -283,6 +283,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: ./packages/cli/coverage/lcov.info
+          informational-patch: ${{ github.event_name == 'push' }}
 
   build-binary:
     name: Build Binary (${{ matrix.target }})
