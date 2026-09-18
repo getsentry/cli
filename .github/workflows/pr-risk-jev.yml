@@ -1,0 +1,46 @@
+name: PR Risk (Jev)
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to analyze
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-risk-jev-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  risk:
+    name: PR risk (Jev)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    steps:
+      # The Action reads PR Git objects without checking out or executing PR code.
+      - name: Classify PR risk
+        uses: getsentry/pr-risk-action@42934115c8d8417f2758462bbf918f71360ac2b1
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+        with:
+          repo: ${{ github.repository }}
+          pr-number: ${{ github.event.pull_request.number || inputs.pr_number }}
+          expected-head-sha: ${{ github.event.pull_request.head.sha }}
+          result-path: risk-pr-result.json
+
+      - name: Upload risk result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr-risk-jev-${{ github.event.pull_request.number || inputs.pr_number }}
+          path: risk-pr-result.json
+          if-no-files-found: warn
+          retention-days: 30
