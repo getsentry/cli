@@ -112,7 +112,7 @@ export type PrepareCommandResult = {
   uploaded: boolean;
   /** Per-module outcome. */
   modules: PrepareResult[];
-  /** Number of companions uploaded. */
+  /** Number of debug files uploaded: companions, plus any source bundles. */
   filesUploaded: number;
 };
 

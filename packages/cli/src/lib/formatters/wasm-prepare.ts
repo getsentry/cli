@@ -77,7 +77,7 @@ function summaryLines(data: PrepareCommandResult): string[] {
       data.org && data.project ? ` to ${data.org}/${data.project}` : "";
     lines.push(
       "",
-      `Uploaded ${uploaded} ${uploaded === 1 ? "companion" : "companions"}${target}.`
+      `Uploaded ${uploaded} ${uploaded === 1 ? "debug file" : "debug files"}${target}.`
     );
   }
   return lines;

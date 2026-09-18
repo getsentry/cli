@@ -145,7 +145,7 @@ describe("formatPrepareResult", () => {
       filesUploaded: 1,
     });
 
-    expect(uploaded).toContain("Uploaded 1 companion to my-org/my-project");
+    expect(uploaded).toContain("Uploaded 1 debug file to my-org/my-project");
     expect(report(splitModule)).not.toContain("Uploaded");
   });
 

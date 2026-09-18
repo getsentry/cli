@@ -150,11 +150,11 @@ async function* reportUpload(
     const details = failures
       .map((r) => `${r.debugId ?? r.name}: ${r.state}`)
       .join("; ");
-    return { hint: `${failures.length} companion(s) failed: ${details}` };
+    return { hint: `${failures.length} debug file(s) failed: ${details}` };
   }
 
   return {
-    hint: `Uploaded ${uploads.length} debug companion(s) to ${params.org}/${params.project}`,
+    hint: `Uploaded ${uploads.length} debug file(s) to ${params.org}/${params.project}`,
   };
 }
 
