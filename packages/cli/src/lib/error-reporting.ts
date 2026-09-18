@@ -55,7 +55,8 @@ type SilenceReason =
   | "auth_expected"
   | "api_user_error"
   | "network_error"
-  | "process_exit";
+  | "process_exit"
+  | "resolution_error";
 
 /**
  * Classify whether an error should be silenced.
@@ -91,6 +92,14 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   // silence alongside the others (CLI-19).
   if (error instanceof AuthError) {
     return "auth_expected";
+  }
+  // A ResolutionError means the user provided a value that exists syntactically
+  // but couldn't be found in any accessible org/project (e.g. an event ID that
+  // has expired or belongs to an org the user can't access). Like AuthError and
+  // ValidationError, this is an expected user-input failure — not a CLI bug —
+  // so there is no actionable signal in capturing it (CLI-31W).
+  if (error instanceof ResolutionError) {
+    return "resolution_error";
   }
   if (error instanceof ApiError && error.status > 400 && error.status < 500) {
     return "api_user_error";

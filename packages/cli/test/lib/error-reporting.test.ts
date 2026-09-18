@@ -298,11 +298,18 @@ describe("classifySilenced", () => {
     expect(classifySilenced(err)).toBeNull();
   });
 
+  test("silences ResolutionError (CLI-31W)", () => {
+    // ResolutionError is a user-facing "not found" error — the user provided a
+    // valid-looking ID that simply doesn't exist or isn't accessible. There is
+    // no actionable bug signal in these reports, so they are silenced.
+    expect(
+      classifySilenced(
+        new ResolutionError("Project 'x'", "not found", "sentry issue list")
+      )
+    ).toBe("resolution_error");
+  });
+
   test.each([
-    [
-      "ResolutionError",
-      new ResolutionError("Project 'x'", "not found", "sentry issue list"),
-    ],
     ["ValidationError", new ValidationError("bad")],
     ["SeerError", new SeerError("not_enabled")],
     ["ConfigError", new ConfigError("bad")],
@@ -508,14 +515,21 @@ describe("reportCliError integration", () => {
     expect(traceErr["cli_error.kind"]).not.toBe(eventErr["cli_error.kind"]);
   });
 
-  test("captures ResolutionError", () => {
+  test("silences ResolutionError and emits metric (CLI-31W)", () => {
     const err = new ResolutionError(
       "Project 'x'",
       "not found",
       "sentry issue list <org>/x"
     );
     reportCliError(err);
-    expect(captureSpy).toHaveBeenCalledWith(err);
+    expect(captureSpy).not.toHaveBeenCalled();
+    expect(metricSpy).toHaveBeenCalledWith(
+      "cli.error.silenced",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({ reason: "resolution_error" }),
+      })
+    );
   });
 
   test("captures SeerError (marketing dashboard)", () => {
