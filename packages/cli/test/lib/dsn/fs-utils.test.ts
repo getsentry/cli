@@ -85,6 +85,17 @@ describe("handleFileError", () => {
       });
       expect(captureException).not.toHaveBeenCalled();
     });
+
+    test("Unknown system error — macOS .trace bundle or other codeless errno", () => {
+      const err = new Error(
+        "Unknown system error -11: Unknown system error -11, scandir '/Users/austin/Documents/app-audit.trace'"
+      );
+      handleFileError(err, {
+        operation: "scan.walk.readdir",
+        path: "/Users/austin/Documents/app-audit.trace",
+      });
+      expect(captureException).not.toHaveBeenCalled();
+    });
   });
 
   describe("unexpected errors (SHOULD report to Sentry)", () => {

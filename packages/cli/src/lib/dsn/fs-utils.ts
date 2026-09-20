@@ -20,6 +20,7 @@ import * as Sentry from "@sentry/node-core/light";
  * - EINVAL: Invalid argument (e.g., scandir on a special/virtual filesystem entry like /proc paths)
  * - ELOOP: Too many symbolic links (e.g., cyclic symlink encountered during scan)
  * - ETIMEDOUT: Connection timed out (e.g., transient read on a network or cloud-mounted filesystem)
+ * - Unknown system error: No named POSIX code (e.g., errno -11 on macOS .trace bundle directories)
  *
  * All other errors are unexpected and should be reported to Sentry.
  *
@@ -27,18 +28,28 @@ import * as Sentry from "@sentry/node-core/light";
  * @returns True if the error is expected and should be ignored
  */
 function isIgnorableFileError(error: unknown): boolean {
-  if (error instanceof Error && "code" in error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return (
-      code === "ENOENT" ||
-      code === "EACCES" ||
-      code === "EPERM" ||
-      code === "EISDIR" ||
-      code === "ENOTDIR" ||
-      code === "EINVAL" ||
-      code === "ELOOP" ||
-      code === "ETIMEDOUT"
-    );
+  if (error instanceof Error) {
+    if ("code" in error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (
+        code === "ENOENT" ||
+        code === "EACCES" ||
+        code === "EPERM" ||
+        code === "EISDIR" ||
+        code === "ENOTDIR" ||
+        code === "EINVAL" ||
+        code === "ELOOP" ||
+        code === "ETIMEDOUT"
+      ) {
+        return true;
+      }
+    }
+    // Node.js surfaces some platform-specific errno values (e.g. -11 on macOS
+    // .trace bundle directories) without a named POSIX code. These are benign
+    // scan noise and should be silently ignored.
+    if (error.message.startsWith("Unknown system error")) {
+      return true;
+    }
   }
   return false;
 }
