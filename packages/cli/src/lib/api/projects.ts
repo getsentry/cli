@@ -40,6 +40,7 @@ import {
   MAX_PAGINATION_PAGES,
   ORG_FANOUT_CONCURRENCY,
   type PaginatedResponse,
+  paginate,
   unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
@@ -126,23 +127,19 @@ export async function listProjectsPaginated(
  * List projects up to `limit`, auto-paginating when the limit exceeds
  * {@link API_MAX_PER_PAGE}.
  *
- * Same contract as `listIssuesAllPages` / {@link autoPaginate}: each request
- * is capped at `API_MAX_PER_PAGE`, then pages are followed until `limit`
- * items are collected or the cursor runs out.
+ * Delegates to {@link paginate} so the `per_page` cap and cursor threading
+ * stay on the shared list helper (#1486).
  *
  * @param orgSlug - Organization slug
  * @param options - Total item limit and optional resume cursor
  * @returns Combined page of projects with optional next cursor
  */
-export async function listProjectsAllPages(
+export function listProjectsAllPages(
   orgSlug: string,
   options: { limit: number; cursor?: string }
 ): Promise<PaginatedResponse<SentryProject[]>> {
-  const perPage = Math.min(options.limit, API_MAX_PER_PAGE);
-  return await autoPaginate(
-    (cursor) => listProjectsPaginated(orgSlug, { cursor, perPage }),
-    options.limit,
-    options.cursor
+  return paginate(options, (perPage, cursor) =>
+    listProjectsPaginated(orgSlug, { cursor, perPage })
   );
 }
 

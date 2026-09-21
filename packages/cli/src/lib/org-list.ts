@@ -30,9 +30,8 @@
  * how to render the result — JSON envelope, human table, or custom formatting.
  */
 
+import { paginate } from "./api/infrastructure.js";
 import {
-  API_MAX_PER_PAGE,
-  autoPaginate,
   findProjectsBySlug,
   listOrganizations,
   type PaginatedResponse,
@@ -450,10 +449,10 @@ function runOrgAll<TEntity, TWithOrg>(
 /**
  * Handle org-all mode: cursor-paginated listing for a single org.
  *
- * `--limit` is the total number of items to return. When it exceeds
- * {@link API_MAX_PER_PAGE}, this handler auto-paginates via {@link autoPaginate}
- * instead of sending an oversized `per_page` (some endpoints 400 rather than
- * silently cap).
+ * `--limit` is the total number of items to return. When it exceeds the API
+ * page size, this handler auto-paginates via {@link paginate} instead of
+ * sending an oversized `per_page` (some endpoints 400 rather than silently
+ * cap).
  *
  * Returns a {@link ListResult} with items, pagination state, and human hints.
  * Cursor side effects (advancePaginationState/clearPaginationState) are performed
@@ -463,7 +462,6 @@ export async function handleOrgAll<TEntity, TWithOrg>(
   options: OrgAllOptions<TEntity, TWithOrg>
 ): Promise<ListResult<TWithOrg>> {
   const { config, org, flags, contextKey, cursor, direction } = options;
-  const perPage = Math.min(flags.limit, API_MAX_PER_PAGE);
 
   const response = await withProgress(
     {
@@ -471,14 +469,11 @@ export async function handleOrgAll<TEntity, TWithOrg>(
       json: flags.json,
     },
     () =>
-      autoPaginate(
-        (pageCursor) =>
-          config.listPaginated(org, {
-            cursor: pageCursor,
-            perPage,
-          }),
-        flags.limit,
-        cursor
+      paginate({ limit: flags.limit, cursor }, (perPage, pageCursor) =>
+        config.listPaginated(org, {
+          cursor: pageCursor,
+          perPage,
+        })
       )
   );
 
