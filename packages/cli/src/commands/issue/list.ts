@@ -1455,6 +1455,7 @@ export const listCommand = buildListCommand("issue", {
       "Target patterns:\n" +
       "  sentry issue list               # auto-detect from DSN or config\n" +
       "  sentry issue list <org>/<proj>  # explicit org and project\n" +
+      "  sentry issue list <org>/a,b     # several projects in the same org\n" +
       "  sentry issue list <org>/        # all projects in org (trailing / required)\n" +
       "  sentry issue list <project>     # find project across all orgs\n\n" +
       `${targetPatternExplanation()}\n\n` +

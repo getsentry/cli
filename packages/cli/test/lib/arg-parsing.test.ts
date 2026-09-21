@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   detectSwappedTrialArgs,
   detectSwappedViewArgs,
+  explicitProjectSlugs,
   looksLikeIssueShortId,
   normalizeSlug,
   parseIssueArg,
@@ -17,6 +18,7 @@ import {
   parseSlashSeparatedArg,
   rejectIssueCommandTokenListTarget,
   splitNewlineArg,
+  splitProjectSelector,
 } from "../../src/lib/arg-parsing.js";
 import { stripDsnOrgPrefix } from "../../src/lib/dsn/index.js";
 import { ValidationError } from "../../src/lib/errors.js";
@@ -69,6 +71,76 @@ describe("parseOrgProjectArg", () => {
       org: "sentry",
       project: "spotlight-electron",
     });
+  });
+
+  test("comma-separated slugs return explicit with projects", () => {
+    expect(parseOrgProjectArg("acme/frontend,backend")).toEqual({
+      type: "explicit",
+      org: "acme",
+      project: "frontend",
+      projects: ["frontend", "backend"],
+    });
+  });
+
+  test("trims and de-duplicates comma-separated slugs", () => {
+    expect(parseOrgProjectArg("acme/web, api,web")).toEqual({
+      type: "explicit",
+      org: "acme",
+      project: "web",
+      projects: ["web", "api"],
+    });
+  });
+
+  test("trailing comma is treated as a single slug", () => {
+    expect(parseOrgProjectArg("acme/web,")).toEqual({
+      type: "explicit",
+      org: "acme",
+      project: "web",
+    });
+  });
+
+  test("empty comma list throws ValidationError", () => {
+    expect(() => parseOrgProjectArg("acme/,,,")).toThrow(ValidationError);
+    expect(() => parseOrgProjectArg("acme/,,,")).toThrow("empty");
+  });
+
+  test("bare comma list is a single project-search slug", () => {
+    expect(parseOrgProjectArg("web,api")).toEqual({
+      type: "project-search",
+      projectSlug: "web,api",
+    });
+  });
+
+  test("comma-separated display names are rejected", () => {
+    expect(() => parseOrgProjectArg("acme/My App,Other App")).toThrow(
+      "must be slugs"
+    );
+  });
+
+  test("invalid character in one comma token throws", () => {
+    expect(() => parseOrgProjectArg("acme/web,api?x")).toThrow(ValidationError);
+  });
+
+  test("splitProjectSelector drops empties and duplicates", () => {
+    expect(splitProjectSelector("web, api,,web")).toEqual(["web", "api"]);
+  });
+
+  test("explicitProjectSlugs falls back to the single project field", () => {
+    expect(
+      explicitProjectSlugs({
+        type: "explicit",
+        org: "acme",
+        project: "web",
+      })
+    ).toEqual(["web"]);
+    expect(
+      explicitProjectSlugs({
+        type: "explicit",
+        org: "acme",
+        project: "web",
+        projects: ["web", "api"],
+      })
+    ).toEqual(["web", "api"]);
   });
 
   // Error case - verify specific message

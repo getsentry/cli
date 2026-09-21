@@ -248,6 +248,10 @@ Split by argument type — do not mix the conventions:
   values on commas; commas may be part of the value. Every project passed to
   `project create` requires a `name:platform` pair — there is no space-separated
   form, with or without an explicit org. Project names cannot contain whitespace.
+- **Exception: `org/project` list selectors.** That positional is a single
+  optional token, not a variadic list, and Sentry slugs cannot contain commas.
+  `issue list acme/web,api` is parsed as two project slugs. See
+  `splitProjectSelector` in `src/lib/arg-parsing.ts`.
 - **Optional flags → comma-separated (sometimes also repeatable).** Split the
   flag value on `,`: `--features errors,tracing`, set-commits `--path a,b`,
   `auth login --scope a,b`. Use `value.split(",")` (repeatable array flags:

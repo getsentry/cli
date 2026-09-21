@@ -1857,6 +1857,50 @@ describe("appendIssueFlags", () => {
   });
 });
 
+describe("issue list: comma-separated project slugs", () => {
+  test("fetches issues from each listed project", async () => {
+    const seen: string[] = [];
+    vi.mocked(projectsApi.getProject).mockImplementation(
+      async (_org, slug) =>
+        ({
+          id: slug === "web" ? "1" : "2",
+          slug,
+          name: slug,
+        }) as Awaited<ReturnType<typeof projectsApi.getProject>>
+    );
+
+    listIssuesAllPagesMock.mockImplementation(async (_org, project) => {
+      seen.push(project);
+      return {
+        issues: [
+          mockIssue({
+            id: project,
+            shortId: `${project.toUpperCase()}-1`,
+            project: { slug: project },
+          }),
+        ],
+        nextCursor: undefined,
+      };
+    });
+
+    const { context, stdout } = createContext();
+    await func.call(
+      context,
+      {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: true,
+      },
+      "test-org/web,api"
+    );
+
+    expect([...seen].sort()).toEqual(["api", "web"]);
+    const output = JSON.parse(stdout.output);
+    expect(output.data).toHaveLength(2);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // sanitizeQuery — tests moved to test/lib/search-query.test.ts
 // ---------------------------------------------------------------------------

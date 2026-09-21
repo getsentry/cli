@@ -21,6 +21,7 @@ import {
   type PaginatedResponse,
 } from "../../lib/api-client.js";
 import {
+  explicitProjectSlugs,
   type ParsedOrgProject,
   parseOrgProjectArg,
 } from "../../lib/arg-parsing.js";
@@ -176,9 +177,11 @@ export function buildContextKey(
     case "auto-detect":
       parts.push("type:auto");
       break;
-    case "explicit":
-      parts.push(`type:explicit:${parsed.org}/${parsed.project}`);
+    case "explicit": {
+      const slugs = explicitProjectSlugs(parsed);
+      parts.push(`type:explicit:${parsed.org}/${slugs.join(",")}`);
       break;
+    }
     case "project-search":
       parts.push(`type:search:${parsed.projectSlug}`);
       break;
@@ -425,6 +428,45 @@ export async function handleExplicit(
   return {
     items: filtered,
     hint: `Tip: Use 'sentry project view ${org}/${projectSlug}' for details`,
+  };
+}
+
+/**
+ * Explicit `org/project` mode, including comma-separated slug lists.
+ */
+async function handleExplicitProjects(
+  parsed: Extract<ParsedOrgProject, { type: "explicit" }>,
+  flags: ListFlags
+): Promise<ListResult<ProjectWithOrg>> {
+  const slugs = explicitProjectSlugs(parsed);
+  if (slugs.length === 1) {
+    return handleExplicit(parsed.org, slugs[0], flags);
+  }
+
+  const results = await Promise.all(
+    slugs.map((slug) => handleExplicit(parsed.org, slug, flags))
+  );
+  const items = results.flatMap((result) => result.items);
+  const missing = slugs.filter((_, index) => {
+    const result = results[index];
+    return result === undefined || result.items.length === 0;
+  });
+
+  if (items.length === 0) {
+    return {
+      items: [],
+      hint:
+        `No projects found among: ${slugs.map((slug) => `'${slug}'`).join(", ")}.\n` +
+        `Tip: Use 'sentry project list ${parsed.org}/' to see all projects`,
+    };
+  }
+
+  return {
+    items,
+    hint:
+      missing.length > 0
+        ? `Missing: ${missing.join(", ")}. Tip: Use 'sentry project list ${parsed.org}/' to see all projects`
+        : `Tip: Use 'sentry project view ${parsed.org}/<project>' for details`,
   };
 }
 
@@ -742,8 +784,7 @@ export const listCommand = buildListCommand("project", {
       orgSlugMatchBehavior: "redirect",
       overrides: {
         "auto-detect": (ctx) => handleAutoDetect(ctx.cwd, flags),
-        explicit: (ctx) =>
-          handleExplicit(ctx.parsed.org, ctx.parsed.project, flags),
+        explicit: (ctx) => handleExplicitProjects(ctx.parsed, flags),
         "org-all": (ctx) => {
           // Build context key and resolve cursor only in org-all mode, after
           // dispatchOrgScopedList has already validated --cursor is allowed here.

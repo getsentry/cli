@@ -51,7 +51,11 @@ vi.mock("../../src/lib/db/auth.js", async (importOriginal) => {
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as auth from "../../src/lib/db/auth.js";
 import { setOrgRegion, setOrgRegions } from "../../src/lib/db/regions.js";
-import { ContextError, ResolutionError } from "../../src/lib/errors.js";
+import {
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../src/lib/errors.js";
 
 vi.mock("../../src/lib/resolve-target.js", async (importOriginal) => {
   const actual =
@@ -214,6 +218,22 @@ describe("resolveOrgProjectTarget", () => {
     const result = await resolveOrgProjectTarget(parsed, CWD, "trace list");
     expect(result).toEqual({ org: "my-org", project: "my-proj" });
     expect(findProjectsBySlugSpy).not.toHaveBeenCalled();
+  });
+
+  test("throws ValidationError for comma-separated explicit slugs", async () => {
+    const parsed = {
+      type: "explicit" as const,
+      org: "my-org",
+      project: "web",
+      projects: ["web", "api"],
+    };
+
+    await expect(
+      resolveOrgProjectTarget(parsed, CWD, "trace list")
+    ).rejects.toThrow(ValidationError);
+    await expect(
+      resolveOrgProjectTarget(parsed, CWD, "trace list")
+    ).rejects.toThrow("one project");
   });
 
   test("throws ContextError for org-all type", async () => {
@@ -420,6 +440,29 @@ describe("resolveTargetsFromParsedArg", () => {
     getProjectSpy.mockRestore();
     listProjectsSpy.mockRestore();
     findProjectsBySlugSpy.mockRestore();
+  });
+
+  test("explicit: resolves each slug in a comma-separated list", async () => {
+    getProjectSpy.mockImplementation(async (_org: string, slug: string) => ({
+      id: slug === "web" ? "1" : "2",
+      slug,
+    }));
+
+    const result = await resolveTargetsFromParsedArg(
+      {
+        type: "explicit",
+        org: "my-org",
+        project: "web",
+        projects: ["web", "api"],
+      },
+      OPTS
+    );
+
+    expect(result.targets).toHaveLength(2);
+    expect(result.targets.map((t) => t.project)).toEqual(["web", "api"]);
+    expect(result.footer).toContain("2 projects");
+    expect(getProjectSpy).toHaveBeenCalledWith("my-org", "web");
+    expect(getProjectSpy).toHaveBeenCalledWith("my-org", "api");
   });
 
   test("explicit: resolves DSN-style org id to the real slug", async () => {

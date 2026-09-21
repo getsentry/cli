@@ -28,6 +28,7 @@ import {
   resolveOrgDisplayName,
 } from "./api-client.js";
 import {
+  explicitProjectSlugs,
   looksLikeIssueShortId,
   type ParsedOrgProject,
   parseOrgProjectArg,
@@ -63,6 +64,7 @@ import {
   ContextError,
   ResolutionError,
   ValidationError,
+  validationError,
   withAuthGuard,
 } from "./errors.js";
 import { fuzzyMatch } from "./fuzzy.js";
@@ -1958,6 +1960,15 @@ export async function resolveOrgProjectTarget(
 
   switch (parsed.type) {
     case "explicit": {
+      const slugs = explicitProjectSlugs(parsed);
+      if (slugs.length > 1) {
+        throw validationError(
+          `This command takes one project, not ${slugs.length}.`,
+          slugs.map((slug) => `sentry ${commandName} ${parsed.org}/${slug}`),
+          "project",
+          `List commands accept comma-separated slugs: sentry issue list ${parsed.org}/${slugs.join(",")}`
+        );
+      }
       const org = await resolveEffectiveOrg(parsed.org);
       return withTelemetryContext({ org, project: parsed.project });
     }
@@ -2187,17 +2198,25 @@ export async function resolveTargetsFromParsedArg(
       // Resolve DSN-style org identifiers (e.g. "o1081365" → "my-org") before
       // hitting the API, mirroring resolveOrgProjectTarget's explicit branch.
       const org = await resolveEffectiveOrg(parsed.org);
-      const projectId = await fetchProjectId(org, parsed.project);
-      return {
-        targets: [
-          {
+      const slugs = explicitProjectSlugs(parsed);
+      const targets: ResolvedTarget[] = await Promise.all(
+        slugs.map(async (project) => {
+          const projectId = await fetchProjectId(org, project);
+          return {
             org,
-            project: parsed.project,
+            project,
             projectId,
             orgDisplay: org,
-            projectDisplay: parsed.project,
-          },
-        ],
+            projectDisplay: project,
+          };
+        })
+      );
+      return {
+        targets,
+        footer:
+          targets.length > 1
+            ? `Showing results from ${targets.length} projects in ${org}`
+            : undefined,
       };
     }
 
