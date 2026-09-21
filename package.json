@@ -8,6 +8,8 @@
     "node": ">=20.0"
   },
   "scripts": {
+    "migrate:open-prs": "node scripts/migrate-open-prs.mjs",
+    "test:migrate-open-prs": "node --test scripts/migrate-open-prs.test.mjs",
     "tsx": "pnpm --filter sentry run tsx",
     "cli": "pnpm --filter sentry run cli",
     "dev": "pnpm --filter sentry run dev",
