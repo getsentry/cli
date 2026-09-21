@@ -1901,6 +1901,56 @@ describe("issue list: comma-separated project slugs", () => {
   });
 });
 
+describe("issue list: project slug globs", () => {
+  test("expands web-* to matching projects", async () => {
+    const seen: string[] = [];
+    vi.mocked(projectsApi.listProjects).mockResolvedValue([
+      { id: "1", slug: "web-backend", name: "Backend" },
+      { id: "2", slug: "web-frontend", name: "Web" },
+      { id: "3", slug: "mobile", name: "Mobile" },
+    ] as Awaited<ReturnType<typeof projectsApi.listProjects>>);
+
+    vi.mocked(projectsApi.getProject).mockImplementation(
+      async (_org, slug) =>
+        ({
+          id: "1",
+          slug,
+          name: slug,
+        }) as Awaited<ReturnType<typeof projectsApi.getProject>>
+    );
+
+    listIssuesAllPagesMock.mockImplementation(async (_org, project) => {
+      seen.push(project);
+      return {
+        issues: [
+          mockIssue({
+            id: project,
+            shortId: `${project.toUpperCase()}-1`,
+            project: { slug: project },
+          }),
+        ],
+        nextCursor: undefined,
+      };
+    });
+
+    const { context, stdout } = createContext();
+    await func.call(
+      context,
+      {
+        limit: 10,
+        sort: "date",
+        period: parsePeriod("90d"),
+        json: true,
+      },
+      "test-org/web-*"
+    );
+
+    expect([...seen].sort()).toEqual(["web-backend", "web-frontend"]);
+    const output = JSON.parse(stdout.output);
+    expect(output.data).toHaveLength(2);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // sanitizeQuery — tests moved to test/lib/search-query.test.ts
 // ---------------------------------------------------------------------------

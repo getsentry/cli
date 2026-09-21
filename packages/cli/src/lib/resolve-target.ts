@@ -17,6 +17,7 @@
 import { basename } from "node:path";
 import { isatty } from "node:tty";
 import pLimit from "p-limit";
+import picomatch from "picomatch";
 import type { SentryOrganization, SentryProject } from "../types/index.js";
 import {
   findProjectByDsnKey,
@@ -29,6 +30,7 @@ import {
 } from "./api-client.js";
 import {
   explicitProjectSlugs,
+  isProjectGlob,
   looksLikeIssueShortId,
   type ParsedOrgProject,
   parseOrgProjectArg,
@@ -1961,7 +1963,7 @@ export async function resolveOrgProjectTarget(
   switch (parsed.type) {
     case "explicit": {
       const slugs = explicitProjectSlugs(parsed);
-      if (slugs.length > 1) {
+      if (!slugs.some(isProjectGlob) && slugs.length > 1) {
         throw validationError(
           `This command takes one project, not ${slugs.length}.`,
           slugs.map((slug) => `sentry ${commandName} ${parsed.org}/${slug}`),
@@ -1970,6 +1972,26 @@ export async function resolveOrgProjectTarget(
         );
       }
       const org = await resolveEffectiveOrg(parsed.org);
+      if (slugs.some(isProjectGlob)) {
+        const expanded = await expandProjectGlobs(org, slugs);
+        if (expanded.length !== 1) {
+          throw validationError(
+            `This command takes one project, not ${expanded.length}.`,
+            expanded.map((slug) => `sentry ${commandName} ${org}/${slug}`),
+            "project",
+            `List commands accept globs: sentry issue list ${org}/${slugs.join(",")}`
+          );
+        }
+        const project = expanded[0];
+        if (project === undefined) {
+          throw validationError(
+            "This command takes one project.",
+            [`sentry ${commandName} ${org}/<project>`],
+            "project"
+          );
+        }
+        return withTelemetryContext({ org, project });
+      }
       return withTelemetryContext({ org, project: parsed.project });
     }
 
@@ -2103,6 +2125,52 @@ export function resolveOrgProjectFromArg(
   return resolveOrgProjectTarget(parseOrgProjectArg(target), cwd, commandName);
 }
 
+/**
+ * Expand `*` globs in an explicit project selector against the org catalog.
+ *
+ * Exact slugs pass through. Duplicate matches (e.g. `web,we*`) keep first-seen
+ * order. A glob that matches nothing is a resolution error, not an empty list.
+ */
+export async function expandProjectGlobs(
+  org: string,
+  slugs: readonly string[]
+): Promise<string[]> {
+  const needsCatalog = slugs.some(isProjectGlob);
+  const catalog = needsCatalog ? await listProjects(org) : [];
+  const expanded: string[] = [];
+  const seen = new Set<string>();
+
+  for (const slug of slugs) {
+    if (!isProjectGlob(slug)) {
+      if (!seen.has(slug)) {
+        seen.add(slug);
+        expanded.push(slug);
+      }
+      continue;
+    }
+
+    const isMatch = picomatch(slug);
+    const matched = catalog.filter((project) => isMatch(project.slug));
+    if (matched.length === 0) {
+      throw new ResolutionError(
+        `Project glob '${slug}'`,
+        `matched no projects in organization '${org}'`,
+        `sentry project list ${org}/`,
+        [`No project slug matched '${slug}'`]
+      );
+    }
+    for (const project of matched) {
+      if (seen.has(project.slug)) {
+        continue;
+      }
+      seen.add(project.slug);
+      expanded.push(project.slug);
+    }
+  }
+
+  return expanded;
+}
+
 // ---------------------------------------------------------------------------
 // Multi-target resolution — shared between project-scoped list commands
 // ---------------------------------------------------------------------------
@@ -2198,7 +2266,7 @@ export async function resolveTargetsFromParsedArg(
       // Resolve DSN-style org identifiers (e.g. "o1081365" → "my-org") before
       // hitting the API, mirroring resolveOrgProjectTarget's explicit branch.
       const org = await resolveEffectiveOrg(parsed.org);
-      const slugs = explicitProjectSlugs(parsed);
+      const slugs = await expandProjectGlobs(org, explicitProjectSlugs(parsed));
       const targets: ResolvedTarget[] = await Promise.all(
         slugs.map(async (project) => {
           const projectId = await fetchProjectId(org, project);

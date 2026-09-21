@@ -57,6 +57,7 @@ import {
 } from "../../lib/org-list.js";
 import { withProgress } from "../../lib/polling.js";
 import {
+  expandProjectGlobs,
   type ProjectNotFoundOutcome,
   type ResolvedTarget,
   resolveAllTargets,
@@ -438,9 +439,13 @@ async function handleExplicitProjects(
   parsed: Extract<ParsedOrgProject, { type: "explicit" }>,
   flags: ListFlags
 ): Promise<ListResult<ProjectWithOrg>> {
-  const slugs = explicitProjectSlugs(parsed);
-  if (slugs.length === 1) {
-    return handleExplicit(parsed.org, slugs[0], flags);
+  const slugs = await expandProjectGlobs(
+    parsed.org,
+    explicitProjectSlugs(parsed)
+  );
+  const firstSlug = slugs[0];
+  if (slugs.length === 1 && firstSlug !== undefined) {
+    return handleExplicit(parsed.org, firstSlug, flags);
   }
 
   const results = await Promise.all(

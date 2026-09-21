@@ -72,7 +72,7 @@ export const LIST_TARGET_POSITIONAL = {
     {
       placeholder: "org/project",
       brief:
-        "<org>/ (all projects), <org>/<project>[,project...], or <project>",
+        "<org>/ (all), <org>/<project>[,project...] or <org>/<glob>, or <project>",
       parse: String,
       optional: true as const,
     },
@@ -102,7 +102,8 @@ export function targetPatternExplanation(cursorNote?: string): string {
     "is treated as a project name search (e.g., 'sentry' searches for a " +
     "project named 'sentry', while 'sentry/' lists all projects in the " +
     "'sentry' org). Comma-separated project slugs after the org " +
-    "(`acme/web,api,worker`) list those projects together.";
+    "(`acme/web,api,worker`) list those projects together. A `*` in a project " +
+    "slug (`acme/web-*`) expands against projects in that org.";
   return cursorNote ? `${base} ${cursorNote}` : base;
 }
 
