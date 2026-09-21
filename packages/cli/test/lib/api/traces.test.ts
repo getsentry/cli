@@ -115,8 +115,7 @@ describe("listTransactions", () => {
   });
 
   test("passes per_page capped at 100 even when limit is higher", async () => {
-    // With limit > 100, the first page should still request per_page=100
-    mockSequential([
+    const { getCapturedUrls } = mockSequential([
       {
         body: { data: makeTxnRows(100), meta: TX_META },
         headers: {
@@ -133,8 +132,8 @@ describe("listTransactions", () => {
 
     await listTransactions("my-org", "my-project", { limit: 150 });
 
-    // Both pages should use per_page=100
-    // (the second page still uses API_MAX_PER_PAGE since limit > 100)
+    expect(getCapturedUrls()[0]).toContain("per_page=100");
+    expect(getCapturedUrls()[1]).toContain("per_page=50");
   });
 
   test("sends sort=-timestamp by default", async () => {
@@ -445,9 +444,8 @@ describe("listSpans", () => {
 
     await listSpans("my-org", "my-project", { limit: 150 });
 
-    // Both pages should use per_page=100
     expect(getCapturedUrls()[0]).toContain("per_page=100");
-    expect(getCapturedUrls()[1]).toContain("per_page=100");
+    expect(getCapturedUrls()[1]).toContain("per_page=50");
   });
 
   test("sends sort=-timestamp by default", async () => {

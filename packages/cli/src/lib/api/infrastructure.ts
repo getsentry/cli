@@ -452,8 +452,10 @@ export async function autoPaginate<T>(
  *
  * Centralizes the two things every list endpoint kept re-deriving by hand and
  * occasionally got wrong (see #1458): capping `per_page` at
- * {@link API_MAX_PER_PAGE} and threading `limit` plus the initial cursor into
- * {@link autoPaginate}. Callers still own region resolution and
+ * {@link API_MAX_PER_PAGE} and following cursors until `limit` rows are
+ * collected. Each request asks only for the remaining items so a limit that
+ * is not a page multiple still yields a usable `nextCursor` (same contract as
+ * `listIssuesAllPages`). Callers still own region resolution and
  * endpoint-specific query building inside `fetchPage`.
  *
  * @param options - Caller list options; `limit` bounds total rows, `cursor` is the start cursor
@@ -461,7 +463,7 @@ export async function autoPaginate<T>(
  * @param defaultLimit - Applied when `options.limit` is undefined
  * @returns Accumulated items with optional nextCursor
  */
-export function paginate<T>(
+export async function paginate<T>(
   options: { limit?: number; cursor?: string },
   fetchPage: (
     perPage: number,
@@ -470,12 +472,39 @@ export function paginate<T>(
   defaultLimit = 10
 ): Promise<PaginatedResponse<T[]>> {
   const limit = options.limit ?? defaultLimit;
-  const perPage = Math.min(limit, API_MAX_PER_PAGE);
-  return autoPaginate(
-    (cursor) => fetchPage(perPage, cursor),
-    limit,
-    options.cursor
+
+  // Single API page when the limit already fits. Do not keep fetching to
+  // fill a short page: `--limit 25` plus `-c next` is one page at a time.
+  if (limit <= API_MAX_PER_PAGE) {
+    return fetchPage(limit, options.cursor);
+  }
+
+  const allRows: T[] = [];
+  let cursor: string | undefined = options.cursor;
+
+  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
+    const remaining = limit - allRows.length;
+    const perPage = Math.min(remaining, API_MAX_PER_PAGE);
+    const result = await fetchPage(perPage, cursor);
+    allRows.push(...result.data);
+
+    if (allRows.length >= limit || !result.nextCursor) {
+      // Server ignored per_page and overshot — trim and drop nextCursor so
+      // navigation cannot skip the discarded rows.
+      if (allRows.length > limit) {
+        return { data: allRows.slice(0, limit) };
+      }
+      return { data: allRows, nextCursor: result.nextCursor };
+    }
+
+    cursor = result.nextCursor;
+  }
+
+  logger.warn(
+    `Pagination limit reached (${MAX_PAGINATION_PAGES} pages, ${allRows.length} items). ` +
+      "Results may be incomplete."
   );
+  return { data: allRows.slice(0, limit) };
 }
 
 /**
