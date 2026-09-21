@@ -103,6 +103,9 @@ sentry issue events FRONT-ABC -c next
 
 ```bash
 sentry issue view FRONT-ABC
+
+# Multiple issues in one invocation (space-separated, not commas)
+sentry issue view FRONT-ABC BACK-2
 ```
 
 ```
@@ -135,11 +138,15 @@ sentry issue view my-project#FRONT-ABC
 
 `--json` returns the issue fields at the top level plus the latest event under
 `event`, the resolved `org` slug, related `replayIds`, and `trace` context.
-Prefer this over the human output when parsing programmatically.
+Prefer this over the human output when parsing programmatically. One issue ID
+still returns a single object; multiple IDs return an array of those objects.
 
 ```bash
 # Full JSON (issue fields + latest event + trace/replay context)
 sentry issue view FRONT-ABC --json
+
+# Multiple issues: JSON is an array of the same objects
+sentry issue view FRONT-ABC BACK-2 --json
 
 # Select specific top-level fields to keep output small
 sentry issue view FRONT-ABC --json --fields shortId,title,culprit,count,userCount,permalink

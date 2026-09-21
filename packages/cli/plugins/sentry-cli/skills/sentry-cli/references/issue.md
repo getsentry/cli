@@ -179,9 +179,9 @@ Generate a solution plan using Seer AI
 - `--force - Force new plan even if one exists`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 
-### `sentry issue view <issue>`
+### `sentry issue view <issue...>`
 
-View details of a specific issue
+View details of one or more issues
 
 **Flags:**
 - `-w, --web - Open in browser`
@@ -221,6 +221,9 @@ View details of a specific issue
 ```bash
 sentry issue view FRONT-ABC
 
+# Multiple issues in one invocation (space-separated, not commas)
+sentry issue view FRONT-ABC BACK-2
+
 # Open in browser
 sentry issue view FRONT-ABC -w
 
@@ -230,6 +233,9 @@ sentry issue view my-project#FRONT-ABC
 
 # Full JSON (issue fields + latest event + trace/replay context)
 sentry issue view FRONT-ABC --json
+
+# Multiple issues: JSON is an array of the same objects
+sentry issue view FRONT-ABC BACK-2 --json
 
 # Select specific top-level fields to keep output small
 sentry issue view FRONT-ABC --json --fields shortId,title,culprit,count,userCount,permalink

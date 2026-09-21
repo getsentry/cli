@@ -31,7 +31,7 @@ View commands use **optional positional arguments** for the primary identifier, 
 ```bash
 sentry org view [org-slug] [--json] [-w]                       # works with DSN if no arg
 sentry project view [<org>/<project>] [--json] [-w]            # works with DSN if no arg
-sentry issue view <issue-id> [--json] [-w]                     # issue ID required
+sentry issue view <issue-id> [<issue-id>...] [--json] [-w]     # one or more issue IDs
 sentry event view [<org>/<project>] <event-id> [--json] [-w]   # event ID required
 ```
 

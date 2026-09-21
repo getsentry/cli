@@ -1,14 +1,20 @@
 /**
  * sentry issue view
  *
- * View detailed information about a Sentry issue.
+ * View detailed information about one or more Sentry issues.
  */
 
+import pLimit from "p-limit";
 import type { SentryContext } from "../../context.js";
-import { getLatestEvent, listReplayIdsForIssue } from "../../lib/api-client.js";
-import { spansFlag } from "../../lib/arg-parsing.js";
+import {
+  getLatestEvent,
+  listReplayIdsForIssue,
+  ORG_FANOUT_CONCURRENCY,
+} from "../../lib/api-client.js";
+import { spansFlag, splitNewlineArg } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
+import { ContextError } from "../../lib/errors.js";
 import {
   formatEventDetails,
   formatIssueDetails,
@@ -31,9 +37,12 @@ import {
 import { getSpanTreeLines } from "../../lib/span-tree.js";
 import type { SentryEvent, SentryIssue } from "../../types/index.js";
 import { IssueViewOutputSchema } from "../../types/index.js";
-import { issueIdPositional, resolveIssue } from "./utils.js";
+import { resolveIssue } from "./utils.js";
 
 const log = logger.withTag("issue.view");
+
+/** Usage hint for ContextError messages */
+const USAGE_HINT = "sentry issue view <issue> [<issue>...]";
 
 type ViewFlags = {
   readonly json: boolean;
@@ -78,8 +87,8 @@ async function tryListReplayIdsForIssue(
   }
 }
 
-/** Return type for issue view — includes all data both renderers need */
-type IssueViewData = {
+/** Per-issue payload both renderers need */
+type SingleIssueViewData = {
   org: string | null;
   issue: SentryIssue;
   event: SentryEvent | null;
@@ -87,6 +96,17 @@ type IssueViewData = {
   trace: { traceId: string; spans: unknown[] } | null;
   /** Pre-formatted span tree lines for human output (not serialized) */
   spanTreeLines?: string[];
+};
+
+/**
+ * Output type for issue view — supports both single and multi-issue.
+ * Multi-issue output occurs when agents pass several IDs or paste
+ * newline-separated IDs (same contract as `event view`).
+ */
+type IssueViewData = {
+  issues: SingleIssueViewData[];
+  /** Number of issues originally requested (before partial failures) */
+  requestedCount: number;
 };
 
 const MAX_REPLAY_IDS_SHOWN = 3;
@@ -120,11 +140,9 @@ function formatReplaySection(org: string | null, replayIds: string[]): string {
 }
 
 /**
- * Format issue view data for human-readable terminal output.
- *
- * Renders issue details, optional latest event, and optional span tree.
+ * Format one issue's view data for human-readable terminal output.
  */
-function formatIssueView(data: IssueViewData): string {
+function formatSingleIssueView(data: SingleIssueViewData): string {
   const parts: string[] = [];
   const eventReplayId = data.event
     ? getReplayIdFromEvent(data.event)
@@ -154,40 +172,207 @@ function formatIssueView(data: IssueViewData): string {
 }
 
 /**
- * Transform issue view data for JSON output.
+ * Format issue view data for human-readable terminal output.
  *
- * Flattens the issue as the primary object so that `--fields shortId,title`
- * works directly on issue properties. The `event`, `trace`, `org`, and
- * `replayIds` enrichment data are attached as sibling keys, accessible via
- * `--fields event.id`, `--fields trace.traceId`, or `--fields replayIds`.
- *
- * Without this transform, `--fields shortId` would return `{}` because
- * the raw yield shape is `{ issue, event, trace }` and `shortId` lives
- * inside `issue`.
+ * Renders issue details, optional latest event, and optional span tree.
+ * Multiple issues are separated by horizontal rules.
  */
-function jsonTransformIssueView(
-  data: IssueViewData,
+export function formatIssueView(data: IssueViewData): string {
+  const parts: string[] = [];
+
+  for (const entry of data.issues) {
+    if (parts.length > 0) {
+      parts.push("\n---\n");
+    }
+    parts.push(formatSingleIssueView(entry));
+  }
+
+  return parts.join("\n");
+}
+
+function flattenIssueView(
+  entry: SingleIssueViewData,
   fields?: string[]
-): unknown {
-  const { issue, event, org, replayIds, trace } = data;
+): Record<string, unknown> {
   const result: Record<string, unknown> = {
-    ...issue,
-    event,
-    org,
-    replayIds,
-    trace,
+    ...entry.issue,
+    event: entry.event,
+    org: entry.org,
+    replayIds: entry.replayIds,
+    trace: entry.trace,
   };
   if (fields && fields.length > 0) {
-    return filterFields(result, fields);
+    return filterFields(result, fields) as Record<string, unknown>;
   }
   return result;
 }
 
+/**
+ * Transform issue view data for JSON output.
+ *
+ * For single-issue output, flattens the issue as the primary object so that
+ * `--fields shortId,title` works directly on issue properties. The `event`,
+ * `trace`, `org`, and `replayIds` enrichment data are attached as sibling
+ * keys, accessible via `--fields event.id`, `--fields trace.traceId`, or
+ * `--fields replayIds`.
+ *
+ * For multi-issue output, returns an array of flattened issue objects.
+ * This preserves backward compatibility: single-issue callers still get
+ * a flat object, while multi-issue callers get an array.
+ *
+ * Use requestedCount (not issues.length) to decide the shape so that
+ * partial failures don't non-deterministically switch from array to object.
+ */
+export function jsonTransformIssueView(
+  data: IssueViewData,
+  fields?: string[]
+): unknown {
+  if (data.requestedCount <= 1) {
+    const [first] = data.issues;
+    if (first) {
+      return flattenIssueView(first, fields);
+    }
+  }
+  return data.issues.map((entry) => flattenIssueView(entry, fields));
+}
+
+/**
+ * Expand positional args by splitting each on newlines.
+ *
+ * When an agent pastes `"IOS-1\nIOS-2\nIOS-3"` as a single arg, this
+ * produces `["IOS-1", "IOS-2", "IOS-3"]`. Commas are left intact —
+ * positional values are space-separated, never comma-split.
+ */
+export function expandNewlineArgs(args: string[]): string[] {
+  return args.flatMap(splitNewlineArg);
+}
+
+/**
+ * Expand newlines and drop duplicate tokens, preserving first-seen order.
+ */
+export function collectIssueArgs(args: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const arg of expandNewlineArgs(args)) {
+    if (!seen.has(arg)) {
+      seen.add(arg);
+      result.push(arg);
+    }
+  }
+  return result;
+}
+
+/**
+ * Resolve one issue and attach latest event, replays, and optional span tree.
+ */
+async function buildSingleIssueViewData(
+  issueArg: string,
+  cwd: string,
+  spans: number
+): Promise<SingleIssueViewData> {
+  const { org: orgSlug, issue } = await resolveIssue({
+    issueArg,
+    cwd,
+    command: "view",
+  });
+
+  const [event, relatedReplayIds] = orgSlug
+    ? await Promise.all([
+        tryGetLatestEvent(orgSlug, issue.id),
+        tryListReplayIdsForIssue(orgSlug, issue.id),
+      ])
+    : [undefined, []];
+  const replayIds = collectReplayIds([
+    event ? getReplayIdFromEvent(event) : undefined,
+    ...relatedReplayIds,
+  ]);
+
+  let spanTreeResult: Awaited<ReturnType<typeof getSpanTreeLines>> | undefined;
+  if (orgSlug && event && spans > 0) {
+    spanTreeResult = await getSpanTreeLines(orgSlug, event, spans);
+  }
+
+  let spanTreeLines: string[] | undefined;
+  if (spanTreeResult) {
+    spanTreeLines = spanTreeResult.lines;
+  } else if (!orgSlug) {
+    const msg = "\nOrganization context required to fetch span tree.";
+    spanTreeLines = [isPlainOutput() ? msg : muted(msg)];
+  } else if (!event) {
+    const msg = "\nCould not fetch event to display span tree.";
+    spanTreeLines = [isPlainOutput() ? msg : muted(msg)];
+  }
+
+  const trace = spanTreeResult?.success
+    ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
+    : null;
+
+  return {
+    org: orgSlug ?? null,
+    issue,
+    event: event ?? null,
+    replayIds,
+    trace,
+    spanTreeLines,
+  };
+}
+
+/** Options for fetching multiple issues in parallel */
+type FetchMultipleIssueViewsOptions = {
+  /** Issue identifiers as provided on the command line */
+  issueArgs: string[];
+  /** Working directory for DSN / project detection */
+  cwd: string;
+  /** Span tree depth (`0` skips the fetch) */
+  spans: number;
+};
+
+/**
+ * Fetch multiple issues with bounded concurrency, collecting successes
+ * and warning on failures.
+ *
+ * Uses {@link ORG_FANOUT_CONCURRENCY} (5) to avoid overwhelming the API
+ * when agents paste dozens of IDs. Mirrors `event view`'s fetchMultipleEvents.
+ *
+ * When all fetches fail, re-throws the error from the primary (first) issue.
+ */
+export async function fetchMultipleIssueViews(
+  options: FetchMultipleIssueViewsOptions
+): Promise<SingleIssueViewData[]> {
+  const { issueArgs, cwd, spans } = options;
+  const limit = pLimit(ORG_FANOUT_CONCURRENCY);
+
+  const results = await Promise.allSettled(
+    issueArgs.map((issueArg) =>
+      limit(() => buildSingleIssueViewData(issueArg, cwd, spans))
+    )
+  );
+
+  const views: SingleIssueViewData[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result?.status === "fulfilled") {
+      views.push(result.value);
+    } else if (result?.status === "rejected") {
+      log.warn(`Failed to fetch issue ${issueArgs[i]}: ${result.reason}`);
+    }
+  }
+
+  if (views.length === 0) {
+    const firstResult = results[0];
+    if (firstResult?.status === "rejected") {
+      throw firstResult.reason;
+    }
+  }
+
+  return views;
+}
+
 export const viewCommand = buildCommand({
   docs: {
-    brief: "View details of a specific issue",
+    brief: "View details of one or more issues",
     fullDescription:
-      "View detailed information about a Sentry issue by its ID or short ID. " +
+      "View detailed information about Sentry issues by ID or short ID. " +
       "The latest event is automatically included for full context.\n\n" +
       "Issue formats:\n" +
       "  @latest         - Most recent unresolved issue\n" +
@@ -199,6 +384,8 @@ export const viewCommand = buildCommand({
       "  suffix          - Suffix only: G (requires DSN context)\n" +
       "  numeric         - Numeric ID: 123456789\n" +
       "  org/project#ID  - GitHub-style: my-org/my-project#PROJ-123\n\n" +
+      "Multiple issue IDs can be passed as separate arguments or newline-separated\n" +
+      "within a single argument (handy when piping from other commands).\n\n" +
       "In multi-project mode (after 'issue list'), use alias-suffix format (e.g., 'f-g' " +
       "where 'f' is the project alias shown in the list).",
   },
@@ -208,7 +395,14 @@ export const viewCommand = buildCommand({
     schema: IssueViewOutputSchema,
   },
   parameters: {
-    positional: issueIdPositional,
+    positional: {
+      kind: "array",
+      parameter: {
+        placeholder: "issue",
+        brief: "<issue> [<issue>...] - One or more issue IDs",
+        parse: String,
+      },
+    },
     flags: {
       web: {
         kind: "boolean",
@@ -220,69 +414,43 @@ export const viewCommand = buildCommand({
     },
     aliases: { ...FRESH_ALIASES, w: "web" },
   },
-  async *func(this: SentryContext, flags: ViewFlags, issueArg: string) {
+  async *func(this: SentryContext, flags: ViewFlags, ...args: string[]) {
     applyFreshFlag(flags);
     const { cwd } = this;
 
-    // Resolve issue using shared resolution logic
-    const { org: orgSlug, issue } = await resolveIssue({
-      issueArg,
-      cwd,
-      command: "view",
-    });
+    const issueArgs = collectIssueArgs(args);
+    const [primaryArg] = issueArgs;
+    if (primaryArg === undefined) {
+      throw new ContextError("Issue ID", USAGE_HINT, []);
+    }
 
     if (flags.web) {
+      if (issueArgs.length > 1) {
+        log.warn(
+          "--web only opens the first issue; extra issue IDs are ignored."
+        );
+      }
+      const { issue } = await resolveIssue({
+        issueArg: primaryArg,
+        cwd,
+        command: "view",
+      });
       await openInBrowser(issue.permalink, "issue");
       return;
     }
 
-    // Fetch the latest event for full context (requires org slug)
-    const [event, relatedReplayIds] = orgSlug
-      ? await Promise.all([
-          tryGetLatestEvent(orgSlug, issue.id),
-          tryListReplayIdsForIssue(orgSlug, issue.id),
-        ])
-      : [undefined, []];
-    const replayIds = collectReplayIds([
-      event ? getReplayIdFromEvent(event) : undefined,
-      ...relatedReplayIds,
-    ]);
-
-    // Fetch span tree data (for both JSON and human output)
-    // Skip when spans=0 (disabled via --spans no or --spans 0)
-    let spanTreeResult:
-      | Awaited<ReturnType<typeof getSpanTreeLines>>
-      | undefined;
-    if (orgSlug && event && flags.spans > 0) {
-      spanTreeResult = await getSpanTreeLines(orgSlug, event, flags.spans);
-    }
-
-    // Prepare span tree lines for human output
-    let spanTreeLines: string[] | undefined;
-    if (spanTreeResult) {
-      spanTreeLines = spanTreeResult.lines;
-    } else if (!orgSlug) {
-      const msg = "\nOrganization context required to fetch span tree.";
-      spanTreeLines = [isPlainOutput() ? msg : muted(msg)];
-    } else if (!event) {
-      const msg = "\nCould not fetch event to display span tree.";
-      spanTreeLines = [isPlainOutput() ? msg : muted(msg)];
-    }
-
-    const trace = spanTreeResult?.success
-      ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
-      : null;
+    const views = await fetchMultipleIssueViews({
+      issueArgs,
+      cwd,
+      spans: flags.spans,
+    });
 
     yield new CommandOutput({
-      org: orgSlug ?? null,
-      issue,
-      event: event ?? null,
-      replayIds,
-      trace,
-      spanTreeLines,
+      issues: views,
+      requestedCount: issueArgs.length,
     });
     return {
-      hint: `Tip: Use 'sentry issue explain ${issueArg}' for AI root cause analysis`,
+      hint: `Tip: Use 'sentry issue explain ${primaryArg}' for AI root cause analysis`,
     };
   },
 });
