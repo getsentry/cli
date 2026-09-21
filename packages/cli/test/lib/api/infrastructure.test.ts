@@ -722,26 +722,6 @@ describe("paginate", () => {
   });
 
   test("accumulates across pages when limit exceeds cap", async () => {
-    const spy = vi.fn((perPage: number, cursor: string | undefined) => {
-      const offset = cursor ? Number(cursor) : 0;
-      const data = Array.from({ length: perPage }, (_, i) => offset + i);
-      return Promise.resolve({
-        data,
-        nextCursor: String(offset + perPage),
-      });
-    });
-
-    const result = await paginate({ limit: 150 }, spy);
-    expect(result.data).toEqual(Array.from({ length: 150 }, (_, i) => i));
-    expect(spy).toHaveBeenCalledTimes(2);
-    expect(spy.mock.calls.map(([perPage]) => perPage)).toEqual([
-      API_MAX_PER_PAGE,
-      50,
-    ]);
-    expect(result.nextCursor).toBe("150");
-  });
-
-  test("drops nextCursor when a page overshoots the remaining limit", async () => {
     const spy = vi
       .fn()
       .mockResolvedValueOnce({
@@ -750,15 +730,15 @@ describe("paginate", () => {
       })
       .mockResolvedValueOnce({
         data: Array.from({ length: 100 }, (_, i) => 100 + i),
-        nextCursor: "c2",
+        nextCursor: undefined,
       });
 
     const result = await paginate({ limit: 150 }, spy);
-    expect(result.data).toHaveLength(150);
-    expect(result.nextCursor).toBeUndefined();
-    expect(spy.mock.calls.map(([perPage]) => perPage)).toEqual([
-      API_MAX_PER_PAGE,
-      50,
-    ]);
+    expect(result.data.length).toBe(150);
+    expect(result.data).toEqual(Array.from({ length: 150 }, (_, i) => i));
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(
+      spy.mock.calls.every(([perPage]) => perPage === API_MAX_PER_PAGE)
+    ).toBe(true);
   });
 });

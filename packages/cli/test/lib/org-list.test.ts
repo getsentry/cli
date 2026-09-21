@@ -517,10 +517,11 @@ describe("handleOrgAll", () => {
     expect(result.items).toHaveLength(250);
     expect(listPaginated).toHaveBeenCalledTimes(3);
     expect(listPaginated.mock.calls.map((call) => call[1].perPage)).toEqual([
-      100, 100, 50,
+      100, 100, 100,
     ]);
-    expect(result.hasMore).toBe(true);
-    expect(result.nextCursor).toBe("250");
+    // Overshoot trims and drops nextCursor so navigation cannot skip rows.
+    expect(result.hasMore).toBe(false);
+    expect(result.nextCursor).toBeNull();
   });
 });
 

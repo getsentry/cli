@@ -401,27 +401,23 @@ export type PaginatedResponse<T> = {
  * Calls `fetchPage` repeatedly until enough rows are collected or pages are
  * exhausted. Caps at {@link MAX_PAGINATION_PAGES} to prevent runaway loops.
  *
- * The caller is responsible for choosing `perPage` inside the `fetchPage`
- * closure. The remaining item budget is provided so callers can avoid
- * overshooting the limit while this helper owns cursor chaining and row
- * accumulation.
+ * The caller is responsible for baking `perPage` into the `fetchPage` closure
+ * (typically `Math.min(limit, API_MAX_PER_PAGE)`). This helper only manages
+ * cursor chaining and row accumulation.
  *
- * @param fetchPage - Async function that fetches a page given a cursor and remaining item budget
+ * @param fetchPage - Async function that fetches a single page given a cursor
  * @param limit - Total number of items to collect
  * @param initialCursor - Optional starting cursor
  * @returns Accumulated items with optional nextCursor from the last page
  */
 export async function autoPaginate<T>(
-  fetchPage: (
-    cursor: string | undefined,
-    remaining: number
-  ) => Promise<PaginatedResponse<T[]>>,
+  fetchPage: (cursor: string | undefined) => Promise<PaginatedResponse<T[]>>,
   limit: number,
   initialCursor?: string
 ): Promise<PaginatedResponse<T[]>> {
   // Fast path: single-page fetch when limit fits in one API page
   if (limit <= API_MAX_PER_PAGE) {
-    return fetchPage(initialCursor, limit);
+    return fetchPage(initialCursor);
   }
 
   // Multi-page: accumulate rows across pages up to the requested limit
@@ -429,8 +425,7 @@ export async function autoPaginate<T>(
   let cursor: string | undefined = initialCursor;
 
   for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
-    const remaining = limit - allRows.length;
-    const result = await fetchPage(cursor, remaining);
+    const result = await fetchPage(cursor);
     allRows.push(...result.data);
 
     if (allRows.length >= limit || !result.nextCursor) {
@@ -457,10 +452,8 @@ export async function autoPaginate<T>(
  *
  * Centralizes the two things every list endpoint kept re-deriving by hand and
  * occasionally got wrong (see #1458): capping `per_page` at
- * {@link API_MAX_PER_PAGE} and following cursors until `limit` rows are
- * collected. Each request asks only for the remaining items so a limit that
- * is not a page multiple still yields a usable `nextCursor` (same contract as
- * `listIssuesAllPages`). Callers still own region resolution and
+ * {@link API_MAX_PER_PAGE} and threading `limit` plus the initial cursor into
+ * {@link autoPaginate}. Callers still own region resolution and
  * endpoint-specific query building inside `fetchPage`.
  *
  * @param options - Caller list options; `limit` bounds total rows, `cursor` is the start cursor
@@ -477,9 +470,9 @@ export function paginate<T>(
   defaultLimit = 10
 ): Promise<PaginatedResponse<T[]>> {
   const limit = options.limit ?? defaultLimit;
+  const perPage = Math.min(limit, API_MAX_PER_PAGE);
   return autoPaginate(
-    (cursor, remaining) =>
-      fetchPage(Math.min(remaining, API_MAX_PER_PAGE), cursor),
+    (cursor) => fetchPage(perPage, cursor),
     limit,
     options.cursor
   );
