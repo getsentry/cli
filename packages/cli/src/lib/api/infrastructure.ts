@@ -401,23 +401,27 @@ export type PaginatedResponse<T> = {
  * Calls `fetchPage` repeatedly until enough rows are collected or pages are
  * exhausted. Caps at {@link MAX_PAGINATION_PAGES} to prevent runaway loops.
  *
- * The caller is responsible for baking `perPage` into the `fetchPage` closure
- * (typically `Math.min(limit, API_MAX_PER_PAGE)`). This helper only manages
- * cursor chaining and row accumulation.
+ * The caller is responsible for choosing `perPage` inside the `fetchPage`
+ * closure. The remaining item budget is provided so callers can avoid
+ * overshooting the limit while this helper owns cursor chaining and row
+ * accumulation.
  *
- * @param fetchPage - Async function that fetches a single page given a cursor
+ * @param fetchPage - Async function that fetches a page given a cursor and remaining item budget
  * @param limit - Total number of items to collect
  * @param initialCursor - Optional starting cursor
  * @returns Accumulated items with optional nextCursor from the last page
  */
 export async function autoPaginate<T>(
-  fetchPage: (cursor: string | undefined) => Promise<PaginatedResponse<T[]>>,
+  fetchPage: (
+    cursor: string | undefined,
+    remaining: number
+  ) => Promise<PaginatedResponse<T[]>>,
   limit: number,
   initialCursor?: string
 ): Promise<PaginatedResponse<T[]>> {
   // Fast path: single-page fetch when limit fits in one API page
   if (limit <= API_MAX_PER_PAGE) {
-    return fetchPage(initialCursor);
+    return fetchPage(initialCursor, limit);
   }
 
   // Multi-page: accumulate rows across pages up to the requested limit
@@ -425,7 +429,8 @@ export async function autoPaginate<T>(
   let cursor: string | undefined = initialCursor;
 
   for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
-    const result = await fetchPage(cursor);
+    const remaining = limit - allRows.length;
+    const result = await fetchPage(cursor, remaining);
     allRows.push(...result.data);
 
     if (allRows.length >= limit || !result.nextCursor) {
@@ -463,7 +468,7 @@ export async function autoPaginate<T>(
  * @param defaultLimit - Applied when `options.limit` is undefined
  * @returns Accumulated items with optional nextCursor
  */
-export async function paginate<T>(
+export function paginate<T>(
   options: { limit?: number; cursor?: string },
   fetchPage: (
     perPage: number,
@@ -472,39 +477,12 @@ export async function paginate<T>(
   defaultLimit = 10
 ): Promise<PaginatedResponse<T[]>> {
   const limit = options.limit ?? defaultLimit;
-
-  // Single API page when the limit already fits. Do not keep fetching to
-  // fill a short page: `--limit 25` plus `-c next` is one page at a time.
-  if (limit <= API_MAX_PER_PAGE) {
-    return fetchPage(limit, options.cursor);
-  }
-
-  const allRows: T[] = [];
-  let cursor: string | undefined = options.cursor;
-
-  for (let page = 0; page < MAX_PAGINATION_PAGES; page += 1) {
-    const remaining = limit - allRows.length;
-    const perPage = Math.min(remaining, API_MAX_PER_PAGE);
-    const result = await fetchPage(perPage, cursor);
-    allRows.push(...result.data);
-
-    if (allRows.length >= limit || !result.nextCursor) {
-      // Server ignored per_page and overshot — trim and drop nextCursor so
-      // navigation cannot skip the discarded rows.
-      if (allRows.length > limit) {
-        return { data: allRows.slice(0, limit) };
-      }
-      return { data: allRows, nextCursor: result.nextCursor };
-    }
-
-    cursor = result.nextCursor;
-  }
-
-  logger.warn(
-    `Pagination limit reached (${MAX_PAGINATION_PAGES} pages, ${allRows.length} items). ` +
-      "Results may be incomplete."
+  return autoPaginate(
+    (cursor, remaining) =>
+      fetchPage(Math.min(remaining, API_MAX_PER_PAGE), cursor),
+    limit,
+    options.cursor
   );
-  return { data: allRows.slice(0, limit) };
 }
 
 /**
