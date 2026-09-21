@@ -397,7 +397,7 @@ export const apiRoutes: MockRoute[] = [
           ],
         };
       }
-      return { status: 404, body: notFoundFixture };
+      return { body: [] };
     },
   },
   {

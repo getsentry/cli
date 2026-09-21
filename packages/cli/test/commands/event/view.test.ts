@@ -952,10 +952,11 @@ describe("resolveAutoDetectTarget", () => {
 // ============================================================================
 
 describe("viewCommand.func", () => {
-  let getEventSpy: ReturnType<typeof spyOn>;
-  let getSpanTreeLinesSpy: ReturnType<typeof spyOn>;
-  let openInBrowserSpy: ReturnType<typeof spyOn>;
-  let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
+  let getEventSpy: ReturnType<typeof vi.spyOn>;
+  let getSpanTreeLinesSpy: ReturnType<typeof vi.spyOn>;
+  let openInBrowserSpy: ReturnType<typeof vi.spyOn>;
+  let resolveProjectBySlugSpy: ReturnType<typeof vi.spyOn>;
+  let listEventAttachmentsSpy: ReturnType<typeof vi.spyOn>;
 
   const VALID_EVENT_ID = "abc123def456abc123def456abc123de";
   const sampleEvent: SentryEvent = {
@@ -982,6 +983,9 @@ describe("viewCommand.func", () => {
     getSpanTreeLinesSpy = vi.spyOn(spanTree, "getSpanTreeLines");
     openInBrowserSpy = vi.spyOn(browser, "openInBrowser");
     resolveProjectBySlugSpy = vi.spyOn(resolveTarget, "resolveProjectBySlug");
+    listEventAttachmentsSpy = vi
+      .spyOn(apiClient, "listEventAttachments")
+      .mockResolvedValue([]);
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
@@ -990,6 +994,7 @@ describe("viewCommand.func", () => {
     getSpanTreeLinesSpy.mockRestore();
     openInBrowserSpy.mockRestore();
     resolveProjectBySlugSpy.mockRestore();
+    listEventAttachmentsSpy.mockRestore();
   });
 
   test("logs warning when args appear swapped", async () => {
@@ -1035,6 +1040,121 @@ describe("viewCommand.func", () => {
     );
 
     expect(result?.hint).toBeUndefined();
+  });
+
+  test("includes attachment metadata and download paths in JSON", async () => {
+    getEventSpy.mockResolvedValue(sampleEvent);
+    getSpanTreeLinesSpy.mockResolvedValue({
+      lines: [],
+      spans: null,
+      traceId: null,
+      success: false,
+    });
+    listEventAttachmentsSpy.mockResolvedValue([
+      {
+        id: "attachment-1",
+        event_id: VALID_EVENT_ID,
+        type: "event.attachment",
+        name: "screenshot.png",
+        mimetype: "image/png",
+        dateCreated: "2026-07-16T12:00:00Z",
+        size: 2048,
+        headers: {},
+        sha1: null,
+      },
+    ]);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: true, web: false, spans: 0 },
+      "test-org/test-proj",
+      VALID_EVENT_ID
+    );
+
+    expect(listEventAttachmentsSpy).toHaveBeenCalledWith(
+      "test-org",
+      "test-proj",
+      VALID_EVENT_ID
+    );
+    const output = JSON.parse(
+      stdoutWrite.mock.calls.map((call) => call[0]).join("")
+    );
+    expect(output.attachments).toEqual([
+      expect.objectContaining({
+        id: "attachment-1",
+        name: "screenshot.png",
+        download: `projects/test-org/test-proj/events/${VALID_EVENT_ID}/attachments/attachment-1/?download=1`,
+      }),
+    ]);
+  });
+
+  test("prints a download command in human output", async () => {
+    getEventSpy.mockResolvedValue(sampleEvent);
+    getSpanTreeLinesSpy.mockResolvedValue({
+      lines: [],
+      spans: null,
+      traceId: null,
+      success: false,
+    });
+    listEventAttachmentsSpy.mockResolvedValue([
+      {
+        id: "attachment-1",
+        event_id: VALID_EVENT_ID,
+        type: "event.attachment",
+        name: "screenshot.png",
+        mimetype: "image/png",
+        dateCreated: "2026-07-16T12:00:00Z",
+        size: 2048,
+        headers: {},
+        sha1: null,
+      },
+    ]);
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: false, web: false, spans: 0 },
+      "test-org/test-proj",
+      VALID_EVENT_ID
+    );
+
+    const output = stdoutWrite.mock.calls
+      .map((call) => String(call[0]))
+      .join("");
+    expect(output).toContain("screenshot.png");
+    expect(output).toContain("sentry api");
+    expect(output).toContain("?download=1");
+  });
+
+  test("keeps event output when attachment listing fails", async () => {
+    getEventSpy.mockResolvedValue(sampleEvent);
+    getSpanTreeLinesSpy.mockResolvedValue({
+      lines: [],
+      spans: null,
+      traceId: null,
+      success: false,
+    });
+    listEventAttachmentsSpy.mockRejectedValue(
+      new Error("attachments unavailable")
+    );
+
+    const { context, stdoutWrite } = createMockContext();
+    const func = await viewCommand.loader();
+    await func.call(
+      context,
+      { json: true, web: false, spans: 0 },
+      "test-org/test-proj",
+      VALID_EVENT_ID
+    );
+
+    const output = JSON.parse(
+      stdoutWrite.mock.calls.map((call) => call[0]).join("")
+    );
+    expect(output.eventID).toBe(VALID_EVENT_ID);
+    expect(output.attachments).toEqual([]);
   });
 
   test("auto-redirects issue short ID in two-arg form via issueShortId path", async () => {
@@ -1645,6 +1765,33 @@ describe("formatEventView", () => {
     expect(result).toContain("span-1 (50ms)");
     expect(result).toContain("span-2 (20ms)");
   });
+
+  test("renders attachments when present", () => {
+    const result = formatEventView({
+      events: [
+        {
+          event: mockEvent("abc123"),
+          trace: null,
+          attachments: [
+            {
+              id: "attachment-1",
+              event_id: "abc123",
+              type: "event.attachment",
+              name: "screenshot.png",
+              mimetype: "image/png",
+              dateCreated: "2026-07-16T12:00:00Z",
+              size: 2048,
+              headers: {},
+              sha1: null,
+            },
+          ],
+        },
+      ],
+      requestedCount: 1,
+    });
+    expect(result).toContain("screenshot.png");
+    expect(result).toContain("attachment-1");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1719,6 +1866,53 @@ describe("jsonTransformEventView", () => {
       ["eventID"]
     );
     expect(result).toEqual([{ eventID: "event1" }, { eventID: "event2" }]);
+  });
+
+  test("includes attachments with download paths", () => {
+    const result = jsonTransformEventView({
+      events: [
+        {
+          event: mockEvent("abc123"),
+          trace: null,
+          org: "acme",
+          project: "frontend",
+          attachments: [
+            {
+              id: "attachment-1",
+              event_id: "abc123",
+              type: "event.attachment",
+              name: "screenshot.png",
+              mimetype: "image/png",
+              dateCreated: "2026-07-16T12:00:00Z",
+              size: 2048,
+              headers: {},
+              sha1: null,
+            },
+          ],
+        },
+      ],
+      requestedCount: 1,
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        eventID: "abc123",
+        attachments: [
+          expect.objectContaining({
+            id: "attachment-1",
+            download:
+              "projects/acme/frontend/events/abc123/attachments/attachment-1/?download=1",
+          }),
+        ],
+      })
+    );
+  });
+
+  test("emits an empty attachments array when none were fetched", () => {
+    const result = jsonTransformEventView({
+      events: [{ event: mockEvent("abc123"), trace: null }],
+      requestedCount: 1,
+    });
+    expect(result).toEqual(expect.objectContaining({ attachments: [] }));
   });
 });
 

@@ -4,6 +4,7 @@
  * View detailed information about a Sentry event.
  */
 
+import type { EventAttachmentDetailsResponse } from "@sentry/api";
 import pLimit from "p-limit";
 import type { SentryContext } from "../../context.js";
 import {
@@ -33,6 +34,13 @@ import {
   ResolutionError,
   ValidationError,
 } from "../../lib/errors.js";
+import {
+  attachmentDownloadHint,
+  eventProjectSlug,
+  formatEventAttachments,
+  jsonEventAttachments,
+  tryListEventAttachments,
+} from "../../lib/event-attachments.js";
 import { formatEventDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
@@ -78,6 +86,10 @@ type SingleEventViewData = {
   trace: { traceId: string; spans: unknown[] } | null;
   /** Pre-formatted span tree lines for human output (not serialized) */
   spanTreeLines?: string[];
+  /** Attachment metadata; omitted from human output when empty */
+  attachments?: EventAttachmentDetailsResponse[];
+  org?: string;
+  project?: string;
 };
 
 /**
@@ -109,6 +121,11 @@ export function formatEventView(data: EventViewData): string {
     if (entry.spanTreeLines && entry.spanTreeLines.length > 0) {
       parts.push(entry.spanTreeLines.join("\n"));
     }
+
+    const attachments = formatEventAttachments(entry.attachments ?? []);
+    if (attachments) {
+      parts.push(attachments);
+    }
   }
 
   return parts.join("\n");
@@ -119,7 +136,9 @@ export function formatEventView(data: EventViewData): string {
  *
  * For single-event output, flattens the event as the primary object so that
  * `--fields eventID,title` works directly on event properties. The `trace`
- * enrichment data is attached as a nested key.
+ * enrichment data is attached as a nested key. Attachment metadata is always
+ * present as `attachments` (empty array when none), with a `download` path
+ * for `sentry api` when org and project are known.
  *
  * For multi-event output, returns an array of flattened event objects.
  * This preserves backward compatibility: single-event callers still get
@@ -133,6 +152,12 @@ export function jsonTransformEventView(
     const result: Record<string, unknown> = {
       ...entry.event,
       trace: entry.trace,
+      attachments: jsonEventAttachments(
+        entry.org,
+        entry.project,
+        entry.event.eventID,
+        entry.attachments ?? []
+      ),
     };
     if (fields && fields.length > 0) {
       return filterFields(result, fields) as Record<string, unknown>;
@@ -164,6 +189,26 @@ function replayHint(org: string, event: SentryEvent): string | undefined {
 function joinHintParts(parts: Array<string | undefined>): string | undefined {
   const hints = parts.filter((part): part is string => Boolean(part));
   return hints.length > 0 ? hints.join(" | ") : undefined;
+}
+
+function viewOutputHint(
+  org: string,
+  data: SingleEventViewData | undefined,
+  extra?: string
+): string | undefined {
+  if (!data) {
+    return extra;
+  }
+  return joinHintParts([
+    extra,
+    replayHint(org, data.event),
+    attachmentDownloadHint(
+      org,
+      data.project,
+      data.event.eventID,
+      data.attachments ?? []
+    ),
+  ]);
 }
 
 /** Usage hint for ContextError messages */
@@ -656,19 +701,33 @@ export async function resolveAutoDetectTarget(
  * @param org - Organization slug (needed for span tree API call)
  * @param event - Already-fetched event
  * @param spans - Span tree depth (0 = skip)
+ * @param project - Project slug for attachment listing, when already resolved
  */
 async function buildSingleEventViewData(
   org: string,
   event: SentryEvent,
-  spans: number
+  spans: number,
+  project?: string
 ): Promise<SingleEventViewData> {
-  const spanTreeResult =
-    spans > 0 ? await getSpanTreeLines(org, event, spans) : undefined;
+  const projectSlug = project ?? eventProjectSlug(event);
+  const [spanTreeResult, attachments] = await Promise.all([
+    spans > 0
+      ? getSpanTreeLines(org, event, spans)
+      : Promise.resolve(undefined),
+    tryListEventAttachments(org, projectSlug, event.eventID),
+  ]);
   const trace =
     spanTreeResult?.success && spanTreeResult.traceId
       ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans ?? [] }
       : null;
-  return { event, trace, spanTreeLines: spanTreeResult?.lines };
+  return {
+    event,
+    trace,
+    spanTreeLines: spanTreeResult?.lines,
+    attachments,
+    org,
+    project: projectSlug,
+  };
 }
 
 /**
@@ -678,10 +737,11 @@ async function buildSingleEventViewData(
 async function fetchLatestEventData(
   org: string,
   issueId: string,
-  spans: number
+  spans: number,
+  project?: string
 ): Promise<SingleEventViewData> {
   const event = await getLatestEvent(org, issueId);
-  return buildSingleEventViewData(org, event, spans);
+  return buildSingleEventViewData(org, event, spans, project);
 }
 
 /**
@@ -835,7 +895,7 @@ async function resolveIssueShortIdEvent(
   spans: number
 ): Promise<SingleEventViewData> {
   const issue = await getIssueByShortId(org, issueShortId);
-  return fetchLatestEventData(org, issue.id, spans);
+  return fetchLatestEventData(org, issue.id, spans, issue.project?.slug);
 }
 
 /** Result from an issue-based shortcut (URL or short ID) */
@@ -880,7 +940,11 @@ async function resolveIssueIdShortcut(
   }
   const org = resolved.org;
   log.info(`Fetching latest event for issue ${issueId}...`);
-  const data = await fetchLatestEventData(org, issueId, spans);
+  const project =
+    parsed.type === ProjectSpecificationType.Explicit
+      ? parsed.project
+      : undefined;
+  const data = await fetchLatestEventData(org, issueId, spans, project);
   return { org, data, hint: `Showing latest event for issue ${issueId}` };
 }
 
@@ -938,7 +1002,12 @@ async function resolveIssueShortcut(
         );
       }
       const event = await getEvent(resolved.org, issueProject, eventId);
-      const data = await buildSingleEventViewData(resolved.org, event, spans);
+      const data = await buildSingleEventViewData(
+        resolved.org,
+        event,
+        spans,
+        issueProject
+      );
       return {
         org: resolved.org,
         data,
@@ -1071,7 +1140,10 @@ export const viewCommand = buildCommand({
       "  sentry event view <org>/<proj> <event-id> [<id>...]  # explicit org and project\n" +
       "  sentry event view <project> <event-id> [<id>...]     # find project across all orgs\n\n" +
       "Multiple event IDs can be passed as separate arguments or newline-separated\n" +
-      "within a single argument (handy when piping from other commands).",
+      "within a single argument (handy when piping from other commands).\n\n" +
+      "Attachment metadata (id, name, size, mimetype) is included when available.\n" +
+      "Download bytes with:\n" +
+      '  sentry api "projects/<org>/<project>/events/<event-id>/attachments/<id>/?download=1" > file',
   },
   output: {
     human: formatEventView,
@@ -1145,10 +1217,11 @@ export const viewCommand = buildCommand({
         requestedCount: 1,
       });
       return {
-        hint: joinHintParts([
-          issueShortcut.hint,
-          replayHint(issueShortcut.org, issueShortcut.data.event),
-        ]),
+        hint: viewOutputHint(
+          issueShortcut.org,
+          issueShortcut.data,
+          issueShortcut.hint
+        ),
       };
     }
 
@@ -1196,7 +1269,7 @@ export const viewCommand = buildCommand({
     // Build view data for each event in parallel
     const viewDataEntries = await Promise.all(
       fetchedEvents.map((event) =>
-        buildSingleEventViewData(target.org, event, flags.spans)
+        buildSingleEventViewData(target.org, event, flags.spans, target.project)
       )
     );
 
@@ -1205,12 +1278,11 @@ export const viewCommand = buildCommand({
       requestedCount: allEventIds.length,
     });
     return {
-      hint: joinHintParts([
-        target.detectedFrom
-          ? `Detected from ${target.detectedFrom}`
-          : undefined,
-        fetchedEvents[0] ? replayHint(target.org, fetchedEvents[0]) : undefined,
-      ]),
+      hint: viewOutputHint(
+        target.org,
+        viewDataEntries[0],
+        target.detectedFrom ? `Detected from ${target.detectedFrom}` : undefined
+      ),
     };
   },
 });
