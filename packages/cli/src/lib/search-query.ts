@@ -10,6 +10,10 @@
  * - **OR**: Attempted rewrite to in-list syntax (`key:[val1,val2]`)
  *   when all OR operands share the same qualifier key. Throws a
  *   {@link ValidationError} when the rewrite is not possible.
+ * - **`project:<digits>`**: `project` is the slug. Numeric ids belong on
+ *   `project_id`. Agents often paste `project:4511…` (CLI-FA). Rewritten
+ *   with a warning. Slugs, `project_id:…`, and namespaced keys
+ *   (`bolt.project_id`) are left alone.
  *
  * Parsing uses a pre-compiled PEG parser generated from
  * `script/search-query.pegjs` (a simplified version of Sentry's
@@ -346,21 +350,30 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
   // These fix common patterns that agents/users produce, regardless of
   // whether the PEG parser would accept them.
   const normalized = normalizeQuery(query);
+  const withNumericProject = rewriteNumericProjectFilters(normalized);
 
   let nodes: SearchNode[];
   // biome-ignore lint/plugin: grandfathered silent catch — see #1531; drain by adding log.debug()/log.warn() or re-throwing.
   try {
-    nodes = parse(normalized);
+    nodes = parse(withNumericProject);
   } catch {
     // PEG parse still failed after normalization — pass through to the
     // API which returns a proper 400 with actionable details.
-    return normalized;
+    return withNumericProject;
   }
 
-  if (normalized !== query) {
-    log.warn(
-      `Auto-repaired search query syntax. Running query: "${normalized}"`
-    );
+  if (withNumericProject !== query) {
+    const notes: string[] = [];
+    if (normalized !== query) {
+      notes.push("Auto-repaired search query syntax.");
+    }
+    if (withNumericProject !== normalized) {
+      notes.push(
+        "`project` is the slug; numeric ids use project_id. Rewrote numeric project: filters."
+      );
+    }
+    notes.push(`Running query: "${withNumericProject}"`);
+    log.warn(notes.join(" "));
   }
 
   // Check for OR inside paren groups first — these are opaque and can't
@@ -394,7 +407,7 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
     return sanitized;
   }
 
-  return normalized;
+  return withNumericProject;
 }
 
 /**
@@ -512,12 +525,38 @@ const BALANCED_BRACKET_RE = /\[[^\]]*\]/g;
 const TRAILING_LIST_COMMA_RE = /,\s*\]$/;
 
 /**
+ * `project:<digits>` as its own filter — not `bolt.project`, not `project_id`.
+ * Issue search treats `project` as a slug and `project_id` as a numeric id.
+ */
+const PROJECT_NUMERIC_RE = /(^|\s)(!?)project:(\d+)(?=\s|$)/gi;
+
+/** `project:[123,456]` — every list value must be digits. */
+const PROJECT_NUMERIC_LIST_RE = /(^|\s)(!?)project:\[(\d+(?:\s*,\s*\d+)*)\]/gi;
+
+/**
  * Pattern that splits a query into alternating unquoted / quoted segments.
  *
  * Matches double-quoted strings (including escaped quotes inside them).
  * Between matches is unquoted text that can be safely normalized.
  */
 const QUOTED_SEGMENT_RE = /"(?:[^"\\]|\\.)*"/g;
+
+/**
+ * Rewrite `project:<digits>` / `project:[digits,…]` to `project_id`.
+ *
+ * `project` is the slug; a numeric value is almost always a pasted Sentry
+ * project id (CLI-FA). Namespaced keys (`bolt.project:…`) and slugs are
+ * untouched. Quoted regions are preserved via {@link transformUnquoted}.
+ */
+function rewriteNumericProjectFilters(query: string): string {
+  return transformUnquoted(query, (segment) => {
+    PROJECT_NUMERIC_RE.lastIndex = 0;
+    PROJECT_NUMERIC_LIST_RE.lastIndex = 0;
+    return segment
+      .replace(PROJECT_NUMERIC_RE, "$1$2project_id:$3")
+      .replace(PROJECT_NUMERIC_LIST_RE, "$1$2project_id:[$3]");
+  });
+}
 
 /**
  * Normalize a search query by applying a pipeline of text repairs.
