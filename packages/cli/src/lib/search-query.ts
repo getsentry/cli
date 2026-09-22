@@ -362,19 +362,7 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
     return withNumericProject;
   }
 
-  if (withNumericProject !== query) {
-    const notes: string[] = [];
-    if (normalized !== query) {
-      notes.push("Auto-repaired search query syntax.");
-    }
-    if (withNumericProject !== normalized) {
-      notes.push(
-        "`project` is the slug; numeric ids use project_id. Rewrote numeric project: filters."
-      );
-    }
-    notes.push(`Running query: "${withNumericProject}"`);
-    log.warn(notes.join(" "));
-  }
+  const notes = preParseRewriteNotes(query, normalized, withNumericProject);
 
   // Check for OR inside paren groups first — these are opaque and can't
   // be rewritten. Must throw even if top-level OR would be rewritable,
@@ -395,37 +383,70 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
   if (hasOr) {
     // Strip AND nodes before OR rewrite
     const withoutAnd = hasAnd ? stripAndNodes(nodes) : nodes;
-    return handleOr(withoutAnd, hasAnd);
+    const result = handleOr(withoutAnd, hasAnd, notes);
+    warnRunningQuery(notes, result);
+    return result;
   }
 
   if (hasAnd) {
     const sanitized = serializeNodes(stripAndNodes(nodes));
-    log.warn(
-      "Sentry search implicitly ANDs terms — removed explicit AND operator. " +
-        `Running query: "${sanitized}"`
+    notes.push(
+      "Sentry search implicitly ANDs terms — removed explicit AND operator."
     );
+    warnRunningQuery(notes, sanitized);
     return sanitized;
   }
 
+  warnRunningQuery(notes, withNumericProject);
   return withNumericProject;
+}
+
+/** Notes from text-layer rewrites that run before PEG parse. */
+function preParseRewriteNotes(
+  query: string,
+  normalized: string,
+  withNumericProject: string
+): string[] {
+  const notes: string[] = [];
+  if (normalized !== query) {
+    notes.push("Auto-repaired search query syntax.");
+  }
+  if (withNumericProject !== normalized) {
+    notes.push(
+      "`project` is the slug; numeric ids use project_id. Rewrote numeric project: filters."
+    );
+  }
+  return notes;
+}
+
+/**
+ * One warning after every successful rewrite. Reasons on the first
+ * line; the query that will actually be sent on the second. Skip if
+ * nothing changed.
+ */
+function warnRunningQuery(notes: string[], result: string): void {
+  if (notes.length === 0) {
+    return;
+  }
+  log.warn(`${notes.join(" ")}\nRunning query: "${result}"`);
 }
 
 /**
  * Handle the OR rewrite path — extracted to keep `sanitizeQuery` under
  * the cognitive complexity limit.
  */
-function handleOr(nodes: SearchNode[], hasAnd: boolean): string {
+function handleOr(
+  nodes: SearchNode[],
+  hasAnd: boolean,
+  notes: string[]
+): string {
   const rewritten = tryRewriteOr(nodes);
   if (rewritten) {
-    const result = serializeNodes(rewritten);
-    const notes: string[] = [];
     notes.push("Rewrote OR using in-list syntax: key:[val1,val2].");
     if (hasAnd) {
       notes.push("Also removed explicit AND (implicit in Sentry search).");
     }
-    notes.push(`Running query: "${result}"`);
-    log.warn(notes.join(" "));
-    return result;
+    return serializeNodes(rewritten);
   }
 
   throw new ValidationError(
