@@ -722,6 +722,8 @@ describe("paginate", () => {
   });
 
   test("accumulates across pages when limit exceeds cap", async () => {
+    // paginate always requests a full API_MAX_PER_PAGE page; autoPaginate
+    // trims the overshoot and drops nextCursor so no rows are skipped.
     const spy = vi.fn((perPage: number, cursor: string | undefined) => {
       const offset = cursor ? Number(cursor) : 0;
       const data = Array.from({ length: perPage }, (_, i) => offset + i);
@@ -735,9 +737,10 @@ describe("paginate", () => {
     expect(result.data).toEqual(Array.from({ length: 150 }, (_, i) => i));
     expect(spy.mock.calls.map(([perPage]) => perPage)).toEqual([
       API_MAX_PER_PAGE,
-      50,
+      API_MAX_PER_PAGE,
     ]);
-    expect(result.nextCursor).toBe("150");
+    // Overshoot (200 fetched, 150 wanted) → nextCursor dropped.
+    expect(result.nextCursor).toBeUndefined();
   });
 
   test("drops nextCursor when a page exceeds the remaining budget", async () => {
@@ -757,7 +760,7 @@ describe("paginate", () => {
     expect(result.nextCursor).toBeUndefined();
     expect(spy.mock.calls.map(([perPage]) => perPage)).toEqual([
       API_MAX_PER_PAGE,
-      50,
+      API_MAX_PER_PAGE,
     ]);
   });
 });
