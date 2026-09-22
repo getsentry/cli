@@ -705,6 +705,32 @@ describe("handleProjectSearch", () => {
     expect(result.items[0]!.orgSlug).toBe("org-a");
   });
 
+  test("reuses fuzzy project data without a second slug search", async () => {
+    const listForProject = vi.fn(() => Promise.resolve([]));
+    const config = makeConfig({ listForProject });
+
+    const result = await handleProjectSearch(config, "app-front", {
+      flags: { limit: 10, json: false },
+      projectSearchResolution: {
+        kind: "fuzzy-project",
+        org: "org-a",
+        project: "app-frontend",
+        projectData: {
+          id: "1",
+          slug: "app-frontend",
+          name: "App Frontend",
+          orgSlug: "org-a",
+        },
+        displaySlug: "app-front",
+        scopedOrg: undefined,
+      },
+    });
+
+    expect(findProjectsBySlugSpy).not.toHaveBeenCalled();
+    expect(listForProject).toHaveBeenCalledWith("org-a", "app-frontend");
+    expect(result.hint).toContain("app-frontend");
+  });
+
   test("without listForProject: fetches from parent org (entity is org-scoped)", async () => {
     findProjectsBySlugSpy.mockResolvedValue({
       projects: [
@@ -1182,7 +1208,8 @@ describe("dispatchOrgScopedList", () => {
       expect(findProjectsBySlugMock).toHaveBeenCalledTimes(1);
       expect(projectHandler).toHaveBeenCalledWith(
         expect.objectContaining({
-          projectSearchResult: expect.objectContaining({
+          projectSearchResolution: expect.objectContaining({
+            kind: "projects",
             projects: [
               expect.objectContaining({
                 slug: "acme-corp",
@@ -1192,6 +1219,28 @@ describe("dispatchOrgScopedList", () => {
           }),
         })
       );
+    });
+
+    test("rejects an invalid cursor before fuzzy project fan-out", async () => {
+      findProjectsBySlugMock.mockResolvedValue({
+        projects: [],
+        orgs: [{ slug: "acme", id: "1", name: "Acme" }],
+      });
+      const listProjectsMock = vi.mocked(apiClient.listProjects);
+      listProjectsMock.mockClear();
+
+      await expect(
+        dispatchOrgScopedList({
+          config: makeConfig(),
+          cwd: "/tmp",
+          flags: { limit: 10, json: false, cursor: "next" },
+          parsed: { type: "project-search", projectSlug: "missing" },
+          orgSlugMatchBehavior: "redirect",
+        })
+      ).rejects.toThrow(ValidationError);
+
+      expect(findProjectsBySlugMock).toHaveBeenCalledTimes(1);
+      expect(listProjectsMock).not.toHaveBeenCalled();
     });
 
     test("error throws ResolutionError when no project matches an organization slug", async () => {

@@ -72,7 +72,7 @@ vi.mock("../../../src/lib/resolve-target.js", async (importOriginal) => {
 
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTarget from "../../../src/lib/resolve-target.js";
-import { resolveProjectBySlug } from "../../../src/lib/resolve-target.js";
+import { resolveProjectBoundSlug } from "../../../src/lib/resolve-target.js";
 
 vi.mock("../../../src/lib/span-tree.js", async (importOriginal) => {
   const actual =
@@ -487,7 +487,7 @@ describe("parsePositionalArgs", () => {
   });
 });
 
-describe("resolveProjectBySlug", () => {
+describe("resolveProjectBoundSlug", () => {
   const HINT = "sentry event view <org>/<project> <event-id>";
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 
@@ -503,7 +503,7 @@ describe("resolveProjectBySlug", () => {
     test("throws ResolutionError when project not found", async () => {
       findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
 
-      await expect(resolveProjectBySlug("my-project", HINT)).rejects.toThrow(
+      await expect(resolveProjectBoundSlug("my-project", HINT)).rejects.toThrow(
         ResolutionError
       );
     });
@@ -512,7 +512,7 @@ describe("resolveProjectBySlug", () => {
       findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
 
       try {
-        await resolveProjectBySlug("frontend", HINT);
+        await resolveProjectBoundSlug("frontend", HINT);
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ResolutionError);
@@ -535,7 +535,7 @@ describe("resolveProjectBySlug", () => {
     });
 
     try {
-      await resolveProjectBySlug("acme-corp", HINT);
+      await resolveProjectBoundSlug("acme-corp", HINT);
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ResolutionError);
@@ -552,7 +552,7 @@ describe("resolveProjectBySlug", () => {
     });
 
     try {
-      await resolveProjectBySlug("sentry", HINT);
+      await resolveProjectBoundSlug("sentry", HINT);
       expect.unreachable("Should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(ResolutionError);
@@ -574,7 +574,7 @@ describe("resolveProjectBySlug", () => {
         orgs: [],
       });
 
-      await expect(resolveProjectBySlug("frontend", HINT)).rejects.toThrow(
+      await expect(resolveProjectBoundSlug("frontend", HINT)).rejects.toThrow(
         ValidationError
       );
     });
@@ -589,7 +589,7 @@ describe("resolveProjectBySlug", () => {
       });
 
       try {
-        await resolveProjectBySlug(
+        await resolveProjectBoundSlug(
           "frontend",
           HINT,
           "sentry event view <org>/frontend event-456"
@@ -616,7 +616,7 @@ describe("resolveProjectBySlug", () => {
       });
 
       try {
-        await resolveProjectBySlug(
+        await resolveProjectBoundSlug(
           "api",
           HINT,
           "sentry event view <org>/api abc123"
@@ -641,7 +641,7 @@ describe("resolveProjectBySlug", () => {
         orgs: [],
       });
 
-      const result = await resolveProjectBySlug("backend", HINT);
+      const result = await resolveProjectBoundSlug("backend", HINT);
 
       expect(result).toMatchObject({
         org: "my-company",
@@ -663,7 +663,7 @@ describe("resolveProjectBySlug", () => {
         orgs: [],
       });
 
-      const result = await resolveProjectBySlug("mobile-app", HINT);
+      const result = await resolveProjectBoundSlug("mobile-app", HINT);
 
       expect(result.org).toBe("acme-industries");
     });
@@ -681,7 +681,7 @@ describe("resolveProjectBySlug", () => {
         orgs: [],
       });
 
-      const result = await resolveProjectBySlug("web-frontend", HINT);
+      const result = await resolveProjectBoundSlug("web-frontend", HINT);
 
       expect(result.project).toBe("web-frontend");
     });
@@ -692,7 +692,7 @@ describe("resolveProjectBySlug", () => {
       findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
 
       try {
-        await resolveProjectBySlug("7275560680", HINT);
+        await resolveProjectBoundSlug("7275560680", HINT);
         expect.unreachable("Should have thrown");
       } catch (error) {
         expect(error).toBeInstanceOf(ResolutionError);
@@ -717,7 +717,7 @@ describe("resolveProjectBySlug", () => {
         orgs: [],
       });
 
-      const result = await resolveProjectBySlug("7275560680", HINT);
+      const result = await resolveProjectBoundSlug("7275560680", HINT);
       expect(result).toMatchObject({ org: "acme", project: "my-frontend" });
       expect(result.projectData).toBeDefined();
     });
@@ -728,13 +728,16 @@ describe("resolveEventTarget", () => {
   let resolveEventInOrgSpy: ReturnType<typeof spyOn>;
   let findEventAcrossOrgsSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
-  let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
+  let resolveProjectBoundSlugSpy: ReturnType<typeof spyOn>;
 
   beforeEach(async () => {
     resolveEventInOrgSpy = vi.spyOn(apiClient, "resolveEventInOrg");
     findEventAcrossOrgsSpy = vi.spyOn(apiClient, "findEventAcrossOrgs");
     resolveOrgAndProjectSpy = vi.spyOn(resolveTarget, "resolveOrgAndProject");
-    resolveProjectBySlugSpy = vi.spyOn(resolveTarget, "resolveProjectBySlug");
+    resolveProjectBoundSlugSpy = vi.spyOn(
+      resolveTarget,
+      "resolveProjectBoundSlug"
+    );
     setOrgRegion("acme", DEFAULT_SENTRY_URL);
   });
 
@@ -742,7 +745,7 @@ describe("resolveEventTarget", () => {
     resolveEventInOrgSpy.mockRestore();
     findEventAcrossOrgsSpy.mockRestore();
     resolveOrgAndProjectSpy.mockRestore();
-    resolveProjectBySlugSpy.mockRestore();
+    resolveProjectBoundSlugSpy.mockRestore();
   });
 
   test("returns explicit target directly", async () => {
@@ -764,8 +767,8 @@ describe("resolveEventTarget", () => {
     });
   });
 
-  test("resolves project search via resolveProjectBySlug", async () => {
-    resolveProjectBySlugSpy.mockResolvedValue({
+  test("resolves project search via resolveProjectBoundSlug", async () => {
+    resolveProjectBoundSlugSpy.mockResolvedValue({
       org: "acme",
       project: "frontend",
     });
@@ -955,7 +958,7 @@ describe("viewCommand.func", () => {
   let getEventSpy: ReturnType<typeof spyOn>;
   let getSpanTreeLinesSpy: ReturnType<typeof spyOn>;
   let openInBrowserSpy: ReturnType<typeof spyOn>;
-  let resolveProjectBySlugSpy: ReturnType<typeof spyOn>;
+  let resolveProjectBoundSlugSpy: ReturnType<typeof spyOn>;
 
   const VALID_EVENT_ID = "abc123def456abc123def456abc123de";
   const sampleEvent: SentryEvent = {
@@ -981,7 +984,10 @@ describe("viewCommand.func", () => {
     getEventSpy = vi.spyOn(apiClient, "getEvent");
     getSpanTreeLinesSpy = vi.spyOn(spanTree, "getSpanTreeLines");
     openInBrowserSpy = vi.spyOn(browser, "openInBrowser");
-    resolveProjectBySlugSpy = vi.spyOn(resolveTarget, "resolveProjectBySlug");
+    resolveProjectBoundSlugSpy = vi.spyOn(
+      resolveTarget,
+      "resolveProjectBoundSlug"
+    );
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
@@ -989,7 +995,7 @@ describe("viewCommand.func", () => {
     getEventSpy.mockRestore();
     getSpanTreeLinesSpy.mockRestore();
     openInBrowserSpy.mockRestore();
-    resolveProjectBySlugSpy.mockRestore();
+    resolveProjectBoundSlugSpy.mockRestore();
   });
 
   test("logs warning when args appear swapped", async () => {
@@ -1068,8 +1074,8 @@ describe("viewCommand.func", () => {
       "95fd7f5a"
     );
 
-    // Should NOT go through resolveProjectBySlug (the old buggy path)
-    expect(resolveProjectBySlugSpy).not.toHaveBeenCalled();
+    // Should NOT go through resolveProjectBoundSlug (the old buggy path)
+    expect(resolveProjectBoundSlugSpy).not.toHaveBeenCalled();
     // Should resolve via issue short ID path
     expect(getIssueByShortIdSpy).toHaveBeenCalledWith("cam-org", "CAM-82X");
     expect(getLatestEventSpy).toHaveBeenCalled();

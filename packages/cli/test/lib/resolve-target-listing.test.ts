@@ -1,8 +1,8 @@
 /**
  * Tests for new resolve-target listing functions
  *
- * Tests for resolveOrgsForListing, resolveOrgProjectTarget, and
- * resolveOrgProjectFromArg added in the pagination PR.
+ * Tests for resolveOrgsForListing, resolveProjectBoundTarget, and
+ * resolveProjectBoundFromArg added in the pagination PR.
  * Uses spyOn to mock dependencies without real HTTP calls.
  */
 
@@ -67,15 +67,105 @@ vi.mock("../../src/lib/resolve-target.js", async (importOriginal) => {
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as resolveTargetModule from "../../src/lib/resolve-target.js";
 import {
-  resolveOrgOptionalProjectTarget,
-  resolveOrgProjectFromArg,
+  classifyProjectSearchTarget,
+  resolveOrgOptionalTarget,
   resolveOrgProjectOrGuide,
-  resolveOrgProjectTarget,
   resolveOrgsForListing,
-  resolveTargetsFromParsedArg,
+  resolveProjectBoundFromArg,
+  resolveProjectBoundTarget,
+  resolveProjectBoundTargets,
 } from "../../src/lib/resolve-target.js";
 
 const CWD = "/tmp/test-project";
+
+describe("classifyProjectSearchTarget", () => {
+  let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
+  let listProjectsSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
+    listProjectsSpy = vi.spyOn(apiClient, "listProjects");
+  });
+
+  afterEach(() => {
+    findProjectsBySlugSpy.mockRestore();
+    listProjectsSpy.mockRestore();
+  });
+
+  test("prefers an exact project over an organization with the same slug", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [
+        {
+          id: "1",
+          slug: "acme",
+          name: "Acme Project",
+          orgSlug: "other-org",
+        },
+      ],
+      orgs: [
+        { slug: "acme", name: "Acme Org" },
+        { slug: "other-org", name: "Other Org" },
+      ],
+    });
+
+    const result = await classifyProjectSearchTarget({
+      type: "project-search",
+      projectSlug: "acme",
+    });
+
+    expect(result.kind).toBe("projects");
+  });
+
+  test("returns an exact organization only after the project search misses", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [],
+      orgs: [{ slug: "acme", name: "Acme Org" }],
+    });
+
+    const result = await classifyProjectSearchTarget({
+      type: "project-search",
+      projectSlug: "acme",
+    });
+
+    expect(result).toMatchObject({ kind: "organization", org: "acme" });
+  });
+
+  test("recovers one fuzzy project after exact project and org misses", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [],
+      orgs: [{ slug: "acme", name: "Acme Org" }],
+    });
+    listProjectsSpy.mockResolvedValue([
+      { id: "1", slug: "app-frontend", name: "App Frontend" },
+    ]);
+
+    const result = await classifyProjectSearchTarget({
+      type: "project-search",
+      projectSlug: "app-front",
+    });
+
+    expect(result).toMatchObject({
+      kind: "fuzzy-project",
+      org: "acme",
+      project: "app-frontend",
+    });
+  });
+
+  test("returns not-found after project, organization, and fuzzy misses", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [],
+      orgs: [{ slug: "acme", name: "Acme Org" }],
+    });
+    listProjectsSpy.mockResolvedValue([]);
+
+    const result = await classifyProjectSearchTarget({
+      type: "project-search",
+      projectSlug: "missing",
+    });
+
+    expect(result.kind).toBe("not-found");
+  });
+});
 
 // ---------------------------------------------------------------------------
 // resolveOrgsForListing
@@ -176,10 +266,10 @@ describe("resolveOrgsForListing", () => {
 });
 
 // ---------------------------------------------------------------------------
-// resolveOrgProjectTarget
+// resolveProjectBoundTarget
 // ---------------------------------------------------------------------------
 
-describe("resolveOrgProjectTarget", () => {
+describe("resolveProjectBoundTarget", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
   let listOrganizationsSpy: ReturnType<typeof spyOn>;
@@ -212,7 +302,7 @@ describe("resolveOrgProjectTarget", () => {
       project: "my-proj",
     };
 
-    const result = await resolveOrgProjectTarget(parsed, CWD, "trace list");
+    const result = await resolveProjectBoundTarget(parsed, CWD, "trace list");
     expect(result).toEqual({ org: "my-org", project: "my-proj" });
     expect(findProjectsBySlugSpy).not.toHaveBeenCalled();
   });
@@ -221,7 +311,7 @@ describe("resolveOrgProjectTarget", () => {
     const parsed = { type: "org-all" as const, org: "my-org" };
 
     await expect(
-      resolveOrgProjectTarget(parsed, CWD, "trace list")
+      resolveProjectBoundTarget(parsed, CWD, "trace list")
     ).rejects.toThrow(ContextError);
   });
 
@@ -233,7 +323,7 @@ describe("resolveOrgProjectTarget", () => {
 
     const parsed = { type: "project-search" as const, projectSlug: "my-proj" };
 
-    const result = await resolveOrgProjectTarget(parsed, CWD, "trace list");
+    const result = await resolveProjectBoundTarget(parsed, CWD, "trace list");
     expect(result).toMatchObject({ org: "found-org", project: "my-proj" });
     expect(result.projectData).toBeDefined();
   });
@@ -247,7 +337,7 @@ describe("resolveOrgProjectTarget", () => {
     };
 
     await expect(
-      resolveOrgProjectTarget(parsed, CWD, "trace list")
+      resolveProjectBoundTarget(parsed, CWD, "trace list")
     ).rejects.toThrow(ResolutionError);
   });
 
@@ -263,11 +353,11 @@ describe("resolveOrgProjectTarget", () => {
     const parsed = { type: "project-search" as const, projectSlug: "my-proj" };
 
     await expect(
-      resolveOrgProjectTarget(parsed, CWD, "trace list")
+      resolveProjectBoundTarget(parsed, CWD, "trace list")
     ).rejects.toThrow(ResolutionError);
   });
 
-  // Skip: same-file internal call — resolveOrgProjectTarget → resolveAllTargets
+  // Skip: same-file internal call — resolveProjectBoundTarget → resolveAllTargets
   // biome-ignore lint/suspicious/noSkippedTests: vitest can't intercept same-file internal calls
   test.skip("resolves auto-detect when DSN detection succeeds", async () => {
     resolveOrgAndProjectSpy.mockResolvedValue({
@@ -279,7 +369,7 @@ describe("resolveOrgProjectTarget", () => {
 
     const parsed = { type: "auto-detect" as const };
 
-    const result = await resolveOrgProjectTarget(parsed, CWD, "log list");
+    const result = await resolveProjectBoundTarget(parsed, CWD, "log list");
     expect(result).toEqual({ org: "detected-org", project: "detected-proj" });
   });
 
@@ -289,7 +379,7 @@ describe("resolveOrgProjectTarget", () => {
     const parsed = { type: "auto-detect" as const };
 
     await expect(
-      resolveOrgProjectTarget(parsed, CWD, "log list")
+      resolveProjectBoundTarget(parsed, CWD, "log list")
     ).rejects.toThrow(ContextError);
   });
 
@@ -297,7 +387,7 @@ describe("resolveOrgProjectTarget", () => {
     const parsed = { type: "org-all" as const, org: "sentry" };
 
     try {
-      await resolveOrgProjectTarget(parsed, CWD, "trace list");
+      await resolveProjectBoundTarget(parsed, CWD, "trace list");
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ContextError);
@@ -319,7 +409,7 @@ describe("resolveOrgProjectTarget", () => {
     };
 
     try {
-      await resolveOrgProjectTarget(parsed, CWD, "trace list");
+      await resolveProjectBoundTarget(parsed, CWD, "trace list");
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ResolutionError);
@@ -332,10 +422,10 @@ describe("resolveOrgProjectTarget", () => {
 });
 
 // ---------------------------------------------------------------------------
-// resolveOrgProjectFromArg
+// resolveProjectBoundFromArg
 // ---------------------------------------------------------------------------
 
-describe("resolveOrgProjectFromArg", () => {
+describe("resolveProjectBoundFromArg", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
   let resolveOrgAndProjectSpy: ReturnType<typeof spyOn>;
 
@@ -354,7 +444,7 @@ describe("resolveOrgProjectFromArg", () => {
   });
 
   test("resolves 'org/project' string to explicit target", async () => {
-    const result = await resolveOrgProjectFromArg(
+    const result = await resolveProjectBoundFromArg(
       "my-org/my-proj",
       CWD,
       "trace list"
@@ -368,18 +458,18 @@ describe("resolveOrgProjectFromArg", () => {
       orgs: [],
     });
 
-    const result = await resolveOrgProjectFromArg("my-proj", CWD, "log list");
+    const result = await resolveProjectBoundFromArg("my-proj", CWD, "log list");
     expect(result).toMatchObject({ org: "found-org", project: "my-proj" });
     expect(result.projectData).toBeDefined();
   });
 
   test("throws ContextError for 'org/' (org-all) string", async () => {
     await expect(
-      resolveOrgProjectFromArg("sentry/", CWD, "trace list")
+      resolveProjectBoundFromArg("sentry/", CWD, "trace list")
     ).rejects.toThrow(ContextError);
   });
 
-  // Skip: same-file internal call — resolveOrgProjectFromArg → resolveAllTargets
+  // Skip: same-file internal call — resolveProjectBoundFromArg → resolveAllTargets
   // biome-ignore lint/suspicious/noSkippedTests: vitest can't intercept same-file internal calls
   test.skip("resolves undefined to auto-detect", async () => {
     resolveOrgAndProjectSpy.mockResolvedValue({
@@ -389,16 +479,20 @@ describe("resolveOrgProjectFromArg", () => {
       projectDisplay: "Auto Project",
     });
 
-    const result = await resolveOrgProjectFromArg(undefined, CWD, "trace list");
+    const result = await resolveProjectBoundFromArg(
+      undefined,
+      CWD,
+      "trace list"
+    );
     expect(result).toEqual({ org: "auto-org", project: "auto-proj" });
   });
 });
 
 // ---------------------------------------------------------------------------
-// resolveTargetsFromParsedArg — org scoping & DSN-style org resolution
+// resolveProjectBoundTargets — org scoping & DSN-style org resolution
 // ---------------------------------------------------------------------------
 
-describe("resolveTargetsFromParsedArg", () => {
+describe("resolveProjectBoundTargets", () => {
   let getProjectSpy: ReturnType<typeof spyOn>;
   let listProjectsSpy: ReturnType<typeof spyOn>;
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
@@ -426,7 +520,7 @@ describe("resolveTargetsFromParsedArg", () => {
   test("explicit: resolves DSN-style org id to the real slug", async () => {
     getProjectSpy.mockResolvedValue({ id: "42", slug: "my-proj" });
 
-    const result = await resolveTargetsFromParsedArg(
+    const result = await resolveProjectBoundTargets(
       { type: "explicit", org: "o1081365", project: "my-proj" },
       OPTS
     );
@@ -447,7 +541,7 @@ describe("resolveTargetsFromParsedArg", () => {
       { id: "2", slug: "p2", name: "P2" },
     ]);
 
-    const result = await resolveTargetsFromParsedArg(
+    const result = await resolveProjectBoundTargets(
       { type: "org-all", org: "o1081365" },
       OPTS
     );
@@ -474,7 +568,7 @@ describe("resolveTargetsFromParsedArg", () => {
       ],
     });
 
-    const result = await resolveTargetsFromParsedArg(
+    const result = await resolveProjectBoundTargets(
       { type: "project-search", projectSlug: "my-proj", org: "my-org" },
       OPTS
     );
@@ -574,7 +668,7 @@ describe("resolveOrgProjectOrGuide", () => {
   });
 });
 
-describe("resolveOrgOptionalProjectTarget bare org slug", () => {
+describe("resolveOrgOptionalTarget bare org slug", () => {
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -591,7 +685,7 @@ describe("resolveOrgOptionalProjectTarget bare org slug", () => {
       orgs: [{ slug: "acme-corp", name: "Acme Corp" }],
     });
 
-    const result = await resolveOrgOptionalProjectTarget(
+    const result = await resolveOrgOptionalTarget(
       { type: "project-search", projectSlug: "acme-corp" },
       CWD,
       "explore"
@@ -618,7 +712,7 @@ describe("resolveOrgOptionalProjectTarget bare org slug", () => {
       ],
     });
 
-    const result = await resolveOrgOptionalProjectTarget(
+    const result = await resolveOrgOptionalTarget(
       { type: "project-search", projectSlug: "acme-corp" },
       CWD,
       "explore"
@@ -637,7 +731,7 @@ describe("resolveOrgOptionalProjectTarget bare org slug", () => {
       orgs: [{ slug: "acme-corp", name: "Acme Corp" }],
     });
 
-    const result = await resolveOrgOptionalProjectTarget(
+    const result = await resolveOrgOptionalTarget(
       { type: "project-search", projectSlug: "frontend" },
       CWD,
       "explore"

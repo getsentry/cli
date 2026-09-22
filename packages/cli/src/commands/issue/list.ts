@@ -14,7 +14,6 @@ import {
   type IssuesPage,
   listIssuesAllPages,
   listIssuesPaginated,
-  type ProjectSearchResult,
 } from "../../lib/api-client.js";
 import { extractRequiredScopes } from "../../lib/api-scope.js";
 import {
@@ -78,8 +77,9 @@ import {
 } from "../../lib/org-list.js";
 import { withProgress } from "../../lib/polling.js";
 import {
+  type ProjectSearchTargetResolution,
   type ResolvedTarget,
-  resolveTargetsFromParsedArg,
+  resolveProjectBoundTargets,
 } from "../../lib/resolve-target.js";
 import {
   SEARCH_SYNTAX_REFERENCE,
@@ -811,7 +811,7 @@ type ResolvedTargetsOptions = {
   flags: ListFlags;
   cwd: string;
   timeRange: TimeRange;
-  projectSearchResult?: ProjectSearchResult;
+  projectSearchResolution?: ProjectSearchTargetResolution;
 };
 
 /** Default --period value (used to detect user-implicit vs explicit). */
@@ -1025,13 +1025,13 @@ function appendProjectMembershipHint(detail: string | undefined): string {
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
 ): Promise<IssueListResult> {
-  const { parsed, flags, cwd, timeRange, projectSearchResult } = options;
+  const { parsed, flags, cwd, timeRange, projectSearchResolution } = options;
 
   const { targets, footer, skippedSelfHosted, detectedDsns } =
-    await resolveTargetsFromParsedArg(parsed, {
+    await resolveProjectBoundTargets(parsed, {
       cwd,
       usageHint: USAGE_HINT,
-      projectSearchResult,
+      projectSearchResolution,
       enrichProjectIds: true,
       checkIssueShortId: true,
     });

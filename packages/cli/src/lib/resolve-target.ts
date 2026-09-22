@@ -25,7 +25,7 @@ import {
   getProject,
   listOrganizations,
   listProjects,
-  type ProjectSearchResult,
+  type ProjectWithOrg,
   resolveOrgDisplayName,
 } from "./api-client.js";
 import {
@@ -686,7 +686,7 @@ async function findSimilarProjectsAcrossOrgs(
    *  it possible to resolve display-name input to the correct slug even
    *  when the slug convention differs (e.g. underscores vs dashes). */
   displayName?: string
-): Promise<{ slug: string; orgSlug: string }[]> {
+): Promise<ProjectWithOrg[]> {
   // biome-ignore lint/plugin: grandfathered silent catch — see #1531; drain by adding log.debug()/log.warn() or re-throwing.
   try {
     const concurrency = pLimit(5);
@@ -697,9 +697,8 @@ async function findSimilarProjectsAcrossOrgs(
           if (!result.ok) {
             return [];
           }
-          return result.value.map((p) => ({
-            slug: p.slug,
-            name: p.name,
+          return result.value.map((project) => ({
+            ...project,
             orgSlug: org.slug,
           }));
         })
@@ -752,7 +751,12 @@ async function findSimilarProjectsAcrossOrgs(
 
 /** Result of a fuzzy project recovery attempt. */
 type FuzzyRecoveryResult =
-  | { kind: "match"; org: string; project: string }
+  | {
+      kind: "match";
+      org: string;
+      project: string;
+      projectData: ProjectWithOrg;
+    }
   | { kind: "suggestions"; suggestions: string[] }
   | { kind: "none" };
 
@@ -776,7 +780,12 @@ export async function tryFuzzyProjectRecovery(
   const similar = await findSimilarProjectsAcrossOrgs(slug, orgs, displayName);
   if (similar.length === 1) {
     const match = similar[0] as (typeof similar)[0];
-    return { kind: "match", org: match.orgSlug, project: match.slug };
+    return {
+      kind: "match",
+      org: match.orgSlug,
+      project: match.slug,
+      projectData: match,
+    };
   }
   if (similar.length > 1) {
     return {
@@ -790,94 +799,120 @@ export async function tryFuzzyProjectRecovery(
 }
 
 // ---------------------------------------------------------------------------
-// Project-not-found helper — shared across all resolution sites
+// Project-search classification — shared across all resolution sites
 // ---------------------------------------------------------------------------
 
-/** Outcome of the "project not found" triage sequence. */
-export type ProjectNotFoundOutcome =
-  | { kind: "org-match"; orgSlug: string }
-  | { kind: "fuzzy-match"; org: string; project: string }
-  | { kind: "not-found"; displaySlug: string; suggestions: string[] };
+type ParsedProjectSearch = Extract<
+  ParsedOrgProject,
+  { type: "project-search" }
+>;
 
-/** Result of resolving the project-first semantics of a bare target. */
-export type BareProjectOrOrgResolution =
-  | { kind: "organization"; org: string }
-  | { kind: "project-search"; projectSearchResult: ProjectSearchResult };
+type ProjectSearchContext = {
+  displaySlug: string;
+  scopedOrg: string | undefined;
+};
+
+/** Canonical classification of a project-search target. */
+export type ProjectSearchTargetResolution = ProjectSearchContext &
+  (
+    | {
+        kind: "projects";
+        projects: [ProjectWithOrg, ...ProjectWithOrg[]];
+      }
+    | { kind: "organization"; org: string }
+    | {
+        kind: "fuzzy-project";
+        org: string;
+        project: string;
+        projectData: ProjectWithOrg;
+      }
+    | { kind: "not-found"; suggestions: string[] }
+  );
+
+/** Options for {@link classifyProjectSearchTarget}. */
+type ClassifyProjectSearchTargetOptions = {
+  /** Disable fuzzy recovery for callers with special miss semantics. */
+  fuzzy?: boolean;
+};
 
 /**
- * Return an exact organization match only after a project search misses.
+ * Classify a project-search target with one shared precedence:
+ * exact project(s), exact organization, fuzzy project, then not found.
  *
- * This enforces the bare-target precedence shared by list and explore
- * commands: project first, then organization. A trailing slash is parsed as
- * `org-all` earlier and does not use this fallback.
+ * Scoped display-name targets keep their organization scope. Explicit
+ * `<org>/` and `<org>/<project>` inputs are parsed into other variants and
+ * never enter this classifier.
+ *
+ * @param parsed - A parsed project-search target
+ * @param options - Optional fuzzy-recovery policy
+ * @returns A capability-neutral classification for the caller to interpret
  */
-function findOrgSlugOnProjectMiss(
-  projectSlug: string,
-  result: ProjectSearchResult
-): string | undefined {
-  if (result.projects.length > 0) {
-    return;
+export async function classifyProjectSearchTarget(
+  parsed: ParsedProjectSearch,
+  options: ClassifyProjectSearchTargetOptions = {}
+): Promise<ProjectSearchTargetResolution> {
+  const displaySlug = parsed.originalSlug ?? parsed.projectSlug;
+  const scopedOrg = parsed.org
+    ? await resolveEffectiveOrg(parsed.org)
+    : undefined;
+  const isDisplayName = parsed.originalSlug !== undefined;
+  const searchResult = isDisplayName
+    ? { projects: [], orgs: await listOrganizations() }
+    : await findProjectsBySlug(parsed.projectSlug);
+  const orgs =
+    scopedOrg === undefined
+      ? searchResult.orgs
+      : searchResult.orgs.filter((org) => org.slug === scopedOrg);
+  const projects =
+    scopedOrg === undefined
+      ? searchResult.projects
+      : searchResult.projects.filter(
+          (project) => project.orgSlug === scopedOrg
+        );
+  const context: ProjectSearchContext = { displaySlug, scopedOrg };
+
+  const [firstProject, ...remainingProjects] = projects;
+  if (firstProject) {
+    return {
+      ...context,
+      kind: "projects",
+      projects: [firstProject, ...remainingProjects],
+    };
   }
-  return result.orgs.find((org) => org.slug === projectSlug)?.slug;
-}
 
-/**
- * Resolve a bare target by searching projects before considering an exact
- * organization-slug fallback.
- *
- * @param slug - Bare target supplied by the user
- * @returns The matching organization, or the project search result for
- * project resolution and not-found handling
- */
-export async function resolveBareProjectOrOrg(
-  slug: string
-): Promise<BareProjectOrOrgResolution> {
-  const projectSearchResult = await findProjectsBySlug(slug);
-  const org = findOrgSlugOnProjectMiss(slug, projectSearchResult);
-  return org
-    ? { kind: "organization", org }
-    : { kind: "project-search", projectSearchResult };
-}
-
-/**
- * Triage a failed project-slug lookup.
- *
- * Runs the shared sequence that all resolution sites perform when
- * `findProjectsBySlug` returns no results:
- * 1. Check if the slug matches an organization (common mistake).
- * 2. Attempt fuzzy recovery (including display-name matching).
- * 3. If a single match is found, emit a warning and return it.
- * 4. Otherwise, build the "not found" suggestions list.
- *
- * The caller decides what to do with each outcome (throw, redirect,
- * recurse, verify-fetch, etc.).
- */
-export async function triageProjectNotFound(
-  slug: string,
-  orgs: { slug: string }[],
-  originalSlug?: string
-): Promise<ProjectNotFoundOutcome> {
-  const displaySlug = originalSlug ?? slug;
-
-  // 1. Check if the slug matches an organization
-  if (orgs.some((o) => o.slug === slug)) {
-    return { kind: "org-match", orgSlug: slug };
+  const matchingOrg = orgs.find((org) => org.slug === parsed.projectSlug);
+  if (matchingOrg) {
+    return { ...context, kind: "organization", org: matchingOrg.slug };
   }
 
-  // 2. Attempt fuzzy recovery — also match display names
-  const fuzzy = await tryFuzzyProjectRecovery(slug, orgs, originalSlug);
-  if (fuzzy.kind === "match") {
-    log.warn(
-      `No project matching '${displaySlug}'. Using '${fuzzy.project}' in org '${fuzzy.org}'.`
+  if (options.fuzzy !== false) {
+    const fuzzy = await tryFuzzyProjectRecovery(
+      parsed.projectSlug,
+      orgs,
+      parsed.originalSlug
     );
-    return { kind: "fuzzy-match", org: fuzzy.org, project: fuzzy.project };
+    if (fuzzy.kind === "match") {
+      log.warn(
+        `No project matching '${displaySlug}'. Using '${fuzzy.project}' in org '${fuzzy.org}'.`
+      );
+      return {
+        ...context,
+        kind: "fuzzy-project",
+        org: fuzzy.org,
+        project: fuzzy.project,
+        projectData: fuzzy.projectData,
+      };
+    }
+    if (fuzzy.kind === "suggestions") {
+      return {
+        ...context,
+        kind: "not-found",
+        suggestions: fuzzy.suggestions,
+      };
+    }
   }
 
-  // 3. Build "not found" result — pass through fuzzy suggestions or empty
-  //    array so each caller can apply its own default hint.
-  const suggestions = fuzzy.kind === "suggestions" ? fuzzy.suggestions : [];
-
-  return { kind: "not-found", displaySlug, suggestions };
+  return { ...context, kind: "not-found", suggestions: [] };
 }
 
 /**
@@ -1778,100 +1813,72 @@ export async function resolveOrg(
  * @throws {ContextError} If no project found
  * @throws {ValidationError} If project exists in multiple organizations
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: multi-path resolution with fuzzy recovery is inherently branchy
-export async function resolveProjectBySlug(
+export async function resolveProjectBoundSlug(
   projectSlug: string,
   usageHint: string,
   disambiguationExample?: string,
   /** Original user input before normalization — used for clearer messages. */
   originalSlug?: string
 ): Promise<{ org: string; project: string; projectData: SentryProject }> {
-  /** Display label: the user's raw input when available, otherwise the slug. */
-  const displaySlug = originalSlug ?? projectSlug;
+  const parsed: ParsedProjectSearch = {
+    type: "project-search",
+    projectSlug,
+    ...(originalSlug !== undefined && { originalSlug }),
+  };
+  const resolution = await classifyProjectSearchTarget(parsed);
 
-  // When the input is a display name (originalSlug set, contains spaces),
-  // skip the slug-based API lookup — it would just produce N 404s — and go
-  // straight to display-name fuzzy matching via triageProjectNotFound.
-  const isDisplayName = originalSlug !== undefined;
-  const { projects, orgs } = isDisplayName
-    ? { projects: [], orgs: await listOrganizations() }
-    : await findProjectsBySlug(projectSlug);
-  if (projects.length === 0) {
-    const outcome = await triageProjectNotFound(
-      projectSlug,
-      orgs,
-      originalSlug
+  if (resolution.kind === "organization") {
+    throw new ResolutionError(
+      `'${projectSlug}'`,
+      "is an organization, not a project",
+      usageHint.replace("<org>/<project>", `${projectSlug}/<project>`),
+      [
+        `List projects: sentry project list ${projectSlug}/`,
+        `Specify a project: ${projectSlug}/<project>`,
+      ]
     );
+  }
 
-    if (outcome.kind === "org-match") {
-      throw new ResolutionError(
-        `'${projectSlug}'`,
-        "is an organization, not a project",
-        usageHint.replace("<org>/<project>", `${projectSlug}/<project>`),
-        [
-          `List projects: sentry project list ${projectSlug}/`,
-          `Specify a project: ${projectSlug}/<project>`,
-        ]
-      );
-    }
+  if (resolution.kind === "fuzzy-project") {
+    const { orgSlug: _fuzzyOrg, ...fuzzyProjectData } = resolution.projectData;
+    return withTelemetryContext({
+      org: resolution.org,
+      project: resolution.project,
+      projectData: fuzzyProjectData,
+    });
+  }
 
-    if (outcome.kind === "fuzzy-match") {
-      // Verify the recovered project is accessible before returning
-      const proj = await withAuthGuard(() =>
-        getProject(outcome.org, outcome.project)
-      );
-      if (proj.ok) {
-        return withTelemetryContext({
-          org: outcome.org,
-          project: outcome.project,
-          projectData: proj.value,
-        });
-      }
-      // Recovery fetch failed — build a custom suggestion
-      const defaultHint = isAllDigits(projectSlug)
-        ? "No project with this ID was found — check the ID or use the project slug instead"
-        : "Check that you have access to a project with this slug";
-      throw new ResolutionError(
-        `Project "${displaySlug}"`,
-        "not found",
-        usageHint,
-        [
-          `Similar project '${outcome.org}/${outcome.project}' was found but could not be accessed`,
-          defaultHint,
-        ]
-      );
-    }
-
-    // outcome.kind === "not-found"
-    let suggestions: string[];
+  if (resolution.kind === "not-found") {
+    let suggestions =
+      resolution.suggestions.length > 0
+        ? resolution.suggestions
+        : ["Check that you have access to a project with this slug"];
     if (isAllDigits(projectSlug)) {
       suggestions = [
         "No project with this ID was found — check the ID or use the project slug instead",
       ];
-    } else if (outcome.suggestions.length > 0) {
-      suggestions = outcome.suggestions;
-    } else {
-      suggestions = ["Check that you have access to a project with this slug"];
     }
     throw new ResolutionError(
-      `Project "${displaySlug}"`,
+      `Project "${resolution.displaySlug}"`,
       "not found",
       usageHint,
       suggestions
     );
   }
+
+  const { projects } = resolution;
   if (projects.length > 1) {
     const orgList = projects.map((p) => `  ${p.orgSlug}/${p.slug}`).join("\n");
     const example = disambiguationExample
       ? `\n\nExample: ${disambiguationExample}`
       : "";
     throw new ValidationError(
-      `Project "${displaySlug}" exists in multiple organizations.\n\n` +
+      `Project "${resolution.displaySlug}" exists in multiple organizations.\n\n` +
         `Specify the organization:\n${orgList}${example}`,
       "project.ambiguous_org"
     );
   }
-  const foundProject = projects[0] as (typeof projects)[0];
+  const foundProject = projects[0];
 
   // When a numeric project ID resolved successfully, hint about using the slug
   if (isAllDigits(projectSlug) && foundProject.slug !== projectSlug) {
@@ -1962,8 +1969,8 @@ export async function resolveOrgsForListing(
   return { orgs: [] };
 }
 
-/** Resolved org and project returned by `resolveOrgProjectTarget` */
-export type ResolvedOrgProject = {
+/** Resolved org and project returned by a project-bound resolver. */
+export type ResolvedProjectBoundTarget = {
   /** Organization slug */
   org: string;
   /** Project slug */
@@ -1973,14 +1980,14 @@ export type ResolvedOrgProject = {
 };
 
 /** Optional request-scoped data for resolving a single project target. */
-export type ResolveOrgProjectTargetOptions = {
+export type ResolveProjectBoundTargetOptions = {
   /**
-   * Result of searching for the current bare project slug.
+   * Classification of the current project-search target.
    *
-   * Dispatchers that already searched to decide whether an organization
-   * fallback applies can pass that result to avoid repeating the fan-out.
+   * Dispatchers can pass this request-scoped result to avoid repeating API
+   * lookups and fuzzy recovery.
    */
-  projectSearchResult?: ProjectSearchResult;
+  projectSearchResolution?: ProjectSearchTargetResolution;
 };
 
 /**
@@ -1997,17 +2004,17 @@ export type ResolveOrgProjectTargetOptions = {
  * @param parsed - Parsed org/project argument
  * @param cwd - Current working directory for DSN auto-detection
  * @param commandName - Command name used in error messages (e.g., "trace list")
- * @param options - Optional request-scoped project search result
+ * @param options - Optional request-scoped project-search classification
  * @returns Resolved org and project slugs
  * @throws {ContextError} When target cannot be resolved or org-all is used
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: multi-mode dispatch with fuzzy recovery is inherently branchy
-export async function resolveOrgProjectTarget(
+export async function resolveProjectBoundTarget(
   parsed: ParsedOrgProject,
   cwd: string,
   commandName: string,
-  options: ResolveOrgProjectTargetOptions = {}
-): Promise<ResolvedOrgProject> {
+  options: ResolveProjectBoundTargetOptions = {}
+): Promise<ResolvedProjectBoundTarget> {
   const usageHint = `sentry ${commandName} <org>/<project>`;
 
   switch (parsed.type) {
@@ -2024,77 +2031,51 @@ export async function resolveOrgProjectTarget(
       );
 
     case "project-search": {
-      const displaySlug = parsed.originalSlug ?? parsed.projectSlug;
-      const isDisplayName = parsed.originalSlug !== undefined;
+      const resolution =
+        options.projectSearchResolution ??
+        (await classifyProjectSearchTarget(parsed));
 
-      // Resolve DSN-style org identifiers (e.g. "o1081365" → "my-org")
-      // before using the org for filtering.
-      const scopedOrg = parsed.org
-        ? await resolveEffectiveOrg(parsed.org)
-        : undefined;
-
-      const { projects: rawProjects, orgs: foundOrgs } = isDisplayName
-        ? { projects: [], orgs: await listOrganizations() }
-        : (options.projectSearchResult ??
-          (await findProjectsBySlug(parsed.projectSlug)));
-
-      // When the caller provided an org (e.g. "org/My Project"), scope the
-      // search to that org instead of all accessible orgs. findProjectsBySlug
-      // fans out across every accessible org, so the matched projects must be
-      // filtered too — otherwise a slug that also exists in a different org
-      // could be returned (or flagged ambiguous) despite the explicit scope.
-      const orgs =
-        scopedOrg !== undefined
-          ? foundOrgs.filter((o) => o.slug === scopedOrg)
-          : foundOrgs;
-      const projects =
-        scopedOrg !== undefined
-          ? rawProjects.filter((p) => p.orgSlug === scopedOrg)
-          : rawProjects;
-
-      if (projects.length === 0) {
-        const outcome = await triageProjectNotFound(
-          parsed.projectSlug,
-          orgs,
-          parsed.originalSlug
-        );
-
-        if (outcome.kind === "org-match") {
-          throw new ResolutionError(
-            `'${parsed.projectSlug}'`,
-            "is an organization, not a project",
-            `sentry ${commandName} ${parsed.projectSlug}/<project>`,
-            [`List projects: sentry project list ${parsed.projectSlug}/`]
-          );
-        }
-
-        if (outcome.kind === "fuzzy-match") {
-          return withTelemetryContext({
-            org: outcome.org,
-            project: outcome.project,
-          });
-        }
-
-        const fallback = scopedOrg
-          ? [
-              `No project with this name found in organization '${scopedOrg}'`,
-              `Check the organization slug or try: sentry project list ${scopedOrg}/`,
-            ]
-          : ["No project with this slug found in any accessible organization"];
+      if (resolution.kind === "organization") {
         throw new ResolutionError(
-          `Project '${displaySlug}'`,
-          "not found",
-          `sentry ${commandName} <org>/${parsed.projectSlug}`,
-          outcome.suggestions.length > 0 ? outcome.suggestions : fallback
+          `'${parsed.projectSlug}'`,
+          "is an organization, not a project",
+          `sentry ${commandName} ${parsed.projectSlug}/<project>`,
+          [`List projects: sentry project list ${parsed.projectSlug}/`]
         );
       }
 
+      if (resolution.kind === "fuzzy-project") {
+        const { orgSlug: _fuzzyOrg, ...fuzzyProjectData } =
+          resolution.projectData;
+        return withTelemetryContext({
+          org: resolution.org,
+          project: resolution.project,
+          projectData: fuzzyProjectData,
+        });
+      }
+
+      if (resolution.kind === "not-found") {
+        const fallback = resolution.scopedOrg
+          ? [
+              `No project with this name found in organization '${resolution.scopedOrg}'`,
+              `Check the organization slug or try: sentry project list ${resolution.scopedOrg}/`,
+            ]
+          : ["No project with this slug found in any accessible organization"];
+        throw new ResolutionError(
+          `Project '${resolution.displaySlug}'`,
+          "not found",
+          `sentry ${commandName} <org>/${parsed.projectSlug}`,
+          resolution.suggestions.length > 0 ? resolution.suggestions : fallback
+        );
+      }
+
+      const { projects } = resolution;
       if (projects.length > 1) {
         const projectOptions = projects
           .map((m) => `  sentry ${commandName} ${m.orgSlug}/${m.slug}`)
           .join("\n");
         throw new ResolutionError(
-          `Project '${displaySlug}'`,
+          `Project '${resolution.displaySlug}'`,
           "is ambiguous",
           `sentry ${commandName} <org>/${parsed.projectSlug}`,
           [
@@ -2103,7 +2084,7 @@ export async function resolveOrgProjectTarget(
         );
       }
 
-      const match = projects[0] as (typeof projects)[number];
+      const match = projects[0];
       const { orgSlug: _org, ...matchData } = match;
       return withTelemetryContext({
         org: match.orgSlug,
@@ -2131,7 +2112,7 @@ export async function resolveOrgProjectTarget(
  * Resolve an org/project target from a raw CLI argument string for commands
  * that require a single project (trace list, log list).
  *
- * Convenience wrapper around `resolveOrgProjectTarget` that also calls
+ * Convenience wrapper around {@link resolveProjectBoundTarget} that also calls
  * `parseOrgProjectArg` on the raw string argument.
  *
  * @param target - Raw CLI argument string (or undefined for auto-detect)
@@ -2139,12 +2120,16 @@ export async function resolveOrgProjectTarget(
  * @param commandName - Command name used in error messages (e.g., "trace list")
  * @returns Resolved org and project slugs
  */
-export function resolveOrgProjectFromArg(
+export function resolveProjectBoundFromArg(
   target: string | undefined,
   cwd: string,
   commandName: string
-): Promise<ResolvedOrgProject> {
-  return resolveOrgProjectTarget(parseOrgProjectArg(target), cwd, commandName);
+): Promise<ResolvedProjectBoundTarget> {
+  return resolveProjectBoundTarget(
+    parseOrgProjectArg(target),
+    cwd,
+    commandName
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -2162,19 +2147,14 @@ export type MultiTargetResolutionResult = {
   detectedDsns?: DetectedDsn[];
 };
 
-/** Options for {@link resolveTargetsFromParsedArg}. */
-export type ResolveTargetsOptions = {
+/** Options for {@link resolveProjectBoundTargets}. */
+export type ResolveProjectBoundTargetsOptions = {
   /** Current working directory, for DSN auto-detection. */
   cwd: string;
   /** Usage hint shown in error messages (e.g. "sentry issue list <org>/<project>"). */
   usageHint: string;
-  /**
-   * Result of searching for the current bare project slug.
-   *
-   * Used when the list dispatcher already searched to evaluate an
-   * organization fallback.
-   */
-  projectSearchResult?: ProjectSearchResult;
+  /** Request-scoped project-search classification from a dispatcher. */
+  projectSearchResolution?: ProjectSearchTargetResolution;
   /**
    * Auto-detect mode only: enrich targets that lack a numeric `projectId` by
    * fetching from the project API. Useful when env-var / config-default paths
@@ -2202,14 +2182,14 @@ export type ResolveTargetsOptions = {
  * `opts.checkIssueShortId` to enable command-specific behaviour.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent multi-mode target resolution with per-mode error handling
-export async function resolveTargetsFromParsedArg(
+export async function resolveProjectBoundTargets(
   parsed: ReturnType<typeof parseOrgProjectArg>,
-  opts: ResolveTargetsOptions
+  opts: ResolveProjectBoundTargetsOptions
 ): Promise<MultiTargetResolutionResult> {
   const {
     cwd,
     usageHint,
-    projectSearchResult,
+    projectSearchResolution,
     enrichProjectIds,
     checkIssueShortId,
   } = opts;
@@ -2253,7 +2233,7 @@ export async function resolveTargetsFromParsedArg(
 
     case "explicit": {
       // Resolve DSN-style org identifiers (e.g. "o1081365" → "my-org") before
-      // hitting the API, mirroring resolveOrgProjectTarget's explicit branch.
+      // hitting the API, mirroring resolveProjectBoundTarget's explicit branch.
       const org = await resolveEffectiveOrg(parsed.org);
       const projectId = await fetchProjectId(org, parsed.project);
       return {
@@ -2315,77 +2295,48 @@ export async function resolveTargetsFromParsedArg(
         );
       }
 
-      // When the input is a display name (originalSlug set, contains spaces),
-      // skip the slug-based API lookup and go straight to fuzzy matching.
-      const isDisplayName = parsed.originalSlug !== undefined;
+      const resolution =
+        projectSearchResolution ?? (await classifyProjectSearchTarget(parsed));
 
-      // Resolve DSN-style org identifiers before filtering.
-      const scopedOrg = parsed.org
-        ? await resolveEffectiveOrg(parsed.org)
-        : undefined;
-
-      const { projects: rawMatches, orgs: foundOrgs } = isDisplayName
-        ? { projects: [], orgs: await listOrganizations() }
-        : (projectSearchResult ??
-          (await findProjectsBySlug(parsed.projectSlug)));
-
-      // When the caller provided an org (e.g. "org/My Project"), scope the
-      // search to that org instead of all accessible orgs. findProjectsBySlug
-      // fans out across every accessible org, so the matched projects must be
-      // filtered too — otherwise a slug that also exists in a different org
-      // could leak into a result that was explicitly scoped to one org.
-      const orgs =
-        scopedOrg !== undefined
-          ? foundOrgs.filter((o) => o.slug === scopedOrg)
-          : foundOrgs;
-      const matches =
-        scopedOrg !== undefined
-          ? rawMatches.filter((m) => m.orgSlug === scopedOrg)
-          : rawMatches;
-
-      if (matches.length === 0) {
-        const outcome = await triageProjectNotFound(
-          parsed.projectSlug,
-          orgs,
-          parsed.originalSlug
+      if (resolution.kind === "organization") {
+        const prefix = usageHint.split(" <")[0];
+        throw new ResolutionError(
+          `'${parsed.projectSlug}'`,
+          "is an organization, not a project",
+          `${prefix} ${parsed.projectSlug}/`,
+          [
+            `List projects: sentry project list ${parsed.projectSlug}/`,
+            `Specify a project: ${prefix} ${parsed.projectSlug}/<project>`,
+          ]
         );
+      }
 
-        if (outcome.kind === "org-match") {
-          const prefix = usageHint.split(" <")[0];
-          throw new ResolutionError(
-            `'${parsed.projectSlug}'`,
-            "is an organization, not a project",
-            `${prefix} ${parsed.projectSlug}/`,
-            [
-              `List projects: sentry project list ${parsed.projectSlug}/`,
-              `Specify a project: ${prefix} ${parsed.projectSlug}/<project>`,
-            ]
-          );
-        }
+      if (resolution.kind === "fuzzy-project") {
+        const projectId =
+          toNumericId(resolution.projectData.id) ??
+          (await fetchProjectId(resolution.org, resolution.project));
+        const targets: ResolvedTarget[] = [
+          {
+            org: resolution.org,
+            project: resolution.project,
+            projectId,
+            orgDisplay: resolution.org,
+            projectDisplay: resolution.project,
+          },
+        ];
+        setOrgProjectContext([resolution.org], [resolution.project]);
+        return { targets };
+      }
 
-        if (outcome.kind === "fuzzy-match") {
-          const projectId = await fetchProjectId(outcome.org, outcome.project);
-          const targets: ResolvedTarget[] = [
-            {
-              org: outcome.org,
-              project: outcome.project,
-              projectId,
-              orgDisplay: outcome.org,
-              projectDisplay: outcome.project,
-            },
-          ];
-          setOrgProjectContext([outcome.org], [outcome.project]);
-          return { targets };
-        }
-
-        const fallback = scopedOrg
+      if (resolution.kind === "not-found") {
+        const fallback = resolution.scopedOrg
           ? [
-              `No project with this name found in organization '${scopedOrg}'`,
-              `Check the organization slug or try: sentry project list ${scopedOrg}/`,
+              `No project with this name found in organization '${resolution.scopedOrg}'`,
+              `Check the organization slug or try: sentry project list ${resolution.scopedOrg}/`,
             ]
           : ["No project with this slug found in any accessible organization"];
         const suggestions =
-          outcome.suggestions.length > 0 ? outcome.suggestions : fallback;
+          resolution.suggestions.length > 0 ? resolution.suggestions : fallback;
         throw new ResolutionError(
           `Project '${displaySlug}'`,
           "not found",
@@ -2394,6 +2345,7 @@ export async function resolveTargetsFromParsedArg(
         );
       }
 
+      const matches = resolution.projects;
       const targets: ResolvedTarget[] = matches.map((m) => ({
         org: m.orgSlug,
         project: m.slug,
@@ -2425,7 +2377,7 @@ export async function resolveTargetsFromParsedArg(
 }
 
 /** Resolved org and optional project — used by commands that accept org-all mode. */
-export type ResolvedOrgOptionalProject = {
+export type ResolvedOrgOptionalTarget = {
   /** Organization slug */
   org: string;
   /** Project slug (absent in org-all and auto-detect modes) */
@@ -2436,12 +2388,12 @@ export type ResolvedOrgOptionalProject = {
 
 /**
  * Resolve an org/project target for commands that accept org-all mode
- * (e.g., `sentry explore`). Unlike {@link resolveOrgProjectTarget}, this
+ * (e.g., `sentry explore`). Unlike {@link resolveProjectBoundTarget}, this
  * function allows `org-all` and `auto-detect` modes to resolve to an
  * org-only result without requiring a project.
  *
  * Handles:
- * - explicit `<org>/<project>` → delegate to {@link resolveOrgProjectTarget}
+ * - explicit `<org>/<project>` → delegate to {@link resolveProjectBoundTarget}
  * - project-search `<project>` → the project when one matches; the
  *   organization only when none does and the slug is an org
  * - org-all `<org>/` → resolve the org slug only
@@ -2453,11 +2405,11 @@ export type ResolvedOrgOptionalProject = {
  * @returns Resolved org and optional project slugs
  * @throws {ContextError} When target cannot be resolved
  */
-export async function resolveOrgOptionalProjectTarget(
+export async function resolveOrgOptionalTarget(
   parsed: ParsedOrgProject,
   cwd: string,
   commandName: string
-): Promise<ResolvedOrgOptionalProject> {
+): Promise<ResolvedOrgOptionalTarget> {
   // org-all: resolve the org slug only
   if (parsed.type === "org-all") {
     const org = await resolveEffectiveOrg(parsed.org);
@@ -2483,27 +2435,51 @@ export async function resolveOrgOptionalProjectTarget(
     parsed.org === undefined &&
     parsed.originalSlug === undefined
   ) {
-    const resolution = await resolveBareProjectOrOrg(parsed.projectSlug);
+    const resolution = await classifyProjectSearchTarget(parsed);
     if (resolution.kind === "organization") {
       log.warn(
         `'${resolution.org}' is an organization, not a project. Using organization '${resolution.org}'.`
       );
       return withTelemetryContext({ org: resolution.org });
     }
-    return resolveOrgProjectTarget(parsed, cwd, commandName, {
-      projectSearchResult: resolution.projectSearchResult,
+    return resolveProjectBoundTarget(parsed, cwd, commandName, {
+      projectSearchResolution: resolution,
     });
   }
 
   // explicit, scoped search, and display names
-  return resolveOrgProjectTarget(parsed, cwd, commandName);
+  return resolveProjectBoundTarget(parsed, cwd, commandName);
+}
+
+/**
+ * Resolve a target for a command whose API is organization-scoped.
+ *
+ * Bare targets still follow project-first precedence: a matching project
+ * contributes its parent organization, while an exact organization is used
+ * only after the project search misses.
+ */
+export async function resolveOrgOnlyTarget(
+  parsed: ParsedOrgProject,
+  cwd: string,
+  commandName: string,
+  usageHint = `sentry ${commandName} <target>`
+): Promise<string> {
+  if (parsed.type === "auto-detect") {
+    const resolved = await resolveOrg({ cwd });
+    if (!resolved) {
+      throw new ContextError("Organization", usageHint);
+    }
+    return resolved.org;
+  }
+  const resolved = await resolveOrgOptionalTarget(parsed, cwd, commandName);
+  return resolved.org;
 }
 
 /**
  * Resolve an org/project target from a raw CLI argument string for commands
  * that accept org-all mode (e.g., `sentry explore`).
  *
- * Convenience wrapper around `resolveOrgOptionalProjectTarget` that also calls
+ * Convenience wrapper around {@link resolveOrgOptionalTarget} that also calls
  * `parseOrgProjectArg` on the raw string argument.
  *
  * @param target - Raw CLI argument string (or undefined for auto-detect)
@@ -2511,14 +2487,25 @@ export async function resolveOrgOptionalProjectTarget(
  * @param commandName - Command name used in error messages (e.g., "explore")
  * @returns Resolved org and optional project slugs
  */
-export function resolveOrgOptionalProjectFromArg(
+export function resolveOrgOptionalFromArg(
   target: string | undefined,
   cwd: string,
   commandName: string
-): Promise<ResolvedOrgOptionalProject> {
-  return resolveOrgOptionalProjectTarget(
+): Promise<ResolvedOrgOptionalTarget> {
+  return resolveOrgOptionalTarget(parseOrgProjectArg(target), cwd, commandName);
+}
+
+/** Parse and resolve a target for an organization-scoped command. */
+export function resolveOrgOnlyFromArg(
+  target: string | undefined,
+  cwd: string,
+  commandName: string,
+  usageHint?: string
+): Promise<string> {
+  return resolveOrgOnlyTarget(
     parseOrgProjectArg(target),
     cwd,
-    commandName
+    commandName,
+    usageHint
   );
 }

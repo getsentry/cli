@@ -53,7 +53,7 @@ import { getReplayIdFromEvent } from "../../lib/replay-search.js";
 import {
   resolveOrg,
   resolveOrgAndProject,
-  resolveProjectBySlug,
+  resolveProjectBoundSlug,
 } from "../../lib/resolve-target.js";
 import {
   applySentryUrlContext,
@@ -555,7 +555,7 @@ export async function resolveEventTarget(
     }
 
     case ProjectSpecificationType.ProjectSearch: {
-      const resolved = await resolveProjectBySlug(
+      const resolved = await resolveProjectBoundSlug(
         parsed.projectSlug,
         USAGE_HINT,
         `sentry event view <org>/${parsed.projectSlug} ${eventId}`,

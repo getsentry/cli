@@ -5,11 +5,27 @@
  * and targetArgToTraceTarget from src/lib/trace-target.ts.
  */
 
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+vi.mock("../../src/lib/api-client.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/lib/api-client.js")>();
+  return Object.fromEntries(
+    Object.entries(actual).map(([key, value]) => [
+      key,
+      typeof value === "function" ? vi.fn(value) : value,
+    ])
+  );
+});
+
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as apiClient from "../../src/lib/api-client.js";
 import { ContextError, ValidationError } from "../../src/lib/errors.js";
 import {
   parseSlashSeparatedTraceTarget,
   parseTraceTarget,
+  resolveTraceOrg,
+  resolveTraceOrgOptionalProject,
   targetArgToTraceTarget,
 } from "../../src/lib/trace-target.js";
 
@@ -116,9 +132,86 @@ describe("targetArgToTraceTarget", () => {
     }
   });
 
+  test("preserves scoped display-name metadata", () => {
+    const result = targetArgToTraceTarget("my-org/My Project", VALID_TRACE_ID);
+    expect(result).toMatchObject({
+      type: "project-search",
+      org: "my-org",
+      projectSlug: "My Project",
+      originalSlug: "My Project",
+    });
+  });
+
   test("empty string → auto-detect", () => {
     const result = targetArgToTraceTarget("", VALID_TRACE_ID);
     expect(result.type).toBe("auto-detect");
+  });
+});
+
+describe("trace target resolution", () => {
+  let findProjectsBySlugSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
+  });
+
+  afterEach(() => {
+    findProjectsBySlugSpy.mockRestore();
+  });
+
+  test("org-only mode uses the parent org of a matching bare project", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [
+        {
+          id: "1",
+          slug: "frontend",
+          name: "Frontend",
+          orgSlug: "project-owner",
+        },
+      ],
+      orgs: [{ slug: "project-owner", name: "Project Owner" }],
+    });
+    const parsed = targetArgToTraceTarget("frontend", VALID_TRACE_ID);
+
+    const resolved = await resolveTraceOrg(
+      parsed,
+      "/tmp",
+      "sentry trace logs [<org>/[<project>/]]<trace-id>"
+    );
+
+    expect(resolved.org).toBe("project-owner");
+  });
+
+  test("org-only mode falls back to an exact org after the project miss", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [],
+      orgs: [{ slug: "acme", name: "Acme" }],
+    });
+    const parsed = targetArgToTraceTarget("acme", VALID_TRACE_ID);
+
+    const resolved = await resolveTraceOrg(
+      parsed,
+      "/tmp",
+      "sentry trace logs [<org>/[<project>/]]<trace-id>"
+    );
+
+    expect(resolved.org).toBe("acme");
+  });
+
+  test("org-capable trace view falls back to an exact bare org", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [],
+      orgs: [{ slug: "acme", name: "Acme" }],
+    });
+    const parsed = targetArgToTraceTarget("acme", VALID_TRACE_ID);
+
+    const resolved = await resolveTraceOrgOptionalProject(
+      parsed,
+      "/tmp",
+      "sentry trace view [<org>/<project>/]<trace-id>"
+    );
+
+    expect(resolved).toEqual({ traceId: VALID_TRACE_ID, org: "acme" });
   });
 });
 
