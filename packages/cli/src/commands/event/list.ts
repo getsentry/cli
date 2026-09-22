@@ -15,6 +15,7 @@ import {
   hasPreviousPage,
   resolveCursor,
 } from "../../lib/db/pagination.js";
+import { rememberSeenEventIds } from "../../lib/db/seen-event-ids.js";
 import { ContextError, toSearchQueryError } from "../../lib/errors.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { buildListCommand, paginationHint } from "../../lib/list-command.js";
@@ -159,6 +160,14 @@ export const listCommand = buildListCommand("event", {
           // An unparseable user --query is a user input mistake, not a CLI bug.
           throw toSearchQueryError(error, flags.query);
         })
+    );
+
+    // Agents copy the EVENT ID cell into `event view`. Remember the full
+    // IDs so a later prefix still resolves — Sentry cannot search partial IDs.
+    rememberSeenEventIds(
+      org,
+      issue.project?.slug ?? "",
+      events.map((event) => event.eventID)
     );
 
     // Update pagination state (handles both advance and truncation)

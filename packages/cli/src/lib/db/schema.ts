@@ -19,7 +19,7 @@ import type { Database } from "./sqlite.js";
 
 const _require = createRequire(import.meta.url);
 
-export const CURRENT_SCHEMA_VERSION = 16;
+export const CURRENT_SCHEMA_VERSION = 17;
 
 /** Environment variable to disable auto-repair */
 const NO_AUTO_REPAIR_ENV = "SENTRY_CLI_NO_AUTO_REPAIR";
@@ -236,6 +236,25 @@ export const TABLE_SCHEMAS: Record<string, TableSchema> = {
       // 2^53 JavaScript number limit if Sentry's group IDs ever exceed it.
       issue_id: { type: "TEXT", primaryKey: true },
       org_slug: { type: "TEXT", notNull: true },
+      cached_at: {
+        type: "INTEGER",
+        notNull: true,
+        default: "(unixepoch() * 1000)",
+      },
+    },
+  },
+  /**
+   * Full event IDs the CLI has already shown (event list / issue events).
+   *
+   * Sentry cannot search by a partial event ID. Agents still pass the
+   * prefix of an ID this process printed. The cache resolves that prefix
+   * locally. Cleared on logout — IDs are scoped to the signed-in account.
+   */
+  seen_event_ids: {
+    columns: {
+      event_id: { type: "TEXT", primaryKey: true },
+      org_slug: { type: "TEXT", notNull: true },
+      project_slug: { type: "TEXT", notNull: true },
       cached_at: {
         type: "INTEGER",
         notNull: true,
@@ -869,6 +888,13 @@ export function runMigrations(db: Database): void {
   // migrated cleanly to the host-scoped model.
   if (currentVersion < 16) {
     addColumnIfMissing(db, "auth", "host", "TEXT");
+  }
+
+  // Migration 16 -> 17: Remember full event IDs the CLI has printed so a
+  // later prefix (`event view <12 hex chars>`) can resolve without a
+  // Sentry search. Partial event-ID search is not supported by the API.
+  if (currentVersion < 17) {
+    db.exec(EXPECTED_TABLES.seen_event_ids as string);
   }
 
   if (currentVersion < CURRENT_SCHEMA_VERSION) {

@@ -227,6 +227,21 @@ describe("clearAuth: integration with per-account caches", () => {
     // their `issue view` fallback routing.
     expect(getCachedIssueOrg("12345")).toBeUndefined();
   });
+
+  test("clearAuth drops seen event IDs (prevents cross-account prefix resolution)", async () => {
+    const { rememberSeenEventIds, findCachedEventIds } = await import(
+      "../../../src/lib/db/seen-event-ids.js"
+    );
+    const eventId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    await setAuthToken("test-token");
+    rememberSeenEventIds("previous-account-org", "frontend", [eventId]);
+    expect(findCachedEventIds("aaaaaaaaaaaa")).toEqual([eventId]);
+
+    await clearAuth();
+
+    expect(findCachedEventIds("aaaaaaaaaaaa")).toEqual([]);
+  });
 });
 
 describe("getIdentityFingerprint", () => {

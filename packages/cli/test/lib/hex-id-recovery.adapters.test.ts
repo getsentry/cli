@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { setAuthToken } from "../../src/lib/db/auth.js";
 import { setOrgRegion } from "../../src/lib/db/regions.js";
+import { rememberSeenEventIds } from "../../src/lib/db/seen-event-ids.js";
 import { ADAPTERS, recoverHexId } from "../../src/lib/hex-id-recovery.js";
 import { mockFetch, useTestConfigDir } from "../helpers.js";
 
@@ -125,6 +126,39 @@ describe("adapter query params", () => {
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     ]);
+  });
+
+  test("event adapter resolves a printed prefix from the local cache", async () => {
+    let fetchCalled = false;
+    globalThis.fetch = mockFetch(async () => {
+      fetchCalled = true;
+      return new Response("{}", { status: 200 });
+    });
+    rememberSeenEventIds("test-org", "test-project", [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ]);
+
+    const ids = await ADAPTERS.event({
+      org: "test-org",
+      project: "test-project",
+      idPrefix: "aaaaaaaaaaaa",
+    });
+
+    expect(ids).toEqual(["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]);
+    expect(fetchCalled).toBe(false);
+  });
+
+  test("event adapter resolves a printed prefix with no org or project", async () => {
+    rememberSeenEventIds("test-org", "test-project", [
+      "cccccccccccccccccccccccccccccccc",
+    ]);
+
+    const ids = await ADAPTERS.event({
+      org: "",
+      idPrefix: "cccccccccccc",
+    });
+
+    expect(ids).toEqual(["cccccccccccccccccccccccccccccccc"]);
   });
 
   test("trace adapter queries the spans dataset and extracts trace field", async () => {

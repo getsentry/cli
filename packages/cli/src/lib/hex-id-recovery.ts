@@ -12,8 +12,10 @@
  *    entity type (e.g., 16-char span passed to `trace view`) → look up
  *    the parent/related entity via the API.
  * 3. **Fuzzy prefix lookup** — input has a ≥8-hex prefix (optionally
- *    with a middle-ellipsis suffix) → scan recent entities in the
- *    configured project and filter client-side.
+ *    with a middle-ellipsis suffix) → for events, resolve a prefix of an
+ *    ID this CLI has already printed (Sentry cannot search partial event
+ *    IDs). Otherwise scan recent entities in the configured project and
+ *    filter client-side.
  *
  * On unrecoverable input, returns a structured failure with classification
  * (sentinel leak, looks-like-slug, too-short, no-matches, multiple-matches,
@@ -32,6 +34,7 @@ import {
   type ParsedOrgProject,
   ProjectSpecificationType,
 } from "./arg-parsing.js";
+import { findCachedEventIds } from "./db/seen-event-ids.js";
 import { AuthError, ResolutionError, ValidationError } from "./errors.js";
 import type { HexEntityType } from "./hex-id.js";
 import {
@@ -125,6 +128,11 @@ export type LookupContext = {
   traceId?: string;
   /** Override for the default scan window (e.g. "90d", "7d"). */
   period?: string;
+  /**
+   * Hex prefix to resolve. Set by fuzzy lookup for events so the adapter
+   * can hit the local cache of IDs the CLI has printed before scanning.
+   */
+  idPrefix?: string;
 };
 
 /** Context passed by command code to produce consistent warnings/errors. */
@@ -449,6 +457,18 @@ function filterByCandidate(ids: string[], candidate: HexCandidate): string[] {
 }
 
 const eventAdapter: FuzzyLookupAdapter = async (ctx) => {
+  // A prefix of an ID we already printed resolves here. Sentry rejects
+  // wildcards on `id`, and the page scan below only sees the newest 100
+  // events in the project — not the issue the user just listed.
+  if (ctx.idPrefix) {
+    const cached = findCachedEventIds(ctx.idPrefix, {
+      org: ctx.org,
+      project: ctx.project,
+    });
+    if (cached.length > 0) {
+      return cached;
+    }
+  }
   if (!(ctx.org && ctx.project)) {
     return [];
   }
@@ -577,6 +597,13 @@ function buildNoMatchHint(
   }
   if (entityType === "span") {
     return "No span matched this prefix within the trace.";
+  }
+  if (entityType === "event") {
+    return (
+      `No event matched this prefix in the last ${window}. ` +
+      "Sentry cannot search by a partial event ID — pass the full " +
+      "32-character ID printed by `sentry event list`."
+    );
   }
   return (
     `No ${entityType} matched this prefix in the last ${window}. ` +
@@ -922,7 +949,9 @@ async function runFuzzyLookup(
 ): Promise<RecoveryResult> {
   let raw: string[];
   try {
-    raw = await ADAPTERS[entityType](ctx);
+    const lookupCtx =
+      entityType === "event" ? { ...ctx, idPrefix: candidate.prefix } : ctx;
+    raw = await ADAPTERS[entityType](lookupCtx);
   } catch (err) {
     if (err instanceof AuthError) {
       throw err;
