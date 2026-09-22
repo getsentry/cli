@@ -33,6 +33,9 @@ sentry event send --raw ./crash.json
 sentry event send --raw ./captured.envelope
 ```
 
+Prefix relative file paths with `./` to distinguish them from an
+`<org>/<project>` target.
+
 ### DSN authentication
 
 `sentry event send` authenticates with ingest via a **DSN**, not a user token.

@@ -101,21 +101,13 @@ describe("sendCommand.func()", () => {
   });
 
   test("missing DSN throws ConfigError", async () => {
-    const savedDsn = process.env.SENTRY_DSN;
-    delete process.env.SENTRY_DSN;
     const { ctx } = makeContext();
-    try {
-      await expect(
-        func.call(ctx, { "no-environ": true })
-      ).rejects.toBeInstanceOf(ConfigError);
-    } finally {
-      if (savedDsn !== undefined) process.env.SENTRY_DSN = savedDsn;
-    }
+    await expect(func.call(ctx, { "no-environ": true })).rejects.toBeInstanceOf(
+      ConfigError
+    );
   });
 
   test("auto-detected DSN is used when flag and env are absent", async () => {
-    const savedDsn = process.env.SENTRY_DSN;
-    delete process.env.SENTRY_DSN;
     detectSpy.mockResolvedValue({
       raw: SAAS_DSN,
       protocol: "https",
@@ -125,15 +117,11 @@ describe("sendCommand.func()", () => {
       source: "env_file",
     });
     const { ctx } = makeContext();
-    try {
-      await func.call(ctx, {
-        message: ["from scan"],
-        level: "error",
-        "no-environ": true,
-      });
-    } finally {
-      if (savedDsn !== undefined) process.env.SENTRY_DSN = savedDsn;
-    }
+    await func.call(ctx, {
+      message: ["from scan"],
+      level: "error",
+      "no-environ": true,
+    });
     expect(sendSpy).toHaveBeenCalledTimes(1);
     expect(sendSpy.mock.calls[0]?.[0]).toBe(SAAS_DSN);
   });
@@ -147,7 +135,7 @@ describe("sendCommand.func()", () => {
       await func.call(
         ctx,
         {
-          message: ["GTT Sentry verify: CLI event send"],
+          message: ["from org/project"],
           level: "error",
           "no-environ": true,
         },
@@ -155,7 +143,7 @@ describe("sendCommand.func()", () => {
       );
       expect(resolveSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          message: ["GTT Sentry verify: CLI event send"],
+          message: ["from org/project"],
         }),
         "/tmp",
         { org: "grow-together-therapy", project: "javascript-react" }

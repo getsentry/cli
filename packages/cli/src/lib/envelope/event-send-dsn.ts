@@ -26,20 +26,23 @@ export const EVENT_SEND_NO_DSN_MESSAGE =
   "No DSN found. Provide one via --dsn <dsn>, set the SENTRY_DSN environment variable, run from a project where a DSN can be detected, or pass <org>/<project> (requires login).";
 
 export type OrgProjectTarget = {
+  /** Organization slug used to look up the project client key. */
   org: string;
+  /** Project slug used to look up the project client key. */
   project: string;
 };
 
 /**
- * Peel a leading `<org>/<project>` positional off the file list when it is
- * not an existing path.
+ * Peel a leading `<org>/<project>` positional when it is unambiguously a
+ * target rather than an event file.
  *
- * Agents pass org/project the same way as other CLI commands. Remaining
- * args stay as JSON/envelope files. A path that exists on disk always wins
- * so `events/crash.json` is never treated as a project slug.
+ * Remaining arguments stay as JSON/envelope files. Existing paths and
+ * path-shaped arguments such as `events/crash.json` are never consumed as
+ * an org/project target.
  *
  * @param cwd - Working directory used to resolve relative paths.
  * @param files - Positional arguments as received by `event send`.
+ * @returns The optional target and the remaining file arguments.
  */
 export function peelOrgProjectTarget(
   cwd: string,
@@ -60,8 +63,8 @@ export function peelOrgProjectTarget(
         files: files.slice(1),
       };
     }
-  } catch (err) {
-    log.debug("positional is not org/project", err);
+  } catch (error) {
+    log.debug("positional is not org/project", error);
   }
   return { target: undefined, files: [...files] };
 }
@@ -71,6 +74,12 @@ export function peelOrgProjectTarget(
  *
  * Priority: `--dsn` / `SENTRY_DSN` → explicit `<org>/<project>` client key
  * (requires login) → project scan via {@link resolveIngestDsn}.
+ *
+ * @param flags - DSN flag source, with `SENTRY_DSN` fallback.
+ * @param cwd - Directory to scan when explicit sources are absent.
+ * @param target - Optional org/project whose public DSN should be fetched.
+ * @returns The resolved ingest DSN.
+ * @throws {ConfigError} When no DSN can be resolved.
  */
 export async function resolveEventSendDsn(
   flags: DsnFlags,
@@ -99,8 +108,8 @@ function pathExists(cwd: string, value: string): boolean {
 /**
  * Cheap pre-filter before {@link parseOrgProjectArg}.
  *
- * Rejects relative/absolute paths, multi-slash paths, and names with a
- * file extension (e.g. `events/crash.json`) so those stay file arguments.
+ * Dots are not valid in current Sentry project slugs, so dotted final
+ * segments remain file arguments even when the file does not exist yet.
  */
 function looksLikeOrgProjectTarget(value: string): boolean {
   if (value.startsWith(".") || value.startsWith("/")) {
@@ -117,10 +126,9 @@ function looksLikeOrgProjectTarget(value: string): boolean {
 /**
  * Look up the public DSN for an org/project via the Web API.
  *
- * Requires a usable session from {@link getAuthConfig} (expired access
- * token + refresh token counts). `event send` skips the shared auth
- * guard, so this must not use `isAuthenticated()`. The token is only
- * used to fetch the client key; ingest still authenticates with the DSN.
+ * A refreshable OAuth session remains usable after its access token expires.
+ * The session is used only for the key lookup; ingest authenticates with the
+ * resulting DSN.
  */
 async function dsnFromOrgProject(
   org: string,
