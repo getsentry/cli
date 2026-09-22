@@ -35,6 +35,45 @@ const log = logger.withTag("wasm.binary");
 /** Section id of a custom section. */
 const CUSTOM_SECTION_ID = 0;
 
+/** Section id of the type section. */
+const TYPE_SECTION_ID = 1;
+
+/** Section id of the import section. */
+const IMPORT_SECTION_ID = 2;
+
+/** Section id of the function section. */
+const FUNCTION_SECTION_ID = 3;
+
+/** Section id of the table section. */
+const TABLE_SECTION_ID = 4;
+
+/** Section id of the memory section. */
+const MEMORY_SECTION_ID = 5;
+
+/** Section id of the global section. */
+const GLOBAL_SECTION_ID = 6;
+
+/** Section id of the export section. */
+const EXPORT_SECTION_ID = 7;
+
+/** Section id of the start section. */
+const START_SECTION_ID = 8;
+
+/** Section id of the element section. */
+const ELEMENT_SECTION_ID = 9;
+
+/** Section id of the code section. DWARF offsets are relative to it. */
+const CODE_SECTION_ID = 10;
+
+/** Section id of the data section. */
+const DATA_SECTION_ID = 11;
+
+/** Section id of the data count section. */
+const DATA_COUNT_SECTION_ID = 12;
+
+/** Section id of the exception tag section, from the exception-handling proposal. */
+const EXCEPTION_TAG_SECTION_ID = 13;
+
 /** Name of the custom section holding function names. */
 const NAME_SECTION = "name";
 
@@ -57,19 +96,19 @@ const DEBUG_SECTION_PREFIX = ".debug_";
  * with the `exception-handling` feature on, which is what makes 13 legal here.
  */
 const SECTION_ORDER = [
-  [1, "type"],
-  [2, "import"],
-  [3, "function"],
-  [4, "table"],
-  [5, "memory"],
-  [13, "exception tag"],
-  [6, "global"],
-  [7, "export"],
-  [8, "start"],
-  [9, "element"],
-  [12, "data count"],
-  [10, "code"],
-  [11, "data"],
+  [TYPE_SECTION_ID, "type"],
+  [IMPORT_SECTION_ID, "import"],
+  [FUNCTION_SECTION_ID, "function"],
+  [TABLE_SECTION_ID, "table"],
+  [MEMORY_SECTION_ID, "memory"],
+  [EXCEPTION_TAG_SECTION_ID, "exception tag"],
+  [GLOBAL_SECTION_ID, "global"],
+  [EXPORT_SECTION_ID, "export"],
+  [START_SECTION_ID, "start"],
+  [ELEMENT_SECTION_ID, "element"],
+  [DATA_COUNT_SECTION_ID, "data count"],
+  [CODE_SECTION_ID, "code"],
+  [DATA_SECTION_ID, "data"],
 ] as const;
 
 /** What a non-custom section id means, and where it sorts. */
@@ -141,7 +180,7 @@ export type WasmSection = {
 };
 
 /** A varuint32 read off a byte stream. */
-export type VarUint32 = {
+type VarUint32 = {
   /** The decoded value. */
   value: number;
   /** Bytes the encoding occupied. */
@@ -158,7 +197,7 @@ export type VarUint32 = {
  * @throws {WasmParseError} when the encoding runs past the buffer, spans more
  *   groups than a 32-bit value can need, or decodes above 2^32 - 1
  */
-export function readVarUint32(bytes: Uint8Array, offset: number): VarUint32 {
+function readVarUint32(bytes: Uint8Array, offset: number): VarUint32 {
   let value = 0;
   let scale = 1;
   for (let size = 0; size < MAX_VARUINT32_BYTES; size++) {
@@ -192,7 +231,7 @@ export function readVarUint32(bytes: Uint8Array, offset: number): VarUint32 {
  * @param value - A non-negative integer below 2^32
  * @returns The encoded bytes, one to five of them
  */
-export function writeVarUint32(value: number): Uint8Array {
+function writeVarUint32(value: number): Uint8Array {
   const bytes: number[] = [];
   let remaining = value;
   do {
@@ -319,6 +358,38 @@ export function makeExternalDebugInfoSection(url: string): WasmSection {
  */
 export function decodeBuildId(contents: Uint8Array): Uint8Array | null {
   return decodeByteVector(contents, BUILD_ID_SECTION);
+}
+
+/**
+ * Read the URL out of an `external_debug_info` section body.
+ *
+ * @param contents - The section body, after its name
+ * @returns The URL, or `null` when the body is malformed or not UTF-8
+ */
+export function decodeExternalDebugInfo(contents: Uint8Array): string | null {
+  const bytes = decodeByteVector(contents, EXTERNAL_DEBUG_INFO_SECTION);
+  if (bytes === null) {
+    return null;
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error) {
+    log.debug(`${EXTERNAL_DEBUG_INFO_SECTION} body is not valid UTF-8`, error);
+    return null;
+  }
+}
+
+/** Whether a section is the code section. */
+export function isCodeSection(section: WasmSection): boolean {
+  return section.id === CODE_SECTION_ID;
+}
+
+/** Whether a section points at a debug companion. */
+export function isExternalDebugInfoSection(section: WasmSection): boolean {
+  return (
+    section.id === CUSTOM_SECTION_ID &&
+    section.name === EXTERNAL_DEBUG_INFO_SECTION
+  );
 }
 
 /** Whether a section is one of the custom sections carrying DWARF. */
