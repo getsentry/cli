@@ -465,6 +465,69 @@ describe("resolveTargetsFromParsedArg", () => {
     expect(getProjectSpy).toHaveBeenCalledWith("my-org", "api");
   });
 
+  test("explicit: expands a project slug glob against the org catalog", async () => {
+    listProjectsSpy.mockResolvedValue([
+      { id: "1", slug: "web-backend", name: "Backend" },
+      { id: "2", slug: "web-frontend", name: "Web" },
+      { id: "3", slug: "mobile", name: "Mobile" },
+    ]);
+    getProjectSpy.mockImplementation(async (_org: string, slug: string) => ({
+      id: slug === "web-backend" ? "1" : "2",
+      slug,
+    }));
+
+    const result = await resolveTargetsFromParsedArg(
+      { type: "explicit", org: "my-org", project: "web-*" },
+      OPTS
+    );
+
+    expect(result.targets.map((t) => t.project)).toEqual([
+      "web-backend",
+      "web-frontend",
+    ]);
+    expect(listProjectsSpy).toHaveBeenCalledWith("my-org");
+    expect(getProjectSpy).not.toHaveBeenCalledWith("my-org", "web-*");
+  });
+
+  test("explicit: a glob that matches nothing is a ResolutionError", async () => {
+    listProjectsSpy.mockResolvedValue([
+      { id: "1", slug: "mobile", name: "Mobile" },
+    ]);
+
+    await expect(
+      resolveTargetsFromParsedArg(
+        { type: "explicit", org: "my-org", project: "web-*" },
+        OPTS
+      )
+    ).rejects.toThrow(ResolutionError);
+  });
+
+  test("explicit: mixes exact slugs with a glob and de-duplicates", async () => {
+    listProjectsSpy.mockResolvedValue([
+      { id: "1", slug: "web-frontend", name: "Web" },
+      { id: "2", slug: "web-worker", name: "Worker" },
+    ]);
+    getProjectSpy.mockImplementation(async (_org: string, slug: string) => ({
+      id: "9",
+      slug,
+    }));
+
+    const result = await resolveTargetsFromParsedArg(
+      {
+        type: "explicit",
+        org: "my-org",
+        project: "web-frontend",
+        projects: ["web-frontend", "web-*"],
+      },
+      OPTS
+    );
+
+    expect(result.targets.map((t) => t.project)).toEqual([
+      "web-frontend",
+      "web-worker",
+    ]);
+  });
+
   test("explicit: resolves DSN-style org id to the real slug", async () => {
     getProjectSpy.mockResolvedValue({ id: "42", slug: "my-proj" });
 

@@ -11,6 +11,7 @@ import {
   detectSwappedTrialArgs,
   detectSwappedViewArgs,
   explicitProjectSlugs,
+  isProjectGlob,
   looksLikeIssueShortId,
   normalizeSlug,
   parseIssueArg,
@@ -141,6 +142,20 @@ describe("parseOrgProjectArg", () => {
         projects: ["web", "api"],
       })
     ).toEqual(["web", "api"]);
+  });
+
+  test("glob selectors parse as an explicit slug containing *", () => {
+    expect(parseOrgProjectArg("acme/web-*")).toEqual({
+      type: "explicit",
+      org: "acme",
+      project: "web-*",
+    });
+  });
+
+  test("isProjectGlob detects star tokens", () => {
+    expect(isProjectGlob("web-*")).toBe(true);
+    expect(isProjectGlob("*")).toBe(true);
+    expect(isProjectGlob("web-frontend")).toBe(false);
   });
 
   // Error case - verify specific message

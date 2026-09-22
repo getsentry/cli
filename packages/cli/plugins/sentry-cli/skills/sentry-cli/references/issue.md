@@ -57,6 +57,9 @@ sentry issue list my-org/frontend
 # Several projects in the same org
 sentry issue list my-org/frontend,backend,worker
 
+# Glob of project slugs in the org
+sentry issue list my-org/web-*
+
 # All projects in an org
 sentry issue list my-org/
 

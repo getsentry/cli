@@ -102,6 +102,11 @@ export function explicitProjectSlugs(
   return first === undefined ? [parsed.project] : [first, ...rest];
 }
 
+/** True when a project selector uses `*` (e.g. `web-*`, `*`). */
+export function isProjectGlob(slug: string): boolean {
+  return slug.includes("*");
+}
+
 // ---------------------------------------------------------------------------
 // Issue short ID detection
 // ---------------------------------------------------------------------------
