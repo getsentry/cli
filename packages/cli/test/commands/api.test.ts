@@ -9,6 +9,7 @@ import { writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
+  apiCommand,
   buildBodyFromFields,
   buildBodyFromInput,
   buildFromFields,
@@ -1842,5 +1843,35 @@ describe("resolveRequestUrl", () => {
   test("omits query string when no params", () => {
     const url = resolveRequestUrl("projects/");
     expect(url).not.toContain("?");
+  });
+
+  test("absolute URL dry-run preserves the regional origin", async () => {
+    let output = "";
+    const func = await apiCommand.loader();
+    await func.call(
+      {
+        cwd: "/tmp",
+        stdin: createMockStdin(""),
+        stdout: {
+          write(value: string | Uint8Array) {
+            output += String(value);
+            return true;
+          },
+        },
+        stderr: { write: () => true },
+      },
+      {
+        method: "GET",
+        silent: false,
+        verbose: false,
+        "dry-run": true,
+        json: true,
+      },
+      "https://de.sentry.io/api/0/organizations/acme/"
+    );
+
+    expect(JSON.parse(output).url).toBe(
+      "https://de.sentry.io/api/0/organizations/acme/"
+    );
   });
 });
