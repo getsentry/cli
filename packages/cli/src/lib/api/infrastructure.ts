@@ -759,22 +759,31 @@ export function isTextualContentType(contentType: string | null): boolean {
  * `Uint8Array` so binary downloads stay byte-for-byte intact.
  *
  * @param endpoint - API endpoint path (e.g., "/organizations/")
- * @param options - Request options including method, body, params, and custom headers
+ * @param options - Request options including method, body, params, custom headers, and optional trusted base URL
  * @returns Response status, status text, headers, and parsed body
  * @throws {AuthError} Only on authentication failure (not on API errors)
  */
 export async function rawApiRequest(
   endpoint: string,
-  options: ApiRequestOptions & { headers?: Record<string, string> } = {}
+  options: ApiRequestOptions & {
+    headers?: Record<string, string>;
+    baseUrl?: string;
+  } = {}
 ): Promise<{
   status: number;
   statusText: string;
   headers: Headers;
   body: unknown;
 }> {
-  const { method = "GET", body, params, headers: customHeaders = {} } = options;
+  const {
+    method = "GET",
+    body,
+    params,
+    headers: customHeaders = {},
+    baseUrl,
+  } = options;
 
-  const config = getDefaultSdkConfig();
+  const config = baseUrl ? getSdkConfig(baseUrl) : getDefaultSdkConfig();
 
   const searchParams = buildSearchParams(params);
   const normalizedEndpoint = endpoint.startsWith("/")

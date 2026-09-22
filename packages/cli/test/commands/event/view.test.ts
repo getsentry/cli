@@ -957,6 +957,7 @@ describe("viewCommand.func", () => {
   let openInBrowserSpy: ReturnType<typeof vi.spyOn>;
   let resolveProjectBySlugSpy: ReturnType<typeof vi.spyOn>;
   let listEventAttachmentsSpy: ReturnType<typeof vi.spyOn>;
+  let getIssueInOrgSpy: ReturnType<typeof vi.spyOn>;
 
   const VALID_EVENT_ID = "abc123def456abc123def456abc123de";
   const sampleEvent: SentryEvent = {
@@ -965,6 +966,18 @@ describe("viewCommand.func", () => {
     metadata: {},
     contexts: {},
   } as unknown as SentryEvent;
+  const attachment = {
+    id: "attachment-1",
+    event_id: VALID_EVENT_ID,
+    type: "event.attachment",
+    name: "screenshot.png",
+    mimetype: "image/png",
+    dateCreated: "2026-07-16T12:00:00Z",
+    size: 2048,
+    headers: {},
+    sha1: null,
+  };
+  const attachmentDownloadUrl = `https://sentry.io/api/0/projects/test-org/test-proj/events/${VALID_EVENT_ID}/attachments/attachment-1/?download=1`;
 
   function createMockContext() {
     const stdoutWrite = vi.fn(() => true);
@@ -986,6 +999,9 @@ describe("viewCommand.func", () => {
     listEventAttachmentsSpy = vi
       .spyOn(apiClient, "listEventAttachments")
       .mockResolvedValue([]);
+    getIssueInOrgSpy = vi.spyOn(apiClient, "getIssueInOrg").mockResolvedValue({
+      project: { slug: "test-proj" },
+    } as never);
     setOrgRegion("test-org", DEFAULT_SENTRY_URL);
   });
 
@@ -995,6 +1011,7 @@ describe("viewCommand.func", () => {
     openInBrowserSpy.mockRestore();
     resolveProjectBySlugSpy.mockRestore();
     listEventAttachmentsSpy.mockRestore();
+    getIssueInOrgSpy.mockRestore();
   });
 
   test("logs warning when args appear swapped", async () => {
@@ -1050,19 +1067,7 @@ describe("viewCommand.func", () => {
       traceId: null,
       success: false,
     });
-    listEventAttachmentsSpy.mockResolvedValue([
-      {
-        id: "attachment-1",
-        event_id: VALID_EVENT_ID,
-        type: "event.attachment",
-        name: "screenshot.png",
-        mimetype: "image/png",
-        dateCreated: "2026-07-16T12:00:00Z",
-        size: 2048,
-        headers: {},
-        sha1: null,
-      },
-    ]);
+    listEventAttachmentsSpy.mockResolvedValue([attachment]);
 
     const { context, stdoutWrite } = createMockContext();
     const func = await viewCommand.loader();
@@ -1085,12 +1090,12 @@ describe("viewCommand.func", () => {
       expect.objectContaining({
         id: "attachment-1",
         name: "screenshot.png",
-        download: `https://sentry.io/api/0/projects/test-org/test-proj/events/${VALID_EVENT_ID}/attachments/attachment-1/?download=1`,
+        download: attachmentDownloadUrl,
       }),
     ]);
   });
 
-  test("prints a download command in human output", async () => {
+  test("shell-quotes the attachment download command", async () => {
     getEventSpy.mockResolvedValue(sampleEvent);
     getSpanTreeLinesSpy.mockResolvedValue({
       lines: [],
@@ -1099,17 +1104,7 @@ describe("viewCommand.func", () => {
       success: false,
     });
     listEventAttachmentsSpy.mockResolvedValue([
-      {
-        id: "attachment-1",
-        event_id: VALID_EVENT_ID,
-        type: "event.attachment",
-        name: "screenshot.png",
-        mimetype: "image/png",
-        dateCreated: "2026-07-16T12:00:00Z",
-        size: 2048,
-        headers: {},
-        sha1: null,
-      },
+      { ...attachment, name: "$(touch /tmp/pwned).png" },
     ]);
 
     const { context, stdoutWrite } = createMockContext();
@@ -1124,11 +1119,9 @@ describe("viewCommand.func", () => {
     const output = stdoutWrite.mock.calls
       .map((call) => String(call[0]))
       .join("");
-    expect(output).toContain("screenshot.png");
     expect(output).toContain("sentry api");
-    expect(output).toContain(
-      `https://sentry.io/api/0/projects/test-org/test-proj/events/${VALID_EVENT_ID}/attachments/attachment-1/?download=1`
-    );
+    expect(output).toContain(`'${attachmentDownloadUrl}'`);
+    expect(output).toContain("> '$(touch /tmp/pwned).png'");
   });
 
   test("keeps event output when attachment listing fails", async () => {
@@ -1211,6 +1204,9 @@ describe("viewCommand.func", () => {
     const getLatestEventSpy = vi
       .spyOn(apiClient, "getLatestEvent")
       .mockResolvedValue(sampleEvent);
+    getIssueInOrgSpy.mockResolvedValue({
+      project: { slug: "auto-project" },
+    } as never);
     getSpanTreeLinesSpy.mockResolvedValue({
       lines: [],
       spans: null,
@@ -1224,6 +1220,11 @@ describe("viewCommand.func", () => {
 
     expect(resolveOrgSpy).toHaveBeenCalled();
     expect(getLatestEventSpy).toHaveBeenCalledWith("auto-org", "17370");
+    expect(listEventAttachmentsSpy).toHaveBeenCalledWith(
+      "auto-org",
+      "auto-project",
+      VALID_EVENT_ID
+    );
 
     resolveOrgSpy.mockRestore();
     getLatestEventSpy.mockRestore();
@@ -1374,7 +1375,11 @@ describe("fetchEventWithContext", () => {
       "my-project",
       "abc123"
     );
-    expect(result).toBe(mockEvent);
+    expect(result).toEqual({
+      org: "my-org",
+      project: "my-project",
+      event: mockEvent,
+    });
     expect(getEventSpy).not.toHaveBeenCalled();
   });
 
@@ -1388,7 +1393,11 @@ describe("fetchEventWithContext", () => {
       "my-project",
       "abc123"
     );
-    expect(result).toBe(mockEvent);
+    expect(result).toEqual({
+      org: "my-org",
+      project: "my-project",
+      event: mockEvent,
+    });
     expect(getEventSpy).toHaveBeenCalledWith("my-org", "my-project", "abc123");
   });
 
@@ -1412,7 +1421,11 @@ describe("fetchEventWithContext", () => {
       "my-project",
       "abc123"
     );
-    expect(result).toBe(resolvedEvent);
+    expect(result).toEqual({
+      org: "my-org",
+      project: "other-project",
+      event: resolvedEvent,
+    });
   });
 
   test("throws ResolutionError when project-scoped, org-wide, and cross-org all fail", async () => {
@@ -1448,7 +1461,11 @@ describe("fetchEventWithContext", () => {
       "my-project",
       "abc123"
     );
-    expect(result).toBe(crossOrgEvent);
+    expect(result).toEqual({
+      org: "other-org",
+      project: "other-project",
+      event: crossOrgEvent,
+    });
   });
 
   test("cross-org fallback passes excludeOrgs when same-org search succeeded", async () => {
@@ -1589,7 +1606,11 @@ describe("fetchEventWithContext", () => {
       "my-project",
       "abc123"
     );
-    expect(result).toBe(crossOrgEvent);
+    expect(result).toEqual({
+      org: "other-org",
+      project: "other-project",
+      event: crossOrgEvent,
+    });
     expect(findSpy).toHaveBeenCalled();
   });
 
@@ -1767,33 +1788,6 @@ describe("formatEventView", () => {
     expect(result).toContain("span-1 (50ms)");
     expect(result).toContain("span-2 (20ms)");
   });
-
-  test("renders attachments when present", () => {
-    const result = formatEventView({
-      events: [
-        {
-          event: mockEvent("abc123"),
-          trace: null,
-          attachments: [
-            {
-              id: "attachment-1",
-              event_id: "abc123",
-              type: "event.attachment",
-              name: "screenshot.png",
-              mimetype: "image/png",
-              dateCreated: "2026-07-16T12:00:00Z",
-              size: 2048,
-              headers: {},
-              sha1: null,
-            },
-          ],
-        },
-      ],
-      requestedCount: 1,
-    });
-    expect(result).toContain("screenshot.png");
-    expect(result).toContain("attachment-1");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1869,54 +1863,6 @@ describe("jsonTransformEventView", () => {
     );
     expect(result).toEqual([{ eventID: "event1" }, { eventID: "event2" }]);
   });
-
-  test("includes attachments with download URLs", () => {
-    const result = jsonTransformEventView({
-      events: [
-        {
-          event: mockEvent("abc123"),
-          trace: null,
-          org: "acme",
-          project: "frontend",
-          apiBase: "https://sentry.io",
-          attachments: [
-            {
-              id: "attachment-1",
-              event_id: "abc123",
-              type: "event.attachment",
-              name: "screenshot.png",
-              mimetype: "image/png",
-              dateCreated: "2026-07-16T12:00:00Z",
-              size: 2048,
-              headers: {},
-              sha1: null,
-            },
-          ],
-        },
-      ],
-      requestedCount: 1,
-    });
-    expect(result).toEqual(
-      expect.objectContaining({
-        eventID: "abc123",
-        attachments: [
-          expect.objectContaining({
-            id: "attachment-1",
-            download:
-              "https://sentry.io/api/0/projects/acme/frontend/events/abc123/attachments/attachment-1/?download=1",
-          }),
-        ],
-      })
-    );
-  });
-
-  test("emits an empty attachments array when none were fetched", () => {
-    const result = jsonTransformEventView({
-      events: [{ event: mockEvent("abc123"), trace: null }],
-      requestedCount: 1,
-    });
-    expect(result).toEqual(expect.objectContaining({ attachments: [] }));
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1941,7 +1887,7 @@ describe("fetchMultipleEvents", () => {
       prefetchedEvent: null,
       primaryId: "abc123",
     });
-    expect(result).toEqual([event]);
+    expect(result).toEqual([{ org: "my-org", project: "my-project", event }]);
   });
 
   test("uses prefetched event for primary ID", async () => {
@@ -1954,7 +1900,9 @@ describe("fetchMultipleEvents", () => {
       prefetchedEvent: prefetched,
       primaryId: "abc123",
     });
-    expect(result).toEqual([prefetched]);
+    expect(result).toEqual([
+      { org: "my-org", project: "my-project", event: prefetched },
+    ]);
   });
 
   test("fetches multiple events in parallel", async () => {
@@ -1973,8 +1921,8 @@ describe("fetchMultipleEvents", () => {
       primaryId: "event1",
     });
     expect(result).toHaveLength(2);
-    expect(result[0]?.eventID).toBe("event1");
-    expect(result[1]?.eventID).toBe("event2");
+    expect(result[0]?.event.eventID).toBe("event1");
+    expect(result[1]?.event.eventID).toBe("event2");
   });
 
   test("warns on individual fetch failures and continues", async () => {
@@ -1994,7 +1942,9 @@ describe("fetchMultipleEvents", () => {
       primaryId: "event1",
     });
     // Only the successful event is returned
-    expect(result).toEqual([event1]);
+    expect(result).toEqual([
+      { org: "my-org", project: "my-project", event: event1 },
+    ]);
   });
 
   test("re-throws primary event error when all fetches fail", async () => {

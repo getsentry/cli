@@ -2,7 +2,7 @@
 
 ## Examples
 
-Endpoints are relative to `/api/0/` — the prefix is added automatically. Absolute `https://` URLs also work; the path is extracted and requested against your configured Sentry host.
+Endpoints are relative to `/api/0/` — the prefix is added automatically. Absolute HTTP(S) Sentry URLs also work; their origin is validated against your authenticated host.
 
 ### GET requests
 

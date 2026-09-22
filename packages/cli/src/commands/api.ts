@@ -17,7 +17,7 @@ import { CommandOutput } from "../lib/formatters/output.js";
 import { validateEndpoint } from "../lib/input-validation.js";
 import { imageBytesToKitty } from "../lib/kitty-image.js";
 import { logger } from "../lib/logger.js";
-import { getDefaultSdkConfig } from "../lib/sentry-client.js";
+import { getDefaultSdkConfig, getSdkConfig } from "../lib/sentry-client.js";
 import {
   canRenderKitty,
   canRenderSixel,
@@ -29,7 +29,6 @@ const log = logger.withTag("api");
 
 /** Strips line breaks and surrounding indentation from copy-pasted endpoints. */
 const LINE_BREAK_PATTERN = /[ \t]*[\r\n]+[ \t]*/g;
-const ABSOLUTE_HTTP_URL_RE = /^https?:\/\//i;
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 
@@ -89,22 +88,22 @@ export function parseMethod(value: string): HttpMethod {
 }
 
 /**
- * Extract pathname + search from an absolute `http(s)://` API URL.
- * Origin is ignored — `sentry api` always uses the CLI's configured host.
+ * Parse an absolute HTTP(S) API URL.
  */
-function endpointFromAbsoluteApiUrl(endpoint: string): string | undefined {
-  if (!ABSOLUTE_HTTP_URL_RE.test(endpoint)) {
+function parseAbsoluteApiUrl(endpoint: string): URL | undefined {
+  const lowerEndpoint = endpoint.toLowerCase();
+  if (
+    !(
+      lowerEndpoint.startsWith("http://") ||
+      lowerEndpoint.startsWith("https://")
+    )
+  ) {
     return;
   }
   try {
-    const url = new URL(endpoint);
-    if (!url.host) {
-      return;
-    }
-    return `${url.pathname}${url.search}`;
-  } catch (error) {
-    log.debug("Could not parse endpoint as absolute URL", error);
-    return;
+    return new URL(endpoint);
+  } catch {
+    throw new ValidationError("Invalid absolute API URL", "endpoint");
   }
 }
 
@@ -113,8 +112,7 @@ function endpointFromAbsoluteApiUrl(endpoint: string): string | undefined {
  * Sentry API requires trailing slashes on endpoints.
  * Handles query strings correctly by only modifying the path portion.
  *
- * Accepts paths relative to `/api/0/` and absolute `https://` URLs
- * (the origin is stripped; only the path is used).
+ * Accepts paths relative to `/api/0/` and absolute HTTP(S) URLs.
  *
  * @param endpoint - API endpoint path or absolute URL (may include query string)
  * @returns Endpoint with trailing slash on path, query string preserved
@@ -131,14 +129,17 @@ export function normalizeEndpoint(endpoint: string): string {
     log.warn("Stripped line breaks from endpoint (copy-paste artifact)");
   }
 
-  // Absolute Sentry API URLs (from `attachments[].download` or copy-paste)
-  // collapse to a path relative to /api/0/. `sentry api` always uses the
-  // CLI's configured host; the origin is only used to extract the path.
-  const fromAbsoluteUrl = endpointFromAbsoluteApiUrl(cleaned);
-  const source = fromAbsoluteUrl ?? cleaned;
+  // Validate before URL parsing so WHATWG dot-segment normalization cannot
+  // hide path traversal from the endpoint validator.
+  validateEndpoint(cleaned);
 
-  // Reject path traversal and remaining control characters after cleaning
-  validateEndpoint(source);
+  // Absolute Sentry API URLs (from `attachments[].download` or copy-paste)
+  // collapse to a path relative to /api/0/. The command retains the origin
+  // separately when it executes the request.
+  const absoluteUrl = parseAbsoluteApiUrl(cleaned);
+  const source = absoluteUrl
+    ? `${absoluteUrl.pathname}${absoluteUrl.search}`
+    : cleaned;
 
   // Remove leading slash if present (rawApiRequest handles the base URL)
   let trimmed = source.startsWith("/") ? source.slice(1) : source;
@@ -163,6 +164,28 @@ export function normalizeEndpoint(endpoint: string): string {
   const query = trimmed.substring(queryIndex);
   const normalizedPath = path.endsWith("/") ? path : `${path}/`;
   return `${normalizedPath}${query}`;
+}
+
+function resolveApiTarget(endpoint: string): {
+  normalizedEndpoint: string;
+  requestBaseUrl?: string;
+  strippedApiPrefix: boolean;
+} {
+  const cleaned = endpoint.replace(LINE_BREAK_PATTERN, "").trim();
+  const absoluteUrl = parseAbsoluteApiUrl(cleaned);
+  const comparableEndpoint = absoluteUrl
+    ? `${absoluteUrl.pathname}${absoluteUrl.search}`
+    : cleaned;
+  const withoutLeadingSlash = comparableEndpoint.startsWith("/")
+    ? comparableEndpoint.slice(1)
+    : comparableEndpoint;
+  return {
+    normalizedEndpoint: normalizeEndpoint(endpoint),
+    requestBaseUrl: absoluteUrl?.origin,
+    strippedApiPrefix:
+      withoutLeadingSlash.startsWith("api/0/") ||
+      withoutLeadingSlash === "api/0",
+  };
 }
 
 /**
@@ -1084,17 +1107,20 @@ function formatApiResponseJson(data: unknown, fields?: string[]): unknown {
  */
 export function resolveRequestUrl(
   endpoint: string,
-  params?: Record<string, string | string[]>
+  params?: Record<string, string | string[]>,
+  baseUrl?: string
 ): string {
-  // Use getDefaultSdkConfig().baseUrl — same as rawApiRequest — to ensure
+  // Use the same SDK config selection as rawApiRequest to ensure
   // trailing slashes are stripped and the URL matches what would be sent.
-  const { baseUrl } = getDefaultSdkConfig();
+  const { baseUrl: normalizedBaseUrl } = baseUrl
+    ? getSdkConfig(baseUrl)
+    : getDefaultSdkConfig();
   const normalizedEndpoint = endpoint.startsWith("/")
     ? endpoint.slice(1)
     : endpoint;
   const searchParams = buildSearchParams(params);
   const queryString = searchParams ? `?${searchParams.toString()}` : "";
-  return `${baseUrl}/api/0/${normalizedEndpoint}${queryString}`;
+  return `${normalizedBaseUrl}/api/0/${normalizedEndpoint}${queryString}`;
 }
 
 /**
@@ -1392,8 +1418,8 @@ export const apiCommand = buildCommand({
     fullDescription:
       "Make a raw API request to the Sentry API. Similar to 'gh api' for GitHub. " +
       "The endpoint is relative to /api/0/ (do not include the prefix). " +
-      "Absolute https:// URLs are also accepted — the path is extracted and " +
-      "requested against your configured Sentry host. " +
+      "Absolute HTTP(S) Sentry URLs are also accepted; their origin is " +
+      "validated against your authenticated host. " +
       "Authentication is handled automatically using your stored credentials.\n\n" +
       "Body options:\n" +
       '  --data/-d \'{"key":"value"}\'   Inline JSON body (like curl -d)\n' +
@@ -1416,8 +1442,7 @@ export const apiCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          brief:
-            "API endpoint relative to /api/0/, or an absolute https:// URL",
+          brief: "API endpoint relative to /api/0/, or an absolute HTTP(S) URL",
           parse: String,
           placeholder: "endpoint",
         },
@@ -1495,18 +1520,9 @@ export const apiCommand = buildCommand({
   async *func(this: SentryContext, flags: ApiFlags, endpoint: string) {
     const { stdin } = this;
 
-    const normalizedEndpoint = normalizeEndpoint(endpoint);
-
-    // Detect whether normalizeEndpoint stripped the api/0/ prefix (CLI-K1).
-    // Compare against the cleaned endpoint (line breaks removed, trimmed,
-    // leading slash removed) since normalizeEndpoint also strips copy-paste
-    // artifacts before the api/0/ check. Without this, line-break removal
-    // alone would shrink the length and trigger a false api/0/ warning.
-    const cleaned = endpoint.replace(LINE_BREAK_PATTERN, "").trim();
-    const baseLen = cleaned.startsWith("/")
-      ? cleaned.length - 1
-      : cleaned.length;
-    if (normalizedEndpoint.length < baseLen) {
+    const { normalizedEndpoint, requestBaseUrl, strippedApiPrefix } =
+      resolveApiTarget(endpoint);
+    if (strippedApiPrefix) {
       // Silent auto-fix — not a warning. Users commonly copy/paste URLs
       // that include the /api/0/ prefix; we strip it transparently and
       // only surface the detail at debug level for troubleshooting
@@ -1526,7 +1542,7 @@ export const apiCommand = buildCommand({
     if (flags["dry-run"]) {
       yield new CommandOutput({
         method: flags.method,
-        url: resolveRequestUrl(normalizedEndpoint, params),
+        url: resolveRequestUrl(normalizedEndpoint, params, requestBaseUrl),
         headers: resolveEffectiveHeaders(headers, body),
         body: body ?? null,
       });
@@ -1544,6 +1560,7 @@ export const apiCommand = buildCommand({
       body,
       params,
       headers,
+      baseUrl: requestBaseUrl,
     });
 
     const isError = isApiErrorStatus(response.status);

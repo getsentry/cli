@@ -92,26 +92,12 @@ describe("normalizeEndpoint: api/0/ prefix stripping (CLI-K1)", () => {
     expect(normalizeEndpoint("api/0")).toBe("/");
   });
 
-  test("strips origin and /api/0/ from absolute URLs", () => {
-    expect(
-      normalizeEndpoint(
-        "https://sentry.io/api/0/projects/my-org/my-project/events/abc/attachments/1/?download=1"
-      )
-    ).toBe("projects/my-org/my-project/events/abc/attachments/1/?download=1");
-  });
-
   test("strips regional origins from absolute URLs", () => {
     expect(
       normalizeEndpoint(
         "https://de.sentry.io/api/0/projects/my-org/my-project/events/abc/attachments/1/?download=1"
       )
     ).toBe("projects/my-org/my-project/events/abc/attachments/1/?download=1");
-  });
-
-  test("accepts absolute URLs without an /api/0/ prefix", () => {
-    expect(
-      normalizeEndpoint("https://sentry.io/organizations/my-org/issues/123")
-    ).toBe("organizations/my-org/issues/123/");
   });
 
   test("does not strip partial api/ prefix", () => {
@@ -140,6 +126,12 @@ describe("normalizeEndpoint: path traversal hardening (#350)", () => {
 
   test("rejects traversal with leading slash", () => {
     expect(() => normalizeEndpoint("/../../admin/")).toThrow(/path traversal/);
+  });
+
+  test("rejects traversal before normalizing an absolute URL", () => {
+    expect(() =>
+      normalizeEndpoint("https://sentry.io/api/0/projects/acme/../admin/")
+    ).toThrow(/path traversal/);
   });
 
   test("allows single dots in paths", () => {
@@ -1819,9 +1811,13 @@ describe("dataToQueryParams", () => {
 // Dry-run tests
 
 describe("resolveRequestUrl", () => {
-  test("builds URL with base URL and endpoint", () => {
-    const url = resolveRequestUrl("organizations/");
-    expect(url).toMatch(/\/api\/0\/organizations\/$/);
+  test("builds URL against an explicit regional origin", () => {
+    const url = resolveRequestUrl(
+      "organizations/",
+      undefined,
+      "https://de.sentry.io"
+    );
+    expect(url).toBe("https://de.sentry.io/api/0/organizations/");
   });
 
   test("strips leading slash from endpoint", () => {

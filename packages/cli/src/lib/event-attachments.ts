@@ -1,8 +1,8 @@
 /**
  * Event attachment helpers for `sentry event view`.
  *
- * Listing uses {@link listEventAttachments}; `download` is an absolute
- * API URL for `sentry api "<url>"` so JSON never carries file bytes.
+ * Listing uses {@link listEventAttachments}; each `download` value is an
+ * absolute authenticated API URL. JSON output never carries file bytes.
  */
 
 import type { EventAttachmentDetailsResponse } from "@sentry/api";
@@ -17,15 +17,24 @@ import { formatBytes } from "./formatters/numbers.js";
 import { logger } from "./logger.js";
 import { resolveOrgRegion } from "./region.js";
 import { getApiBaseUrl } from "./sentry-client.js";
+import { shellQuote } from "./utils.js";
 
 const log = logger.withTag("event.view");
-
-const TRAILING_SLASHES_RE = /\/+$/;
-const TRAILING_API_0_RE = /\/api\/0$/;
 
 type EventWithOptionalProject = SentryEvent & {
   project?: string | { slug?: string | null } | null;
   projectSlug?: string | null;
+};
+
+export type EventViewAttachment = EventAttachmentDetailsResponse & {
+  download: string;
+};
+
+type AttachmentTarget = {
+  apiBase: string;
+  org: string;
+  project: string;
+  eventId: string;
 };
 
 /**
@@ -51,54 +60,34 @@ export function eventProjectSlug(event: SentryEvent): string | undefined {
   return;
 }
 
-/**
- * List attachments for an event. Returns `[]` when project is missing or
- * the request fails — viewing the event must not fail because of this.
- */
-export async function tryListEventAttachments(
-  orgSlug: string,
-  projectSlug: string | undefined,
-  eventId: string
-): Promise<EventAttachmentDetailsResponse[]> {
-  if (!projectSlug) {
-    return [];
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") {
+    end -= 1;
   }
-  try {
-    return await listEventAttachments(orgSlug, projectSlug, eventId);
-  } catch (error) {
-    log.debug("Failed to fetch attachments for event", error);
-    return [];
-  }
+  return value.slice(0, end);
 }
 
-/**
- * Absolute API URL for downloading attachment bytes.
- *
- * The URL still requires a Sentry session — `curl` without a token gets 401.
- * Pass it to `sentry api`, which strips the origin and `/api/0/` prefix.
- */
-export function attachmentDownloadUrl(
-  target: {
-    apiBase: string;
-    org: string;
-    project: string;
-    eventId: string;
-  },
+function attachmentDownloadUrl(
+  target: AttachmentTarget,
   attachmentId: string
 ): string {
-  const origin = target.apiBase
-    .replace(TRAILING_SLASHES_RE, "")
-    .replace(TRAILING_API_0_RE, "");
-  return `${origin}/api/0/projects/${target.org}/${target.project}/events/${target.eventId}/attachments/${attachmentId}/?download=1`;
+  const origin = trimTrailingSlashes(target.apiBase);
+  const path = [
+    "projects",
+    target.org,
+    target.project,
+    "events",
+    target.eventId,
+    "attachments",
+    attachmentId,
+  ]
+    .map(encodeURIComponent)
+    .join("/");
+  return `${origin}/api/0/${path}/?download=1`;
 }
 
-/**
- * Region API origin for attachment download URLs.
- * Falls back to the CLI's configured Sentry URL when region lookup fails.
- */
-export async function tryResolveAttachmentApiBase(
-  org: string
-): Promise<string> {
+async function resolveAttachmentApiBase(org: string): Promise<string> {
   try {
     return await resolveOrgRegion(org);
   } catch (error) {
@@ -107,29 +96,43 @@ export async function tryResolveAttachmentApiBase(
   }
 }
 
-type EventAttachmentScope = {
-  org?: string;
-  project?: string;
-  eventId: string;
-  apiBase?: string;
-};
-
 /**
- * JSON attachment objects plus a `download` URL.
+ * Best-effort attachment metadata with absolute download URLs.
+ *
+ * Event rendering remains available when the project is unknown or attachment
+ * lookup fails.
+ *
+ * @param org - Organization slug
+ * @param project - Project slug, when known
+ * @param eventId - Event ID
+ * @returns Attachment metadata, or an empty array when unavailable
  */
-export function jsonEventAttachments(
-  scope: EventAttachmentScope,
-  attachments: EventAttachmentDetailsResponse[]
-): Array<EventAttachmentDetailsResponse & { download?: string }> {
-  const { org, project, eventId, apiBase } = scope;
-  if (!(org && project)) {
-    return attachments.map((attachment) => ({ ...attachment }));
+export async function loadEventAttachments(
+  org: string,
+  project: string | undefined,
+  eventId: string
+): Promise<EventViewAttachment[]> {
+  if (!project) {
+    return [];
   }
+
+  let attachments: EventAttachmentDetailsResponse[];
+  try {
+    attachments = await listEventAttachments(org, project, eventId);
+  } catch (error) {
+    log.debug("Failed to fetch attachments for event", error);
+    return [];
+  }
+  if (attachments.length === 0) {
+    return [];
+  }
+
+  const apiBase = await resolveAttachmentApiBase(org);
   const target = {
     org,
     project,
     eventId,
-    apiBase: apiBase ?? getApiBaseUrl(),
+    apiBase,
   };
   return attachments.map((attachment) => ({
     ...attachment,
@@ -163,20 +166,14 @@ export function formatEventAttachments(
  * Footer hint with a copy-pasteable download command for the first attachment.
  */
 export function attachmentDownloadHint(
-  scope: EventAttachmentScope,
-  attachments: EventAttachmentDetailsResponse[]
+  attachments: EventViewAttachment[]
 ): string | undefined {
   const [first] = attachments;
-  const { org, project, eventId, apiBase } = scope;
-  if (!(first && project && org)) {
+  if (!first) {
     return;
   }
-  const url = attachmentDownloadUrl(
-    { org, project, eventId, apiBase: apiBase ?? getApiBaseUrl() },
-    first.id
-  );
   const name = first.name || "attachment";
   const extra =
     attachments.length > 1 ? ` (${attachments.length - 1} more)` : "";
-  return `Download attachment: sentry api ${JSON.stringify(url)} > ${JSON.stringify(name)}${extra}`;
+  return `Download attachment: sentry api ${shellQuote(first.download)} > ${shellQuote(name)}${extra}`;
 }
