@@ -1,8 +1,8 @@
 /**
  * Warning copy for stacked search-query rewrites.
  *
- * `sanitizeQuery` must emit one `Running query:` line, quoting the
- * string that is actually sent — not an intermediate rewrite.
+ * `sanitizeQuery` must emit one warn: reasons, then a newline, then
+ * `Running query:` quoting the string that is actually sent.
  */
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
@@ -43,10 +43,11 @@ describe("sanitizeQuery: rewrite warnings", () => {
     );
     const warns = runningQueries();
     expect(warns).toHaveLength(1);
-    expect(warns[0]).toContain('Running query: "project_id:[123,456]"');
+    expect(warns[0].split("\n")).toEqual([
+      "`project` is the slug; numeric ids use project_id. Rewrote numeric project: filters. Rewrote OR using in-list syntax: key:[val1,val2].",
+      'Running query: "project_id:[123,456]"',
+    ]);
     expect(warns[0]).not.toContain("project_id:123 OR project_id:456");
-    expect(warns[0]).toContain("Rewrote numeric project:");
-    expect(warns[0]).toContain("Rewrote OR using in-list syntax");
   });
 
   test("numeric project: plus AND warns once with the stripped query", () => {
@@ -55,9 +56,10 @@ describe("sanitizeQuery: rewrite warnings", () => {
     );
     const warns = runningQueries();
     expect(warns).toHaveLength(1);
-    expect(warns[0]).toContain('Running query: "project_id:123 is:unresolved"');
-    expect(warns[0]).toContain("removed explicit AND operator");
-    expect(warns[0]).not.toContain('Running query: "project:123 AND');
+    expect(warns[0].split("\n")).toEqual([
+      "`project` is the slug; numeric ids use project_id. Rewrote numeric project: filters. Sentry search implicitly ANDs terms — removed explicit AND operator.",
+      'Running query: "project_id:123 is:unresolved"',
+    ]);
   });
 
   test("OR-only still warns once with the in-list", () => {
@@ -66,7 +68,10 @@ describe("sanitizeQuery: rewrite warnings", () => {
     );
     const warns = runningQueries();
     expect(warns).toHaveLength(1);
-    expect(warns[0]).toContain('Running query: "level:[error,warning]"');
+    expect(warns[0].split("\n")).toEqual([
+      "Rewrote OR using in-list syntax: key:[val1,val2].",
+      'Running query: "level:[error,warning]"',
+    ]);
   });
 
   test("does not warn Running query: when OR rewrite fails", () => {

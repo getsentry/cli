@@ -420,14 +420,15 @@ function preParseRewriteNotes(
 }
 
 /**
- * One warning after every successful rewrite, quoting the query that
- * will actually be sent. Skip if nothing changed.
+ * One warning after every successful rewrite. Reasons on the first
+ * line; the query that will actually be sent on the second. Skip if
+ * nothing changed.
  */
 function warnRunningQuery(notes: string[], result: string): void {
   if (notes.length === 0) {
     return;
   }
-  log.warn(`${notes.join(" ")} Running query: "${result}"`);
+  log.warn(`${notes.join(" ")}\nRunning query: "${result}"`);
 }
 
 /**
