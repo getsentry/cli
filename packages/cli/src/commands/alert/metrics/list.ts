@@ -61,6 +61,7 @@ import {
 import { withProgress } from "../../../lib/polling.js";
 import {
   type ResolvedTarget,
+  resolveBareProjectOrOrg,
   resolveTargetsFromParsedArg,
 } from "../../../lib/resolve-target.js";
 import { buildMetricAlertsUrl } from "../../../lib/sentry-urls.js";
@@ -228,7 +229,23 @@ async function resolveWebUrl(
   parsed: ReturnType<typeof parseOrgProjectArg>,
   cwd: string
 ): Promise<string> {
-  const { orgs } = await resolveOrgs(parsed, cwd);
+  let projectSearchResult: ProjectSearchResult | undefined;
+  if (
+    parsed.type === "project-search" &&
+    parsed.org === undefined &&
+    parsed.originalSlug === undefined
+  ) {
+    const resolution = await resolveBareProjectOrOrg(parsed.projectSlug);
+    if (resolution.kind === "organization") {
+      logger.warn(
+        `'${parsed.projectSlug}' is an organization, not a project. Opening organization '${resolution.org}'.`
+      );
+      return buildMetricAlertsUrl(resolution.org);
+    }
+    projectSearchResult = resolution.projectSearchResult;
+  }
+
+  const { orgs } = await resolveOrgs(parsed, cwd, projectSearchResult);
   const uniqueOrgs = [...new Set(orgs)];
   if (uniqueOrgs.length === 0) {
     throw new ContextError("Organization", USAGE_HINT);

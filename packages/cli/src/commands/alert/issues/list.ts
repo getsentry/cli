@@ -68,6 +68,7 @@ import {
 import { withProgress } from "../../../lib/polling.js";
 import {
   type ResolvedTarget,
+  resolveBareProjectOrOrg,
   resolveTargetsFromParsedArg,
 } from "../../../lib/resolve-target.js";
 import { buildIssueAlertsUrl } from "../../../lib/sentry-urls.js";
@@ -197,9 +198,26 @@ async function resolveWebUrl(
     return buildIssueAlertsUrl(parsed.org);
   }
 
+  let projectSearchResult: ProjectSearchResult | undefined;
+  if (
+    parsed.type === "project-search" &&
+    parsed.org === undefined &&
+    parsed.originalSlug === undefined
+  ) {
+    const resolution = await resolveBareProjectOrOrg(parsed.projectSlug);
+    if (resolution.kind === "organization") {
+      logger.warn(
+        `'${parsed.projectSlug}' is an organization, not a project. Opening organization '${resolution.org}'.`
+      );
+      return buildIssueAlertsUrl(resolution.org);
+    }
+    projectSearchResult = resolution.projectSearchResult;
+  }
+
   const { targets } = await resolveTargetsFromParsedArg(parsed, {
     cwd,
     usageHint: USAGE_HINT,
+    projectSearchResult,
   });
   if (targets.length === 0) {
     throw new ContextError("Organization and project", USAGE_HINT);

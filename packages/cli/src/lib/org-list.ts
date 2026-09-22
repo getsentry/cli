@@ -57,8 +57,8 @@ import { logger } from "./logger.js";
 import { withProgress } from "./polling.js";
 import { resolveEffectiveOrg } from "./region.js";
 import {
-  findOrgSlugOnProjectMiss,
   type ProjectNotFoundOutcome,
+  resolveBareProjectOrOrg,
   resolveOrgsForListing,
   triageProjectNotFound,
 } from "./resolve-target.js";
@@ -1088,10 +1088,9 @@ async function resolveOrgSlugMatch(
   }
 
   const slug = parsed.projectSlug;
-  const projectSearchResult = await findProjectsBySlug(slug);
-  const matchingOrg = findOrgSlugOnProjectMiss(slug, projectSearchResult);
+  const resolution = await resolveBareProjectOrOrg(slug);
 
-  if (matchingOrg) {
+  if (resolution.kind === "organization") {
     if (behavior === "error") {
       throw new ResolutionError(
         `'${slug}'`,
@@ -1107,10 +1106,13 @@ async function resolveOrgSlugMatch(
       `'${slug}' is an organization, not a project. ` +
         `Listing all ${config.entityPlural} in '${slug}'.`
     );
-    return { parsed: { type: "org-all", org: matchingOrg } };
+    return { parsed: { type: "org-all", org: resolution.org } };
   }
 
-  return { parsed, projectSearchResult };
+  return {
+    parsed,
+    projectSearchResult: resolution.projectSearchResult,
+  };
 }
 
 /**

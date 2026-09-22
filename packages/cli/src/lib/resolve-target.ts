@@ -799,6 +799,11 @@ export type ProjectNotFoundOutcome =
   | { kind: "fuzzy-match"; org: string; project: string }
   | { kind: "not-found"; displaySlug: string; suggestions: string[] };
 
+/** Result of resolving the project-first semantics of a bare target. */
+export type BareProjectOrOrgResolution =
+  | { kind: "organization"; org: string }
+  | { kind: "project-search"; projectSearchResult: ProjectSearchResult };
+
 /**
  * Return an exact organization match only after a project search misses.
  *
@@ -806,7 +811,7 @@ export type ProjectNotFoundOutcome =
  * commands: project first, then organization. A trailing slash is parsed as
  * `org-all` earlier and does not use this fallback.
  */
-export function findOrgSlugOnProjectMiss(
+function findOrgSlugOnProjectMiss(
   projectSlug: string,
   result: ProjectSearchResult
 ): string | undefined {
@@ -814,6 +819,24 @@ export function findOrgSlugOnProjectMiss(
     return;
   }
   return result.orgs.find((org) => org.slug === projectSlug)?.slug;
+}
+
+/**
+ * Resolve a bare target by searching projects before considering an exact
+ * organization-slug fallback.
+ *
+ * @param slug - Bare target supplied by the user
+ * @returns The matching organization, or the project search result for
+ * project resolution and not-found handling
+ */
+export async function resolveBareProjectOrOrg(
+  slug: string
+): Promise<BareProjectOrOrgResolution> {
+  const projectSearchResult = await findProjectsBySlug(slug);
+  const org = findOrgSlugOnProjectMiss(slug, projectSearchResult);
+  return org
+    ? { kind: "organization", org }
+    : { kind: "project-search", projectSearchResult };
 }
 
 /**
@@ -2460,16 +2483,15 @@ export async function resolveOrgOptionalProjectTarget(
     parsed.org === undefined &&
     parsed.originalSlug === undefined
   ) {
-    const result = await findProjectsBySlug(parsed.projectSlug);
-    const matchingOrg = findOrgSlugOnProjectMiss(parsed.projectSlug, result);
-    if (matchingOrg) {
+    const resolution = await resolveBareProjectOrOrg(parsed.projectSlug);
+    if (resolution.kind === "organization") {
       log.warn(
-        `'${matchingOrg}' is an organization, not a project. Using organization '${matchingOrg}'.`
+        `'${resolution.org}' is an organization, not a project. Using organization '${resolution.org}'.`
       );
-      return withTelemetryContext({ org: matchingOrg });
+      return withTelemetryContext({ org: resolution.org });
     }
     return resolveOrgProjectTarget(parsed, cwd, commandName, {
-      projectSearchResult: result,
+      projectSearchResult: resolution.projectSearchResult,
     });
   }
 
