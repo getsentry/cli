@@ -104,6 +104,13 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   ) {
     return "user_validation";
   }
+  // Any other ValidationError is user-input noise — the user passed malformed
+  // input (e.g. a non-existent directory path, an invalid ID format) and the
+  // CLI already surfaces a clear error message. Silence it so it doesn't
+  // pollute the issue tracker (CLI-1FN).
+  if (error instanceof ValidationError) {
+    return "user_input_error";
+  }
   // A ResolutionError means the user provided a value (event ID, project slug,
   // etc.) that was looked up but not found. This is pure user-input noise, not
   // a CLI bug — the user sees a clear "not found" message (CLI-RP).

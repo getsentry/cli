@@ -319,12 +319,30 @@ describe("classifySilenced", () => {
     ).toBe("user_input_error");
   });
 
+  test("silences ValidationError (no field) as user_input_error", () => {
+    expect(classifySilenced(new ValidationError("bad"))).toBe(
+      "user_input_error"
+    );
+  });
+
+  test("silences ValidationError (other field) as user_input_error", () => {
+    expect(
+      classifySilenced(new ValidationError("Invalid trace ID", "trace_id"))
+    ).toBe("user_input_error");
+  });
+
+  test("silences ValidationError for non-existent directory as user_input_error", () => {
+    expect(
+      classifySilenced(
+        new ValidationError(
+          "Directory '/vercel/path0/apps/app/.next/static/chunks' does not exist.",
+          "directory"
+        )
+      )
+    ).toBe("user_input_error");
+  });
+
   test.each([
-    ["ValidationError (no field)", new ValidationError("bad")],
-    [
-      "ValidationError (other field)",
-      new ValidationError("Invalid trace ID", "trace_id"),
-    ],
     ["SeerError", new SeerError("not_enabled")],
     ["ConfigError", new ConfigError("bad")],
     ["generic Error", new Error("boom")],
@@ -492,41 +510,26 @@ describe("reportCliError integration", () => {
     );
   });
 
-  test("ValidationError with field uses field as kind", () => {
-    const { tags } = capturedScopeTags(new ValidationError("Bad", "trace_id"));
-    expect(tags["cli_error.class"]).toBe("ValidationError");
-    expect(tags["cli_error.kind"]).toBe("trace_id");
-  });
-
-  test("ValidationError without field falls back to message prefix", () => {
-    // Without a stable fallback, every unfielded ValidationError would get
-    // kind="" and collapse into one huge mixed group.
+  test("silences ValidationError and emits metric (CLI-1FN)", () => {
+    // ValidationErrors are user-input noise (malformed args, non-existent paths)
+    // — the CLI already surfaces a clear message, so they must not pollute the
+    // issue tracker.
     const err = new ValidationError(
-      'Invalid trace ID "d2ad4a2d947b5983". Expected 32-char hex.'
+      "Directory '/vercel/path0/apps/app/.next/static/chunks' does not exist.",
+      "directory"
     );
-    const { tags } = capturedScopeTags(err);
-    expect(tags["cli_error.class"]).toBe("ValidationError");
-    expect(tags["cli_error.kind"]).toBe("Invalid trace ID");
-  });
-
-  test("ValidationError kind is stable across different user inputs", () => {
-    const a = capturedScopeTags(
-      new ValidationError('Invalid trace ID "abc"')
-    ).tags;
-    const b = capturedScopeTags(
-      new ValidationError('Invalid trace ID "xyz-different"')
-    ).tags;
-    expect(a["cli_error.kind"]).toBe(b["cli_error.kind"]);
-  });
-
-  test("ValidationError kind differentiates by validator", () => {
-    const traceErr = capturedScopeTags(
-      new ValidationError('Invalid trace ID "abc"')
-    ).tags;
-    const eventErr = capturedScopeTags(
-      new ValidationError('Invalid event ID "abc"')
-    ).tags;
-    expect(traceErr["cli_error.kind"]).not.toBe(eventErr["cli_error.kind"]);
+    reportCliError(err);
+    expect(captureSpy).not.toHaveBeenCalled();
+    expect(metricSpy).toHaveBeenCalledWith(
+      "cli.error.silenced",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          error_class: "ValidationError",
+          reason: "user_input_error",
+        }),
+      })
+    );
   });
 
   test("silences ResolutionError and emits metric (CLI-RP)", () => {

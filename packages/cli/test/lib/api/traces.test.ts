@@ -115,7 +115,7 @@ describe("listTransactions", () => {
     expect(decodeURIComponent(capturedUrl)).toContain("is_transaction:true");
   });
 
-  test("uses the remaining item budget for the final page", async () => {
+  test("always uses full page size (overshoot trimmed by paginator)", async () => {
     const { getCapturedUrls } = mockSequential([
       {
         body: { data: makeTxnRows(100), meta: TX_META },
@@ -134,7 +134,7 @@ describe("listTransactions", () => {
     await listTransactions("my-org", "my-project", { limit: 150 });
 
     expect(getCapturedUrls()[0]).toContain("per_page=100");
-    expect(getCapturedUrls()[1]).toContain("per_page=50");
+    expect(getCapturedUrls()[1]).toContain("per_page=100");
   });
 
   test("sends sort=-timestamp by default", async () => {
@@ -427,7 +427,7 @@ describe("listSpans", () => {
     expect(capturedUrl).toContain("dataset=spans");
   });
 
-  test("uses the remaining item budget for the final page", async () => {
+  test("always uses full page size (overshoot trimmed by paginator)", async () => {
     const { getCapturedUrls } = mockSequential([
       {
         body: { data: makeSpanRows(100), meta: SPAN_META },
@@ -446,7 +446,7 @@ describe("listSpans", () => {
     await listSpans("my-org", "my-project", { limit: 150 });
 
     expect(getCapturedUrls()[0]).toContain("per_page=100");
-    expect(getCapturedUrls()[1]).toContain("per_page=50");
+    expect(getCapturedUrls()[1]).toContain("per_page=100");
   });
 
   test("sends sort=-timestamp by default", async () => {

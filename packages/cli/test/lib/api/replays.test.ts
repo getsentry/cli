@@ -169,7 +169,7 @@ describe("listReplays", () => {
     expect(result.nextCursor).toBeUndefined();
     expect(capturedUrls).toHaveLength(2);
     expect(capturedUrls[0]).toContain("per_page=100");
-    expect(capturedUrls[1]).toContain("per_page=50");
+    expect(capturedUrls[1]).toContain("per_page=100");
   });
 });
 
