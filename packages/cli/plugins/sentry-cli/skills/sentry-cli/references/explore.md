@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-explore
-version: 0.45.0-dev.0
+version: 0.46.0-dev.0
 description: Query aggregate event data (Explore)
 requires:
   bins: ["sentry"]
@@ -16,10 +16,10 @@ Query aggregate event data (Explore)
 Query aggregate event data (Explore)
 
 **Flags:**
-- `-F, --field <value>... - API field or aggregate (repeatable). E.g., title, "count()", "p50(transaction.duration)"`
+- `-F, --field <value>... - API field or aggregate (repeatable). E.g., title, "count()", "p50(span.duration)"`
 - `-m, --metric <value> - Metric name for --dataset metrics. Auto-resolves type/unit via API.`
 - `--agg <value> - Aggregation for --metric (sum, avg, count, p50, p95, etc.) - (default: "sum")`
-- `-d, --dataset <value> - Dataset to query (errors, spans, metrics, logs, replays) - (default: "errors")`
+- `-d, --dataset <value> - Dataset to query (errors, spans, metrics, logs, replays; transaction(s) routes to spans) - (default: "errors")`
 - `-q, --query <value> - Search query (Sentry search syntax)`
 - `-s, --sort <value> - Sort field (prefix with - for desc, e.g., "-count()")`
 - `-e, --environment <value>... - Environment filter (repeatable, comma-separated)`
@@ -72,6 +72,13 @@ sentry explore my-org/ -m cache.hit_rate --agg avg --dataset metrics
 sentry explore my-org/ \
   -F "sum(value,llm.token_usage,distribution,none)" \
   --dataset metrics --period 7d
+
+# List recent replays
+sentry explore my-org/cli --dataset replays --period 24h
+
+# Filter replays by activity level
+sentry explore my-org/cli --dataset replays -F activity -F duration \
+  -F "count_errors" --period 7d
 
 # Log severity counts in the last hour
 sentry explore my-org/cli -F severity -F "count()" \

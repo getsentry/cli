@@ -276,11 +276,13 @@ jobs:
         run: pnpm run generate:schema
       - name: Unit Tests
         run: pnpm run test:unit
+      - name: Verify coverage report
+        run: test -s packages/cli/coverage/lcov.info
       - name: Coverage Report
         uses: getsentry/coverage-action@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          files: ./coverage/lcov.info
+          files: ./packages/cli/coverage/lcov.info
           informational-patch: ${{ github.event_name == 'push' }}
 
   build-binary:

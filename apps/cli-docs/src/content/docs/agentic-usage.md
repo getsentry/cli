@@ -3,7 +3,7 @@ title: Agentic Usage
 description: Enable AI coding agents to use the Sentry CLI
 ---
 
-AI coding agents can use the Sentry CLI through the skill system. The CLI detects and supports Claude Code, Cursor, Windsurf, GitHub Copilot, Gemini CLI, OpenAI Codex, Goose, Amp, Augment, OpenCode, and any agent that reads skills from `~/.agents`. This allows agents to interact with Sentry directly from your development environment.
+AI coding agents can use the Sentry CLI through the skill system. The CLI detects and supports Claude Code (including Cowork), Cursor, Windsurf, GitHub Copilot, Gemini CLI, OpenAI Codex, Goose, Amp, Augment, OpenCode, Cline, Grok, Kimi, Junie, OpenClaw, and any agent that reads skills from `~/.agents`. This allows agents to interact with Sentry directly from your development environment.
 
 ## Automatic Installation
 
@@ -56,6 +56,9 @@ With this skill, agents can:
 - **Query documentation** - Ask questions about Sentry setup and configuration with `sentry docs`
 - **Make API calls** - Execute arbitrary Sentry API requests
 - **Authenticate** - Help you set up CLI authentication
+- **View agent conversations** - List and inspect AI agent conversation transcripts with `sentry agent-conversation`
+- **Check service status** - Query the Sentry status page with `sentry status` (no auth required)
+- **Process WebAssembly** - Add build IDs and split debug data from wasm modules with `sentry wasm-split` (no auth required)
 
 ## How It Works
 
@@ -67,6 +70,7 @@ When you ask your agent about Sentry errors or want to investigate an issue, the
 - "What API endpoints exist for releases?" → `sentry schema releases`
 - "How do I set up source maps for Next.js?" → `sentry docs "source maps Next.js"`
 - "What is Sentry's status right now?" → `sentry status`
+- "Show me recent agent conversations" → `sentry agent-conversation list`
 
 The CLI has dedicated commands for most Sentry tasks, so agents should prefer `sentry` commands over constructing raw API calls. The `sentry docs` command queries Sentry's documentation directly from the terminal, the `sentry schema` command provides built-in API exploration, and `sentry api` handles authenticated requests for anything not covered by a dedicated command.
 
@@ -75,4 +79,4 @@ The skill uses your existing CLI authentication, so you'll need to run `sentry a
 ## Requirements
 
 - An authenticated Sentry CLI installation (`sentry auth login`)
-- An AI coding agent that supports the skills system (e.g., Claude Code, Cursor, Windsurf, GitHub Copilot, Gemini CLI, Codex, Goose, Amp, Augment, OpenCode, or any agent that reads from `~/.agents`)
+- An AI coding agent that supports the skills system (e.g., Claude Code, Cursor, Windsurf, GitHub Copilot, Gemini CLI, Codex, Goose, Amp, Augment, OpenCode, Cline, Grok, Kimi, Junie, OpenClaw, or any agent that reads from `~/.agents`)

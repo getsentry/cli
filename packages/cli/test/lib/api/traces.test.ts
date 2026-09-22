@@ -1,13 +1,14 @@
 /**
- * Tests for the traces API helpers (listTransactions, listSpans).
+ * Tests for the traces API helpers (getDetailedTrace, listTransactions, listSpans).
  *
  * Verifies URL construction, query parameter encoding, schema validation,
- * pagination cursor extraction, and auto-pagination across multiple pages.
+ * pagination cursor extraction, auto-pagination, and the 14d→90d empty-trace retry.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   fetchMultiSpanDetails,
+  getDetailedTrace,
   getSpanDetails,
   listSpans,
   listTransactions,
@@ -79,7 +80,7 @@ describe("listTransactions", () => {
       id: "string",
       transaction: "string",
       timestamp: "date",
-      "transaction.duration": "duration",
+      "span.duration": "duration",
       project: "string",
     },
   };
@@ -91,7 +92,7 @@ describe("listTransactions", () => {
       id: `id-${i}`,
       transaction: `/api/endpoint-${i}`,
       timestamp: "2024-01-15T00:00:00Z",
-      "transaction.duration": 100 + i,
+      "span.duration": 100 + i,
       project: "my-project",
     }));
   }
@@ -105,17 +106,17 @@ describe("listTransactions", () => {
     expect(capturedUrl).toContain("/api/0/organizations/my-org/events/");
   });
 
-  test("sends dataset=transactions", async () => {
+  test("sends dataset=spans with is_transaction:true", async () => {
     mockOk({ data: [], meta: TX_META });
 
     await listTransactions("my-org", "my-project");
 
-    expect(capturedUrl).toContain("dataset=transactions");
+    expect(capturedUrl).toContain("dataset=spans");
+    expect(decodeURIComponent(capturedUrl)).toContain("is_transaction:true");
   });
 
-  test("passes per_page capped at 100 even when limit is higher", async () => {
-    // With limit > 100, the first page should still request per_page=100
-    mockSequential([
+  test("uses the remaining item budget for the final page", async () => {
+    const { getCapturedUrls } = mockSequential([
       {
         body: { data: makeTxnRows(100), meta: TX_META },
         headers: {
@@ -132,8 +133,8 @@ describe("listTransactions", () => {
 
     await listTransactions("my-org", "my-project", { limit: 150 });
 
-    // Both pages should use per_page=100
-    // (the second page still uses API_MAX_PER_PAGE since limit > 100)
+    expect(getCapturedUrls()[0]).toContain("per_page=100");
+    expect(getCapturedUrls()[1]).toContain("per_page=50");
   });
 
   test("sends sort=-timestamp by default", async () => {
@@ -144,14 +145,12 @@ describe("listTransactions", () => {
     expect(capturedUrl).toContain(`sort=${encodeURIComponent("-timestamp")}`);
   });
 
-  test('sends sort=-transaction.duration for sort="duration"', async () => {
+  test('sends sort=-span.duration for sort="duration"', async () => {
     mockOk({ data: [], meta: TX_META });
 
     await listTransactions("my-org", "my-project", { sort: "duration" });
 
-    expect(decodeURIComponent(capturedUrl)).toContain(
-      "sort=-transaction.duration"
-    );
+    expect(decodeURIComponent(capturedUrl)).toContain("sort=-span.duration");
   });
 
   test("passes cursor when provided", async () => {
@@ -271,8 +270,8 @@ describe("listTransactions", () => {
 
     await listTransactions("my-org", "my-project");
 
-    expect(decodeURIComponent(capturedUrl)).toContain(
-      "query=project:my-project"
+    expect(decodeURIComponent(capturedUrl).replaceAll("+", " ")).toContain(
+      "query=is_transaction:true project:my-project"
     );
     // Should NOT appear as a separate project= param
     expect(capturedUrl).not.toMatch(/[?&]project=my-project/);
@@ -428,7 +427,7 @@ describe("listSpans", () => {
     expect(capturedUrl).toContain("dataset=spans");
   });
 
-  test("passes per_page capped at 100 when limit is higher", async () => {
+  test("uses the remaining item budget for the final page", async () => {
     const { getCapturedUrls } = mockSequential([
       {
         body: { data: makeSpanRows(100), meta: SPAN_META },
@@ -446,9 +445,8 @@ describe("listSpans", () => {
 
     await listSpans("my-org", "my-project", { limit: 150 });
 
-    // Both pages should use per_page=100
     expect(getCapturedUrls()[0]).toContain("per_page=100");
-    expect(getCapturedUrls()[1]).toContain("per_page=100");
+    expect(getCapturedUrls()[1]).toContain("per_page=50");
   });
 
   test("sends sort=-timestamp by default", async () => {
@@ -814,5 +812,135 @@ describe("fetchMultiSpanDetails", () => {
       "/projects/my-org/proj-b/trace-items/span-b/"
     );
     expect(details.has("span-b")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getDetailedTrace
+// ---------------------------------------------------------------------------
+
+describe("getDetailedTrace", () => {
+  useTestConfigDir("traces-detail-test-");
+
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const SPAN = {
+    span_id: "span-1",
+    start_timestamp: 1_700_000_000,
+    timestamp: 1_700_000_001,
+  };
+
+  function mockSequential(bodies: unknown[]): {
+    getCapturedUrls: () => string[];
+  } {
+    const capturedUrls: string[] = [];
+    let callIndex = 0;
+
+    globalThis.fetch = mockFetch(async (input, init) => {
+      const req = new Request(input!, init);
+      capturedUrls.push(req.url);
+      const body = bodies[callIndex] ?? [];
+      callIndex += 1;
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    return { getCapturedUrls: () => capturedUrls };
+  }
+
+  test("sends timestamp and skips statsPeriod when event time is known", async () => {
+    const { getCapturedUrls } = mockSequential([[SPAN]]);
+
+    const result = await getDetailedTrace("my-org", "abc123def456", {
+      timestamp: 1_700_000_000,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]!.span_id).toBe("span-1");
+    expect(getCapturedUrls()).toHaveLength(1);
+    const url = new URL(getCapturedUrls()[0]!);
+    expect(url.searchParams.get("timestamp")).toBe("1700000000");
+    expect(url.searchParams.get("statsPeriod")).toBeNull();
+    expect(url.searchParams.get("limit")).toBe("10000");
+    expect(url.searchParams.get("project")).toBe("-1");
+  });
+
+  test("queries 14d and does not retry when spans are returned", async () => {
+    const { getCapturedUrls } = mockSequential([[SPAN]]);
+
+    const result = await getDetailedTrace("my-org", "abc123def456");
+
+    expect(result).toHaveLength(1);
+    expect(getCapturedUrls()).toHaveLength(1);
+    const url = new URL(getCapturedUrls()[0]!);
+    expect(url.searchParams.get("statsPeriod")).toBe("14d");
+    expect(url.searchParams.get("timestamp")).toBeNull();
+  });
+
+  test("retries 90d when the 14d lookup is empty", async () => {
+    const { getCapturedUrls } = mockSequential([[], [SPAN]]);
+
+    const result = await getDetailedTrace("my-org", "abc123def456");
+
+    expect(result).toHaveLength(1);
+    expect(result[0]!.span_id).toBe("span-1");
+    expect(getCapturedUrls()).toHaveLength(2);
+    expect(new URL(getCapturedUrls()[0]!).searchParams.get("statsPeriod")).toBe(
+      "14d"
+    );
+    expect(new URL(getCapturedUrls()[1]!).searchParams.get("statsPeriod")).toBe(
+      "90d"
+    );
+    expect(
+      new URL(getCapturedUrls()[0]!).searchParams.get("timestamp")
+    ).toBeNull();
+    expect(
+      new URL(getCapturedUrls()[1]!).searchParams.get("timestamp")
+    ).toBeNull();
+  });
+
+  test("does not widen when a known timestamp returns empty", async () => {
+    const { getCapturedUrls } = mockSequential([[]]);
+
+    const result = await getDetailedTrace("my-org", "abc123def456", {
+      timestamp: 1_700_000_000,
+    });
+
+    expect(result).toHaveLength(0);
+    expect(getCapturedUrls()).toHaveLength(1);
+    expect(new URL(getCapturedUrls()[0]!).searchParams.get("timestamp")).toBe(
+      "1700000000"
+    );
+    expect(
+      new URL(getCapturedUrls()[0]!).searchParams.get("statsPeriod")
+    ).toBeNull();
+  });
+
+  test("forwards project and additional attributes on both lookups", async () => {
+    const { getCapturedUrls } = mockSequential([[], [SPAN]]);
+
+    await getDetailedTrace("my-org", "abc123def456", {
+      projectId: 42,
+      additionalAttributes: ["gen_ai.request.model"],
+    });
+
+    expect(getCapturedUrls()).toHaveLength(2);
+    for (const raw of getCapturedUrls()) {
+      const url = new URL(raw);
+      expect(url.searchParams.get("project")).toBe("42");
+      expect(url.searchParams.getAll("additional_attributes")).toEqual([
+        "gen_ai.request.model",
+      ]);
+    }
   });
 });

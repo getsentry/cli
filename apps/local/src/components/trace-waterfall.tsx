@@ -1,6 +1,7 @@
 import type { TraceGroup, TraceSpan } from '@/lib/trace-model.ts'
 
 type TraceWaterfallProps = {
+  compact?: boolean
   trace: TraceGroup
 }
 
@@ -131,12 +132,36 @@ function SpanRow({
 }
 
 /** A compact, read-only timeline for the spans contained in one local trace. */
-export function TraceWaterfall({ trace }: TraceWaterfallProps) {
+export function TraceWaterfall({ compact = false, trace }: TraceWaterfallProps) {
+  const capturedItemLabel = `${trace.itemCount} captured item${trace.itemCount === 1 ? '' : 's'} in this trace`
+
   if (trace.spans.length === 0) {
     return (
-      <div className="p-4 text-sm text-muted-foreground">
-        This trace has no timestamped spans to display yet.
-      </div>
+      <section aria-label="Trace waterfall" className="min-h-0 overflow-auto">
+        {compact ? null : (
+          <header className="border-b border-border px-3 py-3 sm:px-4">
+            <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Trace</p>
+            <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+              <h2 className="font-mono text-sm font-medium">{trace.title}</h2>
+              <span className="font-mono text-sm tabular-nums text-foreground">
+                {formatDuration(trace.durationMs)}
+              </span>
+            </div>
+            <div aria-label="Trace summary" className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span>{capturedItemLabel}</span>
+              <span>Trace ID {trace.id.slice(0, 8)}</span>
+            </div>
+          </header>
+        )}
+        {compact ? (
+          <p aria-label="Trace relationship" className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
+            {capturedItemLabel}
+          </p>
+        ) : null}
+        <p className="p-4 text-sm text-muted-foreground">
+          This trace has no timestamped spans to display yet.
+        </p>
+      </section>
     )
   }
 
@@ -144,21 +169,27 @@ export function TraceWaterfall({ trace }: TraceWaterfallProps) {
 
   return (
     <section aria-label="Trace waterfall" className="min-h-0 overflow-auto">
-      <header className="border-b border-border px-3 py-3 sm:px-4">
-        <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Trace</p>
-        <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-          <h2 className="font-mono text-sm font-medium">{trace.title}</h2>
-          <span className="font-mono text-sm tabular-nums text-foreground">
-            {formatDuration(trace.durationMs)}
-          </span>
-        </div>
-        <div aria-label="Trace summary" className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <span>{trace.spans.length} span{trace.spans.length === 1 ? '' : 's'}</span>
-          {trace.errorCount > 0 ? <span className="text-red-500 dark:text-red-400">{trace.errorCount} error{trace.errorCount === 1 ? '' : 's'}</span> : null}
-          {trace.logCount > 0 ? <span>{trace.logCount} log{trace.logCount === 1 ? '' : 's'}</span> : null}
-          <span>Trace ID {trace.id.slice(0, 8)}</span>
-        </div>
-      </header>
+      {compact ? (
+        <p aria-label="Trace relationship" className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
+          {capturedItemLabel}
+        </p>
+      ) : (
+        <header className="border-b border-border px-3 py-3 sm:px-4">
+          <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Trace</p>
+          <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+            <h2 className="font-mono text-sm font-medium">{trace.title}</h2>
+            <span className="font-mono text-sm tabular-nums text-foreground">
+              {formatDuration(trace.durationMs)}
+            </span>
+          </div>
+          <div aria-label="Trace summary" className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>{trace.spans.length} span{trace.spans.length === 1 ? '' : 's'}</span>
+            {trace.errorCount > 0 ? <span className="text-red-500 dark:text-red-400">{trace.errorCount} error{trace.errorCount === 1 ? '' : 's'}</span> : null}
+            {trace.logCount > 0 ? <span>{trace.logCount} log{trace.logCount === 1 ? '' : 's'}</span> : null}
+            <span>Trace ID {trace.id.slice(0, 8)}</span>
+          </div>
+        </header>
+      )}
       <div role="table" aria-label="Trace spans" className="min-w-max">
         <div role="row" className="grid min-w-[48rem] grid-cols-[minmax(18rem,38%)_minmax(18rem,1fr)_6.5rem] border-b border-border bg-muted/40 text-xs font-medium text-muted-foreground">
           <div role="columnheader" aria-label="Span" className="border-r border-border px-3 py-2">

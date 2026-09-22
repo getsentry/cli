@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-react-native
-version: 0.45.0-dev.0
+version: 0.46.0-dev.0
 description: Upload React Native sourcemaps from build steps
 requires:
   bins: ["sentry"]
@@ -54,7 +54,7 @@ sentry react-native gradle \
   --dist 1000
 
 # Xcode build phase (usually added automatically to your build script)
-../node_modules/.bin/sentry-cli react-native xcode
+sentry react-native xcode
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

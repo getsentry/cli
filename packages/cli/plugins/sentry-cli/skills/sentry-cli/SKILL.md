@@ -1,6 +1,6 @@
 ---
 name: sentry-cli
-version: 0.45.0-dev.0
+version: 0.46.0-dev.0
 description: Guide for using the Sentry CLI to interact with Sentry from the command line. Use when the user asks about viewing issues, events, projects, organizations, making API calls, or authenticating with Sentry via CLI.
 requires:
   bins: ["sentry"]
@@ -209,6 +209,35 @@ sentry release deploy my-org/1.0.0 production
 - The **version** must match the `release` value in `Sentry.init()`. If your SDK uses `"1.0.0"`, the command must use `org/1.0.0`.
 - `--auto` requires a Sentry repository integration (GitHub/GitLab/Bitbucket) **and** a local git checkout. It matches your `origin` remote against Sentry's repo list. Without a checkout, use `--local`.
 - With no flag, `set-commits` tries `--auto` first and falls back to `--local` on failure.
+
+#### View Agent Conversations
+
+```bash
+# List recent agent conversations (org auto-detected)
+sentry agent-conversation list
+
+# Explicit org, last 24 hours
+sentry agent-conversation list my-org --period 24h
+
+# View a conversation transcript
+sentry agent-conversation view my-org/conv-123
+
+# JSON output for programmatic access
+sentry agent-conversation view conv-123 --json
+```
+
+#### Process WebAssembly Modules
+
+```bash
+# Add a build id to a wasm module (no auth required)
+sentry wasm-split app.wasm
+
+# Capture the build id for a later debug-files upload
+BUILD_ID=$(sentry wasm-split app.wasm)
+
+# Split debug data into a companion and strip the shipped binary
+sentry wasm-split app.wasm --debug-out app.debug.wasm --strip
+```
 
 #### Arbitrary API Access
 
@@ -702,6 +731,14 @@ Browse the Sentry API schema
 - `sentry schema <resource...>` — Browse the Sentry API schema
 
 → Full flags and examples: `references/schema.md`
+
+### Wasm-split
+
+Add build ids to WebAssembly modules and split out debug data
+
+- `sentry wasm-split <input>` — Add build ids to WebAssembly modules and split out debug data
+
+→ Full flags and examples: `references/wasm-split.md`
 
 ## Global Options
 

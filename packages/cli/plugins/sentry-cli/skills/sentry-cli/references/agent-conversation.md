@@ -1,6 +1,6 @@
 ---
 name: sentry-cli-agent-conversation
-version: 0.45.0-dev.0
+version: 0.46.0-dev.0
 description: List and view agent conversations
 requires:
   bins: ["sentry"]
@@ -27,6 +27,7 @@ List recent agent conversations
 | Field | Type | Description |
 |-------|------|-------------|
 | `conversationId` | string |  |
+| `webUrl` | string |  |
 | `title` | string \| null |  |
 | `flow` | array |  |
 | `errors` | number |  |
@@ -73,11 +74,14 @@ View an agent conversation transcript
 **Examples:**
 
 ```bash
-# View full transcript
-sentry agent-conversation view my-org conv-123
+# View full transcript (org auto-detected)
+sentry agent-conversation view conv-123
+
+# Explicit org (slash-separated)
+sentry agent-conversation view my-org/conv-123
 
 # JSON output
-sentry agent-conversation view my-org conv-123 --json
+sentry agent-conversation view my-org/conv-123 --json
 ```
 
 All commands also support `--json`, `--fields`, `--help`, `--log-level`, and `--verbose` flags.

@@ -5,7 +5,7 @@ import githubDark from '@shikijs/themes/github-dark'
 import githubLight from '@shikijs/themes/github-light'
 import { Check, Copy } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { copyText } from '@/lib/clipboard.ts'
+import { useCopyToClipboard } from '@uidotdev/usehooks'
 
 type JsonViewProps = {
   code: string
@@ -17,17 +17,27 @@ const highlighter = createHighlighterCore({
   themes: [githubLight, githubDark],
 })
 
+function formatJson(code: string) {
+  try {
+    return JSON.stringify(JSON.parse(code), null, 2)
+  } catch {
+    return code
+  }
+}
+
 /** Render JSON with Shiki only after its containing event has been expanded. */
 export function JsonView({ code }: JsonViewProps) {
   const [html, setHtml] = useState<string>()
-  const [copied, setCopied] = useState(false)
+  const [copiedText, copyToClipboard] = useCopyToClipboard()
+  const formattedCode = formatJson(code)
+  const copied = copiedText === code
 
   useEffect(() => {
     let disposed = false
 
     void highlighter
       .then((instance) =>
-        instance.codeToHtml(code, {
+        instance.codeToHtml(formattedCode, {
           lang: 'json',
           themes: {
             light: 'github-light',
@@ -48,11 +58,10 @@ export function JsonView({ code }: JsonViewProps) {
     return () => {
       disposed = true
     }
-  }, [code])
+  }, [formattedCode])
 
   const copyJson = () => {
-    copyText(code)
-    setCopied(true)
+    void copyToClipboard(code)
   }
 
   const copyButton = (
@@ -72,8 +81,8 @@ export function JsonView({ code }: JsonViewProps) {
       <div className="relative">
         <div className="absolute top-2 right-3 z-10">{copyButton}</div>
         {copied ? <span role="status" aria-label="JSON copied" className="sr-only">JSON copied</span> : null}
-        <pre data-testid="highlighted-json" className="json-view overflow-x-auto p-3 pr-28 text-xs leading-6">
-          {code}
+        <pre data-testid="highlighted-json" className="json-view whitespace-pre-wrap break-words p-3 pr-28 text-xs leading-6">
+          {formattedCode}
         </pre>
       </div>
     )
@@ -85,7 +94,7 @@ export function JsonView({ code }: JsonViewProps) {
       {copied ? <span role="status" aria-label="JSON copied" className="sr-only">JSON copied</span> : null}
       <div
         data-testid="highlighted-json"
-        className="json-view overflow-x-auto p-3 pr-28 text-xs leading-6"
+        className="json-view whitespace-pre-wrap break-words p-3 pr-28 text-xs leading-6"
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </div>
