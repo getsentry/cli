@@ -60,6 +60,31 @@ export function resolveOrgRegion(orgSlug: string): Promise<string> {
 }
 
 /**
+ * Coerce a regionUrl from the API into an absolute URL.
+ *
+ * Self-hosted instances may return a relative regionUrl (e.g. "/") which is
+ * truthy but breaks fetch calls that depend on an absolute base URL. Resolve
+ * a relative value against baseUrl so it becomes absolute instead of being
+ * discarded; an already-absolute value is returned unchanged.
+ */
+function toAbsoluteRegionUrl(rawRegionUrl: string, baseUrl: string): string {
+  // Already absolute — use verbatim.
+  if (URL.canParse(rawRegionUrl)) {
+    return rawRegionUrl;
+  }
+
+  // Relative (e.g. "/") — resolve against baseUrl to get an absolute origin.
+  if (URL.canParse(rawRegionUrl, baseUrl)) {
+    return new URL(rawRegionUrl, baseUrl).origin;
+  }
+
+  logger.debug(
+    `regionUrl "${rawRegionUrl}" from API could not be resolved to an absolute URL; falling back to baseUrl`
+  );
+  return baseUrl;
+}
+
+/**
  * Resolve org region from SQLite cache or API.
  * Called at most once per orgSlug per process lifetime.
  */
@@ -86,23 +111,14 @@ async function resolveOrgRegionUncached(orgSlug: string): Promise<string> {
       throw response.error;
     }
 
-    // Validate that the regionUrl is an absolute URL. Self-hosted instances
-    // may return a relative path (e.g. "/") which is truthy but would break
-    // fetch calls that depend on an absolute base URL.
+    // Self-hosted instances may return a relative regionUrl (e.g. "/") which
+    // is truthy but would break fetch calls that depend on an absolute base
+    // URL. Resolve it against baseUrl so a relative value becomes absolute
+    // instead of being discarded; keep an already-absolute value as-is.
     const rawRegionUrl = response.data?.links?.regionUrl;
-    let regionUrl: string;
-    try {
-      if (rawRegionUrl && new URL(rawRegionUrl).hostname) {
-        regionUrl = rawRegionUrl;
-      } else {
-        regionUrl = baseUrl;
-      }
-    } catch {
-      logger.debug(
-        `regionUrl "${rawRegionUrl}" from API is not a valid absolute URL; falling back to baseUrl`
-      );
-      regionUrl = baseUrl;
-    }
+    const regionUrl = rawRegionUrl
+      ? toAbsoluteRegionUrl(rawRegionUrl, baseUrl)
+      : baseUrl;
 
     // Cache for future use. setOrgRegion also extends the in-process
     // trust class so the subsequent request to this region passes the

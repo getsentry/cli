@@ -203,7 +203,7 @@ describe("resolveOrgRegion", () => {
     }
   });
 
-  test("falls back to baseUrl when API returns a relative regionUrl", async () => {
+  test("resolves a relative regionUrl against baseUrl", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = new Request(input, init);
@@ -232,7 +232,8 @@ describe("resolveOrgRegion", () => {
 
     try {
       const regionUrl = await resolveOrgRegion("relative-region-org");
-      // Should fall back to the configured baseUrl, not use the relative regionUrl
+      // Relative "/" resolves to the base origin, producing an absolute URL
+      // instead of a broken relative value.
       expect(regionUrl).toBe("https://sentry.io");
     } finally {
       globalThis.fetch = originalFetch;
@@ -266,6 +267,7 @@ describe("resolveOrgRegion", () => {
     };
 
     try {
+      // A path-like relative value resolves against the base origin.
       const regionUrl = await resolveOrgRegion("malformed-region-org");
       expect(regionUrl).toBe("https://sentry.io");
     } finally {
