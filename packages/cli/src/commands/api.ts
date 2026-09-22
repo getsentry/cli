@@ -29,6 +29,7 @@ const log = logger.withTag("api");
 
 /** Strips line breaks and surrounding indentation from copy-pasted endpoints. */
 const LINE_BREAK_PATTERN = /[ \t]*[\r\n]+[ \t]*/g;
+const ABSOLUTE_HTTP_URL_RE = /^https?:\/\//i;
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 
@@ -88,11 +89,34 @@ export function parseMethod(value: string): HttpMethod {
 }
 
 /**
+ * Extract pathname + search from an absolute `http(s)://` API URL.
+ * Origin is ignored — `sentry api` always uses the CLI's configured host.
+ */
+function endpointFromAbsoluteApiUrl(endpoint: string): string | undefined {
+  if (!ABSOLUTE_HTTP_URL_RE.test(endpoint)) {
+    return;
+  }
+  try {
+    const url = new URL(endpoint);
+    if (!url.host) {
+      return;
+    }
+    return `${url.pathname}${url.search}`;
+  } catch (error) {
+    log.debug("Could not parse endpoint as absolute URL", error);
+    return;
+  }
+}
+
+/**
  * Normalize an API endpoint to ensure the path has a trailing slash.
  * Sentry API requires trailing slashes on endpoints.
  * Handles query strings correctly by only modifying the path portion.
  *
- * @param endpoint - API endpoint path (may include query string)
+ * Accepts paths relative to `/api/0/` and absolute `https://` URLs
+ * (the origin is stripped; only the path is used).
+ *
+ * @param endpoint - API endpoint path or absolute URL (may include query string)
  * @returns Endpoint with trailing slash on path, query string preserved
  * @internal Exported for testing
  */
@@ -107,11 +131,17 @@ export function normalizeEndpoint(endpoint: string): string {
     log.warn("Stripped line breaks from endpoint (copy-paste artifact)");
   }
 
+  // Absolute Sentry API URLs (from `attachments[].download` or copy-paste)
+  // collapse to a path relative to /api/0/. `sentry api` always uses the
+  // CLI's configured host; the origin is only used to extract the path.
+  const fromAbsoluteUrl = endpointFromAbsoluteApiUrl(cleaned);
+  const source = fromAbsoluteUrl ?? cleaned;
+
   // Reject path traversal and remaining control characters after cleaning
-  validateEndpoint(cleaned);
+  validateEndpoint(source);
 
   // Remove leading slash if present (rawApiRequest handles the base URL)
-  let trimmed = cleaned.startsWith("/") ? cleaned.slice(1) : cleaned;
+  let trimmed = source.startsWith("/") ? source.slice(1) : source;
 
   // Strip api/0/ prefix if user accidentally included it — the base URL
   // already includes /api/0/, so keeping it would produce a doubled path
@@ -1362,6 +1392,8 @@ export const apiCommand = buildCommand({
     fullDescription:
       "Make a raw API request to the Sentry API. Similar to 'gh api' for GitHub. " +
       "The endpoint is relative to /api/0/ (do not include the prefix). " +
+      "Absolute https:// URLs are also accepted — the path is extracted and " +
+      "requested against your configured Sentry host. " +
       "Authentication is handled automatically using your stored credentials.\n\n" +
       "Body options:\n" +
       '  --data/-d \'{"key":"value"}\'   Inline JSON body (like curl -d)\n' +
@@ -1384,7 +1416,8 @@ export const apiCommand = buildCommand({
       kind: "tuple",
       parameters: [
         {
-          brief: "API endpoint relative to /api/0/ (e.g., organizations/)",
+          brief:
+            "API endpoint relative to /api/0/, or an absolute https:// URL",
           parse: String,
           placeholder: "endpoint",
         },

@@ -20,7 +20,7 @@ vi.mock("../../src/lib/api-client.js", async (importOriginal) => {
 import * as apiClient from "../../src/lib/api-client.js";
 import {
   attachmentDownloadHint,
-  attachmentDownloadPath,
+  attachmentDownloadUrl,
   eventProjectSlug,
   formatEventAttachments,
   jsonEventAttachments,
@@ -73,10 +73,36 @@ describe("eventProjectSlug", () => {
   });
 });
 
-describe("attachmentDownloadPath", () => {
-  test("builds the sentry api download path", () => {
-    expect(attachmentDownloadPath("acme", "frontend", "evt1", "att1")).toBe(
-      "projects/acme/frontend/events/evt1/attachments/att1/?download=1"
+describe("attachmentDownloadUrl", () => {
+  test("builds an absolute API download URL", () => {
+    expect(
+      attachmentDownloadUrl(
+        {
+          apiBase: "https://sentry.io",
+          org: "acme",
+          project: "frontend",
+          eventId: "evt1",
+        },
+        "att1"
+      )
+    ).toBe(
+      "https://sentry.io/api/0/projects/acme/frontend/events/evt1/attachments/att1/?download=1"
+    );
+  });
+
+  test("uses the region origin and strips a trailing /api/0", () => {
+    expect(
+      attachmentDownloadUrl(
+        {
+          apiBase: "https://de.sentry.io/api/0/",
+          org: "acme",
+          project: "frontend",
+          eventId: "evt1",
+        },
+        "att1"
+      )
+    ).toBe(
+      "https://de.sentry.io/api/0/projects/acme/frontend/events/evt1/attachments/att1/?download=1"
     );
   });
 });
@@ -84,19 +110,27 @@ describe("attachmentDownloadPath", () => {
 describe("jsonEventAttachments", () => {
   test("adds download when org and project are known", () => {
     expect(
-      jsonEventAttachments("acme", "frontend", "evt1", [ATTACHMENT])
+      jsonEventAttachments(
+        {
+          org: "acme",
+          project: "frontend",
+          eventId: "evt1",
+          apiBase: "https://sentry.io",
+        },
+        [ATTACHMENT]
+      )
     ).toEqual([
       {
         ...ATTACHMENT,
         download:
-          "projects/acme/frontend/events/evt1/attachments/attachment-1/?download=1",
+          "https://sentry.io/api/0/projects/acme/frontend/events/evt1/attachments/attachment-1/?download=1",
       },
     ]);
   });
 
   test("omits download without project", () => {
     expect(
-      jsonEventAttachments("acme", undefined, "evt1", [ATTACHMENT])
+      jsonEventAttachments({ org: "acme", eventId: "evt1" }, [ATTACHMENT])
     ).toEqual([{ ...ATTACHMENT }]);
   });
 });
@@ -117,19 +151,31 @@ describe("formatEventAttachments", () => {
 
 describe("attachmentDownloadHint", () => {
   test("returns undefined without attachments or project", () => {
-    expect(attachmentDownloadHint("org", "proj", "evt", [])).toBeUndefined();
     expect(
-      attachmentDownloadHint("org", undefined, "evt", [ATTACHMENT])
+      attachmentDownloadHint(
+        { org: "org", project: "proj", eventId: "evt" },
+        []
+      )
+    ).toBeUndefined();
+    expect(
+      attachmentDownloadHint({ org: "org", eventId: "evt" }, [ATTACHMENT])
     ).toBeUndefined();
   });
 
   test("includes a quoted sentry api command", () => {
-    const hint = attachmentDownloadHint("acme", "frontend", "evt1", [
-      ATTACHMENT,
-      { ...ATTACHMENT, id: "attachment-2", name: "log.txt" },
-    ]);
+    const hint = attachmentDownloadHint(
+      {
+        org: "acme",
+        project: "frontend",
+        eventId: "evt1",
+        apiBase: "https://sentry.io",
+      },
+      [ATTACHMENT, { ...ATTACHMENT, id: "attachment-2", name: "log.txt" }]
+    );
     expect(hint).toContain("sentry api");
-    expect(hint).toContain("?download=1");
+    expect(hint).toContain(
+      "https://sentry.io/api/0/projects/acme/frontend/events/evt1/attachments/attachment-1/?download=1"
+    );
     expect(hint).toContain("screenshot.png");
     expect(hint).toContain("(1 more)");
   });

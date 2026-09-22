@@ -1042,7 +1042,7 @@ describe("viewCommand.func", () => {
     expect(result?.hint).toBeUndefined();
   });
 
-  test("includes attachment metadata and download paths in JSON", async () => {
+  test("includes attachment metadata and download URLs in JSON", async () => {
     getEventSpy.mockResolvedValue(sampleEvent);
     getSpanTreeLinesSpy.mockResolvedValue({
       lines: [],
@@ -1085,7 +1085,7 @@ describe("viewCommand.func", () => {
       expect.objectContaining({
         id: "attachment-1",
         name: "screenshot.png",
-        download: `projects/test-org/test-proj/events/${VALID_EVENT_ID}/attachments/attachment-1/?download=1`,
+        download: `https://sentry.io/api/0/projects/test-org/test-proj/events/${VALID_EVENT_ID}/attachments/attachment-1/?download=1`,
       }),
     ]);
   });
@@ -1126,7 +1126,9 @@ describe("viewCommand.func", () => {
       .join("");
     expect(output).toContain("screenshot.png");
     expect(output).toContain("sentry api");
-    expect(output).toContain("?download=1");
+    expect(output).toContain(
+      `https://sentry.io/api/0/projects/test-org/test-proj/events/${VALID_EVENT_ID}/attachments/attachment-1/?download=1`
+    );
   });
 
   test("keeps event output when attachment listing fails", async () => {
@@ -1868,7 +1870,7 @@ describe("jsonTransformEventView", () => {
     expect(result).toEqual([{ eventID: "event1" }, { eventID: "event2" }]);
   });
 
-  test("includes attachments with download paths", () => {
+  test("includes attachments with download URLs", () => {
     const result = jsonTransformEventView({
       events: [
         {
@@ -1876,6 +1878,7 @@ describe("jsonTransformEventView", () => {
           trace: null,
           org: "acme",
           project: "frontend",
+          apiBase: "https://sentry.io",
           attachments: [
             {
               id: "attachment-1",
@@ -1900,7 +1903,7 @@ describe("jsonTransformEventView", () => {
           expect.objectContaining({
             id: "attachment-1",
             download:
-              "projects/acme/frontend/events/abc123/attachments/attachment-1/?download=1",
+              "https://sentry.io/api/0/projects/acme/frontend/events/abc123/attachments/attachment-1/?download=1",
           }),
         ],
       })

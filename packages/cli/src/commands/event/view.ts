@@ -40,6 +40,7 @@ import {
   formatEventAttachments,
   jsonEventAttachments,
   tryListEventAttachments,
+  tryResolveAttachmentApiBase,
 } from "../../lib/event-attachments.js";
 import { formatEventDetails } from "../../lib/formatters/index.js";
 import { filterFields } from "../../lib/formatters/json.js";
@@ -90,6 +91,8 @@ type SingleEventViewData = {
   attachments?: EventAttachmentDetailsResponse[];
   org?: string;
   project?: string;
+  /** Region API origin used to build attachment download URLs */
+  apiBase?: string;
 };
 
 /**
@@ -137,7 +140,7 @@ export function formatEventView(data: EventViewData): string {
  * For single-event output, flattens the event as the primary object so that
  * `--fields eventID,title` works directly on event properties. The `trace`
  * enrichment data is attached as a nested key. Attachment metadata is always
- * present as `attachments` (empty array when none), with a `download` path
+ * present as `attachments` (empty array when none), with a `download` URL
  * for `sentry api` when org and project are known.
  *
  * For multi-event output, returns an array of flattened event objects.
@@ -153,9 +156,12 @@ export function jsonTransformEventView(
       ...entry.event,
       trace: entry.trace,
       attachments: jsonEventAttachments(
-        entry.org,
-        entry.project,
-        entry.event.eventID,
+        {
+          org: entry.org,
+          project: entry.project,
+          eventId: entry.event.eventID,
+          apiBase: entry.apiBase,
+        },
         entry.attachments ?? []
       ),
     };
@@ -203,9 +209,12 @@ function viewOutputHint(
     extra,
     replayHint(org, data.event),
     attachmentDownloadHint(
-      org,
-      data.project,
-      data.event.eventID,
+      {
+        org,
+        project: data.project,
+        eventId: data.event.eventID,
+        apiBase: data.apiBase,
+      },
       data.attachments ?? []
     ),
   ]);
@@ -710,11 +719,12 @@ async function buildSingleEventViewData(
   project?: string
 ): Promise<SingleEventViewData> {
   const projectSlug = project ?? eventProjectSlug(event);
-  const [spanTreeResult, attachments] = await Promise.all([
+  const [spanTreeResult, attachments, apiBase] = await Promise.all([
     spans > 0
       ? getSpanTreeLines(org, event, spans)
       : Promise.resolve(undefined),
     tryListEventAttachments(org, projectSlug, event.eventID),
+    tryResolveAttachmentApiBase(org),
   ]);
   const trace =
     spanTreeResult?.success && spanTreeResult.traceId
@@ -727,6 +737,7 @@ async function buildSingleEventViewData(
     attachments,
     org,
     project: projectSlug,
+    apiBase,
   };
 }
 
@@ -1141,9 +1152,9 @@ export const viewCommand = buildCommand({
       "  sentry event view <project> <event-id> [<id>...]     # find project across all orgs\n\n" +
       "Multiple event IDs can be passed as separate arguments or newline-separated\n" +
       "within a single argument (handy when piping from other commands).\n\n" +
-      "Attachment metadata (id, name, size, mimetype) is included when available.\n" +
+      "Attachment metadata (id, name, size, mimetype, download URL) is included when available.\n" +
       "Download bytes with:\n" +
-      '  sentry api "projects/<org>/<project>/events/<event-id>/attachments/<id>/?download=1" > file',
+      '  sentry api "<attachments[].download>" > file',
   },
   output: {
     human: formatEventView,
