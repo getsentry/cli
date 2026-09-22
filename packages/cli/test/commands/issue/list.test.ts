@@ -474,7 +474,9 @@ describe("issue list: org-as-project detection", () => {
   });
 
   test("uses the project when an organization has the same slug", async () => {
-    vi.mocked(projectsApi.findProjectsBySlug).mockResolvedValue({
+    const findProjectsBySlugMock = vi.mocked(projectsApi.findProjectsBySlug);
+    findProjectsBySlugMock.mockReset();
+    findProjectsBySlugMock.mockResolvedValue({
       projects: [
         {
           id: "9",
@@ -510,8 +512,9 @@ describe("issue list: org-as-project detection", () => {
         "acme-corp",
         expect.any(Object)
       );
+      expect(findProjectsBySlugMock).toHaveBeenCalledTimes(1);
     } finally {
-      vi.mocked(projectsApi.findProjectsBySlug).mockReset();
+      findProjectsBySlugMock.mockReset();
       listIssuesAllPagesMock.mockReset();
       resolveCursorMock.mockReset();
     }

@@ -14,6 +14,7 @@ import {
   type IssuesPage,
   listIssuesAllPages,
   listIssuesPaginated,
+  type ProjectSearchResult,
 } from "../../lib/api-client.js";
 import { extractRequiredScopes } from "../../lib/api-scope.js";
 import {
@@ -810,6 +811,7 @@ type ResolvedTargetsOptions = {
   flags: ListFlags;
   cwd: string;
   timeRange: TimeRange;
+  projectSearchResult?: ProjectSearchResult;
 };
 
 /** Default --period value (used to detect user-implicit vs explicit). */
@@ -1023,12 +1025,13 @@ function appendProjectMembershipHint(detail: string | undefined): string {
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
 ): Promise<IssueListResult> {
-  const { parsed, flags, cwd, timeRange } = options;
+  const { parsed, flags, cwd, timeRange, projectSearchResult } = options;
 
   const { targets, footer, skippedSelfHosted, detectedDsns } =
     await resolveTargetsFromParsedArg(parsed, {
       cwd,
       usageHint: USAGE_HINT,
+      projectSearchResult,
       enrichProjectIds: true,
       checkIssueShortId: true,
     });

@@ -126,7 +126,6 @@ export {
 } from "./api/organizations.js";
 export {
   type CreatedProjectDetails,
-  clearReusedProjectSearch,
   createProject,
   createProjectWithAutoTeam,
   createProjectWithDsn,
@@ -144,7 +143,6 @@ export {
   type ProjectSearchResult,
   type ProjectWithOrg,
   resolveOrgDisplayName,
-  reuseProjectSearch,
   tryGetPrimaryDsn,
 } from "./api/projects.js";
 export {

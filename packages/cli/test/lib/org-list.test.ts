@@ -1137,6 +1137,7 @@ describe("dispatchOrgScopedList", () => {
       expect(config.listPaginated).toHaveBeenCalled();
       expect(result.items).toHaveLength(1);
       expect(result.items[0].orgSlug).toBe("acme-corp");
+      expect(findProjectsBySlugMock).toHaveBeenCalledTimes(1);
     });
 
     test("keeps the project when an organization has the same slug", async () => {
@@ -1178,6 +1179,19 @@ describe("dispatchOrgScopedList", () => {
 
       expect(projectHandler).toHaveBeenCalledTimes(1);
       expect(orgHandler).not.toHaveBeenCalled();
+      expect(findProjectsBySlugMock).toHaveBeenCalledTimes(1);
+      expect(projectHandler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectSearchResult: expect.objectContaining({
+            projects: [
+              expect.objectContaining({
+                slug: "acme-corp",
+                orgSlug: "other-org",
+              }),
+            ],
+          }),
+        })
+      );
     });
 
     test("error throws ResolutionError when no project matches an organization slug", async () => {

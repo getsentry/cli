@@ -19,15 +19,14 @@ import { isatty } from "node:tty";
 import pLimit from "p-limit";
 import type { SentryOrganization, SentryProject } from "../types/index.js";
 import {
-  clearReusedProjectSearch,
   findProjectByDsnKey,
   findProjectsByPattern,
   findProjectsBySlug,
   getProject,
   listOrganizations,
   listProjects,
+  type ProjectSearchResult,
   resolveOrgDisplayName,
-  reuseProjectSearch,
 } from "./api-client.js";
 import {
   looksLikeIssueShortId,
@@ -799,6 +798,23 @@ export type ProjectNotFoundOutcome =
   | { kind: "org-match"; orgSlug: string }
   | { kind: "fuzzy-match"; org: string; project: string }
   | { kind: "not-found"; displaySlug: string; suggestions: string[] };
+
+/**
+ * Return an exact organization match only after a project search misses.
+ *
+ * This enforces the bare-target precedence shared by list and explore
+ * commands: project first, then organization. A trailing slash is parsed as
+ * `org-all` earlier and does not use this fallback.
+ */
+export function findOrgSlugOnProjectMiss(
+  projectSlug: string,
+  result: ProjectSearchResult
+): string | undefined {
+  if (result.projects.length > 0) {
+    return;
+  }
+  return result.orgs.find((org) => org.slug === projectSlug)?.slug;
+}
 
 /**
  * Triage a failed project-slug lookup.
@@ -1933,6 +1949,17 @@ export type ResolvedOrgProject = {
   projectData?: SentryProject;
 };
 
+/** Optional request-scoped data for resolving a single project target. */
+export type ResolveOrgProjectTargetOptions = {
+  /**
+   * Result of searching for the current bare project slug.
+   *
+   * Dispatchers that already searched to decide whether an organization
+   * fallback applies can pass that result to avoid repeating the fan-out.
+   */
+  projectSearchResult?: ProjectSearchResult;
+};
+
 /**
  * Resolve an org/project target for commands that require a single project
  * (trace list, log list). Rejects `org-all` mode since these commands require
@@ -1947,6 +1974,7 @@ export type ResolvedOrgProject = {
  * @param parsed - Parsed org/project argument
  * @param cwd - Current working directory for DSN auto-detection
  * @param commandName - Command name used in error messages (e.g., "trace list")
+ * @param options - Optional request-scoped project search result
  * @returns Resolved org and project slugs
  * @throws {ContextError} When target cannot be resolved or org-all is used
  */
@@ -1954,7 +1982,8 @@ export type ResolvedOrgProject = {
 export async function resolveOrgProjectTarget(
   parsed: ParsedOrgProject,
   cwd: string,
-  commandName: string
+  commandName: string,
+  options: ResolveOrgProjectTargetOptions = {}
 ): Promise<ResolvedOrgProject> {
   const usageHint = `sentry ${commandName} <org>/<project>`;
 
@@ -1983,7 +2012,8 @@ export async function resolveOrgProjectTarget(
 
       const { projects: rawProjects, orgs: foundOrgs } = isDisplayName
         ? { projects: [], orgs: await listOrganizations() }
-        : await findProjectsBySlug(parsed.projectSlug);
+        : (options.projectSearchResult ??
+          (await findProjectsBySlug(parsed.projectSlug)));
 
       // When the caller provided an org (e.g. "org/My Project"), scope the
       // search to that org instead of all accessible orgs. findProjectsBySlug
@@ -2037,7 +2067,7 @@ export async function resolveOrgProjectTarget(
       }
 
       if (projects.length > 1) {
-        const options = projects
+        const projectOptions = projects
           .map((m) => `  sentry ${commandName} ${m.orgSlug}/${m.slug}`)
           .join("\n");
         throw new ResolutionError(
@@ -2045,7 +2075,7 @@ export async function resolveOrgProjectTarget(
           "is ambiguous",
           `sentry ${commandName} <org>/${parsed.projectSlug}`,
           [
-            `Found in ${projects.length} organizations. Specify one:\n${options}`,
+            `Found in ${projects.length} organizations. Specify one:\n${projectOptions}`,
           ]
         );
       }
@@ -2116,6 +2146,13 @@ export type ResolveTargetsOptions = {
   /** Usage hint shown in error messages (e.g. "sentry issue list <org>/<project>"). */
   usageHint: string;
   /**
+   * Result of searching for the current bare project slug.
+   *
+   * Used when the list dispatcher already searched to evaluate an
+   * organization fallback.
+   */
+  projectSearchResult?: ProjectSearchResult;
+  /**
    * Auto-detect mode only: enrich targets that lack a numeric `projectId` by
    * fetching from the project API. Useful when env-var / config-default paths
    * do not carry IDs (needed for issue list query filters, not needed for alert list).
@@ -2146,7 +2183,13 @@ export async function resolveTargetsFromParsedArg(
   parsed: ReturnType<typeof parseOrgProjectArg>,
   opts: ResolveTargetsOptions
 ): Promise<MultiTargetResolutionResult> {
-  const { cwd, usageHint, enrichProjectIds, checkIssueShortId } = opts;
+  const {
+    cwd,
+    usageHint,
+    projectSearchResult,
+    enrichProjectIds,
+    checkIssueShortId,
+  } = opts;
 
   switch (parsed.type) {
     case "auto-detect": {
@@ -2260,7 +2303,8 @@ export async function resolveTargetsFromParsedArg(
 
       const { projects: rawMatches, orgs: foundOrgs } = isDisplayName
         ? { projects: [], orgs: await listOrganizations() }
-        : await findProjectsBySlug(parsed.projectSlug);
+        : (projectSearchResult ??
+          (await findProjectsBySlug(parsed.projectSlug)));
 
       // When the caller provided an org (e.g. "org/My Project"), scope the
       // search to that org instead of all accessible orgs. findProjectsBySlug
@@ -2417,22 +2461,16 @@ export async function resolveOrgOptionalProjectTarget(
     parsed.originalSlug === undefined
   ) {
     const result = await findProjectsBySlug(parsed.projectSlug);
-    const matchingOrg =
-      result.projects.length === 0
-        ? result.orgs.find((org) => org.slug === parsed.projectSlug)
-        : undefined;
+    const matchingOrg = findOrgSlugOnProjectMiss(parsed.projectSlug, result);
     if (matchingOrg) {
       log.warn(
-        `'${matchingOrg.slug}' is an organization, not a project. Using organization '${matchingOrg.slug}'.`
+        `'${matchingOrg}' is an organization, not a project. Using organization '${matchingOrg}'.`
       );
-      return withTelemetryContext({ org: matchingOrg.slug });
+      return withTelemetryContext({ org: matchingOrg });
     }
-    reuseProjectSearch(parsed.projectSlug, result);
-    try {
-      return await resolveOrgProjectTarget(parsed, cwd, commandName);
-    } finally {
-      clearReusedProjectSearch();
-    }
+    return resolveOrgProjectTarget(parsed, cwd, commandName, {
+      projectSearchResult: result,
+    });
   }
 
   // explicit, scoped search, and display names

@@ -18,6 +18,7 @@ import {
   listProjects,
   listProjectsAllPages,
   type PaginatedResponse,
+  type ProjectSearchResult,
 } from "../../lib/api-client.js";
 import {
   type ParsedOrgProject,
@@ -602,21 +603,29 @@ export async function handleProjectSearch(
     isRecoveryAttempt?: boolean;
     /** Organization slug to scope the search to (e.g. from "org/My Project"). */
     scopedOrg?: string;
+    /** Result supplied by the dispatcher after its bare-slug pre-check. */
+    projectSearchResult?: ProjectSearchResult;
   }
 ): Promise<ListResult<ProjectWithOrg>> {
-  const { originalSlug, isRecoveryAttempt = false, scopedOrg } = options ?? {};
+  const {
+    originalSlug,
+    isRecoveryAttempt = false,
+    scopedOrg,
+    projectSearchResult,
+  } = options ?? {};
   // When the input is a display name (originalSlug set, contains spaces),
   // skip the slug-based API lookup and go straight to name-based matching.
   const isDisplayName = originalSlug !== undefined;
   const { projects, orgs: foundOrgs } = isDisplayName
     ? { projects: [], orgs: await listOrganizations() }
-    : await withProgress(
+    : (projectSearchResult ??
+      (await withProgress(
         {
           message: `Fetching projects (up to ${flags.limit})...`,
           json: flags.json,
         },
         () => findProjectsBySlug(projectSlug)
-      );
+      )));
 
   // When the caller provided an org (e.g. "org/My Project"), scope the
   // search to that org instead of all accessible orgs. This applies to both
@@ -767,6 +776,7 @@ export const listCommand = buildListCommand("project", {
           handleProjectSearch(ctx.parsed.projectSlug, flags, {
             originalSlug: ctx.parsed.originalSlug,
             scopedOrg: ctx.parsed.org,
+            projectSearchResult: ctx.projectSearchResult,
           }),
       },
     });

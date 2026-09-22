@@ -17,6 +17,7 @@ import { MAX_PAGINATION_PAGES } from "../../../lib/api/infrastructure.js";
 import {
   API_MAX_PER_PAGE,
   listIssueAlertsPaginated,
+  type ProjectSearchResult,
 } from "../../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { openInBrowser } from "../../../lib/browser.js";
@@ -226,17 +227,18 @@ type ResolvedTargetsOptions = {
   parsed: ReturnType<typeof parseOrgProjectArg>;
   flags: ListFlags;
   cwd: string;
+  projectSearchResult?: ProjectSearchResult;
 };
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent multi-target resolution, compound cursor, error handling, and display logic
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
 ): Promise<IssueAlertListResult> {
-  const { parsed, flags, cwd } = options;
+  const { parsed, flags, cwd, projectSearchResult } = options;
 
   const { targets, footer, detectedDsns } = await resolveTargetsFromParsedArg(
     parsed,
-    { cwd, usageHint: USAGE_HINT }
+    { cwd, usageHint: USAGE_HINT, projectSearchResult }
   );
 
   if (targets.length === 0) {

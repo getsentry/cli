@@ -599,6 +599,7 @@ describe("resolveOrgOptionalProjectTarget bare org slug", () => {
 
     expect(result).toEqual({ org: "acme-corp" });
     expect(result.project).toBeUndefined();
+    expect(findProjectsBySlugSpy).toHaveBeenCalledTimes(1);
   });
 
   test("uses the project when an organization has the same slug", async () => {
@@ -625,6 +626,7 @@ describe("resolveOrgOptionalProjectTarget bare org slug", () => {
 
     expect(result.org).toBe("other-org");
     expect(result.project).toBe("acme-corp");
+    expect(findProjectsBySlugSpy).toHaveBeenCalledTimes(1);
   });
 
   test("still resolves a project slug that is not an organization", async () => {
@@ -642,5 +644,6 @@ describe("resolveOrgOptionalProjectTarget bare org slug", () => {
     );
 
     expect(result).toMatchObject({ org: "acme-corp", project: "frontend" });
+    expect(findProjectsBySlugSpy).toHaveBeenCalledTimes(1);
   });
 });
