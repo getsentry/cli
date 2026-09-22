@@ -782,12 +782,17 @@ export function isTextualContentType(contentType: string | null): boolean {
  * @param endpoint - API endpoint path (e.g., "/organizations/")
  * @param options - Request options including method, body, params, custom headers, and optional trusted base URL
  * @returns Response status, status text, headers, and parsed body
- * @throws {AuthError} Only on authentication failure (not on API errors)
+ * @throws {AuthError} On authentication failure
+ * @throws {HostScopeError} Before credentials are attached to an untrusted origin
  */
 export async function rawApiRequest(
   endpoint: string,
   options: ApiRequestOptions & {
     headers?: Record<string, string>;
+    /**
+     * Sentry instance or regional base URL. The authenticated fetch rejects
+     * origins outside the active token's trust scope before adding credentials.
+     */
     baseUrl?: string;
   } = {}
 ): Promise<{
@@ -804,6 +809,8 @@ export async function rawApiRequest(
     baseUrl,
   } = options;
 
+  // Both configs share createAuthenticatedFetch(), whose prepareHeaders()
+  // enforces isRequestOriginTrusted() before attaching Authorization.
   const config = baseUrl ? getSdkConfig(baseUrl) : getDefaultSdkConfig();
 
   const normalizedEndpoint = endpoint.startsWith("/")

@@ -155,26 +155,31 @@ export function normalizeEndpoint(endpoint: string): string {
   // producing newlines and indentation (CLI-FR, 215 events).
   // Other control characters (NUL, etc.) are left for validateEndpoint
   // to reject — those indicate corruption, not copy-paste.
-  const cleaned = endpoint.replace(LINE_BREAK_PATTERN, "").trim();
-  if (cleaned !== endpoint) {
+  const rawEndpoint = endpoint.replace(LINE_BREAK_PATTERN, "").trim();
+  if (rawEndpoint !== endpoint) {
     log.warn("Stripped line breaks from endpoint (copy-paste artifact)");
   }
 
-  // Validate before URL parsing so WHATWG dot-segment normalization cannot
-  // hide path traversal from the endpoint validator.
-  validateEndpoint(cleaned);
+  // Stage 1: validate the caller's representation before WHATWG URL parsing
+  // can normalize dot segments away.
+  validateEndpoint(rawEndpoint);
 
   // Absolute Sentry API URLs (from `attachments[].download` or copy-paste)
   // collapse to a path relative to /api/0/. The command retains the base URL
   // separately when it executes the request.
-  const absoluteUrl = parseAbsoluteApiUrl(cleaned);
-  const source = absoluteUrl
+  const absoluteUrl = parseAbsoluteApiUrl(rawEndpoint);
+  const relativeEndpoint = absoluteUrl
     ? splitAbsoluteApiUrl(absoluteUrl).endpoint
-    : cleaned;
-  validateEndpoint(source);
+    : rawEndpoint;
+
+  // Stage 2: validate the transformed path that rawApiRequest will receive
+  // after origin and API-prefix extraction.
+  validateEndpoint(relativeEndpoint);
 
   // Remove leading slash if present (rawApiRequest handles the base URL)
-  let trimmed = source.startsWith("/") ? source.slice(1) : source;
+  let trimmed = relativeEndpoint.startsWith("/")
+    ? relativeEndpoint.slice(1)
+    : relativeEndpoint;
 
   // Strip api/0/ prefix if user accidentally included it — the base URL
   // already includes /api/0/, so keeping it would produce a doubled path
@@ -1588,6 +1593,8 @@ export const apiCommand = buildCommand({
       logRequest(flags.method, normalizedEndpoint, headers);
     }
 
+    // The shared authenticated fetch validates requestBaseUrl against the
+    // token host and registered regional origins before adding credentials.
     const response = await rawApiRequest(normalizedEndpoint, {
       method: flags.method,
       body,
