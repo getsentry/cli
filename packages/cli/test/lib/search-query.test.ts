@@ -153,6 +153,12 @@ describe("sanitizeQuery: numeric project:", () => {
       "project:[frontend,6442225]"
     );
   });
+
+  test("rewrites numeric project: then OR in one step", () => {
+    expect(sanitizeQuery("project:123 OR project:456")).toBe(
+      "project_id:[123,456]"
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
