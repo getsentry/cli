@@ -375,6 +375,26 @@ export type ProjectSearchResult = {
 };
 
 /**
+ * One-shot handoff so a dispatcher that already searched can let the
+ * following `findProjectsBySlug` for the same slug reuse that result.
+ * A project hit would otherwise fan out across every organization twice.
+ */
+let reusedSearch: { slug: string; result: ProjectSearchResult } | null = null;
+
+/** Remember a search result for the next {@link findProjectsBySlug} of `slug`. */
+export function reuseProjectSearch(
+  slug: string,
+  result: ProjectSearchResult
+): void {
+  reusedSearch = { slug, result };
+}
+
+/** Drop a held search result when the follow-up lookup does not happen. */
+export function clearReusedProjectSearch(): void {
+  reusedSearch = null;
+}
+
+/**
  * Search for projects matching a slug across all accessible organizations.
  *
  * Used for `sentry issue list <project-name>` when no org is specified.
@@ -390,6 +410,12 @@ export type ProjectSearchResult = {
 export async function findProjectsBySlug(
   projectSlug: string
 ): Promise<ProjectSearchResult> {
+  if (reusedSearch?.slug === projectSlug) {
+    const result = reusedSearch.result;
+    reusedSearch = null;
+    return result;
+  }
+
   const isNumericId = isAllDigits(projectSlug);
 
   // listOrganizations() returns from cache when populated, avoiding

@@ -1608,9 +1608,8 @@ export const listCommand = buildListCommand("issue", {
       cwd,
       flags,
       parsed,
-      // When a bare slug matches a cached org, silently redirect to org-all
-      // mode instead of erroring (CLI-MC, 17 users). The user typed an org
-      // slug — their intent is clear, and org-all handles it correctly.
+      // Bare slug: the project wins when one exists. If none does and the
+      // slug is an organization, list that org. `<org>/` is the explicit form.
       orgSlugMatchBehavior: "redirect",
       // Multi-target modes (auto-detect, explicit, project-search) handle
       // compound cursor pagination themselves via handleResolvedTargets.

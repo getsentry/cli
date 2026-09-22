@@ -32,9 +32,11 @@
 
 import { paginate } from "./api/infrastructure.js";
 import {
+  clearReusedProjectSearch,
   findProjectsBySlug,
   listOrganizations,
   type PaginatedResponse,
+  reuseProjectSearch,
 } from "./api-client.js";
 import type { ParsedOrgProject } from "./arg-parsing.js";
 import {
@@ -757,9 +759,9 @@ export async function handleExplicitProject<TEntity, TWithOrg>(
  * Handle project-search mode (bare slug, e.g., "cli").
  *
  * Searches for a project matching the slug across all accessible orgs via
- * `findProjectsBySlug`. This gives consistent UX with `project list` and
- * `issue list` where a bare slug is always treated as a project slug, not
- * an org slug.
+ * `findProjectsBySlug`. A project with that slug is used. When none exists
+ * and the slug is an organization, callers pass `orgAllFallback` — the
+ * trailing `/` form is still the explicit organization target.
  *
  * If `config.listForProject` is available, fetches entities scoped to each
  * matched project. Otherwise fetches org-scoped entities from the matched
@@ -1026,60 +1028,68 @@ export type DispatchOptions<TEntity = unknown, TWithOrg = unknown> = {
    */
   allowCursorInModes?: readonly ParsedOrgProject["type"][];
   /**
-   * Behavior when a project-search slug matches a cached organization.
+   * Behavior when a bare slug matches an organization and no project does.
    *
-   * Before cursor validation and handler dispatch, the dispatcher checks
-   * whether the bare slug matches a cached org. This prevents commands
-   * from accidentally treating an org slug as a project name.
+   * Before cursor validation and handler dispatch, the dispatcher searches
+   * projects. A project with that slug wins, including when an organization
+   * has the same name. `<org>/` is the explicit organization form. Only a
+   * miss falls through to the organization:
    *
-   * - `"redirect"` (default): Convert to org-all mode with a warning log.
+   * - `"redirect"`: Convert to org-all mode with a warning log.
    *   The existing org-all handler runs naturally.
    * - `"error"`: Throw a {@link ResolutionError} with actionable hints.
-   *   Use this when org-all redirect is inappropriate (e.g., issue list
-   *   has custom per-project query logic that doesn't support org-all).
+   *   Use this when listing the whole organization is inappropriate.
    *
-   * Cache-only: if the cache is cold or stale, the check is skipped and
-   * the handler's own org-slug check serves as a safety net.
+   * The search is the same lookup the handler would do, so a cold org
+   * cache still resolves. The result is reused by that handler.
    */
   orgSlugMatchBehavior?: "redirect" | "error";
 };
 
 /**
- * Pre-check: when a bare slug matches a cached organization, redirect to
- * org-all mode or throw an error before handler dispatch. This prevents
- * commands from accidentally treating an org slug as a project name (CLI-9A).
+ * Pre-check: when a bare slug matches an organization and no project does,
+ * redirect to org-all mode or throw before handler dispatch.
  *
- * Cache-only: if the cache is cold or stale, returns the original parsed
- * value and the handler's own org-slug check serves as a safety net.
+ * A project with the same slug wins. Scoped searches (`org/Name`) and
+ * display names are left to the handler. `<org>/` never reaches here.
  */
 async function resolveOrgSlugMatch(
   parsed: ParsedOrgProject & { type: "project-search" },
   behavior: "redirect" | "error",
   config: ListCommandMeta
 ): Promise<ParsedOrgProject> {
-  const slug = parsed.projectSlug;
-  const { getCachedOrganizations } = await import("./db/regions.js");
-  const cachedOrgs = getCachedOrganizations();
-  const matchingOrg = cachedOrgs.find((o) => o.slug === slug);
-  if (!matchingOrg) {
+  if (parsed.org !== undefined || parsed.originalSlug !== undefined) {
     return parsed;
   }
-  if (behavior === "error") {
-    throw new ResolutionError(
-      `'${slug}'`,
-      "is an organization, not a project",
-      `${config.commandPrefix} ${slug}/`,
-      [
-        `List projects: sentry project list ${slug}/`,
-        `Specify a project: ${config.commandPrefix} ${slug}/<project>`,
-      ]
+
+  const slug = parsed.projectSlug;
+  const result = await findProjectsBySlug(slug);
+  const matchingOrg =
+    result.projects.length === 0
+      ? result.orgs.find((org) => org.slug === slug)
+      : undefined;
+
+  if (matchingOrg) {
+    if (behavior === "error") {
+      throw new ResolutionError(
+        `'${slug}'`,
+        "is an organization, not a project",
+        `${config.commandPrefix} ${slug}/`,
+        [
+          `List projects: sentry project list ${slug}/`,
+          `Specify a project: ${config.commandPrefix} ${slug}/<project>`,
+        ]
+      );
+    }
+    log.warn(
+      `'${slug}' is an organization, not a project. ` +
+        `Listing all ${config.entityPlural} in '${slug}'.`
     );
+    return { type: "org-all", org: matchingOrg.slug };
   }
-  log.warn(
-    `'${slug}' is an organization, not a project. ` +
-      `Listing all ${config.entityPlural} in '${slug}'.`
-  );
-  return { type: "org-all", org: matchingOrg.slug };
+
+  reuseProjectSearch(slug, result);
+  return parsed;
 }
 
 /**
@@ -1117,6 +1127,17 @@ async function resolveOrgInParsed(
  * This is the single entry point for all org-scoped list commands.
  */
 export async function dispatchOrgScopedList<TEntity, TWithOrg>(
+  options: DispatchOptions<TEntity, TWithOrg>
+  // biome-ignore lint/suspicious/noExplicitAny: TWithOrg varies per command; callers narrow the return type
+): Promise<ListResult<any>> {
+  try {
+    return await dispatchOrgScopedListInner(options);
+  } finally {
+    clearReusedProjectSearch();
+  }
+}
+
+async function dispatchOrgScopedListInner<TEntity, TWithOrg>(
   options: DispatchOptions<TEntity, TWithOrg>
   // biome-ignore lint/suspicious/noExplicitAny: TWithOrg varies per command; callers narrow the return type
 ): Promise<ListResult<any>> {

@@ -19,6 +19,7 @@ import { isatty } from "node:tty";
 import pLimit from "p-limit";
 import type { SentryOrganization, SentryProject } from "../types/index.js";
 import {
+  clearReusedProjectSearch,
   findProjectByDsnKey,
   findProjectsByPattern,
   findProjectsBySlug,
@@ -26,6 +27,7 @@ import {
   listOrganizations,
   listProjects,
   resolveOrgDisplayName,
+  reuseProjectSearch,
 } from "./api-client.js";
 import {
   looksLikeIssueShortId,
@@ -2373,7 +2375,8 @@ export type ResolvedOrgOptionalProject = {
  *
  * Handles:
  * - explicit `<org>/<project>` → delegate to {@link resolveOrgProjectTarget}
- * - project-search `<project>` → delegate to {@link resolveOrgProjectTarget}
+ * - project-search `<project>` → the project when one matches; the
+ *   organization only when none does and the slug is an org
  * - org-all `<org>/` → resolve the org slug only
  * - auto-detect → resolve org only (no project required)
  *
@@ -2406,7 +2409,33 @@ export async function resolveOrgOptionalProjectTarget(
     return withTelemetryContext({ org: resolved.org });
   }
 
-  // explicit and project-search: delegate to the project-required resolver
+  // Bare slug: a project with that name wins. The organization is used
+  // only when the search finds no project. `<org>/` is already org-all.
+  if (
+    parsed.type === "project-search" &&
+    parsed.org === undefined &&
+    parsed.originalSlug === undefined
+  ) {
+    const result = await findProjectsBySlug(parsed.projectSlug);
+    const matchingOrg =
+      result.projects.length === 0
+        ? result.orgs.find((org) => org.slug === parsed.projectSlug)
+        : undefined;
+    if (matchingOrg) {
+      log.warn(
+        `'${matchingOrg.slug}' is an organization, not a project. Using organization '${matchingOrg.slug}'.`
+      );
+      return withTelemetryContext({ org: matchingOrg.slug });
+    }
+    reuseProjectSearch(parsed.projectSlug, result);
+    try {
+      return await resolveOrgProjectTarget(parsed, cwd, commandName);
+    } finally {
+      clearReusedProjectSearch();
+    }
+  }
+
+  // explicit, scoped search, and display names
   return resolveOrgProjectTarget(parsed, cwd, commandName);
 }
 
