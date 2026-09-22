@@ -17,6 +17,7 @@ import { MAX_PAGINATION_PAGES } from "../../../lib/api/infrastructure.js";
 import {
   API_MAX_PER_PAGE,
   listIssueAlertsPaginated,
+  type ProjectSearchResult,
 } from "../../../lib/api-client.js";
 import { parseOrgProjectArg } from "../../../lib/arg-parsing.js";
 import { openInBrowser } from "../../../lib/browser.js";
@@ -67,6 +68,7 @@ import {
 import { withProgress } from "../../../lib/polling.js";
 import {
   type ResolvedTarget,
+  resolveBareProjectOrOrg,
   resolveTargetsFromParsedArg,
 } from "../../../lib/resolve-target.js";
 import { buildIssueAlertsUrl } from "../../../lib/sentry-urls.js";
@@ -196,9 +198,26 @@ async function resolveWebUrl(
     return buildIssueAlertsUrl(parsed.org);
   }
 
+  let projectSearchResult: ProjectSearchResult | undefined;
+  if (
+    parsed.type === "project-search" &&
+    parsed.org === undefined &&
+    parsed.originalSlug === undefined
+  ) {
+    const resolution = await resolveBareProjectOrOrg(parsed.projectSlug);
+    if (resolution.kind === "organization") {
+      logger.warn(
+        `'${parsed.projectSlug}' is an organization, not a project. Opening organization '${resolution.org}'.`
+      );
+      return buildIssueAlertsUrl(resolution.org);
+    }
+    projectSearchResult = resolution.projectSearchResult;
+  }
+
   const { targets } = await resolveTargetsFromParsedArg(parsed, {
     cwd,
     usageHint: USAGE_HINT,
+    projectSearchResult,
   });
   if (targets.length === 0) {
     throw new ContextError("Organization and project", USAGE_HINT);
@@ -226,17 +245,18 @@ type ResolvedTargetsOptions = {
   parsed: ReturnType<typeof parseOrgProjectArg>;
   flags: ListFlags;
   cwd: string;
+  projectSearchResult?: ProjectSearchResult;
 };
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: inherent multi-target resolution, compound cursor, error handling, and display logic
 async function handleResolvedTargets(
   options: ResolvedTargetsOptions
 ): Promise<IssueAlertListResult> {
-  const { parsed, flags, cwd } = options;
+  const { parsed, flags, cwd, projectSearchResult } = options;
 
   const { targets, footer, detectedDsns } = await resolveTargetsFromParsedArg(
     parsed,
-    { cwd, usageHint: USAGE_HINT }
+    { cwd, usageHint: USAGE_HINT, projectSearchResult }
   );
 
   if (targets.length === 0) {

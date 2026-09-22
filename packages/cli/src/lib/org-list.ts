@@ -35,6 +35,7 @@ import {
   findProjectsBySlug,
   listOrganizations,
   type PaginatedResponse,
+  type ProjectSearchResult,
 } from "./api-client.js";
 import type { ParsedOrgProject } from "./arg-parsing.js";
 import {
@@ -57,6 +58,7 @@ import { withProgress } from "./polling.js";
 import { resolveEffectiveOrg } from "./region.js";
 import {
   type ProjectNotFoundOutcome,
+  resolveBareProjectOrOrg,
   resolveOrgsForListing,
   triageProjectNotFound,
 } from "./resolve-target.js";
@@ -337,6 +339,12 @@ export type HandlerContext<
   cwd: string;
   /** Shared list command flags (limit, json, cursor). */
   flags: BaseListFlags;
+  /**
+   * Request-scoped result from the bare project-slug pre-check.
+   *
+   * Present only when project-search mode continues to a handler.
+   */
+  projectSearchResult?: ProjectSearchResult;
 };
 
 /**
@@ -757,9 +765,9 @@ export async function handleExplicitProject<TEntity, TWithOrg>(
  * Handle project-search mode (bare slug, e.g., "cli").
  *
  * Searches for a project matching the slug across all accessible orgs via
- * `findProjectsBySlug`. This gives consistent UX with `project list` and
- * `issue list` where a bare slug is always treated as a project slug, not
- * an org slug.
+ * `findProjectsBySlug`. A project with that slug is used. When none exists
+ * and the slug is an organization, callers pass `orgAllFallback` — the
+ * trailing `/` form is still the explicit organization target.
  *
  * If `config.listForProject` is available, fetches entities scoped to each
  * matched project. Otherwise fetches org-scoped entities from the matched
@@ -783,11 +791,19 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
     originalSlug?: string;
     /** Organization slug to scope the search to (e.g. from "org/My Project"). */
     org?: string;
+    /** Result supplied by the dispatcher after its bare-slug pre-check. */
+    projectSearchResult?: ProjectSearchResult;
   },
   /** Guard against infinite recursion from fuzzy recovery. */
   _isRecoveryAttempt = false
 ): Promise<ListResult<TWithOrg>> {
-  const { flags, orgAllFallback, originalSlug, org: scopedOrg } = options;
+  const {
+    flags,
+    orgAllFallback,
+    originalSlug,
+    org: scopedOrg,
+    projectSearchResult,
+  } = options;
   /** Display label: the user's raw input when available, otherwise the slug. */
   const displaySlug = originalSlug ?? projectSlug;
   // When the input is a display name (originalSlug set, contains spaces),
@@ -795,13 +811,14 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
   const isDisplayName = originalSlug !== undefined;
   const { projects: rawMatches, orgs: foundOrgs } = isDisplayName
     ? { projects: [], orgs: await listOrganizations() }
-    : await withProgress(
+    : (projectSearchResult ??
+      (await withProgress(
         {
           message: `Fetching ${config.entityPlural} (up to ${flags.limit})...`,
           json: flags.json,
         },
         () => findProjectsBySlug(projectSlug)
-      );
+      )));
 
   // When the caller provided an org (e.g. "org/My Project"), scope the
   // search to that org instead of all accessible orgs. This applies to both
@@ -849,7 +866,11 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
       return handleProjectSearch(
         config,
         outcome.project,
-        { ...options, originalSlug: undefined },
+        {
+          ...options,
+          originalSlug: undefined,
+          projectSearchResult: undefined,
+        },
         true
       );
     }
@@ -983,6 +1004,7 @@ function buildDefaultHandlers<TEntity, TWithOrg>(
         orgAllFallback: (orgSlug) => runOrgAll(config, orgSlug, ctx.flags),
         originalSlug: ctx.parsed.originalSlug,
         org: ctx.parsed.org,
+        projectSearchResult: ctx.projectSearchResult,
       }),
 
     "org-all": (ctx) => {
@@ -1026,60 +1048,71 @@ export type DispatchOptions<TEntity = unknown, TWithOrg = unknown> = {
    */
   allowCursorInModes?: readonly ParsedOrgProject["type"][];
   /**
-   * Behavior when a project-search slug matches a cached organization.
+   * Behavior when a bare slug matches an organization and no project does.
    *
-   * Before cursor validation and handler dispatch, the dispatcher checks
-   * whether the bare slug matches a cached org. This prevents commands
-   * from accidentally treating an org slug as a project name.
+   * Before cursor validation and handler dispatch, the dispatcher searches
+   * projects. A project with that slug wins, including when an organization
+   * has the same name. `<org>/` is the explicit organization form. Only a
+   * miss falls through to the organization:
    *
-   * - `"redirect"` (default): Convert to org-all mode with a warning log.
+   * - `"redirect"`: Convert to org-all mode with a warning log.
    *   The existing org-all handler runs naturally.
    * - `"error"`: Throw a {@link ResolutionError} with actionable hints.
-   *   Use this when org-all redirect is inappropriate (e.g., issue list
-   *   has custom per-project query logic that doesn't support org-all).
+   *   Use this when listing the whole organization is inappropriate.
    *
-   * Cache-only: if the cache is cold or stale, the check is skipped and
-   * the handler's own org-slug check serves as a safety net.
+   * The search is the same lookup the handler would do, so a cold org
+   * cache still resolves. The result is passed to that handler.
    */
   orgSlugMatchBehavior?: "redirect" | "error";
 };
 
+type OrgSlugMatchResult = {
+  parsed: ParsedOrgProject;
+  projectSearchResult?: ProjectSearchResult;
+};
+
 /**
- * Pre-check: when a bare slug matches a cached organization, redirect to
- * org-all mode or throw an error before handler dispatch. This prevents
- * commands from accidentally treating an org slug as a project name (CLI-9A).
+ * Pre-check: when a bare slug matches an organization and no project does,
+ * redirect to org-all mode or throw before handler dispatch.
  *
- * Cache-only: if the cache is cold or stale, returns the original parsed
- * value and the handler's own org-slug check serves as a safety net.
+ * A project with the same slug wins. Scoped searches (`org/Name`) and
+ * display names are left to the handler. `<org>/` never reaches here.
  */
 async function resolveOrgSlugMatch(
   parsed: ParsedOrgProject & { type: "project-search" },
   behavior: "redirect" | "error",
   config: ListCommandMeta
-): Promise<ParsedOrgProject> {
+): Promise<OrgSlugMatchResult> {
+  if (parsed.org !== undefined || parsed.originalSlug !== undefined) {
+    return { parsed };
+  }
+
   const slug = parsed.projectSlug;
-  const { getCachedOrganizations } = await import("./db/regions.js");
-  const cachedOrgs = getCachedOrganizations();
-  const matchingOrg = cachedOrgs.find((o) => o.slug === slug);
-  if (!matchingOrg) {
-    return parsed;
-  }
-  if (behavior === "error") {
-    throw new ResolutionError(
-      `'${slug}'`,
-      "is an organization, not a project",
-      `${config.commandPrefix} ${slug}/`,
-      [
-        `List projects: sentry project list ${slug}/`,
-        `Specify a project: ${config.commandPrefix} ${slug}/<project>`,
-      ]
+  const resolution = await resolveBareProjectOrOrg(slug);
+
+  if (resolution.kind === "organization") {
+    if (behavior === "error") {
+      throw new ResolutionError(
+        `'${slug}'`,
+        "is an organization, not a project",
+        `${config.commandPrefix} ${slug}/`,
+        [
+          `List projects: sentry project list ${slug}/`,
+          `Specify a project: ${config.commandPrefix} ${slug}/<project>`,
+        ]
+      );
+    }
+    log.warn(
+      `'${slug}' is an organization, not a project. ` +
+        `Listing all ${config.entityPlural} in '${slug}'.`
     );
+    return { parsed: { type: "org-all", org: resolution.org } };
   }
-  log.warn(
-    `'${slug}' is an organization, not a project. ` +
-      `Listing all ${config.entityPlural} in '${slug}'.`
-  );
-  return { type: "org-all", org: matchingOrg.slug };
+
+  return {
+    parsed,
+    projectSearchResult: resolution.projectSearchResult,
+  };
 }
 
 /**
@@ -1123,16 +1156,19 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
   const { config, cwd, flags, parsed, overrides } = options;
 
   let effectiveParsed: ParsedOrgProject = parsed;
+  let projectSearchResult: ProjectSearchResult | undefined;
 
   if (
     effectiveParsed.type === "project-search" &&
     options.orgSlugMatchBehavior
   ) {
-    effectiveParsed = await resolveOrgSlugMatch(
+    const resolution = await resolveOrgSlugMatch(
       effectiveParsed,
       options.orgSlugMatchBehavior,
       config
     );
+    effectiveParsed = resolution.parsed;
+    projectSearchResult = resolution.projectSearchResult;
   }
 
   const cursorAllowedModes: readonly ParsedOrgProject["type"][] = [
@@ -1163,6 +1199,7 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
     parsed: effectiveParsed,
     cwd,
     flags,
+    projectSearchResult,
   };
 
   // biome-ignore lint/suspicious/noExplicitAny: safe — dispatch guarantees type match
