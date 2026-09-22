@@ -453,8 +453,8 @@ export async function autoPaginate<T>(
  * Centralizes the two things every list endpoint kept re-deriving by hand and
  * occasionally got wrong (see #1458): capping `per_page` at
  * {@link API_MAX_PER_PAGE} and threading `limit` plus the initial cursor into
- * {@link autoPaginate}. Each request asks only for the remaining item budget,
- * so a partial final page can return a cursor without skipping trimmed rows.
+ * {@link autoPaginate}. Every page uses the same capped `perPage`; overshoot
+ * on the final page is trimmed by {@link autoPaginate} so no rows are skipped.
  * Callers still own region resolution and
  * endpoint-specific query building inside `fetchPage`.
  *
@@ -472,16 +472,9 @@ export function paginate<T>(
   defaultLimit = 10
 ): Promise<PaginatedResponse<T[]>> {
   const limit = options.limit ?? defaultLimit;
-  let remaining = limit;
+  const perPage = Math.min(limit, API_MAX_PER_PAGE);
   return autoPaginate(
-    async (cursor) => {
-      const result = await fetchPage(
-        Math.min(remaining, API_MAX_PER_PAGE),
-        cursor
-      );
-      remaining -= result.data.length;
-      return result;
-    },
+    (cursor) => fetchPage(perPage, cursor),
     limit,
     options.cursor
   );
