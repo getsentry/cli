@@ -12,7 +12,6 @@ import { withDbSpan } from "../telemetry.js";
 import { getDatabase } from "./index.js";
 import { clearAllIssueOrgCache } from "./issue-org-cache.js";
 import { clearTrustedHostState } from "./regions.js";
-import { clearAllSeenEventIds } from "./seen-event-ids.js";
 import { runUpsert } from "./utils.js";
 
 /** Refresh when less than 10% of token lifetime remains */
@@ -445,14 +444,13 @@ export async function clearAuth(): Promise<void> {
   withDbSpan("clearAuth", () => {
     const db = getDatabase();
     db.query("DELETE FROM auth WHERE id = 1").run();
-    // Also clear user info, org region cache, pagination cursors, the
-    // issue-id → org cache, and printed event IDs (scoped to the current
-    // user's permissions) when logging out.
+    // Also clear user info, org region cache, pagination cursors, and the
+    // issue-id → org cache (scoped to the current user's permissions) when
+    // logging out.
     db.query("DELETE FROM user_info WHERE id = 1").run();
     db.query("DELETE FROM org_regions").run();
     db.query("DELETE FROM pagination_cursors").run();
     clearAllIssueOrgCache();
-    clearAllSeenEventIds();
   });
   resetIdentityFingerprintCache();
   resetAuthTokenCache();
