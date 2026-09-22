@@ -29,6 +29,7 @@ The `sentry` CLI follows conventions from well-known tools — if you're familia
 - Use `--limit` to cap the number of results (default is usually 10–100)
 - Prefer `sentry issue view PROJECT-123` over listing and filtering manually
 - Pass multiple issue IDs in one call (`sentry issue view A B C --json`) instead of looping `issue view` per ID
+- Analyze multiple issues in one call (`sentry issue explain A B C --json`) instead of looping `issue explain` per ID
 - Use `sentry api` for endpoints not covered by dedicated commands
 
 ## Safety Rules

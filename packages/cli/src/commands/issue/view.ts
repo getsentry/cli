@@ -4,25 +4,18 @@
  * View detailed information about one or more Sentry issues.
  */
 
-import pLimit from "p-limit";
 import type { SentryContext } from "../../context.js";
-import {
-  getLatestEvent,
-  listReplayIdsForIssue,
-  ORG_FANOUT_CONCURRENCY,
-} from "../../lib/api-client.js";
-import { spansFlag, splitNewlineArg } from "../../lib/arg-parsing.js";
+import { getLatestEvent, listReplayIdsForIssue } from "../../lib/api-client.js";
+import { spansFlag } from "../../lib/arg-parsing.js";
 import { openInBrowser } from "../../lib/browser.js";
 import { buildCommand } from "../../lib/command.js";
 import { ContextError } from "../../lib/errors.js";
+import { plainSafeMuted } from "../../lib/formatters/human.js";
 import {
-  formatEventDetails,
-  formatIssueDetails,
-  isPlainOutput,
-  muted,
-  renderMarkdown,
-} from "../../lib/formatters/index.js";
-import { filterFields } from "../../lib/formatters/json.js";
+  formatIssueView,
+  jsonTransformIssueView,
+  type SingleIssueViewData,
+} from "../../lib/formatters/issue.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import {
   applyFreshFlag,
@@ -35,18 +28,27 @@ import {
   getReplayIdFromEvent,
 } from "../../lib/replay-search.js";
 import { getSpanTreeLines } from "../../lib/span-tree.js";
-import type { SentryEvent, SentryIssue } from "../../types/index.js";
+import type { SentryEvent } from "../../types/index.js";
 import { IssueViewOutputSchema } from "../../types/index.js";
-import { resolveIssue } from "./utils.js";
+import {
+  collectIssueArgs,
+  issueIdsPositional,
+  mapIssueArgsConcurrently,
+  resolveIssue,
+} from "./utils.js";
 
 const log = logger.withTag("issue.view");
 
 /** Usage hint for ContextError messages */
 const USAGE_HINT = "sentry issue view <issue> [<issue>...]";
 
+/** Maximum browser tabs opened without an explicit safety override. */
+export const MAX_WEB_ISSUES = 5;
+
 type ViewFlags = {
   readonly json: boolean;
   readonly web: boolean;
+  readonly force: boolean;
   readonly spans: number;
   readonly fresh: boolean;
   readonly fields?: string[];
@@ -87,179 +89,40 @@ async function tryListReplayIdsForIssue(
   }
 }
 
-/** Per-issue payload both renderers need */
-type SingleIssueViewData = {
-  org: string | null;
-  issue: SentryIssue;
-  event: SentryEvent | null;
-  replayIds: string[];
-  trace: { traceId: string; spans: unknown[] } | null;
-  /** Pre-formatted span tree lines for human output (not serialized) */
-  spanTreeLines?: string[];
-};
+async function buildIssueSpanData(
+  orgSlug: string | undefined,
+  event: SentryEvent | undefined,
+  spans: number
+): Promise<Pick<SingleIssueViewData, "spanTreeLines" | "trace">> {
+  const spanTreeResult =
+    orgSlug && event && spans > 0
+      ? await getSpanTreeLines(orgSlug, event, spans)
+      : undefined;
 
-/**
- * Output type for issue view — supports both single and multi-issue.
- * Multi-issue output occurs when agents pass several IDs or paste
- * newline-separated IDs (same contract as `event view`).
- */
-type IssueViewData = {
-  issues: SingleIssueViewData[];
-  /** Number of issues originally requested (before partial failures) */
-  requestedCount: number;
-};
-
-const MAX_REPLAY_IDS_SHOWN = 3;
-
-function formatReplaySection(org: string | null, replayIds: string[]): string {
-  if (replayIds.length === 0) {
-    return "";
+  if (spanTreeResult) {
+    const trace =
+      spanTreeResult.success && spanTreeResult.traceId
+        ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans ?? [] }
+        : null;
+    return { trace, spanTreeLines: spanTreeResult.lines };
   }
-
-  const visibleReplayIds = replayIds.slice(0, MAX_REPLAY_IDS_SHOWN);
-  const lines = ["### Related Replays", ""];
-
-  for (const replayId of visibleReplayIds) {
-    if (org) {
-      lines.push(
-        `- \`${replayId}\` (view: \`sentry replay view ${org}/${replayId}\`)`
-      );
-    } else {
-      lines.push(`- \`${replayId}\``);
-    }
+  if (!orgSlug) {
+    return {
+      trace: null,
+      spanTreeLines: [
+        plainSafeMuted("\nOrganization context required to fetch span tree."),
+      ],
+    };
   }
-
-  const remainingCount = replayIds.length - visibleReplayIds.length;
-  if (remainingCount > 0) {
-    lines.push(
-      `- ${remainingCount} more related replay${remainingCount === 1 ? "" : "s"}`
-    );
+  if (!event) {
+    return {
+      trace: null,
+      spanTreeLines: [
+        plainSafeMuted("\nCould not fetch event to display span tree."),
+      ],
+    };
   }
-
-  return renderMarkdown(lines.join("\n"));
-}
-
-/**
- * Format one issue's view data for human-readable terminal output.
- */
-function formatSingleIssueView(data: SingleIssueViewData): string {
-  const parts: string[] = [];
-  const eventReplayId = data.event
-    ? getReplayIdFromEvent(data.event)
-    : undefined;
-
-  parts.push(formatIssueDetails(data.issue));
-
-  if (data.event) {
-    parts.push(
-      formatEventDetails(data.event, "Latest Event", data.issue.permalink)
-    );
-  }
-
-  const additionalReplayIds = eventReplayId
-    ? data.replayIds.filter((replayId) => replayId !== eventReplayId)
-    : data.replayIds;
-  const replaySection = formatReplaySection(data.org, additionalReplayIds);
-  if (replaySection) {
-    parts.push(replaySection);
-  }
-
-  if (data.spanTreeLines && data.spanTreeLines.length > 0) {
-    parts.push(data.spanTreeLines.join("\n"));
-  }
-
-  return parts.join("\n");
-}
-
-/**
- * Format issue view data for human-readable terminal output.
- *
- * Renders issue details, optional latest event, and optional span tree.
- * Multiple issues are separated by horizontal rules.
- */
-export function formatIssueView(data: IssueViewData): string {
-  const parts: string[] = [];
-
-  for (const entry of data.issues) {
-    if (parts.length > 0) {
-      parts.push("\n---\n");
-    }
-    parts.push(formatSingleIssueView(entry));
-  }
-
-  return parts.join("\n");
-}
-
-function flattenIssueView(
-  entry: SingleIssueViewData,
-  fields?: string[]
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {
-    ...entry.issue,
-    event: entry.event,
-    org: entry.org,
-    replayIds: entry.replayIds,
-    trace: entry.trace,
-  };
-  if (fields && fields.length > 0) {
-    return filterFields(result, fields) as Record<string, unknown>;
-  }
-  return result;
-}
-
-/**
- * Transform issue view data for JSON output.
- *
- * For single-issue output, flattens the issue as the primary object so that
- * `--fields shortId,title` works directly on issue properties. The `event`,
- * `trace`, `org`, and `replayIds` enrichment data are attached as sibling
- * keys, accessible via `--fields event.id`, `--fields trace.traceId`, or
- * `--fields replayIds`.
- *
- * For multi-issue output, returns an array of flattened issue objects.
- * This preserves backward compatibility: single-issue callers still get
- * a flat object, while multi-issue callers get an array.
- *
- * Use requestedCount (not issues.length) to decide the shape so that
- * partial failures don't non-deterministically switch from array to object.
- */
-export function jsonTransformIssueView(
-  data: IssueViewData,
-  fields?: string[]
-): unknown {
-  if (data.requestedCount <= 1) {
-    const [first] = data.issues;
-    if (first) {
-      return flattenIssueView(first, fields);
-    }
-  }
-  return data.issues.map((entry) => flattenIssueView(entry, fields));
-}
-
-/**
- * Expand positional args by splitting each on newlines.
- *
- * When an agent pastes `"IOS-1\nIOS-2\nIOS-3"` as a single arg, this
- * produces `["IOS-1", "IOS-2", "IOS-3"]`. Commas are left intact —
- * positional values are space-separated, never comma-split.
- */
-export function expandNewlineArgs(args: string[]): string[] {
-  return args.flatMap(splitNewlineArg);
-}
-
-/**
- * Expand newlines and drop duplicate tokens, preserving first-seen order.
- */
-export function collectIssueArgs(args: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const arg of expandNewlineArgs(args)) {
-    if (!seen.has(arg)) {
-      seen.add(arg);
-      result.push(arg);
-    }
-  }
-  return result;
+  return { trace: null };
 }
 
 /**
@@ -286,41 +149,21 @@ async function buildSingleIssueViewData(
     event ? getReplayIdFromEvent(event) : undefined,
     ...relatedReplayIds,
   ]);
-
-  let spanTreeResult: Awaited<ReturnType<typeof getSpanTreeLines>> | undefined;
-  if (orgSlug && event && spans > 0) {
-    spanTreeResult = await getSpanTreeLines(orgSlug, event, spans);
-  }
-
-  let spanTreeLines: string[] | undefined;
-  if (spanTreeResult) {
-    spanTreeLines = spanTreeResult.lines;
-  } else if (!orgSlug) {
-    const msg = "\nOrganization context required to fetch span tree.";
-    spanTreeLines = [isPlainOutput() ? msg : muted(msg)];
-  } else if (!event) {
-    const msg = "\nCould not fetch event to display span tree.";
-    spanTreeLines = [isPlainOutput() ? msg : muted(msg)];
-  }
-
-  const trace = spanTreeResult?.success
-    ? { traceId: spanTreeResult.traceId, spans: spanTreeResult.spans }
-    : null;
+  const spanData = await buildIssueSpanData(orgSlug, event, spans);
 
   return {
     org: orgSlug ?? null,
     issue,
     event: event ?? null,
     replayIds,
-    trace,
-    spanTreeLines,
+    ...spanData,
   };
 }
 
 /** Options for fetching multiple issues in parallel */
 type FetchMultipleIssueViewsOptions = {
   /** Issue identifiers as provided on the command line */
-  issueArgs: string[];
+  issueArgs: readonly string[];
   /** Working directory for DSN / project detection */
   cwd: string;
   /** Span tree depth (`0` skips the fetch) */
@@ -331,41 +174,61 @@ type FetchMultipleIssueViewsOptions = {
  * Fetch multiple issues with bounded concurrency, collecting successes
  * and warning on failures.
  *
- * Uses {@link ORG_FANOUT_CONCURRENCY} (5) to avoid overwhelming the API
- * when agents paste dozens of IDs. Mirrors `event view`'s fetchMultipleEvents.
+ * Uses the shared issue-batch concurrency limit to avoid overwhelming the API
+ * when agents paste dozens of IDs.
  *
  * When all fetches fail, re-throws the error from the primary (first) issue.
  */
-export async function fetchMultipleIssueViews(
+export function fetchMultipleIssueViews(
   options: FetchMultipleIssueViewsOptions
 ): Promise<SingleIssueViewData[]> {
   const { issueArgs, cwd, spans } = options;
-  const limit = pLimit(ORG_FANOUT_CONCURRENCY);
+  return mapIssueArgsConcurrently(
+    issueArgs,
+    (issueArg) => buildSingleIssueViewData(issueArg, cwd, spans),
+    (issueArg, reason) => {
+      log.warn(`Failed to fetch issue ${issueArg}: ${reason}`);
+    }
+  );
+}
 
-  const results = await Promise.allSettled(
-    issueArgs.map((issueArg) =>
-      limit(() => buildSingleIssueViewData(issueArg, cwd, spans))
-    )
+/**
+ * Resolve and open issue browser pages, respecting the tab safety limit.
+ *
+ * @param issueArgs - Normalized issue identifiers
+ * @param cwd - Working directory for issue resolution
+ * @param force - Whether to bypass {@link MAX_WEB_ISSUES}
+ */
+async function openIssuesInBrowser(
+  issueArgs: readonly string[],
+  cwd: string,
+  force: boolean
+): Promise<void> {
+  const argsToOpen = force ? issueArgs : issueArgs.slice(0, MAX_WEB_ISSUES);
+  if (argsToOpen.length < issueArgs.length) {
+    log.warn(
+      `Opening the first ${MAX_WEB_ISSUES} of ${issueArgs.length} issues. Use --force to open all.`
+    );
+  }
+
+  const issues = await mapIssueArgsConcurrently(
+    argsToOpen,
+    async (issueArg) => {
+      const { issue } = await resolveIssue({
+        issueArg,
+        cwd,
+        command: "view",
+      });
+      return issue;
+    },
+    (issueArg, reason) => {
+      log.warn(`Failed to open issue ${issueArg}: ${reason}`);
+    }
   );
 
-  const views: SingleIssueViewData[] = [];
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    if (result?.status === "fulfilled") {
-      views.push(result.value);
-    } else if (result?.status === "rejected") {
-      log.warn(`Failed to fetch issue ${issueArgs[i]}: ${result.reason}`);
-    }
+  for (const issue of issues) {
+    await openInBrowser(issue.permalink, "issue");
   }
-
-  if (views.length === 0) {
-    const firstResult = results[0];
-    if (firstResult?.status === "rejected") {
-      throw firstResult.reason;
-    }
-  }
-
-  return views;
 }
 
 export const viewCommand = buildCommand({
@@ -385,7 +248,8 @@ export const viewCommand = buildCommand({
       "  numeric         - Numeric ID: 123456789\n" +
       "  org/project#ID  - GitHub-style: my-org/my-project#PROJ-123\n\n" +
       "Multiple issue IDs can be passed as separate arguments or newline-separated\n" +
-      "within a single argument (handy when piping from other commands).\n\n" +
+      "within a single argument (handy when piping from other commands).\n" +
+      `With --web, up to ${MAX_WEB_ISSUES} issues open by default; pass --force to open all.\n\n` +
       "In multi-project mode (after 'issue list'), use alias-suffix format (e.g., 'f-g' " +
       "where 'f' is the project alias shown in the list).",
   },
@@ -395,18 +259,16 @@ export const viewCommand = buildCommand({
     schema: IssueViewOutputSchema,
   },
   parameters: {
-    positional: {
-      kind: "array",
-      parameter: {
-        placeholder: "issue",
-        brief: "<issue> [<issue>...] - One or more issue IDs",
-        parse: String,
-      },
-    },
+    positional: issueIdsPositional,
     flags: {
       web: {
         kind: "boolean",
         brief: "Open in browser",
+        default: false,
+      },
+      force: {
+        kind: "boolean",
+        brief: `Allow --web to open more than ${MAX_WEB_ISSUES} issues`,
         default: false,
       },
       ...spansFlag,
@@ -425,17 +287,7 @@ export const viewCommand = buildCommand({
     }
 
     if (flags.web) {
-      if (issueArgs.length > 1) {
-        log.warn(
-          "--web only opens the first issue; extra issue IDs are ignored."
-        );
-      }
-      const { issue } = await resolveIssue({
-        issueArg: primaryArg,
-        cwd,
-        command: "view",
-      });
-      await openInBrowser(issue.permalink, "issue");
+      await openIssuesInBrowser(issueArgs, cwd, flags.force);
       return;
     }
 

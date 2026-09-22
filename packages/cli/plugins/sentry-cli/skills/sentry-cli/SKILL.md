@@ -41,6 +41,7 @@ The `sentry` CLI follows conventions from well-known tools — if you're familia
 - Use `--limit` to cap the number of results (default is usually 10–100)
 - Prefer `sentry issue view PROJECT-123` over listing and filtering manually
 - Pass multiple issue IDs in one call (`sentry issue view A B C --json`) instead of looping `issue view` per ID
+- Analyze multiple issues in one call (`sentry issue explain A B C --json`) instead of looping `issue explain` per ID
 - Use `sentry api` for endpoints not covered by dedicated commands
 
 ### Safety Rules
@@ -409,7 +410,7 @@ Manage Sentry issues
 
 - `sentry issue list <org/project>` — List issues in a project
 - `sentry issue events <issue>` — List events for a specific issue
-- `sentry issue explain <issue>` — Analyze an issue's root cause using Seer AI
+- `sentry issue explain <issue...>` — Analyze one or more issues using Seer AI
 - `sentry issue plan <issue>` — Generate a solution plan using Seer AI
 - `sentry issue view <issue...>` — View details of one or more issues
 - `sentry issue resolve <issue>` — Mark an issue as resolved

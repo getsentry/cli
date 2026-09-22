@@ -37,7 +37,7 @@ sentry event view [<org>/<project>] <event-id> [--json] [-w]   # event ID requir
 
 **Key insight**: `org view` and `project view` mirror `gh repo view` - works in context (DSN) or with explicit arg.
 
-**Browser flag**: All view commands support `-w` (or `--web`) to open the resource in your default browser instead of displaying it in the terminal.
+**Browser flag**: All view commands support `-w` (or `--web`) to open the resource in your default browser instead of displaying it in the terminal. Batch `issue view` opens at most 5 tabs unless `--force` is passed.
 
 ## Context Resolution
 

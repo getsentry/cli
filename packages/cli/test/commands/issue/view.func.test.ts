@@ -21,6 +21,7 @@ vi.mock("../../../src/commands/issue/utils.js", async (importOriginal) => {
 import * as issueUtils from "../../../src/commands/issue/utils.js";
 import {
   fetchMultipleIssueViews,
+  MAX_WEB_ISSUES,
   viewCommand,
 } from "../../../src/commands/issue/view.js";
 
@@ -92,6 +93,7 @@ function createMockContext() {
 const VIEW_FLAGS = {
   json: true,
   web: false,
+  force: false,
   spans: 0,
   fresh: false,
 } as const;
@@ -147,7 +149,7 @@ describe("issue view replay integration", () => {
     const func = await viewCommand.loader();
     await func.call(
       context,
-      { json: false, web: false, spans: 0, fresh: false },
+      { json: false, web: false, force: false, spans: 0, fresh: false },
       "CLI-123"
     );
 
@@ -294,26 +296,67 @@ describe("issue view multiple IDs", () => {
     await expect(func.call(context, VIEW_FLAGS)).rejects.toThrow(ContextError);
   });
 
-  test("--web opens only the first issue", async () => {
-    resolveIssueSpy.mockResolvedValue({
-      org: "test-org",
-      issue: sampleIssue(),
-    });
+  test("--web opens every issue within the safety limit", async () => {
+    resolveIssueSpy.mockImplementation(
+      async (options: { issueArg: string }) => ({
+        org: "test-org",
+        issue: sampleIssue({
+          shortId: options.issueArg,
+          permalink: `https://sentry.io/issues/${options.issueArg}/`,
+        }),
+      })
+    );
 
     const { context } = createMockContext();
     const func = await viewCommand.loader();
     await func.call(
       context,
-      { json: false, web: true, spans: 0, fresh: false },
+      { json: false, web: true, force: false, spans: 0, fresh: false },
       "IOS-1",
       "IOS-2"
     );
 
-    expect(resolveIssueSpy).toHaveBeenCalledTimes(1);
-    expect(openInBrowserSpy).toHaveBeenCalledWith(
-      sampleIssue().permalink,
+    expect(resolveIssueSpy).toHaveBeenCalledTimes(2);
+    expect(openInBrowserSpy).toHaveBeenNthCalledWith(
+      1,
+      "https://sentry.io/issues/IOS-1/",
       "issue"
     );
+    expect(openInBrowserSpy).toHaveBeenNthCalledWith(
+      2,
+      "https://sentry.io/issues/IOS-2/",
+      "issue"
+    );
+  });
+
+  test("--web caps opened issues unless --force is passed", async () => {
+    resolveIssueSpy.mockImplementation(
+      async (options: { issueArg: string }) => ({
+        org: "test-org",
+        issue: sampleIssue({ shortId: options.issueArg }),
+      })
+    );
+    const issueArgs = Array.from(
+      { length: MAX_WEB_ISSUES + 2 },
+      (_, index) => `IOS-${index + 1}`
+    );
+
+    const func = await viewCommand.loader();
+    await func.call(
+      createMockContext().context,
+      { json: false, web: true, force: false, spans: 0, fresh: false },
+      ...issueArgs
+    );
+    expect(openInBrowserSpy).toHaveBeenCalledTimes(MAX_WEB_ISSUES);
+
+    openInBrowserSpy.mockClear();
+    resolveIssueSpy.mockClear();
+    await func.call(
+      createMockContext().context,
+      { json: false, web: true, force: true, spans: 0, fresh: false },
+      ...issueArgs
+    );
+    expect(openInBrowserSpy).toHaveBeenCalledTimes(issueArgs.length);
   });
 });
 

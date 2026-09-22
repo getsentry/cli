@@ -20,7 +20,11 @@ import {
   triggerRootCauseAnalysis,
   tryGetIssueByShortId,
 } from "../../lib/api-client.js";
-import { type IssueSelector, parseIssueArg } from "../../lib/arg-parsing.js";
+import {
+  type IssueSelector,
+  parseIssueArg,
+  splitNewlineArg,
+} from "../../lib/arg-parsing.js";
 import {
   clearCachedIssueOrg,
   getCachedIssueOrg,
@@ -66,6 +70,75 @@ export const issueIdPositional = {
     },
   ],
 } as const;
+
+/** Variadic positional parameter for commands that accept multiple issues. */
+export const issueIdsPositional = {
+  kind: "array",
+  parameter: {
+    placeholder: "issue",
+    brief: "One or more issue IDs",
+    parse: String,
+  },
+} as const;
+
+/**
+ * Normalize variadic issue arguments.
+ *
+ * Newline-separated values are expanded for pasted or piped input. Duplicate
+ * tokens are removed while preserving the first-seen order. Commas remain
+ * part of the identifier, matching the CLI's positional-argument convention.
+ *
+ * @param args - Raw positional arguments
+ * @returns Normalized issue identifiers
+ */
+export function collectIssueArgs(args: readonly string[]): string[] {
+  return [...new Set(args.flatMap(splitNewlineArg))];
+}
+
+/**
+ * Map issue identifiers with the standard organization fan-out concurrency.
+ *
+ * Successful values preserve input order. Individual failures invoke
+ * `onError`; if every operation fails, the first error is rethrown.
+ *
+ * @param issueArgs - Normalized issue identifiers
+ * @param operation - Async work to perform for each identifier
+ * @param onError - Called for each failed identifier
+ * @returns Successful operation results in input order
+ */
+export async function mapIssueArgsConcurrently<T>(
+  issueArgs: readonly string[],
+  operation: (issueArg: string) => Promise<T>,
+  onError: (issueArg: string, reason: unknown) => void
+): Promise<T[]> {
+  const limit = pLimit(ORG_FANOUT_CONCURRENCY);
+  const settled = await Promise.allSettled(
+    issueArgs.map((issueArg) => limit(() => operation(issueArg)))
+  );
+
+  const values: T[] = [];
+  for (let index = 0; index < settled.length; index++) {
+    const result = settled[index];
+    const issueArg = issueArgs[index];
+    if (issueArg === undefined) {
+      continue;
+    }
+    if (result?.status === "fulfilled") {
+      values.push(result.value);
+    } else if (result?.status === "rejected") {
+      onError(issueArg, result.reason);
+    }
+  }
+
+  if (values.length === 0) {
+    const first = settled[0];
+    if (first?.status === "rejected") {
+      throw first.reason;
+    }
+  }
+
+  return values;
+}
 
 /**
  * Build a command hint string for error messages.

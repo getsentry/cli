@@ -4,12 +4,11 @@
  */
 
 import { describe, expect, test } from "vitest";
+import { collectIssueArgs } from "../../../src/commands/issue/utils.js";
 import {
-  collectIssueArgs,
-  expandNewlineArgs,
   formatIssueView,
   jsonTransformIssueView,
-} from "../../../src/commands/issue/view.js";
+} from "../../../src/lib/formatters/issue.js";
 import type { SentryIssue } from "../../../src/types/index.js";
 
 function sampleIssue(overrides: Partial<SentryIssue> = {}): SentryIssue {
@@ -32,21 +31,17 @@ function sampleView(overrides: Partial<SentryIssue> = {}) {
   };
 }
 
-describe("expandNewlineArgs", () => {
-  test("expands newline-separated args into a flat array", () => {
-    expect(expandNewlineArgs(["IOS-1\nIOS-2\nIOS-3"])).toEqual([
+describe("collectIssueArgs", () => {
+  test("expands newline-separated args", () => {
+    expect(collectIssueArgs(["IOS-1\nIOS-2\nIOS-3"])).toEqual([
       "IOS-1",
       "IOS-2",
       "IOS-3",
     ]);
   });
 
-  test("passes through args without newlines", () => {
-    expect(expandNewlineArgs(["IOS-1", "IOS-2"])).toEqual(["IOS-1", "IOS-2"]);
-  });
-
-  test("handles mixed args with and without newlines", () => {
-    expect(expandNewlineArgs(["IOS-1", "IOS-2\nIOS-3"])).toEqual([
+  test("handles mixed arguments and removes duplicates", () => {
+    expect(collectIssueArgs(["IOS-1", "IOS-2\nIOS-3", "IOS-2"])).toEqual([
       "IOS-1",
       "IOS-2",
       "IOS-3",
@@ -54,27 +49,11 @@ describe("expandNewlineArgs", () => {
   });
 
   test("does not split on commas", () => {
-    expect(expandNewlineArgs(["IOS-1,IOS-2"])).toEqual(["IOS-1,IOS-2"]);
+    expect(collectIssueArgs(["IOS-1,IOS-2"])).toEqual(["IOS-1,IOS-2"]);
   });
 
   test("handles empty array", () => {
-    expect(expandNewlineArgs([])).toEqual([]);
-  });
-});
-
-describe("collectIssueArgs", () => {
-  test("deduplicates while preserving first-seen order", () => {
-    expect(collectIssueArgs(["IOS-1", "IOS-2", "IOS-1"])).toEqual([
-      "IOS-1",
-      "IOS-2",
-    ]);
-  });
-
-  test("deduplicates across newline expansion", () => {
-    expect(collectIssueArgs(["IOS-1\nIOS-2", "IOS-2"])).toEqual([
-      "IOS-1",
-      "IOS-2",
-    ]);
+    expect(collectIssueArgs([])).toEqual([]);
   });
 });
 
