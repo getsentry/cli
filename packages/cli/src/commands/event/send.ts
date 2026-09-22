@@ -1,10 +1,13 @@
 /**
  * `sentry event send` — Send a Sentry event from CLI flags or a JSON file.
  *
- * Unlike most commands, this authenticates via a DSN (not a Bearer token),
- * so no `sentry auth login` is required. The DSN can be provided via:
+ * Unlike most commands, this authenticates via a DSN (not a Bearer token).
+ * The DSN is resolved in order:
  *   1. --dsn flag
  *   2. SENTRY_DSN environment variable
+ *   3. A leading `<org>/<project>` positional (looks up the project's client
+ *      key; requires `sentry auth login`)
+ *   4. Auto-detection from the current project (`.env`, source, env files)
  */
 
 import type { DsnComponents, Event } from "@sentry/core";
@@ -16,8 +19,11 @@ import {
   type SendEventFlags,
 } from "../../lib/envelope/event-builder.js";
 import {
+  peelOrgProjectTarget,
+  resolveEventSendDsn,
+} from "../../lib/envelope/event-send-dsn.js";
+import {
   readFileBytes,
-  requireDsn,
   sendEnvelopeRequest,
 } from "../../lib/envelope/transport.js";
 import { ConfigError, ValidationError } from "../../lib/errors.js";
@@ -94,12 +100,14 @@ export const sendCommand = buildCommand({
     fullDescription: `\
 Send a Sentry event to the ingest pipeline using DSN-based authentication.
 
-No login required — provide a DSN via --dsn or the SENTRY_DSN environment variable.
+A DSN can come from \`--dsn\`, \`SENTRY_DSN\`, a leading \`<org>/<project>\`
+positional (requires login), or auto-detection from the current project.
 
 ## Building an event from flags
 
 \`\`\`
 sentry event send -m "Something went wrong" -l error --tag env:prod
+sentry event send sentry/cli -m "Something went wrong"
 \`\`\`
 
 ## Sending from a JSON file
@@ -141,7 +149,8 @@ built entirely from the file contents.
     positional: {
       kind: "array",
       parameter: {
-        brief: "Path(s) to JSON event file(s) to send",
+        brief:
+          "Org/project target and/or path(s) to JSON event file(s) to send",
         parse: String,
         optional: true,
       },
@@ -282,7 +291,8 @@ built entirely from the file contents.
     },
     ...files: string[]
   ) {
-    const dsn = requireDsn(flags);
+    const { target, files: eventFiles } = peelOrgProjectTarget(this.cwd, files);
+    const dsn = await resolveEventSendDsn(flags, this.cwd, target);
     let dsnComponents: ReturnType<typeof makeDsn>;
     try {
       dsnComponents = makeDsn(dsn);
@@ -294,8 +304,8 @@ built entirely from the file contents.
       throw new ValidationError(`Invalid DSN: ${dsn}`, "dsn");
     }
 
-    if (files.length > 0) {
-      for (const file of files) {
+    if (eventFiles.length > 0) {
+      for (const file of eventFiles) {
         const { body, eventId } = await buildFilePayload(
           file,
           flags.raw ?? false,

@@ -5,8 +5,12 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { sendCommand } from "../../../src/commands/event/send.js";
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn
+import * as dsnIndex from "../../../src/lib/dsn/index.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn
+import * as eventSendDsn from "../../../src/lib/envelope/event-send-dsn.js";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn
 import * as transport from "../../../src/lib/envelope/transport.js";
-import { ValidationError } from "../../../src/lib/errors.js";
+import { ConfigError, ValidationError } from "../../../src/lib/errors.js";
 import { useTestConfigDir } from "../../helpers.js";
 
 useTestConfigDir("send-event-");
@@ -33,16 +37,21 @@ function makeContext() {
 describe("sendCommand.func()", () => {
   let func: Awaited<ReturnType<typeof sendCommand.loader>>;
   let sendSpy: ReturnType<typeof vi.spyOn>;
+  let detectSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
+    vi.stubEnv("SENTRY_DSN", "");
     func = await sendCommand.loader();
     sendSpy = vi
       .spyOn(transport, "sendEnvelopeRequest")
       .mockResolvedValue(undefined);
+    detectSpy = vi.spyOn(dsnIndex, "detectDsn").mockResolvedValue(null);
   });
 
   afterEach(() => {
     sendSpy.mockRestore();
+    detectSpy.mockRestore();
+    vi.unstubAllEnvs();
   });
 
   test("inline message sends an envelope and prints event ID", async () => {
@@ -96,9 +105,65 @@ describe("sendCommand.func()", () => {
     delete process.env.SENTRY_DSN;
     const { ctx } = makeContext();
     try {
-      await expect(func.call(ctx, { "no-environ": true })).rejects.toThrow();
+      await expect(
+        func.call(ctx, { "no-environ": true })
+      ).rejects.toBeInstanceOf(ConfigError);
     } finally {
       if (savedDsn !== undefined) process.env.SENTRY_DSN = savedDsn;
+    }
+  });
+
+  test("auto-detected DSN is used when flag and env are absent", async () => {
+    const savedDsn = process.env.SENTRY_DSN;
+    delete process.env.SENTRY_DSN;
+    detectSpy.mockResolvedValue({
+      raw: SAAS_DSN,
+      protocol: "https",
+      publicKey: "abc123",
+      host: "o1.ingest.us.sentry.io",
+      projectId: "999",
+      source: "env_file",
+    });
+    const { ctx } = makeContext();
+    try {
+      await func.call(ctx, {
+        message: ["from scan"],
+        level: "error",
+        "no-environ": true,
+      });
+    } finally {
+      if (savedDsn !== undefined) process.env.SENTRY_DSN = savedDsn;
+    }
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy.mock.calls[0]?.[0]).toBe(SAAS_DSN);
+  });
+
+  test("org/project positional is passed as a DSN target, not a file", async () => {
+    const resolveSpy = vi
+      .spyOn(eventSendDsn, "resolveEventSendDsn")
+      .mockResolvedValue(SAAS_DSN);
+    const { ctx } = makeContext();
+    try {
+      await func.call(
+        ctx,
+        {
+          message: ["GTT Sentry verify: CLI event send"],
+          level: "error",
+          "no-environ": true,
+        },
+        "grow-together-therapy/javascript-react"
+      );
+      expect(resolveSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: ["GTT Sentry verify: CLI event send"],
+        }),
+        "/tmp",
+        { org: "grow-together-therapy", project: "javascript-react" }
+      );
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      expect(sendSpy.mock.calls[0]?.[0]).toBe(SAAS_DSN);
+    } finally {
+      resolveSpy.mockRestore();
     }
   });
 

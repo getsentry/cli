@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   buildEnvelopeUrl,
   resolveDsn,
+  resolveIngestDsn,
   sendEnvelopeRequest,
 } from "../../../src/lib/envelope/transport.js";
 import { ApiError, ValidationError } from "../../../src/lib/errors.js";
@@ -91,6 +92,23 @@ describe("resolveDsn", () => {
     process.env.SENTRY_DSN = `\n${SAAS_DSN}\n`;
     const result = resolveDsn({ dsn: undefined });
     expect(result).toBe(SAAS_DSN);
+  });
+});
+
+describe("resolveIngestDsn", () => {
+  const originalEnv = process.env.SENTRY_DSN;
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.SENTRY_DSN;
+    } else {
+      process.env.SENTRY_DSN = originalEnv;
+    }
+  });
+
+  test("returns flag/env DSN without scanning", async () => {
+    process.env.SENTRY_DSN = SAAS_DSN;
+    await expect(resolveIngestDsn({}, "/tmp")).resolves.toBe(SAAS_DSN);
   });
 });
 

@@ -12,6 +12,7 @@
  */
 
 import { getEnvelopeEndpointWithUrlEncodedAuth, makeDsn } from "@sentry/core";
+import { detectDsn } from "../dsn/index.js";
 import { ApiError, ConfigError, ValidationError } from "../errors.js";
 import { logger } from "../logger.js";
 
@@ -66,10 +67,39 @@ export function resolveDsn(flags: DsnFlags): string | undefined {
 }
 
 /**
- * Require a DSN to be available, throwing a helpful ConfigError if not.
+ * Resolve a DSN for envelope ingest: `--dsn` → `SENTRY_DSN` → project scan.
  *
- * Auto-detection via project scanning is intentionally deferred — callers
- * that want it can call the DSN detector before this.
+ * Used by ingest commands (`event send`, `monitor run`). Returns `undefined`
+ * when none of those sources yield a DSN; callers decide whether to look up
+ * a project key via the Web API or throw.
+ *
+ * @param flags - DSN flag source (`--dsn`), with `SENTRY_DSN` fallback.
+ * @param cwd - Directory to scan for a project DSN when flag/env are absent.
+ */
+export async function resolveIngestDsn(
+  flags: DsnFlags,
+  cwd: string
+): Promise<string | undefined> {
+  const explicit = resolveDsn(flags);
+  if (explicit) {
+    return explicit;
+  }
+
+  const detected = await detectDsn(cwd);
+  if (detected) {
+    log.debug(`Using auto-detected DSN from ${detected.source}`);
+    return detected.raw;
+  }
+
+  return;
+}
+
+/**
+ * Require a DSN from `--dsn` or `SENTRY_DSN` only (no project scan).
+ *
+ * Prefer {@link resolveIngestDsn} for user-facing ingest commands. This
+ * narrower helper remains for callers that must not touch the filesystem
+ * (e.g. `bash-hook` generating a script).
  *
  * @param flags - DSN flag source (`--dsn`), with `SENTRY_DSN` fallback.
  * @param usageHint - Optional command-specific usage example shown in the

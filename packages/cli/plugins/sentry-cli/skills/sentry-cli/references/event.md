@@ -190,6 +190,9 @@ sentry event send -m "Test" --dsn "https://key@o123.ingest.us.sentry.io/456"
 export SENTRY_DSN="https://key@o123.ingest.us.sentry.io/456"
 sentry event send -m "Test"
 
+# Org/project (logged-in session; CLI fetches the project's DSN)
+sentry event send sentry/cli -m "Test"
+
 sentry send-event    # same as: sentry event send
 ```
 
