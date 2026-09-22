@@ -10,7 +10,7 @@ import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { getProjectKeys } from "../api/projects.js";
 import { parseOrgProjectArg } from "../arg-parsing.js";
-import { isAuthenticated } from "../db/auth.js";
+import { getAuthConfig } from "../db/auth.js";
 import { ConfigError } from "../errors.js";
 import { logger } from "../logger.js";
 import { type DsnFlags, resolveDsn, resolveIngestDsn } from "./transport.js";
@@ -117,14 +117,16 @@ function looksLikeOrgProjectTarget(value: string): boolean {
 /**
  * Look up the public DSN for an org/project via the Web API.
  *
- * Requires a logged-in session. The event is still sent to ingest with that
- * DSN; the token is only used to fetch the project's client key.
+ * Requires a usable session from {@link getAuthConfig} (expired access
+ * token + refresh token counts). `event send` skips the shared auth
+ * guard, so this must not use `isAuthenticated()`. The token is only
+ * used to fetch the client key; ingest still authenticates with the DSN.
  */
 async function dsnFromOrgProject(
   org: string,
   project: string
 ): Promise<string> {
-  if (!isAuthenticated()) {
+  if (!getAuthConfig()) {
     throw new ConfigError(
       `No DSN found for ${org}/${project}. Provide one via --dsn, set SENTRY_DSN, or run sentry auth login.`,
       "sentry auth login"

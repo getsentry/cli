@@ -33,6 +33,20 @@ const ACTIVE_KEY = {
   dsn: { public: SAAS_DSN, secret: "" },
 } as ProjectKey;
 
+const OAUTH_SESSION = {
+  token: "sntrys_access",
+  source: "oauth" as const,
+  refreshToken: "refresh_xyz",
+  expiresAt: Date.now() + 3_600_000,
+};
+
+const EXPIRED_OAUTH_WITH_REFRESH = {
+  token: "sntrys_expired_access",
+  source: "oauth" as const,
+  refreshToken: "refresh_xyz",
+  expiresAt: Date.now() - 60_000,
+};
+
 function detectedDsn(raw: string) {
   return {
     raw,
@@ -99,7 +113,7 @@ describe("resolveEventSendDsn", () => {
     delete process.env.SENTRY_DSN;
     detectSpy = vi.spyOn(dsnIndex, "detectDsn").mockResolvedValue(null);
     keysSpy = vi.spyOn(projectsApi, "getProjectKeys").mockResolvedValue([]);
-    authSpy = vi.spyOn(auth, "isAuthenticated").mockReturnValue(false);
+    authSpy = vi.spyOn(auth, "getAuthConfig").mockReturnValue(undefined);
   });
 
   afterEach(() => {
@@ -115,7 +129,7 @@ describe("resolveEventSendDsn", () => {
 
   test("--dsn wins over org/project and project scan", async () => {
     detectSpy.mockResolvedValue(detectedDsn(OTHER_DSN));
-    authSpy.mockReturnValue(true);
+    authSpy.mockReturnValue(OAUTH_SESSION);
     keysSpy.mockResolvedValue([ACTIVE_KEY]);
 
     const dsn = await resolveEventSendDsn({ dsn: SAAS_DSN }, "/tmp", {
@@ -129,7 +143,7 @@ describe("resolveEventSendDsn", () => {
 
   test("SENTRY_DSN wins over org/project", async () => {
     process.env.SENTRY_DSN = SAAS_DSN;
-    authSpy.mockReturnValue(true);
+    authSpy.mockReturnValue(OAUTH_SESSION);
     keysSpy.mockResolvedValue([ACTIVE_KEY]);
 
     const dsn = await resolveEventSendDsn({}, "/tmp", {
@@ -141,7 +155,7 @@ describe("resolveEventSendDsn", () => {
   });
 
   test("org/project looks up the project client key when logged in", async () => {
-    authSpy.mockReturnValue(true);
+    authSpy.mockReturnValue(OAUTH_SESSION);
     keysSpy.mockResolvedValue([ACTIVE_KEY]);
 
     const dsn = await resolveEventSendDsn({}, "/tmp", {
@@ -158,6 +172,18 @@ describe("resolveEventSendDsn", () => {
       resolveEventSendDsn({}, "/tmp", { org: "acme", project: "web" })
     ).rejects.toBeInstanceOf(ConfigError);
     expect(keysSpy).not.toHaveBeenCalled();
+  });
+
+  test("org/project looks up the client key when the access token is expired but a refresh token exists", async () => {
+    authSpy.mockReturnValue(EXPIRED_OAUTH_WITH_REFRESH);
+    keysSpy.mockResolvedValue([ACTIVE_KEY]);
+
+    const dsn = await resolveEventSendDsn({}, "/tmp", {
+      org: "acme",
+      project: "web",
+    });
+    expect(dsn).toBe(SAAS_DSN);
+    expect(keysSpy).toHaveBeenCalledWith("acme", "web");
   });
 
   test("falls back to project scan when no flag, env, or target", async () => {
