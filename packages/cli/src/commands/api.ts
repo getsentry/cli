@@ -9,7 +9,7 @@ import { access, readFile } from "node:fs/promises";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK recommends namespace import
 import * as Sentry from "@sentry/node-core/light";
 import type { SentryContext } from "../context.js";
-import { buildSearchParams, rawApiRequest } from "../lib/api-client.js";
+import { appendSearchParams, rawApiRequest } from "../lib/api-client.js";
 import { buildCommand } from "../lib/command.js";
 import { OutputError, ValidationError } from "../lib/errors.js";
 import { filterFields } from "../lib/formatters/json.js";
@@ -29,6 +29,8 @@ const log = logger.withTag("api");
 
 /** Strips line breaks and surrounding indentation from copy-pasted endpoints. */
 const LINE_BREAK_PATTERN = /[ \t]*[\r\n]+[ \t]*/g;
+const API_PREFIX = "/api/0";
+const API_PREFIX_WITH_SLASH = `${API_PREFIX}/`;
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 
@@ -107,6 +109,35 @@ function parseAbsoluteApiUrl(endpoint: string): URL | undefined {
   }
 }
 
+type AbsoluteApiTarget = {
+  endpoint: string;
+  baseUrl: string;
+  strippedApiPrefix: boolean;
+};
+
+function splitAbsoluteApiUrl(url: URL): AbsoluteApiTarget {
+  const prefixIndex = url.pathname.indexOf(API_PREFIX_WITH_SLASH);
+  if (prefixIndex !== -1) {
+    return {
+      endpoint: `${url.pathname.slice(prefixIndex + API_PREFIX_WITH_SLASH.length)}${url.search}`,
+      baseUrl: `${url.origin}${url.pathname.slice(0, prefixIndex)}`,
+      strippedApiPrefix: true,
+    };
+  }
+  if (url.pathname.endsWith(API_PREFIX)) {
+    return {
+      endpoint: url.search,
+      baseUrl: `${url.origin}${url.pathname.slice(0, -API_PREFIX.length)}`,
+      strippedApiPrefix: true,
+    };
+  }
+  return {
+    endpoint: `${url.pathname}${url.search}`,
+    baseUrl: url.origin,
+    strippedApiPrefix: false,
+  };
+}
+
 /**
  * Normalize an API endpoint to ensure the path has a trailing slash.
  * Sentry API requires trailing slashes on endpoints.
@@ -134,12 +165,13 @@ export function normalizeEndpoint(endpoint: string): string {
   validateEndpoint(cleaned);
 
   // Absolute Sentry API URLs (from `attachments[].download` or copy-paste)
-  // collapse to a path relative to /api/0/. The command retains the origin
+  // collapse to a path relative to /api/0/. The command retains the base URL
   // separately when it executes the request.
   const absoluteUrl = parseAbsoluteApiUrl(cleaned);
   const source = absoluteUrl
-    ? `${absoluteUrl.pathname}${absoluteUrl.search}`
+    ? splitAbsoluteApiUrl(absoluteUrl).endpoint
     : cleaned;
+  validateEndpoint(source);
 
   // Remove leading slash if present (rawApiRequest handles the base URL)
   let trimmed = source.startsWith("/") ? source.slice(1) : source;
@@ -173,18 +205,20 @@ function resolveApiTarget(endpoint: string): {
 } {
   const cleaned = endpoint.replace(LINE_BREAK_PATTERN, "").trim();
   const absoluteUrl = parseAbsoluteApiUrl(cleaned);
-  const comparableEndpoint = absoluteUrl
-    ? `${absoluteUrl.pathname}${absoluteUrl.search}`
-    : cleaned;
+  const absoluteTarget = absoluteUrl
+    ? splitAbsoluteApiUrl(absoluteUrl)
+    : undefined;
+  const comparableEndpoint = absoluteTarget?.endpoint ?? cleaned;
   const withoutLeadingSlash = comparableEndpoint.startsWith("/")
     ? comparableEndpoint.slice(1)
     : comparableEndpoint;
   return {
     normalizedEndpoint: normalizeEndpoint(endpoint),
-    requestBaseUrl: absoluteUrl?.origin,
+    requestBaseUrl: absoluteTarget?.baseUrl,
     strippedApiPrefix:
-      withoutLeadingSlash.startsWith("api/0/") ||
-      withoutLeadingSlash === "api/0",
+      absoluteTarget?.strippedApiPrefix ??
+      (withoutLeadingSlash.startsWith("api/0/") ||
+        withoutLeadingSlash === "api/0"),
   };
 }
 
@@ -1118,9 +1152,8 @@ export function resolveRequestUrl(
   const normalizedEndpoint = endpoint.startsWith("/")
     ? endpoint.slice(1)
     : endpoint;
-  const searchParams = buildSearchParams(params);
-  const queryString = searchParams ? `?${searchParams.toString()}` : "";
-  return `${normalizedBaseUrl}/api/0/${normalizedEndpoint}${queryString}`;
+  const endpointWithParams = appendSearchParams(normalizedEndpoint, params);
+  return `${normalizedBaseUrl}/api/0/${endpointWithParams}`;
 }
 
 /**

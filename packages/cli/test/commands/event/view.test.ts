@@ -977,7 +977,7 @@ describe("viewCommand.func", () => {
     headers: {},
     sha1: null,
   };
-  const attachmentDownloadUrl = `https://sentry.io/api/0/projects/test-org/test-proj/events/${VALID_EVENT_ID}/attachments/attachment-1/?download=1`;
+  const attachmentDownloadUrl = `https://sentry.io/sentry/api/0/projects/test-org/test-proj/events/${VALID_EVENT_ID}/attachments/attachment-1/?download=1`;
 
   function createMockContext() {
     const stdoutWrite = vi.fn(() => true);
@@ -1002,7 +1002,7 @@ describe("viewCommand.func", () => {
     getIssueInOrgSpy = vi.spyOn(apiClient, "getIssueInOrg").mockResolvedValue({
       project: { slug: "test-proj" },
     } as never);
-    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+    setOrgRegion("test-org", `${DEFAULT_SENTRY_URL}/sentry`);
   });
 
   afterEach(() => {

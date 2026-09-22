@@ -344,6 +344,28 @@ export function buildSearchParams(
 }
 
 /**
+ * Append query parameters without replacing an endpoint's existing query.
+ *
+ * @param endpoint - API endpoint, optionally with a query string
+ * @param params - Additional query parameters
+ * @returns Endpoint containing both existing and additional parameters
+ */
+export function appendSearchParams(
+  endpoint: string,
+  params?: ApiRequestOptions["params"]
+): string {
+  const searchParams = buildSearchParams(params);
+  if (!searchParams) {
+    return endpoint;
+  }
+  let separator = "?";
+  if (endpoint.includes("?")) {
+    separator = endpoint.endsWith("?") || endpoint.endsWith("&") ? "" : "&";
+  }
+  return `${endpoint}${separator}${searchParams.toString()}`;
+}
+
+/**
  * Get SDK config for an organization's region.
  * Resolves the org's region URL and returns the config.
  */
@@ -505,13 +527,12 @@ export async function apiRequestToRegion<T>(
   const { method = "GET", body, bodyEncoding, params, schema } = options;
   const config = getSdkConfig(regionUrl);
 
-  const searchParams = buildSearchParams(params);
   const normalizedEndpoint = endpoint.startsWith("/")
     ? endpoint.slice(1)
     : endpoint;
-  const queryString = searchParams ? `?${searchParams.toString()}` : "";
+  const endpointWithParams = appendSearchParams(normalizedEndpoint, params);
   // getSdkConfig.baseUrl is the plain region URL; add /api/0/ for raw requests
-  const url = `${config.baseUrl}/api/0/${normalizedEndpoint}${queryString}`;
+  const url = `${config.baseUrl}/api/0/${endpointWithParams}`;
 
   const fetchFn = config.fetch;
   const headers: Record<string, string> = {
@@ -785,13 +806,12 @@ export async function rawApiRequest(
 
   const config = baseUrl ? getSdkConfig(baseUrl) : getDefaultSdkConfig();
 
-  const searchParams = buildSearchParams(params);
   const normalizedEndpoint = endpoint.startsWith("/")
     ? endpoint.slice(1)
     : endpoint;
-  const queryString = searchParams ? `?${searchParams.toString()}` : "";
+  const endpointWithParams = appendSearchParams(normalizedEndpoint, params);
   // getSdkConfig.baseUrl is the plain region URL; add /api/0/ for raw requests
-  const url = `${config.baseUrl}/api/0/${normalizedEndpoint}${queryString}`;
+  const url = `${config.baseUrl}/api/0/${endpointWithParams}`;
 
   // Build request headers and body.
   // String bodies: no Content-Type unless the caller explicitly provides one.
