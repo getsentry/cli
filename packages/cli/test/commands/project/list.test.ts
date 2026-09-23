@@ -26,6 +26,7 @@ import {
   handleExplicit,
   handleOrgAll,
   handleProjectSearch,
+  listCommand,
   PAGINATION_KEY,
 } from "../../../src/commands/project/list.js";
 import type { ParsedOrgProject } from "../../../src/lib/arg-parsing.js";
@@ -47,7 +48,9 @@ import type { SentryProject } from "../../../src/types/index.js";
 import { useTestConfigDir } from "../../helpers.js";
 import { DEFAULT_NUM_RUNS } from "../../model-based/helpers.js";
 
-useTestConfigDir("test-project-list-", { isolateProjectRoot: true });
+const getConfigDir = useTestConfigDir("test-project-list-", {
+  isolateProjectRoot: true,
+});
 
 /** Create a minimal project for testing */
 function makeProject(
@@ -307,8 +310,13 @@ function mockProjectFetch(
 
     // getProject (single project fetch via /projects/{org}/{slug}/)
     if (url.match(/\/projects\/[^/]+\/[^/]+\//)) {
-      if (projects.length > 0) {
-        return new Response(JSON.stringify(projects[0]), {
+      const projectSlug = new URL(url).pathname
+        .split("/")
+        .filter(Boolean)
+        .at(-1);
+      const project = projects.find(({ slug }) => slug === projectSlug);
+      if (project) {
+        return new Response(JSON.stringify(project), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -453,6 +461,76 @@ describe("handleExplicit", () => {
 
     expect(result.items).toHaveLength(1);
     expect(result.items[0]?.slug).toBe("frontend");
+  });
+});
+
+describe("project list: comma-separated project slugs", () => {
+  const flags = { limit: 30, json: false, fresh: false };
+  let func: Awaited<ReturnType<typeof listCommand.loader>>;
+
+  beforeEach(async () => {
+    originalFetch = globalThis.fetch;
+    func = await listCommand.loader();
+    await setAuthToken("test-token");
+    setOrgRegion("test-org", DEFAULT_SENTRY_URL);
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function createCommandContext() {
+    const stdout = {
+      output: "",
+      write(value: string) {
+        stdout.output += value;
+        return true;
+      },
+    };
+    const stderr = { write: () => true };
+    const context = {
+      process,
+      env: process.env,
+      stdout,
+      stderr,
+      cwd: getConfigDir(),
+    };
+    return { context, stdout };
+  }
+
+  test("returns every requested project in input order", async () => {
+    globalThis.fetch = mockProjectFetch(sampleProjects);
+    const { context, stdout } = createCommandContext();
+
+    await func.call(
+      context,
+      { ...flags, json: true },
+      "test-org/frontend,backend"
+    );
+
+    const output = JSON.parse(stdout.output) as SentryProject[];
+    expect(output.map(({ slug }) => slug)).toEqual(["frontend", "backend"]);
+  });
+
+  test("returns matches and names missing projects", async () => {
+    globalThis.fetch = mockProjectFetch(sampleProjects.slice(0, 1));
+    const { context, stdout } = createCommandContext();
+
+    await func.call(context, flags, "test-org/frontend,backend");
+
+    expect(stdout.output).toContain("frontend");
+    expect(stdout.output).toContain("Missing: backend");
+  });
+
+  test("reports every requested project when none exist", async () => {
+    globalThis.fetch = mockProjectFetch([]);
+    const { context, stdout } = createCommandContext();
+
+    await func.call(context, flags, "test-org/frontend,backend");
+
+    expect(stdout.output).toContain(
+      "No projects found among: 'frontend', 'backend'."
+    );
   });
 });
 

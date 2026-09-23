@@ -1071,6 +1071,21 @@ describe("project create", () => {
     );
   });
 
+  test("rejects comma-separated names scoped to an organization", async () => {
+    const { context } = createMockContext();
+    const func = await createCommand.loader();
+    const error = await func
+      .call(context, { json: false }, "acme/web,api:node")
+      .catch((caught: Error) => caught);
+
+    expect(error).toBeInstanceOf(ValidationError);
+    expect(error.message).toContain(
+      "Create one project per name:platform pair"
+    );
+    expect(resolveOrgSpy).not.toHaveBeenCalled();
+    expect(createProjectWithDsnSpy).not.toHaveBeenCalled();
+  });
+
   test("splits a project specification on its final colon", async () => {
     const { context } = createMockContext();
     const func = await createCommand.loader();

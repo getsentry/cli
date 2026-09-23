@@ -72,7 +72,8 @@ export const LIST_TARGET_POSITIONAL = {
   parameters: [
     {
       placeholder: "org/project",
-      brief: "<org>/ (all projects), <org>/<project>, or <project> (search)",
+      brief:
+        "<org>/ (all projects), <org>/<project>[,project...], or <project>",
       parse: String,
       optional: true as const,
     },
@@ -101,7 +102,8 @@ export function targetPatternExplanation(cursorNote?: string): string {
     "The trailing slash on <org>/ is significant — without it, the argument " +
     "is treated as a project name search (e.g., 'sentry' searches for a " +
     "project named 'sentry', while 'sentry/' lists all projects in the " +
-    "'sentry' org).";
+    "'sentry' org). Comma-separated project slugs after the org " +
+    "(`acme/web,api,worker`) list those projects together.";
   return cursorNote ? `${base} ${cursorNote}` : base;
 }
 

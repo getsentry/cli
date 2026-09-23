@@ -26,7 +26,10 @@ import {
   listTeams,
   MEMBER_PROJECT_CREATION_DISABLED_DETAIL,
 } from "../../lib/api-client.js";
-import { parseOrgProjectArg } from "../../lib/arg-parsing.js";
+import {
+  explicitProjectSlugs,
+  parseOrgProjectArg,
+} from "../../lib/arg-parsing.js";
 import { buildCommand } from "../../lib/command.js";
 import {
   ApiError,
@@ -396,6 +399,12 @@ function parseProjectName(
   const parsedName = parseOrgProjectArg(rawName);
   switch (parsedName.type) {
     case "explicit":
+      if (explicitProjectSlugs(parsedName).length > 1) {
+        throw new ValidationError(
+          "Create one project per name:platform pair. Comma-separated names are not supported.",
+          "name"
+        );
+      }
       return {
         org: parsedName.org,
         name: parsedName.project,
