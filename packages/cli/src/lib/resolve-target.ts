@@ -2364,7 +2364,7 @@ export async function resolveProjectBoundTargets(
         throw new ResolutionError(
           `Project '${displaySlug}'`,
           "not found",
-          "sentry project list",
+          usageHint,
           suggestions
         );
       }

@@ -579,6 +579,21 @@ describe("resolveProjectBoundTargets", () => {
       project: "my-proj",
     });
   });
+
+  test("project-search: uses the calling command's usage hint when not found", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
+
+    try {
+      await resolveProjectBoundTargets(
+        { type: "project-search", projectSlug: "missing" },
+        OPTS
+      );
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      expect((error as ResolutionError).hint).toBe(OPTS.usageHint);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
