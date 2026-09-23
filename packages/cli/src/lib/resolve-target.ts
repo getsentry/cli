@@ -1799,6 +1799,36 @@ export async function resolveOrg(
   }
 }
 
+/** Fetch and verify the full project selected by fuzzy recovery. */
+async function resolveFuzzyProjectBoundSlug(
+  resolution: Extract<ProjectSearchTargetResolution, { kind: "fuzzy-project" }>,
+  projectSlug: string,
+  usageHint: string
+): Promise<{ org: string; project: string; projectData: SentryProject }> {
+  const project = await withAuthGuard(() =>
+    getProject(resolution.org, resolution.project)
+  );
+  if (project.ok) {
+    return withTelemetryContext({
+      org: resolution.org,
+      project: resolution.project,
+      projectData: project.value,
+    });
+  }
+  const defaultHint = isAllDigits(projectSlug)
+    ? "No project with this ID was found — check the ID or use the project slug instead"
+    : "Check that you have access to a project with this slug";
+  throw new ResolutionError(
+    `Project "${resolution.displaySlug}"`,
+    "not found",
+    usageHint,
+    [
+      `Similar project '${resolution.org}/${resolution.project}' was found but could not be accessed`,
+      defaultHint,
+    ]
+  );
+}
+
 /**
  * Search for a project by slug across all accessible organizations.
  *
@@ -1808,8 +1838,9 @@ export async function resolveOrg(
  *
  * @param projectSlug - Project slug to search for
  * @param usageHint - Usage example shown in error messages
- * @param disambiguationExample - Example command for multi-org disambiguation (e.g., "sentry event view <org>/frontend abc123")
- * @returns Resolved org, project slugs, and the full project data (avoids redundant re-fetch)
+ * @param disambiguationExample - Example command for multi-org disambiguation
+ * @param originalSlug - Original user input before normalization
+ * @returns Resolved org, project slugs, and full project data
  * @throws {ContextError} If no project found
  * @throws {ValidationError} If project exists in multiple organizations
  */
@@ -1840,12 +1871,7 @@ export async function resolveProjectBoundSlug(
   }
 
   if (resolution.kind === "fuzzy-project") {
-    const { orgSlug: _fuzzyOrg, ...fuzzyProjectData } = resolution.projectData;
-    return withTelemetryContext({
-      org: resolution.org,
-      project: resolution.project,
-      projectData: fuzzyProjectData,
-    });
+    return resolveFuzzyProjectBoundSlug(resolution, projectSlug, usageHint);
   }
 
   if (resolution.kind === "not-found") {
@@ -2045,12 +2071,9 @@ export async function resolveProjectBoundTarget(
       }
 
       if (resolution.kind === "fuzzy-project") {
-        const { orgSlug: _fuzzyOrg, ...fuzzyProjectData } =
-          resolution.projectData;
         return withTelemetryContext({
           org: resolution.org,
           project: resolution.project,
-          projectData: fuzzyProjectData,
         });
       }
 
@@ -2312,9 +2335,10 @@ export async function resolveProjectBoundTargets(
       }
 
       if (resolution.kind === "fuzzy-project") {
-        const projectId =
-          toNumericId(resolution.projectData.id) ??
-          (await fetchProjectId(resolution.org, resolution.project));
+        const projectId = await fetchProjectId(
+          resolution.org,
+          resolution.project
+        );
         const targets: ResolvedTarget[] = [
           {
             org: resolution.org,

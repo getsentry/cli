@@ -490,13 +490,19 @@ describe("parsePositionalArgs", () => {
 describe("resolveProjectBoundSlug", () => {
   const HINT = "sentry event view <org>/<project> <event-id>";
   let findProjectsBySlugSpy: ReturnType<typeof spyOn>;
+  let listProjectsSpy: ReturnType<typeof spyOn>;
+  let getProjectSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     findProjectsBySlugSpy = vi.spyOn(apiClient, "findProjectsBySlug");
+    listProjectsSpy = vi.spyOn(apiClient, "listProjects");
+    getProjectSpy = vi.spyOn(apiClient, "getProject");
   });
 
   afterEach(() => {
     findProjectsBySlugSpy.mockRestore();
+    listProjectsSpy.mockRestore();
+    getProjectSpy.mockRestore();
   });
 
   describe("no projects found", () => {
@@ -562,6 +568,27 @@ describe("resolveProjectBoundSlug", () => {
       // "sentry" command prefix should still be intact
       expect(msg).not.toContain("sentry/<project> event view");
     }
+  });
+
+  test("fetches full project data after fuzzy recovery", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({
+      projects: [],
+      orgs: [{ slug: "acme", name: "Acme" }],
+    });
+    listProjectsSpy.mockResolvedValue([
+      { id: "1", slug: "app-frontend", name: "App Frontend" },
+    ]);
+    getProjectSpy.mockResolvedValue({
+      id: "1",
+      slug: "app-frontend",
+      name: "App Frontend",
+      platform: "javascript",
+    });
+
+    const result = await resolveProjectBoundSlug("app-front", HINT);
+
+    expect(getProjectSpy).toHaveBeenCalledWith("acme", "app-frontend");
+    expect(result.projectData.platform).toBe("javascript");
   });
 
   describe("multiple projects found", () => {
