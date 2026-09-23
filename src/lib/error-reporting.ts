@@ -83,11 +83,13 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   if (error instanceof ContextError) {
     return "context_missing";
   }
-  // A ValidationError always means the user passed malformed or out-of-range
-  // input (e.g. too many positional arguments). It is never a CLI bug — the
-  // user must correct their invocation. Silence the whole class; the
-  // `cli.error.silenced` metric preserves the volume. (CLI-1AN)
-  if (error instanceof ValidationError) {
+  // A ValidationError with field "positional" means the user passed the wrong
+  // number of positional arguments — a user invocation mistake, never a CLI
+  // bug. Silence only this sub-case; other ValidationError fields (e.g.
+  // "installUrl" from buildFormatFromUrl) may reflect API-contract issues
+  // worth capturing. The `cli.error.silenced` metric preserves the volume.
+  // (CLI-1AN)
+  if (error instanceof ValidationError && error.field === "positional") {
     return "validation_error";
   }
   // All AuthError reasons are expected auth states the user must act on, not
