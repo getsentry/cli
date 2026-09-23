@@ -21,7 +21,7 @@ const log = logger.withTag("envelope.transport");
 /** Client name passed to getEnvelopeEndpointWithUrlEncodedAuth, which appends /<version> internally. */
 const SENTRY_CLIENT = "sentry-cli";
 
-/** Flags subset relevant to DSN resolution. */
+/** Optional `--dsn` flag exposed by some ingest commands. */
 export type DsnFlags = {
   dsn?: string;
 };
@@ -67,13 +67,13 @@ export function resolveDsn(flags: DsnFlags): string | undefined {
 }
 
 /**
- * Resolve a DSN for envelope ingest: `--dsn` → `SENTRY_DSN` → project scan.
+ * Resolve a DSN for envelope ingest: optional flag → `SENTRY_DSN` → project scan.
  *
- * Used by ingest commands (`event send`, `monitor run`). Returns `undefined`
+ * Used by ingest commands such as `event send` and `monitor run`. Returns `undefined`
  * when none of those sources yield a DSN; callers decide whether to look up
  * a project key via the Web API or throw.
  *
- * @param flags - DSN flag source (`--dsn`), with `SENTRY_DSN` fallback.
+ * @param flags - Optional DSN flag source, with `SENTRY_DSN` fallback.
  * @param cwd - Directory to scan for a project DSN when flag/env are absent.
  */
 export async function resolveIngestDsn(
@@ -103,12 +103,11 @@ export async function resolveIngestDsn(
  *
  * @param flags - DSN flag source (`--dsn`), with `SENTRY_DSN` fallback.
  * @param usageHint - Optional command-specific usage example shown in the
- *   error (e.g. `"sentry monitor run <slug> -- <command>"`). Defaults to the
- *   `event send` example.
+ *   error (e.g. `"sentry monitor run <slug> -- <command>"`).
  */
 export function requireDsn(
   flags: DsnFlags,
-  usageHint = "sentry event send --dsn <your-dsn>"
+  usageHint = "sentry bash-hook --dsn <your-dsn>"
 ): string {
   const dsn = resolveDsn(flags);
   if (dsn) {

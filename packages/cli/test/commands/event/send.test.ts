@@ -56,12 +56,15 @@ describe("sendCommand.func()", () => {
 
   test("inline message sends an envelope and prints event ID", async () => {
     const { ctx, writes } = makeContext();
-    await func.call(ctx, {
-      dsn: SAAS_DSN,
-      message: ["Test message"],
-      level: "error",
-      "no-environ": true,
-    });
+    await func.call(
+      ctx,
+      {
+        message: ["Test message"],
+        level: "error",
+        "no-environ": true,
+      },
+      SAAS_DSN
+    );
 
     expect(sendSpy).toHaveBeenCalledTimes(1);
     const [calledDsn, calledBody] = sendSpy.mock.calls[0] as [string, string];
@@ -75,12 +78,15 @@ describe("sendCommand.func()", () => {
 
   test("--level flag is included in envelope body", async () => {
     const { ctx } = makeContext();
-    await func.call(ctx, {
-      dsn: SAAS_DSN,
-      message: ["boom"],
-      level: "fatal",
-      "no-environ": true,
-    });
+    await func.call(
+      ctx,
+      {
+        message: ["boom"],
+        level: "fatal",
+        "no-environ": true,
+      },
+      SAAS_DSN
+    );
 
     const body = sendSpy.mock.calls[0]?.[1] as string;
     expect(body).toContain('"level":"fatal"');
@@ -88,12 +94,15 @@ describe("sendCommand.func()", () => {
 
   test("--tag pairs appear in envelope body", async () => {
     const { ctx } = makeContext();
-    await func.call(ctx, {
-      dsn: SAAS_DSN,
-      message: ["hi"],
-      tag: ["env:prod", "region:us"],
-      "no-environ": true,
-    });
+    await func.call(
+      ctx,
+      {
+        message: ["hi"],
+        tag: ["env:prod", "region:us"],
+        "no-environ": true,
+      },
+      SAAS_DSN
+    );
 
     const body = sendSpy.mock.calls[0]?.[1] as string;
     expect(body).toContain('"env":"prod"');
@@ -126,7 +135,7 @@ describe("sendCommand.func()", () => {
     expect(sendSpy.mock.calls[0]?.[0]).toBe(SAAS_DSN);
   });
 
-  test("org/project positional is passed as a DSN target, not a file", async () => {
+  test("org/project positional is passed as a project target, not a file", async () => {
     const resolveSpy = vi
       .spyOn(eventSendDsn, "resolveEventSendDsn")
       .mockResolvedValue(SAAS_DSN);
@@ -141,13 +150,10 @@ describe("sendCommand.func()", () => {
         },
         "grow-together-therapy/javascript-react"
       );
-      expect(resolveSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: ["from org/project"],
-        }),
-        "/tmp",
-        { org: "grow-together-therapy", project: "javascript-react" }
-      );
+      expect(resolveSpy).toHaveBeenCalledWith("/tmp", {
+        kind: "project",
+        target: "grow-together-therapy/javascript-react",
+      });
       expect(sendSpy).toHaveBeenCalledTimes(1);
       expect(sendSpy.mock.calls[0]?.[0]).toBe(SAAS_DSN);
     } finally {
@@ -157,12 +163,15 @@ describe("sendCommand.func()", () => {
 
   test("--json outputs JSON with eventId field", async () => {
     const { ctx, writes } = makeContext();
-    await func.call(ctx, {
-      dsn: SAAS_DSN,
-      message: ["hello"],
-      json: true,
-      "no-environ": true,
-    });
+    await func.call(
+      ctx,
+      {
+        message: ["hello"],
+        json: true,
+        "no-environ": true,
+      },
+      SAAS_DSN
+    );
 
     const output = writes.join("");
     const parsed = JSON.parse(output);
@@ -176,7 +185,8 @@ describe("sendCommand.func()", () => {
     await expect(
       func.call(
         ctx,
-        { dsn: SAAS_DSN, "no-environ": true },
+        { "no-environ": true },
+        SAAS_DSN,
         "/nonexistent/missing.json"
       )
     ).rejects.toBeInstanceOf(ValidationError);
@@ -186,7 +196,7 @@ describe("sendCommand.func()", () => {
     const { ctx } = makeContext();
 
     await expect(
-      func.call(ctx, { dsn: SAAS_DSN, raw: true, "no-environ": true })
+      func.call(ctx, { raw: true, "no-environ": true }, SAAS_DSN)
     ).rejects.toBeInstanceOf(ValidationError);
   });
 });

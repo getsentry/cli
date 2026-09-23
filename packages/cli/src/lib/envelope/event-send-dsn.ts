@@ -1,151 +1,154 @@
 /**
  * DSN resolution for `sentry event send`.
  *
- * Ingest still authenticates with a DSN. This module fills that DSN from
- * the same sources users expect on other commands: `--dsn` / `SENTRY_DSN`,
- * a leading `<org>/<project>` positional, then a project-directory scan.
+ * Ingest still authenticates with a DSN. The first positional may be a DSN,
+ * project, or org/project target. Without one, the command falls back to
+ * `SENTRY_DSN` and project-directory detection.
  */
 
-import { existsSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute } from "node:path";
 import { getProjectKeys } from "../api/projects.js";
-import { parseOrgProjectArg } from "../arg-parsing.js";
 import { getAuthConfig } from "../db/auth.js";
 import { ConfigError } from "../errors.js";
 import { logger } from "../logger.js";
-import { type DsnFlags, resolveDsn, resolveIngestDsn } from "./transport.js";
+import { resolveOrgProjectFromArg } from "../resolve-target.js";
+import { resolveIngestDsn } from "./transport.js";
 
 const log = logger.withTag("event.send");
+const DSN_PREFIX_RE = /^https?:\/\//i;
 
 /** Usage example shown on missing-DSN errors. */
-export const EVENT_SEND_DSN_HINT =
-  "sentry event send --dsn <your-dsn> -m 'My message'";
+export const EVENT_SEND_DSN_HINT = "sentry event send <dsn> -m 'My message'";
 
 /** User-facing missing-DSN message covering every resolution source. */
 export const EVENT_SEND_NO_DSN_MESSAGE =
-  "No DSN found. Provide one via --dsn <dsn>, set the SENTRY_DSN environment variable, run from a project where a DSN can be detected, or pass <org>/<project> (requires login).";
+  "No DSN found. Pass <dsn>, <project>, or <org>/<project> as the first argument, set SENTRY_DSN, or run from a project where a DSN can be detected.";
 
-export type OrgProjectTarget = {
-  /** Organization slug used to look up the project client key. */
-  org: string;
-  /** Project slug used to look up the project client key. */
-  project: string;
-};
+export type EventSendTarget =
+  | { kind: "dsn"; dsn: string }
+  | { kind: "project"; target: string };
 
 /**
- * Peel a leading `<org>/<project>` positional when it is unambiguously a
- * target rather than an event file.
+ * Peel an optional DSN/project target from the leading positional.
  *
- * Remaining arguments stay as JSON/envelope files. Existing paths and
- * path-shaped arguments such as `events/crash.json` are never consumed as
- * an org/project target.
+ * Target-shaped values take precedence. Event files should use an explicit
+ * path (`./event`, `/tmp/event`) or a dotted filename (`event.json`).
  *
- * @param cwd - Working directory used to resolve relative paths.
  * @param files - Positional arguments as received by `event send`.
  * @returns The optional target and the remaining file arguments.
  */
-export function peelOrgProjectTarget(
-  cwd: string,
-  files: readonly string[]
-): { target: OrgProjectTarget | undefined; files: string[] } {
+export function peelEventSendTarget(files: readonly string[]): {
+  target: EventSendTarget | undefined;
+  files: string[];
+} {
   const first = files[0];
   if (!first) {
     return { target: undefined, files: [...files] };
   }
-  if (pathExists(cwd, first) || !looksLikeOrgProjectTarget(first)) {
+  if (looksLikeDsn(first)) {
+    return {
+      target: { kind: "dsn", dsn: first },
+      files: files.slice(1),
+    };
+  }
+  if (looksLikeFileArgument(first)) {
     return { target: undefined, files: [...files] };
   }
-  try {
-    const parsed = parseOrgProjectArg(first);
-    if (parsed.type === "explicit") {
-      return {
-        target: { org: parsed.org, project: parsed.project },
-        files: files.slice(1),
-      };
-    }
-  } catch (error) {
-    log.debug("positional is not org/project", error);
-  }
-  return { target: undefined, files: [...files] };
+  return {
+    target: { kind: "project", target: first },
+    files: files.slice(1),
+  };
 }
 
 /**
  * Resolve the ingest DSN for `event send`.
  *
- * Priority: `--dsn` / `SENTRY_DSN` → explicit `<org>/<project>` client key
- * (requires login) → project scan via {@link resolveIngestDsn}.
+ * Priority: positional DSN/project target → `SENTRY_DSN` → project scan.
  *
- * @param flags - DSN flag source, with `SENTRY_DSN` fallback.
  * @param cwd - Directory to scan when explicit sources are absent.
- * @param target - Optional org/project whose public DSN should be fetched.
+ * @param target - Optional positional DSN or project target.
  * @returns The resolved ingest DSN.
  * @throws {ConfigError} When no DSN can be resolved.
  */
 export async function resolveEventSendDsn(
-  flags: DsnFlags,
   cwd: string,
-  target: OrgProjectTarget | undefined
+  target: EventSendTarget | undefined
 ): Promise<string> {
-  const explicit = resolveDsn(flags);
-  if (explicit) {
-    return explicit;
+  if (target?.kind === "dsn") {
+    return target.dsn.trim();
   }
-  if (target) {
-    return dsnFromOrgProject(target.org, target.project);
+  if (target?.kind === "project") {
+    return dsnFromProjectTarget(target.target, cwd);
   }
-  const scanned = await resolveIngestDsn(flags, cwd);
+  const scanned = await resolveIngestDsn({}, cwd);
   if (scanned) {
     return scanned;
   }
   throw new ConfigError(EVENT_SEND_NO_DSN_MESSAGE, EVENT_SEND_DSN_HINT);
 }
 
-function pathExists(cwd: string, value: string): boolean {
-  const abs = isAbsolute(value) ? value : resolve(cwd, value);
-  return existsSync(abs);
+function looksLikeDsn(value: string): boolean {
+  return DSN_PREFIX_RE.test(value);
 }
 
 /**
- * Cheap pre-filter before {@link parseOrgProjectArg}.
- *
- * Dots are not valid in current Sentry project slugs, so dotted final
- * segments remain file arguments even when the file does not exist yet.
+ * Distinguish explicit file paths from project targets.
+ * Dots are not valid in Sentry project slugs, so dotted final segments are
+ * files. Prefix extensionless relative files with `./`.
  */
-function looksLikeOrgProjectTarget(value: string): boolean {
-  if (value.startsWith(".") || value.startsWith("/")) {
-    return false;
+function looksLikeFileArgument(value: string): boolean {
+  if (value.startsWith(".") || isAbsolute(value)) {
+    return true;
   }
-  const slash = value.indexOf("/");
-  if (slash <= 0 || slash !== value.lastIndexOf("/")) {
-    return false;
+  const slashCount = value.split("/").length - 1;
+  if (slashCount > 1) {
+    return true;
   }
-  const project = value.slice(slash + 1);
-  return project.length > 0 && !project.includes(".");
+  const finalSegment = value.slice(value.lastIndexOf("/") + 1);
+  return finalSegment.includes(".");
 }
 
 /**
- * Look up the public DSN for an org/project via the Web API.
+ * Resolve a project target and look up its sole active public DSN.
  *
  * A refreshable OAuth session remains usable after its access token expires.
  * The session is used only for the key lookup; ingest authenticates with the
  * resulting DSN.
  */
-async function dsnFromOrgProject(
-  org: string,
-  project: string
+async function dsnFromProjectTarget(
+  target: string,
+  cwd: string
 ): Promise<string> {
   if (!getAuthConfig()) {
     throw new ConfigError(
-      `No DSN found for ${org}/${project}. Provide one via --dsn, set SENTRY_DSN, or run sentry auth login.`,
+      `Cannot resolve project '${target}' without a logged-in session. Pass the DSN as the first argument or run sentry auth login.`,
       "sentry auth login"
     );
   }
-  const keys = await getProjectKeys(org, project);
-  const dsn =
-    keys.find((key) => key.isActive)?.dsn.public ?? keys[0]?.dsn.public;
+  const { org, project } = await resolveOrgProjectFromArg(
+    target,
+    cwd,
+    "event send"
+  );
+  const keys = await getProjectKeys(org, project, { status: "active" });
+  const activeDsns = [
+    ...new Set(
+      keys
+        .filter((key) => key.isActive)
+        .map((key) => key.dsn.public)
+        .filter(Boolean)
+    ),
+  ];
+  if (activeDsns.length > 1) {
+    throw new ConfigError(
+      `Project ${org}/${project} has multiple active DSNs. Pass the desired DSN as the first argument.`,
+      EVENT_SEND_DSN_HINT
+    );
+  }
+  const dsn = activeDsns[0];
   if (!dsn) {
     throw new ConfigError(
-      `No DSN found for ${org}/${project}. The project has no client keys.`,
+      `No active DSN found for ${org}/${project}. Pass a DSN as the first argument.`,
       EVENT_SEND_DSN_HINT
     );
   }

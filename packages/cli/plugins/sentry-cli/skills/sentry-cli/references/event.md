@@ -135,12 +135,11 @@ sentry event list PROJ-ABC -c prev
 sentry event list PROJ-ABC --json
 ```
 
-### `sentry event send <args...>`
+### `sentry event send <target-or-file...>`
 
 Send a Sentry event
 
 **Flags:**
-- `--dsn <value> - DSN to send events to (overrides SENTRY_DSN env var)`
 - `-m, --message <value>... - Event message (repeat for multi-line)`
 - `-a, --message-arg <value>... - Arguments for message template (repeat for multiple)`
 - `-l, --level <value> - Event severity level - (default: "error")`
@@ -184,13 +183,16 @@ sentry event send --raw ./crash.json
 sentry event send --raw ./captured.envelope
 
 # Explicit DSN
-sentry event send -m "Test" --dsn "https://key@o123.ingest.us.sentry.io/456"
+sentry event send "https://key@o123.ingest.us.sentry.io/456" -m "Test"
 
 # Via environment variable
 export SENTRY_DSN="https://key@o123.ingest.us.sentry.io/456"
 sentry event send -m "Test"
 
-# Org/project (logged-in session; CLI fetches the project's DSN)
+# Project target (logged-in session; CLI fetches its sole active DSN)
+sentry event send cli -m "Test"
+
+# Org/project target
 sentry event send sentry/cli -m "Test"
 
 # Auto-detect from the current project
