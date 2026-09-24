@@ -82,16 +82,35 @@
     @apply m-0 break-words bg-transparent p-0 font-mono text-inherit whitespace-pre-wrap;
   }
 
-  .json-view .shiki {
-    background-color: transparent !important;
-    padding: 0 !important;
+  .json-view .json-view-code {
+    background-color: transparent;
+    padding: 0;
+    color: #24292e;
   }
 
-  .json-view .shiki span {
-    color: var(--shiki-light);
+  .json-view .tok.string {
+    color: #032f62;
   }
 
-  .dark .json-view .shiki span {
-    color: var(--shiki-dark);
+  .json-view .tok.number,
+  .json-view .tok.boolean,
+  .json-view .tok.keyword,
+  .json-view .tok.tok-key {
+    color: #005cc5;
+  }
+
+  .dark .json-view .json-view-code {
+    color: #e1e4e8;
+  }
+
+  .dark .json-view .tok.string {
+    color: #9ecbff;
+  }
+
+  .dark .json-view .tok.number,
+  .dark .json-view .tok.boolean,
+  .dark .json-view .tok.keyword,
+  .dark .json-view .tok.tok-key {
+    color: #79b8ff;
   }
 }
