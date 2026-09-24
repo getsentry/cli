@@ -17,11 +17,8 @@
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-slot": "^1.3.3",
-    "@shikijs/core": "^3.23.0",
-    "@shikijs/engine-javascript": "^3.23.0",
-    "@shikijs/langs": "^3.23.0",
-    "@shikijs/themes": "^3.23.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@twinkleplop/json": "0.1.4",
     "@uidotdev/usehooks": "^2.4.1",
     "@vercel/analytics": "^2.0.1",
     "class-variance-authority": "^0.7.1",
