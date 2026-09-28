@@ -53,6 +53,7 @@ apps/cli-docs/.astro
 
 # local planning notes (not for version control)
 .plans
+cli-open-pr-migration-plan.json
 
 # IntelliJ based IDEs
 .idea

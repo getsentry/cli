@@ -7,8 +7,11 @@
 
 import { writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as Sentry from "@sentry/node-core/light";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  apiCommand,
   buildBodyFromFields,
   buildBodyFromInput,
   buildFromFields,
@@ -26,6 +29,7 @@ import {
   parseFieldKey,
   parseFields,
   parseHeaders,
+  parseOrgProjectFromApiPath,
   prepareRequestOptions,
   readStdin,
   resolveApiResponseOutput,
@@ -92,10 +96,67 @@ describe("normalizeEndpoint: api/0/ prefix stripping (CLI-K1)", () => {
     expect(normalizeEndpoint("api/0")).toBe("/");
   });
 
+  test("strips regional origins from absolute URLs", () => {
+    expect(
+      normalizeEndpoint(
+        "https://de.sentry.io/sentry/api/0/projects/my-org/my-project/events/abc/attachments/1/?download=1"
+      )
+    ).toBe("projects/my-org/my-project/events/abc/attachments/1/?download=1");
+  });
+
   test("does not strip partial api/ prefix", () => {
     expect(normalizeEndpoint("api/1/organizations/")).toBe(
       "api/1/organizations/"
     );
+  });
+});
+
+describe("parseOrgProjectFromApiPath", () => {
+  test.each([
+    ["organizations/acme/issues/", { org: "acme" }],
+    ["projects/acme/web/events/", { org: "acme", project: "web" }],
+    ["teams/acme/engineering/", { org: "acme" }],
+    ["organizations/", undefined],
+    ["organizations/{organization_id_or_slug}/issues/", undefined],
+    ["issues/", undefined],
+  ] as const)("%s", (path, expected) => {
+    expect(parseOrgProjectFromApiPath(path)).toEqual(expected);
+  });
+});
+
+describe("apiCommand tags org from the path", () => {
+  let setTagSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    setTagSpy = vi.spyOn(Sentry, "setTag");
+  });
+
+  afterEach(() => {
+    setTagSpy.mockRestore();
+  });
+
+  test("dry-run of a projects path sets sentry.org and sentry.project", async () => {
+    const func = await apiCommand.loader();
+    const context = {
+      stdin: createMockStdin(""),
+      stdout: { write: vi.fn(() => true), isTTY: false },
+      stderr: { write: vi.fn(() => true) },
+      cwd: "/tmp",
+    };
+    await func.call(
+      context,
+      {
+        method: "GET",
+        silent: false,
+        verbose: false,
+        "dry-run": true,
+        json: false,
+      },
+      "projects/acme/web/events/"
+    );
+
+    expect(setTagSpy).toHaveBeenCalledWith("sentry.org", "acme");
+    expect(setTagSpy).toHaveBeenCalledWith("sentry.project", "web");
   });
 });
 
@@ -118,6 +179,12 @@ describe("normalizeEndpoint: path traversal hardening (#350)", () => {
 
   test("rejects traversal with leading slash", () => {
     expect(() => normalizeEndpoint("/../../admin/")).toThrow(/path traversal/);
+  });
+
+  test("rejects traversal before normalizing an absolute URL", () => {
+    expect(() =>
+      normalizeEndpoint("https://sentry.io/api/0/projects/acme/%2e%2e/admin/")
+    ).toThrow(/path traversal/);
   });
 
   test("allows single dots in paths", () => {
@@ -1797,9 +1864,13 @@ describe("dataToQueryParams", () => {
 // Dry-run tests
 
 describe("resolveRequestUrl", () => {
-  test("builds URL with base URL and endpoint", () => {
-    const url = resolveRequestUrl("organizations/");
-    expect(url).toMatch(/\/api\/0\/organizations\/$/);
+  test("builds URL against an explicit regional origin", () => {
+    const url = resolveRequestUrl(
+      "organizations/",
+      undefined,
+      "https://de.sentry.io/sentry"
+    );
+    expect(url).toBe("https://de.sentry.io/sentry/api/0/organizations/");
   });
 
   test("strips leading slash from endpoint", () => {
@@ -1824,5 +1895,42 @@ describe("resolveRequestUrl", () => {
   test("omits query string when no params", () => {
     const url = resolveRequestUrl("projects/");
     expect(url).not.toContain("?");
+  });
+
+  test("merges params with an existing query string", () => {
+    const url = resolveRequestUrl("attachments/?download=1", {
+      mode: "raw",
+    });
+    expect(url).toContain("attachments/?download=1&mode=raw");
+  });
+
+  test("absolute URL dry-run preserves the regional origin", async () => {
+    let output = "";
+    const func = await apiCommand.loader();
+    await func.call(
+      {
+        cwd: "/tmp",
+        stdin: createMockStdin(""),
+        stdout: {
+          write(value: string | Uint8Array) {
+            output += String(value);
+            return true;
+          },
+        },
+        stderr: { write: () => true },
+      },
+      {
+        method: "GET",
+        silent: false,
+        verbose: false,
+        "dry-run": true,
+        json: true,
+      },
+      "https://de.sentry.io/sentry/api/0/organizations/acme/"
+    );
+
+    expect(JSON.parse(output).url).toBe(
+      "https://de.sentry.io/sentry/api/0/organizations/acme/"
+    );
   });
 });

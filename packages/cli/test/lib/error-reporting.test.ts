@@ -298,12 +298,42 @@ describe("classifySilenced", () => {
     expect(classifySilenced(err)).toBeNull();
   });
 
+  test("silences ValidationError with field 'project.ambiguous_org'", () => {
+    // A project slug that exists in multiple orgs is user-input ambiguity, not
+    // a CLI bug. Silence it so it doesn't pollute the issue tracker.
+    expect(
+      classifySilenced(
+        new ValidationError(
+          'Project "webapp-backend" exists in multiple organizations.',
+          "project.ambiguous_org"
+        )
+      )
+    ).toBe("user_validation");
+  });
+
+  test("silences ValidationError with field 'input' (--input file not found)", () => {
+    // A missing --input file is pure user-input noise, not a CLI bug (CLI-1JY).
+    expect(
+      classifySilenced(
+        new ValidationError("File not found: /tmp/does-not-exist.json", "input")
+      )
+    ).toBe("user_input_error");
+  });
+
+  test("silences ResolutionError (user provided a value that wasn't found)", () => {
+    expect(
+      classifySilenced(
+        new ResolutionError("Project 'x'", "not found", "sentry issue list")
+      )
+    ).toBe("user_input_error");
+  });
+
   test.each([
+    ["ValidationError (no field)", new ValidationError("bad")],
     [
-      "ResolutionError",
-      new ResolutionError("Project 'x'", "not found", "sentry issue list"),
+      "ValidationError (other field)",
+      new ValidationError("Invalid trace ID", "trace_id"),
     ],
-    ["ValidationError", new ValidationError("bad")],
     ["SeerError", new SeerError("not_enabled")],
     ["ConfigError", new ConfigError("bad")],
     ["generic Error", new Error("boom")],
@@ -508,14 +538,26 @@ describe("reportCliError integration", () => {
     expect(traceErr["cli_error.kind"]).not.toBe(eventErr["cli_error.kind"]);
   });
 
-  test("captures ResolutionError", () => {
+  test("silences ResolutionError and emits metric (CLI-RP)", () => {
+    // ResolutionError is user-input noise (value provided but not found),
+    // not a CLI bug — silence it so it doesn't pollute the issue tracker.
     const err = new ResolutionError(
       "Project 'x'",
       "not found",
       "sentry issue list <org>/x"
     );
     reportCliError(err);
-    expect(captureSpy).toHaveBeenCalledWith(err);
+    expect(captureSpy).not.toHaveBeenCalled();
+    expect(metricSpy).toHaveBeenCalledWith(
+      "cli.error.silenced",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          error_class: "ResolutionError",
+          reason: "user_input_error",
+        }),
+      })
+    );
   });
 
   test("captures SeerError (marketing dashboard)", () => {

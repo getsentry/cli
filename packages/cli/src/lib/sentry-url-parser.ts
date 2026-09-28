@@ -12,8 +12,11 @@ import { DEFAULT_SENTRY_HOST } from "./constants.js";
 import { getEnv } from "./env.js";
 import { HostScopeError } from "./errors.js";
 import { tryNormalizeHexId } from "./hex-id.js";
+import { logger } from "./logger.js";
 import { isSaaSTrustOrigin } from "./sentry-urls.js";
 import { getActiveTokenHost, isHostTrusted } from "./token-host.js";
+
+const log = logger.withTag("url-parser");
 
 const FEEDBACK_SLUG_RE = /^([a-z0-9][a-z0-9_-]*):(\d+)$/i;
 
@@ -67,6 +70,10 @@ function matchOrganizationsPath(
     const eventId =
       segments[4] === "events" && segments[5] ? segments[5] : undefined;
     return { baseUrl, org, issueId: segments[3], eventId };
+  }
+
+  if (segments[2] === "share" && segments[3] === "issue" && segments[4]) {
+    return { baseUrl, org, shareId: segments[4] };
   }
 
   const tracePath = matchTracePath(segments, 2);
@@ -341,6 +348,7 @@ function matchSharePath(
  * Recognizes these path patterns (both SaaS and self-hosted):
  * - `/organizations/{org}/issues/{id}/`
  * - `/organizations/{org}/issues/{id}/events/{eventId}/`
+ * - `/organizations/{org}/share/issue/{shareId}/`
  * - `/settings/{org}/projects/{project}/`
  * - `/organizations/{org}/explore/traces/trace/{traceId}/` (canonical)
  * - `/organizations/{org}/traces/{traceId}/` (legacy)
@@ -372,10 +380,10 @@ export function parseSentryUrl(input: string): ParsedSentryUrl | null {
   }
 
   let url: URL;
-  // biome-ignore lint/plugin: grandfathered silent catch — see #1531; drain by adding log.debug()/log.warn() or re-throwing.
   try {
     url = new URL(input);
-  } catch {
+  } catch (error) {
+    log.debug("Failed to parse URL", input, error);
     return null;
   }
 

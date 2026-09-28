@@ -13,19 +13,16 @@ import {
 import type { parseOrgProjectArg } from "../../lib/arg-parsing.js";
 import {
   ApiError,
-  ContextError,
   ResolutionError,
   ValidationError,
 } from "../../lib/errors.js";
 import { fuzzyMatch } from "../../lib/fuzzy.js";
 import { logger } from "../../lib/logger.js";
-import { resolveEffectiveOrg } from "../../lib/region.js";
-import { resolveOrg } from "../../lib/resolve-target.js";
+import { resolveOrgOnlyTarget } from "../../lib/resolve-target.js";
 import {
   applySentryUrlContext,
   parseSentryUrl,
 } from "../../lib/sentry-url-parser.js";
-import { setOrgProjectContext } from "../../lib/telemetry.js";
 import { isAllDigits } from "../../lib/utils.js";
 import {
   type DashboardWidget,
@@ -61,34 +58,12 @@ export type WidgetQueryFlags = {
  * @param usageHint - Usage example for error messages
  * @returns Organization slug
  */
-export async function resolveOrgFromTarget(
+export function resolveOrgFromTarget(
   parsed: ReturnType<typeof parseOrgProjectArg>,
   cwd: string,
   usageHint: string
 ): Promise<string> {
-  switch (parsed.type) {
-    case "explicit":
-    case "org-all": {
-      const org = await resolveEffectiveOrg(parsed.org);
-      setOrgProjectContext([org], []);
-      return org;
-    }
-    case "project-search":
-    case "auto-detect": {
-      // resolveOrg already sets telemetry context
-      const resolved = await resolveOrg({ cwd });
-      if (!resolved) {
-        throw new ContextError("Organization", usageHint);
-      }
-      return resolved.org;
-    }
-    default: {
-      const _exhaustive: never = parsed;
-      throw new Error(
-        `Unexpected parsed type: ${(_exhaustive as { type: string }).type}`
-      );
-    }
-  }
+  return resolveOrgOnlyTarget(parsed, cwd, "dashboard", usageHint);
 }
 
 /** Result of URL-based dashboard arg extraction */
@@ -696,7 +671,6 @@ async function build404Error(
       "Check the dashboard ID or title with: sentry dashboard list",
     ];
     if (ctx.orgSlug) {
-      // biome-ignore lint/plugin: grandfathered silent catch — see #1531; drain by adding log.debug()/log.warn() or re-throwing.
       try {
         const { data } = await listDashboardsPaginated(ctx.orgSlug, {
           perPage: MAX_404_SUGGESTIONS,
@@ -707,8 +681,8 @@ async function build404Error(
           );
           alternatives.push(`Available dashboards:\n${lines.join("\n")}`);
         }
-      } catch {
-        // Suggestion fetch failed — don't mask the original error
+      } catch (error) {
+        log.debug("Suggestion fetch failed for 404 alternatives", error);
       }
     }
     throw new ResolutionError(

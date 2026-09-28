@@ -11,7 +11,7 @@
  *
  * Also handles two-arg forms:
  * - `<org>/<project> <trace-id>` — target as first arg, trace ID as second
- * - `<org> <trace-id>` — org as first arg, trace ID as second
+ * - `<project> <trace-id>` — project-first bare target with org fallback
  *
  * Used by: span list, span view, trace view, trace logs.
  */
@@ -28,13 +28,19 @@ import {
   guideOrgProjectFailure,
   resolveOrg,
   resolveOrgAndProject,
-  resolveProjectBySlug,
+  resolveOrgOnlyTarget,
+  resolveOrgOptionalTarget,
+  resolveProjectBoundTarget,
 } from "./resolve-target.js";
 import { setOrgProjectContext } from "./telemetry.js";
 import { isTraceId, validateTraceId } from "./trace-id.js";
 
+const log = logger.withTag("trace-target");
+
 /** Match `[<prefix>]<trail>` in usageHint — captures bracket content + trailing placeholder */
 const USAGE_TARGET_RE = /\[.*\]<[^>]+>/;
+const SENTRY_COMMAND_PREFIX_RE = /^sentry\s+/;
+const USAGE_ARGUMENT_START_RE = /\s+(?:\[|<)/;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,6 +73,10 @@ export type ParsedTraceTarget =
       type: "project-search";
       traceId: string;
       projectSlug: string;
+      /** Optional organization scope for display-name project searches. */
+      org?: string;
+      /** Project display name before slug normalization. */
+      originalSlug?: string;
       /** True if slug was normalized */
       normalized?: boolean;
     }
@@ -102,7 +112,7 @@ export type ResolvedTraceOrg = {
  *
  * **Two arguments (space-separated):**
  * - `<org>/<project> <trace-id>` → explicit
- * - `<org> <trace-id>` → project-search (bare slug)
+ * - `<target> <trace-id>` → project-first bare target with org fallback
  *
  * Extra positional arguments beyond the first two are ignored with a
  * warning, matching the established pattern across CLI commands.
@@ -128,7 +138,6 @@ export function parseTraceTarget(
 
   // Warn about extra positional args that will be ignored
   if (args.length > 2) {
-    const log = logger.withTag("trace-target");
     log.warn(
       `Extra arguments ignored: ${args.slice(2).join(" ")}. Expected: ${usageHint}`
     );
@@ -254,6 +263,10 @@ export function targetArgToTraceTarget(
         type: "project-search",
         traceId,
         projectSlug: parsed.projectSlug,
+        ...(parsed.org !== undefined && { org: parsed.org }),
+        ...(parsed.originalSlug !== undefined && {
+          originalSlug: parsed.originalSlug,
+        }),
       };
 
     case "auto-detect":
@@ -361,10 +374,10 @@ async function recoveryContextFromTargetArg(
     return { org: "", project: undefined };
   }
   let parsedTarget: ReturnType<typeof parseOrgProjectArg>;
-  // biome-ignore lint/plugin: grandfathered silent catch — see #1531; drain by adding log.debug()/log.warn() or re-throwing.
   try {
     parsedTarget = parseOrgProjectArg(targetArg);
-  } catch {
+  } catch (error) {
+    log.debug("Failed to parse target arg for recovery context", error);
     return { org: "", project: undefined };
   }
   return (
@@ -401,8 +414,8 @@ function substituteTraceId(args: string[], recoveredTraceId: string): string[] {
  */
 export function warnIfNormalized(parsed: ParsedTraceTarget, tag: string): void {
   if ("normalized" in parsed && parsed.normalized) {
-    const log = logger.withTag(tag);
-    log.warn(
+    const taggedLog = logger.withTag(tag);
+    taggedLog.warn(
       "Normalized slug (Sentry slugs use lowercase with dashes, not spaces)"
     );
   }
@@ -411,6 +424,14 @@ export function warnIfNormalized(parsed: ParsedTraceTarget, tag: string): void {
 // ---------------------------------------------------------------------------
 // Resolution — org + project
 // ---------------------------------------------------------------------------
+
+function commandNameFromUsageHint(usageHint: string): string {
+  const withoutPrefix = usageHint.replace(SENTRY_COMMAND_PREFIX_RE, "");
+  const targetIndex = withoutPrefix.search(USAGE_ARGUMENT_START_RE);
+  return targetIndex === -1
+    ? withoutPrefix
+    : withoutPrefix.slice(0, targetIndex);
+}
 
 /**
  * Resolve a parsed trace target to org + optional project.
@@ -421,14 +442,23 @@ export function warnIfNormalized(parsed: ParsedTraceTarget, tag: string): void {
  *
  * @throws {ContextError} If auto-detection fails
  */
-export function resolveTraceOrgOptionalProject(
+export async function resolveTraceOrgOptionalProject(
   parsed: ParsedTraceTarget,
   cwd: string,
   usageHint: string
 ): Promise<ResolvedTraceOrgProject | ResolvedTraceOrg> {
   if (parsed.type === "org-scoped") {
     setOrgProjectContext([parsed.org], []);
-    return Promise.resolve({ traceId: parsed.traceId, org: parsed.org });
+    return { traceId: parsed.traceId, org: parsed.org };
+  }
+  if (parsed.type === "project-search") {
+    const resolved = await resolveOrgOptionalTarget(
+      parsed,
+      cwd,
+      commandNameFromUsageHint(usageHint),
+      usageHint
+    );
+    return { traceId: parsed.traceId, ...resolved };
   }
   return resolveTraceOrgProject(parsed, cwd, usageHint);
 }
@@ -457,8 +487,8 @@ export async function resolveTraceOrgProject(
       };
 
     case "project-search":
-      // resolveProjectBySlug (called inside) already sets telemetry context
-      return resolveProjectSearchTarget(parsed, usageHint);
+      // resolveProjectBoundTarget (called inside) sets telemetry context.
+      return resolveProjectSearchTarget(parsed, cwd, usageHint);
 
     case "org-scoped":
       throw new ContextError("Specific project", usageHint, [
@@ -490,16 +520,14 @@ export async function resolveTraceOrgProject(
 /** Resolve a project-search target by searching across orgs. */
 async function resolveProjectSearchTarget(
   parsed: Extract<ParsedTraceTarget, { type: "project-search" }>,
+  cwd: string,
   usageHint: string
 ): Promise<ResolvedTraceOrgProject> {
-  const target = await resolveProjectBySlug(
-    parsed.projectSlug,
-    usageHint,
-    usageHint.replace(
-      USAGE_TARGET_RE,
-      `<org>/${parsed.projectSlug}/${parsed.traceId}`
-    ),
-    undefined // ParsedTraceTarget has no originalSlug
+  const target = await resolveProjectBoundTarget(
+    parsed,
+    cwd,
+    commandNameFromUsageHint(usageHint),
+    { usageHint }
   );
   return {
     traceId: parsed.traceId,
@@ -535,16 +563,13 @@ export async function resolveTraceOrg(
       return { traceId: parsed.traceId, org: parsed.org };
 
     case "project-search": {
-      // Bare slug in org-only context → treat as org slug
-      // resolveOrg already sets telemetry context
-      const resolved = await resolveOrg({ org: parsed.projectSlug, cwd });
-      if (!resolved) {
-        throw new ContextError("Organization", usageHint, [
-          `Could not resolve "${parsed.projectSlug}" as an organization.`,
-          `Specify the org explicitly: <org>/${parsed.traceId}`,
-        ]);
-      }
-      return { traceId: parsed.traceId, org: resolved.org };
+      const org = await resolveOrgOnlyTarget(
+        parsed,
+        cwd,
+        commandNameFromUsageHint(usageHint),
+        usageHint
+      );
+      return { traceId: parsed.traceId, org };
     }
 
     case "auto-detect": {
