@@ -1,5 +1,5 @@
 /**
- * Tests for `debug-files prepare` human output and the `--require-dwarf` gate.
+ * Tests for `debug-files wasm-upload` human output and the `--require-dwarf` gate.
  *
  * Output assertions cover the rendered string only; split and stamp behaviour is
  * covered by test/lib/wasm/prepare.test.ts.
@@ -16,8 +16,8 @@ import chalk from "chalk";
 import { describe, expect, test, vi } from "vitest";
 import {
   lacksDwarf,
-  prepareCommand,
-} from "../../../src/commands/debug-files/prepare.js";
+  wasmUploadCommand,
+} from "../../../src/commands/debug-files/wasm-upload.js";
 import { ValidationError } from "../../../src/lib/errors.js";
 import { COLORS } from "../../../src/lib/formatters/colors.js";
 import { formatPrepareResult } from "../../../src/lib/formatters/wasm-prepare.js";
@@ -214,7 +214,7 @@ describe("--build-id", () => {
 
   /** Run the command with `--build-id` over the given paths. */
   async function runWithBuildId(...paths: string[]): Promise<void> {
-    const func = (await prepareCommand.loader()) as unknown as (
+    const func = (await wasmUploadCommand.loader()) as unknown as (
       this: unknown,
       flags: Record<string, unknown>,
       ...rest: string[]
