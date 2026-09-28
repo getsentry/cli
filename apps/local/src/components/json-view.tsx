@@ -1,21 +1,12 @@
-import { createHighlighterCore } from '@shikijs/core'
-import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript'
-import json from '@shikijs/langs/json'
-import githubDark from '@shikijs/themes/github-dark'
-import githubLight from '@shikijs/themes/github-light'
+import { language } from '@twinkleplop/json'
 import { Check, Copy } from 'lucide-react'
-import { useEffect, useState } from 'react'
 import { useCopyToClipboard } from '@uidotdev/usehooks'
 
 type JsonViewProps = {
   code: string
 }
 
-const highlighter = createHighlighterCore({
-  engine: createJavaScriptRegexEngine(),
-  langs: [json],
-  themes: [githubLight, githubDark],
-})
+const highlight = language()
 
 function formatJson(code: string) {
   try {
@@ -25,40 +16,20 @@ function formatJson(code: string) {
   }
 }
 
-/** Render JSON with Shiki only after its containing event has been expanded. */
+function highlightJson(code: string) {
+  try {
+    return highlight(code)
+  } catch {
+    return undefined
+  }
+}
+
+/** Render JSON with Twinkleplop once its containing event has been expanded. */
 export function JsonView({ code }: JsonViewProps) {
-  const [html, setHtml] = useState<string>()
   const [copiedText, copyToClipboard] = useCopyToClipboard()
   const formattedCode = formatJson(code)
+  const html = highlightJson(formattedCode)
   const copied = copiedText === code
-
-  useEffect(() => {
-    let disposed = false
-
-    void highlighter
-      .then((instance) =>
-        instance.codeToHtml(formattedCode, {
-          lang: 'json',
-          themes: {
-            light: 'github-light',
-            dark: 'github-dark',
-          },
-          defaultColor: false,
-        })
-      )
-      .then((result) => {
-        if (!disposed) {
-          setHtml(result)
-        }
-      })
-      .catch(() => {
-        // Keep the readable, escaped source fallback if syntax highlighting cannot load.
-      })
-
-    return () => {
-      disposed = true
-    }
-  }, [formattedCode])
 
   const copyJson = () => {
     void copyToClipboard(code)
