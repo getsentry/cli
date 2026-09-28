@@ -40,8 +40,10 @@ const FORM = {
   ],
 };
 const COMPONENT = {
+  uuid: "component-uuid",
   type: "issue-link",
-  sentryApp: { uuid: "app-uuid", slug: "linear" },
+  error: "",
+  sentryApp: { uuid: "app-uuid", slug: "linear", name: "Linear", avatars: [] },
   schema: { link: FORM },
 };
 
@@ -68,7 +70,7 @@ beforeEach(async () => {
   choices = [["linear-uuid", "ENG-42: Fix the crash"]];
   form = FORM;
   installation = INSTALLATION;
-  actionStatus = 200;
+  actionStatus = 201;
   actionLink = LINK;
   globalThis.fetch = mockFetch(async (input, init) => {
     const request = new Request(input, init);
@@ -88,7 +90,7 @@ beforeEach(async () => {
     }
     if (path.endsWith("/external-issue-actions/")) {
       return json(
-        actionStatus === 200 ? actionLink : { detail: "Provider failed" },
+        actionStatus < 300 ? actionLink : { detail: "Provider failed" },
         actionStatus
       );
     }
@@ -126,6 +128,11 @@ describe("app issue-link action", () => {
     );
     expect(await linkAppIssue(prepared)).toEqual({ changed: true, link: LINK });
     expect(writes()).toHaveLength(1);
+    expect(
+      new globalThis.URL(writes()[0]!.url).searchParams.get(
+        "expectedExternalIssueUrl"
+      )
+    ).toBe(URL);
     expect(await writes()[0]?.json()).toEqual({
       groupId: ISSUE,
       action: "link",
@@ -133,6 +140,9 @@ describe("app issue-link action", () => {
       issueId: "linear-uuid",
     });
     expect(calls.every((request) => request.cache === "no-store")).toBe(true);
+    expect(
+      calls.filter((request) => request.url.includes("/external-issues/"))
+    ).toHaveLength(1);
   });
 
   test("does not treat a prefix search result as an exact Linear issue", async () => {
@@ -185,13 +195,21 @@ describe("app issue-link action", () => {
     expect(writes()).toHaveLength(0);
   });
 
-  test("rechecks the singleton immediately before calling the app", async () => {
+  test("uses the backend guard when another association appears after preflight", async () => {
     const prepared = await resolveAppIssueLink(OPTIONS);
-    links = [
-      { ...LINK, webUrl: "https://linear.app/example/issue/ENG-99/other" },
-    ];
-    await expect(linkAppIssue(prepared)).rejects.toThrow("Unlink it before");
-    expect(writes()).toHaveLength(0);
+    actionStatus = 409;
+    await expect(linkAppIssue(prepared)).rejects.toMatchObject({ status: 409 });
+    expect(writes()).toHaveLength(1);
+  });
+
+  test("reports a backend no-op when the same association appears after preflight", async () => {
+    const prepared = await resolveAppIssueLink(OPTIONS);
+    actionStatus = 200;
+    expect(await linkAppIssue(prepared)).toEqual({
+      changed: false,
+      link: LINK,
+    });
+    expect(writes()).toHaveLength(1);
   });
 
   test("does not blindly replay a failed app action", async () => {
@@ -239,16 +257,25 @@ describe("app issue-link action", () => {
     expect(writes()).toHaveLength(1);
   });
 
-  test("reports a different returned target without retrying or deleting it", async () => {
-    const prepared = await resolveAppIssueLink(OPTIONS);
-    actionLink = {
-      ...LINK,
-      webUrl: "https://linear.app/example/issue/ENG-99/other",
+  test("preserves query and fragment identity in the backend URL guard", async () => {
+    const url = "https://tracker.example/view?id=42#issue";
+    installation = {
+      ...INSTALLATION,
+      app: { ...INSTALLATION.app, slug: "custom" },
     };
-    await expect(linkAppIssue(prepared)).rejects.toThrow(
-      "different issue after linking"
-    );
-    expect(writes()).toHaveLength(1);
+    form = { uri: "/link", required_fields: [{ name: "url", type: "text" }] };
+    actionLink = { ...LINK, serviceType: "custom", webUrl: url };
+    const prepared = await resolveAppIssueLink({
+      ...OPTIONS,
+      appSlug: "custom",
+      url,
+    });
+    await linkAppIssue(prepared);
+    expect(
+      new globalThis.URL(writes()[0]!.url).searchParams.get(
+        "expectedExternalIssueUrl"
+      )
+    ).toBe(url);
   });
 
   test("requires an installation in the requested organization", async () => {
@@ -319,6 +346,26 @@ describe("app issue-link action", () => {
     expect(writes()).toHaveLength(0);
   });
 
+  test("keeps the query guard separate from an app field with the same name", async () => {
+    form = {
+      ...FORM,
+      optional_fields: [{ name: "expectedExternalIssueUrl", type: "text" }],
+    };
+    const prepared = await resolveAppIssueLink({
+      ...OPTIONS,
+      fields: { expectedExternalIssueUrl: "provider-field" },
+    });
+    await linkAppIssue(prepared);
+    expect(
+      new globalThis.URL(writes()[0]!.url).searchParams.get(
+        "expectedExternalIssueUrl"
+      )
+    ).toBe(URL);
+    expect(await writes()[0]?.json()).toMatchObject({
+      expectedExternalIssueUrl: "provider-field",
+    });
+  });
+
   test("resolves dependent choices using validated field values", async () => {
     form = {
       ...FORM,
@@ -358,6 +405,40 @@ describe("app issue-link action", () => {
     await expect(resolveAppIssueLink(OPTIONS)).rejects.toThrow(
       "--field team=VALUE"
     );
+    expect(writes()).toHaveLength(0);
+  });
+
+  test("names missing dependencies instead of reporting a dependency cycle", async () => {
+    form = {
+      ...FORM,
+      required_fields: [
+        { ...FORM.required_fields[0], depends_on: ["team"] },
+        { name: "team", type: "text" },
+      ],
+    };
+    await expect(resolveAppIssueLink(OPTIONS)).rejects.toThrow(
+      "Missing app link fields: --field team=VALUE"
+    );
+    expect(
+      calls.some((request) => request.url.includes("external-requests"))
+    ).toBe(false);
+    expect(writes()).toHaveLength(0);
+  });
+
+  test("distinguishes actual dependency cycles from missing values", async () => {
+    form = {
+      ...FORM,
+      required_fields: [
+        { ...FORM.required_fields[0], depends_on: ["team"] },
+        { name: "team", type: "text", depends_on: ["issueId"] },
+      ],
+    };
+    await expect(
+      resolveAppIssueLink({
+        ...OPTIONS,
+        fields: { team: "Engineering", issueId: "ENG-42" },
+      })
+    ).rejects.toThrow("App link fields have circular dependencies");
     expect(writes()).toHaveLength(0);
   });
 
@@ -458,6 +539,24 @@ describe("list and unlink app associations", () => {
     expect(
       findAppIssueLink([link], "https://tracker.example/issues/42", "other")
     ).toBeUndefined();
+  });
+
+  test.each([
+    "invalid",
+    "https://linear.app/example/settings",
+    "javascript:alert(1)",
+  ])("ignores malformed stored sibling %s when matching a valid target", (webUrl) => {
+    const sibling = { ...LINK, id: "100", webUrl };
+    expect(findAppIssueLink([sibling, LINK], URL)).toBe(LINK);
+    expect(() => findAppIssueLink([LINK], webUrl)).toThrow(ValidationError);
+  });
+
+  test("still refuses replacement of a corrupt link belonging to the selected app", async () => {
+    links = [{ ...LINK, webUrl: "invalid" }];
+    await expect(resolveAppIssueLink(OPTIONS)).rejects.toThrow(
+      "Unlink it before"
+    );
+    expect(writes()).toHaveLength(0);
   });
 
   test("keeps query and fragment identifiers distinct for generic apps", () => {

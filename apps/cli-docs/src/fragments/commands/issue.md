@@ -331,16 +331,18 @@ sentry issue link FRONT-123 https://linear.app/example/issue/APP-42/fix-error
 ```
 
 The matching integration must already be installed in the Sentry organization.
+Linking requires a Sentry version with native issue URL resolution and guarded
+Sentry App callbacks; older self-hosted versions may require an upgrade.
 Native integrations include GitHub, GitHub Enterprise, Jira, Jira Server,
 GitLab, Bitbucket, and Azure DevOps. Linear uses its installed Sentry App.
-GitLab resolves the repository through the integration's repository search;
-it must be visible to that installation.
+Sentry resolves native issue URLs through the selected integration; the remote
+issue must be visible to that installation.
 Use `--integration <id>` if more than one native integration matches the URL.
 Other Sentry Apps require `--app <slug>` and must expose an issue-link form;
 additional required form values can be supplied with `--field name=value`.
 For other Apps, an issue select can be supplied by exact ID or label with
-`--field`, for example `--app custom --field task_id=123`. The CLI checks
-that the app's link response identifies the requested URL before reporting success.
+`--field`, for example `--app custom --field task_id=123`. Sentry checks
+that the app's callback identifies the requested URL before saving the association.
 
 ```bash
 sentry issue link my-org/FRONT-123 https://github.com/example/app/issues/42 --dry-run
@@ -351,6 +353,8 @@ sentry issue link my-org/FRONT-123 https://github.com/example/app/issues/42 --js
 write. The provider validates the remote issue when the link is submitted.
 An existing matching link succeeds with `changed: false`. A Sentry App that
 already links this issue to a different resource must be unlinked first.
+App callbacks must return the exact supplied URL; use the issue URL copied from
+the tracker, including its title suffix. A mismatch fails without saving the link.
 
 GitHub and GitHub Enterprise pull requests are stored as external references.
 Their `/pull/NUMBER` and `/issues/NUMBER` URLs identify the same resource for
@@ -363,11 +367,11 @@ integration status-sync settings continue to apply after linking.
 #### Link permissions
 
 Linking requires `event:write` and access to the Sentry project. Discovering
-GitHub/GitLab repositories and Sentry Apps also requires `org:read`. Both scopes
-are included in the default OAuth login. If an older OAuth session lacks the
+Sentry Apps also requires `org:read`. Both scopes are included in the default
+OAuth login. If an older OAuth session lacks the
 requested scopes, the CLI offers reauthorization after a permission error.
-In non-interactive mode, follow the `sentry auth refresh` command shown in the
-error. Environment tokens must be updated separately.
+Use `sentry auth refresh` to update an older OAuth grant. Environment tokens must
+be updated separately.
 
 ### Unlink an external issue
 
@@ -397,7 +401,4 @@ Unlink requires **`event:write` and access to the Sentry project**; `event:admin
 is also accepted. The organization's “Let Members Delete Events” setting does
 not restrict unlinking on updated Sentry versions.
 
-Older Sentry versions still require `event:admin` in the token and your effective
-project permissions. For those installations, request it explicitly alongside
-your existing scopes with `sentry auth refresh --scope ...`. Granting a token
-more scopes does not override the organization's project-access policy.
+Granting a token more scopes does not override project-access policy.

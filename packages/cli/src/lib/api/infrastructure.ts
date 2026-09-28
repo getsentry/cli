@@ -21,8 +21,8 @@ import { logger } from "../logger.js";
 import { resolveOrgRegion } from "../region.js";
 import {
   getApiBaseUrl,
+  getDefaultSdkConfig,
   getSdkConfig,
-  type SentryRequestOptions,
 } from "../sentry-client.js";
 
 /**
@@ -178,7 +178,7 @@ const zstdCompressAsync =
   typeof zstdCompressCb === "function" ? promisify(zstdCompressCb) : null;
 
 /** Options for raw API requests to Sentry endpoints. */
-export type ApiRequestOptions<T = unknown> = SentryRequestOptions & {
+export type ApiRequestOptions<T = unknown> = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   body?: unknown;
   /**
@@ -525,7 +525,7 @@ export async function apiRequestToRegion<T>(
   options: ApiRequestOptions<T> = {}
 ): Promise<{ data: T; headers: Headers }> {
   const { method = "GET", body, bodyEncoding, params, schema } = options;
-  const config = getSdkConfig(regionUrl, options);
+  const config = getSdkConfig(regionUrl);
 
   const normalizedEndpoint = endpoint.startsWith("/")
     ? endpoint.slice(1)
@@ -681,7 +681,7 @@ export async function apiRequestToRegionNoContent(
   options: Omit<ApiRequestOptions, "schema"> = {}
 ): Promise<void> {
   const { method = "GET", body, params } = options;
-  const config = getSdkConfig(regionUrl, options);
+  const config = getSdkConfig(regionUrl);
 
   const searchParams = buildSearchParams(params);
   const normalizedEndpoint = endpoint.startsWith("/")
@@ -809,8 +809,9 @@ export async function rawApiRequest(
     baseUrl,
   } = options;
 
-// createAuthenticatedFetch enforces origin trust before attaching Authorization.
-  const config = getSdkConfig(baseUrl ?? getApiBaseUrl(), options);
+  // Both configs share createAuthenticatedFetch(), whose prepareHeaders()
+  // enforces isRequestOriginTrusted() before attaching Authorization.
+  const config = baseUrl ? getSdkConfig(baseUrl) : getDefaultSdkConfig();
 
   const normalizedEndpoint = endpoint.startsWith("/")
     ? endpoint.slice(1)

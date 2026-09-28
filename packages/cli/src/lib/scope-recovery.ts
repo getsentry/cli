@@ -3,22 +3,17 @@ import { getCurrentAuthScopes } from "./api/auth.js";
 import { assertAutoLoginHostTrusted } from "./auto-auth.js";
 import { type AuthSource, getAuthConfig } from "./db/auth.js";
 import { ApiError, AuthError } from "./errors.js";
-import type {
-  InteractiveLoginOptions,
-  LoginResult,
-} from "./interactive-login.js";
+import type { LoginResult } from "./interactive-login.js";
 import { interactivePromptsAllowed } from "./interactive-prompts.js";
 import { logger } from "./logger.js";
 import { OAUTH_SCOPES } from "./oauth.js";
 
-type InteractiveLogin = (
-  options?: InteractiveLoginOptions
-) => Promise<LoginResult | null>;
+type InteractiveLogin = () => Promise<LoginResult | null>;
 
 type OAuthScopeState =
   | { kind: "current" }
   | { kind: "invalid" }
-  | { kind: "missing"; scopes: string[]; requestedScopes: string[] };
+  | { kind: "missing"; scopes: string[] };
 
 export type ScopeRecoveryRuntime = {
   assertTrustedHost: () => void;
@@ -57,11 +52,7 @@ async function inspectOAuthScopes(
     const grantedSet = new Set(granted);
     const missing = OAUTH_SCOPES.filter((scope) => !grantedSet.has(scope));
     return missing.length > 0
-      ? {
-          kind: "missing",
-          scopes: missing,
-          requestedScopes: [...new Set([...OAUTH_SCOPES, ...granted])],
-        }
+      ? { kind: "missing", scopes: missing }
       : { kind: "current" };
   } catch (error) {
     if (
@@ -129,15 +120,6 @@ async function refreshOAuthScopes(
   runtime: ScopeRecoveryRuntime
 ): Promise<boolean> {
   if (!(runtime.inputIsTty() && runtime.promptsAllowed())) {
-    if (state.kind === "missing") {
-      const scopeArgs = state.requestedScopes
-        .map((scope) => `--scope ${scope}`)
-        .join(" ");
-      runtime.write(
-        `Your CLI authorization is missing ${state.scopes.join(", ")}.\n` +
-          `Re-authenticate with: sentry auth refresh ${scopeArgs}\n`
-      );
-    }
     return false;
   }
 
@@ -151,13 +133,7 @@ async function refreshOAuthScopes(
       "Your CLI authorization is no longer valid. Starting authorization...\n\n"
     );
   }
-  return Boolean(
-    await runInteractiveLogin(
-      state.kind === "missing"
-        ? { scope: state.requestedScopes.join(" ") }
-        : undefined
-    )
-  );
+  return Boolean(await runInteractiveLogin());
 }
 
 /** Refresh a stored OAuth grant when it lacks any scope requested by this CLI. */

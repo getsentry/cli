@@ -2,35 +2,21 @@
 import {
   deleteOrganizationIssueIntegration,
   type ExternalIssueLinkResponse,
-  type LinkExternalIssueRequest,
-  type ListOrganizationReposResponse,
-  listOrganizationRepos,
+  type IssueIntegrationsResponse,
+  listOrganizationIssueIntegrations,
   updateOrganizationIssueIntegration,
 } from "@sentry/api";
 import {
   vExternalIssueLinkResponse,
-  vIntegrationIssueConfigResponse,
-  vListOrganizationReposResponse,
+  vIssueIntegrationsResponse,
 } from "@sentry/api/valibot";
-import {
-  array,
-  type InferOutput,
-  nullish,
-  object,
-  optional,
-  pick,
-  safeParse,
-  string,
-} from "valibot";
+import { safeParse } from "valibot";
 import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import { getSdkConfig } from "../sentry-client.js";
 import {
   API_MAX_PER_PAGE,
-  apiRequestToRegion,
   MAX_PAGINATION_PAGES,
-  type PaginatedResponse,
-  parseLinkHeader,
   unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
@@ -50,35 +36,7 @@ export type NativeIssueLink = Pick<
   title?: string;
 };
 
-// The private list serializes link IDs as strings; the SDK mutation uses numbers.
-const NativeIntegrationSchema = object({
-  ...pick(vIntegrationIssueConfigResponse, [
-    "id",
-    "name",
-    "domainName",
-    "status",
-    "provider",
-  ]).entries,
-  externalIssues: array(
-    object({
-      ...pick(vExternalIssueLinkResponse, ["key", "url", "displayName"])
-        .entries,
-      id: string(),
-      title: nullish(string()),
-    })
-  ),
-});
-const NativeIntegrationsSchema = array(NativeIntegrationSchema);
-const NativeIssueMutationSchema = object({
-  ...vExternalIssueLinkResponse.entries,
-  title: optional(string()),
-});
-const GitlabRepositoriesSchema = object({
-  repos: array(
-    object({ identifier: string(), name: string(), url: nullish(string()) })
-  ),
-});
-type NativeIntegration = InferOutput<typeof NativeIntegrationSchema>;
+type NativeIntegration = IssueIntegrationsResponse[number];
 
 /** Read-only resolution result used for previews and a subsequent link mutation. */
 export type PreparedNativeIssueLink = {
@@ -92,113 +50,62 @@ export type PreparedNativeIssueLink = {
   integrationId: string;
   /** Native integration provider key. */
   provider: string;
-  /** Canonical tracker issue URL for the preview. */
+  /** External issue URL submitted to the backend for provider resolution. */
   url: string;
-  /** Provider issue key for the preview. */
-  key: string;
-  /** Provider-specific issue identifier and repository. */
-  body: LinkExternalIssueRequest;
   /** Reference found during fresh preflight; avoids a duplicate mutation. */
   existing?: NativeIssueLink;
 };
-
-type ParsedTarget = Pick<PreparedNativeIssueLink, "url" | "key" | "body">;
 
 const TRAILING_SLASH = /\/+$/;
 const REPOSITORY_ISSUE = /^\/([^/]+\/[^/]+)\/issues\/(\d+)(?:\/[^/]+)?$/;
 const GITHUB_PULL_REQUEST = /^\/([^/]+\/[^/]+)\/pull\/(\d+)(?:\/[^/]+)?$/;
 const GITLAB_ISSUE = /^\/(.+?)(?:\/-)?\/issues\/(\d+)$/;
-const JIRA_ISSUE = /^(.*?)\/browse\/([A-Z][A-Z0-9_]*-\d+)$/i;
+const JIRA_KEY = /^[A-Z][A-Z0-9]*-\d+$/i;
+const JIRA_PATH = /^(.*?)\/(browse|issues)\/([A-Z][A-Z0-9]*-\d+)$/i;
+const JIRA_PROJECT_PATH = /\/projects\/[^/]+$/;
+const JIRA_BOARD_PATH =
+  /^(.*?)(?:\/jira\/(?:software|servicedesk|core)\/|\/secure\/RapidBoard\.jspa$)/;
 const WORK_ITEM = /^(.*?)\/_workitems\/edit\/(\d+)$/;
 const SCM_CHANGE =
   /(?:^\/[^/]+\/[^/]+\/(?:pulls?|pull-requests|commits?)\/|\/-\/(?:merge_requests|commits?)\/)/;
 
-function issuePath(orgSlug: string, issueId: string): string {
-  return `/organizations/${encodeURIComponent(orgSlug)}/issues/${encodeURIComponent(issueId)}/integrations/`;
-}
-
 function parseUrl(value: string): URL {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
+  const url = storedUrl(value);
+  if (!url) {
     throw new ValidationError(
-      "External issue must be an absolute HTTP(S) URL."
+      "External issue must be an absolute HTTP(S) URL without credentials."
     );
   }
+  return url;
+}
+
+/** Invalid stored URLs must not prevent matching an unrelated valid association. */
+function storedUrl(value: string): URL | undefined {
+  const url = URL.canParse(value) ? new URL(value) : undefined;
   if (
-    !["https:", "http:"].includes(url.protocol) ||
+    !(url && ["https:", "http:"].includes(url.protocol)) ||
     url.username ||
     url.password
   ) {
-    throw new ValidationError(
-      "External issue must be an HTTP(S) URL without credentials."
-    );
+    return;
   }
   url.hash = "";
-  url.search = "";
   url.pathname = url.pathname.replace(TRAILING_SLASH, "");
   return url;
 }
 
 function integrationUrl(integration: NativeIntegration): URL | undefined {
-  if (!integration.domainName) {
-    return;
-  }
   const domain = integration.domainName;
+  if (!domain) {
+    return integration.provider.key === "github"
+      ? storedUrl(`https://github.com/${integration.name}`)
+      : undefined;
+  }
   // Older personal Bitbucket installations store only the username.
   if (integration.provider.key === "bitbucket" && !domain.includes("/")) {
-    return parseUrl(`https://bitbucket.org/${domain}`);
+    return storedUrl(`https://bitbucket.org/${domain}`);
   }
-  return parseUrl(domain.includes("://") ? domain : `https://${domain}`);
-}
-
-function parseRepositoryIssue(
-  url: URL,
-  provider: string
-): ParsedTarget | undefined {
-  // GitHub exposes PRs through its issue API; both URL forms share repo#number.
-  const pullRequest = ["github", "github_enterprise"].includes(provider)
-    ? GITHUB_PULL_REQUEST.exec(url.pathname)
-    : null;
-  const match = pullRequest ?? REPOSITORY_ISSUE.exec(url.pathname);
-  if (!(match?.[1] && match[2])) {
-    return;
-  }
-  const repo = match[1];
-  const number = match[2];
-  return {
-    url: `${url.origin}/${repo}/${pullRequest ? "pull" : "issues"}/${number}`,
-    key: `${repo}#${number}`,
-    body: { repo, externalIssue: number },
-  };
-}
-
-function parseGitlabIssue(url: URL): ParsedTarget | undefined {
-  const match = GITLAB_ISSUE.exec(url.pathname);
-  if (!(match?.[1] && match[2])) {
-    return;
-  }
-  const project = match[1];
-  const number = match[2];
-  return {
-    url: `${url.origin}/${project}/-/issues/${number}`,
-    key: `${url.host}:${project}#${number}`,
-    body: { externalIssue: `${project}#${number}` },
-  };
-}
-
-function parseJiraIssue(url: URL): ParsedTarget | undefined {
-  const match = JIRA_ISSUE.exec(url.pathname);
-  if (!match?.[2]) {
-    return;
-  }
-  const key = match[2].toUpperCase();
-  return {
-    url: `${url.origin}${match[1]}/browse/${key}`,
-    key,
-    body: { externalIssue: key },
-  };
+  return storedUrl(domain.includes("://") ? domain : `https://${domain}`);
 }
 
 function azureAccount(url: URL): string | undefined {
@@ -210,115 +117,151 @@ function azureAccount(url: URL): string | undefined {
   }
 }
 
-function parseAzureIssue(url: URL, domain: URL): ParsedTarget | undefined {
-  const account = azureAccount(domain);
-  const match = WORK_ITEM.exec(url.pathname);
-  if (!(account && account === azureAccount(url) && match?.[2])) {
-    return;
-  }
-  const key = match[2];
-  return {
-    url: `${domain.origin}${domain.pathname.replace(TRAILING_SLASH, "")}/_workitems/edit/${key}`,
-    key,
-    body: { externalIssue: key },
-  };
+/** Jira copy links can select the issue in a path or board/backlog query. */
+function jiraIssueKey(url: URL): string | undefined {
+  const selected = url.searchParams
+    .getAll("selectedIssue")
+    .find((key) => JIRA_KEY.test(key));
+  return (selected ?? JIRA_PATH.exec(url.pathname)?.[3])?.toUpperCase();
 }
 
-/**
- * Match GitLab's actual project URL to keep deployment prefixes out of project IDs.
- * The private picker has no SDK operation and includes unregistered repositories;
- * public integration metadata omits the deployment prefix.
- */
-async function resolveGitlabIssue(
-  orgSlug: string,
-  url: URL,
-  integration: NativeIntegration
-): Promise<ParsedTarget | undefined> {
-  const match = GITLAB_ISSUE.exec(url.pathname);
-  if (
-    integrationUrl(integration)?.host !== url.host ||
-    !match?.[1] ||
-    !match[2]
-  ) {
-    return;
+/** Infer contexts only for known Jira UI paths to keep installations distinct. */
+function jiraContextPath(url: URL): string | undefined {
+  const path = JIRA_PATH.exec(url.pathname);
+  if (path) {
+    return path[2] === "issues"
+      ? path[1]?.replace(JIRA_PROJECT_PATH, "")
+      : path[1];
   }
-  const projectUrl = `${url.origin}/${match[1]}`;
-  const { data } = await apiRequestToRegion(
-    await resolveOrgRegion(orgSlug),
-    `/organizations/${encodeURIComponent(orgSlug)}/integrations/${encodeURIComponent(integration.id)}/repos/`,
-    {
-      params: { search: match[1].split("/").at(-1) },
-      cache: "no-store",
-      schema: GitlabRepositoriesSchema,
+  return JIRA_BOARD_PATH.exec(url.pathname)?.[1];
+}
+
+function requireJiraContext(url: URL): string {
+  const context = jiraContextPath(url);
+  if (context === undefined) {
+    throw new ValidationError(
+      "Cannot identify this Jira URL's installation context. Use the canonical /browse/<ISSUE-KEY> URL."
+    );
+  }
+  return context;
+}
+
+/** Compare URL aliases locally; provider identifiers are resolved by the backend. */
+function issueIdentity(url: URL, provider: string): string | undefined {
+  switch (provider) {
+    case "github":
+    case "github_enterprise":
+    case "bitbucket": {
+      const pull =
+        provider === "bitbucket"
+          ? null
+          : GITHUB_PULL_REQUEST.exec(url.pathname);
+      const match = pull ?? REPOSITORY_ISSUE.exec(url.pathname);
+      return match
+        ? `${url.host}/${match[1]?.toLowerCase()}#${match[2]}`
+        : undefined;
     }
-  );
-  const repository = data.repos.find(
-    (repo) => repo.url && parseUrl(repo.url).href === projectUrl
-  );
-  if (!repository) {
-    return;
+    case "gitlab": {
+      const match = GITLAB_ISSUE.exec(url.pathname);
+      return match ? `${url.host}/${match[1]}#${match[2]}` : undefined;
+    }
+    case "jira":
+    case "jira_server": {
+      const key = jiraIssueKey(url);
+      return key ? `${url.host}#${key}` : undefined;
+    }
+    case "vsts": {
+      const account = azureAccount(url);
+      const match = WORK_ITEM.exec(url.pathname);
+      return account && match
+        ? `${account}:${url.port}#${match[2]}`
+        : undefined;
+    }
+    default:
+      return;
   }
-  return {
-    url: `${projectUrl}/-/issues/${match[2]}`,
-    key: `${repository.name}#${match[2]}`,
-    body: { externalIssue: `${repository.identifier}#${match[2]}` },
-  };
 }
 
-function parseTarget(
+function matchesIntegration(
   url: URL,
-  integration: NativeIntegration
-): ParsedTarget | undefined {
-  const domain = integrationUrl(integration);
-  if (!(domain && integration.domainName)) {
-    return;
-  }
+  integration: NativeIntegration,
+  explicitlySelected: boolean
+): boolean {
   const provider = integration.provider.key;
+  if (!issueIdentity(url, provider)) {
+    return false;
+  }
+  // Older Enterprise metadata may omit its host. Only an explicit selection
+  // can delegate host validation to the backend's instance_hostname metadata.
+  if (provider === "github_enterprise" && !integration.domainName) {
+    return (
+      explicitlySelected &&
+      url.pathname.split("/")[1]?.toLowerCase() ===
+        integration.name.toLowerCase()
+    );
+  }
+  const domain = integrationUrl(integration);
+  if (!domain) {
+    return false;
+  }
   if (provider === "vsts") {
-    return parseAzureIssue(url, domain);
+    return azureAccount(domain) === azureAccount(url);
   }
   if (domain.host !== url.host) {
-    return;
+    return false;
   }
   if (["github", "github_enterprise", "bitbucket"].includes(provider)) {
-    const target = parseRepositoryIssue(url, provider);
     const account = domain.pathname.split("/").find(Boolean);
-    if (
-      account &&
-      target?.body.repo?.split("/")[0]?.toLowerCase() !== account.toLowerCase()
-    ) {
-      return;
-    }
-    return target;
-  }
-  if (provider === "gitlab") {
-    return parseGitlabIssue(url);
+    return (
+      !account ||
+      url.pathname.split("/")[1]?.toLowerCase() === account.toLowerCase()
+    );
   }
   if (provider === "jira" || provider === "jira_server") {
+    requireJiraContext(url);
     const prefix = domain.pathname.replace(TRAILING_SLASH, "");
-    if (prefix && !url.pathname.startsWith(`${prefix}/browse/`)) {
-      return;
-    }
-    return parseJiraIssue(url);
+    return (
+      !prefix ||
+      url.pathname === prefix ||
+      url.pathname.startsWith(`${prefix}/`)
+    );
   }
+  // GitLab's public domain omits its deployment prefix. The backend validates
+  // that prefix and group; multiple installations on the host require a selector.
+  return provider === "gitlab";
 }
 
-/**
- * Retrieve every page before choosing an integration or checking existing links.
- * Partial results could miss a duplicate or hide an ambiguous match, so reaching
- * the safety limit must fail instead of returning the partial list from autoPaginate.
- */
-async function listFreshPages<T>(
-  fetchPage: (cursor?: string) => Promise<PaginatedResponse<T[]>>
-): Promise<T[]> {
-  const items: T[] = [];
+/** Read every integration page; partial discovery could hide an ambiguous match. */
+async function listIntegrations(
+  orgSlug: string,
+  issueId: string
+): Promise<NativeIntegration[]> {
+  const config = getSdkConfig(await resolveOrgRegion(orgSlug), {
+    cache: "no-store",
+  });
+  const integrations: NativeIntegration[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
-    const response = await fetchPage(cursor);
-    items.push(...response.data);
+    const result = await listOrganizationIssueIntegrations({
+      ...config,
+      path: { organization_id_or_slug: orgSlug, issue_id: issueId },
+      query: { cursor, per_page: API_MAX_PER_PAGE },
+    });
+    const response = unwrapPaginatedResult<unknown>(
+      result,
+      "Failed to list issue integrations"
+    );
+    const parsed = safeParse(vIssueIntegrationsResponse, response.data);
+    if (!parsed.success) {
+      throw new ApiError(
+        "Unexpected response format when listing issue integrations",
+        0
+      );
+    }
+    integrations.push(...parsed.output);
     cursor = response.nextCursor;
     if (!cursor) {
-      return items;
+      return integrations;
     }
   }
   throw new ValidationError(
@@ -326,68 +269,25 @@ async function listFreshPages<T>(
   );
 }
 
-async function listIntegrations(
-  orgSlug: string,
-  issueId: string
-): Promise<NativeIntegration[]> {
-  const regionUrl = await resolveOrgRegion(orgSlug);
-  // The SDK exposes integration detail and mutations, but no issue-integration list.
-  return listFreshPages(async (cursor) => {
-    const response = await apiRequestToRegion<NativeIntegration[]>(
-      regionUrl,
-      issuePath(orgSlug, issueId),
-      {
-        params: { cursor, per_page: API_MAX_PER_PAGE },
-        cache: "no-store",
-        schema: NativeIntegrationsSchema,
-      }
-    );
-    return {
-      data: response.data,
-      nextCursor: parseLinkHeader(response.headers.get("Link")).nextCursor,
-    };
-  });
-}
-
-async function listFreshRepositories(
-  orgSlug: string
-): Promise<ListOrganizationReposResponse> {
-  const config = getSdkConfig(await resolveOrgRegion(orgSlug), {
-    cache: "no-store",
-  });
-  return listFreshPages(async (cursor) => {
-    const result = await listOrganizationRepos({
-      ...config,
-      path: { organization_id_or_slug: orgSlug },
-      query: { cursor, per_page: API_MAX_PER_PAGE },
-    });
-    const page = unwrapPaginatedResult<unknown>(
-      result,
-      "Failed to list repositories"
-    );
-    const parsed = safeParse(vListOrganizationReposResponse, page.data);
-    if (!parsed.success) {
-      throw new ApiError(
-        "Unexpected response format when listing repositories",
-        0
-      );
-    }
-    return { ...page, data: parsed.output };
-  });
-}
-
 function flattenLinks(integrations: NativeIntegration[]): NativeIssueLink[] {
   return integrations.flatMap((integration) =>
-    integration.externalIssues.map((link) => ({
-      ...link,
-      id: String(link.id),
-      title: link.title ?? undefined,
-      integrationId: integration.id,
-      provider: integration.provider.key,
-      url:
-        parseTarget(parseUrl(link.url), integration)?.url ??
-        parseUrl(link.url).href,
-    }))
+    integration.externalIssues.flatMap((link) => {
+      const url = storedUrl(link.url);
+      if (!url) {
+        return [];
+      }
+      return [
+        {
+          id: link.id,
+          key: link.key,
+          displayName: link.displayName,
+          title: link.title ?? undefined,
+          integrationId: integration.id,
+          provider: integration.provider.key,
+          url: url.href,
+        },
+      ];
+    })
   );
 }
 
@@ -400,41 +300,29 @@ export async function listNativeIssueLinks(
 }
 
 function matchesNativeUrl(link: NativeIssueLink, target: URL): boolean {
-  const existing = parseUrl(link.url);
-  if (link.provider === "vsts") {
-    const issueId = WORK_ITEM.exec(target.pathname)?.[2];
-    const account = azureAccount(target);
-    return Boolean(
-      issueId &&
-        account &&
-        account === azureAccount(existing) &&
-        issueId === WORK_ITEM.exec(existing.pathname)?.[2]
-    );
-  }
-  if (existing.host !== target.host) {
+  const existing = storedUrl(link.url);
+  if (!existing) {
     return false;
   }
-  if (link.provider === "gitlab") {
-    const existingMatch = GITLAB_ISSUE.exec(existing.pathname);
-    const targetMatch = GITLAB_ISSUE.exec(target.pathname);
-    return Boolean(
-      existingMatch &&
-        targetMatch &&
-        existingMatch[1] === targetMatch[1] &&
-        existingMatch[2] === targetMatch[2]
-    );
-  }
-  if (["github", "github_enterprise", "bitbucket"].includes(link.provider)) {
-    // Sentry's list response can reconstruct /issues/N for a linked /pull/N.
-    const key = parseRepositoryIssue(target, link.provider)?.key.toLowerCase();
-    return Boolean(
-      key &&
-        key === parseRepositoryIssue(existing, link.provider)?.key.toLowerCase()
-    );
-  }
   if (["jira", "jira_server"].includes(link.provider)) {
-    const canonical = parseJiraIssue(target)?.url;
-    return Boolean(canonical && canonical === parseJiraIssue(existing)?.url);
+    if (existing.host !== target.host) {
+      return false;
+    }
+    const key = jiraIssueKey(target);
+    if (!key) {
+      return false;
+    }
+    const context = jiraContextPath(existing);
+    const targetContext = requireJiraContext(target);
+    return (
+      context !== undefined &&
+      context === targetContext &&
+      key === jiraIssueKey(existing)
+    );
+  }
+  const identity = issueIdentity(target, link.provider);
+  if (identity) {
+    return identity === issueIdentity(existing, link.provider);
   }
   return existing.href === target.href;
 }
@@ -477,59 +365,12 @@ export async function resolveNativeIssueLink(options: {
     );
   }
   const integrations = await listIntegrations(options.orgSlug, options.issueId);
-  let candidates = (
-    await Promise.all(
-      integrations.map(async (integration) => {
-        if (
-          integration.status !== "active" ||
-          (options.integrationId && options.integrationId !== integration.id)
-        ) {
-          return [];
-        }
-        const target =
-          integration.provider.key === "gitlab"
-            ? await resolveGitlabIssue(options.orgSlug, url, integration)
-            : parseTarget(url, integration);
-        return target ? [{ integration, target }] : [];
-      })
-    )
-  ).flat();
-  if (
-    candidates.some(({ integration }) =>
-      ["github", "github_enterprise"].includes(integration.provider.key)
-    )
-  ) {
-    const repositories = await listFreshRepositories(options.orgSlug);
-    candidates = candidates.flatMap(({ integration, target }) => {
-      if (!["github", "github_enterprise"].includes(integration.provider.key)) {
-        return [{ integration, target }];
-      }
-      const repository = repositories.find(
-        (repo) =>
-          repo.status === "active" &&
-          repo.integrationId === integration.id &&
-          repo.name.toLowerCase() === target.body.repo?.toLowerCase()
-      );
-      if (!repository) {
-        return [];
-      }
-      // Sentry's repository lookup is case-sensitive; use its registered spelling.
-      return [
-        {
-          integration,
-          target: {
-            ...target,
-            body: { ...target.body, repo: repository.name },
-            key: `${repository.name}#${target.body.externalIssue}`,
-            url: target.url.replace(
-              `/${target.body.repo}/`,
-              `/${repository.name}/`
-            ),
-          },
-        },
-      ];
-    });
-  }
+  const candidates = integrations.filter(
+    (integration) =>
+      integration.status === "active" &&
+      (!options.integrationId || options.integrationId === integration.id) &&
+      matchesIntegration(url, integration, Boolean(options.integrationId))
+  );
   if (candidates.length === 0) {
     throw new ValidationError(
       "No installed native issue-tracker integration matches this URL. Check --integration, or use --app <slug> for a Sentry App."
@@ -537,7 +378,7 @@ export async function resolveNativeIssueLink(options: {
   }
   if (candidates.length > 1) {
     throw new ValidationError(
-      `Multiple integrations match this URL. Specify --integration <id>: ${candidates.map(({ integration }) => `${integration.id} (${integration.name})`).join(", ")}`
+      `Multiple integrations match this URL. Specify --integration <id>: ${candidates.map((integration) => `${integration.id} (${integration.name})`).join(", ")}`
     );
   }
   const selected = candidates[0];
@@ -548,18 +389,18 @@ export async function resolveNativeIssueLink(options: {
     orgSlug: options.orgSlug,
     issueId: options.issueId,
     regionUrl: await resolveOrgRegion(options.orgSlug),
-    integrationId: selected.integration.id,
-    provider: selected.integration.provider.key,
-    ...selected.target,
+    integrationId: selected.id,
+    provider: selected.provider.key,
+    url: url.href,
     existing: findNativeIssueLink(
       flattenLinks(integrations),
-      selected.target.url,
-      selected.integration.id
+      url.href,
+      selected.id
     ),
   };
 }
 
-/** Link an existing tracker issue, without a comment or automatic mutation retry. */
+/** Link by URL; the backend resolves provider identifiers and enforces idempotency. */
 export async function linkNativeIssue(
   prepared: PreparedNativeIssueLink
 ): Promise<{ link: NativeIssueLink; changed: boolean }> {
@@ -568,7 +409,6 @@ export async function linkNativeIssue(
   }
   const result = await updateOrganizationIssueIntegration({
     ...getSdkConfig(prepared.regionUrl, {
-      retry: false,
       cache: "no-store",
     }),
     path: {
@@ -576,10 +416,10 @@ export async function linkNativeIssue(
       issue_id: prepared.issueId,
       integration_id: prepared.integrationId,
     },
-    body: prepared.body,
+    body: { externalIssue: prepared.url },
   });
   const parsed = safeParse(
-    NativeIssueMutationSchema,
+    vExternalIssueLinkResponse,
     unwrapResult<unknown>(result, "Failed to link external issue")
   );
   if (!parsed.success) {
@@ -596,7 +436,7 @@ export async function linkNativeIssue(
       integrationId: String(data.integrationId),
       provider: prepared.provider,
     },
-    changed: true,
+    changed: result.response.status === 201,
   };
 }
 
@@ -614,7 +454,6 @@ export async function unlinkNativeIssueLink(
   }
   const result = await deleteOrganizationIssueIntegration({
     ...getSdkConfig(await resolveOrgRegion(orgSlug), {
-      retry: false,
       cache: "no-store",
     }),
     path: {

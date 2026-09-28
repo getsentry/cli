@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   findNativeIssueLink,
   linkNativeIssue,
@@ -18,9 +18,6 @@ import { mockFetch, useTestConfigDir } from "../../helpers.js";
 
 const REGION = "https://eu.sentry.io";
 const INTEGRATIONS = "/api/0/organizations/test-org/issues/42/integrations/";
-const REPOSITORIES = "/api/0/organizations/test-org/repos/";
-const GITLAB_REPOSITORIES =
-  "/api/0/organizations/test-org/integrations/10/repos/";
 const SOURCE = { orgSlug: "test-org", issueId: "42" };
 const JIRA_URL = "https://tracker.example.com/browse/PROJ-7";
 const LINK: NativeIssueLink = {
@@ -30,12 +27,11 @@ const LINK: NativeIssueLink = {
   key: "PROJ-7",
   url: JIRA_URL,
   displayName: "PROJ-7",
-  title: "Example issue",
 };
 
 function integration(
   provider = "jira",
-  domainName = "tracker.example.com",
+  domainName: string | null = "tracker.example.com",
   id = "10",
   externalIssues: NativeIssueLink[] = []
 ) {
@@ -43,6 +39,11 @@ function integration(
     id,
     name: `Example ${provider}`,
     domainName,
+    icon: null,
+    accountType: null,
+    scopes: null,
+    outOfDate: null,
+    missingFeatures: null,
     provider: {
       key: provider,
       slug: provider,
@@ -53,17 +54,11 @@ function integration(
       aspects: {},
     },
     status: "active",
-    externalIssues,
-  };
-}
-
-function repository(name: string, integrationId: string) {
-  return {
-    id: "100",
-    name,
-    integrationId,
-    status: "active",
-    dateCreated: "2026-01-01T00:00:00Z",
+    externalIssues: externalIssues.map((link) => ({
+      ...link,
+      title: link.title ?? null,
+      description: null,
+    })),
   };
 }
 
@@ -101,40 +96,32 @@ describe("native tracker issue links", () => {
     {
       provider: "jira",
       domain: "tracker.example.com",
-      url: `${JIRA_URL.toLowerCase()}/?source=cli#details`,
+      url: JIRA_URL.toLowerCase(),
       canonical: JIRA_URL,
-      body: { externalIssue: "PROJ-7" },
     },
     {
       provider: "jira_server",
       domain: "tracker.example.com",
       url: "https://tracker.example.com/jira/browse/PROJ-7",
       canonical: "https://tracker.example.com/jira/browse/PROJ-7",
-      body: { externalIssue: "PROJ-7" },
     },
     {
       provider: "gitlab",
       domain: "gitlab.example.com/group/subgroup",
       url: "https://gitlab.example.com/group/subgroup/project/-/issues/7",
       canonical: "https://gitlab.example.com/group/subgroup/project/-/issues/7",
-      repositoryUrl: "https://gitlab.example.com/group/subgroup/project",
-      body: { externalIssue: "456#7" },
     },
     {
       provider: "gitlab",
       domain: "gitlab.example.com/group/subgroup",
       url: "https://gitlab.example.com/group/subgroup/pull/-/issues/7",
       canonical: "https://gitlab.example.com/group/subgroup/pull/-/issues/7",
-      repositoryUrl: "https://gitlab.example.com/group/subgroup/pull",
-      body: { externalIssue: "456#7" },
     },
     {
       provider: "gitlab",
       domain: "gitlab.example.com",
       url: "https://gitlab.example.com/gitlab/group/project/issues/7",
       canonical: "https://gitlab.example.com/gitlab/group/project/-/issues/7",
-      repositoryUrl: "https://gitlab.example.com/gitlab/group/project",
-      body: { externalIssue: "456#7" },
     },
     {
       provider: "gitlab",
@@ -142,124 +129,76 @@ describe("native tracker issue links", () => {
       url: "https://gitlab.example.com/services/gitlab/group/subgroup/project/-/issues/7",
       canonical:
         "https://gitlab.example.com/services/gitlab/group/subgroup/project/-/issues/7",
-      repositoryUrl:
-        "https://gitlab.example.com/services/gitlab/group/subgroup/project",
-      body: { externalIssue: "456#7" },
     },
     {
       provider: "bitbucket",
       domain: "bitbucket.org/workspace",
       url: "https://bitbucket.org/workspace/repo/issues/7/a-title",
       canonical: "https://bitbucket.org/workspace/repo/issues/7",
-      body: { repo: "workspace/repo", externalIssue: "7" },
     },
     {
       provider: "bitbucket",
       domain: "username",
       url: "https://bitbucket.org/username/commits/issues/7",
       canonical: "https://bitbucket.org/username/commits/issues/7",
-      body: { repo: "username/commits", externalIssue: "7" },
     },
     {
       provider: "vsts",
       domain: "https://example.visualstudio.com",
       url: "https://dev.azure.com/example/project/_workitems/edit/7",
-      canonical: "https://example.visualstudio.com/_workitems/edit/7",
-      body: { externalIssue: "7" },
+      canonical: "https://dev.azure.com/example/project/_workitems/edit/7",
     },
     {
       provider: "vsts",
       domain: "https://dev.azure.com/example",
       url: "https://example.visualstudio.com/project/_workitems/edit/7",
-      canonical: "https://dev.azure.com/example/_workitems/edit/7",
-      body: { externalIssue: "7" },
+      canonical: "https://example.visualstudio.com/project/_workitems/edit/7",
     },
-  ])("prepares $provider without creating or commenting", async (fixture) => {
-    const requests = mockApi((request) => {
+    ...["github", "github_enterprise"].flatMap((provider) =>
+      ["issues", "pull"].map((path) => ({
+        provider,
+        domain: "github.example.com/owner",
+        url: `https://github.example.com/OWNER/repo/${path}/7`,
+        canonical: `https://github.example.com/OWNER/repo/${path}/7`,
+      }))
+    ),
+  ])("links $provider using the URL without repository discovery or a comment", async (fixture) => {
+    const requests = mockApi(async (request) => {
       const url = new URL(request.url);
       expect(url.origin).toBe(REGION);
       expect(request.cache).toBe("no-store");
-      expect(request.method).toBe("GET");
-      if (url.pathname === INTEGRATIONS) {
-        return json([integration(fixture.provider, fixture.domain)]);
+      if (request.method === "PUT") {
+        expect(url.pathname).toBe(`${INTEGRATIONS}10/`);
+        expect(await request.json()).toEqual({
+          externalIssue: fixture.url,
+        });
+        return Response.json(
+          { ...LINK, id: 1234, integrationId: 10, url: fixture.canonical },
+          { status: 201 }
+        );
       }
-      expect(url.pathname).toBe(GITLAB_REPOSITORIES);
-      expect(url.searchParams.get("search")).toBe(
-        fixture.repositoryUrl?.split("/").at(-1)
-      );
-      return json({
-        repos: [
-          {
-            identifier: "456",
-            name: "Group / Project",
-            url: fixture.repositoryUrl,
-            isInstalled: false,
-            externalId: "gitlab.example.com:456",
-            defaultBranch: null,
-          },
-        ],
-        searchable: true,
-      });
+      expect(request.method).toBe("GET");
+      expect(url.pathname).toBe(INTEGRATIONS);
+      return json([integration(fixture.provider, fixture.domain)]);
     });
-
     const prepared = await resolveNativeIssueLink({
       ...SOURCE,
       url: fixture.url,
     });
-
     expect(prepared).toMatchObject({
       ...SOURCE,
       regionUrl: REGION,
       integrationId: "10",
       provider: fixture.provider,
-      url: fixture.canonical,
-      body: fixture.body,
+      url: fixture.url,
     });
     expect(prepared.existing).toBeUndefined();
-    expect(requests).toHaveLength(fixture.provider === "gitlab" ? 2 : 1);
-    if (fixture.provider === "gitlab") {
-      expect(prepared.key).toBe("Group / Project#7");
-    }
-  });
-
-  test.each([
-    { provider: "github", host: "github.com", path: "issues" },
-    {
-      provider: "github_enterprise",
-      host: "github.example.com",
-      path: "issues",
-    },
-    { provider: "github", host: "github.com", path: "pull" },
-    { provider: "github_enterprise", host: "github.example.com", path: "pull" },
-  ])("prepares $provider /$path with the registered repository spelling", async ({
-    provider,
-    host,
-    path,
-  }) => {
-    const requests = mockApi((request) => {
-      const { pathname } = new URL(request.url);
-      expect(request.method).toBe("GET");
-      if (pathname === INTEGRATIONS) {
-        return json([
-          integration(provider, `${host}/owner`, "10"),
-          integration(provider, `${host}/owner`, "20"),
-        ]);
-      }
-      expect(pathname).toBe(REPOSITORIES);
-      return json([repository("Owner/Repo", "20")]);
+    expect(requests).toHaveLength(1);
+    expect(await linkNativeIssue(prepared)).toMatchObject({
+      changed: true,
+      link: { url: fixture.canonical },
     });
-
-    const prepared = await resolveNativeIssueLink({
-      ...SOURCE,
-      url: `https://${host}/OWNER/repo/${path}/7`,
-    });
-
-    expect(prepared).toMatchObject({
-      integrationId: "20",
-      body: { repo: "Owner/Repo", externalIssue: "7" },
-      url: `https://${host}/Owner/Repo/${path}/7`,
-    });
-    expect(requests).toHaveLength(2);
+    expect(requests.map((request) => request.method)).toEqual(["GET", "PUT"]);
   });
 
   test.each([
@@ -285,8 +224,7 @@ describe("native tracker issue links", () => {
       if (request.method === "PUT") {
         expect(url.pathname).toBe(`${INTEGRATIONS}10/`);
         expect(await request.json()).toEqual({
-          repo: "Owner/Repo",
-          externalIssue: "7",
+          externalIssue: `https://${host}/OWNER/repo/pull/7/files?source=cli`,
         });
         linked = true;
         // The mutation uses GitHub's html_url; listing reconstructs /issues/N.
@@ -312,8 +250,7 @@ describe("native tracker issue links", () => {
           ),
         ]);
       }
-      expect(url.pathname).toBe(REPOSITORIES);
-      return json([repository("Owner/Repo", "10")]);
+      throw new Error(`Unexpected request: ${request.url}`);
     });
 
     const options = {
@@ -355,6 +292,145 @@ describe("native tracker issue links", () => {
     ).toEqual(["PUT", "DELETE"]);
   });
 
+  test("preserves the full query while stripping fragment and trailing slash", async () => {
+    mockApi(() => json([integration()]));
+    const prepared = await resolveNativeIssueLink({
+      ...SOURCE,
+      url: `${JIRA_URL}/?source=cli#details`,
+    });
+    expect(prepared.url).toBe(`${JIRA_URL}?source=cli`);
+  });
+
+  test.each([
+    {
+      domain: "tracker.example.com",
+      url: "https://tracker.example.com/projects/PROJ/issues/PROJ-7",
+      stored: JIRA_URL,
+    },
+    {
+      domain: "tracker.example.com",
+      url: "https://tracker.example.com/jira/software/projects/PROJ/boards/1?selectedIssue=PROJ-7&view=detail",
+      stored: JIRA_URL,
+    },
+    {
+      domain: "tracker.example.com/jira",
+      url: "https://tracker.example.com/jira/secure/RapidBoard.jspa?rapidView=1&selectedIssue=PROJ-7",
+      stored: "https://tracker.example.com/jira/browse/PROJ-7",
+    },
+  ])("forwards Jira copy link $url and matches its stored browse alias", async ({
+    domain,
+    url,
+    stored,
+  }) => {
+    const requests = mockApi(async (request) => {
+      if (request.method === "GET")
+        return json([integration("jira_server", domain)]);
+      expect(await request.json()).toEqual({ externalIssue: url });
+      return Response.json(
+        { ...LINK, id: 1234, integrationId: 10, url: stored },
+        { status: 201 }
+      );
+    });
+    const prepared = await resolveNativeIssueLink({ ...SOURCE, url });
+    expect(await linkNativeIssue(prepared)).toMatchObject({
+      changed: true,
+      link: { url: stored },
+    });
+    expect(
+      findNativeIssueLink(
+        [{ ...LINK, provider: "jira_server", url: stored }],
+        url
+      )?.id
+    ).toBe(LINK.id);
+    expect(requests).toHaveLength(2);
+  });
+
+  test("unknown Jira board contexts require a canonical issue URL before any mutation", async () => {
+    const requests = mockApi(() =>
+      json([integration("jira_server", "tracker.example.com")])
+    );
+    const url =
+      "https://tracker.example.com/jira-archive/board?selectedIssue=PROJ-7";
+    await expect(resolveNativeIssueLink({ ...SOURCE, url })).rejects.toThrow(
+      "canonical /browse/"
+    );
+    expect(() => findNativeIssueLink([LINK], url)).toThrow(
+      "canonical /browse/"
+    );
+    expect(requests.every((request) => request.method === "GET")).toBe(true);
+  });
+
+  test("selects GitHub cloud installations with missing domain metadata by owner", async () => {
+    mockApi(() => json([{ ...integration("github", null), name: "Owner" }]));
+    expect(
+      await resolveNativeIssueLink({
+        ...SOURCE,
+        url: "https://github.com/OWNER/repo/issues/7",
+      })
+    ).toMatchObject({ integrationId: "10" });
+    await expect(
+      resolveNativeIssueLink({
+        ...SOURCE,
+        url: "https://github.com/another/repo/issues/7",
+      })
+    ).rejects.toThrow("No installed native");
+  });
+
+  test("requires an explicit Enterprise installation when its host metadata is missing", async () => {
+    mockApi(() =>
+      json([{ ...integration("github_enterprise", null), name: "Owner" }])
+    );
+    const options = {
+      ...SOURCE,
+      url: "https://github.example.com/OWNER/repo/pull/7",
+    };
+    await expect(resolveNativeIssueLink(options)).rejects.toThrow(
+      "--integration"
+    );
+    expect(
+      await resolveNativeIssueLink({ ...options, integrationId: "10" })
+    ).toMatchObject({ integrationId: "10", url: options.url });
+  });
+
+  test("requires a selector for GitLab installations sharing a host", async () => {
+    mockApi(() =>
+      json([
+        integration("gitlab", "gitlab.example.com/group", "10"),
+        integration("gitlab", "gitlab.example.com/another", "20"),
+      ])
+    );
+    const options = {
+      ...SOURCE,
+      url: "https://gitlab.example.com/deployment/group/repo/-/issues/7",
+    };
+    await expect(resolveNativeIssueLink(options)).rejects.toThrow(
+      "Multiple integrations"
+    );
+    expect(
+      await resolveNativeIssueLink({ ...options, integrationId: "10" })
+    ).toMatchObject({ integrationId: "10", url: options.url });
+  });
+
+  test("malformed stored URLs and domains do not block an unrelated valid association", async () => {
+    const requests = mockApi(() =>
+      json([
+        integration("jira", "https://", "20"),
+        integration("jira", "tracker.example.com", "10", [
+          { ...LINK, id: "999", url: "not a URL" },
+          LINK,
+        ]),
+      ])
+    );
+    const prepared = await resolveNativeIssueLink({ ...SOURCE, url: JIRA_URL });
+    expect(await linkNativeIssue(prepared)).toMatchObject({
+      changed: false,
+      link: LINK,
+    });
+    const links = await listNativeIssueLinks(SOURCE.orgSlug, SOURCE.issueId);
+    expect(findNativeIssueLink(links, JIRA_URL)?.id).toBe(LINK.id);
+    expect(requests.every((request) => request.method === "GET")).toBe(true);
+  });
+
   test("does not treat a Bitbucket pull request as an issue", async () => {
     const requests = mockApi(() =>
       json([integration("bitbucket", "bitbucket.org/owner")])
@@ -368,20 +444,22 @@ describe("native tracker issue links", () => {
     expect(requests.every((request) => request.method === "GET")).toBe(true);
   });
 
-  test("does not select GitHub repositories absent from the installation", async () => {
-    mockApi((request) =>
-      json(
-        new URL(request.url).pathname === INTEGRATIONS
-          ? [integration("github", "github.com/owner")]
-          : [repository("owner/repo", "20")]
-      )
+  test("delegates repository membership and URL validation to the backend", async () => {
+    const requests = mockApi((request) =>
+      request.method === "GET"
+        ? json([integration("github", "github.com/owner")])
+        : Response.json(
+            { detail: "Repository is not installed" },
+            { status: 400 }
+          )
     );
     await expect(
       resolveNativeIssueLink({
         ...SOURCE,
         url: "https://github.com/owner/repo/issues/7",
-      })
-    ).rejects.toThrow("No installed native");
+      }).then(linkNativeIssue)
+    ).rejects.toBeInstanceOf(ApiError);
+    expect(requests.map((request) => request.method)).toEqual(["GET", "PUT"]);
   });
 
   test.each([
@@ -400,78 +478,6 @@ describe("native tracker issue links", () => {
       resolveNativeIssueLink({ ...SOURCE, url: JIRA_URL }).then(linkNativeIssue)
     ).rejects.toBeInstanceOf(ApiError);
     expect(requests.map((request) => request.method)).toEqual(["GET"]);
-  });
-
-  test.each([
-    { name: "empty 204", response: () => new Response(null, { status: 204 }) },
-    { name: "non-array page", response: () => json({}) },
-    {
-      name: "invalid repository",
-      response: () => json([{ ...repository("owner/repo", "10"), name: 42 }]),
-    },
-  ])("rejects an invalid SDK repository response: $name", async ({
-    response,
-  }) => {
-    const requests = mockApi((request) =>
-      new URL(request.url).pathname === INTEGRATIONS
-        ? json([integration("github", "github.com/owner")])
-        : response()
-    );
-    await expect(
-      resolveNativeIssueLink({
-        ...SOURCE,
-        url: "https://github.com/owner/repo/issues/7",
-      }).then(linkNativeIssue)
-    ).rejects.toBeInstanceOf(ApiError);
-    expect(requests.map((request) => request.method)).toEqual(["GET", "GET"]);
-  });
-
-  test("preserves repository pagination and provider body fields through the SDK", async () => {
-    const githubLink = {
-      ...LINK,
-      provider: "github",
-      key: "owner/repo#7",
-      url: "https://github.com/owner/repo/issues/7",
-    };
-    const requests = mockApi(async (request) => {
-      const url = new URL(request.url);
-      expect(url.origin).toBe(REGION);
-      expect(request.cache).toBe("no-store");
-      if (request.method === "PUT") {
-        expect(url.pathname).toBe(`${INTEGRATIONS}10/`);
-        expect(await request.json()).toEqual({
-          repo: "owner/repo",
-          externalIssue: "7",
-        });
-        return Response.json(
-          { ...githubLink, id: 1234, integrationId: 10 },
-          { status: 201 }
-        );
-      }
-      expect(request.method).toBe("GET");
-      if (url.pathname === INTEGRATIONS) {
-        return json([integration("github", "github.com/owner")]);
-      }
-      expect(url.pathname).toBe(REPOSITORIES);
-      expect(url.searchParams.get("per_page")).toBe("100");
-      if (!url.searchParams.has("cursor")) {
-        return json([], {
-          Link: '<https://eu.sentry.io/ignored>; rel="next"; results="true"; cursor="second"',
-        });
-      }
-      expect(url.searchParams.get("cursor")).toBe("second");
-      return json([repository("owner/repo", "10")]);
-    });
-
-    const prepared = await resolveNativeIssueLink({
-      ...SOURCE,
-      url: githubLink.url,
-    });
-    expect(await linkNativeIssue(prepared)).toEqual({
-      link: githubLink,
-      changed: true,
-    });
-    expect(requests).toHaveLength(4);
   });
 
   test("fetches all integration pages before deciding the link is absent", async () => {
@@ -518,7 +524,7 @@ describe("native tracker issue links", () => {
       expect(request.cache).toBe("no-store");
       if (request.method === "PUT") {
         expect(new URL(request.url).pathname).toBe(`${INTEGRATIONS}10/`);
-        expect(await request.json()).toEqual({ externalIssue: "PROJ-7" });
+        expect(await request.json()).toEqual({ externalIssue: JIRA_URL });
         return Response.json(
           { ...LINK, id: 1234, integrationId: 10 },
           { status: 201 }
@@ -563,25 +569,54 @@ describe("native tracker issue links", () => {
   test.each([
     "PUT",
     "DELETE",
-  ])("does not retry failed %s mutations", async (method) => {
-    const requests = mockApi((request) => {
-      if (request.method === "GET") {
-        return json([integration()]);
-      }
-      expect(request.method).toBe(method);
-      return new Response(JSON.stringify({ detail: "Temporary error" }), {
-        status: 503,
+  ])("retries an idempotent %s mutation", async (method) => {
+    vi.useFakeTimers();
+    try {
+      let attempts = 0;
+      const requests = mockApi((request) => {
+        if (request.method === "GET") return json([integration()]);
+        expect(request.method).toBe(method);
+        attempts += 1;
+        if (attempts === 1)
+          return Response.json({ detail: "Temporary error" }, { status: 503 });
+        return method === "PUT"
+          ? json({ ...LINK, id: 1234, integrationId: 10 })
+          : new Response(null, { status: 204 });
       });
-    });
+      const prepared = await resolveNativeIssueLink({
+        ...SOURCE,
+        url: JIRA_URL,
+      });
+      const mutation =
+        method === "PUT"
+          ? linkNativeIssue(prepared)
+          : unlinkNativeIssueLink(SOURCE.orgSlug, SOURCE.issueId, LINK);
+      await vi.runAllTimersAsync();
+      if (method === "PUT") {
+        expect(await mutation).toMatchObject({ changed: false });
+      } else {
+        await mutation;
+      }
+      expect(
+        requests.filter((request) => request.method === method)
+      ).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a concurrent PUT no-op uses the backend's 200 status", async () => {
+    mockApi((request) =>
+      request.method === "GET"
+        ? json([integration()])
+        : json({ ...LINK, id: 1234, integrationId: 10 })
+    );
     const prepared = await resolveNativeIssueLink({ ...SOURCE, url: JIRA_URL });
-    const mutation =
-      method === "PUT"
-        ? linkNativeIssue(prepared)
-        : unlinkNativeIssueLink(SOURCE.orgSlug, SOURCE.issueId, LINK);
-    await expect(mutation).rejects.toThrow();
-    expect(
-      requests.filter((request) => request.method === method)
-    ).toHaveLength(1);
+    expect(prepared.existing).toBeUndefined();
+    expect(await linkNativeIssue(prepared)).toEqual({
+      link: LINK,
+      changed: false,
+    });
   });
 
   test("DELETE uses Sentry's ExternalIssue ID and accepts an empty 204 response", async () => {
@@ -617,13 +652,11 @@ describe("native tracker issue links", () => {
     url,
     canonical,
   }) => {
-    const storedLink = { ...LINK, provider, url, title: null };
+    const storedLink = { ...LINK, provider, url };
     const requests = mockApi((request) => {
       if (request.method === "GET") {
         expect(new URL(request.url).pathname).toBe(INTEGRATIONS);
-        return json([
-          { ...integration(provider, domain), externalIssues: [storedLink] },
-        ]);
+        return json([integration(provider, domain, "10", [storedLink])]);
       }
       expect(request.method).toBe("DELETE");
       expect(new URL(request.url).searchParams.get("externalIssue")).toBe(
@@ -633,9 +666,9 @@ describe("native tracker issue links", () => {
     });
     const link = findNativeIssueLink(
       await listNativeIssueLinks(SOURCE.orgSlug, SOURCE.issueId),
-      url
+      canonical
     );
-    expect(link).toEqual({ ...storedLink, url: canonical, title: undefined });
+    expect(link).toEqual({ ...storedLink, title: undefined });
     if (!link) {
       throw new Error("Expected the existing external issue link");
     }
@@ -674,16 +707,6 @@ describe("native tracker issue links", () => {
 
   test.each([
     {
-      provider: "gitlab",
-      domain: "gitlab.example.com/team",
-      url: "https://gitlab.example.com/another/repo/issues/7",
-    },
-    {
-      provider: "gitlab",
-      domain: "gitlab.example.com/team",
-      url: "https://gitlab.example.com/wrong/team/repo/issues/7",
-    },
-    {
       provider: "jira",
       domain: "https://tracker.example.com/jira",
       url: JIRA_URL,
@@ -703,21 +726,7 @@ describe("native tracker issue links", () => {
     domain,
     url,
   }) => {
-    mockApi((request) =>
-      json(
-        new URL(request.url).pathname === INTEGRATIONS
-          ? [integration(provider, domain)]
-          : {
-              repos: [
-                {
-                  identifier: "456",
-                  name: "Team / Repo",
-                  url: "https://gitlab.example.com/team/repo",
-                },
-              ],
-            }
-      )
-    );
+    mockApi(() => json([integration(provider, domain)]));
     await expect(resolveNativeIssueLink({ ...SOURCE, url })).rejects.toThrow(
       "No installed native"
     );
@@ -772,6 +781,54 @@ describe("findNativeIssueLink", () => {
   }) => {
     const link = { ...LINK, provider, url: existing };
     expect(findNativeIssueLink([link], target)).toBe(link);
+  });
+
+  test.each([
+    {
+      stored: "https://tracker.example.com/browse/PROJ-7",
+      target: "https://tracker.example.com/jira-archive/browse/PROJ-7",
+    },
+    {
+      stored: "https://tracker.example.com/jira/browse/PROJ-7",
+      target: "https://tracker.example.com/jira/archive/browse/PROJ-7",
+    },
+    {
+      stored: "https://tracker.example.com/browse/PROJ-7",
+      target:
+        "https://tracker.example.com/jira-archive/projects/PROJ/issues/PROJ-7",
+    },
+    {
+      stored: "https://tracker.example.com/browse/PROJ-7",
+      target:
+        "https://tracker.example.com/jira-archive/secure/RapidBoard.jspa?selectedIssue=PROJ-7",
+    },
+    {
+      stored: "https://tracker.example.com/jira/browse/PROJ-7",
+      target:
+        "https://tracker.example.com/jira/archive/secure/RapidBoard.jspa?selectedIssue=PROJ-7",
+    },
+  ])("does not match Jira aliases from another context: $target", ({
+    stored,
+    target,
+  }) => {
+    expect(
+      findNativeIssueLink(
+        [{ ...LINK, provider: "jira_server", url: stored }],
+        target
+      )
+    ).toBeUndefined();
+  });
+
+  test("a Jira sibling on the same host does not block an Enterprise issue match", () => {
+    const enterprise = {
+      ...LINK,
+      id: "5678",
+      provider: "github_enterprise",
+      url: "https://tracker.example.com/owner/repo/issues/7",
+    };
+    expect(findNativeIssueLink([LINK, enterprise], enterprise.url)).toBe(
+      enterprise
+    );
   });
 
   test("rejects ambiguous links and accepts an integration selector", () => {

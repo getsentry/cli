@@ -165,7 +165,7 @@ export async function linkExternalIssue(
       changed: false,
       externalIssue: {
         id: prepared.existing?.id,
-        identifier: prepared.key,
+        identifier: prepared.existing?.key,
         url: prepared.url,
         provider: prepared.provider,
       },

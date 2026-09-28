@@ -61,8 +61,6 @@ beforeEach(() => {
     regionUrl: "https://de.sentry.io",
     integrationId: nativeLink.integrationId,
     provider: nativeLink.provider,
-    key: nativeLink.key,
-    body: { repo: "example/app", externalIssue: "42" },
   });
   vi.mocked(linkNativeIssue).mockResolvedValue({
     link: nativeLink,

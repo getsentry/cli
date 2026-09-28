@@ -48,41 +48,9 @@ describe("runWithScopeRecovery", () => {
     expect(proceed).toHaveBeenCalledTimes(2);
     expect(testRuntime.getAuthScopes).toHaveBeenCalledOnce();
     expect(testRuntime.assertTrustedHost).toHaveBeenCalledOnce();
-    expect(login).toHaveBeenCalledWith({ scope: OAUTH_SCOPES.join(" ") });
+    expect(login).toHaveBeenCalledWith();
     expect(testRuntime.write).toHaveBeenCalledWith(
       expect.stringContaining("team:admin")
-    );
-  });
-
-  test("preserves custom grants when recovering issue unlink authorization", async () => {
-    const error = new ApiError("Forbidden", 403);
-    const proceed = vi
-      .fn<(argv: string[]) => Promise<void>>()
-      .mockRejectedValueOnce(error)
-      .mockResolvedValueOnce();
-    const login = vi.fn().mockResolvedValue({ method: "oauth" });
-    const testRuntime = runtime({
-      getAuthScopes: vi
-        .fn()
-        .mockResolvedValue([
-          ...OAUTH_SCOPES.filter((scope) => scope !== "event:write"),
-          "org:write",
-        ]),
-    });
-
-    await runWithScopeRecovery(
-      proceed,
-      ["issue", "unlink"],
-      login,
-      testRuntime
-    );
-
-    expect(login).toHaveBeenCalledWith({
-      scope: [...OAUTH_SCOPES, "org:write"].join(" "),
-    });
-    expect(proceed).toHaveBeenCalledTimes(2);
-    expect(testRuntime.write).toHaveBeenCalledWith(
-      expect.stringContaining("missing event:write")
     );
   });
 
@@ -187,52 +155,38 @@ describe("runWithScopeRecovery", () => {
 
   test("checks scopes but does not launch OAuth without an interactive TTY", async () => {
     const error = new ApiError("Forbidden", 403);
-    const getAuthScopes = vi
-      .fn()
-      .mockResolvedValue([
-        ...OAUTH_SCOPES.filter((scope) => scope !== "event:write"),
-        "org:write",
-      ]);
+    const getAuthScopes = vi.fn().mockResolvedValue([]);
     const login = vi.fn();
-    const testRuntime = runtime({ getAuthScopes, inputIsTty: () => false });
 
     await expect(
       runWithScopeRecovery(
         vi.fn().mockRejectedValue(error),
         [],
         login,
-        testRuntime
+        runtime({ getAuthScopes, inputIsTty: () => false })
       )
     ).rejects.toBe(error);
 
     expect(getAuthScopes).toHaveBeenCalledOnce();
     expect(login).not.toHaveBeenCalled();
-    expect(testRuntime.write).toHaveBeenCalledWith(
-      "Your CLI authorization is missing event:write.\n" +
-        `Re-authenticate with: sentry auth refresh ${[...OAUTH_SCOPES, "org:write"].map((scope) => `--scope ${scope}`).join(" ")}\n`
-    );
   });
 
   test("does not launch OAuth when JSON output disables prompts", async () => {
     const error = new ApiError("Forbidden", 403);
     const getAuthScopes = vi.fn().mockResolvedValue([]);
     const login = vi.fn();
-    const testRuntime = runtime({ getAuthScopes, promptsAllowed: () => false });
 
     await expect(
       runWithScopeRecovery(
         vi.fn().mockRejectedValue(error),
         ["--json"],
         login,
-        testRuntime
+        runtime({ getAuthScopes, promptsAllowed: () => false })
       )
     ).rejects.toBe(error);
 
     expect(getAuthScopes).toHaveBeenCalledOnce();
     expect(login).not.toHaveBeenCalled();
-    expect(testRuntime.write).toHaveBeenCalledWith(
-      expect.stringContaining("sentry auth refresh --scope project:read")
-    );
   });
 
   test("preserves the original error when scope inspection fails", async () => {

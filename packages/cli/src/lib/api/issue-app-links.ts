@@ -4,13 +4,19 @@
  */
 
 import {
+  deleteOrganizationIssueExternalIssue,
+  executeSentryAppInstallationExternalIssueAction,
   type GroupExternalIssueResponse,
+  getSentryAppInstallationExternalRequestOptions,
+  type ListOrganizationSentryAppComponentsResponse,
   type ListOrganizationSentryAppInstallationsResponse,
   listOrganizationIssueExternalIssues,
+  listOrganizationSentryAppComponents,
   listOrganizationSentryAppInstallations,
 } from "@sentry/api";
 import {
   vGroupExternalIssueResponse,
+  vListOrganizationSentryAppComponentsResponse,
   vListOrganizationSentryAppInstallationsResponse,
 } from "@sentry/api/valibot";
 import {
@@ -27,23 +33,21 @@ import {
   string,
   tuple,
   union,
-  unknown,
 } from "valibot";
 import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import { getControlSiloUrl, getSdkConfig } from "../sentry-client.js";
 import {
-  apiRequestToRegion,
-  apiRequestToRegionNoContent,
   MAX_PAGINATION_PAGES,
   type PaginatedResponse,
-  parseLinkHeader,
   unwrapPaginatedResult,
+  unwrapResult,
 } from "./infrastructure.js";
 
 /** A stored Sentry App association; id identifies the link, not the remote ticket. */
 export type AppIssueLink = GroupExternalIssueResponse[number];
 type AppInstallation = ListOrganizationSentryAppInstallationsResponse[number];
+type Component = ListOrganizationSentryAppComponentsResponse[number];
 const ChoiceSchema = tuple([
   union([string(), number()]),
   union([string(), number()]),
@@ -63,18 +67,10 @@ const LinkFormSchema = object({
   required_fields: optional(array(FieldSchema)),
   optional_fields: optional(array(FieldSchema)),
 });
-const ComponentSchema = object({
-  type: string(),
-  error: optional(unknown()),
-  sentryApp: object({ slug: string(), uuid: string() }),
-  schema: object({ link: optional(LinkFormSchema) }),
-});
-const ComponentsSchema = array(ComponentSchema);
 const ChoicesResponseSchema = object({ choices: array(ChoiceSchema) });
 type Choice = InferOutput<typeof ChoiceSchema>;
 type Field = InferOutput<typeof FieldSchema>;
 type LinkForm = InferOutput<typeof LinkFormSchema>;
-type Component = InferOutput<typeof ComponentSchema>;
 
 /** Inputs for a read-only preflight of the app's existing-issue link action. */
 export type ResolveAppIssueLinkOptions = {
@@ -161,7 +157,7 @@ function parseTarget(raw: string) {
   const identity = linear
     ? `linear.app/${linear[1]?.toLowerCase()}/${linear[2]?.toUpperCase()}`
     : `${url.origin}${url.pathname.replace(TRAILING_SLASHES, "")}${url.search}${url.hash}`;
-  return { url, identity, key: linear?.[2]?.toUpperCase() };
+  return { url: url.href, identity, key: linear?.[2]?.toUpperCase() };
 }
 
 /** Match a stored target by URL, ignoring Linear title suffixes; reject ambiguous matches. */
@@ -171,11 +167,18 @@ export function findAppIssueLink(
   appSlug?: string
 ): AppIssueLink | undefined {
   const target = parseTarget(url);
-  const matches = links.filter(
-    (link) =>
-      (!appSlug || link.serviceType === appSlug) &&
-      parseTarget(link.webUrl).identity === target.identity
-  );
+  const matches = links.filter((link) => {
+    if (appSlug && link.serviceType !== appSlug) {
+      return false;
+    }
+    // biome-ignore lint/plugin: Invalid persisted URLs cannot identify the requested target.
+    try {
+      return parseTarget(link.webUrl).identity === target.identity;
+    } catch {
+      // A malformed stored sibling must not prevent unlinking a valid target.
+      return false;
+    }
+  });
   if (matches.length > 1) {
     throw new ValidationError(
       "Multiple app links match this URL; specify the app with --app",
@@ -345,24 +348,18 @@ async function getLinkForm(
   installation: AppInstallation
 ): Promise<LinkForm> {
   const endpoint = `/organizations/${encodeURIComponent(orgSlug)}/sentry-app-components/`;
-  // Installed app UI components are not exposed by the SDK.
+  const config = getSdkConfig(getControlSiloUrl(), { cache: "no-store" });
   const components = await listAll<Component>(
     async (cursor) => {
-      const { data, headers } = await apiRequestToRegion<unknown>(
-        getControlSiloUrl(),
-        endpoint,
-        {
-          params: { filter: "issue-link", cursor },
-          cache: "no-store",
-        }
-      );
-      return {
-        data,
-        nextCursor: parseLinkHeader(headers.get("Link")).nextCursor,
-      };
+      const result = await listOrganizationSentryAppComponents({
+        ...config,
+        path: { organization_id_or_slug: orgSlug },
+        query: { filter: "issue-link", cursor },
+      });
+      return unwrapPaginatedResult(result, "Failed to list app components");
     },
     endpoint,
-    ComponentsSchema
+    vListOrganizationSentryAppComponentsResponse
   );
   const matches = components.filter(
     (item) =>
@@ -370,8 +367,7 @@ async function getLinkForm(
       item.sentryApp.uuid === installation.app.uuid
   );
   const component = matches[0];
-  const form = component?.schema.link;
-  if (matches.length !== 1 || !component || !form) {
+  if (matches.length !== 1 || !component) {
     throw new ValidationError(
       `App ${installation.app.slug} does not expose an unambiguous issue-link form`,
       "app"
@@ -384,8 +380,16 @@ async function getLinkForm(
       JSON.stringify(component.error)
     );
   }
-  validateUri(form.uri);
-  return form;
+  // App-defined form schemas are intentionally untyped in the API contract.
+  const form = safeParse(LinkFormSchema, component.schema.link);
+  if (!form.success) {
+    throw new ValidationError(
+      `App ${installation.app.slug} does not expose a supported issue-link form`,
+      "app"
+    );
+  }
+  validateUri(form.output.uri);
+  return form.output;
 }
 
 async function getChoices({
@@ -405,34 +409,29 @@ async function getChoices({
     return field.choices ?? field.options ?? [];
   }
   validateUri(field.uri);
-  const dependentData: Record<string, string | number> = {};
-  for (const name of field.depends_on ?? []) {
-    if (values[name] === undefined) {
-      throw new ValidationError(
-        `App field ${field.name} requires --field ${name}=VALUE`,
-        "field"
-      );
-    }
-    dependentData[name] = values[name];
-  }
-  // App form option searches are not exposed by the SDK.
-  const { data } = await apiRequestToRegion<{ choices: Choice[] }>(
-    getControlSiloUrl(),
-    `/sentry-app-installations/${encodeURIComponent(installationUuid)}/external-requests/`,
-    {
-      params: {
-        uri: field.uri,
-        query,
-        projectId,
-        dependentData: field.depends_on?.length
-          ? JSON.stringify(dependentData)
-          : undefined,
-      },
-      cache: "no-store",
-      schema: ChoicesResponseSchema,
-    }
+  const dependentData = Object.fromEntries(
+    (field.depends_on ?? []).map((name) => [name, values[name]])
   );
-  return data.choices;
+  const result = await getSentryAppInstallationExternalRequestOptions({
+    ...getSdkConfig(getControlSiloUrl(), { cache: "no-store" }),
+    path: { uuid: installationUuid },
+    query: {
+      uri: field.uri,
+      query,
+      projectId: projectId === undefined ? undefined : Number(projectId),
+      dependentData: field.depends_on?.length
+        ? JSON.stringify(dependentData)
+        : undefined,
+    },
+  });
+  const parsed = safeParse(
+    ChoicesResponseSchema,
+    unwrapResult(result, "Failed to search app issues")
+  );
+  if (!parsed.success) {
+    throw new ApiError("App search returned invalid issue choices", 0);
+  }
+  return parsed.output.choices;
 }
 
 function selectChoice(
@@ -482,8 +481,15 @@ async function resolveFields(
     );
     const field = pending[index];
     if (!field) {
+      const missing = new Set(
+        pending.flatMap((item) =>
+          (item.depends_on ?? []).filter((name) => values[name] === undefined)
+        )
+      );
       throw new ValidationError(
-        "App link fields have missing or circular dependencies; supply the required --field values",
+        missing.size
+          ? `Missing app link fields: ${[...missing].map((name) => `--field ${name}=VALUE`).join(", ")}`
+          : "App link fields have circular dependencies",
         "field"
       );
     }
@@ -671,53 +677,35 @@ export async function resolveAppIssueLink(
   };
 }
 
-/** Execute one app callback after a fresh singleton check; concurrent server-side replacements remain possible. */
+/** Execute the callback with the backend's atomic no-op and replacement guard. */
 export async function linkAppIssue(
   prepared: PreparedAppIssueLink
 ): Promise<{ link: AppIssueLink; changed: boolean }> {
-  const existing = checkExisting(
-    await listAppIssueLinks(prepared.orgSlug, prepared.issueId),
-    prepared.url,
-    prepared.appSlug
-  );
-  if (existing) {
-    return { link: existing, changed: false };
-  }
   if (prepared.existing) {
-    throw new ValidationError(
-      "The app link changed after preflight; run the command again",
-      "url"
-    );
+    return { link: prepared.existing, changed: false };
   }
   validateUri(prepared.uri);
-  // The SDK's direct registration skips the app's link callback.
-  const { data: link } = await apiRequestToRegion<AppIssueLink>(
-    getControlSiloUrl(),
-    `/sentry-app-installations/${encodeURIComponent(prepared.installationUuid)}/external-issue-actions/`,
-    {
-      method: "POST",
-      body: {
-        ...prepared.fields,
-        groupId: prepared.issueId,
-        action: "link",
-        uri: prepared.uri,
-      },
+  const result = await executeSentryAppInstallationExternalIssueAction({
+    ...getSdkConfig(getControlSiloUrl(), {
+      // A callback can have external effects before a failed association write.
       retry: false,
       cache: "no-store",
-      schema: vGroupExternalIssueResponse.item,
-    }
-  );
-  if (
-    String(link.issueId) !== prepared.issueId ||
-    link.serviceType !== prepared.appSlug ||
-    parseTarget(link.webUrl).identity !== parseTarget(prepared.url).identity
-  ) {
-    throw new ApiError(
-      "The app returned a different issue after linking; inspect the current links before retrying",
-      0
-    );
-  }
-  return { link, changed: true };
+    }),
+    path: { uuid: prepared.installationUuid },
+    query: {
+      expectedExternalIssueUrl: parseTarget(prepared.url).url,
+    },
+    body: {
+      ...prepared.fields,
+      groupId: prepared.issueId,
+      action: "link",
+      uri: prepared.uri,
+    },
+  });
+  return {
+    link: unwrapResult(result, "Failed to link app issue"),
+    changed: result.response?.status === 201,
+  };
 }
 
 /** Remove only the selected local app association, using event:write or event:admin. */
@@ -732,14 +720,14 @@ export async function unlinkAppIssueLink(
       "linkId"
     );
   }
-  // The SDK's installation unlink uses different auth; this group-scoped operation is absent.
-  await apiRequestToRegionNoContent(
-    await resolveOrgRegion(orgSlug),
-    `${groupPath(orgSlug, issueId)}${encodeURIComponent(linkId)}/`,
-    {
-      method: "DELETE",
-      retry: false,
-      cache: "no-store",
-    }
-  );
+  groupPath(orgSlug, issueId);
+  const result = await deleteOrganizationIssueExternalIssue({
+    ...getSdkConfig(await resolveOrgRegion(orgSlug), { cache: "no-store" }),
+    path: {
+      organization_id_or_slug: orgSlug,
+      issue_id: issueId,
+      external_issue_id: linkId,
+    },
+  });
+  unwrapResult(result, "Failed to unlink app issue");
 }
