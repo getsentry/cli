@@ -23,6 +23,7 @@ import {
   getConfiguredSentryUrl,
   SENTRY_CLI_DSN,
 } from "./constants.js";
+import { redactTelemetryEnvelope } from "./credential-redaction.js";
 import { getCustomCaCerts } from "./custom-ca.js";
 import { getTelemetryPreference } from "./db/defaults.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
@@ -595,7 +596,15 @@ export function initSentry(
     // smaller payloads, faster compress/decompress on both sides.
     // Automatic gzip fallback when running on Node < 22.15, where
     // `node:zlib`'s zstd support is unavailable.
-    transport: makeCompressedTransport,
+    transport: (transportOptions) => {
+      const transport = makeCompressedTransport(transportOptions);
+      return {
+        // The SDK adds log scope attributes after beforeSendLog and skips
+        // beforeSend for internal errors. Redact at the final delivery boundary.
+        send: (envelope) => transport.send(redactTelemetryEnvelope(envelope)),
+        flush: (timeout) => transport.flush(timeout),
+      };
+    },
     // Pass custom CA certificates to the transport for corporate TLS proxies.
     // The zstd-transport reads `caCerts` and passes it as `ca:` to
     // `http.request()`, and the SDK's fallback `makeNodeTransport` does the same.

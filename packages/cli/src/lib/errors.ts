@@ -23,6 +23,7 @@
  * @see https://cli.sentry.dev/exit-codes/ for full reference
  */
 
+import { redactCredentialText } from "./credential-redaction.js";
 import {
   buildBillingUrl,
   buildOrgSettingsUrl,
@@ -803,9 +804,9 @@ export function stringifyUnknown(value: unknown): string {
  */
 export function formatError(error: unknown): string {
   if (error instanceof CliError) {
-    return error.format();
+    return redactCredentialText(error.format());
   }
-  return stringifyUnknown(error);
+  return redactCredentialText(stringifyUnknown(error));
 }
 
 /**
