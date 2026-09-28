@@ -114,6 +114,20 @@ describe("sentry auth login --token", () => {
 });
 
 describe("sentry auth whoami", () => {
+  test("rejects a split stored token without exposing it in JSON mode", async () => {
+    const token = "sntryu_SYNTHETIC-PREFIX\nSYNTHETIC-SECRET-TAIL";
+    await ctx.setAuthToken(token);
+
+    const result = await ctx.run(["auth", "whoami", "--json"]);
+    const output = result.stdout + result.stderr;
+
+    expect(result.exitCode).toBe(EXIT.AUTH_INVALID);
+    expect(output).toContain("single line");
+    expect(output).not.toContain("SYNTHETIC-PREFIX");
+    expect(output).not.toContain("SYNTHETIC-SECRET-TAIL");
+    expect(output).not.toContain("Headers.set");
+  });
+
   test("requires authentication", async () => {
     const result = await ctx.run(["auth", "whoami"]);
 

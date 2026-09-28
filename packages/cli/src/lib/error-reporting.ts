@@ -87,10 +87,9 @@ export function classifySilenced(error: unknown): SilenceReason | null {
   //
   // All AuthError reasons are expected auth states the user must act on, not
   // CLI bugs: `not_authenticated` (no token), `expired` (token aged out), and
-  // `invalid` (a bad/insufficiently-scoped token the user supplied). `invalid`
-  // is now only thrown for a genuine 401/403 (see auth/login.ts) — transient
-  // network/server failures no longer masquerade as it — so it is safe to
-  // silence alongside the others (CLI-19).
+  // `invalid` (malformed credentials or a bad/insufficiently-scoped token).
+  // Transient network/server failures do not masquerade as invalid tokens,
+  // so it is safe to silence these alongside the others (CLI-19).
   if (error instanceof AuthError) {
     return "auth_expected";
   }

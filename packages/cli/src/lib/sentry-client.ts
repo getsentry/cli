@@ -10,6 +10,7 @@
 
 import { setTimeout as sleepMs } from "node:timers/promises";
 import { getTraceData } from "@sentry/node-core/light";
+import { formatAuthHeader } from "./auth-header.js";
 import { maybeWarnEnvTokenIgnored } from "./auth-hint.js";
 import { computeInvalidationPrefixes } from "./cache-keys.js";
 import {
@@ -25,7 +26,7 @@ import {
 } from "./custom-ca.js";
 import { applyCustomHeaders } from "./custom-headers.js";
 import { getAuthToken, refreshToken } from "./db/auth.js";
-import { ApiError, HostScopeError, TimeoutError } from "./errors.js";
+import { ApiError, AuthError, HostScopeError, TimeoutError } from "./errors.js";
 import { logger } from "./logger.js";
 import {
   clearLastCacheHitAge,
@@ -145,7 +146,7 @@ function prepareHeaders(
   const sourceHeaders =
     init?.headers ?? (input instanceof Request ? input.headers : undefined);
   const headers = new Headers(sourceHeaders);
-  headers.set("Authorization", `Bearer ${token}`);
+  headers.set("Authorization", formatAuthHeader(token));
   if (!headers.has("User-Agent")) {
     headers.set("User-Agent", getUserAgent());
   }
@@ -181,17 +182,26 @@ async function handleUnauthorized(headers: Headers): Promise<boolean> {
   // the effective auth source, or returns the env token without refresh when
   // SENTRY_FORCE_ENV_TOKEN is set. If the token can't be refreshed (env token,
   // no refresh token), `refreshed` is false and the 401 propagates.
+  let newToken: string;
   try {
-    const { token: newToken, refreshed } = await refreshToken({ force: true });
-    if (refreshed) {
-      headers.set("Authorization", `Bearer ${newToken}`);
-      headers.set(RETRY_MARKER_HEADER, "1");
-      return true;
+    const result = await refreshToken({ force: true });
+    if (!result.refreshed) {
+      return false;
     }
+    newToken = result.token;
   } catch (error) {
+    if (error instanceof AuthError && error.reason === "invalid") {
+      throw error;
+    }
     log.debug("Token refresh failed after 401", error);
+    return false;
   }
-  return false;
+
+  // Invalid refreshed credentials must propagate as an auth error, rather
+  // than being swallowed by the best-effort refresh catch above.
+  headers.set("Authorization", formatAuthHeader(newToken));
+  headers.set(RETRY_MARKER_HEADER, "1");
+  return true;
 }
 
 /** Link an external abort signal to an AbortController */

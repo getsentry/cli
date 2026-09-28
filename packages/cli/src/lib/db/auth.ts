@@ -3,6 +3,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { formatAuthHeader } from "../auth-header.js";
 import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "../constants.js";
 import { getEnv } from "../env.js";
 import { getEnvTokenHost } from "../env-token-host.js";
@@ -609,23 +610,9 @@ async function performTokenRefresh(
   const { refreshAccessToken } = await import("../oauth.js");
   const { AuthError } = await import("../errors.js");
 
+  let tokenResponse: Awaited<ReturnType<typeof refreshAccessToken>>;
   try {
-    const tokenResponse = await refreshAccessToken(storedRefreshToken);
-    const now = Date.now();
-    const expiresAt = now + tokenResponse.expires_in * 1000;
-
-    await setAuthToken(
-      tokenResponse.access_token,
-      tokenResponse.expires_in,
-      tokenResponse.refresh_token ?? storedRefreshToken
-    );
-
-    return {
-      token: tokenResponse.access_token,
-      refreshed: true,
-      expiresAt,
-      expiresIn: tokenResponse.expires_in,
-    };
+    tokenResponse = await refreshAccessToken(storedRefreshToken);
   } catch (error) {
     // Only clear auth on explicit rejection, not network errors
     if (error instanceof AuthError) {
@@ -633,6 +620,25 @@ async function performTokenRefresh(
     }
     throw error;
   }
+
+  // Validate before SQLite can truncate NUL-containing credentials or replace
+  // the current session with a malformed response. Keep that session intact.
+  formatAuthHeader(tokenResponse.access_token);
+  const now = Date.now();
+  const expiresAt = now + tokenResponse.expires_in * 1000;
+
+  await setAuthToken(
+    tokenResponse.access_token,
+    tokenResponse.expires_in,
+    tokenResponse.refresh_token ?? storedRefreshToken
+  );
+
+  return {
+    token: tokenResponse.access_token,
+    refreshed: true,
+    expiresAt,
+    expiresIn: tokenResponse.expires_in,
+  };
 }
 
 /** Get a valid token, refreshing if needed. Use force=true after 401 responses. */
