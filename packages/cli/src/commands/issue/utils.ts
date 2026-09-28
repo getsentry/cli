@@ -99,8 +99,9 @@ export function collectIssueArgs(args: readonly string[]): string[] {
 /**
  * Map issue identifiers with the standard organization fan-out concurrency.
  *
- * Successful values preserve input order. Individual failures invoke
- * `onError`; if every operation fails, the first error is rethrown.
+ * Successful values preserve input order. Partial failures invoke `onError`.
+ * If every operation fails, the first error is rethrown without invoking
+ * `onError`, avoiding duplicate warning and error output.
  *
  * @param issueArgs - Normalized issue identifiers
  * @param operation - Async work to perform for each identifier
@@ -118,16 +119,9 @@ export async function mapIssueArgsConcurrently<T>(
   );
 
   const values: T[] = [];
-  for (let index = 0; index < settled.length; index++) {
-    const result = settled[index];
-    const issueArg = issueArgs[index];
-    if (issueArg === undefined) {
-      continue;
-    }
+  for (const result of settled) {
     if (result?.status === "fulfilled") {
       values.push(result.value);
-    } else if (result?.status === "rejected") {
-      onError(issueArg, result.reason);
     }
   }
 
@@ -135,6 +129,14 @@ export async function mapIssueArgsConcurrently<T>(
     const first = settled[0];
     if (first?.status === "rejected") {
       throw first.reason;
+    }
+  }
+
+  for (let index = 0; index < settled.length; index++) {
+    const result = settled[index];
+    const issueArg = issueArgs[index];
+    if (result?.status === "rejected" && issueArg !== undefined) {
+      onError(issueArg, result.reason);
     }
   }
 
