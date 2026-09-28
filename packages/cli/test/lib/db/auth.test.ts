@@ -7,7 +7,7 @@
  * by property tests (isAuthenticated, getActiveEnvVarName).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import {
   ANON_IDENTITY,
   clearAuth,
@@ -20,7 +20,6 @@ import {
   isAuthenticated,
   isEnvTokenActive,
   refreshToken,
-  resetAuthRowCache,
   resetAuthTokenCache,
   resetHasStoredCredsCache,
   resetIdentityFingerprintCache,
@@ -28,35 +27,10 @@ import {
 } from "../../../src/lib/db/auth.js";
 import { getDatabase } from "../../../src/lib/db/index.js";
 import { MalformedAuthTokenError } from "../../../src/lib/errors.js";
-import { useTestConfigDir } from "../../helpers.js";
+import { useEnvSandbox, useTestConfigDir } from "../../helpers.js";
 
 useTestConfigDir("auth-env-");
-
-let savedAuthToken: string | undefined;
-let savedSentryToken: string | undefined;
-
-beforeEach(() => {
-  savedAuthToken = process.env.SENTRY_AUTH_TOKEN;
-  savedSentryToken = process.env.SENTRY_TOKEN;
-  delete process.env.SENTRY_AUTH_TOKEN;
-  delete process.env.SENTRY_TOKEN;
-  resetIdentityFingerprintCache();
-  resetAuthTokenCache();
-  resetAuthRowCache();
-});
-
-afterEach(() => {
-  if (savedAuthToken !== undefined) {
-    process.env.SENTRY_AUTH_TOKEN = savedAuthToken;
-  } else {
-    delete process.env.SENTRY_AUTH_TOKEN;
-  }
-  if (savedSentryToken !== undefined) {
-    process.env.SENTRY_TOKEN = savedSentryToken;
-  } else {
-    delete process.env.SENTRY_TOKEN;
-  }
-});
+useEnvSandbox(["SENTRY_AUTH_TOKEN", "SENTRY_TOKEN", "SENTRY_FORCE_ENV_TOKEN"]);
 
 describe("env var auth: getAuthToken edge cases", () => {
   test("ignores empty SENTRY_AUTH_TOKEN", () => {
@@ -106,16 +80,6 @@ describe("env var auth: isEnvTokenActive edge case", () => {
 });
 
 describe("env var auth: getActiveEnvVarName", () => {
-  test("returns SENTRY_AUTH_TOKEN when that var is set", () => {
-    process.env.SENTRY_AUTH_TOKEN = "test_token";
-    expect(getActiveEnvVarName()).toBe("SENTRY_AUTH_TOKEN");
-  });
-
-  test("returns SENTRY_TOKEN when only that var is set", () => {
-    process.env.SENTRY_TOKEN = "test_token";
-    expect(getActiveEnvVarName()).toBe("SENTRY_TOKEN");
-  });
-
   test("prefers SENTRY_AUTH_TOKEN when both are set", () => {
     process.env.SENTRY_AUTH_TOKEN = "primary";
     process.env.SENTRY_TOKEN = "secondary";
@@ -195,11 +159,6 @@ describe("env var auth: getRawEnvToken", () => {
     process.env.SENTRY_TOKEN = "\x01secondary-token\x7f";
     expect(getRawEnvToken()).toBe("secondary-token");
     expect(getActiveEnvVarName()).toBe("SENTRY_TOKEN");
-  });
-
-  test("returns SENTRY_TOKEN when SENTRY_AUTH_TOKEN is unset", () => {
-    process.env.SENTRY_TOKEN = "fallback_token";
-    expect(getRawEnvToken()).toBe("fallback_token");
   });
 
   test("returns undefined when no env var is set", () => {

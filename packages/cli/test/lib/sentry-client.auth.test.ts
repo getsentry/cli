@@ -58,18 +58,24 @@ describe("authenticated fetch bearer validation", () => {
   let originalFetch: typeof globalThis.fetch;
   let requests: { url: string; authorization: string | null }[];
 
+  /** Mock responses while recording the actual request URL and Authorization. */
+  function mockResponses(
+    respond: (url: string, authorization: string | null) => Response
+  ): typeof fetch {
+    return mockFetch((input, init) => {
+      const url = extractFetchUrl(input);
+      const authorization = new Headers(init?.headers).get("Authorization");
+      requests.push({ url, authorization });
+      return Promise.resolve(respond(url, authorization));
+    });
+  }
+
   beforeEach(async () => {
     await resetHostScopingState();
     resetAuthenticatedFetch();
     originalFetch = globalThis.fetch;
     requests = [];
-    globalThis.fetch = mockFetch((input, init) => {
-      requests.push({
-        url: extractFetchUrl(input),
-        authorization: new Headers(init?.headers).get("Authorization"),
-      });
-      return Promise.resolve(new Response("{}", { status: 200 }));
-    });
+    globalThis.fetch = mockResponses(() => new Response("{}", { status: 200 }));
   });
 
   afterEach(async () => {
@@ -220,23 +226,17 @@ describe("authenticated fetch bearer validation", () => {
 
   test("stores Vary: Authorization with the credential actually sent", async () => {
     storeLegacyToken("\x1fsynthetic-token\x7f");
-    globalThis.fetch = mockFetch((input, init) => {
-      requests.push({
-        url: extractFetchUrl(input),
-        authorization: new Headers(init?.headers).get("Authorization"),
-      });
-      return Promise.resolve(
-        Response.json(
-          { source: "network" },
-          {
-            headers: {
-              "Cache-Control": "private, max-age=300",
-              Vary: "Authorization",
-            },
-          }
-        )
-      );
-    });
+    globalThis.fetch = mockResponses(() =>
+      Response.json(
+        { source: "network" },
+        {
+          headers: {
+            "Cache-Control": "private, max-age=300",
+            Vary: "Authorization",
+          },
+        }
+      )
+    );
 
     await request();
 
@@ -260,7 +260,7 @@ describe("authenticated fetch bearer validation", () => {
       url: "https://other-sentry.example.com",
       org: "synthetic-org",
     });
-    setAuthToken(` \n${token}\t `);
+    storeLegacyToken(` \n${token}\t `);
     await expect(request()).rejects.toBeInstanceOf(HostScopeError);
     expect(requests).toEqual([]);
   });
@@ -319,24 +319,17 @@ describe("authenticated fetch bearer validation", () => {
   ])("retries with a normalized valid refreshed bearer %#", async (token) => {
     process.env.SENTRY_CLIENT_ID = "synthetic-client-id";
     setAuthToken("stored-token", 3600, "synthetic-refresh-token");
-    globalThis.fetch = mockFetch((input, init) => {
-      const url = extractFetchUrl(input);
-      const authorization = new Headers(init?.headers).get("Authorization");
-      requests.push({ url, authorization });
+    globalThis.fetch = mockResponses((url, authorization) => {
       if (url.endsWith("/oauth/token/")) {
-        return Promise.resolve(
-          Response.json({
-            access_token: token,
-            token_type: "bearer",
-            expires_in: 3600,
-          })
-        );
+        return Response.json({
+          access_token: token,
+          token_type: "bearer",
+          expires_in: 3600,
+        });
       }
-      return Promise.resolve(
-        new Response("{}", {
-          status: authorization === "Bearer stored-token" ? 401 : 200,
-        })
-      );
+      return new Response("{}", {
+        status: authorization === "Bearer stored-token" ? 401 : 200,
+      });
     });
 
     expect((await request()).status).toBe(200);
@@ -357,23 +350,16 @@ describe("authenticated fetch bearer validation", () => {
   ])("rejects malformed refreshed credentials without retrying the request %#", async (token) => {
     process.env.SENTRY_CLIENT_ID = "synthetic-client-id";
     setAuthToken("stored-token", 3600, "synthetic-refresh-token");
-    globalThis.fetch = mockFetch((input, init) => {
-      const url = extractFetchUrl(input);
-      requests.push({
-        url,
-        authorization: new Headers(init?.headers).get("Authorization"),
-      });
+    globalThis.fetch = mockResponses((url) => {
       if (url.endsWith("/oauth/token/")) {
-        return Promise.resolve(
-          Response.json({
-            access_token: token,
-            token_type: "bearer",
-            expires_in: 3600,
-            refresh_token: "synthetic-refresh-token",
-          })
-        );
+        return Response.json({
+          access_token: token,
+          token_type: "bearer",
+          expires_in: 3600,
+          refresh_token: "synthetic-refresh-token",
+        });
       }
-      return Promise.resolve(new Response("{}", { status: 401 }));
+      return new Response("{}", { status: 401 });
     });
 
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -408,23 +394,16 @@ describe("authenticated fetch bearer validation", () => {
       process.env[source] = MALFORMED_TOKEN;
     }
     setAuthToken("expired-token", -1, "synthetic-refresh-token");
-    globalThis.fetch = mockFetch((input, init) => {
-      const url = extractFetchUrl(input);
-      requests.push({
-        url,
-        authorization: new Headers(init?.headers).get("Authorization"),
-      });
-      return Promise.resolve(
-        url.endsWith("/oauth/token/")
-          ? Response.json({
-              access_token: "\x1f \nrefreshed-token\r\t\x7f",
-              token_type: "bearer",
-              expires_in: 3600,
-              refresh_token: "replacement-refresh-token",
-            })
-          : Response.json({})
-      );
-    });
+    globalThis.fetch = mockResponses((url) =>
+      url.endsWith("/oauth/token/")
+        ? Response.json({
+            access_token: "\x1f \nrefreshed-token\r\t\x7f",
+            token_type: "bearer",
+            expires_in: 3600,
+            refresh_token: "replacement-refresh-token",
+          })
+        : Response.json({})
+    );
 
     expect((await request()).status).toBe(200);
     expect(getAuthConfig()).toMatchObject({
@@ -440,20 +419,14 @@ describe("authenticated fetch bearer validation", () => {
   test("rejects malformed proactive refresh before storing or using the token", async () => {
     process.env.SENTRY_CLIENT_ID = "synthetic-client-id";
     setAuthToken("expired-token", -1, "synthetic-refresh-token");
-    globalThis.fetch = mockFetch((input, init) => {
-      requests.push({
-        url: extractFetchUrl(input),
-        authorization: new Headers(init?.headers).get("Authorization"),
-      });
-      return Promise.resolve(
-        Response.json({
-          access_token: "opaque-\0-secret-tail",
-          token_type: "bearer",
-          expires_in: 3600,
-          refresh_token: "replacement-refresh-token",
-        })
-      );
-    });
+    globalThis.fetch = mockResponses(() =>
+      Response.json({
+        access_token: "opaque-\0-secret-tail",
+        token_type: "bearer",
+        expires_in: 3600,
+        refresh_token: "replacement-refresh-token",
+      })
+    );
 
     await expect(request()).rejects.toMatchObject({
       reason: "invalid",
