@@ -60,6 +60,12 @@ sentry cli defaults ca-cert /path/to/ca.pem
 # Disable telemetry
 sentry cli defaults telemetry off
 
+# Stop installing agent skills on setup/upgrade (re-enable with "on")
+sentry cli defaults agent-skills off
+
+# Disable inline terminal images (kitty/sixel)
+sentry cli defaults graphics off
+
 # Clear a single default
 sentry cli defaults org --clear
 
@@ -129,7 +135,7 @@ Configure shell integration
 
 **Flags:**
 - `--install - Install the binary from a temp location to the system path`
-- `--method <value> - Installation method (curl, npm, pnpm, bun, yarn)`
+- `--method <value> - Installation method (curl, brew, npm, pnpm, bun, yarn)`
 - `--channel <value> - Release channel to persist (stable or nightly)`
 - `--no-modify-path - Skip PATH modification`
 - `--no-completions - Skip shell completion installation`
@@ -142,7 +148,7 @@ Configure shell integration
 # Run full setup (PATH, completions, agent skills)
 sentry cli setup
 
-# Skip agent skill installation
+# Skip agent skill installation (remembered for future upgrades)
 sentry cli setup --no-agent-skills
 
 # Skip PATH and completion modifications
@@ -154,7 +160,7 @@ sentry cli setup --no-modify-path --no-completions
 Uninstall Sentry CLI
 
 **Flags:**
-- `--keep-config - Keep the config directory (~/.sentry) and auth tokens`
+- `--keep-config - Keep the config directory (default ~/.config/sentry) and auth tokens`
 - `-y, --yes - Skip confirmation prompt`
 - `-f, --force - Force the operation without confirmation`
 - `-n, --dry-run - Show what would happen without making changes`

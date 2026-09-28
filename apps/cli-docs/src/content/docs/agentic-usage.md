@@ -3,15 +3,15 @@ title: Agentic Usage
 description: Enable AI coding agents to use the Sentry CLI
 ---
 
-AI coding agents can use the Sentry CLI through the skill system. The CLI detects and supports Claude Code (including Cowork), Cursor, Windsurf, GitHub Copilot, Gemini CLI, OpenAI Codex, Goose, Amp, Augment, OpenCode, Cline, Grok, Kimi, Junie, OpenClaw, and any agent that reads skills from `~/.agents`. This allows agents to interact with Sentry directly from your development environment.
+AI coding agents can use the Sentry CLI through the skill system. The CLI detects and supports Claude Code (including Cowork), Cursor, Windsurf, GitHub Copilot, Gemini CLI, OpenAI Codex, Antigravity, Goose, Amp, Augment, OpenCode, Cline, Grok, Kimi, Junie, OpenClaw, and any agent that reads skills from `~/.agents`. This allows agents to interact with Sentry directly from your development environment.
 
 ## Automatic Installation
 
-When you install the CLI (via `curl`, Homebrew, or a package manager), `sentry cli setup` automatically installs agent skills into any detected agent root directories (`~/.claude`, `~/.agents`). Skills are also refreshed on `sentry cli upgrade`. No network fetch is needed — skill files are embedded in the binary.
+`sentry cli setup` installs the agent skill into the `~/.claude` and `~/.agents` directories when they already exist (the CLI never creates them). The install script and Homebrew run setup for you; after an npm, pnpm, yarn, or bun install, run `sentry cli setup` once. Skills are also refreshed on `sentry cli upgrade`. No network fetch is needed — skill files are embedded in the binary.
 
 This uses the same `~/.agents` convention as [dotagents](https://github.com/getsentry/dotagents), Sentry's first-party tool for installing agent skills. See [Manual Installation](#manual-installation) to add the skill with dotagents yourself.
 
-To skip automatic skill installation, pass `--no-agent-skills` to `sentry cli setup`.
+To skip automatic skill installation, pass `--no-agent-skills` to the install script, `sentry cli setup`, or `sentry cli upgrade`. The opt-out is remembered for future upgrades; turn installation back on with `sentry cli defaults agent-skills on`.
 
 ## Manual Installation
 
