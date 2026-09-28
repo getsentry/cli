@@ -14,6 +14,7 @@ import {
   option,
   property,
   string,
+  stringMatching,
 } from "fast-check";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
@@ -35,6 +36,9 @@ useTestConfigDir("auth-prop-");
 const tokenArb = string({ minLength: 1, maxLength: 100 }).filter(
   (s) => s.trim().length > 0
 );
+
+/** Stored tokens must satisfy the persistence boundary; malformed inputs have separate coverage. */
+const storedTokenArb = stringMatching(/^[\x21-\x7e]{1,100}$/);
 
 /** Save and restore env vars around each test */
 let savedAuthToken: string | undefined;
@@ -87,7 +91,7 @@ describe("property: env var priority", () => {
 
   test("stored OAuth wins over env var (default behavior)", () => {
     fcAssert(
-      property(tokenArb, tokenArb, (envToken, storedToken) => {
+      property(tokenArb, storedTokenArb, (envToken, storedToken) => {
         resetAuthCaches();
         setAuthToken(storedToken);
         process.env.SENTRY_AUTH_TOKEN = envToken;
@@ -102,7 +106,7 @@ describe("property: env var priority", () => {
 
   test("SENTRY_FORCE_ENV_TOKEN overrides stored OAuth", () => {
     fcAssert(
-      property(tokenArb, tokenArb, (envToken, storedToken) => {
+      property(tokenArb, storedTokenArb, (envToken, storedToken) => {
         resetAuthCaches();
         setAuthToken(storedToken);
         process.env.SENTRY_AUTH_TOKEN = envToken;
@@ -124,7 +128,7 @@ describe("property: env var priority", () => {
 
   test("stored token used when no env vars set", () => {
     fcAssert(
-      property(tokenArb, (storedToken) => {
+      property(storedTokenArb, (storedToken) => {
         resetAuthCaches();
         setAuthToken(storedToken);
 
@@ -171,7 +175,7 @@ describe("property: env tokens never trigger refresh", () => {
 describe("property: isEnvTokenActive consistency", () => {
   test("when no env token, getAuthConfig never returns env source", () => {
     fcAssert(
-      property(option(tokenArb), (storedTokenOpt) => {
+      property(option(storedTokenArb), (storedTokenOpt) => {
         resetAuthCaches();
         // Clean slate — no env tokens
         delete process.env.SENTRY_AUTH_TOKEN;
@@ -195,7 +199,7 @@ describe("property: isEnvTokenActive consistency", () => {
 
   test("stored OAuth takes priority: getAuthConfig returns oauth even when env token is set", () => {
     fcAssert(
-      property(tokenArb, tokenArb, (envToken, storedToken) => {
+      property(tokenArb, storedTokenArb, (envToken, storedToken) => {
         resetAuthCaches();
         process.env.SENTRY_AUTH_TOKEN = envToken;
         setAuthToken(storedToken);

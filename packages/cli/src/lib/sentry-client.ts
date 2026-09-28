@@ -10,7 +10,11 @@
 
 import { setTimeout as sleepMs } from "node:timers/promises";
 import { getTraceData } from "@sentry/node-core/light";
-import { formatAuthHeader, normalizeAuthToken } from "./auth-header.js";
+import {
+  formatAuthHeader,
+  normalizeAuthToken,
+  trimAuthToken,
+} from "./auth-header.js";
 import { maybeWarnEnvTokenIgnored } from "./auth-hint.js";
 import { computeInvalidationPrefixes } from "./cache-keys.js";
 import {
@@ -470,9 +474,9 @@ async function invalidateAfterMutation(
   }
 }
 
-/** Build a `{ authorization }` header map from a bearer token, or `{}` if absent. */
+/** Cache metadata must not validate a candidate before OAuth refresh selects a token. */
 function authHeaders(token: string | undefined): Record<string, string> {
-  return token ? { authorization: `Bearer ${token.trim()}` } : {};
+  return token ? { authorization: `Bearer ${trimAuthToken(token)}` } : {};
 }
 
 type AttemptInputFactory = () => {

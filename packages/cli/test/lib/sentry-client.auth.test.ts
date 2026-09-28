@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { shouldAutoAuth } from "../../src/lib/auto-auth.js";
 import { getAuthConfig, setAuthToken } from "../../src/lib/db/auth.js";
+import { getDatabase } from "../../src/lib/db/index.js";
 import { setEnv } from "../../src/lib/env.js";
 import {
   AuthError,
@@ -11,6 +12,10 @@ import {
   MalformedAuthTokenError,
   withAuthGuard,
 } from "../../src/lib/errors.js";
+import {
+  getCachedResponse,
+  storeCachedResponse,
+} from "../../src/lib/response-cache.js";
 import {
   getSdkConfig,
   resetAuthenticatedFetch,
@@ -36,6 +41,9 @@ const MALFORMED_TOKEN = ORG_TOKEN.replace(
   "test-secret-tail",
   "te\nst-secret-tail"
 );
+const EDGE_CONTROLS = `${Array.from({ length: 32 }, (_, code) =>
+  String.fromCharCode(code)
+).join("")}\x7f`;
 
 describe("authenticated fetch bearer validation", () => {
   useTestConfigDir("sentry-client-auth-");
@@ -75,12 +83,18 @@ describe("authenticated fetch bearer validation", () => {
     return getSdkConfig(REGION_URL).fetch(RESOURCE_URL);
   }
 
+  /** Simulate credentials persisted before setAuthToken validated its input. */
+  function storeLegacyToken(token: string): void {
+    setAuthToken("legacy-token");
+    getDatabase().query("UPDATE auth SET token = ? WHERE id = 1").run(token);
+  }
+
   test.each([
     ...ENV_TOKEN_KEYS,
     "stored",
   ])("rejects an internal LF from %s before any request or auth fallback", async (source) => {
     if (source === "stored") {
-      setAuthToken(MALFORMED_TOKEN);
+      storeLegacyToken(MALFORMED_TOKEN);
     } else {
       process.env[source] = MALFORMED_TOKEN;
     }
@@ -145,11 +159,28 @@ describe("authenticated fetch bearer validation", () => {
     expect(requests[0]?.authorization).toBe("Bearer synthetic-token");
   });
 
+  test.each(
+    ENV_TOKEN_KEYS
+  )("trims surrounding C0, DEL and whitespace from SDK %s", async (key) => {
+    // An isolated SDK environment preserves NULs that process.env cannot.
+    setEnv({
+      ...process.env,
+      [key]: `${EDGE_CONTROLS}\u00a0synthetic-token\ufeff${EDGE_CONTROLS}`,
+    });
+
+    await request();
+
+    expect(requests).toEqual([
+      { url: RESOURCE_URL, authorization: "Bearer synthetic-token" },
+    ]);
+  });
+
   test.each([
     " stored-token ",
     "\t\n\u00a0stored-token\r\n",
-  ])("trims surrounding whitespace from stored credentials %#", async (token) => {
-    setAuthToken(token);
+    "\x1f\u00a0stored-token\ufeff\x7f",
+  ])("trims surrounding controls and whitespace from legacy credentials %#", async (token) => {
+    storeLegacyToken(token);
     await request();
     expect(requests).toEqual([
       { url: RESOURCE_URL, authorization: "Bearer stored-token" },
@@ -157,13 +188,70 @@ describe("authenticated fetch bearer validation", () => {
   });
 
   test("rejects a whitespace-only stored credential", async () => {
-    setAuthToken(" \t\r\n ");
+    storeLegacyToken(" \t\r\n ");
     await expect(request()).rejects.toMatchObject({
       name: "MalformedAuthTokenError",
       reason: "invalid",
       exitCode: EXIT.AUTH_INVALID,
     });
     expect(requests).toEqual([]);
+  });
+
+  test("looks up Vary: Authorization using the normalized legacy credential", async () => {
+    storeLegacyToken("\x1fsynthetic-token\x7f");
+    await storeCachedResponse(
+      "GET",
+      RESOURCE_URL,
+      { authorization: "Bearer synthetic-token" },
+      Response.json(
+        { source: "cache" },
+        {
+          headers: {
+            "Cache-Control": "private, max-age=300",
+            Vary: "Authorization",
+          },
+        }
+      )
+    );
+
+    expect(await (await request()).json()).toEqual({ source: "cache" });
+    expect(requests).toEqual([]);
+  });
+
+  test("stores Vary: Authorization with the credential actually sent", async () => {
+    storeLegacyToken("\x1fsynthetic-token\x7f");
+    globalThis.fetch = mockFetch((input, init) => {
+      requests.push({
+        url: extractFetchUrl(input),
+        authorization: new Headers(init?.headers).get("Authorization"),
+      });
+      return Promise.resolve(
+        Response.json(
+          { source: "network" },
+          {
+            headers: {
+              "Cache-Control": "private, max-age=300",
+              Vary: "Authorization",
+            },
+          }
+        )
+      );
+    });
+
+    await request();
+
+    // Cache writes are fire-and-forget; wait for the entry rather than sleeping.
+    await expect
+      .poll(async () => {
+        const cached = await getCachedResponse("GET", RESOURCE_URL, {
+          authorization: "Bearer synthetic-token",
+        });
+        return cached?.json();
+      })
+      .toEqual({ source: "network" });
+    expect(requests).toEqual([
+      { url: RESOURCE_URL, authorization: "Bearer synthetic-token" },
+    ]);
   });
 
   test("checks token host claims after removing surrounding whitespace", async () => {
@@ -198,8 +286,36 @@ describe("authenticated fetch bearer validation", () => {
   });
 
   test.each([
+    { key: "SENTRY_AUTH_TOKEN", forceEnv: false },
+    { key: "SENTRY_AUTH_TOKEN", forceEnv: true },
+    { key: "SENTRY_TOKEN", forceEnv: true },
+  ])("rejects control-only $key without fallback (force-env=$forceEnv)", async ({
+    key,
+    forceEnv,
+  }) => {
+    if (forceEnv) {
+      setAuthToken("stored-token");
+    }
+    setEnv({
+      ...process.env,
+      SENTRY_AUTH_TOKEN: undefined,
+      SENTRY_TOKEN: "alias-token",
+      SENTRY_FORCE_ENV_TOKEN: forceEnv ? "1" : undefined,
+      [key]: "\0\x01\x7f",
+    });
+
+    await expect(request()).rejects.toMatchObject({
+      name: "MalformedAuthTokenError",
+      reason: "invalid",
+      exitCode: EXIT.AUTH_INVALID,
+    });
+    expect(requests).toEqual([]);
+  });
+
+  test.each([
     "refreshed-token",
     " \nrefreshed-token\r\t",
+    "\x1f\nrefreshed-token\r\x7f",
   ])("retries with a normalized valid refreshed bearer %#", async (token) => {
     process.env.SENTRY_CLIENT_ID = "synthetic-client-id";
     setAuthToken("stored-token", 3600, "synthetic-refresh-token");
@@ -283,8 +399,14 @@ describe("authenticated fetch bearer validation", () => {
     expect(requests).toEqual([...refreshAttempt, ...refreshAttempt]);
   });
 
-  test("normalizes a proactive refresh before storing and using the token", async () => {
+  test.each([
+    "none",
+    ...ENV_TOKEN_KEYS,
+  ])("normalizes a proactive refresh with malformed env source %s", async (source) => {
     process.env.SENTRY_CLIENT_ID = "synthetic-client-id";
+    if (source !== "none") {
+      process.env[source] = MALFORMED_TOKEN;
+    }
     setAuthToken("expired-token", -1, "synthetic-refresh-token");
     globalThis.fetch = mockFetch((input, init) => {
       const url = extractFetchUrl(input);
@@ -295,7 +417,7 @@ describe("authenticated fetch bearer validation", () => {
       return Promise.resolve(
         url.endsWith("/oauth/token/")
           ? Response.json({
-              access_token: " \nrefreshed-token\r\t",
+              access_token: "\x1f \nrefreshed-token\r\t\x7f",
               token_type: "bearer",
               expires_in: 3600,
               refresh_token: "replacement-refresh-token",
