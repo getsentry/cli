@@ -10,7 +10,7 @@
 
 import { setTimeout as sleepMs } from "node:timers/promises";
 import { getTraceData } from "@sentry/node-core/light";
-import { formatAuthHeader } from "./auth-header.js";
+import { formatAuthHeader, normalizeAuthToken } from "./auth-header.js";
 import { maybeWarnEnvTokenIgnored } from "./auth-hint.js";
 import { computeInvalidationPrefixes } from "./cache-keys.js";
 import {
@@ -26,7 +26,12 @@ import {
 } from "./custom-ca.js";
 import { applyCustomHeaders } from "./custom-headers.js";
 import { getAuthToken, refreshToken } from "./db/auth.js";
-import { ApiError, AuthError, HostScopeError, TimeoutError } from "./errors.js";
+import {
+  ApiError,
+  HostScopeError,
+  MalformedAuthTokenError,
+  TimeoutError,
+} from "./errors.js";
 import { logger } from "./logger.js";
 import {
   clearLastCacheHitAge,
@@ -131,7 +136,8 @@ function prepareHeaders(
   // multiple Sentry instances. The claim is unsigned (see token-claims.ts);
   // fail-open on parse errors. Uses isHostTrustedForClaim so multi-region
   // fan-out via the control silo's region URLs still works.
-  const claimUrl = parseSntrysClaim(token)?.url;
+  const normalizedToken = normalizeAuthToken(token);
+  const claimUrl = parseSntrysClaim(normalizedToken)?.url;
   if (claimUrl && !isHostTrustedForClaim(input, claimUrl)) {
     throw new HostScopeError(
       "Credentials",
@@ -146,7 +152,7 @@ function prepareHeaders(
   const sourceHeaders =
     init?.headers ?? (input instanceof Request ? input.headers : undefined);
   const headers = new Headers(sourceHeaders);
-  headers.set("Authorization", formatAuthHeader(token));
+  headers.set("Authorization", formatAuthHeader(normalizedToken));
   if (!headers.has("User-Agent")) {
     headers.set("User-Agent", getUserAgent());
   }
@@ -190,7 +196,7 @@ async function handleUnauthorized(headers: Headers): Promise<boolean> {
     }
     newToken = result.token;
   } catch (error) {
-    if (error instanceof AuthError && error.reason === "invalid") {
+    if (error instanceof MalformedAuthTokenError) {
       throw error;
     }
     log.debug("Token refresh failed after 401", error);
@@ -466,7 +472,7 @@ async function invalidateAfterMutation(
 
 /** Build a `{ authorization }` header map from a bearer token, or `{}` if absent. */
 function authHeaders(token: string | undefined): Record<string, string> {
-  return token ? { authorization: `Bearer ${token}` } : {};
+  return token ? { authorization: `Bearer ${token.trim()}` } : {};
 }
 
 type AttemptInputFactory = () => {

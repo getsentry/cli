@@ -3,7 +3,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { formatAuthHeader } from "../auth-header.js";
+import { normalizeAuthToken } from "../auth-header.js";
 import { DEFAULT_SENTRY_URL, getConfiguredSentryUrl } from "../constants.js";
 import { getEnv } from "../env.js";
 import { getEnvTokenHost } from "../env-token-host.js";
@@ -623,18 +623,18 @@ async function performTokenRefresh(
 
   // Validate before SQLite can truncate NUL-containing credentials or replace
   // the current session with a malformed response. Keep that session intact.
-  formatAuthHeader(tokenResponse.access_token);
+  const token = normalizeAuthToken(tokenResponse.access_token);
   const now = Date.now();
   const expiresAt = now + tokenResponse.expires_in * 1000;
 
   await setAuthToken(
-    tokenResponse.access_token,
+    token,
     tokenResponse.expires_in,
     tokenResponse.refresh_token ?? storedRefreshToken
   );
 
   return {
-    token: tokenResponse.access_token,
+    token,
     refreshed: true,
     expiresAt,
     expiresIn: tokenResponse.expires_in,

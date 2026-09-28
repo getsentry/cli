@@ -136,8 +136,11 @@ describe("sentry auth whoami", () => {
     expect(result.exitCode).toBe(EXIT.AUTH_NOT_AUTHENTICATED);
   });
 
-  test("shows current user identity", async () => {
-    await ctx.setAuthToken(TEST_TOKEN);
+  test.each([
+    TEST_TOKEN,
+    ` \n${TEST_TOKEN}\r\t`,
+  ])("shows current user identity with surrounding token whitespace %#", async (token) => {
+    await ctx.setAuthToken(token);
 
     const result = await ctx.run(["auth", "whoami"]);
 

@@ -4,7 +4,13 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { shouldAutoAuth } from "../../src/lib/auto-auth.js";
 import { getAuthConfig, setAuthToken } from "../../src/lib/db/auth.js";
 import { setEnv } from "../../src/lib/env.js";
-import { AuthError, EXIT, withAuthGuard } from "../../src/lib/errors.js";
+import {
+  AuthError,
+  EXIT,
+  HostScopeError,
+  MalformedAuthTokenError,
+  withAuthGuard,
+} from "../../src/lib/errors.js";
 import {
   getSdkConfig,
   resetAuthenticatedFetch,
@@ -83,6 +89,7 @@ describe("authenticated fetch bearer validation", () => {
       (caught: unknown) => caught
     );
     expect(error).toBeInstanceOf(AuthError);
+    expect(error).toBeInstanceOf(MalformedAuthTokenError);
     const authError = error as AuthError;
     expect(authError.reason).toBe("invalid");
     expect(authError.exitCode).toBe(EXIT.AUTH_INVALID);
@@ -138,13 +145,35 @@ describe("authenticated fetch bearer validation", () => {
     expect(requests[0]?.authorization).toBe("Bearer synthetic-token");
   });
 
-  test("does not silently trim stored credentials", async () => {
-    const token = " stored-token ";
+  test.each([
+    " stored-token ",
+    "\t\n\u00a0stored-token\r\n",
+  ])("trims surrounding whitespace from stored credentials %#", async (token) => {
     setAuthToken(token);
+    await request();
+    expect(requests).toEqual([
+      { url: RESOURCE_URL, authorization: "Bearer stored-token" },
+    ]);
+  });
+
+  test("rejects a whitespace-only stored credential", async () => {
+    setAuthToken(" \t\r\n ");
     await expect(request()).rejects.toMatchObject({
+      name: "MalformedAuthTokenError",
       reason: "invalid",
       exitCode: EXIT.AUTH_INVALID,
     });
+    expect(requests).toEqual([]);
+  });
+
+  test("checks token host claims after removing surrounding whitespace", async () => {
+    const token = mintSntrysToken({
+      iat: 1,
+      url: "https://other-sentry.example.com",
+      org: "synthetic-org",
+    });
+    setAuthToken(` \n${token}\t `);
+    await expect(request()).rejects.toBeInstanceOf(HostScopeError);
     expect(requests).toEqual([]);
   });
 
@@ -168,7 +197,10 @@ describe("authenticated fetch bearer validation", () => {
     expect(requests).toEqual([]);
   });
 
-  test("retries with a valid refreshed bearer", async () => {
+  test.each([
+    "refreshed-token",
+    " \nrefreshed-token\r\t",
+  ])("retries with a normalized valid refreshed bearer %#", async (token) => {
     process.env.SENTRY_CLIENT_ID = "synthetic-client-id";
     setAuthToken("stored-token", 3600, "synthetic-refresh-token");
     globalThis.fetch = mockFetch((input, init) => {
@@ -178,7 +210,7 @@ describe("authenticated fetch bearer validation", () => {
       if (url.endsWith("/oauth/token/")) {
         return Promise.resolve(
           Response.json({
-            access_token: "refreshed-token",
+            access_token: token,
             token_type: "bearer",
             expires_in: 3600,
           })
@@ -197,11 +229,13 @@ describe("authenticated fetch bearer validation", () => {
       { url: "https://sentry.io/oauth/token/", authorization: null },
       { url: RESOURCE_URL, authorization: "Bearer refreshed-token" },
     ]);
+    expect(getAuthConfig()?.token).toBe("refreshed-token");
   });
 
   test.each([
     MALFORMED_TOKEN,
     "",
+    " \t\n ",
     "opaque-\0-token",
     "opaque-\u0100-token",
   ])("rejects malformed refreshed credentials without retrying the request %#", async (token) => {
@@ -228,7 +262,7 @@ describe("authenticated fetch bearer validation", () => {
 
     for (let attempt = 0; attempt < 2; attempt++) {
       const error = await request().catch((caught: unknown) => caught);
-      expect(error).toBeInstanceOf(AuthError);
+      expect(error).toBeInstanceOf(MalformedAuthTokenError);
       expect(error).toMatchObject({
         reason: "invalid",
         exitCode: EXIT.AUTH_INVALID,
@@ -247,6 +281,38 @@ describe("authenticated fetch bearer validation", () => {
       { url: "https://sentry.io/oauth/token/", authorization: null },
     ];
     expect(requests).toEqual([...refreshAttempt, ...refreshAttempt]);
+  });
+
+  test("normalizes a proactive refresh before storing and using the token", async () => {
+    process.env.SENTRY_CLIENT_ID = "synthetic-client-id";
+    setAuthToken("expired-token", -1, "synthetic-refresh-token");
+    globalThis.fetch = mockFetch((input, init) => {
+      const url = extractFetchUrl(input);
+      requests.push({
+        url,
+        authorization: new Headers(init?.headers).get("Authorization"),
+      });
+      return Promise.resolve(
+        url.endsWith("/oauth/token/")
+          ? Response.json({
+              access_token: " \nrefreshed-token\r\t",
+              token_type: "bearer",
+              expires_in: 3600,
+              refresh_token: "replacement-refresh-token",
+            })
+          : Response.json({})
+      );
+    });
+
+    expect((await request()).status).toBe(200);
+    expect(getAuthConfig()).toMatchObject({
+      token: "refreshed-token",
+      refreshToken: "replacement-refresh-token",
+    });
+    expect(requests).toEqual([
+      { url: "https://sentry.io/oauth/token/", authorization: null },
+      { url: RESOURCE_URL, authorization: "Bearer refreshed-token" },
+    ]);
   });
 
   test("rejects malformed proactive refresh before storing or using the token", async () => {

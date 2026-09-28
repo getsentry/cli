@@ -135,9 +135,9 @@ When a token comes from an environment variable, the CLI skips expiry checks and
 ## Invalid Token Formatting
 
 Tokens must be a single line of printable ASCII characters, without spaces.
-The CLI rejects embedded whitespace, control characters, and non-ASCII
-characters before sending an authenticated request. It does not join split
-lines or send only the first line of a token.
+The CLI removes surrounding whitespace, then rejects any remaining whitespace,
+control characters, and non-ASCII characters before sending an authenticated
+request. It does not join split lines or send only the first line of a token.
 
 If you see "Invalid authentication token", copy the complete token again into
 the configuration that supplies it. For environment tokens, check
