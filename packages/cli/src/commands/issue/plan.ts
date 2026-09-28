@@ -156,31 +156,37 @@ function buildPlanData(state: AutofixState): PlanData {
 }
 
 /**
- * Root cause analysis paused waiting for the user to pick a root cause. When the
- * session is interactive (a TTY and not JSON output), present the candidate root
- * causes and let the user choose in the terminal so planning can continue.
- * Throws a {@link CliError} pointing at the Sentry UI when we cannot prompt
- * (JSON mode, non-TTY, no candidates) or the user cancels the selection.
+ * Root cause analysis paused waiting for the user to confirm the identified root
+ * cause before solution planning. When the session is interactive (a TTY and not
+ * JSON output), show the root cause and ask whether to continue; the caller then
+ * advances the run via {@link triggerSolutionPlanning}, which is how the Sentry
+ * UI proceeds from this state.
+ *
+ * The Sentry API has no endpoint to submit a specific `cause_id` from the CLI
+ * (selecting among candidates happens through the web UI's interactive run
+ * state), so this is a confirm-to-continue rather than a picker. Throws a
+ * {@link CliError} pointing at the Sentry UI when we cannot prompt (JSON mode,
+ * non-TTY, no root cause) or the user declines.
  */
-async function ensureRootCauseSelected(
+async function confirmRootCauseAndContinue(
   state: AutofixState,
   json: boolean
 ): Promise<void> {
   const causes = json ? [] : extractRootCauses(state);
-  const canPrompt = isatty(0) && isatty(2) && causes.length > 0;
+  const primaryCause = causes[0];
 
-  if (canPrompt) {
+  if (isatty(0) && isatty(2) && primaryCause) {
     const log = logger.withTag("issue.plan");
-    const response = await log.prompt("Select a root cause to plan against:", {
-      type: "select",
-      options: causes.map((cause) => ({
-        label: cause.description,
-        value: String(cause.id),
-      })),
+    log.info("Root cause identified:");
+    log.info(`"${primaryCause.description}"`);
+
+    const proceed = await log.prompt("Generate a solution plan for it?", {
+      type: "confirm",
+      initial: true,
     });
 
-    // consola returns a non-string (Symbol(clack:cancel)) when cancelled.
-    if (typeof response === "string") {
+    // consola returns a non-boolean (Symbol(clack:cancel)) when cancelled.
+    if (proceed === true) {
       return;
     }
   }
@@ -254,11 +260,11 @@ export const planCommand = buildCommand({
         json: flags.json,
       });
 
-      // Root cause analysis can pause waiting for the user to pick a root
-      // cause. When running interactively, let the user choose in the terminal
-      // and continue; otherwise point them at the Sentry UI.
+      // Root cause analysis can pause waiting for the user to confirm the
+      // root cause before planning. When running interactively, confirm in the
+      // terminal and continue; otherwise point them at the Sentry UI.
       if (state.status === "WAITING_FOR_USER_RESPONSE") {
-        await ensureRootCauseSelected(state, flags.json);
+        await confirmRootCauseAndContinue(state, flags.json);
       }
 
       // Check if solution already exists (skip if --force)
