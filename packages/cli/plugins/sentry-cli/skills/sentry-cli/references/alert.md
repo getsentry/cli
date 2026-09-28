@@ -166,8 +166,8 @@ Create a metric alert rule
 **Examples:**
 
 ```bash
-# Create an organization metric alert rule
-sentry alert metrics create my-org \
+# Create an organization metric alert rule (trailing slash targets the org)
+sentry alert metrics create my-org/ \
   --name "P95 Latency" \
   --query "environment:prod" \
   --aggregate "p95(span.duration)" \
