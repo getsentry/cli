@@ -3,8 +3,8 @@ changelog:
   policy: auto
 versioning:
   policy: auto
-preReleaseCommand: node --experimental-strip-types script/bump-version.ts --pre
-postReleaseCommand: node --experimental-strip-types script/bump-version.ts --post
+preReleaseCommand: bash -c 'cd packages/cli && node --experimental-strip-types script/bump-version.ts --pre'
+postReleaseCommand: bash -c 'cd packages/cli && node --experimental-strip-types script/bump-version.ts --post'
 artifactProvider:
   name: github
   config:
@@ -12,11 +12,12 @@ artifactProvider:
       Build:
         - '/^sentry-.*$/'
         - 'npm-package'
-        - 'gh-pages'
+        - 'vercel'
 targets:
   - name: npm
   - name: github
-  - name: gh-pages
+  - name: vercel
+    projectId: prj_wVkOnIwI3eIQbGD1Gw7qS1MqFFIK
   - name: registry
     apps:
       'app:sentry':
@@ -38,7 +39,7 @@ targets:
         desc "Sentry command-line tool for error monitoring and debugging"
         homepage "https://cli.sentry.dev"
         version "{{version}}"
-        license "FSL-1.1-MIT"
+        license "FSL-1.1-Apache-2.0"
 
         if OS.mac?
           if Hardware::CPU.arm?

@@ -1,0 +1,37 @@
+name: Publish codemod
+
+# Publishes codemods/sentry-v3-to-v4 to the Codemod Registry
+# (https://codemod.com/registry) as `@sentry/cli-v3-to-v4`.
+#
+# Prerequisites (one-time, done on codemod.com):
+#   1. Own/create the `@sentry` scope in the Codemod Registry.
+#   2. Register this repository as a trusted publisher (OIDC) for that scope,
+#      so no long-lived API key is needed here.
+#
+# Trigger by pushing a tag like `codemod-v0.1.0`, or run manually.
+
+on:
+  push:
+    tags:
+      - "codemod-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for the Codemod Registry trusted publisher
+
+jobs:
+  publish:
+    name: Publish to Codemod Registry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Publish
+        working-directory: codemods/sentry-v3-to-v4
+        # Pin the CLI in this OIDC-privileged job (avoid running unreviewed
+        # `@latest` with a publish token). Bump deliberately alongside the CI
+        # `codemod-test` job.
+        run: npx codemod@1.12.7 publish

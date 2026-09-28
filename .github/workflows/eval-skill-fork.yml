@@ -9,6 +9,15 @@ permissions:
   statuses: write
   pull-requests: write
 
+env:
+  # Pin Node to the exact patched release rather than floating on the runner's
+  # pre-cached major. Node 24.17.0 (CVE-2026-48931's http.Agent fix) added a
+  # `data` listener on idle agent sockets that makes keep-alive fetch reuse
+  # throw a false ERR_STREAM_PREMATURE_CLOSE — exactly the failure the
+  # skill-eval planner hits talking to external APIs. Fixed in 24.18.0
+  # (nodejs/node#64004). Keep in sync with NODE_VERSION_24 in ci.yml.
+  NODE_VERSION_24: "24.18.0"
+
 jobs:
   remove-labels-on-sync:
     name: Reset eval labels
@@ -38,11 +47,18 @@ jobs:
 
       - uses: pnpm/action-setup@v4
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION_24 }}
+
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
 
@@ -53,6 +69,7 @@ jobs:
         id: eval
         run: pnpm run eval:skill
         env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         continue-on-error: true
 

@@ -30,6 +30,23 @@ env:
   # don't fully support it, causing SIGABRT in Node.js processes.
   # See: https://github.com/actions/runner-images/issues/13602
   UV_USE_IO_URING: "0"
+  # CI Node.js versions, pinned to exact patches and used as the single source
+  # of truth for every actions/setup-node step (referenced as
+  # ${{ env.NODE_VERSION_xx }}). Node 24.17.0 / 22.23.0 (CVE-2026-48931's
+  # http.Agent fix) added a `data` listener on idle agent sockets that makes
+  # keep-alive fetch reuse throw false ERR_STREAM_PREMATURE_CLOSE
+  # ("Premature close" — hit by the skill-eval planner talking to external
+  # APIs). Fixed in 24.18.0 / 22.23.1 (nodejs/node#64004). A floating major
+  # ("24"/"22") silently reuses the runner's pre-cached buggy patch, so pin the
+  # exact patched versions here and bump them in one place.
+  #
+  # Node 20 is the WASM-SQLite floor: the npm package supports Node >= 18, and
+  # on < 22.15 (which lacks node:sqlite) it falls back to the bundled
+  # node-sqlite3-wasm driver. The npm-package job runs a Node 20 matrix entry
+  # so that fallback path is exercised in CI rather than only in production.
+  NODE_VERSION_20: "20.20.2"
+  NODE_VERSION_22: "22.23.1"
+  NODE_VERSION_24: "24.18.0"
 
 jobs:
   changes:
@@ -40,6 +57,7 @@ jobs:
     outputs:
       skill: ${{ steps.filter.outputs.skill == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
       code: ${{ steps.filter.outputs.code == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
+      codemod: ${{ steps.filter.outputs.codemod == 'true' || startsWith(github.ref, 'refs/heads/release/') }}
       build-targets: ${{ steps.targets.outputs.matrix }}
       nightly-version: ${{ steps.nightly.outputs.version }}
     steps:
@@ -49,25 +67,28 @@ jobs:
         with:
           filters: |
             skill:
-              - 'src/**'
-              - 'docs/**'
-              - 'package.json'
-              - 'README.md'
-              - 'DEVELOPMENT.md'
-              - 'script/generate-skill.ts'
-              - 'script/generate-command-docs.ts'
-              - 'script/generate-docs-sections.ts'
-              - 'script/eval-skill.ts'
-              - 'test/skill-eval/**'
+              - 'packages/cli/src/**'
+              - 'apps/cli-docs/**'
+              - 'packages/cli/package.json'
+              - 'packages/cli/README.md'
+              - 'packages/cli/DEVELOPMENT.md'
+              - 'packages/cli/script/generate-skill.ts'
+              - 'packages/cli/script/generate-command-docs.ts'
+              - 'packages/cli/script/generate-docs-sections.ts'
+              - 'packages/cli/script/eval-skill.ts'
+              - 'packages/cli/test/skill-eval/**'
             code:
-              - 'src/**'
-              - 'test/**'
-              - 'script/**'
-              - 'patches/**'
-              - 'docs/**'
-              - 'plugins/**'
-              - 'package.json'
+              - 'packages/cli/src/**'
+              - 'packages/cli/test/**'
+              - 'packages/cli/script/**'
+              - 'packages/cli/patches/**'
+              - 'apps/cli-docs/**'
+              - 'packages/cli/plugins/**'
+              - 'packages/cli/package.json'
               - 'pnpm-lock.yaml'
+              - '.github/workflows/ci.yml'
+            codemod:
+              - 'codemods/**'
               - '.github/workflows/ci.yml'
       - name: Compute build matrix
         id: targets
@@ -75,9 +96,13 @@ jobs:
           {
             echo 'matrix<<MATRIX_EOF'
             if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-              # PRs build linux-x64 (smoke test + e2e)
+              # PRs build linux-x64 (smoke test + e2e) and darwin-arm64. The
+              # darwin-arm64 build runs natively on macOS so the CoreUI-based
+              # Assets.car pixel extractor is compiled and exercised on PRs, not
+              # just on main/release.
               echo '{"include":[
-                {"target":"linux-x64", "os":"ubuntu-latest", "can-test":true}
+                {"target":"linux-x64",    "os":"ubuntu-latest", "can-test":true},
+                {"target":"darwin-arm64", "os":"macos-latest",  "can-test":true}
               ]}'
             else
               # main, release/**, workflow_call: full cross-platform matrix.
@@ -98,10 +123,26 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           TS=$(date -d "$COMMIT_TIMESTAMP" +%s)
-          CURRENT=$(jq -r .version package.json)
+          CURRENT=$(jq -r .version packages/cli/package.json)
           VERSION=$(echo "$CURRENT" | sed "s/-dev\.[0-9]*$/-dev.${TS}/")
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Nightly version: ${VERSION}"
+
+  codemod-test:
+    name: Codemod tests
+    needs: [changes]
+    if: needs.changes.outputs.codemod == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION_22 }}
+      # jssg fixtures live under codemods/sentry-v3-to-v4/tests/<case>/. The
+      # codemod CLI is pinned for reproducible runs (bump deliberately).
+      - name: Run jssg codemod tests
+        working-directory: codemods/sentry-v3-to-v4
+        run: npx codemod@1.12.7 jssg test -l typescript ./scripts/codemod.ts
 
   check-generated:
     name: Validate generated files
@@ -128,12 +169,15 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION_22 }}
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Generate API Schema
@@ -145,7 +189,7 @@ jobs:
       - name: Check skill files
         id: check-skill
         run: |
-          if git diff --quiet plugins/sentry-cli/skills/sentry-cli/; then
+          if git diff --quiet packages/cli/plugins/sentry-cli/skills/sentry-cli/; then
             echo "Skill files are up to date"
           else
             echo "stale=true" >> "$GITHUB_OUTPUT"
@@ -154,7 +198,7 @@ jobs:
       - name: Check docs sections
         id: check-sections
         run: |
-          if git diff --quiet README.md DEVELOPMENT.md docs/src/content/docs/contributing.md docs/src/content/docs/self-hosted.md docs/src/content/docs/getting-started.mdx; then
+          if git diff --quiet packages/cli/README.md packages/cli/DEVELOPMENT.md apps/cli-docs/src/content/docs/contributing.md apps/cli-docs/src/content/docs/self-hosted.md apps/cli-docs/src/content/docs/getting-started.mdx; then
             echo "Docs sections are up to date"
           else
             echo "stale=true" >> "$GITHUB_OUTPUT"
@@ -165,7 +209,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add plugins/sentry-cli/skills/sentry-cli/ README.md DEVELOPMENT.md docs/src/content/docs/contributing.md docs/src/content/docs/self-hosted.md docs/src/content/docs/getting-started.mdx
+          git add packages/cli/plugins/sentry-cli/skills/sentry-cli/ packages/cli/README.md packages/cli/DEVELOPMENT.md apps/cli-docs/src/content/docs/contributing.md apps/cli-docs/src/content/docs/self-hosted.md apps/cli-docs/src/content/docs/getting-started.mdx
           git diff --cached --quiet || (git commit -m "chore: regenerate docs" && git push)
       - name: Fail for fork PRs with stale generated files
         if: (steps.check-skill.outputs.stale == 'true' || steps.check-sections.outputs.stale == 'true') && steps.token.outcome != 'success'
@@ -183,12 +227,15 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION_22 }}
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - run: pnpm run generate:schema
@@ -214,23 +261,28 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: ${{ env.NODE_VERSION_24 }}
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Generate API Schema
         run: pnpm run generate:schema
       - name: Unit Tests
         run: pnpm run test:unit
+      - name: Verify coverage report
+        run: test -s packages/cli/coverage/lcov.info
       - name: Coverage Report
-        uses: getsentry/codecov-action@main
+        uses: getsentry/coverage-action@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          files: ./coverage/lcov.info
+          files: ./packages/cli/coverage/lcov.info
           informational-patch: ${{ github.event_name == 'push' }}
 
   build-binary:
@@ -249,12 +301,15 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION_22 }}
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ matrix.os }}-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ matrix.os }}-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - name: Install dependencies
         if: steps.cache.outputs.cache-hit != 'true'
         shell: bash
@@ -300,8 +355,8 @@ jobs:
         if: needs.changes.outputs.nightly-version != ''
         shell: bash
         run: |
-          jq --arg v "${{ needs.changes.outputs.nightly-version }}" '.version = $v' package.json > package.json.tmp
-          mv package.json.tmp package.json
+          jq --arg v "${{ needs.changes.outputs.nightly-version }}" '.version = $v' packages/cli/package.json > packages/cli/package.json.tmp
+          mv packages/cli/package.json.tmp packages/cli/package.json
       - name: Build
         env:
           # Environment-scoped (production) — must be set at step level to
@@ -320,9 +375,9 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-            ./dist-bin/sentry-windows-x64.exe --help
+            ./packages/cli/dist-bin/sentry-windows-x64.exe --help
           else
-            ./dist-bin/sentry-${{ matrix.target }} --help
+            ./packages/cli/dist-bin/sentry-${{ matrix.target }} --help
           fi
       - name: Smoke test (deep — SQLite, telemetry, auth DB)
         if: matrix.can-test
@@ -332,9 +387,9 @@ jobs:
           SENTRY_TOKEN: ""
         run: |
           if [[ "${{ matrix.target }}" == "windows-x64" ]]; then
-            BIN=./dist-bin/sentry-windows-x64.exe
+            BIN=./packages/cli/dist-bin/sentry-windows-x64.exe
           else
-            BIN=./dist-bin/sentry-${{ matrix.target }}
+            BIN=./packages/cli/dist-bin/sentry-${{ matrix.target }}
           fi
           # auth status without a token exercises SQLite init, schema
           # migrations, telemetry lazy import, and the CJS require chain.
@@ -360,7 +415,7 @@ jobs:
           (github.ref_name == 'main' || startsWith(github.ref_name, 'release/'))
         shell: bash
         run: |
-          BIN=./dist-bin/sentry-${{ matrix.target }}
+          BIN=./packages/cli/dist-bin/sentry-${{ matrix.target }}
           echo "Verifying code signature on $BIN..."
           rcodesign verify "$BIN"
       - name: Upload binary artifact
@@ -368,15 +423,15 @@ jobs:
         with:
           name: sentry-${{ matrix.target }}
           path: |
-            dist-bin/sentry-*
-            !dist-bin/*.gz
+            packages/cli/dist-bin/sentry-*
+            !packages/cli/dist-bin/*.gz
 
       - name: Upload compressed artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: sentry-${{ matrix.target }}-gz
-          path: dist-bin/*.gz
+          path: packages/cli/dist-bin/*.gz
 
   generate-patches:
     name: Generate Delta Patches
@@ -385,29 +440,19 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     continue-on-error: true
+    # `from-version`: the previous version the patches were actually generated
+    # FROM, as computed by the binpatch action. Carried through to
+    # publish-nightly so it stamps the `from-version` annotation on the
+    # pushed patch manifest with the SAME value. See
+    # https://github.com/BYK/binpatch/blob/main/website/src/content/docs/security.md#from-version-annotation-trust
+    #
+    # Note: the `release/**` path uses `generate-release` (different mode) and
+    # its `from-version` is captured only for the `Upload patch artifacts` step
+    # gate below. `publish-nightly` only runs on `main`, so the release-branch
+    # from-version is intentionally not exposed as a job output.
+    outputs:
+      from-version: ${{ steps.gen-ghcr.outputs.from-version }}
     steps:
-      - name: Install ORAS CLI
-        # Only needed on main (to fetch previous nightly from GHCR)
-        if: github.ref == 'refs/heads/main'
-        run: |
-          VERSION=1.3.1
-          EXPECTED_SHA256="d52c4af76ce6a3ceb8579e51fb751a43ac051cca67f965f973a0b0e897a2bb86"
-          TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
-          curl --retry 3 --retry-delay 5 --retry-all-errors -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
-          echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
-          tar -xz -C /usr/local/bin oras < "$TARBALL"
-          rm "$TARBALL"
-
-      - name: Install zig-bsdiff
-        run: |
-          VERSION=0.1.19
-          EXPECTED_SHA256="9f1ac75a133ee09883ad2096a86d57791513de5fc6f262dfadee8dcee94a71b9"
-          TARBALL="zig-bsdiff-linux-x64.tar.gz"
-          curl --retry 3 --retry-delay 5 --retry-all-errors -sfLo "$TARBALL" "https://github.com/blackboardsh/zig-bsdiff/releases/download/v${VERSION}/${TARBALL}"
-          echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
-          tar -xz -C /usr/local/bin < "$TARBALL"
-          rm "$TARBALL"
-
       - name: Download current binaries
         uses: actions/download-artifact@v8
         with:
@@ -417,147 +462,34 @@ jobs:
           path: new-binaries
           merge-multiple: true
 
-      - name: Download previous nightly binaries (main)
+      - name: Generate delta patches (nightly)
+        id: gen-ghcr
         if: github.ref == 'refs/heads/main'
-        run: |
-          VERSION="${{ needs.changes.outputs.nightly-version }}"
-          REPO="ghcr.io/getsentry/cli"
+        uses: BYK/binpatch/action@0.4.2
+        with:
+          mode: generate-ghcr
+          version: ${{ needs.changes.outputs.nightly-version }}
+          registry: ghcr.io
+          repo: getsentry/cli
+          binary-glob: 'sentry-*'
+          new-binaries-dir: new-binaries
+          new-gz-dir: new-binaries
+          patches-dir: patches
 
-          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
-
-          # Find previous nightly tag
-          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-[0-9]' | sort -V || echo "")
-          PREV_TAG=""
-          for tag in $TAGS; do
-            # Current tag may not exist yet (publish-nightly hasn't run),
-            # but that's fine — we want the latest existing nightly tag
-            if [ "$tag" = "nightly-${VERSION}" ]; then
-              break
-            fi
-            PREV_TAG="$tag"
-          done
-
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous versioned nightly found, skipping patches"
-            exit 0
-          fi
-          echo "HAS_PREV=true" >> "$GITHUB_ENV"
-          echo "Previous nightly: ${PREV_TAG}"
-
-          # Download and decompress previous nightly binaries
-          mkdir -p old-binaries
-          PREV_MANIFEST_JSON=$(oras manifest fetch "${REPO}:${PREV_TAG}")
-          echo "$PREV_MANIFEST_JSON" | jq -r '.layers[] | select(.annotations["org.opencontainers.image.title"] | endswith(".gz")) | .annotations["org.opencontainers.image.title"] + " " + .digest' | while read -r filename digest; do
-            basename="${filename%.gz}"
-            echo "  Downloading previous ${basename}..."
-            oras blob fetch "${REPO}@${digest}" --output "old-binaries/${filename}"
-            gunzip -f "old-binaries/${filename}"
-          done
-
-      - name: Download previous release binaries (release/**)
+      - name: Generate delta patches (stable)
+        id: gen-release
         if: startsWith(github.ref, 'refs/heads/release/')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          PREV_TAG=$(gh api "repos/${{ github.repository }}/releases?per_page=5" \
-            --jq '[.[] | select(.prerelease == false and .draft == false)] | .[0].tag_name // empty')
-
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous stable release found — skipping patch generation"
-            exit 0
-          fi
-          echo "HAS_PREV=true" >> "$GITHUB_ENV"
-          echo "Previous release: ${PREV_TAG}"
-
-          shopt -s nullglob
-          mkdir -p old-binaries
-          for gz in new-binaries/*.gz; do
-            name=$(basename "${gz%.gz}")
-            echo "  Downloading ${name}.gz from ${PREV_TAG}..."
-            gh release download "${PREV_TAG}" \
-              --repo "${{ github.repository }}" \
-              --pattern "${name}.gz" \
-              --dir old-binaries || echo "  Warning: not found, skipping"
-          done
-          gunzip old-binaries/*.gz 2>/dev/null || true
-
-      - name: Generate delta patches
-        if: env.HAS_PREV == 'true'
-        run: |
-          mkdir -p patches
-          GENERATED=0
-
-          for new_binary in new-binaries/sentry-*; do
-            name=$(basename "$new_binary")
-            case "$name" in *.gz) continue ;; esac
-
-            old_binary="old-binaries/${name}"
-            [ -f "$old_binary" ] || continue
-
-            echo "Generating patch: ${name}.patch"
-            bsdiff "$old_binary" "$new_binary" "patches/${name}.patch" --use-zstd
-
-            patch_size=$(stat --printf='%s' "patches/${name}.patch")
-            new_size=$(stat --printf='%s' "$new_binary")
-            ratio=$(awk "BEGIN { printf \"%.1f\", ($patch_size / $new_size) * 100 }")
-            echo "  ${patch_size} bytes (${ratio}% of binary)"
-            GENERATED=$((GENERATED + 1))
-          done
-
-          echo "Generated ${GENERATED} patches"
-
-      - name: Validate patch sizes
-        if: env.HAS_PREV == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # Client rejects chains exceeding 60% of gzipped binary size
-          # (SIZE_THRESHOLD_RATIO in src/lib/delta-upgrade.ts). Use 50% here
-          # so single-step patches are caught with margin to spare.
-          MAX_RATIO: 50
-        run: |
-          shopt -s nullglob
-          OVERSIZED=""
-
-          for patch_file in patches/*.patch; do
-            name=$(basename "$patch_file" .patch)
-            gz_binary="new-binaries/${name}.gz"
-            [ -f "$gz_binary" ] || continue
-
-            patch_size=$(stat --printf='%s' "$patch_file")
-            gz_size=$(stat --printf='%s' "$gz_binary")
-            ratio=$(awk "BEGIN { printf \"%.0f\", ($patch_size / $gz_size) * 100 }")
-
-            if [ "$ratio" -gt "$MAX_RATIO" ]; then
-              echo "::error::Patch ${name}.patch is ${ratio}% of gzipped binary (limit: ${MAX_RATIO}%)"
-              OVERSIZED="$(printf '%s\n- `%s.patch`: %s%% of gzipped binary (%s / %s bytes)' "$OVERSIZED" "$name" "$ratio" "$patch_size" "$gz_size")"
-              rm "$patch_file"
-            fi
-          done
-
-          if [ -n "$OVERSIZED" ]; then
-            TITLE="Delta patch generation produced oversized patches"
-            BODY="$(cat <<ISSUE_EOF
-          The \`generate-patches\` job produced patches exceeding ${MAX_RATIO}% of gzipped binary size:
-          ${OVERSIZED}
-
-          These patches were **excluded** from the artifact upload. This usually means the old binary download failed (empty/wrong file).
-
-          **Branch:** \`${GITHUB_REF_NAME}\`
-          **Commit:** ${GITHUB_SHA}
-          **Run:** ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
-          ISSUE_EOF
-          )"
-
-            EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE" --json number --jq '.[0].number // empty')
-            if [ -n "$EXISTING" ]; then
-              gh issue comment "$EXISTING" --repo "$GITHUB_REPOSITORY" --body "$BODY"
-            else
-              gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY" --label bug
-            fi
-          fi
+        uses: BYK/binpatch/action@0.4.2
+        with:
+          mode: generate-release
+          repo: ${{ github.repository }}
+          binary-glob: 'sentry-*'
+          new-binaries-dir: new-binaries
+          new-gz-dir: new-binaries
+          patches-dir: patches
 
       - name: Upload patch artifacts
-        if: env.HAS_PREV == 'true'
+        if: steps.gen-ghcr.outputs.has-patches == 'true' || steps.gen-release.outputs.has-patches == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: sentry-patches
@@ -615,91 +547,23 @@ jobs:
           name: sentry-patches
           path: patches
 
-      - name: Install ORAS CLI
-        run: |
-          VERSION=1.3.1
-          EXPECTED_SHA256="d52c4af76ce6a3ceb8579e51fb751a43ac051cca67f965f973a0b0e897a2bb86"
-          TARBALL="oras_${VERSION}_linux_amd64.tar.gz"
-          curl --retry 3 --retry-delay 5 --retry-all-errors -sfLo "$TARBALL" "https://github.com/oras-project/oras/releases/download/v${VERSION}/${TARBALL}"
-          echo "${EXPECTED_SHA256}  ${TARBALL}" | sha256sum -c -
-          tar -xz -C /usr/local/bin oras < "$TARBALL"
-          rm "$TARBALL"
-
-      - name: Log in to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
-
-      - name: Push binaries to GHCR
-        # Push from inside the artifacts directory so ORAS records bare
-        # filenames (e.g. "sentry-linux-x64.gz") as layer titles, not
-        # "artifacts/sentry-linux-x64.gz". The CLI matches layers by
-        # filename in findLayerByFilename().
-        working-directory: artifacts
-        run: |
-          VERSION="${{ needs.changes.outputs.nightly-version }}"
-          oras push ghcr.io/getsentry/cli:nightly \
-            --artifact-type application/vnd.sentry.cli.nightly \
-            --annotation "org.opencontainers.image.source=https://github.com/getsentry/cli" \
-            --annotation "version=${VERSION}" \
-            *.gz
-
-      - name: Tag versioned nightly
-        # Create an immutable versioned tag via zero-copy oras tag.
-        # This enables patch chain resolution to find specific nightly versions.
-        run: |
-          VERSION="${{ needs.changes.outputs.nightly-version }}"
-          oras tag ghcr.io/getsentry/cli:nightly "nightly-${VERSION}"
-
-      - name: Push delta patches to GHCR
-        # Upload pre-generated patches from generate-patches job as a
-        # :patch-<version> manifest with SHA-256 annotations.
-        # Failure here is non-fatal — delta upgrades are optional.
-        if: steps.download-patches.outcome == 'success'
-        continue-on-error: true
-        run: |
-          VERSION="${{ needs.changes.outputs.nightly-version }}"
-          REPO="ghcr.io/getsentry/cli"
-
-          # Compute SHA-256 annotations from new binaries and collect patch files
-          shopt -s nullglob
-          ANNOTATIONS=""
-          PATCH_FILES=""
-          for patch_file in patches/*.patch; do
-            basename_patch=$(basename "$patch_file" .patch)
-            new_binary="binaries/${basename_patch}"
-            if [ -f "$new_binary" ]; then
-              sha256=$(sha256sum "$new_binary" | cut -d' ' -f1)
-              ANNOTATIONS="${ANNOTATIONS} --annotation sha256-${basename_patch}=${sha256}"
-            fi
-            PATCH_FILES="${PATCH_FILES} $(basename "$patch_file")"
-          done
-
-          if [ -z "$PATCH_FILES" ]; then
-            echo "No patches to push"
-            exit 0
-          fi
-
-          # Find from-version by listing GHCR nightly tags
-          TAGS=$(oras repo tags "${REPO}" 2>/dev/null | grep '^nightly-[0-9]' | sort -V || echo "")
-          PREV_TAG=""
-          for tag in $TAGS; do
-            if [ "$tag" = "nightly-${VERSION}" ]; then break; fi
-            PREV_TAG="$tag"
-          done
-
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous nightly tag found, skipping patch push"
-            exit 0
-          fi
-          PREV_VERSION="${PREV_TAG#nightly-}"
-
-          cd patches
-          eval oras push "${REPO}:patch-${VERSION}" \
-            --artifact-type application/vnd.sentry.cli.patch \
-            --annotation "from-version=${PREV_VERSION}" \
-            ${ANNOTATIONS} \
-            ${PATCH_FILES}
-
-          echo "Pushed patch manifest: patch-${VERSION} (from ${PREV_VERSION})"
+      - name: Push to GHCR (binpatch action)
+        uses: BYK/binpatch/action@0.4.2
+        with:
+          mode: publish-ghcr
+          version: ${{ needs.changes.outputs.nightly-version }}
+          registry: ghcr.io
+          repo: getsentry/cli
+          binary-glob: 'sentry-*'
+          artifacts-dir: artifacts
+          binaries-dir: binaries
+          patches-dir: patches
+          # CRITICAL: stamp the annotation with the value the generate step
+          # actually used, NOT a re-derived tag listing. binpatch verifies
+          # only the final output SHA, so a mismatched `from-version` annotation
+          # silently bypasses the user's expected upgrade path. See
+          # https://github.com/BYK/binpatch/blob/main/website/src/content/docs/security.md#from-version-annotation-trust
+          from-version: ${{ needs.generate-patches.outputs.from-version }}
 
   test-e2e:
     name: E2E Tests
@@ -710,12 +574,18 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          # Pinned to a patched 24 — the skill-eval planner makes keep-alive
+          # HTTPS calls and would hit the ERR_STREAM_PREMATURE_CLOSE regression
+          # on a floating "24". See NODE_VERSION_24 in the top-level env block.
+          node-version: ${{ env.NODE_VERSION_24 }}
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Download Linux binary
@@ -730,31 +600,78 @@ jobs:
       - name: E2E Tests
         env:
           SENTRY_CLI_BINARY: ${{ github.workspace }}/dist-bin/sentry-linux-x64
-          # Pass API key only when skill files changed — the skill-eval e2e test
-          # auto-skips when the key is absent, so non-skill PRs aren't affected.
-          ANTHROPIC_API_KEY: ${{ needs.changes.outputs.skill == 'true' && secrets.ANTHROPIC_API_KEY || '' }}
+          # No eval provider key here: the skill eval runs in the dedicated
+          # `eval-skill` job (non-forks) and `eval-skill-fork.yml` (forks). The
+          # inline skill-eval e2e test stays for local runs and auto-skips in
+          # CI when no key is present, so it never double-runs the eval.
         run: pnpm run test:e2e
+  eval-skill:
+    name: Eval SKILL.md
+    needs: [changes]
+    # Skill eval for non-fork PRs and pushes. Fork PRs are handled separately
+    # by eval-skill-fork.yml (they can't read secrets on pull_request, so they
+    # go through a label-gated pull_request_target flow). Fork PRs skip here
+    # because head.repo.fork is true; same-repo PRs and pushes have secrets.
+    if: >-
+      needs.changes.outputs.skill == 'true'
+      && (github.event_name != 'pull_request'
+          || github.event.pull_request.head.repo.fork == false)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          # Pinned to a patched 24 — the skill-eval planner makes keep-alive
+          # HTTPS calls and would hit the ERR_STREAM_PREMATURE_CLOSE regression
+          # on a floating "24". See NODE_VERSION_24 in the top-level env block.
+          node-version: ${{ env.NODE_VERSION_24 }}
+      - uses: actions/cache@v5
+        id: cache
+        with:
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile
+      - name: Generate docs and skill files
+        run: pnpm run generate:schema && pnpm run generate:docs
+      - name: Eval SKILL.md
+        run: pnpm run eval:skill
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
   build-npm:
-    name: Build npm Package (Node ${{ matrix.node }})
+    name: Build npm Package (smoke Node ${{ matrix.node }})
     needs: [lint, test-unit]
     runs-on: ubuntu-latest
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 'production' || '' }}
     strategy:
       fail-fast: false
       matrix:
-        node: ["22", "24"]
+        node: ["20", "22", "24"]
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v4
+      # Build under our development Node floor (22.15+). The build tooling
+      # (tsx loader hooks in script/require-shim.mjs) uses node:module APIs
+      # only present on 22.15+, so the bundle is always produced on a modern
+      # Node — matching how we actually publish. The matrix Node version is
+      # only used to *run* the produced artifact below.
       - uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node }}
+          node-version: ${{ env.NODE_VERSION_22 }}
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Bundle
@@ -762,18 +679,39 @@ jobs:
           # Environment-scoped (production) — see note in build-binary.
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: pnpm run bundle
+      # Switch to the matrix Node to run the produced artifact. This is the
+      # consumer's perspective: Node 20 exercises the WASM SQLite fallback
+      # (no node:sqlite before 22.15); 22/24 use the native driver.
+      - uses: actions/setup-node@v6
+        with:
+          # Matrix entries stay bare majors ("20"/"22"/"24") for the job name
+          # and the `matrix.node == '22'` artifact guard below; map each to its
+          # exact patched version from the central env block here.
+          node-version: ${{ matrix.node == '24' && env.NODE_VERSION_24 || matrix.node == '20' && env.NODE_VERSION_20 || env.NODE_VERSION_22 }}
       - name: Smoke test (Node.js)
-        run: node dist/bin.cjs --help
+        env:
+          # Clear auth tokens — on main the job inherits SENTRY_AUTH_TOKEN
+          # from the production environment (for the Bundle step's sourcemap
+          # upload). The smoke tests must not use it.
+          SENTRY_AUTH_TOKEN: ""
+          SENTRY_TOKEN: ""
+          # Use a temp config dir so the WASM SQLite driver (Node 20) can
+          # create and open the database reliably. The runner's ~/.sentry
+          # may not exist under the switched Node 20 runtime.
+          SENTRY_CONFIG_DIR: ${{ runner.temp }}/.sentry-smoke
+        run: node packages/cli/dist/bin.cjs --help
       - name: Smoke test (Node.js — deep)
         shell: bash
         env:
           SENTRY_AUTH_TOKEN: ""
           SENTRY_TOKEN: ""
+          SENTRY_CONFIG_DIR: ${{ runner.temp }}/.sentry-smoke
         run: |
           # auth status without a token exercises SQLite init, schema
           # migrations, telemetry lazy import, and the CJS require chain.
-          # Expected: exit 10 (AUTH_NOT_AUTHENTICATED), NOT a crash/syntax error.
-          OUTPUT=$(node dist/bin.cjs auth status 2>&1) && EXIT_CODE=$? || EXIT_CODE=$?
+          # On Node 20 this runs entirely through the bundled WASM SQLite
+          # driver. Expected: exit 10 (AUTH_NOT_AUTHENTICATED), NOT a crash.
+          OUTPUT=$(node packages/cli/dist/bin.cjs auth status 2>&1) && EXIT_CODE=$? || EXIT_CODE=$?
           if [[ $EXIT_CODE -ne 10 ]]; then
             echo "::error::Expected exit code 10 (not authenticated), got $EXIT_CODE"
             echo "$OUTPUT"
@@ -785,12 +723,13 @@ jobs:
             exit 1
           fi
       - run: npm pack
+        working-directory: packages/cli
       - name: Upload artifact
         if: matrix.node == '22'
         uses: actions/upload-artifact@v7
         with:
           name: npm-package
-          path: "*.tgz"
+          path: "packages/cli/*.tgz"
 
   build-docs:
     name: Build Docs
@@ -812,17 +751,20 @@ jobs:
       # build doesn't rely on whatever ships on the runner image.
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: ${{ env.NODE_VERSION_24 }}
       - uses: actions/cache@v5
         id: cache
         with:
-          path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'patches/**') }}
+          path: |
+            node_modules
+            packages/*/node_modules
+            apps/*/node_modules
+          key: node-modules-${{ hashFiles('pnpm-lock.yaml', '.npmrc', 'packages/cli/patches/**') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Get CLI version
         id: version
-        run: echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(node -p 'require("./packages/cli/package.json").version')" >> "$GITHUB_OUTPUT"
       - name: Download compiled CLI binary
         uses: actions/download-artifact@v8
         with:
@@ -833,7 +775,7 @@ jobs:
       - name: Generate docs content
         run: pnpm run generate:schema && pnpm run generate:docs
       - name: Build Docs
-        working-directory: docs
+        working-directory: apps/cli-docs
         env:
           PUBLIC_SENTRY_ENVIRONMENT: production
           SENTRY_RELEASE: ${{ steps.version.outputs.version }}
@@ -850,28 +792,34 @@ jobs:
           SENTRY_ORG: sentry
           SENTRY_PROJECT: cli-website
         run: |
-          ./dist-bin/sentry-linux-x64 sourcemap inject docs/dist/
-          ./dist-bin/sentry-linux-x64 sourcemap upload docs/dist/ \
+          ./dist-bin/sentry-linux-x64 sourcemap inject apps/cli-docs/dist/
+          ./dist-bin/sentry-linux-x64 sourcemap upload apps/cli-docs/dist/ \
             --release "${{ steps.version.outputs.version }}" \
             --url-prefix "~/"
       # Remove .map files — they were uploaded to Sentry but shouldn't
       # be deployed to production.
       - name: Remove sourcemaps from output
-        run: find docs/dist -name '*.map' -delete
+        run: find apps/cli-docs/dist -name '*.map' -delete
+      # Package the built site using Vercel's Build Output API so Craft's
+      # release-gated Vercel target can deploy it without rebuilding.
       - name: Package Docs
         run: |
-          cp .nojekyll docs/dist/
-          cd docs/dist && zip -r ../../gh-pages.zip .
+          OUTPUT_DIR="$RUNNER_TEMP/vercel-output"
+          rm -rf "$OUTPUT_DIR"
+          mkdir -p "$OUTPUT_DIR/.vercel/output/static"
+          cp -R apps/cli-docs/dist/. "$OUTPUT_DIR/.vercel/output/static/"
+          printf '%s\n' '{"version":3}' > "$OUTPUT_DIR/.vercel/output/config.json"
+          (cd "$OUTPUT_DIR" && zip -qr "$GITHUB_WORKSPACE/vercel.zip" .vercel)
       - name: Upload docs artifact
         uses: actions/upload-artifact@v7
         with:
-          name: gh-pages
-          path: gh-pages.zip
+          name: vercel
+          path: vercel.zip
 
   ci-status:
     name: CI Status
     if: always()
-    needs: [changes, check-generated, build-binary, build-npm, build-docs, test-e2e, generate-patches]
+    needs: [changes, check-generated, build-binary, build-npm, build-docs, test-e2e, eval-skill, generate-patches, codemod-test]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -880,7 +828,10 @@ jobs:
           # Check for explicit failures or cancellations in all jobs
           # generate-patches is skipped on PRs — that's expected
           # publish-nightly is excluded: it's infrastructure (GHCR push), not code quality
-          results="${{ needs.check-generated.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.generate-patches.result }}"
+          # eval-skill is skipped on fork PRs (handled by eval-skill-fork.yml)
+          # and when skill files didn't change — a "skipped" result is fine, we
+          # only fail on an actual failure/cancellation.
+          results="${{ needs.check-generated.result }} ${{ needs.build-binary.result }} ${{ needs.build-npm.result }} ${{ needs.build-docs.result }} ${{ needs.test-e2e.result }} ${{ needs.eval-skill.result }} ${{ needs.generate-patches.result }} ${{ needs.codemod-test.result }}"
           for result in $results; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "::error::CI failed"
@@ -896,6 +847,10 @@ jobs:
           fi
           if [[ "${{ needs.changes.outputs.skill }}" == "true" && "${{ needs.check-generated.result }}" == "skipped" ]]; then
             echo "::error::CI failed - upstream job failed causing check-generated to be skipped"
+            exit 1
+          fi
+          if [[ "${{ needs.changes.outputs.codemod }}" == "true" && "${{ needs.codemod-test.result }}" == "skipped" ]]; then
+            echo "::error::CI failed - upstream job failed causing codemod-test to be skipped"
             exit 1
           fi
           echo "CI passed"
