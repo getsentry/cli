@@ -6,8 +6,10 @@
  * pattern as api-client.seer.test.ts.
  */
 
+// biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
+import * as Sentry from "@sentry/node-core/light";
 import { number, object, string } from "valibot";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { resolveEventInOrg } from "../../src/lib/api/events.js";
 import { unwrapResult } from "../../src/lib/api/infrastructure.js";
 import {
@@ -879,13 +881,16 @@ describe("projects.ts", () => {
       globalThis.fetch = mockFetch(async (input, init) => {
         const req = new Request(input!, init);
         expect(req.url).toContain("/projects/test-org/test-project/keys/");
+        expect(new URL(req.url).searchParams.get("status")).toBe("active");
         return new Response(JSON.stringify(keys), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
       });
 
-      const result = await getProjectKeys("test-org", "test-project");
+      const result = await getProjectKeys("test-org", "test-project", {
+        status: "active",
+      });
       expect(result).toHaveLength(1);
       expect(result[0]!.dsn.public).toBe("https://abc@sentry.io/1");
     });
@@ -964,8 +969,49 @@ describe("projects.ts", () => {
           })
       );
 
-      const dsn = await tryGetPrimaryDsn("test-org", "test-project");
-      expect(dsn).toBeNull();
+      const captureSpy = vi.spyOn(Sentry, "captureException");
+      try {
+        const dsn = await tryGetPrimaryDsn("test-org", "test-project");
+        expect(dsn).toBeNull();
+        // 404 is expected user/API noise — silenced, not an issue.
+        expect(captureSpy).not.toHaveBeenCalled();
+      } finally {
+        captureSpy.mockRestore();
+      }
+    });
+
+    test("reports unexpected DSN fetch failures to Sentry", async () => {
+      globalThis.fetch = mockFetch(
+        async () =>
+          new Response(JSON.stringify({ detail: "Internal error" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          })
+      );
+
+      const captureSpy = vi.spyOn(Sentry, "captureException");
+      const withScopeSpy = vi.spyOn(Sentry, "withScope");
+      withScopeSpy.mockImplementation((fn: (scope: unknown) => void) => {
+        fn({
+          setTag() {
+            /* noop */
+          },
+          setContext() {
+            /* noop */
+          },
+          setFingerprint() {
+            /* noop */
+          },
+        });
+      });
+      try {
+        const dsn = await tryGetPrimaryDsn("test-org", "test-project");
+        expect(dsn).toBeNull();
+        expect(captureSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        captureSpy.mockRestore();
+        withScopeSpy.mockRestore();
+      }
     });
   });
 });
@@ -2178,17 +2224,20 @@ describe("infrastructure.ts (rawApiRequest)", () => {
       expect(capturedAccept).toBe("text/csv");
     });
 
-    test("includes query params", async () => {
+    test("merges query params with an existing endpoint query", async () => {
       globalThis.fetch = mockFetch(async (input) => {
-        const url = String(input instanceof Request ? input.url : input);
-        expect(url).toContain("per_page=10");
+        const url = new URL(
+          String(input instanceof Request ? input.url : input)
+        );
+        expect(url.searchParams.get("download")).toBe("1");
+        expect(url.searchParams.get("per_page")).toBe("10");
         return new Response(JSON.stringify({}), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
       });
 
-      await rawApiRequest("/test/", {
+      await rawApiRequest("/test/?download=1", {
         params: { per_page: 10 },
       });
     });
