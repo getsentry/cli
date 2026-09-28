@@ -68,6 +68,7 @@ vi.mock("../../src/lib/resolve-target.js", async (importOriginal) => {
 import * as resolveTargetModule from "../../src/lib/resolve-target.js";
 import {
   classifyProjectSearchTarget,
+  resolveOrgOnlyTarget,
   resolveOrgOptionalTarget,
   resolveOrgProjectOrGuide,
   resolveOrgsForListing,
@@ -754,5 +755,23 @@ describe("resolveOrgOptionalTarget bare org slug", () => {
 
     expect(result).toMatchObject({ org: "acme-corp", project: "frontend" });
     expect(findProjectsBySlugSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("org-only mode preserves its usage hint when a bare target is missing", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
+    const usageHint = "sentry alert metrics create <org>/";
+
+    try {
+      await resolveOrgOnlyTarget(
+        { type: "project-search", projectSlug: "missing" },
+        CWD,
+        "alert metrics create",
+        usageHint
+      );
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      expect((error as ResolutionError).hint).toBe(usageHint);
+    }
   });
 });

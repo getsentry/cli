@@ -2014,6 +2014,8 @@ export type ResolveProjectBoundTargetOptions = {
    * lookups and fuzzy recovery.
    */
   projectSearchResolution?: ProjectSearchTargetResolution;
+  /** Usage example supplied by the calling command. */
+  usageHint?: string;
 };
 
 /**
@@ -2041,7 +2043,8 @@ export async function resolveProjectBoundTarget(
   commandName: string,
   options: ResolveProjectBoundTargetOptions = {}
 ): Promise<ResolvedProjectBoundTarget> {
-  const usageHint = `sentry ${commandName} <org>/<project>`;
+  const usageHint =
+    options.usageHint ?? `sentry ${commandName} <org>/<project>`;
 
   switch (parsed.type) {
     case "explicit": {
@@ -2087,7 +2090,7 @@ export async function resolveProjectBoundTarget(
         throw new ResolutionError(
           `Project '${resolution.displaySlug}'`,
           "not found",
-          `sentry ${commandName} <org>/${parsed.projectSlug}`,
+          usageHint,
           resolution.suggestions.length > 0 ? resolution.suggestions : fallback
         );
       }
@@ -2432,7 +2435,8 @@ export type ResolvedOrgOptionalTarget = {
 export async function resolveOrgOptionalTarget(
   parsed: ParsedOrgProject,
   cwd: string,
-  commandName: string
+  commandName: string,
+  usageHint = `sentry ${commandName} <target>`
 ): Promise<ResolvedOrgOptionalTarget> {
   // org-all: resolve the org slug only
   if (parsed.type === "org-all") {
@@ -2444,7 +2448,7 @@ export async function resolveOrgOptionalTarget(
   if (parsed.type === "auto-detect") {
     const resolved = await resolveOrg({ cwd });
     if (!resolved) {
-      throw new ContextError("Organization", `sentry ${commandName} <target>`, [
+      throw new ContextError("Organization", usageHint, [
         "SENTRY_ORG environment variable",
         "sentry cli defaults",
       ]);
@@ -2468,11 +2472,12 @@ export async function resolveOrgOptionalTarget(
     }
     return resolveProjectBoundTarget(parsed, cwd, commandName, {
       projectSearchResolution: resolution,
+      usageHint,
     });
   }
 
   // explicit, scoped search, and display names
-  return resolveProjectBoundTarget(parsed, cwd, commandName);
+  return resolveProjectBoundTarget(parsed, cwd, commandName, { usageHint });
 }
 
 /**
@@ -2495,7 +2500,12 @@ export async function resolveOrgOnlyTarget(
     }
     return resolved.org;
   }
-  const resolved = await resolveOrgOptionalTarget(parsed, cwd, commandName);
+  const resolved = await resolveOrgOptionalTarget(
+    parsed,
+    cwd,
+    commandName,
+    usageHint
+  );
   return resolved.org;
 }
 
