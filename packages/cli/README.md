@@ -39,6 +39,8 @@ bun add -g sentry
 
 > The npm/pnpm/yarn packages require Node.js 20+. On Node.js 22.15+ the CLI uses the built-in `node:sqlite`; on Node.js 20–22.14 it transparently falls back to a bundled WASM SQLite driver.
 
+Package manager installs don't set up shell completions or agent skills. Run `sentry cli setup` once to enable them.
+
 ### Run Without Installing
 
 ```bash
