@@ -115,7 +115,7 @@ export type PrepareResult = {
   recommendation?: string;
 };
 
-/** Outcome of a whole `debug-files prepare` run. */
+/** Outcome of a whole `debug-files wasm-upload` run. */
 export type PrepareCommandResult = {
   /** Organization slug. Omitted when nothing was uploaded. */
   org?: string;

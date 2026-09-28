@@ -1,5 +1,5 @@
 /**
- * Human-readable report for `sentry debug-files prepare`.
+ * Human-readable report for `sentry debug-files wasm-upload`.
  *
  * One table per module, so a warning stays next to the module it belongs to.
  * A build directory can hold dozens of modules, and a flat list of lines makes
