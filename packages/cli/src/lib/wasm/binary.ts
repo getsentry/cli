@@ -81,7 +81,7 @@ const NAME_SECTION = "name";
 export const BUILD_ID_SECTION = "build_id";
 
 /** Name of the custom section pointing at a module's debug companion. */
-const EXTERNAL_DEBUG_INFO_SECTION = "external_debug_info";
+export const EXTERNAL_DEBUG_INFO_SECTION = "external_debug_info";
 
 /** Prefix shared by the custom sections that carry DWARF. */
 const DEBUG_SECTION_PREFIX = ".debug_";
@@ -130,7 +130,7 @@ const WASM_HEADER = Uint8Array.from([
 ]);
 
 /** Bytes consumed by {@link WASM_HEADER}. */
-const WASM_HEADER_LENGTH = WASM_HEADER.length;
+export const WASM_HEADER_LENGTH = WASM_HEADER.length;
 
 /** Continuation flag of a LEB128 group: another byte follows. */
 const CONTINUATION_BIT = 0x80;
@@ -288,6 +288,48 @@ export function parseSections(bytes: Uint8Array): WasmSection[] {
   return sections;
 }
 
+/** Framing of one section, read from bytes starting at the section's id. */
+export type SectionFrame = {
+  /** Section id. */
+  id: number;
+  /** Custom section name, when `head` was long enough to hold it. */
+  name?: string;
+  /** Bytes taken by the id and the length prefix. */
+  headerLength: number;
+  /** Payload length, as declared by the prefix. */
+  payloadLength: number;
+};
+
+/**
+ * Decode a section's framing from its first bytes, without its payload.
+ *
+ * Lets a caller walk a module on disk by reading only section headers and
+ * seeking past payloads. Section order is not checked: that needs the whole
+ * module, and {@link parseSections} checks it.
+ *
+ * @param head - Bytes starting at the section's id. A custom section's name is
+ *   decoded only when `head` holds all of it.
+ * @throws {WasmParseError} when `head` is empty or the length prefix is invalid
+ */
+export function readSectionFrame(head: Uint8Array): SectionFrame {
+  const id = head[0];
+  if (id === undefined) {
+    throw new WasmParseError("truncated section header");
+  }
+  const { value: payloadLength, size } = readVarUint32(head, 1);
+  const headerLength = 1 + size;
+  const { name } = readCustomHeader(
+    id,
+    head.subarray(headerLength, headerLength + payloadLength)
+  );
+  return {
+    id,
+    ...(name === undefined ? {} : { name }),
+    headerLength,
+    payloadLength,
+  };
+}
+
 /**
  * Reassemble sections into a module.
  *
@@ -407,7 +449,7 @@ export function isNameSection(section: WasmSection): boolean {
 }
 
 /** Throw unless `bytes` opens with the WebAssembly magic and version. */
-function assertWasmHeader(bytes: Uint8Array): void {
+export function assertWasmHeader(bytes: Uint8Array): void {
   if (bytes.length < WASM_HEADER_LENGTH) {
     throw new WasmParseError(
       `too short to be a WebAssembly module (${bytes.length} bytes)`
@@ -482,7 +524,7 @@ function checkSectionOrder(
  * that error on the floor, so an unreadable name costs the section its identity
  * and nothing more.
  */
-function readCustomHeader(
+export function readCustomHeader(
   id: number,
   payload: Uint8Array
 ): { name?: string; contents?: Uint8Array } {

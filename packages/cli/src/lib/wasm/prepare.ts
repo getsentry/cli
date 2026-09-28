@@ -14,16 +14,29 @@
  * tool are interchangeable in Sentry.
  */
 
-import { readFile, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { type FileHandle, open, readFile, writeFile } from "node:fs/promises";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { logger } from "../logger.js";
 import {
+  assertWasmHeader,
   decodeExternalDebugInfo,
+  EXTERNAL_DEBUG_INFO_SECTION,
   isCodeSection,
   isDebugSection,
   isExternalDebugInfoSection,
   isNameSection,
   parseSections,
+  readCustomHeader,
+  readSectionFrame,
+  WASM_HEADER_LENGTH,
   type WasmSection,
 } from "./binary.js";
 import {
@@ -354,6 +367,87 @@ function resolveExternalDebugPath(
     return null;
   }
   return isAbsolute(url) ? url : join(dirname(wasmPath), url);
+}
+
+/** Bytes read per section header: id, length, name length, and the name. */
+const SECTION_PROBE_LENGTH = 32;
+
+/** Read up to `length` bytes of an open file, starting at `position`. */
+async function readAt(
+  file: FileHandle,
+  position: number,
+  length: number
+): Promise<Uint8Array> {
+  const buffer = new Uint8Array(length);
+  const { bytesRead } = await file.read(buffer, 0, length, position);
+  return buffer.subarray(0, bytesRead);
+}
+
+/**
+ * Read a module's `external_debug_info` pointer without loading the module.
+ *
+ * Walks section headers on disk and seeks past every payload but the pointer's,
+ * so a module carrying hundreds of megabytes of DWARF costs a few small reads.
+ *
+ * @returns The pointer, or `null` when there is none, the file is unreadable,
+ *   or its envelope is malformed. Malformed modules are reported when they are
+ *   prepared, so they are not reported here.
+ */
+async function readExternalDebugInfoFromFile(
+  path: string
+): Promise<string | null> {
+  let file: FileHandle | undefined;
+  try {
+    file = await open(path, "r");
+    const { size } = await file.stat();
+    assertWasmHeader(await readAt(file, 0, WASM_HEADER_LENGTH));
+    let offset = WASM_HEADER_LENGTH;
+    while (offset < size) {
+      const frame = readSectionFrame(
+        await readAt(file, offset, SECTION_PROBE_LENGTH)
+      );
+      const payloadOffset = offset + frame.headerLength;
+      if (frame.name === EXTERNAL_DEBUG_INFO_SECTION) {
+        const payload = await readAt(file, payloadOffset, frame.payloadLength);
+        const { contents } = readCustomHeader(frame.id, payload);
+        return contents ? decodeExternalDebugInfo(contents) : null;
+      }
+      offset = payloadOffset + frame.payloadLength;
+    }
+    return null;
+  } catch (error) {
+    log.debug(`No readable external_debug_info in ${path}`, error);
+    return null;
+  } finally {
+    await file?.close();
+  }
+}
+
+/**
+ * Paths another candidate names as its debug companion.
+ *
+ * A companion with a custom name looks like any module carrying DWARF, so a
+ * scan would split it and strip the debug info its deployable points at. Only
+ * the deployable's `external_debug_info` gives it away, so every candidate's
+ * pointer is read before anything is split. A companion scanned without its
+ * deployable still cannot be recognized.
+ *
+ * @param paths - Absolute paths of the scanned modules.
+ * @returns Absolute paths of the referenced companions. Remote URLs and
+ *   modules pointing at themselves contribute nothing.
+ */
+export async function findReferencedCompanions(
+  paths: string[]
+): Promise<Set<string>> {
+  const companions = new Set<string>();
+  for (const path of paths) {
+    const url = await readExternalDebugInfoFromFile(path);
+    const companion = url && resolveExternalDebugPath(path, url);
+    if (companion && resolve(companion) !== resolve(path)) {
+      companions.add(resolve(companion));
+    }
+  }
+  return companions;
 }
 
 /** An existing companion, and the quality to report for the pair. */

@@ -15,6 +15,7 @@ import { parseSections } from "../../../src/lib/wasm/binary.js";
 import { formatBuildId, uuidToBytes } from "../../../src/lib/wasm/build-id.js";
 import {
   companionPath,
+  findReferencedCompanions,
   hasDwarfQuality,
   inspectWasm,
   isDebugCompanionPath,
@@ -514,5 +515,67 @@ describe("prepareWasmFile: pairs split by another tool", () => {
     // Pairing with it would claim an id for a file holding no debug info.
     expect(result.action).toBe("skipped");
     expect(result.quality).toBe("external-debug-info");
+  });
+});
+
+describe("findReferencedCompanions", () => {
+  const buildId = new Uint8Array(16).fill(0x42);
+
+  test("protects a custom-named companion its deployable points at", async () => {
+    const companion = await writeModule(
+      "app.symbols.wasm",
+      wasmModule([code(), dwarf(), buildIdSection(buildId)])
+    );
+    const module = await writeModule(
+      "app.wasm",
+      wasmModule([
+        code(),
+        buildIdSection(buildId),
+        externalDebugInfoSection("app.symbols.wasm"),
+      ])
+    );
+
+    const companions = await findReferencedCompanions([module, companion]);
+    const result = await prepareWasmFile(module);
+
+    expect([...companions]).toEqual([companion]);
+    expect(result.action).toBe("already-prepared");
+    expect(result.companion).toBe(companion);
+    expect(hasSection(await readFile(companion), ".debug_info")).toBe(true);
+  });
+
+  test("reads a pointer placed after a large payload", async () => {
+    const module = await writeModule(
+      "app.wasm",
+      wasmModule([
+        code(),
+        customSection(".debug_info", new Uint8Array(1024 * 1024)),
+        externalDebugInfoSection("app.symbols.wasm"),
+      ])
+    );
+
+    const companions = await findReferencedCompanions([module]);
+
+    expect([...companions]).toEqual([join(dir, "app.symbols.wasm")]);
+    expect(inspectWasm(await readFile(module)).externalDebugInfo).toBe(
+      "app.symbols.wasm"
+    );
+  });
+
+  test("ignores remote, self-referencing, and invalid modules", async () => {
+    const paths = [
+      await writeModule(
+        "remote.wasm",
+        wasmModule([code(), externalDebugInfoSection("https://cdn/app.wasm")])
+      ),
+      await writeModule(
+        "self.wasm",
+        wasmModule([code(), externalDebugInfoSection("self.wasm")])
+      ),
+      await writeModule("broken.wasm", fromHex("0061736d01000000ff")),
+      await writeModule("text.wasm", new TextEncoder().encode("not wasm")),
+    ];
+
+    expect((await findReferencedCompanions(paths)).size).toBe(0);
   });
 });

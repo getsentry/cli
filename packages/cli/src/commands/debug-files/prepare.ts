@@ -37,6 +37,7 @@ import { resolveOrgAndProject } from "../../lib/resolve-target.js";
 import { buildIgnoreMatcher, normalizePath } from "../../lib/scan/index.js";
 import { debugIdFromBuildId, uuidToBytes } from "../../lib/wasm/build-id.js";
 import {
+  findReferencedCompanions,
   hasDwarfQuality,
   isDebugCompanionPath,
   isWasmPath,
@@ -468,8 +469,19 @@ export const prepareCommand = buildCommand({
       });
     }
 
+    // A custom-named companion looks like a module with DWARF; splitting it
+    // would strip the debug info its deployable points at.
+    const companions = await findReferencedCompanions(candidates);
+    const modules = candidates.filter((path) => {
+      if (!companions.has(resolve(path))) {
+        return true;
+      }
+      log.debug(`Skipping ${path}: referenced as a debug companion`);
+      return false;
+    });
+
     const results: PrepareResult[] = [];
-    for (const path of candidates) {
+    for (const path of modules) {
       results.push(
         await prepareWasmFile(path, {
           dryRun,
