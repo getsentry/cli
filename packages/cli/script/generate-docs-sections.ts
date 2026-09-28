@@ -157,7 +157,7 @@ function getSubcommandLabel(route: RouteInfo): string {
 function generateProjectStructure(allRoutes: RouteInfo[]): string {
   const lines: string[] = [];
   lines.push("```");
-  lines.push("cli/");
+  lines.push("packages/cli/");
   lines.push("├── src/");
   lines.push("│   ├── bin.ts          # Entry point");
   lines.push("│   ├── app.ts          # Stricli application setup");
@@ -210,10 +210,7 @@ function generateProjectStructure(allRoutes: RouteInfo[]): string {
   lines.push("│   └── types/          # TypeScript types and Valibot schemas");
   lines.push("├── test/               # Test files (mirrors src/ structure)");
   lines.push("├── script/             # Build and utility scripts");
-  lines.push("├── plugins/            # Agent skill files");
-  lines.push(
-    "└── docs/               # Documentation site (Astro + Starlight)"
-  );
+  lines.push("└── plugins/            # Agent skill files");
   lines.push("```");
 
   return lines.join("\n");

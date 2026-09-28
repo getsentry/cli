@@ -6,32 +6,50 @@
 - [Node.js](https://nodejs.org/) v22.15+ installed
 - [pnpm](https://pnpm.io/) v10.11+ installed
 <!-- GENERATED:END dev-prereq -->
-- A Sentry OAuth application (create one at https://sentry.io/settings/account/api/applications/)
+- A Sentry OAuth application, only if you test against a self-hosted instance or your own OAuth app (create one at https://sentry.io/settings/account/api/applications/)
 
 ## Setup
 
-1. Install dependencies:
+1. Install dependencies (from the repository root):
 
 ```bash
 pnpm install
 ```
 
-2. Create a `.env.local` file in the project root:
+2. Generate the build-time files the CLI imports (the API schema is fetched
+   from GitHub, so this needs network access):
+
+```bash
+pnpm run generate:schema
+pnpm run generate:docs
+```
+
+`typecheck`, `test:unit`, and `test:e2e` regenerate docs but not the API
+schema, so run `generate:schema` again after changing the `@sentry/api` version.
+
+3. Optionally, create `packages/cli/.env.local` from the example file:
+
+```bash
+cp packages/cli/.env.example packages/cli/.env.local
+```
+
+`pnpm run cli` loads `.env.local` automatically. Without `SENTRY_CLIENT_ID`,
+local runs use the CLI's public sentry.io OAuth client ID. Set it when testing
+against a self-hosted instance or your own OAuth app:
 
 ```
 SENTRY_CLIENT_ID=your-sentry-oauth-client-id
 ```
 
-Get the client ID from your Sentry OAuth application settings.
+`pnpm run build` and `pnpm run bundle` require `SENTRY_CLIENT_ID`, because the
+value is baked into the built CLI.
 
 **Note:** No client secret is needed - the CLI uses OAuth 2.0 Device Authorization Grant (RFC 8628) which is designed for public clients.
 
 ## Running Locally
 
-Load environment variables from `.env.local` (e.g. via `dotenv` or `export $(cat .env.local | xargs)`), then:
-
 ```bash
-pnpm run cli -- auth login
+pnpm run cli auth login
 ```
 
 ## Testing the Device Flow
@@ -39,7 +57,7 @@ pnpm run cli -- auth login
 1. Run the CLI login command:
 
 ```bash
-pnpm run cli -- auth login
+pnpm run cli auth login
 ```
 
 2. You'll see output like:

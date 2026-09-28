@@ -136,16 +136,20 @@ Errors are thrown as `SentryError` with `.exitCode` and `.stderr`.
 git clone https://github.com/getsentry/cli.git
 cd cli
 pnpm install
+
+# Generate build-time files (API schema, search parser, docs, skills)
+pnpm run generate:schema
+pnpm run generate:docs
 ```
 
 ### Running Locally
 
 ```bash
 # Run CLI in development mode
-pnpm run cli -- --help
+pnpm run cli --help
 
-# With environment variables (create .env.local first, see DEVELOPMENT.md)
-pnpm run cli -- --help
+# Loads packages/cli/.env.local automatically when present (see DEVELOPMENT.md)
+pnpm run cli auth status
 ```
 
 ### Scripts

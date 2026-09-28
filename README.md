@@ -9,6 +9,8 @@ the Sentry CLI and Sentry MCP server into a single `getsentry/toolkit` monorepo.
   binary `sentry`). See [packages/cli/README.md](./packages/cli/README.md).
 - [`apps/cli-docs/`](./apps/cli-docs) — the CLI documentation site
   (Astro + Starlight, published to `cli.sentry.dev`).
+- [`apps/local/`](./apps/local) — the Sentry Local UI used by `sentry local --open`
+  (Vite + React, published to `local.sentry.dev`).
 
 ## Development
 

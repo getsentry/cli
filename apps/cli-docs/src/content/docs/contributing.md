@@ -25,8 +25,12 @@ cd cli
 # Install dependencies
 pnpm install
 
+# Generate build-time files (API schema, search parser, docs, skills)
+pnpm run generate:schema
+pnpm run generate:docs
+
 # Run CLI in development mode
-pnpm run cli -- --help
+pnpm run cli --help
 
 # Run tests
 pnpm run test
@@ -37,16 +41,22 @@ pnpm run test
 Create a `.env.local` file for development:
 
 ```bash
-cp .env.example .env.local
+cp packages/cli/.env.example packages/cli/.env.local
 ```
 
-Edit `.env.local` with your development credentials.
+Edit `.env.local` with your development credentials. `pnpm run cli` loads it
+automatically. See [DEVELOPMENT.md](https://github.com/getsentry/cli/blob/main/packages/cli/DEVELOPMENT.md)
+for when `SENTRY_CLIENT_ID` is needed.
 
 ## Project Structure
 
+The repository is a pnpm workspace. The CLI lives in `packages/cli/`, the
+documentation site (Astro + Starlight) in `apps/cli-docs/`, and the Sentry
+Local UI in `apps/local/`.
+
 <!-- GENERATED:START project-structure -->
 ```
-cli/
+packages/cli/
 ├── src/
 │   ├── bin.ts          # Entry point
 │   ├── app.ts          # Stricli application setup
@@ -94,8 +104,7 @@ cli/
 │   └── types/          # TypeScript types and Valibot schemas
 ├── test/               # Test files (mirrors src/ structure)
 ├── script/             # Build and utility scripts
-├── plugins/            # Agent skill files
-└── docs/               # Documentation site (Astro + Starlight)
+└── plugins/            # Agent skill files
 ```
 <!-- GENERATED:END project-structure -->
 
@@ -117,17 +126,18 @@ pnpm run bundle
 ## Testing
 
 ```bash
-# Run all tests
+# Run all unit tests (regenerates docs and the SDK first, with coverage)
 pnpm run test
 
-# Run specific test file
-pnpm run test -- test/path/to/test.ts
+# Run a specific test file (path relative to packages/cli; skips the
+# generate steps, so run `pnpm run test` once first)
+pnpm --filter sentry exec vitest run test/path/to/test.ts
 
-# Run with watch mode
-pnpm run test -- --watch
+# Run in watch mode
+pnpm --filter sentry exec vitest
 
-# Run with coverage
-pnpm run test -- --coverage
+# Run end-to-end tests
+pnpm run test:e2e
 ```
 
 ## Code Style
