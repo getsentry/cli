@@ -5,6 +5,7 @@
  * Automatically runs root cause analysis if not already done.
  */
 
+import { isatty } from "node:tty";
 import type { SentryContext } from "../../context.js";
 import { triggerSolutionPlanning } from "../../lib/api-client.js";
 import { buildCommand } from "../../lib/command.js";
@@ -154,6 +155,42 @@ function buildPlanData(state: AutofixState): PlanData {
   return data;
 }
 
+/**
+ * Root cause analysis paused waiting for the user to pick a root cause. When the
+ * session is interactive (a TTY and not JSON output), present the candidate root
+ * causes and let the user choose in the terminal so planning can continue.
+ * Throws a {@link CliError} pointing at the Sentry UI when we cannot prompt
+ * (JSON mode, non-TTY, no candidates) or the user cancels the selection.
+ */
+async function ensureRootCauseSelected(
+  state: AutofixState,
+  json: boolean
+): Promise<void> {
+  const causes = json ? [] : extractRootCauses(state);
+  const canPrompt = isatty(0) && isatty(2) && causes.length > 0;
+
+  if (canPrompt) {
+    const log = logger.withTag("issue.plan");
+    const response = await log.prompt("Select a root cause to plan against:", {
+      type: "select",
+      options: causes.map((cause) => ({
+        label: cause.description,
+        value: String(cause.id),
+      })),
+    });
+
+    // consola returns a non-string (Symbol(clack:cancel)) when cancelled.
+    if (typeof response === "string") {
+      return;
+    }
+  }
+
+  throw new CliError(
+    "Root cause analysis requires your input before a plan can be generated.\n" +
+      "Open the issue in Sentry to select a root cause, then re-run this command."
+  );
+}
+
 export const planCommand = buildCommand({
   docs: {
     brief: "Generate a solution plan using Seer AI",
@@ -217,13 +254,11 @@ export const planCommand = buildCommand({
         json: flags.json,
       });
 
-      // Root cause analysis requires user input in the Sentry UI before
-      // solution planning can proceed (e.g. selecting a root cause).
+      // Root cause analysis can pause waiting for the user to pick a root
+      // cause. When running interactively, let the user choose in the terminal
+      // and continue; otherwise point them at the Sentry UI.
       if (state.status === "WAITING_FOR_USER_RESPONSE") {
-        throw new CliError(
-          "Root cause analysis requires your input before a plan can be generated.\n" +
-            "Open the issue in Sentry to select a root cause, then re-run this command."
-        );
+        await ensureRootCauseSelected(state, flags.json);
       }
 
       // Check if solution already exists (skip if --force)
