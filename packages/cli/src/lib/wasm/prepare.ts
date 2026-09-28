@@ -243,17 +243,18 @@ export function inspectWasm(bytes: Uint8Array): WasmInspection {
 }
 
 /**
- * Read a module's build id off disk.
+ * Read a companion's build id off disk.
  *
- * @returns The id, or `null` when the file is missing, unparseable, or carries
- *   no readable `build_id`. Callers treat all three the same way: there is no
- *   id here to match against.
+ * @returns The id, or `null` when the file is missing, unparseable, carries no
+ *   DWARF, or has no readable `build_id`. Callers treat all four the same way:
+ *   there is no usable companion here to match against.
  */
 async function readCompanionBuildId(path: string): Promise<Uint8Array | null> {
   try {
-    return buildIdFromSections(parseSections(await readFile(path)));
+    const companion = inspectWasm(await readFile(path));
+    return companion.quality === "dwarf" ? companion.buildId : null;
   } catch (error) {
-    log.debug(`No readable build id at ${path}`, error);
+    log.debug(`No usable companion at ${path}`, error);
     return null;
   }
 }
