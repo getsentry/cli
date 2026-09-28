@@ -11,7 +11,7 @@
  *
  * Also handles two-arg forms:
  * - `<org>/<project> <trace-id>` — target as first arg, trace ID as second
- * - `<org> <trace-id>` — org as first arg, trace ID as second
+ * - `<project> <trace-id>` — project-first bare target with org fallback
  *
  * Used by: span list, span view, trace view, trace logs.
  */
@@ -112,7 +112,7 @@ export type ResolvedTraceOrg = {
  *
  * **Two arguments (space-separated):**
  * - `<org>/<project> <trace-id>` → explicit
- * - `<org> <trace-id>` → project-search (bare slug)
+ * - `<target> <trace-id>` → project-first bare target with org fallback
  *
  * Extra positional arguments beyond the first two are ignored with a
  * warning, matching the established pattern across CLI commands.
@@ -455,7 +455,8 @@ export async function resolveTraceOrgOptionalProject(
     const resolved = await resolveOrgOptionalTarget(
       parsed,
       cwd,
-      commandNameFromUsageHint(usageHint)
+      commandNameFromUsageHint(usageHint),
+      usageHint
     );
     return { traceId: parsed.traceId, ...resolved };
   }
@@ -525,7 +526,8 @@ async function resolveProjectSearchTarget(
   const target = await resolveProjectBoundTarget(
     parsed,
     cwd,
-    commandNameFromUsageHint(usageHint)
+    commandNameFromUsageHint(usageHint),
+    { usageHint }
   );
   return {
     traceId: parsed.traceId,

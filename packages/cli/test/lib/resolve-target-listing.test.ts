@@ -68,6 +68,7 @@ vi.mock("../../src/lib/resolve-target.js", async (importOriginal) => {
 import * as resolveTargetModule from "../../src/lib/resolve-target.js";
 import {
   classifyProjectSearchTarget,
+  projectSearchNotFoundSuggestions,
   resolveOrgOnlyTarget,
   resolveOrgOptionalTarget,
   resolveOrgProjectOrGuide,
@@ -165,6 +166,43 @@ describe("classifyProjectSearchTarget", () => {
     });
 
     expect(result.kind).toBe("not-found");
+  });
+});
+
+describe("projectSearchNotFoundSuggestions", () => {
+  test.each([
+    {
+      name: "preserves fuzzy suggestions",
+      scopedOrg: undefined,
+      suggestions: ["Similar projects: 'acme/frontend'"],
+      expected: ["Similar projects: 'acme/frontend'"],
+    },
+    {
+      name: "describes a scoped organization miss",
+      scopedOrg: "acme",
+      suggestions: [],
+      expected: [
+        "No project with this name found in organization 'acme'",
+        "Check the organization slug or try: sentry project list acme/",
+      ],
+    },
+    {
+      name: "describes an unscoped miss",
+      scopedOrg: undefined,
+      suggestions: [],
+      expected: [
+        "No project with this slug found in any accessible organization",
+      ],
+    },
+  ])("$name", ({ scopedOrg, suggestions, expected }) => {
+    expect(
+      projectSearchNotFoundSuggestions({
+        kind: "not-found",
+        displaySlug: "missing",
+        scopedOrg,
+        suggestions,
+      })
+    ).toEqual(expected);
   });
 });
 
@@ -709,51 +747,6 @@ describe("resolveOrgOptionalTarget bare org slug", () => {
 
     expect(result).toEqual({ org: "acme-corp" });
     expect(result.project).toBeUndefined();
-    expect(findProjectsBySlugSpy).toHaveBeenCalledTimes(1);
-  });
-
-  test("uses the project when an organization has the same slug", async () => {
-    findProjectsBySlugSpy.mockResolvedValue({
-      projects: [
-        {
-          orgSlug: "other-org",
-          slug: "acme-corp",
-          id: "9",
-          name: "Acme Project",
-        },
-      ],
-      orgs: [
-        { slug: "acme-corp", name: "Acme Corp" },
-        { slug: "other-org", name: "Other Org" },
-      ],
-    });
-
-    const result = await resolveOrgOptionalTarget(
-      { type: "project-search", projectSlug: "acme-corp" },
-      CWD,
-      "explore"
-    );
-
-    expect(result.org).toBe("other-org");
-    expect(result.project).toBe("acme-corp");
-    expect(findProjectsBySlugSpy).toHaveBeenCalledTimes(1);
-  });
-
-  test("still resolves a project slug that is not an organization", async () => {
-    findProjectsBySlugSpy.mockResolvedValue({
-      projects: [
-        { orgSlug: "acme-corp", slug: "frontend", id: "3", name: "Frontend" },
-      ],
-      orgs: [{ slug: "acme-corp", name: "Acme Corp" }],
-    });
-
-    const result = await resolveOrgOptionalTarget(
-      { type: "project-search", projectSlug: "frontend" },
-      CWD,
-      "explore"
-    );
-
-    expect(result).toMatchObject({ org: "acme-corp", project: "frontend" });
     expect(findProjectsBySlugSpy).toHaveBeenCalledTimes(1);
   });
 

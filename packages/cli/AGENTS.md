@@ -688,11 +688,13 @@ Two abstraction levels exist for list commands:
 2. **`src/lib/org-list.ts`** — `dispatchOrgScopedList` with `OrgListConfig` and a 4-mode handler map: `auto-detect`, `explicit`, `org-all`, `project-search`. Complex commands (`project list`, `issue list`) call `dispatchOrgScopedList` with an `overrides` map directly instead of using `buildOrgListCommand`.
 
 Key rules when writing overrides:
-- Each mode handler receives a `HandlerContext<T>` with the narrowed `parsed` plus shared I/O (`stdout`, `cwd`, `flags`). Access parsed fields via `ctx.parsed.org`, `ctx.parsed.projectSlug`, etc. — no manual `Extract<>` casts needed.
+- Each mode handler receives a `HandlerContext<T>` with narrowed `parsed`, `cwd`, `flags`, and optional request-scoped project-search classification. Access parsed fields via `ctx.parsed.org`, `ctx.parsed.projectSlug`, etc. — no manual `Extract<>` casts needed.
 - Commands with extra fields (e.g., `stderr`, `setContext`) spread the context and add them: `(ctx) => handle({ ...ctx, flags, stderr, setContext })`. Override `ctx.flags` with the command-specific flags type when needed.
 - `resolveCursor()` must be called **inside** the `org-all` override closure, not before `dispatchOrgScopedList`, so that `--cursor` validation errors fire correctly for non-org-all modes.
-- `handleProjectSearch` errors must use `"Project"` as the `ContextError` resource, not `config.entityName`.
-- Always set `orgSlugMatchBehavior` on `dispatchOrgScopedList` to declare how bare-slug org matches are handled. Use `"redirect"` for commands where listing all entities in the org makes sense (e.g., `project list`, `team list`, `issue list`). Use `"error"` for commands where org-all redirect is inappropriate. The pre-check uses the shared target classifier and passes its request-scoped result to the selected handler.
+- For an unscoped bare target, `dispatchOrgScopedList` applies the shared
+  classifier before dispatch: an organization match becomes `org-all`, while
+  project results are passed request-scoped to the handler. Scoped and
+  display-name searches stay in `project-search` and are classified there.
 
 3. **Standalone list commands** (e.g., `span list`, `trace list`) that don't use org-scoped dispatch wire pagination directly in `func()`. See the "List Command Pagination" section above for the pattern.
 

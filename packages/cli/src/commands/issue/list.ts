@@ -1327,7 +1327,6 @@ async function handleResolvedTargets(
 /** Metadata for the shared dispatch infrastructure. */
 const issueListMeta: ListCommandMeta = {
   paginationKey: PAGINATION_KEY,
-  entityName: "issue",
   entityPlural: "issues",
   commandPrefix: "sentry issue list",
 };
@@ -1613,7 +1612,6 @@ export const listCommand = buildListCommand("issue", {
       parsed,
       // Bare slug: the project wins when one exists. If none does and the
       // slug is an organization, list that org. `<org>/` is the explicit form.
-      orgSlugMatchBehavior: "redirect",
       // Multi-target modes (auto-detect, explicit, project-search) handle
       // compound cursor pagination themselves via handleResolvedTargets.
       allowCursorInModes: ["auto-detect", "explicit", "project-search"],

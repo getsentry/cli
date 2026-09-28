@@ -54,6 +54,7 @@ import { resolveEffectiveOrg } from "./region.js";
 import {
   classifyProjectSearchTarget,
   type ProjectSearchTargetResolution,
+  projectSearchNotFoundSuggestions,
   resolveOrgsForListing,
 } from "./resolve-target.js";
 import { setOrgProjectContext } from "./telemetry.js";
@@ -234,8 +235,6 @@ export function trimWithGroupGuarantee<T>(
 export type ListCommandMeta = {
   /** Key stored in the pagination cursor table (e.g., "team-list") */
   paginationKey: string;
-  /** Singular entity name for messages (e.g., "team") */
-  entityName: string;
   /** Plural entity name for messages (e.g., "teams") */
   entityPlural: string;
   /** CLI command prefix for hints (e.g., "sentry team list") */
@@ -319,8 +318,8 @@ export type ParsedVariant<T extends ParsedOrgProject["type"]> = Extract<
 /**
  * Context object passed to every mode handler by the dispatcher.
  *
- * Contains the correctly-narrowed parsed variant plus shared I/O and flags,
- * so handlers don't need to close over these values from their parent scope.
+ * Contains the correctly-narrowed parsed variant, working directory, flags,
+ * and any request-scoped project-search classification.
  * Commands that need additional fields (e.g. `stderr`) can
  * spread the context and add their own: `(ctx) => handle({ ...ctx, extra })`.
  */
@@ -835,17 +834,11 @@ export async function handleProjectSearch<TEntity, TWithOrg>(
       return { items: [] };
     }
 
-    const fallback = resolution.scopedOrg
-      ? [
-          `No project with this name found in organization '${resolution.scopedOrg}'`,
-          `Check the organization slug or try: sentry project list ${resolution.scopedOrg}/`,
-        ]
-      : ["No project with this slug found in any accessible organization"];
     throw new ResolutionError(
       `Project '${resolution.displaySlug}'`,
       "not found",
       `${config.commandPrefix} <org>/${projectSlug}`,
-      resolution.suggestions.length > 0 ? resolution.suggestions : fallback
+      projectSearchNotFoundSuggestions(resolution)
     );
   }
 
@@ -1011,23 +1004,6 @@ export type DispatchOptions<TEntity = unknown, TWithOrg = unknown> = {
    * `issue list`) can list those mode types here to bypass the guard.
    */
   allowCursorInModes?: readonly ParsedOrgProject["type"][];
-  /**
-   * Behavior when a bare slug matches an organization and no project does.
-   *
-   * Before cursor validation and handler dispatch, the dispatcher searches
-   * projects. A project with that slug wins, including when an organization
-   * has the same name. `<org>/` is the explicit organization form. Only a
-   * miss falls through to the organization:
-   *
-   * - `"redirect"`: Convert to org-all mode with a warning log.
-   *   The existing org-all handler runs naturally.
-   * - `"error"`: Throw a {@link ResolutionError} with actionable hints.
-   *   Use this when listing the whole organization is inappropriate.
-   *
-   * The exact search also works with a cold org cache. Exact project results
-   * are passed to the handler; fuzzy recovery stays behind cursor validation.
-   */
-  orgSlugMatchBehavior?: "redirect" | "error";
 };
 
 type OrgSlugMatchResult = {
@@ -1037,14 +1013,13 @@ type OrgSlugMatchResult = {
 
 /**
  * Pre-check: when a bare slug matches an organization and no project does,
- * redirect to org-all mode or throw before handler dispatch.
+ * redirect to org-all mode before handler dispatch.
  *
  * A project with the same slug wins. Scoped searches (`org/Name`) and
  * display names are left to the handler. `<org>/` never reaches here.
  */
 async function resolveOrgSlugMatch(
   parsed: ParsedOrgProject & { type: "project-search" },
-  behavior: "redirect" | "error",
   config: ListCommandMeta,
   fuzzy: boolean
 ): Promise<OrgSlugMatchResult> {
@@ -1058,17 +1033,6 @@ async function resolveOrgSlugMatch(
   });
 
   if (resolution.kind === "organization") {
-    if (behavior === "error") {
-      throw new ResolutionError(
-        `'${slug}'`,
-        "is an organization, not a project",
-        `${config.commandPrefix} ${slug}/`,
-        [
-          `List projects: sentry project list ${slug}/`,
-          `Specify a project: ${config.commandPrefix} ${slug}/<project>`,
-        ]
-      );
-    }
     log.warn(
       `'${slug}' is an organization, not a project. ` +
         `Listing all ${config.entityPlural} in '${slug}'.`
@@ -1129,13 +1093,9 @@ export async function dispatchOrgScopedList<TEntity, TWithOrg>(
     ...(options.allowCursorInModes ?? []),
   ];
 
-  if (
-    effectiveParsed.type === "project-search" &&
-    options.orgSlugMatchBehavior
-  ) {
+  if (effectiveParsed.type === "project-search") {
     const resolution = await resolveOrgSlugMatch(
       effectiveParsed,
-      options.orgSlugMatchBehavior,
       config,
       flags.cursor === undefined ||
         cursorAllowedModes.includes("project-search")

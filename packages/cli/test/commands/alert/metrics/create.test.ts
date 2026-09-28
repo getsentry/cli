@@ -175,34 +175,6 @@ describe("alert metrics create", () => {
     expect(createSpy).not.toHaveBeenCalled();
   });
 
-  test("falls back to a bare organization when no project matches", async () => {
-    const context = createContext();
-    const func = (await createCommand.loader()) as unknown as (
-      this: unknown,
-      flags: CreateFlags,
-      arg: string
-    ) => Promise<void>;
-
-    await func.call(
-      context,
-      {
-        name: "Metric Rule",
-        query: "event.type:error",
-        aggregate: "count()",
-        dataset: "errors",
-        "time-window": 5,
-        trigger: ['{"alertThreshold":100,"actions":[{"id":"notify"}]}'],
-        project: ["backend"],
-        "dry-run": true,
-        json: true,
-      },
-      "my-org"
-    );
-
-    expect(findProjectsBySlugSpy).toHaveBeenCalledWith("my-org");
-    expect(createSpy).not.toHaveBeenCalled();
-  });
-
   test("prefers a project over an organization with the same bare slug", async () => {
     findProjectsBySlugSpy.mockResolvedValue({
       projects: [

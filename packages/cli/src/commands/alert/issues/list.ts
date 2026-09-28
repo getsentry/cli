@@ -122,7 +122,6 @@ type IssueAlertListResult = ListResult<IssueAlertRule> & {
 
 const issueAlertListMeta: ListCommandMeta = {
   paginationKey: PAGINATION_KEY,
-  entityName: "issue alert rule",
   entityPlural: "issue alert rules",
   commandPrefix: "sentry alert issues list",
 };
@@ -600,7 +599,6 @@ export const listCommand = buildListCommand("alert issues", {
       cwd,
       flags,
       parsed,
-      orgSlugMatchBehavior: "redirect",
       // All modes use per-project fetching with compound cursor support
       allowCursorInModes: [
         "auto-detect",

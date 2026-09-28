@@ -915,6 +915,22 @@ export async function classifyProjectSearchTarget(
   return { ...context, kind: "not-found", suggestions: [] };
 }
 
+/** Return actionable suggestions for a classified project-search miss. */
+export function projectSearchNotFoundSuggestions(
+  resolution: Extract<ProjectSearchTargetResolution, { kind: "not-found" }>
+): string[] {
+  if (resolution.suggestions.length > 0) {
+    return resolution.suggestions;
+  }
+  if (resolution.scopedOrg) {
+    return [
+      `No project with this name found in organization '${resolution.scopedOrg}'`,
+      `Check the organization slug or try: sentry project list ${resolution.scopedOrg}/`,
+    ];
+  }
+  return ["No project with this slug found in any accessible organization"];
+}
+
 /**
  * Build {@link ResolutionError} suggestions when `getProject(org, project)` 404s.
  *
@@ -2036,7 +2052,6 @@ export type ResolveProjectBoundTargetOptions = {
  * @returns Resolved org and project slugs
  * @throws {ContextError} When target cannot be resolved or org-all is used
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: multi-mode dispatch with fuzzy recovery is inherently branchy
 export async function resolveProjectBoundTarget(
   parsed: ParsedOrgProject,
   cwd: string,
@@ -2081,17 +2096,11 @@ export async function resolveProjectBoundTarget(
       }
 
       if (resolution.kind === "not-found") {
-        const fallback = resolution.scopedOrg
-          ? [
-              `No project with this name found in organization '${resolution.scopedOrg}'`,
-              `Check the organization slug or try: sentry project list ${resolution.scopedOrg}/`,
-            ]
-          : ["No project with this slug found in any accessible organization"];
         throw new ResolutionError(
           `Project '${resolution.displaySlug}'`,
           "not found",
           usageHint,
-          resolution.suggestions.length > 0 ? resolution.suggestions : fallback
+          projectSearchNotFoundSuggestions(resolution)
         );
       }
 
@@ -2356,19 +2365,11 @@ export async function resolveProjectBoundTargets(
       }
 
       if (resolution.kind === "not-found") {
-        const fallback = resolution.scopedOrg
-          ? [
-              `No project with this name found in organization '${resolution.scopedOrg}'`,
-              `Check the organization slug or try: sentry project list ${resolution.scopedOrg}/`,
-            ]
-          : ["No project with this slug found in any accessible organization"];
-        const suggestions =
-          resolution.suggestions.length > 0 ? resolution.suggestions : fallback;
         throw new ResolutionError(
           `Project '${displaySlug}'`,
           "not found",
           usageHint,
-          suggestions
+          projectSearchNotFoundSuggestions(resolution)
         );
       }
 

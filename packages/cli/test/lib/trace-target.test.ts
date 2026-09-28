@@ -20,12 +20,17 @@ vi.mock("../../src/lib/api-client.js", async (importOriginal) => {
 
 // biome-ignore lint/performance/noNamespaceImport: needed for spyOn mocking
 import * as apiClient from "../../src/lib/api-client.js";
-import { ContextError, ValidationError } from "../../src/lib/errors.js";
+import {
+  ContextError,
+  ResolutionError,
+  ValidationError,
+} from "../../src/lib/errors.js";
 import {
   parseSlashSeparatedTraceTarget,
   parseTraceTarget,
   resolveTraceOrg,
   resolveTraceOrgOptionalProject,
+  resolveTraceOrgProject,
   targetArgToTraceTarget,
 } from "../../src/lib/trace-target.js";
 
@@ -182,36 +187,32 @@ describe("trace target resolution", () => {
     expect(resolved.org).toBe("project-owner");
   });
 
-  test("org-only mode falls back to an exact org after the project miss", async () => {
-    findProjectsBySlugSpy.mockResolvedValue({
-      projects: [],
-      orgs: [{ slug: "acme", name: "Acme" }],
-    });
-    const parsed = targetArgToTraceTarget("acme", VALID_TRACE_ID);
+  test("project-bound errors preserve the full trace usage hint", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
+    const parsed = targetArgToTraceTarget("missing", VALID_TRACE_ID);
+    const usageHint = "sentry span view [<org>/<project>/]<span-id>";
 
-    const resolved = await resolveTraceOrg(
-      parsed,
-      "/tmp",
-      "sentry trace logs [<org>/[<project>/]]<trace-id>"
-    );
-
-    expect(resolved.org).toBe("acme");
+    try {
+      await resolveTraceOrgProject(parsed, "/tmp", usageHint);
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      expect((error as ResolutionError).hint).toBe(usageHint);
+    }
   });
 
-  test("org-capable trace view falls back to an exact bare org", async () => {
-    findProjectsBySlugSpy.mockResolvedValue({
-      projects: [],
-      orgs: [{ slug: "acme", name: "Acme" }],
-    });
-    const parsed = targetArgToTraceTarget("acme", VALID_TRACE_ID);
+  test("org-capable errors preserve the full trace usage hint", async () => {
+    findProjectsBySlugSpy.mockResolvedValue({ projects: [], orgs: [] });
+    const parsed = targetArgToTraceTarget("missing", VALID_TRACE_ID);
+    const usageHint = "sentry trace view [<org>/<project>/]<trace-id>";
 
-    const resolved = await resolveTraceOrgOptionalProject(
-      parsed,
-      "/tmp",
-      "sentry trace view [<org>/<project>/]<trace-id>"
-    );
-
-    expect(resolved).toEqual({ traceId: VALID_TRACE_ID, org: "acme" });
+    try {
+      await resolveTraceOrgOptionalProject(parsed, "/tmp", usageHint);
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ResolutionError);
+      expect((error as ResolutionError).hint).toBe(usageHint);
+    }
   });
 });
 

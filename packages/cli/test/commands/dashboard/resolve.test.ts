@@ -498,7 +498,6 @@ describe("resolveOrgFromTarget", () => {
     );
     expect(org).toBe("my-org");
     expect(resolveEffectiveOrgSpy).toHaveBeenCalledWith("my-org");
-    expect(resolveOrgOnlyTargetSpy).toHaveBeenCalled();
   });
 
   test("explicit type with o-prefixed numeric ID resolves to slug", async () => {

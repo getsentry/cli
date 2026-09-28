@@ -128,7 +128,6 @@ type MetricAlertListResult = ListResult<MetricAlertRule> & {
 
 const metricAlertListMeta: ListCommandMeta = {
   paginationKey: PAGINATION_KEY,
-  entityName: "metric alert rule",
   entityPlural: "metric alert rules",
   commandPrefix: "sentry alert metrics list",
 };
@@ -599,7 +598,6 @@ export const listCommand = buildListCommand("alert metrics", {
       cwd,
       flags,
       parsed,
-      orgSlugMatchBehavior: "redirect",
       // All modes use per-org fetching with compound cursor support
       allowCursorInModes: [
         "auto-detect",

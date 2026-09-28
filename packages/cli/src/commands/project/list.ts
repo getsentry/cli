@@ -56,6 +56,7 @@ import { withProgress } from "../../lib/polling.js";
 import {
   classifyProjectSearchTarget,
   type ProjectSearchTargetResolution,
+  projectSearchNotFoundSuggestions,
   type ResolvedTarget,
   resolveAllTargets,
 } from "../../lib/resolve-target.js";
@@ -610,24 +611,17 @@ function handleProjectSearchNotFound(
   if (json) {
     return { items: [] };
   }
-  const fallback = resolution.scopedOrg
-    ? [
-        `No project with this name found in organization '${resolution.scopedOrg}'`,
-        `Check the organization slug or try: sentry project list ${resolution.scopedOrg}/`,
-      ]
-    : ["No project with this slug found in any accessible organization"];
   throw new ResolutionError(
     `Project '${resolution.displaySlug}'`,
     "not found",
     `sentry project list <org>/${projectSlug}`,
-    resolution.suggestions.length > 0 ? resolution.suggestions : fallback
+    projectSearchNotFoundSuggestions(resolution)
   );
 }
 
 /** Metadata used by the shared dispatch infrastructure for error messages and cursor keys. */
 const projectListMeta: ListCommandMeta = {
   paginationKey: PAGINATION_KEY,
-  entityName: "project",
   entityPlural: "projects",
   commandPrefix: "sentry project list",
 };
@@ -694,7 +688,6 @@ export const listCommand = buildListCommand("project", {
       cwd,
       flags,
       parsed,
-      orgSlugMatchBehavior: "redirect",
       overrides: {
         "auto-detect": (ctx) => handleAutoDetect(ctx.cwd, flags),
         explicit: (ctx) =>
