@@ -178,6 +178,7 @@ async function findStoredLink(
   const { orgSlug, issueId, url } = options;
   if (appSlug) {
     const links = await listAppIssueLinks(orgSlug, issueId);
+    // Only an explicit --app narrows the match: another App may store a Linear URL.
     const link = findAppIssueLink(links, url, options.appSlug);
     if (!link) {
       return;
