@@ -293,20 +293,18 @@ export function findNativeIssueLink(
   return matches[0];
 }
 
-/** Prepare a reference using installed integration metadata; performs no mutations. */
-export async function resolveNativeIssueLink(options: {
-  orgSlug: string;
-  issueId: string;
-  url: string;
-  integrationId?: string;
-}): Promise<PreparedNativeIssueLink> {
-  const url = parseUrl(options.url);
-  const integrations = await listIntegrations(options.orgSlug, options.issueId);
+/** Select the one active installation that can own the URL; ambiguity requires --integration. */
+export function selectNativeIntegration(
+  integrations: NativeIntegration[],
+  url: string,
+  integrationId?: string
+): NativeIntegration {
+  const target = parseUrl(url);
   const candidates = integrations.filter(
     (integration) =>
       integration.status === "active" &&
-      (!options.integrationId || options.integrationId === integration.id) &&
-      matchesIntegration(url, integration, Boolean(options.integrationId))
+      (!integrationId || integrationId === integration.id) &&
+      matchesIntegration(target, integration, Boolean(integrationId))
   );
   if (candidates.length === 0) {
     throw new ValidationError(
@@ -322,6 +320,23 @@ export async function resolveNativeIssueLink(options: {
   if (!selected) {
     throw new ValidationError("No matching integration.");
   }
+  return selected;
+}
+
+/** Prepare a reference using installed integration metadata; performs no mutations. */
+export async function resolveNativeIssueLink(options: {
+  orgSlug: string;
+  issueId: string;
+  url: string;
+  integrationId?: string;
+}): Promise<PreparedNativeIssueLink> {
+  const url = parseUrl(options.url);
+  const integrations = await listIntegrations(options.orgSlug, options.issueId);
+  const selected = selectNativeIntegration(
+    integrations,
+    url.href,
+    options.integrationId
+  );
   return {
     orgSlug: options.orgSlug,
     issueId: options.issueId,
