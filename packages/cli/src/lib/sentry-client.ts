@@ -323,13 +323,15 @@ type AttemptResult =
 /**
  * Decide what to do with a successful HTTP response.
  * Returns 'done' for final responses, 'retry' for retryable errors and 401s.
+ * The last attempt always returns 'done': a refreshed token there would have
+ * no attempt left to use it.
  */
 async function handleResponse(
   response: Response,
   headers: Headers,
   isLastAttempt: boolean
 ): Promise<AttemptResult> {
-  if (response.status === 401) {
+  if (response.status === 401 && !isLastAttempt) {
     const refreshed = await handleUnauthorized(headers);
     return refreshed ? { action: "retry" } : { action: "done", response };
   }
@@ -553,7 +555,6 @@ async function fetchWithRetry(
       headers,
       isLastAttempt,
       timeoutMs,
-      retry: options.retry,
     });
 
     if (result.action === "done") {
@@ -576,7 +577,7 @@ async function fetchWithRetry(
 
     const delay = backoffDelay(attempt);
     log.debug(
-      `${method} ${new URL(fullUrl).pathname} → retry ${attempt + 1}/${MAX_RETRIES} after ${delay}ms`
+      `${method} ${new URL(fullUrl).pathname} → retry ${attempt + 1}/${maxRetries} after ${delay}ms`
     );
     await sleepMs(delay);
   }
@@ -678,7 +679,6 @@ type ExecuteAttemptArgs = {
   headers: Headers;
   isLastAttempt: boolean;
   timeoutMs: number;
-  retry?: boolean;
 };
 
 async function executeAttempt({
@@ -687,7 +687,6 @@ async function executeAttempt({
   headers,
   isLastAttempt,
   timeoutMs,
-  retry,
 }: ExecuteAttemptArgs): Promise<AttemptResult> {
   try {
     const response = await fetchWithTimeout({
@@ -697,9 +696,7 @@ async function executeAttempt({
       externalSignal: init?.signal,
       timeoutMs,
     });
-    return retry === false
-      ? { action: "done", response }
-      : handleResponse(response, headers, isLastAttempt);
+    return handleResponse(response, headers, isLastAttempt);
   } catch (error) {
     return handleFetchError(error, init?.signal, isLastAttempt);
   }
@@ -747,6 +744,7 @@ export function getControlSiloUrl(): string {
  * - `throwOnError`: Always false (we handle errors ourselves)
  *
  * @param regionUrl - The base URL for the target region (e.g., https://us.sentry.io)
+ * @param options - Per-request retry and cache controls; omit for the shared fetch
  * @returns Configuration object to spread into SDK function options
  *
  * @example

@@ -16,7 +16,12 @@ import {
   getSdkConfig,
   resetAuthenticatedFetch,
 } from "../../src/lib/sentry-client.js";
-import { mockFetch, useTestConfigDir } from "../helpers.js";
+import {
+  extractFetchUrl,
+  mockFetch,
+  useEnvSandbox,
+  useTestConfigDir,
+} from "../helpers.js";
 
 useTestConfigDir("sentry-client-");
 
@@ -38,6 +43,48 @@ afterEach(() => {
 function getAuthenticatedFetch(): typeof fetch {
   return getSdkConfig(REGION_URL).fetch as typeof fetch;
 }
+
+describe("401 replay", () => {
+  useEnvSandbox(["SENTRY_CLIENT_ID"]);
+
+  /** Answer resource requests with `statuses` in order while OAuth refresh succeeds. */
+  async function mockRefreshableSession(statuses: number[]): Promise<string[]> {
+    process.env.SENTRY_CLIENT_ID = "synthetic-client-id";
+    await setAuthToken("stored-token", 3600, "synthetic-refresh-token");
+    const urls: string[] = [];
+    globalThis.fetch = mockFetch(async (input) => {
+      const url = extractFetchUrl(input);
+      urls.push(url);
+      if (url.endsWith("/oauth/token/")) {
+        return Response.json({
+          access_token: "refreshed-token",
+          token_type: "bearer",
+          expires_in: 3600,
+        });
+      }
+      return new Response("{}", { status: statuses.shift() ?? 200 });
+    });
+    return urls;
+  }
+
+  test("returns a 401 from the final attempt instead of replaying it", async () => {
+    const urls = await mockRefreshableSession([503, 503, 401]);
+    const response = await getAuthenticatedFetch()(
+      `${REGION_URL}/api/0/organizations/`
+    );
+    expect(response.status).toBe(401);
+    expect(urls.filter((url) => url.endsWith("/oauth/token/"))).toEqual([]);
+  });
+
+  test("retry false returns a 401 without refreshing the token", async () => {
+    const urls = await mockRefreshableSession([401]);
+    const url = `${REGION_URL}/api/0/issue-link/`;
+    const fetchOnce = getSdkConfig(REGION_URL, { retry: false }).fetch;
+    const response = await fetchOnce(url, { method: "POST" });
+    expect(response.status).toBe(401);
+    expect(urls).toEqual([url]);
+  });
+});
 
 describe("per-request transport controls", () => {
   test("retry false sends a mutation once for transient HTTP and network failures", async () => {
@@ -64,20 +111,6 @@ describe("per-request transport controls", () => {
       fetchOnce(`${REGION_URL}/api/0/issue-link/`, { method: "POST" })
     ).rejects.toBe(networkError);
     expect(callCount).toBe(2);
-  });
-
-  test("retry false returns an unauthorized mutation without replaying it", async () => {
-    let callCount = 0;
-    globalThis.fetch = mockFetch(async () => {
-      callCount += 1;
-      return new Response("unauthorized", { status: 401 });
-    });
-    const fetchOnce = getSdkConfig(REGION_URL, { retry: false }).fetch;
-    const response = await fetchOnce(`${REGION_URL}/api/0/issue-link/`, {
-      method: "POST",
-    });
-    expect(response.status).toBe(401);
-    expect(callCount).toBe(1);
   });
 
   test("no-store preflight bypasses both cache lookup and cache storage", async () => {
