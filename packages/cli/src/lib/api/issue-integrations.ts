@@ -136,7 +136,9 @@ function issueIdentity(url: URL, provider: string): string | undefined {
     }
     case "gitlab": {
       const match = GITLAB_ISSUE.exec(url.pathname);
-      return match ? `${url.host}/${match[1]}#${match[2]}` : undefined;
+      return match
+        ? `${url.host}/${match[1]?.toLowerCase()}#${match[2]}`
+        : undefined;
     }
     case "vsts": {
       const account = azureAccount(url);

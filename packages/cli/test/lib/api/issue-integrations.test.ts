@@ -202,6 +202,7 @@ describe("findNativeIssueLink", () => {
     ${"jira_server"} | ${"https://tracker.example.com/jira/browse/PROJ-7"}     | ${"https://tracker.example.com/jira/secure/RapidBoard.jspa?rapidView=1&selectedIssue=PROJ-7"}
     ${"jira"}        | ${JIRA_URL}                                             | ${"https://tracker.example.com/browse/PROJ-1?selectedIssue=invalid&selectedIssue=proj-7&selectedIssue=PROJ-1"}
     ${"gitlab"}      | ${"https://gitlab.com/group/repo/issues/7"}             | ${"https://gitlab.com/group/repo/-/issues/7"}
+    ${"gitlab"}      | ${"https://gitlab.com/MyOrg/Repo/-/issues/7"}           | ${"https://gitlab.com/myorg/repo/-/issues/7"}
     ${"github"}      | ${"https://github.com/owner/repo/issues/7"}             | ${"https://github.com/OWNER/Repo/issues/7/"}
     ${"github"}      | ${"https://github.com/owner/repo/issues/7"}             | ${"https://github.com/OWNER/repo/pull/7/files?source=cli#diff"}
     ${"bitbucket"}   | ${"https://bitbucket.org/owner/repo/issues/7/a-title"}  | ${"https://bitbucket.org/owner/repo/issues/7"}
