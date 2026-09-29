@@ -15,8 +15,8 @@ import {
   withScope,
 } from "@sentry/node-core/light";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { redactTelemetryEnvelope } from "../../src/lib/credential-redaction.js";
 import { extractMessagePrefix } from "../../src/lib/error-reporting.js";
+import { redactTelemetryEnvelope } from "../../src/lib/telemetry/credential-redaction.js";
 // biome-ignore lint/performance/noNamespaceImport: spy on the outbound transport factory
 import * as transportModule from "../../src/lib/telemetry/zstd-transport.js";
 import { initSentry } from "../../src/lib/telemetry.js";

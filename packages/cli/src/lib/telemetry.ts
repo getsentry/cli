@@ -23,7 +23,6 @@ import {
   getConfiguredSentryUrl,
   SENTRY_CLI_DSN,
 } from "./constants.js";
-import { redactTelemetryEnvelope } from "./credential-redaction.js";
 import { getCustomCaCerts } from "./custom-ca.js";
 import { getTelemetryPreference } from "./db/defaults.js";
 import { isReadonlyError, tryRepairAndRetry } from "./db/schema.js";
@@ -41,6 +40,7 @@ import {
 import { ApiError, isUserError } from "./errors.js";
 import { attachSentryReporter, logger } from "./logger.js";
 import { getSentryBaseUrl, isSentrySaasUrl } from "./sentry-urls.js";
+import { redactTelemetryEnvelope } from "./telemetry/credential-redaction.js";
 import { makeCompressedTransport } from "./telemetry/zstd-transport.js";
 import { getRealUsername } from "./utils.js";
 

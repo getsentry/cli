@@ -10,6 +10,7 @@
  * stream error handlers and calls `startCli()`.
  */
 
+import { redactCredentialText } from "./lib/credential-redaction.js";
 import { getEnv } from "./lib/env.js";
 import { CliError, formatError } from "./lib/errors.js";
 import { initTimezone } from "./lib/timezone.js";
@@ -701,7 +702,7 @@ export async function startCli(): Promise<void> {
   }
 
   return runCli(args).catch((err) => {
-    process.stderr.write(`Fatal: ${formatError(err)}\n`);
+    process.stderr.write(`Fatal: ${redactCredentialText(String(err))}\n`);
     process.exitCode = 1;
   });
 }
