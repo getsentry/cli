@@ -52,7 +52,7 @@ export type PreparedNativeIssueLink = {
   provider: string;
   /** External issue URL submitted to the backend for provider resolution. */
   url: string;
-  /** Reference found during fresh preflight; avoids a duplicate mutation. */
+  /** Reference found during preflight, used only to describe a dry run. */
   existing?: NativeIssueLink;
 };
 
@@ -61,13 +61,9 @@ const REPOSITORY_ISSUE = /^\/([^/]+\/[^/]+)\/issues\/(\d+)(?:\/[^/]+)?$/;
 const GITHUB_PULL_REQUEST = /^\/([^/]+\/[^/]+)\/pull\/(\d+)(?:\/[^/]+)?$/;
 const GITLAB_ISSUE = /^\/(.+?)(?:\/-)?\/issues\/(\d+)$/;
 const JIRA_KEY = /^[A-Z][A-Z0-9]*-\d+$/i;
-const JIRA_PATH = /^(.*?)\/(browse|issues)\/([A-Z][A-Z0-9]*-\d+)$/i;
-const JIRA_PROJECT_PATH = /\/projects\/[^/]+$/;
-const JIRA_BOARD_PATH =
-  /^(.*?)(?:\/jira\/(?:software|servicedesk|core)\/|\/secure\/RapidBoard\.jspa$)/;
+const JIRA_PATH = /\/(?:browse|issues)\/([A-Z][A-Z0-9]*-\d+)$/i;
+const JIRA_CANONICAL_PATH = /^(.*)\/browse\/([^/]+)$/;
 const WORK_ITEM = /^(.*?)\/_workitems\/edit\/(\d+)$/;
-const SCM_CHANGE =
-  /(?:^\/[^/]+\/[^/]+\/(?:pulls?|pull-requests|commits?)\/|\/-\/(?:merge_requests|commits?)\/)/;
 
 function parseUrl(value: string): URL {
   const url = storedUrl(value);
@@ -122,28 +118,7 @@ function jiraIssueKey(url: URL): string | undefined {
   const selected = url.searchParams
     .getAll("selectedIssue")
     .find((key) => JIRA_KEY.test(key));
-  return (selected ?? JIRA_PATH.exec(url.pathname)?.[3])?.toUpperCase();
-}
-
-/** Infer contexts only for known Jira UI paths to keep installations distinct. */
-function jiraContextPath(url: URL): string | undefined {
-  const path = JIRA_PATH.exec(url.pathname);
-  if (path) {
-    return path[2] === "issues"
-      ? path[1]?.replace(JIRA_PROJECT_PATH, "")
-      : path[1];
-  }
-  return JIRA_BOARD_PATH.exec(url.pathname)?.[1];
-}
-
-function requireJiraContext(url: URL): string {
-  const context = jiraContextPath(url);
-  if (context === undefined) {
-    throw new ValidationError(
-      "Cannot identify this Jira URL's installation context. Use the canonical /browse/<ISSUE-KEY> URL."
-    );
-  }
-  return context;
+  return (selected ?? JIRA_PATH.exec(url.pathname)?.[1])?.toUpperCase();
 }
 
 /** Compare URL aliases locally; provider identifiers are resolved by the backend. */
@@ -165,11 +140,6 @@ function issueIdentity(url: URL, provider: string): string | undefined {
       const match = GITLAB_ISSUE.exec(url.pathname);
       return match ? `${url.host}/${match[1]}#${match[2]}` : undefined;
     }
-    case "jira":
-    case "jira_server": {
-      const key = jiraIssueKey(url);
-      return key ? `${url.host}#${key}` : undefined;
-    }
     case "vsts": {
       const account = azureAccount(url);
       const match = WORK_ITEM.exec(url.pathname);
@@ -188,9 +158,6 @@ function matchesIntegration(
   explicitlySelected: boolean
 ): boolean {
   const provider = integration.provider.key;
-  if (!issueIdentity(url, provider)) {
-    return false;
-  }
   // Older Enterprise metadata may omit its host. Only an explicit selection
   // can delegate host validation to the backend's instance_hostname metadata.
   if (provider === "github_enterprise" && !integration.domainName) {
@@ -205,7 +172,8 @@ function matchesIntegration(
     return false;
   }
   if (provider === "vsts") {
-    return azureAccount(domain) === azureAccount(url);
+    const account = azureAccount(url);
+    return Boolean(account) && account === azureAccount(domain);
   }
   if (domain.host !== url.host) {
     return false;
@@ -218,7 +186,6 @@ function matchesIntegration(
     );
   }
   if (provider === "jira" || provider === "jira_server") {
-    requireJiraContext(url);
     const prefix = domain.pathname.replace(TRAILING_SLASH, "");
     return (
       !prefix ||
@@ -305,19 +272,16 @@ function matchesNativeUrl(link: NativeIssueLink, target: URL): boolean {
     return false;
   }
   if (["jira", "jira_server"].includes(link.provider)) {
-    if (existing.host !== target.host) {
-      return false;
-    }
-    const key = jiraIssueKey(target);
-    if (!key) {
-      return false;
-    }
-    const context = jiraContextPath(existing);
-    const targetContext = requireJiraContext(target);
+    // Sentry returns /browse/ URLs whose prefix preserves the installation's
+    // context path, including contexts omitted from integration.domainName.
+    const canonical = JIRA_CANONICAL_PATH.exec(existing.pathname);
+    const context = canonical?.[1];
     return (
+      existing.host === target.host &&
       context !== undefined &&
-      context === targetContext &&
-      key === jiraIssueKey(existing)
+      (target.pathname === context ||
+        target.pathname.startsWith(`${context}/`)) &&
+      jiraIssueKey(target) === canonical?.[2]?.toUpperCase()
     );
   }
   const identity = issueIdentity(target, link.provider);
@@ -355,15 +319,6 @@ export async function resolveNativeIssueLink(options: {
   integrationId?: string;
 }): Promise<PreparedNativeIssueLink> {
   const url = parseUrl(options.url);
-  if (
-    SCM_CHANGE.test(url.pathname) &&
-    !GITHUB_PULL_REQUEST.test(url.pathname) &&
-    !GITLAB_ISSUE.test(url.pathname)
-  ) {
-    throw new ValidationError(
-      "External issue linking supports tracker issues and GitHub pull requests."
-    );
-  }
   const integrations = await listIntegrations(options.orgSlug, options.issueId);
   const candidates = integrations.filter(
     (integration) =>
@@ -404,9 +359,6 @@ export async function resolveNativeIssueLink(options: {
 export async function linkNativeIssue(
   prepared: PreparedNativeIssueLink
 ): Promise<{ link: NativeIssueLink; changed: boolean }> {
-  if (prepared.existing) {
-    return { link: prepared.existing, changed: false };
-  }
   const result = await updateOrganizationIssueIntegration({
     ...getSdkConfig(prepared.regionUrl, {
       cache: "no-store",
