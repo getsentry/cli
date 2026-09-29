@@ -10,11 +10,16 @@ describe("credential redaction", () => {
     "legacy_SYNTHETIC_PAYLOAD\n_SYNTHETIC_SECRET",
     "legacy_SYNTHETIC_PAYLOAD\\n_SYNTHETIC_SECRET",
     'legacy_SYNTHETIC_"PAYLOAD\n_SYNTHETIC_SECRET',
-  ])("redacts the entire invalid Bearer header: %j", (token) => {
-    const message = `Headers.set: "Bearer ${token}" is an invalid header value.`;
-    expect(redactCredentialText(message)).toBe(
-      'Headers.set: "Bearer [REDACTED]" is an invalid header value.'
-    );
+    'legacy_SYNTHETIC_" is an invalid header value\n_SYNTHETIC_SECRET',
+  ])("redacts invalid Bearer headers through JSON escaping: %j", (token) => {
+    let input = `Headers.set: "Bearer ${token}" is an invalid header value.`;
+    let expected =
+      'Headers.set: "Bearer [REDACTED]" is an invalid header value.';
+    for (let level = 0; level <= 3; level++) {
+      expect(redactCredentialText(input)).toBe(expected);
+      input = JSON.stringify({ error: input });
+      expected = JSON.stringify({ error: expected });
+    }
   });
 
   test("handles quotes escaped by JSON serialization", () => {
@@ -24,20 +29,6 @@ describe("credential redaction", () => {
     expect(JSON.parse(redactCredentialText(message))).toEqual({
       error: 'Headers.set: "Bearer [REDACTED]" is invalid.',
     });
-  });
-
-  test.each([
-    1, 2, 3,
-  ])("preserves %i levels of JSON escaping around an invalid header", (levels) => {
-    let input =
-      'Headers.set: "Bearer legacy_SYNTHETIC_"PAYLOAD\n_SECRET" is an invalid header value.';
-    let expected =
-      'Headers.set: "Bearer [REDACTED]" is an invalid header value.';
-    for (let level = 0; level < levels; level++) {
-      input = JSON.stringify({ error: input });
-      expected = JSON.stringify({ error: expected });
-    }
-    expect(redactCredentialText(input)).toBe(expected);
   });
 
   test("preserves nested JSON escaping around quoted Sentry credentials", () => {
@@ -97,7 +88,6 @@ describe("credential redaction", () => {
     ],
   ])("redacts recognizable unquoted credentials: %j", (token, expected) => {
     const redacted = redactCredentialText(`Rejected ${token}; try again.`);
-    expect(redacted).not.toContain("SYNTHETIC");
     expect(redacted).toBe(expected);
     expect(redactCredentialText(redacted)).toBe(redacted);
   });
@@ -112,27 +102,15 @@ describe("credential redaction", () => {
     "opaque:SYNTHETIC_PAYLOAD\n  !SYNTHETIC_SECRET",
     "opaque@SYNTHETIC_PAYLOAD\\n  :SYNTHETIC_SECRET",
   ])("redacts punctuation in an unquoted Bearer value: %j", (token) => {
-    const text = `Authorization: Bearer ${token}`;
-    const expected = "Authorization: Bearer [REDACTED]";
-    expect(redactCredentialText(text)).toBe(expected);
-    expect(redactCredentialText(expected)).toBe(expected);
-
-    const serialized = JSON.stringify({ error: text, status: 401 });
-    const redacted = redactCredentialText(serialized);
-    expect(JSON.parse(redacted)).toEqual({ error: expected, status: 401 });
-    expect(redactCredentialText(redacted)).toBe(redacted);
-  });
-
-  test("preserves escaped JSON quote delimiters after an unquoted Bearer", () => {
-    const nested = JSON.stringify({
-      error: "Authorization: Bearer opaque:SECRET",
-    });
-    const serialized = JSON.stringify({ nested });
-    const redacted = redactCredentialText(serialized);
-    expect(JSON.parse(JSON.parse(redacted).nested)).toEqual({
-      error: "Authorization: Bearer [REDACTED]",
-    });
-    expect(redactCredentialText(redacted)).toBe(redacted);
+    let input = `Authorization: Bearer ${token}`;
+    let expected = "Authorization: Bearer [REDACTED]";
+    for (let level = 0; level <= 2; level++) {
+      const redacted = redactCredentialText(input);
+      expect(redacted).toBe(expected);
+      expect(redactCredentialText(redacted)).toBe(expected);
+      input = JSON.stringify({ error: input, status: 401 });
+      expected = JSON.stringify({ error: expected, status: 401 });
+    }
   });
 
   test("redacts a quoted header truncated before its closing quote", () => {
@@ -162,7 +140,6 @@ describe("error output boundaries", () => {
 
   test("formats non-Error thrown objects safely", () => {
     const formatted = formatError({ error: message });
-    expect(formatted).not.toContain("SYNTHETIC");
     expect(JSON.parse(formatted)).toEqual({
       error: 'Headers.set: "Bearer [REDACTED]" is an invalid header value.',
     });

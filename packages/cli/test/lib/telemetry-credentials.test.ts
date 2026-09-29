@@ -41,7 +41,16 @@ function captureTelemetry() {
   client.getOptions().enabled = true;
   client.getOptions().enableLogs = true;
   client.init();
-  return { client, send, flush };
+  function serializedEnvelope(type: string): string {
+    const envelope = send.mock.calls.find(([entry]) =>
+      entry[1].some(([header]) => header.type === type)
+    )?.[0];
+    if (!envelope) {
+      throw new Error(`Expected a ${type} envelope`);
+    }
+    return JSON.stringify(envelope);
+  }
+  return { client, send, flush, serializedEnvelope };
 }
 
 afterEach(async () => {
@@ -71,13 +80,10 @@ describe("telemetry credential boundaries", () => {
     captureEvent(event);
     await capture.client.flush(1000);
 
-    const envelope = capture.send.mock.calls.find(([entry]) =>
-      entry[1].some(([header]) => header.type === "event")
-    )?.[0];
-    expect(envelope).toBeDefined();
-    expect(JSON.stringify(envelope)).not.toContain("SYNTHETIC");
-    expect(JSON.stringify(envelope)).toContain("[REDACTED]");
-    expect(JSON.stringify(envelope)).toContain('"status":500');
+    const serialized = capture.serializedEnvelope("event");
+    expect(serialized).not.toContain("SYNTHETIC");
+    expect(serialized).toContain("[REDACTED]");
+    expect(serialized).toContain('"status":500');
     expect(event.contexts?.cli_error?.detail).toBe(headerError);
   });
 
@@ -88,11 +94,7 @@ describe("telemetry credential boundaries", () => {
     );
     await capture.client.flush(1000);
 
-    const envelope = capture.send.mock.calls.find(([entry]) =>
-      entry[1].some(([header]) => header.type === "event")
-    )?.[0];
-    expect(envelope).toBeDefined();
-    const serialized = JSON.stringify(envelope);
+    const serialized = capture.serializedEnvelope("event");
     expect(serialized).toContain("[REDACTED]");
     expect(serialized).toContain("TypeError");
     expect(serialized).toContain("Rejected");
@@ -115,11 +117,7 @@ describe("telemetry credential boundaries", () => {
     _INTERNAL_flushLogsBuffer(capture.client);
     await capture.client.flush(1000);
 
-    const envelope = capture.send.mock.calls.find(([entry]) =>
-      entry[1].some(([header]) => header.type === "log")
-    )?.[0];
-    expect(envelope).toBeDefined();
-    const serialized = JSON.stringify(envelope);
+    const serialized = capture.serializedEnvelope("log");
     expect(serialized).not.toContain("SYNTHETIC");
     expect(serialized).toContain("scope.token");
     expect(serialized).toContain("sentry.message.parameter.0");
@@ -136,12 +134,12 @@ describe("telemetry credential boundaries", () => {
     startSpan({ name: "synthetic-review", forceTransaction: true }, (span) => {
       span.setAttribute("diagnostic", headerError);
     });
-    await capture.client.flush(1000);
+    capture.flush.mockResolvedValueOnce(false);
+    await expect(capture.client.flush(1000)).resolves.toBe(false);
 
-    const envelopes = capture.send.mock.calls.map(([envelope]) => envelope);
-    expect(envelopes).toHaveLength(1);
-    expect(envelopes[0]?.[1][0]?.[0].type).toBe("transaction");
-    expect(JSON.stringify(envelopes)).not.toContain("SYNTHETIC");
+    expect(capture.send).toHaveBeenCalledOnce();
+    const serialized = capture.serializedEnvelope("transaction");
+    expect(serialized).not.toContain("SYNTHETIC");
     expect(context.token).toBe(token);
     expect(capture.client.getOptions().release).toBe(token);
     expect(capture.flush).toHaveBeenCalledWith(1000);
@@ -156,7 +154,7 @@ describe("telemetry credential boundaries", () => {
     await capture.client.flush(1000);
 
     expect(capture.send).toHaveBeenCalledOnce();
-    const serialized = JSON.stringify(capture.send.mock.calls);
+    const serialized = capture.serializedEnvelope("event");
     expect(serialized).toContain("[REDACTED]");
     expect(serialized).not.toContain("SYNTHETIC");
   });

@@ -803,10 +803,9 @@ export function stringifyUnknown(value: unknown): string {
  * @returns Formatted error string
  */
 export function formatError(error: unknown): string {
-  if (error instanceof CliError) {
-    return redactCredentialText(error.format());
-  }
-  return redactCredentialText(stringifyUnknown(error));
+  return redactCredentialText(
+    error instanceof CliError ? error.format() : stringifyUnknown(error)
+  );
 }
 
 /**

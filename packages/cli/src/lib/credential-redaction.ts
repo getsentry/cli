@@ -12,17 +12,24 @@ const INVALID_HEADER_END = /(?<!\\)(\\*["']) is an invalid header value/gi;
 // The end-of-string alternative also covers messages truncated by the SDK.
 const QUOTED_CREDENTIAL =
   /(?<!\\)(\\*["'])(Bearer[ \t]+|sntry[su]_)[\s\S]*?(?:\1|$)/gi;
+/** Control characters can also appear escaped in serialized diagnostics. */
+const ESCAPED_CONTROL = /\\+(?:[nrtbfv]|u00[01][\da-f]|u007f|u202[89])/.source;
+const BEARER_PART = String.raw`(?:${ESCAPED_CONTROL}[ \t]*|\\+[^"'\s\\]|[^\s"'\\])`;
 // An explicit Bearer context can contain opaque tokens with punctuation.
 // Quotes (including JSON-escaped quotes) delimit the diagnostic string.
-const BEARER_CREDENTIAL =
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: malformed credentials can contain control characters.
-  /\bBearer[ \t]+(?:\\+(?:[nrtbfv]|u00[01][\da-f]|u007f|u202[89])[ \t]*|\\+[^"'\s\\]|[^\s"'\\])+(?:(?:\r\n|(?! )[\s\x00-\x1f\x7f-\x9f])[ \t]*(?:\\+(?:[nrtbfv]|u00[01][\da-f]|u007f|u202[89])[ \t]*|\\+[^"'\s\\]|[^\s"'\\])+)*/gi;
-const SENTRY_CREDENTIAL =
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: malformed credentials can contain control characters.
-  /\bsntry[su]_[A-Za-z0-9._~+/=-]+(?:(?:\r\n|(?! )[\s\x00-\x1f\x7f-\x9f]|\\+(?:[nrtbfv]|u00[01][\da-f]|u007f|u202[89]))[ \t]*[A-Za-z0-9._~+/=-]+)*/gi;
+const BEARER_CREDENTIAL = new RegExp(
+  String.raw`\bBearer[ \t]+${BEARER_PART}+(?:(?:\r\n|(?! )[\s\x00-\x1f\x7f-\x9f])[ \t]*${BEARER_PART}+)*`,
+  "gi"
+);
+const SENTRY_CREDENTIAL = new RegExp(
+  String.raw`\bsntry[su]_[A-Za-z0-9._~+/=-]+(?:(?:\r\n|(?! )[\s\x00-\x1f\x7f-\x9f]|${ESCAPED_CONTROL})[ \t]*[A-Za-z0-9._~+/=-]+)*`,
+  "gi"
+);
 
 /**
  * Use the runtime's final delimiter because an invalid token can contain quotes.
+ * This may also hide text between concatenated diagnostics with the same quote:
+ * the runtime does not distinguish a delimiter inside a token from its end.
  * Index suffixes once so repeated header prefixes cannot cause quadratic scans.
  */
 function redactInvalidBearerHeaders(text: string): string {
