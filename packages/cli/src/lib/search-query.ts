@@ -351,18 +351,19 @@ export function sanitizeQuery(query: string | undefined): string | undefined {
   // whether the PEG parser would accept them.
   const normalized = normalizeQuery(query);
   const withNumericProject = rewriteNumericProjectFilters(normalized);
+  const notes = preParseRewriteNotes(query, normalized, withNumericProject);
 
   let nodes: SearchNode[];
-  // biome-ignore lint/plugin: grandfathered silent catch — see #1531; drain by adding log.debug()/log.warn() or re-throwing.
   try {
     nodes = parse(withNumericProject);
-  } catch {
+  } catch (err) {
     // PEG parse still failed after normalization — pass through to the
-    // API which returns a proper 400 with actionable details.
+    // API which returns a proper 400 with actionable details. The text
+    // rewrites already ran, so say so: the 400 will quote them.
+    log.debug("Search query did not parse; sending as-is", err);
+    warnRunningQuery(notes, withNumericProject);
     return withNumericProject;
   }
-
-  const notes = preParseRewriteNotes(query, normalized, withNumericProject);
 
   // Check for OR inside paren groups first — these are opaque and can't
   // be rewritten. Must throw even if top-level OR would be rewritable,

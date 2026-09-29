@@ -83,4 +83,24 @@ describe("sanitizeQuery: rewrite warnings", () => {
     expect(() => sanitizeQuery("project:123 OR assigned:me")).toThrow();
     expect(runningQueries()).toHaveLength(0);
   });
+
+  test("still warns about the numeric rewrite when the query does not parse", () => {
+    // Unmatched paren → PEG parse fails → passthrough. The rewrite already
+    // happened, and the API 400 will quote project_id, so the user must
+    // be told.
+    expect(sanitizeQuery("project:123 ((( broken")).toBe(
+      "project_id:123 ((( broken"
+    );
+    const warns = runningQueries();
+    expect(warns).toHaveLength(1);
+    expect(warns[0].split("\n")).toEqual([
+      "`project` is the slug; numeric ids use project_id. Rewrote numeric project: filters.",
+      'Running query: "project_id:123 ((( broken"',
+    ]);
+  });
+
+  test("does not warn on unparseable passthrough with no rewrites", () => {
+    expect(sanitizeQuery("((( broken")).toBe("((( broken");
+    expect(runningQueries()).toHaveLength(0);
+  });
 });
