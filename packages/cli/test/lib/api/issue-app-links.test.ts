@@ -145,16 +145,11 @@ describe("app issue-link action", () => {
     ).toHaveLength(1);
   });
 
-  test("does not treat a prefix search result as an exact Linear issue", async () => {
-    choices = [["wrong", "ENG-420: Other issue"]];
-    await expect(resolveAppIssueLink(OPTIONS)).rejects.toThrow(
-      "did not return an exact match"
-    );
-    expect(writes()).toHaveLength(0);
-  });
-
-  test("does not select an issue whose title merely mentions the requested key", async () => {
-    choices = [["wrong", "ENG-99: Follow up on ENG-42"]];
+  test.each([
+    "ENG-420: Other issue",
+    "ENG-99: Follow up on ENG-42",
+  ])("rejects a nonmatching Linear label: %s", async (label) => {
+    choices = [["wrong", label]];
     await expect(resolveAppIssueLink(OPTIONS)).rejects.toThrow(
       "did not return an exact match"
     );
@@ -169,20 +164,31 @@ describe("app issue-link action", () => {
     expect(writes()).toHaveLength(0);
   });
 
-  test("recognizes an existing Linear link even when the URL title changes", async () => {
+  test.each([
+    200, 201,
+  ])("guards an existing Linear link with its canonical URL (HTTP %s)", async (status) => {
     links = [
       { ...LINK, webUrl: "https://linear.app/example/issue/eng-42/new-title" },
     ];
     const prepared = await resolveAppIssueLink(OPTIONS);
     expect(prepared.existing?.id).toBe(LINK.id);
+    expect(prepared.fields).toEqual({ issueId: "linear-uuid" });
+    actionStatus = status;
+    actionLink = links[0]!;
     expect(await linkAppIssue(prepared)).toEqual({
-      changed: false,
+      changed: status === 201,
       link: links[0],
     });
     expect(
-      calls.some((request) => request.url.includes("sentry-app-components"))
-    ).toBe(false);
-    expect(writes()).toHaveLength(0);
+      new globalThis.URL(writes()[0]!.url).searchParams.get(
+        "expectedExternalIssueUrl"
+      )
+    ).toBe(links[0]!.webUrl);
+    expect(await writes()[0]?.json()).toMatchObject({
+      uri: FORM.uri,
+      issueId: "linear-uuid",
+    });
+    expect(writes()).toHaveLength(1);
   });
 
   test("refuses to replace another issue linked to the same app", async () => {
@@ -346,6 +352,47 @@ describe("app issue-link action", () => {
     expect(writes()).toHaveLength(0);
   });
 
+  test("uses a supplied ID to disambiguate matching labels without accepting another issue", async () => {
+    choices = [
+      ["linear-uuid", "ENG-42: Fix"],
+      ["another-uuid", "ENG-42: Fix"],
+      ["wrong", "ENG-99: Other"],
+    ];
+    const prepared = await resolveAppIssueLink({
+      ...OPTIONS,
+      fields: { issueId: "linear-uuid" },
+    });
+    expect(prepared.fields).toEqual({ issueId: "linear-uuid" });
+    await expect(
+      resolveAppIssueLink({
+        ...OPTIONS,
+        fields: { issueId: "wrong" },
+      })
+    ).rejects.toThrow("conflicts");
+    expect(writes()).toHaveLength(0);
+  });
+
+  test.each([
+    "ENG-42",
+    "ENG-99",
+  ])("uses Linear choice ID %s before the label's key", async (id) => {
+    choices = [
+      [
+        id,
+        id === "ENG-42"
+          ? "ENG-99 mentioned in title"
+          : "ENG-42 misleading label",
+      ],
+    ];
+    const result = resolveAppIssueLink({ ...OPTIONS, fields: { issueId: id } });
+    if (id === "ENG-42") {
+      expect((await result).fields).toEqual({ issueId: id });
+    } else {
+      await expect(result).rejects.toThrow("conflicts");
+    }
+    expect(writes()).toHaveLength(0);
+  });
+
   test("keeps the query guard separate from an app field with the same name", async () => {
     form = {
       ...FORM,
@@ -394,6 +441,57 @@ describe("app issue-link action", () => {
     ).toBe('{"team":"team-uuid"}');
   });
 
+  test("resolves a required dependency from the App's remote default", async () => {
+    form = {
+      ...FORM,
+      required_fields: [{ ...FORM.required_fields[0], depends_on: ["team"] }],
+      optional_fields: [{ name: "team", type: "select", uri: "/teams" }],
+    };
+    const defaultFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch((input, init) => {
+      const request = new Request(input, init);
+      const query = new globalThis.URL(request.url).searchParams;
+      if (query.get("uri") === "/teams") {
+        calls.push(request);
+        expect(query.has("query")).toBe(false);
+        return Promise.resolve(
+          json({
+            choices: [["team-uuid", "Engineering"]],
+            defaultValue: "team-uuid",
+          })
+        );
+      }
+      return defaultFetch(input, init);
+    });
+    const prepared = await resolveAppIssueLink(OPTIONS);
+    expect(prepared.fields).toEqual({
+      team: "team-uuid",
+      issueId: "linear-uuid",
+    });
+    const search = calls.find((request) =>
+      new globalThis.URL(request.url).searchParams.has("dependentData")
+    );
+    expect(
+      new globalThis.URL(search!.url).searchParams.get("dependentData")
+    ).toBe('{"team":"team-uuid"}');
+  });
+
+  test.each([
+    { defaultValue: "", fields: undefined },
+    { defaultValue: "preset", fields: { note: "" } },
+  ])("omits empty optional fields ($defaultValue)", async ({
+    defaultValue,
+    fields,
+  }) => {
+    form = {
+      ...FORM,
+      optional_fields: [{ name: "note", type: "text", defaultValue }],
+    };
+    expect((await resolveAppIssueLink({ ...OPTIONS, fields })).fields).toEqual({
+      issueId: "linear-uuid",
+    });
+  });
+
   test("reports required fields rather than sending a partial form", async () => {
     form = {
       ...FORM,
@@ -408,7 +506,10 @@ describe("app issue-link action", () => {
     expect(writes()).toHaveLength(0);
   });
 
-  test("names missing dependencies instead of reporting a dependency cycle", async () => {
+  test.each([
+    undefined,
+    { team: "" },
+  ])("requires missing or empty dependencies (%j)", async (fields) => {
     form = {
       ...FORM,
       required_fields: [
@@ -416,7 +517,7 @@ describe("app issue-link action", () => {
         { name: "team", type: "text" },
       ],
     };
-    await expect(resolveAppIssueLink(OPTIONS)).rejects.toThrow(
+    await expect(resolveAppIssueLink({ ...OPTIONS, fields })).rejects.toThrow(
       "Missing app link fields: --field team=VALUE"
     );
     expect(

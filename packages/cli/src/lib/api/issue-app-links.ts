@@ -67,7 +67,10 @@ const LinkFormSchema = object({
   required_fields: optional(array(FieldSchema)),
   optional_fields: optional(array(FieldSchema)),
 });
-const ChoicesResponseSchema = object({ choices: array(ChoiceSchema) });
+const ChoicesResponseSchema = object({
+  choices: array(ChoiceSchema),
+  defaultValue: FieldSchema.entries.defaultValue,
+});
 type Choice = InferOutput<typeof ChoiceSchema>;
 type Field = InferOutput<typeof FieldSchema>;
 type LinkForm = InferOutput<typeof LinkFormSchema>;
@@ -106,7 +109,7 @@ export type PreparedAppIssueLink = {
   uri: string;
   /** Validated form fields, sent at the top level of the action request. */
   fields: Record<string, string | number>;
-  /** Existing association to the same target; no callback is needed. */
+  /** Existing association to the same target, supplying the canonical URL guard. */
   existing?: AppIssueLink;
 };
 
@@ -123,6 +126,7 @@ const RESERVED_FIELDS = new Set([
 ]);
 const TRAILING_SLASHES = /\/+$/;
 const CHOICE_LABEL_TOKENS = /[^A-Z0-9-]+/;
+const LINEAR_ISSUE_KEY = /^[A-Z][A-Z0-9]*-\d+$/;
 const URL_FIELD = /url/i;
 const NUMERIC_ID = /^\d+$/;
 
@@ -401,12 +405,12 @@ async function getChoices({
 }: {
   installationUuid: string;
   field: Field;
-  query: string;
+  query?: string;
   values: Record<string, string | number>;
   projectId?: string;
-}): Promise<Choice[]> {
+}): Promise<InferOutput<typeof ChoicesResponseSchema>> {
   if (!field.uri) {
-    return field.choices ?? field.options ?? [];
+    return { choices: field.choices ?? field.options ?? [] };
   }
   validateUri(field.uri);
   const dependentData = Object.fromEntries(
@@ -431,34 +435,88 @@ async function getChoices({
   if (!parsed.success) {
     throw new ApiError("App search returned invalid issue choices", 0);
   }
-  return parsed.output.choices;
+  return parsed.output;
+}
+
+function choiceLabelKey(label: string | number): string | undefined {
+  return String(label)
+    .toUpperCase()
+    .split(CHOICE_LABEL_TOKENS)
+    .find((token) => token.length > 0);
+}
+
+/** Reject supplied IDs that identify another Linear issue before invoking its callback. */
+function validateLinearChoice(
+  choice: Choice,
+  choices: Choice[],
+  key: string
+): void {
+  const valueKey = String(choice[0]).toUpperCase();
+  const labelKey = choiceLabelKey(choice[1]);
+  const identified = choices.filter(
+    ([value, label]) =>
+      String(value).toUpperCase() === key || choiceLabelKey(label) === key
+  );
+  if (
+    (LINEAR_ISSUE_KEY.test(valueKey) && valueKey !== key) ||
+    (!LINEAR_ISSUE_KEY.test(valueKey) &&
+      ((identified.length &&
+        !identified.some(([value]) => value === choice[0])) ||
+        (labelKey && LINEAR_ISSUE_KEY.test(labelKey) && labelKey !== key)))
+  ) {
+    throw new ValidationError(
+      "App issue choice conflicts with the requested issue URL",
+      "field"
+    );
+  }
 }
 
 function selectChoice(
   choices: Choice[],
   query: string,
-  linearKey?: string
+  linearKey?: string,
+  supplied?: string
 ): string | number {
+  const wanted = supplied ?? query;
   const matches = choices.filter(
     ([value, label]) =>
-      String(value) === query ||
-      String(label) === query ||
+      String(value) === wanted ||
+      String(label) === wanted ||
       (linearKey !== undefined &&
-        String(label)
-          .toUpperCase()
-          .split(CHOICE_LABEL_TOKENS)
-          .find((token) => token.length > 0) === linearKey)
+        choiceLabelKey(label) === linearKey &&
+        (supplied === undefined ||
+          supplied === query ||
+          String(value) === supplied))
   );
   const choice = matches[0];
   if (matches.length !== 1 || !choice) {
+    const missingMessage =
+      supplied && linearKey
+        ? "App issue choice conflicts with the requested issue URL"
+        : "App search did not return an exact match for the external issue";
     throw new ValidationError(
       matches.length
         ? "App search returned multiple exact issue matches"
-        : "App search did not return an exact match for the external issue",
+        : missingMessage,
       "url"
     );
   }
+  if (linearKey) {
+    validateLinearChoice(choice, choices, linearKey);
+  }
   return choice[0];
+}
+
+/** Dependencies are required even when their fields are otherwise optional. */
+function addDependencies(pending: Field[], fields: Field[]): void {
+  for (const field of pending) {
+    for (const name of field.depends_on ?? []) {
+      const dependency = fields.find((item) => item.name === name);
+      if (dependency && !pending.includes(dependency)) {
+        pending.push(dependency);
+      }
+    }
+  }
 }
 
 /** Resolve form dependencies while keeping the target field bound to the requested issue URL. */
@@ -472,8 +530,12 @@ async function resolveFields(
   const values = seedFields(fields, options.fields ?? {});
   const targetField = findTargetField(fields, required);
   const pending = fields.filter(
-    (field) => field === targetField || values[field.name] !== undefined
+    (field) =>
+      field === targetField ||
+      required.includes(field) ||
+      values[field.name] !== undefined
   );
+  addDependencies(pending, fields);
   const resolved = new Set<string>();
   while (pending.length) {
     const index = pending.findIndex((item) =>
@@ -503,15 +565,6 @@ async function resolveFields(
     });
     resolved.add(field.name);
   }
-  const missing = required.filter(
-    (field) => values[field.name] === undefined || values[field.name] === ""
-  );
-  if (missing.length) {
-    throw new ValidationError(
-      `Missing app link fields: ${missing.map((field) => `--field ${field.name}=VALUE`).join(", ")}`,
-      "field"
-    );
-  }
   return values;
 }
 
@@ -536,7 +589,9 @@ function seedFields(
         "field"
       );
     }
-    values[name] = value;
+    if (value !== "") {
+      values[name] = value;
+    }
   }
   for (const field of fields) {
     if (RESERVED_FIELDS.has(field.name)) {
@@ -552,9 +607,10 @@ function seedFields(
       );
     }
     if (
-      values[field.name] === undefined &&
+      supplied[field.name] === undefined &&
       field.defaultValue !== undefined &&
-      field.defaultValue !== null
+      field.defaultValue !== null &&
+      field.defaultValue !== ""
     ) {
       values[field.name] = field.defaultValue;
     }
@@ -577,6 +633,31 @@ function findTargetField(fields: Field[], required: Field[]): Field {
   return targetField;
 }
 
+/** Required fields and dependencies need a value; explicit target values must agree. */
+function validateFieldValue(
+  fieldName: string,
+  value: string | number | undefined,
+  query: string | number | undefined,
+  supplied?: string
+): asserts value is string | number {
+  if (
+    supplied !== undefined &&
+    supplied !== String(value) &&
+    supplied !== query
+  ) {
+    throw new ValidationError(
+      `App field ${fieldName} conflicts with the requested issue URL`,
+      "field"
+    );
+  }
+  if (value === undefined || value === "") {
+    throw new ValidationError(
+      `Missing app link fields: --field ${fieldName}=VALUE`,
+      "field"
+    );
+  }
+}
+
 async function resolveFieldValue({
   field,
   targetField,
@@ -590,42 +671,41 @@ async function resolveFieldValue({
   options: ResolveAppIssueLinkOptions;
   installationUuid: string;
 }): Promise<string | number> {
-  const target = parseTarget(options.url);
+  const isTarget = field === targetField;
+  const targetKey = isTarget ? parseTarget(options.url).key : undefined;
+  const supplied = isTarget ? options.fields?.[field.name] : undefined;
   // Generic selects can use provider IDs that cannot be inferred from the URL.
-  const query =
-    target.key ??
-    (field === targetField && field.type === "select"
-      ? options.fields?.[field.name]
-      : undefined) ??
-    options.url;
-  const input = field === targetField ? query : String(values[field.name]);
-  let value: string | number = input;
+  let query = (options.fields?.[field.name] ?? values[field.name])?.toString();
+  if (isTarget) {
+    query =
+      targetKey ??
+      (field.type === "select" ? supplied : undefined) ??
+      options.url;
+  }
+  let value: string | number | undefined = query;
   if (field.type === "select") {
-    value = selectChoice(
-      await getChoices({
-        installationUuid,
-        field,
-        query: input,
-        values,
-        projectId: options.projectId,
-      }),
-      input,
-      field === targetField ? target.key : undefined
-    );
-  } else if (field === targetField && URL_FIELD.test(field.name)) {
+    const optionsResponse = await getChoices({
+      installationUuid,
+      field,
+      query,
+      values,
+      projectId: options.projectId,
+    });
+    if (!isTarget) {
+      value ??= optionsResponse.defaultValue ?? undefined;
+    }
+    if (value !== undefined) {
+      value = selectChoice(
+        optionsResponse.choices,
+        String(value),
+        targetKey,
+        supplied
+      );
+    }
+  } else if (isTarget && URL_FIELD.test(field.name)) {
     value = options.url;
   }
-  if (
-    field === targetField &&
-    options.fields?.[field.name] !== undefined &&
-    options.fields[field.name] !== String(value) &&
-    options.fields[field.name] !== query
-  ) {
-    throw new ValidationError(
-      `App field ${field.name} conflicts with the requested issue URL`,
-      "field"
-    );
-  }
+  validateFieldValue(field.name, value, query, supplied);
   return value;
 }
 
@@ -653,27 +733,17 @@ export async function resolveAppIssueLink(
     appSlug
   );
   const installation = await resolveInstallation(options.orgSlug, appSlug);
-  if (existing) {
-    return {
-      ...options,
-      appSlug,
-      installationUuid: installation.uuid,
-      displayName: existing.displayName,
-      uri: "",
-      fields: {},
-      existing,
-    };
-  }
   const form = await getLinkForm(options.orgSlug, installation);
   return {
     orgSlug: options.orgSlug,
     issueId: options.issueId,
     appSlug,
     url: options.url,
-    displayName: target.key ?? options.url,
+    displayName: existing?.displayName ?? target.key ?? options.url,
     installationUuid: installation.uuid,
     uri: form.uri,
     fields: await resolveFields(options, form, installation.uuid),
+    existing,
   };
 }
 
@@ -681,9 +751,6 @@ export async function resolveAppIssueLink(
 export async function linkAppIssue(
   prepared: PreparedAppIssueLink
 ): Promise<{ link: AppIssueLink; changed: boolean }> {
-  if (prepared.existing) {
-    return { link: prepared.existing, changed: false };
-  }
   validateUri(prepared.uri);
   const result = await executeSentryAppInstallationExternalIssueAction({
     ...getSdkConfig(getControlSiloUrl(), {
@@ -693,7 +760,8 @@ export async function linkAppIssue(
     }),
     path: { uuid: prepared.installationUuid },
     query: {
-      expectedExternalIssueUrl: parseTarget(prepared.url).url,
+      expectedExternalIssueUrl:
+        prepared.existing?.webUrl ?? parseTarget(prepared.url).url,
     },
     body: {
       ...prepared.fields,
