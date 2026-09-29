@@ -16,7 +16,7 @@ import { resolveOrgRegion } from "../region.js";
 import { getSdkConfig } from "../sentry-client.js";
 import {
   API_MAX_PER_PAGE,
-  MAX_PAGINATION_PAGES,
+  fetchAllPages,
   unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
@@ -206,33 +206,17 @@ async function listIntegrations(
   const config = getSdkConfig(await resolveOrgRegion(orgSlug), {
     cache: "no-store",
   });
-  const integrations: NativeIntegration[] = [];
-  let cursor: string | undefined;
-  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
-    const result = await listOrganizationIssueIntegrations({
-      ...config,
-      path: { organization_id_or_slug: orgSlug, issue_id: issueId },
-      query: { cursor, per_page: API_MAX_PER_PAGE },
-    });
-    const response = unwrapPaginatedResult<unknown>(
-      result,
-      "Failed to list issue integrations"
-    );
-    const parsed = safeParse(vIssueIntegrationsResponse, response.data);
-    if (!parsed.success) {
-      throw new ApiError(
-        "Unexpected response format when listing issue integrations",
-        0
-      );
-    }
-    integrations.push(...parsed.output);
-    cursor = response.nextCursor;
-    if (!cursor) {
-      return integrations;
-    }
-  }
-  throw new ValidationError(
-    "Too many results to resolve the issue link safely."
+  return fetchAllPages(
+    async (cursor) => {
+      const result = await listOrganizationIssueIntegrations({
+        ...config,
+        path: { organization_id_or_slug: orgSlug, issue_id: issueId },
+        query: { cursor, per_page: API_MAX_PER_PAGE },
+      });
+      return unwrapPaginatedResult(result, "Failed to list issue integrations");
+    },
+    vIssueIntegrationsResponse,
+    "listing issue integrations"
   );
 }
 

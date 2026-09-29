@@ -8,7 +8,6 @@ import {
   executeSentryAppInstallationExternalIssueAction,
   type GroupExternalIssueResponse,
   getSentryAppInstallationExternalRequestOptions,
-  type ListOrganizationSentryAppComponentsResponse,
   type ListOrganizationSentryAppInstallationsResponse,
   listOrganizationIssueExternalIssues,
   listOrganizationSentryAppComponents,
@@ -22,7 +21,6 @@ import {
 import {
   array,
   boolean,
-  type GenericSchema,
   type InferOutput,
   nullish,
   number,
@@ -37,9 +35,9 @@ import {
 import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import { getControlSiloUrl, getSdkConfig } from "../sentry-client.js";
+import { isAllDigits } from "../utils.js";
 import {
-  MAX_PAGINATION_PAGES,
-  type PaginatedResponse,
+  fetchAllPages,
   unwrapPaginatedResult,
   unwrapResult,
 } from "./infrastructure.js";
@@ -47,7 +45,6 @@ import {
 /** A stored Sentry App association; id identifies the link, not the remote ticket. */
 export type AppIssueLink = GroupExternalIssueResponse[number];
 type AppInstallation = ListOrganizationSentryAppInstallationsResponse[number];
-type Component = ListOrganizationSentryAppComponentsResponse[number];
 const ChoiceSchema = tuple([
   union([string(), number()]),
   union([string(), number()]),
@@ -128,7 +125,6 @@ const TRAILING_SLASHES = /\/+$/;
 const CHOICE_LABEL_TOKENS = /[^A-Z0-9-]+/;
 const LINEAR_ISSUE_KEY = /^[A-Z][A-Z0-9]*-\d+$/;
 const URL_FIELD = /url/i;
-const NUMERIC_ID = /^\d+$/;
 
 function parseTarget(raw: string) {
   let url: URL;
@@ -192,64 +188,18 @@ export function findAppIssueLink(
   return matches[0];
 }
 
-/** Fetch a complete, validated collection; partial results cannot safely authorize a link mutation. */
-async function listAll<T>(
-  fetchPage: (
-    cursor: string | undefined
-  ) => Promise<PaginatedResponse<unknown>>,
-  endpoint: string,
-  schema: GenericSchema<unknown, T[]>
-): Promise<T[]> {
-  const result: T[] = [];
-  const seen = new Set<string>();
-  let cursor: string | undefined;
-  for (let page = 0; page < MAX_PAGINATION_PAGES; page++) {
-    const { data, nextCursor } = await fetchPage(cursor);
-    const parsed = safeParse(schema, data);
-    if (!parsed.success) {
-      throw new ApiError(
-        "Unexpected API response when listing app issue links",
-        0,
-        undefined,
-        endpoint
-      );
-    }
-    result.push(...parsed.output);
-    cursor = nextCursor;
-    if (!cursor) {
-      return result;
-    }
-    if (seen.has(cursor)) {
-      throw new ApiError(
-        "App issue link pagination repeated a cursor",
-        0,
-        undefined,
-        endpoint
-      );
-    }
-    seen.add(cursor);
-  }
-  throw new ApiError(
-    "App issue link pagination exceeded the safety limit",
-    0,
-    undefined,
-    endpoint
-  );
-}
-
-function groupPath(orgSlug: string, issueId: string): string {
+function requireIssueTarget(orgSlug: string, issueId: string): void {
   if (
     !orgSlug ||
     orgSlug === "." ||
     orgSlug === ".." ||
-    !NUMERIC_ID.test(issueId)
+    !isAllDigits(issueId)
   ) {
     throw new ValidationError(
       "App links require an organization and numeric Sentry issue ID",
       "issueId"
     );
   }
-  return `/organizations/${encodeURIComponent(orgSlug)}/issues/${encodeURIComponent(issueId)}/external-issues/`;
 }
 
 /** Retrieve all app associations in the issue's region, bypassing stale cached preflights. */
@@ -257,11 +207,11 @@ export async function listAppIssueLinks(
   orgSlug: string,
   issueId: string
 ): Promise<AppIssueLink[]> {
-  const endpoint = groupPath(orgSlug, issueId);
+  requireIssueTarget(orgSlug, issueId);
   const config = getSdkConfig(await resolveOrgRegion(orgSlug), {
     cache: "no-store",
   });
-  return listAll<AppIssueLink>(
+  return fetchAllPages(
     async (cursor) => {
       const result = await listOrganizationIssueExternalIssues({
         ...config,
@@ -270,8 +220,8 @@ export async function listAppIssueLinks(
       });
       return unwrapPaginatedResult(result, "Failed to list app issue links");
     },
-    endpoint,
-    vGroupExternalIssueResponse
+    vGroupExternalIssueResponse,
+    "listing app issue links"
   );
 }
 
@@ -314,7 +264,7 @@ async function resolveInstallation(
   appSlug: string
 ): Promise<AppInstallation> {
   const config = getSdkConfig(getControlSiloUrl(), { cache: "no-store" });
-  const installations = await listAll<AppInstallation>(
+  const installations = await fetchAllPages(
     async (cursor) => {
       const result = await listOrganizationSentryAppInstallations({
         ...config,
@@ -326,8 +276,8 @@ async function resolveInstallation(
         "Failed to list Sentry App installations"
       );
     },
-    `/organizations/${encodeURIComponent(orgSlug)}/sentry-app-installations/`,
-    vListOrganizationSentryAppInstallationsResponse
+    vListOrganizationSentryAppInstallationsResponse,
+    "listing Sentry App installations"
   );
   const matches = installations.filter(
     (item) =>
@@ -351,9 +301,8 @@ async function getLinkForm(
   orgSlug: string,
   installation: AppInstallation
 ): Promise<LinkForm> {
-  const endpoint = `/organizations/${encodeURIComponent(orgSlug)}/sentry-app-components/`;
   const config = getSdkConfig(getControlSiloUrl(), { cache: "no-store" });
-  const components = await listAll<Component>(
+  const components = await fetchAllPages(
     async (cursor) => {
       const result = await listOrganizationSentryAppComponents({
         ...config,
@@ -362,8 +311,8 @@ async function getLinkForm(
       });
       return unwrapPaginatedResult(result, "Failed to list app components");
     },
-    endpoint,
-    vListOrganizationSentryAppComponentsResponse
+    vListOrganizationSentryAppComponentsResponse,
+    "listing Sentry App components"
   );
   const matches = components.filter(
     (item) =>
@@ -721,12 +670,6 @@ export async function resolveAppIssueLink(
       "app"
     );
   }
-  if (!NUMERIC_ID.test(options.issueId)) {
-    throw new ValidationError(
-      "App linking requires the numeric Sentry issue ID",
-      "issueId"
-    );
-  }
   const existing = checkExisting(
     await listAppIssueLinks(options.orgSlug, options.issueId),
     options.url,
@@ -782,13 +725,13 @@ export async function unlinkAppIssueLink(
   issueId: string,
   linkId: string
 ): Promise<void> {
-  if (!NUMERIC_ID.test(linkId)) {
+  if (!isAllDigits(linkId)) {
     throw new ValidationError(
       "App unlink requires the numeric association ID",
       "linkId"
     );
   }
-  groupPath(orgSlug, issueId);
+  requireIssueTarget(orgSlug, issueId);
   const result = await deleteOrganizationIssueExternalIssue({
     ...getSdkConfig(await resolveOrgRegion(orgSlug), { cache: "no-store" }),
     path: {
