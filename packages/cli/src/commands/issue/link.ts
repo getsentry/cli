@@ -2,7 +2,6 @@
 
 import type { SentryContext } from "../../context.js";
 import { buildCommand } from "../../lib/command.js";
-import { ContextError } from "../../lib/errors.js";
 import { formatIssueLinkResult } from "../../lib/formatters/issue-links.js";
 import { CommandOutput } from "../../lib/formatters/output.js";
 import { linkExternalIssue } from "../../lib/issue-links.js";
@@ -12,7 +11,7 @@ import {
   EXTERNAL_ISSUE_POSITIONALS,
   parseIssueLinkFields,
 } from "./link-utils.js";
-import { resolveIssue } from "./utils.js";
+import { resolveOrgAndIssueId } from "./utils.js";
 
 type LinkFlags = {
   readonly integration?: string;
@@ -60,21 +59,15 @@ export const linkCommand = buildCommand({
     url: string
   ) {
     const fields = parseIssueLinkFields(flags.field);
-    const { org, issue } = await resolveIssue({
+    const { org, issueId, projectId } = await resolveOrgAndIssueId({
       issueArg,
       cwd: this.cwd,
       command: "link",
     });
-    if (!org) {
-      throw new ContextError(
-        "Organization",
-        "sentry issue link <org>/ISSUE <url>"
-      );
-    }
     const result = await linkExternalIssue({
       orgSlug: org,
-      issueId: issue.id,
-      projectId: issue.project?.id,
+      issueId,
+      projectId,
       url,
       integrationId: flags.integration,
       appSlug: flags.app,

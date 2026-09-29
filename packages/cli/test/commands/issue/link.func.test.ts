@@ -2,19 +2,18 @@
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { linkCommand } from "../../../src/commands/issue/link.js";
-import { resolveIssue } from "../../../src/commands/issue/utils.js";
-import { ContextError, ValidationError } from "../../../src/lib/errors.js";
+import { resolveOrgAndIssueId } from "../../../src/commands/issue/utils.js";
+import { ValidationError } from "../../../src/lib/errors.js";
 import {
   type ExternalIssueLinkResult,
   linkExternalIssue,
 } from "../../../src/lib/issue-links.js";
-import type { SentryIssue } from "../../../src/types/sentry.js";
 
 vi.mock("../../../src/commands/issue/utils.js", async (importOriginal) => ({
   ...(await importOriginal<
     typeof import("../../../src/commands/issue/utils.js")
   >()),
-  resolveIssue: vi.fn(),
+  resolveOrgAndIssueId: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/issue-links.js", () => ({
@@ -26,20 +25,6 @@ const defaultFlags = {
   "dry-run": false,
   json: false,
 };
-const issue = {
-  id: "123456789",
-  shortId: "APP-42",
-  title: "TypeError: boom",
-  culprit: "handler",
-  count: "10",
-  userCount: 3,
-  firstSeen: "2026-03-01T00:00:00Z",
-  lastSeen: "2026-04-03T12:00:00Z",
-  level: "error",
-  status: "unresolved",
-  permalink: "https://sentry.io/organizations/test-org/issues/123456789/",
-  project: { id: "456", slug: "test-project", name: "Test Project" },
-} as SentryIssue;
 const linkedResult: ExternalIssueLinkResult = {
   org: "test-org",
   issueId: "123456789",
@@ -68,9 +53,13 @@ function createMockContext() {
 
 describe("issue link", () => {
   beforeEach(() => {
-    vi.mocked(resolveIssue).mockReset();
+    vi.mocked(resolveOrgAndIssueId).mockReset();
     vi.mocked(linkExternalIssue).mockReset();
-    vi.mocked(resolveIssue).mockResolvedValue({ org: "test-org", issue });
+    vi.mocked(resolveOrgAndIssueId).mockResolvedValue({
+      org: "test-org",
+      issueId: "123456789",
+      projectId: "456",
+    });
     vi.mocked(linkExternalIssue).mockResolvedValue(linkedResult);
   });
 
@@ -84,7 +73,7 @@ describe("issue link", () => {
       externalUrl
     );
 
-    expect(resolveIssue).toHaveBeenCalledExactlyOnceWith({
+    expect(resolveOrgAndIssueId).toHaveBeenCalledExactlyOnceWith({
       issueArg: "test-org/APP-42",
       cwd: "/tmp/example-project",
       command: "link",
@@ -150,20 +139,9 @@ describe("issue link", () => {
       )
     ).rejects.toBeInstanceOf(ValidationError);
 
-    expect(resolveIssue).not.toHaveBeenCalled();
+    expect(resolveOrgAndIssueId).not.toHaveBeenCalled();
     expect(linkExternalIssue).not.toHaveBeenCalled();
     expect(output()).toBe("");
-  });
-
-  test("requires organization context before linking a numeric issue", async () => {
-    vi.mocked(resolveIssue).mockResolvedValue({ org: undefined, issue });
-    const { context } = createMockContext();
-    const func = await linkCommand.loader();
-
-    await expect(
-      func.call(context, defaultFlags, "123456789", externalUrl)
-    ).rejects.toBeInstanceOf(ContextError);
-    expect(linkExternalIssue).not.toHaveBeenCalled();
   });
 
   test("renders a dry-run preview while forwarding the no-write flag", async () => {
