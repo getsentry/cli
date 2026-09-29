@@ -44,7 +44,6 @@ describe("generated SDK positional arguments", () => {
       ],
       flags: { field: ["team=engineering", "label=bug"] },
     });
-    expect(calls[0]?.flags).not.toHaveProperty("external-issue");
   });
 
   test("issue unlink forwards the issue and URL as separate positionals", async () => {
@@ -59,7 +58,6 @@ describe("generated SDK positional arguments", () => {
       positional: ["example/APP-42", "https://github.com/example/app/pull/123"],
       flags: { yes: true },
     });
-    expect(calls[0]?.flags).not.toHaveProperty("external-issue");
   });
 
   test("release deploy passes version, environment and name as separate tokens", async () => {

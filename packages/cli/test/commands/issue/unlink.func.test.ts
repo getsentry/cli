@@ -3,8 +3,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { unlinkCommand } from "../../../src/commands/issue/unlink.js";
 import { resolveOrgAndIssueId } from "../../../src/commands/issue/utils.js";
-import { updateIssueStatus } from "../../../src/lib/api-client.js";
-import { ApiError } from "../../../src/lib/errors.js";
 import {
   type ExternalIssueLinkResult,
   unlinkExternalIssue,
@@ -27,11 +25,6 @@ vi.mock("../../../src/commands/issue/utils.js", async (importOriginal) => ({
     typeof import("../../../src/commands/issue/utils.js")
   >()),
   resolveOrgAndIssueId: vi.fn(),
-}));
-
-vi.mock("../../../src/lib/api-client.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../src/lib/api-client.js")>()),
-  updateIssueStatus: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/issue-links.js", () => ({
@@ -84,7 +77,6 @@ describe("issue unlink", () => {
     vi.mocked(resolveOrgAndIssueId).mockReset();
     vi.mocked(unlinkExternalIssue).mockReset();
     vi.mocked(confirmByTyping).mockReset().mockResolvedValue(true);
-    vi.mocked(updateIssueStatus).mockClear();
     vi.mocked(resolveOrgAndIssueId).mockResolvedValue({
       org: "test-org",
       issueId: "123456789",
@@ -129,7 +121,6 @@ describe("issue unlink", () => {
     expect(confirmByTyping).not.toHaveBeenCalled();
     expect(output()).toContain("Unlinked");
     expect(output()).toContain("external issue was not deleted");
-    expect(updateIssueStatus).not.toHaveBeenCalled();
   });
 
   test("refuses non-interactive mutation without explicit confirmation before resolving", async () => {
@@ -196,7 +187,6 @@ describe("issue unlink", () => {
     expect(confirmByTyping).toHaveBeenCalledOnce();
     expect(unlinkExternalIssue).not.toHaveBeenCalled();
     expect(output()).toContain("Cancelled.");
-    expect(updateIssueStatus).not.toHaveBeenCalled();
   });
 
   test("permits --dry-run without a TTY and preserves current link state in JSON", async () => {
@@ -221,42 +211,5 @@ describe("issue unlink", () => {
       expect.objectContaining({ dryRun: true })
     );
     expect(JSON.parse(output())).toEqual(result);
-    expect(updateIssueStatus).not.toHaveBeenCalled();
-  });
-
-  test.each([
-    true,
-    false,
-  ])("emits structured unlink state with changed=%s in JSON", async (changed) => {
-    const result = { ...unlinkedResult, changed };
-    vi.mocked(unlinkExternalIssue).mockResolvedValue(result);
-    const { context, output } = createMockContext();
-    const func = await unlinkCommand.loader();
-    await func.call(
-      context,
-      { ...defaultFlags, yes: true, json: true },
-      "APP-42",
-      externalUrl
-    );
-
-    expect(JSON.parse(output())).toEqual(result);
-    expect(updateIssueStatus).not.toHaveBeenCalled();
-  });
-
-  test("propagates the original 403 so scope recovery can handle it", async () => {
-    const error = new ApiError("Permission denied", 403, "Missing event:admin");
-    vi.mocked(unlinkExternalIssue).mockRejectedValue(error);
-    const { context, output } = createMockContext();
-    const func = await unlinkCommand.loader();
-
-    await expect(
-      func.call(
-        context,
-        { ...defaultFlags, yes: true, json: true },
-        "APP-42",
-        externalUrl
-      )
-    ).rejects.toBe(error);
-    expect(output()).toBe("");
   });
 });

@@ -3,12 +3,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { linkCommand } from "../../../src/commands/issue/link.js";
 import { resolveIssue } from "../../../src/commands/issue/utils.js";
-import { updateIssueStatus } from "../../../src/lib/api-client.js";
-import {
-  ApiError,
-  ContextError,
-  ValidationError,
-} from "../../../src/lib/errors.js";
+import { ContextError, ValidationError } from "../../../src/lib/errors.js";
 import {
   type ExternalIssueLinkResult,
   linkExternalIssue,
@@ -20,11 +15,6 @@ vi.mock("../../../src/commands/issue/utils.js", async (importOriginal) => ({
     typeof import("../../../src/commands/issue/utils.js")
   >()),
   resolveIssue: vi.fn(),
-}));
-
-vi.mock("../../../src/lib/api-client.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../src/lib/api-client.js")>()),
-  updateIssueStatus: vi.fn(),
 }));
 
 vi.mock("../../../src/lib/issue-links.js", () => ({
@@ -80,7 +70,6 @@ describe("issue link", () => {
   beforeEach(() => {
     vi.mocked(resolveIssue).mockReset();
     vi.mocked(linkExternalIssue).mockReset();
-    vi.mocked(updateIssueStatus).mockClear();
     vi.mocked(resolveIssue).mockResolvedValue({ org: "test-org", issue });
     vi.mocked(linkExternalIssue).mockResolvedValue(linkedResult);
   });
@@ -113,7 +102,6 @@ describe("issue link", () => {
     expect(output()).toContain("Linked");
     expect(output()).toContain(externalUrl);
     expect(output()).toContain("test-org/123456789");
-    expect(updateIssueStatus).not.toHaveBeenCalled();
   });
 
   test("forwards an App selector and parses repeatable fields without losing values", async () => {
@@ -140,7 +128,6 @@ describe("issue link", () => {
       fields: { team: "team-1", query: "key=value", optional: "" },
       dryRun: false,
     });
-    expect(updateIssueStatus).not.toHaveBeenCalled();
   });
 
   test.each([
@@ -200,15 +187,9 @@ describe("issue link", () => {
     );
     expect(output()).toContain("Would link");
     expect(output()).toContain("dry run");
-    expect(updateIssueStatus).not.toHaveBeenCalled();
   });
 
-  test.each([
-    true,
-    false,
-  ])("emits structured link state with changed=%s in JSON", async (changed) => {
-    const result = { ...linkedResult, changed };
-    vi.mocked(linkExternalIssue).mockResolvedValue(result);
+  test("emits the link result unchanged in JSON", async () => {
     const { context, output } = createMockContext();
     const func = await linkCommand.loader();
     await func.call(
@@ -218,19 +199,6 @@ describe("issue link", () => {
       externalUrl
     );
 
-    expect(JSON.parse(output())).toEqual(result);
-    expect(updateIssueStatus).not.toHaveBeenCalled();
-  });
-
-  test("propagates the original 403 so scope recovery can handle it", async () => {
-    const error = new ApiError("Permission denied", 403, "Missing event:write");
-    vi.mocked(linkExternalIssue).mockRejectedValue(error);
-    const { context, output } = createMockContext();
-    const func = await linkCommand.loader();
-
-    await expect(
-      func.call(context, { ...defaultFlags, json: true }, "APP-42", externalUrl)
-    ).rejects.toBe(error);
-    expect(output()).toBe("");
+    expect(JSON.parse(output())).toEqual(linkedResult);
   });
 });

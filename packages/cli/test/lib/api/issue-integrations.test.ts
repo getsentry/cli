@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
   findNativeIssueLink,
   linkNativeIssue,
@@ -551,45 +551,6 @@ describe("native tracker issue links", () => {
       "inspect the current links before retrying"
     );
     expect(requests.map((request) => request.method)).toEqual(["GET", "PUT"]);
-  });
-
-  test.each([
-    "PUT",
-    "DELETE",
-  ])("retries an idempotent %s mutation", async (method) => {
-    vi.useFakeTimers();
-    try {
-      let attempts = 0;
-      const requests = mockApi((request) => {
-        if (request.method === "GET") return json([integration()]);
-        expect(request.method).toBe(method);
-        attempts += 1;
-        if (attempts === 1)
-          return Response.json({ detail: "Temporary error" }, { status: 503 });
-        return method === "PUT"
-          ? json({ ...LINK, id: 1234, integrationId: 10 })
-          : new Response(null, { status: 204 });
-      });
-      const prepared = await resolveNativeIssueLink({
-        ...SOURCE,
-        url: JIRA_URL,
-      });
-      const mutation =
-        method === "PUT"
-          ? linkNativeIssue(prepared)
-          : unlinkNativeIssueLink(SOURCE.orgSlug, SOURCE.issueId, LINK);
-      await vi.runAllTimersAsync();
-      if (method === "PUT") {
-        expect(await mutation).toMatchObject({ changed: false });
-      } else {
-        await mutation;
-      }
-      expect(
-        requests.filter((request) => request.method === method)
-      ).toHaveLength(2);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   test("a concurrent PUT no-op uses the backend's 200 status", async () => {

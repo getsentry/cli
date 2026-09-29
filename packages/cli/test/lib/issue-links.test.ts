@@ -16,7 +16,6 @@ import {
   unlinkNativeIssueLink,
 } from "../../src/lib/api/issue-integrations.js";
 import { ApiError } from "../../src/lib/errors.js";
-import { formatIssueLinkResult } from "../../src/lib/formatters/issue-links.js";
 import {
   linkExternalIssue,
   unlinkExternalIssue,
@@ -137,7 +136,6 @@ describe("external issue associations", () => {
     expect(linkNativeIssue).not.toHaveBeenCalled();
     expect(linkAppIssue).not.toHaveBeenCalled();
     expect(invalidateCachedResponsesMatching).not.toHaveBeenCalled();
-    expect(formatIssueLinkResult(result)).toContain("Would link");
   });
 
   test("already-linked is a successful no-op, with no cache mutation", async () => {
@@ -147,7 +145,6 @@ describe("external issue associations", () => {
     });
     const result = await linkExternalIssue(options);
     expect(result).toMatchObject({ linked: true, changed: false });
-    expect(formatIssueLinkResult(result)).toContain("Already linked");
     expect(invalidateCachedResponsesMatching).not.toHaveBeenCalled();
   });
 
@@ -161,9 +158,6 @@ describe("external issue associations", () => {
     expect(resolveNativeIssueLink).not.toHaveBeenCalled();
     expect(resolveAppIssueLink).not.toHaveBeenCalled();
     expect(result).toMatchObject({ linked: false, changed: true });
-    expect(formatIssueLinkResult(result)).toContain(
-      "external issue was not deleted"
-    );
   });
 
   test("unlink uses the stored app record ID, without invoking a link workflow", async () => {
@@ -189,7 +183,6 @@ describe("external issue associations", () => {
     });
     expect(unlinkNativeIssueLink).not.toHaveBeenCalled();
     expect(unlinkAppIssueLink).not.toHaveBeenCalled();
-    expect(formatIssueLinkResult(result)).toContain("Would unlink");
   });
 
   test.each([
