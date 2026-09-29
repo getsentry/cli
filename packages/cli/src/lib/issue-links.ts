@@ -4,6 +4,7 @@
  */
 
 import {
+  type AppIssueLink,
   findAppIssueLink,
   linkAppIssue,
   listAppIssueLinks,
@@ -14,6 +15,7 @@ import {
   findNativeIssueLink,
   linkNativeIssue,
   listNativeIssueLinks,
+  type NativeIssueLink,
   resolveNativeIssueLink,
   unlinkNativeIssueLink,
 } from "./api/issue-integrations.js";
@@ -21,6 +23,7 @@ import { ValidationError } from "./errors.js";
 import { resolveOrgRegion } from "./region.js";
 import { invalidateCachedResponsesMatching } from "./response-cache.js";
 import { getApiBaseUrl } from "./sentry-client.js";
+import { parseHttpUrl } from "./utils.js";
 
 /** An external resource selected for linking to a Sentry issue. */
 export type ExternalIssueLinkOptions = {
@@ -69,35 +72,144 @@ export type ExternalIssueLinkResult = {
   };
 };
 
-/** Validate the URL and select the native integration or Sentry App workflow. */
-function usesSentryApp(options: ExternalIssueLinkOptions): boolean {
-  let url: URL;
-  try {
-    url = new URL(options.url);
-  } catch {
-    throw new ValidationError("URL must be a complete external issue URL.");
-  }
-  if (
-    !["https:", "http:"].includes(url.protocol) ||
-    url.username ||
-    url.password
-  ) {
+type ExternalIssueRef = ExternalIssueLinkResult["externalIssue"];
+
+/** A link prepared with reads only: its dry-run preview and the write that creates it. */
+type LinkPlan = {
+  /** Whether preflight found this association already stored. */
+  linked: boolean;
+  /** External issue reported by a dry run. */
+  preview: ExternalIssueRef;
+  /** Submit the link; the backend decides whether it changed anything. */
+  submit: () => Promise<{ ref: ExternalIssueRef; changed: boolean }>;
+};
+
+/** A stored association matching the requested URL. */
+type StoredLink = {
+  ref: ExternalIssueRef;
+  /** Delete the association, leaving the remote issue untouched. */
+  remove: () => Promise<void>;
+};
+
+/** Validate the URL and return the Sentry App slug, or undefined for a native integration. */
+function selectSentryApp(
+  options: ExternalIssueLinkOptions
+): string | undefined {
+  const url = parseHttpUrl(options.url);
+  if (!url) {
     throw new ValidationError(
-      "URL must use HTTP(S) without embedded credentials."
+      "External issue must be an absolute HTTP(S) URL without credentials.",
+      "url"
     );
   }
-  const app = Boolean(options.appSlug) || url.hostname === "linear.app";
-  if (app && options.integrationId) {
+  const appSlug =
+    options.appSlug || (url.hostname === "linear.app" ? "linear" : undefined);
+  if (appSlug && options.integrationId) {
     throw new ValidationError(
       "--integration selects a native integration. Use --app for a Sentry App."
     );
   }
-  if (!app && options.fields && Object.keys(options.fields).length > 0) {
+  if (!appSlug && options.fields && Object.keys(options.fields).length > 0) {
     throw new ValidationError(
       "--field requires a Sentry App selected with --app."
     );
   }
-  return app;
+  return appSlug;
+}
+
+function appRef(link: AppIssueLink): ExternalIssueRef {
+  return {
+    id: link.id,
+    identifier: link.displayName,
+    url: link.webUrl,
+    provider: link.serviceType,
+  };
+}
+
+function nativeRef(link: NativeIssueLink): ExternalIssueRef {
+  return {
+    id: link.id,
+    identifier: link.key,
+    url: link.url,
+    provider: link.provider,
+  };
+}
+
+async function planLink(
+  options: ExternalIssueLinkOptions,
+  appSlug: string | undefined
+): Promise<LinkPlan> {
+  if (appSlug) {
+    const prepared = await resolveAppIssueLink(options);
+    return {
+      linked: Boolean(prepared.existing),
+      preview: {
+        id: prepared.existing?.id,
+        identifier: prepared.existing?.displayName,
+        url: prepared.url,
+        provider: prepared.appSlug,
+      },
+      submit: async () => {
+        const { link, changed } = await linkAppIssue(prepared);
+        return { ref: appRef(link), changed };
+      },
+    };
+  }
+  const prepared = await resolveNativeIssueLink(options);
+  return {
+    linked: Boolean(prepared.existing),
+    preview: {
+      id: prepared.existing?.id,
+      identifier: prepared.existing?.key,
+      url: prepared.url,
+      provider: prepared.provider,
+    },
+    submit: async () => {
+      const { link, changed } = await linkNativeIssue(prepared);
+      return { ref: nativeRef(link), changed };
+    },
+  };
+}
+
+async function findStoredLink(
+  options: ExternalIssueLinkOptions,
+  appSlug: string | undefined
+): Promise<StoredLink | undefined> {
+  const { orgSlug, issueId, url } = options;
+  if (appSlug) {
+    const links = await listAppIssueLinks(orgSlug, issueId);
+    const link = findAppIssueLink(links, url, options.appSlug);
+    if (!link) {
+      return;
+    }
+    return {
+      ref: appRef(link),
+      remove: () => unlinkAppIssueLink(orgSlug, issueId, link.id),
+    };
+  }
+  const links = await listNativeIssueLinks(orgSlug, issueId);
+  const link = findNativeIssueLink(links, url, options.integrationId);
+  if (!link) {
+    return;
+  }
+  return {
+    ref: nativeRef(link),
+    remove: () => unlinkNativeIssueLink(orgSlug, issueId, link),
+  };
+}
+
+function toResult(
+  options: ExternalIssueLinkOptions,
+  action: ExternalIssueLinkResult["action"],
+  outcome: Pick<ExternalIssueLinkResult, "linked" | "changed" | "externalIssue">
+): ExternalIssueLinkResult {
+  return {
+    org: options.orgSlug,
+    issueId: options.issueId,
+    action,
+    dryRun: options.dryRun,
+    ...outcome,
+  };
 }
 
 /** App callbacks run on the control silo, so invalidate the issue's regional cache too. */
@@ -121,117 +233,38 @@ async function invalidateIssueLinks(
 export async function linkExternalIssue(
   options: ExternalIssueLinkOptions
 ): Promise<ExternalIssueLinkResult> {
-  const base = {
-    org: options.orgSlug,
-    issueId: options.issueId,
-    action: "link" as const,
-    dryRun: options.dryRun,
-  };
-  if (usesSentryApp(options)) {
-    const prepared = await resolveAppIssueLink(options);
-    if (options.dryRun) {
-      return {
-        ...base,
-        linked: Boolean(prepared.existing),
-        changed: false,
-        externalIssue: {
-          id: prepared.existing?.id,
-          url: options.url,
-          provider: options.appSlug ?? "linear",
-        },
-      };
-    }
-    const { link: appLink, changed: appChanged } = await linkAppIssue(prepared);
-    if (appChanged) {
-      await invalidateIssueLinks(options);
-    }
-    return {
-      ...base,
-      linked: true,
-      changed: appChanged,
-      externalIssue: {
-        id: appLink.id,
-        identifier: appLink.displayName,
-        url: appLink.webUrl,
-        provider: appLink.serviceType,
-      },
-    };
-  }
-  const prepared = await resolveNativeIssueLink(options);
+  const plan = await planLink(options, selectSentryApp(options));
   if (options.dryRun) {
-    return {
-      ...base,
-      linked: Boolean(prepared.existing),
+    return toResult(options, "link", {
+      linked: plan.linked,
       changed: false,
-      externalIssue: {
-        id: prepared.existing?.id,
-        identifier: prepared.existing?.key,
-        url: prepared.url,
-        provider: prepared.provider,
-      },
-    };
+      externalIssue: plan.preview,
+    });
   }
-  const { link, changed } = await linkNativeIssue(prepared);
+  const { ref, changed } = await plan.submit();
   if (changed) {
     await invalidateIssueLinks(options);
   }
-  return {
-    ...base,
+  return toResult(options, "link", {
     linked: true,
     changed,
-    externalIssue: {
-      id: link.id,
-      identifier: link.key,
-      url: link.url,
-      provider: link.provider,
-    },
-  };
+    externalIssue: ref,
+  });
 }
 
 /** Remove a stored association without contacting or deleting the remote ticket. */
 export async function unlinkExternalIssue(
   options: ExternalIssueLinkOptions
 ): Promise<ExternalIssueLinkResult> {
-  const base = {
-    org: options.orgSlug,
-    issueId: options.issueId,
-    action: "unlink" as const,
-    dryRun: options.dryRun,
-  };
-  if (usesSentryApp(options)) {
-    const links = await listAppIssueLinks(options.orgSlug, options.issueId);
-    const link = findAppIssueLink(links, options.url, options.appSlug);
-    if (link && !options.dryRun) {
-      await unlinkAppIssueLink(options.orgSlug, options.issueId, link.id);
-      await invalidateIssueLinks(options);
-    }
-    return {
-      ...base,
-      linked: Boolean(link && options.dryRun),
-      changed: Boolean(link && !options.dryRun),
-      externalIssue: {
-        id: link?.id,
-        identifier: link?.displayName,
-        url: link?.webUrl ?? options.url,
-        provider: link?.serviceType ?? options.appSlug ?? "linear",
-      },
-    };
-  }
-  const links = await listNativeIssueLinks(options.orgSlug, options.issueId);
-  const link = findNativeIssueLink(links, options.url, options.integrationId);
+  const appSlug = selectSentryApp(options);
+  const link = await findStoredLink(options, appSlug);
   if (link && !options.dryRun) {
-    await unlinkNativeIssueLink(options.orgSlug, options.issueId, link);
+    await link.remove();
     await invalidateIssueLinks(options);
   }
-  return {
-    ...base,
+  return toResult(options, "unlink", {
     linked: Boolean(link && options.dryRun),
     changed: Boolean(link && !options.dryRun),
-    externalIssue: {
-      id: link?.id,
-      identifier: link?.key,
-      url: link?.url ?? options.url,
-      provider: link?.provider,
-    },
-  };
+    externalIssue: link?.ref ?? { url: options.url, provider: appSlug },
+  });
 }

@@ -35,7 +35,7 @@ import {
 import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import { getControlSiloUrl, getSdkConfig } from "../sentry-client.js";
-import { isAllDigits } from "../utils.js";
+import { isAllDigits, parseHttpUrl } from "../utils.js";
 import {
   fetchAllPages,
   unwrapPaginatedResult,
@@ -98,8 +98,6 @@ export type PreparedAppIssueLink = {
   appSlug: string;
   /** Requested external resource URL. */
   url: string;
-  /** Human-facing issue key when available. */
-  displayName: string;
   /** UUID selected from this organization's installed apps. */
   installationUuid: string;
   /** Link action URI supplied by the installed app schema. */
@@ -127,22 +125,10 @@ const LINEAR_ISSUE_KEY = /^[A-Z][A-Z0-9]*-\d+$/;
 const URL_FIELD = /url/i;
 
 function parseTarget(raw: string) {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
+  const url = parseHttpUrl(raw);
+  if (!url) {
     throw new ValidationError(
-      "External issue must be a valid HTTP(S) URL",
-      "url"
-    );
-  }
-  if (
-    !["http:", "https:"].includes(url.protocol) ||
-    url.username ||
-    url.password
-  ) {
-    throw new ValidationError(
-      "External issue must be an HTTP(S) URL without credentials",
+      "External issue must be an absolute HTTP(S) URL without credentials.",
       "url"
     );
   }
@@ -682,7 +668,6 @@ export async function resolveAppIssueLink(
     issueId: options.issueId,
     appSlug,
     url: options.url,
-    displayName: existing?.displayName ?? target.key ?? options.url,
     installationUuid: installation.uuid,
     uri: form.uri,
     fields: await resolveFields(options, form, installation.uuid),

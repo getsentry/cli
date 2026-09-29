@@ -14,6 +14,7 @@ import { safeParse } from "valibot";
 import { ApiError, ValidationError } from "../errors.js";
 import { resolveOrgRegion } from "../region.js";
 import { getSdkConfig } from "../sentry-client.js";
+import { parseHttpUrl } from "../utils.js";
 import {
   API_MAX_PER_PAGE,
   fetchAllPages,
@@ -69,7 +70,8 @@ function parseUrl(value: string): URL {
   const url = storedUrl(value);
   if (!url) {
     throw new ValidationError(
-      "External issue must be an absolute HTTP(S) URL without credentials."
+      "External issue must be an absolute HTTP(S) URL without credentials.",
+      "url"
     );
   }
   return url;
@@ -77,12 +79,8 @@ function parseUrl(value: string): URL {
 
 /** Invalid stored URLs must not prevent matching an unrelated valid association. */
 function storedUrl(value: string): URL | undefined {
-  const url = URL.canParse(value) ? new URL(value) : undefined;
-  if (
-    !(url && ["https:", "http:"].includes(url.protocol)) ||
-    url.username ||
-    url.password
-  ) {
+  const url = parseHttpUrl(value);
+  if (!url) {
     return;
   }
   url.hash = "";

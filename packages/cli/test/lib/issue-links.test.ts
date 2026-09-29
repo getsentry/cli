@@ -71,7 +71,6 @@ beforeEach(() => {
     ...options,
     url: appLink.webUrl,
     appSlug: "linear",
-    displayName: appLink.displayName,
     installationUuid: "installation",
     uri: "/link",
     fields: { issueId: "remote-uuid" },
@@ -136,6 +135,30 @@ describe("external issue associations", () => {
     expect(linkNativeIssue).not.toHaveBeenCalled();
     expect(linkAppIssue).not.toHaveBeenCalled();
     expect(invalidateCachedResponsesMatching).not.toHaveBeenCalled();
+  });
+
+  test("dry-run link describes an existing app association", async () => {
+    vi.mocked(resolveAppIssueLink).mockResolvedValue({
+      ...options,
+      url: appLink.webUrl,
+      appSlug: "linear",
+      installationUuid: "installation",
+      uri: "/link",
+      fields: { issueId: "remote-uuid" },
+      existing: appLink,
+    });
+    const result = await linkExternalIssue({
+      ...options,
+      url: appLink.webUrl,
+      dryRun: true,
+    });
+    expect(result).toMatchObject({ linked: true, changed: false });
+    expect(result.externalIssue).toEqual({
+      id: appLink.id,
+      identifier: appLink.displayName,
+      url: appLink.webUrl,
+      provider: "linear",
+    });
   });
 
   test("already-linked is a successful no-op, with no cache mutation", async () => {
