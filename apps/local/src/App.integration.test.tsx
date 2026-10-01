@@ -211,7 +211,7 @@ describe('local receiver to viewer integration', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Copy JSON' }))
       expect(await screen.findByRole('status', { name: 'JSON copied' })).not.toBeNull()
       await waitFor(() => {
-        expect(screen.getByTestId('highlighted-json').querySelector('.shiki')).not.toBeNull()
+        expect(screen.getByTestId('highlighted-json').querySelector('.json-view-code')).not.toBeNull()
       })
       fireEvent.click(events[0]!)
       fireEvent.click(screen.getByRole('tab', { name: 'JSON' }))
