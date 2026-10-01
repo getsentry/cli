@@ -1,4 +1,4 @@
-import { ChevronDown, Moon, Sun, Trash2 } from 'lucide-react'
+import { ChevronDown, Moon, Sun, Trash2, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { useTheme } from 'next-themes'
 import type { ConnectionPresentation } from '@/lib/presentation.ts'
@@ -8,6 +8,7 @@ type ReceiverControlsProps = {
   connection: ConnectionPresentation
   retainedItemCount: number
   onClear: () => void
+  onCloseSession?: () => void
   showStatusRole?: boolean
 }
 
@@ -17,6 +18,7 @@ export function ReceiverControls({
   connection,
   retainedItemCount,
   onClear,
+  onCloseSession,
   showStatusRole = true,
 }: ReceiverControlsProps) {
   const [isOpen, setIsOpen] = useState(false)
@@ -129,6 +131,19 @@ export function ReceiverControls({
             <Trash2 className="size-4" />
             Clear all events
           </button>
+          {onCloseSession ? (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-2 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              onClick={() => {
+                onCloseSession()
+                setIsOpen(false)
+              }}
+            >
+              <X className="size-4" />
+              Close session
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

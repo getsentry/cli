@@ -65,7 +65,7 @@ cli/
 │   │   ├── event/       # list, send, view
 │   │   ├── feedback/    # list, view
 │   │   ├── issue/       # archive, events, explain, list, merge, plan, resolve, unresolve, view
-│   │   ├── local/       # run, serve
+│   │   ├── local/       # close, create, list, reset, restart, run, serve, start, status, stop, view
 │   │   ├── log/         # list, view
 │   │   ├── monitor/     # list, run
 │   │   ├── org/         # list, view

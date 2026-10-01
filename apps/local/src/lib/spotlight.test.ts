@@ -45,6 +45,12 @@ describe("getStreamUrlFromHash", () => {
     ).toBe("http://localhost:8969/stream");
   });
 
+  test("accepts a loopback daemon session stream with a read capability", () => {
+    const url =
+      "http://127.0.0.1:8969/_local/v1/sessions/session/stream?cap=read";
+    expect(parseStreamEndpoint(url)).toEqual({ url, kind: "loopback" });
+  });
+
   test("rejects a non-loopback stream URL", () => {
     expect(
       getStreamUrlFromHash("#stream=http%3A%2F%2Fexample.com%2Fstream")

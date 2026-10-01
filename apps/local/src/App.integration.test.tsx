@@ -663,6 +663,55 @@ describe('local receiver to viewer integration', () => {
     await waitFor(() => expect(clearButton.disabled).toBe(true))
   })
 
+  test('uses scoped loopback controls to reset and close a telemetry session', async () => {
+    ControllableEventSource.instances = []
+    vi.stubGlobal('EventSource', ControllableEventSource)
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    renderBareViewer()
+
+    const initialSource = ControllableEventSource.instances[0]
+    expect(initialSource).toBeDefined()
+    await act(async () => initialSource?.onopen?.(new Event('open')))
+    fireEvent.click(screen.getByRole('button', { name: 'Change receiver' }))
+
+    const streamUrl =
+      'http://127.0.0.1:8969/_local/v1/sessions/session-1/stream?cap=read-capability'
+    fireEvent.change(screen.getByLabelText('Receiver endpoint'), {
+      target: { value: streamUrl },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+    const scopedSource = ControllableEventSource.instances[1]
+    expect(scopedSource).toBeDefined()
+    await act(async () => scopedSource?.onopen?.(new Event('open')))
+    await act(async () => {
+      scopedSource?.dispatchEvent(
+        new MessageEvent(SENTRY_CONTENT_TYPE, {
+          data: JSON.stringify([{}, []]),
+          lastEventId: 'scoped-envelope',
+        })
+      )
+    })
+
+    const clearButton = screen.getByRole('button', { name: 'Clear events' })
+    await waitFor(() => expect((clearButton as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(clearButton)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      'http://127.0.0.1:8969/_local/v1/sessions/session-1/ui/reset?cap=read-capability'
+    )
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual({ method: 'POST' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close telemetry session' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      'http://127.0.0.1:8969/_local/v1/sessions/session-1/ui/close?cap=read-capability'
+    )
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual({ method: 'POST' })
+    await waitFor(() => expect(scopedSource?.closed).toBe(true))
+  })
+
   test('keeps retained raw envelopes accessible after the receiver fails', async () => {
     ControllableEventSource.instances = []
     vi.stubGlobal('EventSource', ControllableEventSource)

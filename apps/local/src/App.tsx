@@ -8,6 +8,7 @@ import {
   Search,
   Terminal,
   Trash2,
+  X,
 } from 'lucide-react'
 import {
   Fragment,
@@ -69,6 +70,11 @@ type EventEntryProps = {
 const CONNECTION_TIMEOUT_MS = 10_000
 const SEARCH_DEBOUNCE_MS = 150
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'sentry.local.sidebar-collapsed'
+const SCOPED_SESSION_STREAM_PATH_RE = /^\/_local\/v1\/sessions\/[^/]+\/stream$/
+
+function isScopedSessionStream(pathname: string): boolean {
+  return SCOPED_SESSION_STREAM_PATH_RE.test(pathname)
+}
 
 function formatTimestamp(timestamp: LocalFeedItem['timestamp']): string {
   if (timestamp === undefined) {
@@ -403,6 +409,7 @@ type WorkspaceSidebarProps = {
   snapshot: LocalTelemetrySnapshot
   traceCount: number
   onClear: () => void
+  onCloseSession?: () => void
   onChangeReceiver: () => void
   onOpenCommand: (trigger: HTMLButtonElement) => void
   onSelect: (view: WorkspaceView) => void
@@ -418,6 +425,7 @@ function WorkspaceSidebar({
   snapshot,
   traceCount,
   onClear,
+  onCloseSession,
   onChangeReceiver,
   onOpenCommand,
   onSelect,
@@ -542,7 +550,13 @@ function WorkspaceSidebar({
         ))}
       </nav>
       <div className="shrink-0 border-t border-border p-2">
-        <div className={collapsed ? 'space-y-1' : 'grid grid-cols-2 gap-1'}>
+        <div
+          className={
+            collapsed
+              ? 'space-y-1'
+              : `grid ${onCloseSession ? 'grid-cols-3' : 'grid-cols-2'} gap-1`
+          }
+        >
           <button
             type="button"
             aria-label="Change receiver connection"
@@ -568,6 +582,20 @@ function WorkspaceSidebar({
             <Trash2 className="size-3.5 shrink-0" aria-hidden="true" />
             {!collapsed ? <span>Clear</span> : null}
           </button>
+          {onCloseSession ? (
+            <button
+              type="button"
+              aria-label="Close telemetry session"
+              title={collapsed ? 'Close telemetry session' : undefined}
+              className={`flex h-8 w-full items-center rounded-md text-xs font-medium text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                collapsed ? 'justify-center px-0' : 'justify-center gap-1.5 px-2'
+              }`}
+              onClick={onCloseSession}
+            >
+              <X className="size-3.5 shrink-0" aria-hidden="true" />
+              {!collapsed ? <span>Close</span> : null}
+            </button>
+          ) : null}
         </div>
       </div>
     </aside>
@@ -699,12 +727,43 @@ export default function App() {
       return
     }
     const clearUrl = new URL(endpoint.url)
-    clearUrl.pathname = '/clear'
-    clearUrl.search = ''
-    void fetch(clearUrl, { method: 'DELETE' }).catch(() => {
+    const scopedSession = isScopedSessionStream(clearUrl.pathname)
+    if (scopedSession) {
+      clearUrl.pathname = clearUrl.pathname.replace(/\/stream$/, '/ui/reset')
+    } else {
+      clearUrl.pathname = '/clear'
+      clearUrl.search = ''
+    }
+    void fetch(clearUrl, { method: scopedSession ? 'POST' : 'DELETE' }).catch(() => {
       setMessage('Cleared this viewer, but the receiver could not clear its retained session.')
     })
   }
+
+  const closeScopedSession = () => {
+    const endpoint = parseStreamEndpoint(streamUrl)
+    if (endpoint?.kind !== 'loopback') {
+      return
+    }
+    const closeUrl = new URL(endpoint.url)
+    if (!isScopedSessionStream(closeUrl.pathname)) {
+      return
+    }
+    closeUrl.pathname = closeUrl.pathname.replace(/\/stream$/, '/ui/close')
+    void fetch(closeUrl, { method: 'POST' })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Session close failed with HTTP ${response.status}`)
+        }
+        setIsConnectionEnabled(false)
+        setMessage('Telemetry session closed. Retained events remain available for three hours.')
+      })
+      .catch(() => setMessage('Could not close this telemetry session.'))
+  }
+
+  const currentEndpoint = parseStreamEndpoint(streamUrl)
+  const hasScopedSession =
+    currentEndpoint?.kind === 'loopback' &&
+    isScopedSessionStream(new URL(currentEndpoint.url).pathname)
 
   const connectToDraft = () => {
     const endpoint = parseStreamEndpoint(draftEndpoint)
@@ -853,6 +912,7 @@ export default function App() {
             snapshot={telemetry}
             traceCount={traces.length}
             onClear={clearItems}
+            onCloseSession={hasScopedSession ? closeScopedSession : undefined}
             onChangeReceiver={() => setIsEditingReceiver(true)}
             onOpenCommand={openCommand}
             onSelect={selectWorkspace}
@@ -905,6 +965,7 @@ export default function App() {
                 connection={presentation}
                 retainedItemCount={retainedItemCount}
                 onClear={clearItems}
+                onCloseSession={hasScopedSession ? closeScopedSession : undefined}
                 showStatusRole={false}
               />
             </div>
