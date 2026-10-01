@@ -76,7 +76,9 @@ export function classifySilenced(error: unknown): SilenceReason | null {
     return "output_error";
   }
   // A raw `TypeError: "fetch failed"` (CLI-16W) means the CLI could not reach
-  // Sentry at all (offline, DNS, connection refused/timeout). There is nothing
+  // Sentry at all (offline, DNS, connection refused/timeout); a raw
+  // `TypeError: "terminated"` (CLI-2AD) means the connection dropped while
+  // streaming the response body. There is nothing
   // actionable in a "user is offline" report, so drop it — same rationale as
   // EPIPE/EBADF OS noise in `beforeSend`. Note: TLS cert errors are wrapped as
   // ApiError(status 0), NOT matched here, so they stay captured/actionable.

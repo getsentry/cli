@@ -911,6 +911,11 @@ export function toSearchQueryError(
  * `TypeError: "fetch failed"` for every such failure (the real errno is in
  * `cause`).
  *
+ * When the connection drops *after* response headers arrive (e.g. `read
+ * ETIMEDOUT` while streaming the body), undici instead aborts the body stream
+ * with `TypeError: "terminated"` (CLI-2AD). That is the same class of
+ * environmental failure, so it is matched too.
+ *
  * This reflects the user's environment, not a CLI bug, so it is treated as a
  * user error (no upgrade nudge) and is not reported to Sentry — the same
  * rationale as dropping EPIPE/EBADF OS noise in `beforeSend`.
@@ -922,7 +927,10 @@ export function toSearchQueryError(
  * CLI bug" treatment for `status === 0` check it explicitly.
  */
 export function isNetworkError(error: unknown): boolean {
-  return error instanceof TypeError && error.message === "fetch failed";
+  return (
+    error instanceof TypeError &&
+    (error.message === "fetch failed" || error.message === "terminated")
+  );
 }
 
 /**
