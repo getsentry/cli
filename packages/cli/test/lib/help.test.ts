@@ -5,8 +5,10 @@
  * command generation from routes, and contextual examples.
  */
 
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { bannerLinesForWidth, formatBanner } from "../../src/lib/banner.js";
+import { ENV_VAR_AGENTS } from "../../src/lib/detect-agent.js";
+import { setEnv } from "../../src/lib/env.js";
 import { introspectAllCommands, printCustomHelp } from "../../src/lib/help.js";
 import { useTestConfigDir } from "../helpers.js";
 
@@ -15,6 +17,20 @@ import { useTestConfigDir } from "../helpers.js";
 const ANSI_RE = /\u001B\[[0-9;]*m/g;
 function stripAnsi(str: string): string {
   return str.replace(ANSI_RE, "");
+}
+
+function withoutAgentEnv(): NodeJS.ProcessEnv {
+  const agentKeys = new Set([
+    "AI_AGENT",
+    "AGENT",
+    "CLAUDECODE",
+    "CLAUDE_CODE",
+    "CURSOR_EXTENSION_HOST_ROLE",
+    ...ENV_VAR_AGENTS.keys(),
+  ]);
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !agentKeys.has(key))
+  );
 }
 
 /** Widest line (in code points) in a rendered banner, ignoring ANSI codes. */
@@ -67,6 +83,10 @@ describe("formatBanner", () => {
 describe("printCustomHelp", () => {
   useTestConfigDir("help-test-");
 
+  afterEach(() => {
+    setEnv(process.env);
+  });
+
   test("returns non-empty string", async () => {
     const output = printCustomHelp();
     expect(output.length).toBeGreaterThan(0);
@@ -84,13 +104,43 @@ describe("printCustomHelp", () => {
     expect(output).toContain("sentry");
     // Route map command (exercises isRouteMap branch)
     expect(output).toContain("auth");
-    // Direct command with tuple positional (exercises isCommand + getPositionalPlaceholder)
-    expect(output).toContain("init");
+    expect(output).toContain("event");
   });
 
   test("output contains docs URL", async () => {
     const output = stripAnsi(printCustomHelp());
     expect(output).toContain("cli.sentry.dev");
+  });
+
+  test("shows prioritized commands and subcommands for human users", () => {
+    setEnv(withoutAgentEnv());
+
+    const output = stripAnsi(printCustomHelp());
+    const authIndex = output.indexOf("sentry auth login | status | whoami");
+    const issueIndex = output.indexOf(
+      "sentry issue list | view | explain | plan | resolve"
+    );
+    const eventIndex = output.indexOf("sentry event list | view");
+    const traceIndex = output.indexOf("sentry trace list | view | logs");
+    const logIndex = output.indexOf("sentry log list | view");
+
+    expect(authIndex).toBeGreaterThan(-1);
+    expect(issueIndex).toBeGreaterThan(authIndex);
+    expect(eventIndex).toBeGreaterThan(issueIndex);
+    expect(traceIndex).toBeGreaterThan(eventIndex);
+    expect(logIndex).toBeGreaterThan(traceIndex);
+    expect(output).not.toContain("sentry dashboard");
+    expect(output).not.toContain("sentry project");
+  });
+
+  test("shows all commands and subcommands for agent-driven runs", () => {
+    setEnv({ ...withoutAgentEnv(), AI_AGENT: "test-agent" });
+
+    const output = stripAnsi(printCustomHelp());
+
+    expect(output).toContain("sentry auth login | logout");
+    expect(output).toContain("sentry dashboard");
+    expect(output).toContain("sentry project");
   });
 
   test("includes the banner only when stdout is a TTY", () => {
