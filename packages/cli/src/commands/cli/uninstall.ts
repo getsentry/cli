@@ -435,7 +435,8 @@ export const uninstallCommand = buildDeleteCommand({
     flags: {
       "keep-config": {
         kind: "boolean",
-        brief: "Keep the config directory (~/.sentry) and auth tokens",
+        brief:
+          "Keep the config directory (default ~/.config/sentry) and auth tokens",
         default: false,
         optional: true,
       },

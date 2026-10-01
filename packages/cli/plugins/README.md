@@ -6,9 +6,13 @@ Agent skills for using the Sentry CLI, following the [Agent Skills](https://gith
 
 ### Automatic (recommended)
 
-When you install the CLI via the install script, Homebrew, or a package manager,
-`sentry cli setup` automatically installs skills into detected agent directories
-(`~/.claude`, `~/.agents`). Skills are also refreshed on `sentry cli upgrade`.
+`sentry cli setup` installs the skill into the `~/.claude` and `~/.agents`
+directories when they already exist. The install script and Homebrew run setup
+automatically; after an npm, pnpm, yarn, or bun install, run `sentry cli setup`
+once. Skills are also refreshed on `sentry cli upgrade`.
+
+Pass `--no-agent-skills` to opt out. The choice is remembered for future
+upgrades; re-enable with `sentry cli defaults agent-skills on`.
 
 ### dotagents
 
@@ -19,9 +23,19 @@ the well-known source:
 npx @sentry/dotagents add https://cli.sentry.dev sentry-cli
 ```
 
+### skills
+
+```bash
+npx skills add https://cli.sentry.dev
+```
+
+The docs site publishes the skill files and their discovery manifest under
+`https://cli.sentry.dev/.well-known/skills/`.
+
 ### Cursor
 
-Skills are automatically available in `.cursor/skills/` for Cursor users.
+The repository ships Cursor skill symlinks in
+`packages/cli/.cursor/skills/sentry-cli/`, pointing at the files below.
 
 ### Other Agents
 
@@ -48,13 +62,14 @@ The skill will guide the assistant to provide accurate CLI commands.
 ## Repository Structure
 
 ```
-cli/                              # Repository root
+packages/cli/
 ├── .claude-plugin/
 │   └── marketplace.json          # Marketplace manifest
 ├── .cursor/
 │   └── skills/
 │       └── sentry-cli/
-│           └── SKILL.md          # Symlink to plugins location
+│           ├── SKILL.md          # Symlink to plugins location
+│           └── references        # Symlink to plugins location
 ├── plugins/
 │   ├── README.md                 # This file
 │   └── sentry-cli/
@@ -62,10 +77,14 @@ cli/                              # Repository root
 │       │   └── plugin.json       # Plugin manifest
 │       └── skills/
 │           └── sentry-cli/
-│               └── SKILL.md      # CLI usage skill (auto-generated)
+│               ├── SKILL.md      # CLI usage skill (auto-generated)
+│               └── references/   # One file per command group (auto-generated)
 └── script/
-    └── generate-skill.ts         # Generates SKILL.md from CLI commands
+    └── generate-skill.ts         # Generates SKILL.md and references/
 ```
+
+The docs site serves the same files, plus the generated `index.json` discovery
+manifest, from `apps/cli-docs/public/.well-known/skills/`.
 
 ## Updating SKILL.md
 

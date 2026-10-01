@@ -38,8 +38,9 @@ Before working on this codebase, read the Cursor rules:
 ```bash
 # Development
 pnpm install                             # Install dependencies (from repo root)
+pnpm run generate:schema                 # Fetch the API schema (needed once before cli/typecheck/test)
 pnpm run dev                             # Run CLI in dev mode
-pnpm run cli -- <args>                   # Run the CLI with arguments
+pnpm run cli <args>                      # Run the CLI with arguments
 
 # Build
 pnpm run build                           # Build for current platform
@@ -102,9 +103,9 @@ const result = execFileSync("id", ["-u", "username"], { encoding: "utf-8", stdio
 
 ## Architecture
 
-The full project-structure tree — including the live command/subcommand list and the
-domain API modules — is generated from the route tree and lives in
-[`apps/cli-docs/src/content/docs/contributing.md`](apps/cli-docs/src/content/docs/contributing.md)
+The full project-structure tree — including the live command/subcommand list — is
+generated from the route tree and lives in
+[`apps/cli-docs/src/content/docs/contributing.md`](../../apps/cli-docs/src/content/docs/contributing.md)
 (the `project-structure` block produced by `script/generate-docs-sections.ts`). It is
 kept in sync automatically, so it is **not** duplicated here to avoid drift. For the
 current command list run `ls src/commands/` or `sentry --help`.
@@ -428,11 +429,11 @@ Use `"date"` for timestamp-based sort (not `"time"`). Export sort types from the
 
 ### Generated Docs & Skills
 
-All command docs and skill files are generated via `pnpm run generate:docs` (which runs `generate:command-docs` then `generate:skill`). This runs automatically as part of `dev`, `build`, `typecheck`, and `test` scripts.
+All command docs and skill files are generated via `pnpm run generate:docs` (which runs `generate:banner`, `generate:parser`, `generate:command-docs`, `generate:skill`, then `generate:docs-sections`). This runs automatically as part of `dev`, `build`, `typecheck`, and `test` scripts. It needs `src/generated/api-schema.json`, so run `pnpm run generate:schema` first on a fresh checkout (`dev` and `build` do this for you).
 
-- **Command docs** (`docs/src/content/docs/commands/*.md`) are **gitignored** and generated from CLI metadata + hand-written fragments in `docs/src/fragments/commands/`.
+- **Command docs** (`apps/cli-docs/src/content/docs/commands/*.md`) and `configuration.md` are **gitignored** and generated from CLI metadata + hand-written fragments in `apps/cli-docs/src/fragments/`.
 - **Skill files** (`plugins/sentry-cli/skills/sentry-cli/`) are **committed** (consumed by external plugin systems) and auto-committed by CI when stale.
-- Edit fragments in `docs/src/fragments/commands/` for custom examples and guides.
+- Edit fragments in `apps/cli-docs/src/fragments/commands/` for custom examples and guides.
 - `pnpm run check:fragments` validates fragment ↔ route consistency.
 - Positional `placeholder` values must be descriptive: `"org/project/trace-id"` not `"args"`.
 
@@ -1019,8 +1020,8 @@ vi.mock("./some-module", () => ({
 | Add unit tests | `test/` (mirror `src/` structure) |
 | Add E2E tests | `test/e2e/` |
 | Test helpers | `test/model-based/helpers.ts` |
-| Add documentation | `docs/src/content/docs/` |
-| Hand-written command doc content | `docs/src/fragments/commands/` |
+| Add documentation | `apps/cli-docs/src/content/docs/` (repo root) |
+| Hand-written command doc content | `apps/cli-docs/src/fragments/commands/` (repo root) |
 
 ## Automated Fix PRs (BugBot / agents)
 
@@ -1057,5 +1058,5 @@ duplication and staleness that caused five overlapping PRs to pile up:
 <!-- This section is maintained by the coding agent via lore (https://github.com/BYK/loreai) -->
 ## Long-term Knowledge
 
-For long-term knowledge entries managed by [lore](https://github.com/BYK/loreai) (gotchas, patterns, decisions, architecture), see [`.lore.md`](.lore.md) in the project root.
+For long-term knowledge entries managed by [lore](https://github.com/BYK/loreai) (gotchas, patterns, decisions, architecture), see [`.lore.md`](../../.lore.md) in the repository root.
 <!-- End lore-managed section -->

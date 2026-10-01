@@ -20,7 +20,7 @@ The OAuth device flow requires **Sentry 26.1.0 or later** and a public OAuth app
 1. In your Sentry instance, go to **Settings → Developer Settings → Applications → Create New Application** (or visit `https://sentry.example.com/settings/account/api/applications/`)
 2. Select **Public** as the application type
 3. Fill in the required fields (name, redirect URL — can be any placeholder URL)
-3. Save the application and copy the **Client ID**
+4. Save the application and copy the **Client ID**
 
 #### 2. Log In
 
@@ -66,11 +66,17 @@ SENTRY_HOST=https://sentry.example.com sentry auth login --token YOUR_TOKEN
 
 ## After Login
 
-Once authenticated, the CLI stores your instance URL — you don't need to set `SENTRY_URL` on every command. All subsequent commands automatically use the correct instance:
+When you log in with `--url`, the CLI saves the instance URL as your default (the same setting as `sentry cli defaults url`), so you don't need to set `SENTRY_HOST` or `SENTRY_URL` on every command. All subsequent commands automatically use the correct instance:
 
 ```bash
 sentry issue list
 sentry org list
+```
+
+If you logged in by setting `SENTRY_HOST`/`SENTRY_URL` instead, the URL is not saved. Keep the variable set, or persist it:
+
+```bash
+sentry cli defaults url https://sentry.example.com
 ```
 
 If you pass a self-hosted Sentry URL as a command argument (e.g., an issue or event URL), the CLI detects the instance automatically.

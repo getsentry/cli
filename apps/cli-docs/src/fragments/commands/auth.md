@@ -57,6 +57,10 @@ For token-based auth with self-hosted:
 sentry auth --token YOUR_TOKEN --url https://sentry.example.com
 ```
 
+After a successful login, `--url` is saved as the default instance URL. A URL
+supplied only through `SENTRY_URL` is not saved, so keep it set for later
+commands.
+
 See [Self-Hosted Sentry](../self-hosted/) for details.
 
 ### Logout

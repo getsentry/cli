@@ -97,8 +97,8 @@ Examples:
     curl -fsSL https://cli.sentry.dev/install | SENTRY_INIT=1 bash
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version nightly
     curl -fsSL https://cli.sentry.dev/install | bash -s -- --version 0.42.2
-    SENTRY_VERSION=nightly curl -fsSL https://cli.sentry.dev/install | bash
-    SENTRY_INSTALL_DIR=~/.local/bin curl -fsSL https://cli.sentry.dev/install | bash
+    curl -fsSL https://cli.sentry.dev/install | SENTRY_VERSION=nightly bash
+    curl -fsSL https://cli.sentry.dev/install | SENTRY_INSTALL_DIR=~/.local/bin bash
 EOF
 }
 
