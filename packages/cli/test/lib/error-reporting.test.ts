@@ -251,6 +251,13 @@ describe("classifySilenced", () => {
     );
   });
 
+  test("silences a raw 'terminated' TypeError (mid-body connection drop)", () => {
+    const err = new TypeError("terminated", {
+      cause: new Error("read ETIMEDOUT"),
+    });
+    expect(classifySilenced(err)).toBe("network_error");
+  });
+
   test("does NOT silence a TLS cert error wrapped as ApiError(0)", () => {
     // status 0 is shared by network failures and TLS cert errors; the latter
     // are actionable (missing CA) and must stay captured.
