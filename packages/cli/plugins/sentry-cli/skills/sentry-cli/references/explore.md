@@ -24,7 +24,7 @@ Query aggregate event data (Explore)
 - `-s, --sort <value> - Sort field (prefix with - for desc, e.g., "-count()")`
 - `-e, --environment <value>... - Environment filter (repeatable, comma-separated)`
 - `-n, --limit <value> - Number of rows (1-1000) - (default: "25")`
-- `-t, --period <value> - Time range: "7d", "2026-08-01..2026-09-01", ">=2026-08-01" - (default: "24h")`
+- `-t, --period <value> - Time range: "7d", "2026-09-01..2026-10-01", ">=2026-09-01" - (default: "24h")`
 - `-f, --fresh - Bypass cache, re-detect projects, and fetch fresh data`
 - `-c, --cursor <value> - Navigate pages: "next", "prev", "first" (or raw cursor string)`
 
@@ -45,7 +45,7 @@ sentry explore
 
 # Errors with user impact for a specific UTC window
 sentry explore my-org/cli -F title -F "count()" -F "count_unique(user)" \
-  --period "2024-01-15T00:00:00Z/2024-01-16T00:00:00Z"
+  --period "2024-01-15T00:00:00Z..2024-01-16T00:00:00Z"
 
 # Filter by specific error type (combines with auto-injected project filter)
 sentry explore my-org/cli -F title -F "count()" \

@@ -32,8 +32,8 @@ sentry proguard upload mapping-release.txt mapping-debug.txt
 # Validate without uploading (dry-run)
 sentry proguard upload mapping.txt --no-upload
 
-# Fail if no mapping files are provided (useful in CI)
-sentry proguard upload ./mapping/ --require-one
+# Fail if no mapping files are provided (useful in CI when paths come from a search)
+sentry proguard upload $(find app/build/outputs/mapping -name mapping.txt) --require-one
 ```
 
 ### `sentry proguard uuid <path>`

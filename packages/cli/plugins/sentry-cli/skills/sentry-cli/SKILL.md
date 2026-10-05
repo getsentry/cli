@@ -38,7 +38,7 @@ The `sentry` CLI follows conventions from well-known tools — if you're familia
 
 - Use `--json --fields` to select specific fields and reduce output size. Run `<command> --help` to see available fields. Example: `sentry issue list --json --fields shortId,title,priority,level,status`
 - Use `--json` when piping output between commands or processing programmatically
-- Use `--limit` to cap the number of results (default is usually 10–100)
+- Use `--limit` to cap the number of results (most list commands default to 25; log lists default to 100)
 - Prefer `sentry issue view PROJECT-123` over listing and filtering manually
 - Pass multiple issue IDs in one call (`sentry issue view A B C --json`) instead of looping `issue view` per ID
 - Analyze multiple issues in one call (`sentry issue explain A B C --json`) instead of looping `issue explain` per ID
@@ -333,7 +333,7 @@ When querying the Events API (directly or via `sentry api`), valid dataset value
 
 ### Common Mistakes
 
-- **Wrong issue ID format**: Use `PROJECT-123` (short ID), not the numeric ID `123456789`. The short ID includes the project prefix.
+- **Dropping the project prefix from a short ID**: Both the short ID (`PROJECT-123`, which includes the project prefix) and the numeric issue ID from an issue URL (`123456789`) work. A bare number is always treated as a numeric issue ID, so pass the full short ID rather than just its suffix (`123`).
 - **Pre-authenticating unnecessarily**: Don't run `sentry auth login` before every command. The CLI detects missing/expired auth and prompts automatically. Only run `sentry auth login` if you need to switch accounts.
 - **Missing `--json` for piping**: Human-readable output includes formatting. Use `--json` when parsing output programmatically.
 - **Specifying org/project when not needed**: Auto-detection resolves org/project from `.sentryclirc` config files, DSNs, env vars, and directory names. Let it work first — only add `<org>/<project>` if the CLI says it can't detect the target or detects the wrong one.
@@ -759,6 +759,12 @@ Most list and view commands support `--json` flag for JSON output, making it eas
 
 ```bash
 sentry org list --json | jq '.[] | .slug'
+```
+
+Add `--fields` with a comma-separated list to keep only the fields you need:
+
+```bash
+sentry issue list --json --fields shortId,title,count
 ```
 
 ### Opening in Browser
