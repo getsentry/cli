@@ -120,7 +120,8 @@ Top-level layout:
   `release`, `replay`, `repo`, `snapshots`, `sourcemap`, `span`, `status`,
   `team`, `trace`, `trial`) plus standalone command files (`api.ts`,
   `explore.ts`, `help.ts`, `info.ts`, `init.ts`, `schema.ts`,
-  `wasm-split.ts`).
+  `wasm-split.ts`) and hidden legacy `sentry-cli` aliases (`bash-hook.ts`,
+  `send-event.ts`, `send-envelope.ts`).
 - **`src/lib/`** — shared utilities. Key subtrees: `api/` (domain API modules),
   `db/` (SQLite layer), `dsn/` (DSN detection, with per-language extractors under
   `dsn/languages/`), and `formatters/` (output formatting). See the file-locations
