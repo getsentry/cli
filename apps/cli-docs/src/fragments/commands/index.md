@@ -17,6 +17,12 @@ Most list and view commands support `--json` flag for JSON output, making it eas
 sentry org list --json | jq '.[] | .slug'
 ```
 
+Add `--fields` with a comma-separated list to keep only the fields you need:
+
+```bash
+sentry issue list --json --fields shortId,title,count
+```
+
 ## Opening in Browser
 
 View commands support `-w` or `--web` flag to open the resource in your browser:

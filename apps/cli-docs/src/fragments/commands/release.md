@@ -24,6 +24,9 @@ sentry release finalize 1.0.0
 # Set commits from local git history
 sentry release set-commits 1.0.0 --local
 
+# Monorepo: only commits since the previous release tag that touch these paths
+sentry release set-commits 1.0.0 --from v0.9.0 --path apps/mobile,packages/shared-ui
+
 # Create a deploy
 sentry release deploy 1.0.0 production
 sentry release deploy 1.0.0 staging "Deploy #42"
@@ -38,6 +41,9 @@ sentry release deploys my-org/1.0.0
 # Archive a release (hide it from the default list, but keep it)
 sentry release archive 1.0.0
 sentry release archive my-org/1.0.0 --dry-run   # Preview without archiving
+
+# List archived releases
+sentry release list --status archived
 
 # Restore a previously archived release
 sentry release restore 1.0.0
@@ -65,3 +71,4 @@ sentry release deploy my-org/1.0.0 production
 - **The `org/` prefix is the org slug**: In `sentry release create sentry/1.0.0`, `sentry` is the org slug and `1.0.0` is the version. The `/` separates org from version — it is not part of the version string.
 - **`--auto` needs a git checkout**: The `--auto` flag lists repos from the Sentry API and matches against your local `origin` remote URL. Without a local git repo, use `--local` instead.
 - **Default mode tries `--auto` first**: When neither `--auto` nor `--local` is specified, `set-commits` tries auto-discovery first and falls back to local git history if the integration isn't configured.
+- **`--path` and `--from` read local history**: Both imply `--local` and can't be combined with `--auto` or `--commit`. `--from <ref>` reads the whole `<ref>..HEAD` range, so it needs a full (non-shallow) checkout.

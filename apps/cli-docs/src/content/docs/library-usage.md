@@ -60,7 +60,8 @@ const issues = await sdk.issue.list({
   sort: "date",
 });
 
-const issue = await sdk.issue.view({ issue: "ACME-123" });
+// Commands that accept several IDs take them as trailing arguments
+const issue = await sdk.issue.view({}, "ACME-123");
 ```
 
 ### Events, Traces, Spans
@@ -80,10 +81,11 @@ const spans = await sdk.span.list({}, "acme/frontend");
 const dashboards = await sdk.dashboard.list({}, "acme/");
 const dashboard = await sdk.dashboard.view({}, "acme/", "my-dashboard");
 
-// Nested widget commands
+// Nested widget commands: [<org>/] <dashboard> <widget title>
+// Repeatable flags (like --query) take arrays
 await sdk.dashboard.widget.add(
-  { display: "line", query: "count" },
-  "acme/", "my-dashboard"
+  { display: "line", query: ["count"] },
+  "acme/", "my-dashboard", "Error Count"
 );
 ```
 
@@ -112,7 +114,7 @@ pass raw CLI flags, use `sdk.run()`:
 ```typescript
 // Run any CLI command — returns parsed JSON by default
 const version = await sdk.run("--version");
-const issues = await sdk.run("issue", "list", "-l", "5");
+const issues = await sdk.run("issue", "list", "-n", "5");
 const help = await sdk.run("help", "issue");
 ```
 
@@ -169,7 +171,7 @@ const issues = await sdk.issue.list({ orgProject: "acme/frontend" });
 
 // run() → parsed JSON or string
 const version = await sdk.run("--version");
-// "sentry 0.21.0"
+// e.g. "0.45.0"
 ```
 
 ## Error Handling
@@ -182,7 +184,7 @@ import createSentrySDK, { SentryError } from "sentry";
 const sdk = createSentrySDK();
 
 try {
-  await sdk.issue.view({ issue: "NONEXISTENT-1" });
+  await sdk.issue.view({}, "NONEXISTENT-1");
 } catch (err) {
   if (err instanceof SentryError) {
     console.error(err.message);   // Clean error message (no ANSI codes)
@@ -233,7 +235,7 @@ When using streaming flags, methods return an `AsyncIterable` instead of a `Prom
 const sdk = createSentrySDK({ token: "sntrys_..." });
 
 // Stream logs as they arrive (polls every 5 seconds)
-for await (const log of sdk.log.list({ follow: "5", orgProject: "acme/backend" })) {
+for await (const log of sdk.log.list({ follow: "5" }, "acme/backend")) {
   console.log(log);
 }
 

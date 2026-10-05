@@ -56,8 +56,12 @@ sentry alert metrics create my-org \
   --aggregate "p95(span.duration)" \
   --dataset spans \
   --time-window 5 \
+  --project my-project \
   --trigger '{"alertThreshold":500,"actions":[{"id":"sentry.mail.actions.NotifyEmailAction","targetType":"Team","targetIdentifier":1}]}'
 ```
+
+`--project` is required: metric alert rules are org-scoped, but each rule must
+watch at least one project (repeat the flag or pass a comma-separated list).
 
 ### List metric alert rules
 

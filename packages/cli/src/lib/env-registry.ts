@@ -100,7 +100,8 @@ export const ENV_VAR_REGISTRY: readonly EnvVarEntry[] = [
       "Explicit release version for `sentry release propose-version`. When set, " +
       "the command returns this value immediately without checking CI environment " +
       "variables or local git history. Useful in CI pipelines where the release " +
-      "version is determined by a prior step.",
+      "version is determined by a prior step.\n\n" +
+      "`sentry react-native xcode` also reads it as the release to upload sourcemaps to.",
     example: "1.0.0",
   },
   // -- URL --

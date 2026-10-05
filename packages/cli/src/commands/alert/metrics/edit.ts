@@ -170,7 +170,7 @@ export const editCommand = buildCommand({
   docs: {
     brief: "Edit a metric alert rule",
     fullDescription:
-      "Update a metric alert rule. Pass at least one of --name or --status. " +
+      "Update a metric alert rule. Pass at least one field to change (for example --name or --status). " +
       "Status 'active' enables the rule; 'disabled' sets it to disabled (API status 1).\n\n" +
       "Examples:\n" +
       "  sentry alert metrics edit my-org/9 --name 'Error budget'\n" +

@@ -173,6 +173,7 @@ sentry alert metrics create my-org \
   --aggregate "p95(span.duration)" \
   --dataset spans \
   --time-window 5 \
+  --project my-project \
   --trigger '{"alertThreshold":500,"actions":[{"id":"sentry.mail.actions.NotifyEmailAction","targetType":"Team","targetIdentifier":1}]}'
 ```
 

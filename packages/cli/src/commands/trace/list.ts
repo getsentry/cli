@@ -206,7 +206,7 @@ export const listCommand = buildListCommand("trace", {
       "  sentry trace list <project>     # find project across all orgs\n\n" +
       `${TARGET_PATTERN_NOTE}\n\n` +
       "Examples:\n" +
-      "  sentry trace list                     # List last 10 traces\n" +
+      "  sentry trace list                     # List recent traces\n" +
       "  sentry trace list --limit 50          # Show more traces\n" +
       "  sentry trace list --sort duration     # Sort by slowest first\n" +
       "  sentry trace list --period 24h        # Last 24 hours only\n" +

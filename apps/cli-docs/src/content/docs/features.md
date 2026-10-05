@@ -40,7 +40,8 @@ The CLI scans source files for DSN URLs (the `https://…@….ingest.sentry.io/�
 | Rust | `.rs` |
 | Dart/Flutter | `.dart` |
 | Elixir/Erlang | `.ex`, `.exs`, `.erl` |
-| Config files | `.json`, `.yaml`, `.yml`, `.toml`, `.xml`, `.properties` |
+| Lua | `.lua` |
+| Config files | `.json`, `.yaml`, `.yml`, `.toml`, `.xml`, `.properties`, `.config` |
 
 ### Caching
 
@@ -63,13 +64,13 @@ sentry issue list my-org/my-project
 sentry issue list
 ```
 
-The CLI will show which project was detected:
+The output names the project that was detected:
 
 ```
-Detected project: my-app (from .env)
+Issues in my-org/my-app:
 
-ID          SHORT ID    TITLE                           COUNT
-123456789   MYAPP-ABC   TypeError: Cannot read prop...  142
+SHORT ID    ISSUE                           EVENTS
+MYAPP-ABC   TypeError: Cannot read prop...  142
 ```
 
 ## Monorepo Support & Alias System
@@ -88,7 +89,7 @@ Aliases are the shortest unique prefix of each project slug. For example:
 
 | Project Slug | Alias |
 |--------------|-------|
-| `frontend` | `f` |
+| `frontend` | `fr` |
 | `functions` | `fu` |
 | `backend` | `b` |
 
@@ -105,15 +106,18 @@ For projects with a common prefix (like `spotlight-electron`, `spotlight-website
 After running `issue list`, you can reference issues using the `alias-suffix` format:
 
 ```bash
-# List issues - note the ALIAS column
+# List issues - each SHORT ID is followed by its alias-suffix shorthand
 sentry issue list
 ```
 
 ```
-ALIAS  SHORT ID             TITLE                           COUNT
-e      SPOTLIGHT-ELEC-4Y    TypeError: Cannot read prop...  142
-w      SPOTLIGHT-WEB-ABC    Failed to fetch user data       89
-b      SPOTLIGHT-BACK-XYZ   Connection timeout              34
+SHORT ID                ISSUE
+SPOTLIGHT-ELECTRON-4Y   TypeError: Cannot read prop...
+e-4y
+SPOTLIGHT-WEBSITE-ABC   Failed to fetch user data
+w-abc
+SPOTLIGHT-BACKEND-XYZ   Connection timeout
+b-xyz
 ```
 
 ```bash
@@ -129,13 +133,9 @@ sentry issue plan b-XYZ
 
 ### Cross-Organization Support
 
-If you work with multiple organizations that have projects with the same slug, the CLI uses org-prefixed aliases:
+If you work with multiple organizations that have projects with the same slug, the CLI prefixes those aliases with a short org alias, in the form `<org-alias>/<project-alias>`. For example, an `api` project in both `acme` and `globex` gets the aliases `a/a` and `g/a`.
 
-```
-ALIAS    SHORT ID        TITLE
-o1:api   ORG1-API-123    Error in API handler
-o2:api   ORG2-API-456    Database connection failed
-```
+These org-prefixed aliases are for display only. To open one of those issues, use its full short ID, optionally with the org slug (`acme/API-123`).
 
 ## Issue ID Formats
 
@@ -159,12 +159,20 @@ sentry issue view MYPROJECT-ABC
 sentry issue explain FRONTEND-XYZ
 ```
 
-### Short Suffix
+### Org-Qualified Short ID
 
-Just the suffix portion when project context is provided via the `<org>/` prefix:
+Prefix the short ID with the org slug to look it up in that organization only:
 
 ```bash
-sentry issue view my-org/myproject-ABC
+sentry issue view my-org/MYPROJECT-ABC
+```
+
+### Short Suffix
+
+Just the suffix portion, when the CLI can detect the project (from a DSN, `.sentryclirc`, or defaults):
+
+```bash
+sentry issue view ABC
 ```
 
 ### GitHub-Style (`#` separator)

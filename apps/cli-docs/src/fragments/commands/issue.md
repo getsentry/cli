@@ -55,6 +55,13 @@ Sentry search uses **implicit AND** — space-separated terms are all required.
 - Run separate queries for different terms
 - `*term*` — wildcard matching
 
+The CLI repairs common mistakes before sending the query and prints the query
+it actually runs: an explicit `AND` is dropped, `key:a OR key:b` becomes
+`key:[a,b]` (OR across different keys or free-text terms is rejected), and a
+numeric `project:<id>` filter becomes `project_id:<id>`. The same repairs apply
+to `--query` on the other search commands (events, traces, spans, logs,
+replays, feedback, and `explore`).
+
 Full syntax reference: [Sentry Search Docs](https://docs.sentry.io/concepts/search/)
 :::
 
@@ -215,6 +222,11 @@ sentry issue plan 123456789 --force
 - GitHub integration configured with repository access
 - Code mappings set up to link stack frames to source files
 - Root cause analysis is run automatically if needed (the `plan` command triggers `explain` first)
+
+If Seer pauses for you to confirm the root cause, `plan` shows it and asks
+whether to continue when run in an interactive terminal. With `--json` or
+without a terminal, the command exits with an error; confirm the root cause in
+the Sentry UI, then run it again.
 
 ### Resolve and reopen issues
 

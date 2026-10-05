@@ -76,12 +76,12 @@ SENTRY_INSTALL_DIR=~/.local/bin curl https://cli.sentry.dev/install -fsS | bash
     <tr>
       <td><strong>Linux</strong></td>
       <td>x64, arm64</td>
-      <td>glibc and musl (Alpine)</td>
+      <td>glibc only; no musl (Alpine) binary is published, so use the npm package there</td>
     </tr>
     <tr>
       <td><strong>Windows</strong></td>
       <td>x64</td>
-      <td>Via Git Bash, MSYS2, or WSL</td>
+      <td>Via Git Bash or MSYS2 (under WSL, the Linux binary is installed)</td>
     </tr>
   </tbody>
 </table>

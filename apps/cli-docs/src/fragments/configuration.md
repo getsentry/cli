@@ -6,7 +6,7 @@ The CLI supports a `.sentryclirc` config file using standard INI syntax. This is
 
 ### How It Works
 
-The CLI looks for `.sentryclirc` files by walking up from your current directory toward the filesystem root. If multiple files are found, values from the closest file take priority, with `~/.sentryclirc` serving as a global fallback.
+The CLI looks for `.sentryclirc` files by walking up from your current directory toward the filesystem root. If multiple files are found, values from the closest file take priority. A `.sentryclirc` in the CLI config directory (see [Credential Storage](#credential-storage)) and then `~/.sentryclirc` serve as global fallbacks.
 
 ```ini
 [defaults]
@@ -91,10 +91,11 @@ Overrides `SENTRY_LOG_LEVEL` when both are set.
 
 ### `--verbose`
 
-Shorthand for `--log-level debug`. Enables debug-level diagnostic output.
+Shorthand for `--log-level debug`. Enables debug-level diagnostic output. `-v` is the short form.
 
 ```bash
 sentry issue list --verbose
+sentry issue list -v
 ```
 
 :::note

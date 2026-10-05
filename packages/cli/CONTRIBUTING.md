@@ -44,8 +44,11 @@ sentry event view [<org>/<project>] <event-id> [--json] [-w]   # event ID requir
 Context (org, project) is resolved in this priority order:
 
 1. **Positional arguments** (`<org>/<project>`) - explicit, always wins
-2. **Config defaults** - set via `sentry cli defaults`
-3. **DSN auto-detection** - from `SENTRY_DSN` env var or source code
+2. **Environment variables** - `SENTRY_ORG` / `SENTRY_PROJECT`
+3. **`.sentryclirc` files** - walked up from the current directory, merged with global fallbacks
+4. **Config defaults** - set via `sentry cli defaults`
+5. **DSN auto-detection** - from source code, `.env` files, or the `SENTRY_DSN` env var
+6. **Directory name inference** - matches the directory name against project slugs
 
 ## Common Flags
 
@@ -87,7 +90,7 @@ Or:
 
 1. **Choose the right pattern**: list (flags only) or view (optional positional)
 2. **Use existing utilities**: `resolveOrg()`, `resolveOrgAndProject()` from `lib/resolve-target.ts`
-3. **Support JSON output**: All commands should have `--json` flag
+3. **Support JSON output**: Pass an `output` config to `buildCommand()`, which injects `--json` and `--fields` for you; don't define your own `json` flag
 4. **Support browser viewing**: View commands should have `-w`/`--web` flag
 5. **Use ContextError**: For missing context errors, use `ContextError` class
 6. **Add tests**: E2E tests in `test/e2e/` directory

@@ -130,6 +130,9 @@ sentry release finalize 1.0.0
 # Set commits from local git history
 sentry release set-commits 1.0.0 --local
 
+# Monorepo: only commits since the previous release tag that touch these paths
+sentry release set-commits 1.0.0 --from v0.9.0 --path apps/mobile,packages/shared-ui
+
 # Create a deploy
 sentry release deploy 1.0.0 production
 sentry release deploy 1.0.0 staging "Deploy #42"
@@ -144,6 +147,9 @@ sentry release deploys my-org/1.0.0
 # Archive a release (hide it from the default list, but keep it)
 sentry release archive 1.0.0
 sentry release archive my-org/1.0.0 --dry-run   # Preview without archiving
+
+# List archived releases
+sentry release list --status archived
 
 # Restore a previously archived release
 sentry release restore 1.0.0
