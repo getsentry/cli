@@ -23,7 +23,7 @@ sentry explore
 ```bash
 # Errors with user impact for a specific UTC window
 sentry explore my-org/cli -F title -F "count()" -F "count_unique(user)" \
-  --period "2024-01-15T00:00:00Z/2024-01-16T00:00:00Z"
+  --period "2024-01-15T00:00:00Z..2024-01-16T00:00:00Z"
 
 # Filter by specific error type (combines with auto-injected project filter)
 sentry explore my-org/cli -F title -F "count()" \

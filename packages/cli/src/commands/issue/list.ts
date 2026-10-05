@@ -301,7 +301,7 @@ function formatListFooter(mode: "single" | "multi" | "none"): string {
     case "single":
       return "\nTip: Use 'sentry issue view <ID>' to view details (bold part works as shorthand).";
     case "multi":
-      return "\nTip: Use 'sentry issue view <ALIAS>' to view details (see ALIAS column).";
+      return "\nTip: Use 'sentry issue view <ALIAS>' to view details (alias shown with each SHORT ID).";
     default:
       return "\nTip: Use 'sentry issue view <SHORT_ID>' to view issue details.";
   }
@@ -322,7 +322,7 @@ function formatListFooter(mode: "single" | "multi" | "none"): string {
  *
  * @param results - Issue list results with targets
  * @param aliasMap - Map from "org:project" to alias
- * @param isMultiProject - Whether in multi-project mode (shows ALIAS column)
+ * @param isMultiProject - Whether in multi-project mode (shows alias shorthand with each short ID)
  */
 function attachFormatOptions(
   results: IssueListFetchResult[],

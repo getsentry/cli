@@ -165,14 +165,14 @@ export const editCommand = buildCommand({
   docs: {
     brief: "Edit an issue alert rule",
     fullDescription:
-      "Update an issue alert rule by id or name. You must set at least one of --name or " +
-      "--status.\n\n" +
+      "Update an issue alert rule by id or name. Pass at least one field to change " +
+      "(for example --name or --status).\n\n" +
       "The CLI loads the current rule, applies your changes, and updates it via the API.\n\n" +
       "Examples:\n" +
       "  sentry alert issues edit my-org/my-app/12 --name 'Prod errors'\n" +
       "  sentry alert issues edit my-org/my-app/'Old name' --status disabled\n" +
       "  sentry alert issues edit 12 --name 'Renamed' --status active\n" +
-      '  sentry alert issues edit my-org/my-app/12 --condition \'{"id":"sentry.rules.conditions.first_seen_event.FirstSeenEventCondition"}\'',
+      '  sentry alert issues edit my-org/my-app/12 --condition \'{"type":"first_seen_event","comparison":true,"conditionResult":true}\'',
   },
   output: {
     human: formatEdited,

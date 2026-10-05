@@ -5,7 +5,7 @@
 ### List traces
 
 ```bash
-# List last 20 traces (default)
+# List recent traces (25 by default)
 sentry trace list
 
 # Sort by slowest first

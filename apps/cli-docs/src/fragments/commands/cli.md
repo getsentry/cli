@@ -28,7 +28,19 @@ sentry cli upgrade 0.5.0
 
 # Force re-download
 sentry cli upgrade --force
+
+# Upgrade from cached version info and patches only (no network)
+sentry cli upgrade --offline
+
+# Upgrade with a specific installation method instead of the detected one
+sentry cli upgrade --method npm
 ```
+
+Homebrew installs can't be pinned to a specific stable version; run
+`brew upgrade getsentry/tools/sentry` instead. `--offline` works only for curl
+installs, uses the latest version recorded by the CLI's background update
+check, and can't switch channels. Curl installs also fall back to that cached
+target automatically when the network is unavailable.
 
 ### Release Channels
 
