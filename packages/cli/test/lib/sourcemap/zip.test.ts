@@ -273,4 +273,34 @@ describe("ZipWriter binary format", () => {
     expect(entriesOnDisk).toBe(3);
     expect(totalEntries).toBe(3);
   });
+
+  test("writes ZIP64 end records when entries overflow the EOCD count", async () => {
+    const zipPath = join(tmpDir, "zip64.zip");
+    const entryCount = 0x1_00_00;
+    const zip = await ZipWriter.create(zipPath, { compression: "stored" });
+    for (let i = 0; i < entryCount; i++) {
+      await zip.addEntry(`_/_/chunk-${i}.js`, Buffer.alloc(0));
+    }
+    await zip.finalize();
+
+    const data = await readFile(zipPath);
+    const eocdStart = data.length - 22;
+    expect(data.readUInt16LE(eocdStart + 8)).toBe(0xff_ff);
+    expect(data.readUInt16LE(eocdStart + 10)).toBe(0xff_ff);
+
+    // ZIP64 locator (20 bytes) sits directly before the classic EOCD
+    const locatorStart = eocdStart - 20;
+    expect(data.readUInt32LE(locatorStart)).toBe(0x07_06_4b_50);
+    const recordStart = Number(data.readBigUInt64LE(locatorStart + 8));
+    expect(recordStart).toBe(locatorStart - 56);
+    expect(data.readUInt32LE(recordStart)).toBe(0x06_06_4b_50);
+    expect(data.readBigUInt64LE(recordStart + 24)).toBe(BigInt(entryCount));
+    expect(data.readBigUInt64LE(recordStart + 32)).toBe(BigInt(entryCount));
+
+    const proc = spawnSync("unzip", ["-t", zipPath], {
+      stdio: ["pipe", "pipe", "pipe"],
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    expect(proc.status).toBe(0);
+  }, 60_000);
 });
