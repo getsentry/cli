@@ -518,8 +518,16 @@ function generateSelfHostedEnvVarsTable(): string {
  */
 const PLATFORM_ROWS: readonly [string, string, string][] = [
   ["macOS", "x64, arm64 (Apple Silicon)", ""],
-  ["Linux", "x64, arm64", "glibc and musl (Alpine)"],
-  ["Windows", "x64", "Via Git Bash, MSYS2, or WSL"],
+  [
+    "Linux",
+    "x64, arm64",
+    "glibc only; no musl (Alpine) binary is published, so use the npm package there",
+  ],
+  [
+    "Windows",
+    "x64",
+    "Via Git Bash or MSYS2 (under WSL, the Linux binary is installed)",
+  ],
 ];
 
 /** Generate the platform support table for getting-started.mdx. */
