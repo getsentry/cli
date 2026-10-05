@@ -31,6 +31,8 @@ const METHOD_DEFLATE = 8;
 const LOCAL_FILE_HEADER_SIG = 0x04_03_4b_50;
 const CENTRAL_DIR_HEADER_SIG = 0x02_01_4b_50;
 const EOCD_SIG = 0x06_05_4b_50;
+const ZIP64_EOCD_SIG = 0x06_06_4b_50;
+const ZIP64_EOCD_LOCATOR_SIG = 0x07_06_4b_50;
 
 /** Fixed portion of a local file header (before the file name). */
 const LOCAL_HEADER_FIXED_SIZE = 30;
@@ -40,6 +42,21 @@ const CENTRAL_HEADER_FIXED_SIZE = 46;
 
 /** End of central directory record size (no comment). */
 const EOCD_SIZE = 22;
+
+/** ZIP64 end of central directory record size (no extensible data). */
+const ZIP64_EOCD_SIZE = 56;
+
+/** ZIP64 end of central directory locator size. */
+const ZIP64_EOCD_LOCATOR_SIZE = 20;
+
+/** Version 4.5 — minimum needed to extract ZIP64 archives. */
+const ZIP64_VERSION = 45;
+
+/**
+ * Largest entry count the classic EOCD record's 16-bit fields can hold.
+ * Archives with more entries need the ZIP64 EOCD record (APPNOTE 4.4.1.4).
+ */
+const MAX_EOCD_ENTRIES = 0xff_ff;
 
 /**
  * Metadata captured per entry so the central directory can be
@@ -256,6 +273,15 @@ export class ZipWriter {
       }
 
       const centralDirSize = this.offset - centralDirOffset;
+      const entryCount = this.entries.length;
+
+      if (entryCount > MAX_EOCD_ENTRIES) {
+        await this.writeZip64EndRecords(
+          entryCount,
+          centralDirSize,
+          centralDirOffset
+        );
+      }
 
       const eocd = Buffer.alloc(EOCD_SIZE);
       eocd.writeUInt32LE(EOCD_SIG, 0);
@@ -263,8 +289,10 @@ export class ZipWriter {
       eocd.writeUInt16LE(0, 4);
       // Disk number with central directory — 0
       eocd.writeUInt16LE(0, 6);
-      eocd.writeUInt16LE(this.entries.length, 8);
-      eocd.writeUInt16LE(this.entries.length, 10);
+      // Saturates at 0xFFFF; readers then take the count from the ZIP64 record
+      const eocdEntryCount = Math.min(entryCount, MAX_EOCD_ENTRIES);
+      eocd.writeUInt16LE(eocdEntryCount, 8);
+      eocd.writeUInt16LE(eocdEntryCount, 10);
       eocd.writeUInt32LE(centralDirSize, 12);
       eocd.writeUInt32LE(centralDirOffset, 16);
       // ZIP file comment length — 0
@@ -274,5 +302,46 @@ export class ZipWriter {
     } finally {
       await this.fh.close();
     }
+  }
+
+  /**
+   * Write the ZIP64 end-of-central-directory record and its locator,
+   * which carry the entry count when it overflows the classic EOCD
+   * record. Must be written immediately before the classic EOCD record.
+   */
+  private async writeZip64EndRecords(
+    entryCount: number,
+    centralDirSize: number,
+    centralDirOffset: number
+  ): Promise<void> {
+    const recordOffset = this.offset;
+
+    const record = Buffer.alloc(ZIP64_EOCD_SIZE);
+    record.writeUInt32LE(ZIP64_EOCD_SIG, 0);
+    // Size of the record excluding the leading signature and this field
+    record.writeBigUInt64LE(BigInt(ZIP64_EOCD_SIZE - 12), 4);
+    record.writeUInt16LE(ZIP64_VERSION, 12);
+    record.writeUInt16LE(ZIP64_VERSION, 14);
+    // Disk number — 0
+    record.writeUInt32LE(0, 16);
+    // Disk number with central directory — 0
+    record.writeUInt32LE(0, 20);
+    record.writeBigUInt64LE(BigInt(entryCount), 24);
+    record.writeBigUInt64LE(BigInt(entryCount), 32);
+    record.writeBigUInt64LE(BigInt(centralDirSize), 40);
+    record.writeBigUInt64LE(BigInt(centralDirOffset), 48);
+
+    const locator = Buffer.alloc(ZIP64_EOCD_LOCATOR_SIZE);
+    locator.writeUInt32LE(ZIP64_EOCD_LOCATOR_SIG, 0);
+    // Disk number with ZIP64 EOCD record — 0
+    locator.writeUInt32LE(0, 4);
+    locator.writeBigUInt64LE(BigInt(recordOffset), 8);
+    // Total number of disks — 1
+    locator.writeUInt32LE(1, 16);
+
+    await this.fh.write(record, 0, record.length);
+    await this.fh.write(locator, 0, locator.length);
+
+    this.offset += ZIP64_EOCD_SIZE + ZIP64_EOCD_LOCATOR_SIZE;
   }
 }
