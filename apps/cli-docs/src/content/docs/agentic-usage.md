@@ -79,4 +79,4 @@ The skill uses your existing CLI authentication, so you'll need to run `sentry a
 ## Requirements
 
 - An authenticated Sentry CLI installation (`sentry auth login`)
-- An AI coding agent that supports the skills system (e.g., Claude Code, Cursor, Windsurf, GitHub Copilot, Gemini CLI, Codex, Goose, Amp, Augment, OpenCode, Cline, Grok, Kimi, Junie, OpenClaw, or any agent that reads from `~/.agents`)
+- An AI coding agent that supports the skills system (e.g., Claude Code, Cursor, Windsurf, GitHub Copilot, Gemini CLI, Codex, Antigravity, Goose, Amp, Augment, OpenCode, Cline, Grok, Kimi, Junie, OpenClaw, or any agent that reads from `~/.agents`)
