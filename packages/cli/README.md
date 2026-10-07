@@ -12,6 +12,8 @@
   <a href="https://cli.sentry.dev/commands/">Commands</a>
 </p>
 
+> **Moved.** Development continues in [`getsentry/toolkit`](https://github.com/getsentry/toolkit) ([`packages/cli`](https://github.com/getsentry/toolkit/tree/main/packages/cli)). This repository is not archived, but new issues, pull requests, and changes go there.
+
 ---
 
 ## Installation
@@ -122,6 +124,8 @@ Errors are thrown as `SentryError` with `.exitCode` and `.stderr`.
 
 ## Development
 
+New development happens in [`getsentry/toolkit`](https://github.com/getsentry/toolkit).
+
 ### Prerequisites
 
 <!-- GENERATED:START dev-prereq -->
@@ -131,8 +135,8 @@ Errors are thrown as `SentryError` with `.exitCode` and `.stderr`.
 ### Setup
 
 ```bash
-git clone https://github.com/getsentry/cli.git
-cd cli
+git clone https://github.com/getsentry/toolkit.git
+cd toolkit
 pnpm install
 ```
 
