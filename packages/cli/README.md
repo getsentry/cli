@@ -12,7 +12,7 @@
   <a href="https://cli.sentry.dev/commands/">Commands</a>
 </p>
 
-> **Moved.** Development continues in [`getsentry/toolkit`](https://github.com/getsentry/toolkit) ([`packages/cli`](https://github.com/getsentry/toolkit/tree/main/packages/cli)). This repository is not archived, but new issues, pull requests, and changes go there.
+> **Moved.** Development continues in [`getsentry/toolkit`](https://github.com/getsentry/toolkit) ([`packages/cli`](https://github.com/getsentry/toolkit/tree/main/packages/cli)). This repository will be archived. New issues, pull requests, and changes go there.
 
 ---
 
