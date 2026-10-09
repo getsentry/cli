@@ -14,7 +14,7 @@
  * Or in package.json scripts via the `pnpm tsx` alias.
  */
 
-import { createRequire, registerHooks } from "node:module";
+import { createRequire, register } from "node:module";
 
 if (typeof globalThis.require === "undefined") {
   globalThis.require = createRequire(
@@ -22,20 +22,7 @@ if (typeof globalThis.require === "undefined") {
   );
 }
 
-// Handle `with { type: "file" }` import attributes in Node.js dev mode.
-// Bun supports this natively; esbuild's text-import-plugin handles it at
-// build time. In tsx dev mode neither applies, so we register a synchronous
-// hook that returns the file path as a string — matching Bun's behaviour.
-// registerHooks() is available from Node 22.15+ (our minimum).
-registerHooks({
-  load(url, context, nextLoad) {
-    if (context.importAttributes?.type === "file") {
-      return {
-        format: "module",
-        shortCircuit: true,
-        source: `export default ${JSON.stringify(new URL(url).pathname)};`,
-      };
-    }
-    return nextLoad(url, context);
-  },
-});
+// Use an asynchronous hook so existing CommonJS loaders may omit `source`.
+// Node 24 rejects that valid asynchronous result when it passes through a
+// synchronous hook.
+register(new URL("./file-import-hook.mjs", import.meta.url));
