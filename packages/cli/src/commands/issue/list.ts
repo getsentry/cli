@@ -8,6 +8,10 @@
 import type { SentryContext } from "../../context.js";
 import { buildProjectAliasMap } from "../../lib/alias.js";
 import {
+  fetchScopedCounts,
+  type ScopedCount,
+} from "../../lib/api/issue-scoped-counts.js";
+import {
   API_MAX_PER_PAGE,
   buildIssueListCollapse,
   type IssueCollapseField,
@@ -259,78 +263,146 @@ function buildListApiOptions(json: boolean, fields?: string[]): ListApiOptions {
 }
 
 /**
- * Whether the seen-stats counts (`count`/`userCount`) are present in the output
- * for the given flags. Human output always shows them; JSON only omits them
- * when `--fields` collapses lifetime fields away.
+ * Whether the seen-stats counts (`count`/`userCount`) are displayed for the
+ * given flags. Human output always shows them; JSON only omits them when
+ * `--fields` collapses lifetime fields away. Used to skip the scoped-count
+ * refetch when the counts aren't shown anyway. See #1518.
  */
 function countsShown(json: boolean, fields?: string[]): boolean {
   return !(json && shouldCollapseForFields(fields, LIFETIME_FIELDS));
 }
 
-/**
- * Build a warning describing that displayed counts are period-wide totals, not
- * scoped to a count-unscoped query filter (e.g. `release:`). Returns undefined
- * when no such filter is present or the counts aren't shown. See #1518.
- */
-function buildCountScopeNote(
-  flags: Pick<ListFlags, "query" | "json" | "fields" | "sort">
-): { human: string; keys: string[] } | undefined {
-  if (!countsShown(flags.json, flags.fields)) {
-    return;
-  }
-  const keys = unscopedCountFilterKeys(flags.query);
-  if (keys.length === 0) {
-    return;
-  }
-  const filterList = keys.map((k) => `${k}:`).join(", ");
-  const sortNote =
-    flags.sort === "freq" || flags.sort === "user"
-      ? ` The --sort ${flags.sort} ordering follows these unscoped counts.`
-      : "";
-  return {
-    keys,
-    human:
-      `Note: EVENTS/USERS counts are period-wide totals and are NOT scoped to the ${filterList} filter — ` +
-      `the query restricts which issues appear, but their counts still span every ${keys.join("/")}.` +
-      `${sortNote} For counts matching the filter, query the events endpoint ` +
-      `(e.g. sentry api "/organizations/<org>/events/?field=count()&query=issue:<SHORT-ID> ${filterList}...").`,
-  };
+/** Whether a scoped-count refetch applies to the current flags. */
+function shouldScopeCounts(
+  flags: Pick<ListFlags, "query" | "json" | "fields">
+): boolean {
+  return Boolean(
+    flags.query &&
+      countsShown(flags.json, flags.fields) &&
+      unscopedCountFilterKeys(flags.query).length > 0
+  );
 }
 
 /**
- * Attach the count-scope warning to a result's JSON envelope when applicable,
- * returning the note (or undefined) so the caller can also surface it in the
- * human footer. Only applied when at least one issue is shown. See #1518.
+ * Group display rows by org slug so each events query runs against the right
+ * organization (org-all / multi-project modes mix orgs). Rows without a short
+ * ID are skipped — they can't be scoped via `issue:`.
  */
-function applyCountScopeNote(
-  result: IssueListResult,
-  flags: Pick<ListFlags, "query" | "json" | "fields" | "sort">
-): { human: string; keys: string[] } | undefined {
-  const countScope = buildCountScopeNote(flags);
-  if (!countScope || result.items.length === 0) {
-    return;
+function groupRowsByOrg(rows: IssueTableRow[]): Map<string, IssueTableRow[]> {
+  const byOrg = new Map<string, IssueTableRow[]>();
+  for (const row of rows) {
+    if (!row.issue.shortId) {
+      continue;
+    }
+    const group = byOrg.get(row.orgSlug);
+    if (group) {
+      group.push(row);
+    } else {
+      byOrg.set(row.orgSlug, [row]);
+    }
   }
-  result.jsonExtra = {
-    ...result.jsonExtra,
-    _countScope: {
-      _type: "unscoped_counts",
-      filters: countScope.keys,
-      fields: ["count", "userCount"],
-      message: countScope.human,
-    },
-  };
-  return countScope;
+  return byOrg;
 }
 
 /**
- * Combine the framework footer hint from a result's more/footer/count-scope
- * parts. Only forwards a hint when items exist — empty results render their
- * hint text inside {@link formatIssueListHuman}.
+ * Overwrite each row's issue counts from the per-org scoped-count maps.
+ * Returns true when at least one count changed.
  */
-function buildCombinedHint(
+function overwriteScopedCounts(
+  groups: { orgRows: IssueTableRow[]; scoped: Map<string, ScopedCount> }[]
+): boolean {
+  let changed = false;
+  for (const { orgRows, scoped } of groups) {
+    for (const row of orgRows) {
+      const s = scoped.get(row.issue.shortId);
+      if (s) {
+        row.issue.count = String(s.count);
+        row.issue.userCount = s.userCount;
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
+/**
+ * Replace each issue's unscoped list-endpoint counts (`count`/`userCount`) with
+ * filter-scoped counts from the events endpoint when the query filters on a key
+ * the issues-list seen-stats ignore (e.g. `release:`). The list endpoint reports
+ * period-wide totals across every value of that key, so a release-scoped triage
+ * silently over-reports; the events endpoint returns counts that match the
+ * filter. See getsentry/cli#1518.
+ *
+ * Best-effort: any failure leaves the original counts untouched. When the sort
+ * depends on counts (`freq`/`user`), the display is re-ranked to follow the
+ * corrected numbers. Mutates `result` in place.
+ */
+async function applyScopedCounts(
   result: IssueListResult,
-  countScope: { human: string } | undefined
-): string | undefined {
+  flags: Pick<ListFlags, "query" | "json" | "fields" | "sort">,
+  timeRange: TimeRange
+): Promise<void> {
+  try {
+    const rows = result.displayRows;
+    if (!(shouldScopeCounts(flags) && rows && rows.length > 0)) {
+      return;
+    }
+    const byOrg = groupRowsByOrg(rows);
+    if (byOrg.size === 0) {
+      return;
+    }
+
+    const timeParams = timeRangeToApiParams(timeRange);
+    const groups = await Promise.all(
+      [...byOrg.entries()].map(async ([orgSlug, orgRows]) => {
+        const scoped = await fetchScopedCounts(
+          orgSlug,
+          orgRows.map((row) => ({
+            shortId: row.issue.shortId,
+            projectId: parseProjectId(row.issue.project?.id),
+          })),
+          {
+            query: flags.query ?? "",
+            statsPeriod: timeParams.statsPeriod,
+            start: timeParams.start,
+            end: timeParams.end,
+          }
+        );
+        return { orgRows, scoped };
+      })
+    );
+
+    // Re-rank when the ordering follows the counts we just corrected.
+    if (
+      overwriteScopedCounts(groups) &&
+      (flags.sort === "freq" || flags.sort === "user")
+    ) {
+      const cmp = getComparator(flags.sort);
+      result.items.sort(cmp);
+      rows.sort((a, b) => cmp(a.issue, b.issue));
+    }
+  } catch (error) {
+    logger
+      .withTag("issue.list")
+      .debug(`Scoped-count refetch skipped: ${String(error)}`);
+  }
+}
+
+/** Coerce an optional project ID (string from the API) to a number. */
+function parseProjectId(id: string | undefined): number | undefined {
+  if (id === undefined) {
+    return;
+  }
+  const n = Number(id);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Combine the framework footer hint from a result's more/footer parts. Only
+ * forwards a hint when items exist — empty results render their hint text
+ * inside {@link formatIssueListHuman}.
+ */
+function buildCombinedHint(result: IssueListResult): string | undefined {
   if (result.items.length === 0) {
     return;
   }
@@ -340,9 +412,6 @@ function buildCombinedHint(
   }
   if (result.footer) {
     hintParts.push(result.footer);
-  }
-  if (countScope) {
-    hintParts.push(countScope.human);
   }
   return hintParts.length > 0 ? hintParts.join("\n") : result.hint;
 }
@@ -1718,12 +1787,13 @@ export const listCommand = buildListCommand("issue", {
       },
     })) as IssueListResult;
 
-    // Warn when the query filters on a key the issues endpoint does not apply
-    // to its seen-stats (e.g. release:) — the displayed counts are period-wide
-    // totals, not scoped to the filter. See #1518.
-    const countScope = applyCountScopeNote(result, flags);
+    // The issues-list endpoint's seen-stats (count/userCount) are period-wide
+    // totals that ignore query filters like release:. When such a filter is
+    // active, re-fetch filter-scoped counts from the events endpoint so the
+    // displayed numbers (and freq/user ordering) match the query. See #1518.
+    await applyScopedCounts(result, flags, timeRange);
 
-    const combinedHint = buildCombinedHint(result, countScope);
+    const combinedHint = buildCombinedHint(result);
 
     yield new CommandOutput(result);
     return { hint: combinedHint };
