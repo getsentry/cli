@@ -16,7 +16,7 @@ env:
   # throw a false ERR_STREAM_PREMATURE_CLOSE — exactly the failure the
   # skill-eval planner hits talking to external APIs. Fixed in 24.18.0
   # (nodejs/node#64004). Keep in sync with NODE_VERSION_24 in ci.yml.
-  NODE_VERSION_24: "24.18.0"
+  NODE_VERSION_24: "24.22.1"
 
 jobs:
   remove-labels-on-sync:
