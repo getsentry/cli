@@ -15,6 +15,7 @@ import { copyFileSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { zstdCompressSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { useTestConfigDir } from "../helpers.js";
@@ -134,13 +135,19 @@ describe("resolveStableDelta", () => {
       },
     ];
 
-    // A fake patch that is valid TRDIFF10 header but will fail during application
-    // (header says 0 control/diff/new size, which produces an empty file)
-    const emptyTrdiff10 = new Uint8Array(32);
-    // Set magic: "TRDIFF10"
-    const magic = new TextEncoder().encode("TRDIFF10");
-    emptyTrdiff10.set(magic, 0);
-    // All sizes stay 0 — this will produce an empty output
+    // A valid TRDIFF10 patch that produces an empty file, so the final
+    // SHA-256 check fails. Each block is a real zstd frame because newer Node
+    // releases reject zero-length zstd input with "unexpected end of file".
+    const emptyBlock = zstdCompressSync(Buffer.alloc(0));
+    const emptyTrdiff10 = new Uint8Array(32 + emptyBlock.length * 3);
+    const header = new DataView(emptyTrdiff10.buffer);
+    emptyTrdiff10.set(new TextEncoder().encode("TRDIFF10"), 0);
+    header.setBigInt64(8, BigInt(emptyBlock.length), true); // controlLen
+    header.setBigInt64(16, BigInt(emptyBlock.length), true); // diffLen
+    // newSize at offset 24 stays 0
+    emptyTrdiff10.set(emptyBlock, 32);
+    emptyTrdiff10.set(emptyBlock, 32 + emptyBlock.length);
+    emptyTrdiff10.set(emptyBlock, 32 + emptyBlock.length * 2);
 
     mockFetch(async (url) => {
       const urlStr = String(url);
